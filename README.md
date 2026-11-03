@@ -6,14 +6,16 @@ It is built on the Agent Office design system (x1.5), which lives in this folder
 
 ## What it does
 
-- **Sessions as bots.** Each session sits at a desk. Typing means working, an amber badge means it needs you, and subagents appear as extra bots.
+- **Sessions as bots.** Each session sits at a desk in the room of its project folder. Typing means working, an amber badge means it needs you, and a red badge means the turn failed (Retry or Dismiss).
+- **Subagents as helpers.** A Task or Agent call brings a grey helper by the elevator. The helper does its own tool calls and leaves when it returns its result.
+- **Trace every step.** Select a bot and open Trace: the plan from TodoWrite with each step's state, every tool call with its argument, time and failure, skills loaded, pages read, and the schedule that started the run.
 - **No terminal needed.** A session can run inside the office. You chat with it, and its replies appear as they are written.
 - **Approve from the office.** Permission prompts become Approve and Decline cards that show the edit or command. One click can also allow it from now on.
 - **Control a live session.** Stop the current turn, switch model or permissions, attach images and text files, and run slash commands and skills (type `/` in the chat).
 - **See the work.** A Changes view shows the branch, the files and a colored diff. A session can run in its own git worktree, so your main branch stays clean, and you can open a pull request from the office.
 - **Come back later.** Closed sessions are saved. Reopen one and Claude continues with its context. Search every past session.
 - **Run things on a schedule.** Save prompts as templates. Schedule a prompt daily or every N minutes.
-- **Keep an eye on cost.** Each bot shows cost and context fill, and a session can have a spend limit.
+- **Keep an eye on cost.** The control strip shows tokens, cost and the cache hit rate of a session that runs in the office, and its context fill. A session can have a spend limit.
 - **Ask the user.** Claude can call an `office_ask` tool to ask you a question and wait for your answer.
 
 ## Requirements
@@ -61,7 +63,7 @@ Claude Code ──hooks (HTTP or command)──▶ server.mjs ──SSE──▶
      └───── MCP (mcp.mjs): office_inbox, office_ask
 ```
 
-- **Hooks** report prompts, tool calls and stops. A `PermissionRequest` hook holds the prompt until you answer in the office.
+- **Hooks** report prompts, tool calls (with their id and time), failed tool calls, subagent start and stop, and stops. `payload.mjs` trims each payload the same way for command and HTTP hooks; tool output never leaves the session. A `PermissionRequest` hook holds the prompt until you answer in the office.
 - **Sessions in the office** run `claude -p` in stream-json mode with a pipe. Messages go in on stdin, replies and control requests come out on stdout.
 - **MCP** gives a session two tools: read messages the user sent from the office, and ask the user a question.
 - **The adapter** (`public/adapter.js`) turns the server's session snapshots into design system events.

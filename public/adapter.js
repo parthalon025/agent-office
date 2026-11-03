@@ -1,20 +1,27 @@
 /* Agent Office adapter x0.1 for Claude Code (bridge pattern, hooks in, process control out).
    The server (server.mjs) turns Claude Code hook events into session snapshots and streams them
-   over SSE. This file turns each snapshot into Agent Office events.
-   Claude Code session -> bot in the Lab room. Subagent (Task/Agent tool) -> spawned helper.
-   Tool use -> tool.call / tool.result. Permission prompt (PermissionRequest hook) -> request with Approve and Decline.
-   Permission prompts use the PermissionRequest hook, which waits for the office. If nobody answers in
-   time, the question goes back to the terminal dialog. */
+   over SSE. This file turns each snapshot into Agent Office events:
+   - Project folder -> room (room.add). Claude Code session -> bot in its project room.
+   - Tool use -> tool.call / tool.result (arguments, time, failure). Skill -> skill.load. Web reads -> knowledge.
+   - Subagent (Task or Agent tool) -> delegate with a spawned helper; its own tool calls show on the helper;
+     subagent.done when it returns.
+   - TodoWrite -> plan and plan.step. A failed turn or a spending limit -> error (Retry, Dismiss).
+   - A run started by a schedule -> trigger.run.
+   - Permission prompt (PermissionRequest hook) -> request with Approve and Decline. It waits for the
+     office; if nobody answers in time, the question goes back to the terminal dialog. */
 (function () {
   var TOKEN = document.querySelector('meta[name="office-token"]').content;
-  var ROOM = 'lab';
   var SHAPES = ['cone', 'blob', 'octa', 'capsule'];
-  var KIND = { Bash: 'terminal', WebFetch: 'browser', WebSearch: 'search', Grep: 'search', Glob: 'search', Read: 'code', Edit: 'code', Write: 'code', MultiEdit: 'code', NotebookEdit: 'code', Task: 'flow', Agent: 'flow', Skill: 'skill' };
+  var KIND = { Bash: 'terminal', PowerShell: 'terminal', WebFetch: 'browser', WebSearch: 'search', Grep: 'search', Glob: 'search', Read: 'code', Edit: 'code', Write: 'code', MultiEdit: 'code', NotebookEdit: 'code', Task: 'flow', Agent: 'flow', Skill: 'skill', TodoWrite: 'memory' };
+  var ARG = { Bash: 'command', PowerShell: 'command', Read: 'file', Edit: 'file', Write: 'file', MultiEdit: 'file', NotebookEdit: 'file', Grep: 'pattern', Glob: 'pattern', WebFetch: 'url', WebSearch: 'query', Task: 'task', Agent: 'task', Skill: 'skill' };
+  var TODO = { pending: 'resting', in_progress: 'working', completed: 'finished' };
   var REMOVE_AFTER_MS = 6000;
+  var HISTORY_CALLS = 12; // calls shown in the trace when the page opens mid-session
 
   function hash(s) { var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; }
   function kindOf(tool) { return KIND[tool] || (String(tool).indexOf('mcp__') === 0 ? 'mcp' : 'api'); }
   function clip(t, n) { t = String(t || ''); return t.length > n ? t.slice(0, n - 1) + '…' : t; }
+  function base(p) { return String(p || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() || ''; }
   function mapStatus(s) {
     if (s.status === 'working' || s.status === 'waiting') return s.status;
     if (s.status === 'idle') return s.turns > 0 ? 'finished' : 'resting';
@@ -29,14 +36,85 @@
     if (s.status === 'ended') return 'Left the office';
     return s.turns > 0 ? (clip(s.prompt, 60) || 'Last turn') : 'Waiting for a prompt';
   }
+  // A subagent's type picks its role: the workstation and the icon.
+  function helperRole(type) {
+    if (/explore|research|search|guide/i.test(type)) return 'research';
+    if (/plan|architect/i.test(type)) return 'planner';
+    if (/review|verif|audit|security/i.test(type)) return 'analyst';
+    if (/doc|writ/i.test(type)) return 'writer';
+    return 'coder';
+  }
+  function argsOf(c) { if (!c.detail) return undefined; var a = {}; a[ARG[c.name] || 'input'] = c.detail; return a; }
+  function hostOf(url) { return String(url).replace(/^https?:\/\//, '').split('/')[0] || String(url); }
 
   var known = {};   // uid -> mirror of what the office was told
   var taken = {};   // bot name -> true
+  var rooms = {};   // room id -> true, for rooms this page added
+  var emitRef = null;
   function uniqueName(base) {
     var n = base || 'session', i = 2;
     while (taken[n]) n = base + ' ' + i++;
     taken[n] = true;
     return n;
+  }
+  // One room per project. A worktree session sits with its main repository.
+  function roomOf(s, emit) {
+    var name = base(s.worktree && s.worktree.repo) || base(s.cwd) || 'Claude Code';
+    var id = 'p-' + (name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'root');
+    if (!rooms[id]) { rooms[id] = true; emit({ type: 'room.add', floorId: 1, room: { id: id, type: 'lab', name: name, bots: [] } }); }
+    return id;
+  }
+
+  function syncHelpers(s, k, emit) {
+    (s.agents || []).forEach(function (a) {
+      var hn = k.helpers[a.call];
+      if (!hn && !a.done) {
+        hn = k.helpers[a.call] = uniqueName(k.name + ' ' + a.type);
+        emit({ type: 'delegate', bot: k.name, roomId: k.room, spawn: { name: hn, role: helperRole(a.type), shape: 'blob' }, task: clip(a.task, 80) || 'Subagent task' });
+      }
+      if (hn && a.done && !k.helpersDone[a.call]) {
+        k.helpersDone[a.call] = true;
+        emit({ type: 'subagent.done', bot: hn, remove: true, result: a.ok ? 'Returned its result' : 'Stopped before it finished' });
+        delete taken[hn];
+      }
+    });
+  }
+  function syncCalls(s, k, emit, quiet) {
+    var byAgent = {};
+    (s.agents || []).forEach(function (a) { if (a.id && k.helpers[a.call] && !k.helpersDone[a.call]) byAgent[a.id] = k.helpers[a.call]; });
+    (s.calls || []).forEach(function (c) {
+      var seen = k.calls[c.id];
+      if (!seen) {
+        var who = (c.agent && byAgent[c.agent]) || k.name;
+        seen = k.calls[c.id] = { bot: who, closed: false };
+        emit({ type: 'tool.call', bot: who, id: c.id, tool: c.name, kind: kindOf(c.name), args: argsOf(c), say: !quiet });
+        if (c.name === 'Skill' && c.detail) emit({ type: 'skill.load', bot: who, skill: c.detail });
+        if (c.name === 'WebFetch' && c.detail) emit({ type: 'knowledge', bot: who, source: hostOf(c.detail), text: c.detail });
+        if (c.name === 'WebSearch' && c.detail) emit({ type: 'knowledge', bot: who, source: 'Web search', text: c.detail });
+      }
+      if (!seen.closed && c.ok !== null) {
+        seen.closed = true;
+        var r = { type: 'tool.result', bot: seen.bot, id: c.id, ok: c.ok };
+        if (typeof c.ms === 'number') r.ms = c.ms;
+        if (c.err) r.summary = c.err;
+        emit(r);
+      }
+    });
+  }
+  function syncPlan(s, k, emit) {
+    var todos = s.todos || [];
+    if (!todos.length) return;
+    var sig = todos.map(function (t) { return t.text; }).join('\n');
+    if (sig !== k.planSig) {
+      k.planSig = sig; k.planState = todos.map(function (t) { return t.status; });
+      emit({ type: 'plan', bot: k.name, goal: clip(s.prompt, 120) || 'Plan', steps: todos.map(function (t, i) { return { id: 't' + i, text: t.text, status: TODO[t.status] || 'resting' }; }) });
+      return;
+    }
+    todos.forEach(function (t, i) {
+      if (k.planState[i] === t.status) return;
+      k.planState[i] = t.status;
+      emit({ type: 'plan.step', bot: k.name, id: 't' + i, status: TODO[t.status] || 'resting' });
+    });
   }
 
   function apply(snapshot, emit) {
@@ -47,70 +125,73 @@
       if (!k) {
         if (s.status === 'ended') return;
         var name = uniqueName(s.name);
-        k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: mapStatus(s), task: taskOf(s), tools: s.tools, helpers: [], call: null, seq: 0, model: s.model, ended: false };
-        emit({ type: 'bot.add', roomId: ROOM, bot: { name: name, role: 'coder', shape: SHAPES[hash(s.uid) % SHAPES.length], status: k.status, task: k.task } });
-        emit({ type: 'session.start', bot: name, session: s.uid, title: s.cwd });
+        k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: mapStatus(s), task: taskOf(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, model: s.model, ended: false, room: roomOf(s, emit) };
+        var bot = { name: name, role: 'coder', shape: SHAPES[hash(s.uid) % SHAPES.length], status: k.status, task: k.task, platform: 'Claude Code', identity: s.cwd };
+        if (s.skills && s.skills.length) bot.skills = s.skills.slice(0, 16);
+        if (s.scheduleId) bot.triggers = [s.name];
+        emit({ type: 'bot.add', roomId: k.room, bot: bot });
+        emit({ type: 'session.start', bot: name, session: s.uid, title: s.worktree ? s.cwd + ' (' + s.worktree.branch + ')' : s.cwd });
         if (s.model) emit({ type: 'model', bot: name, model: s.model });
+        if (s.scheduleId) emit({ type: 'trigger.run', job: s.name, bot: name });
+        // A page opened mid-session: fill the trace with the plan and the last calls, without bubbles.
+        // Older calls and finished subagents are history, not news.
+        var calls = s.calls || [], from = Math.max(0, calls.length - HISTORY_CALLS);
+        calls.forEach(function (c, i) { if (i < from && c.ok !== null) k.calls[c.id] = { bot: name, closed: true }; });
+        (s.agents || []).forEach(function (a) { if (a.done) k.helpersDone[a.call] = true; });
+        if (s.error) k.errorSeen = s.error.id;
+        syncHelpers(s, k, emit);
+        syncCalls(s, k, emit, true);
+        syncPlan(s, k, emit);
         return;
       }
       if (k.ended) return;
-      var bot = k.name;
-      if (s.model && s.model !== k.model) { k.model = s.model; emit({ type: 'model', bot: bot, model: s.model }); }
+      var bot0 = k.name;
+      if (s.model && s.model !== k.model) { k.model = s.model; emit({ type: 'model', bot: bot0, model: s.model }); }
 
-      // tool calls: a call opens when s.tool appears and closes when the counter moves
-      if (s.tool && !k.call) { k.call = 'c' + s.uid + '-' + (++k.seq); emit({ type: 'tool.call', bot: bot, id: k.call, tool: s.tool.name, kind: kindOf(s.tool.name) }); }
-      if (s.tools > k.tools) {
-        if (!k.call) { k.call = 'c' + s.uid + '-' + (++k.seq); emit({ type: 'tool.call', bot: bot, id: k.call, tool: 'Tool', kind: 'api' }); }
-        emit({ type: 'tool.result', bot: bot, id: k.call, ok: true });
-        k.call = null; k.tools = s.tools;
-        if (s.tool) { k.call = 'c' + s.uid + '-' + (++k.seq); emit({ type: 'tool.call', bot: bot, id: k.call, tool: s.tool.name, kind: kindOf(s.tool.name) }); }
-      }
-
-      // subagents: one spawned helper per running Task or Agent call
-      while (k.helpers.length < s.helpers) {
-        var hn = uniqueName(bot + ' helper');
-        k.helpers.push(hn);
-        emit({ type: 'delegate', bot: bot, roomId: ROOM, spawn: { name: hn, role: 'research', shape: 'blob' }, task: s.tool ? clip(s.tool.detail, 60) : 'Subagent task' });
-      }
-      while (k.helpers.length > s.helpers) {
-        var gone = k.helpers.pop(); delete taken[gone];
-        emit({ type: 'subagent.done', bot: gone, remove: true, result: 'Done' });
-      }
+      syncHelpers(s, k, emit);
+      syncCalls(s, k, emit);
+      syncPlan(s, k, emit);
 
       // permission prompts: each pending question becomes one request with Approve and Decline
       (s.pending || []).forEach(function (r) {
         if (k.asked[r.id]) return;
         k.asked[r.id] = true;
-        emit({ type: 'request', bot: bot, id: r.id, text: 'Allow ' + r.tool + (r.detail ? ': ' + clip(r.detail, 80) : '') + '?', risk: r.risk, tool: r.tool, preview: r.preview || r.detail });
+        emit({ type: 'request', bot: bot0, id: r.id, text: 'Allow ' + r.tool + (r.detail ? ': ' + clip(r.detail, 80) : '') + '?', risk: r.risk, tool: r.tool, preview: r.preview || r.detail });
       });
-
       // free-form questions from the session (office_ask): answer with Yes or No, or reply in the chat
       (s.questions || []).forEach(function (q) {
         if (k.asked[q.id]) return;
         k.asked[q.id] = true;
-        emit({ type: 'request', bot: bot, id: q.id, text: q.text, risk: 'low', tool: 'office_ask' });
+        emit({ type: 'request', bot: bot0, id: q.id, text: q.text, risk: 'low', tool: 'office_ask' });
       });
       // what the session said (headless sessions only; a terminal session answers in its terminal)
       (s.replies || []).forEach(function (r) {
         if (r.id <= k.replySeen) return;
         k.replySeen = r.id;
-        emit({ type: 'message', bot: bot, text: r.text });
+        emit({ type: 'message', bot: bot0, text: r.text });
       });
       // a queued message was read by the session
       var queued = (s.inbox || []).length;
-      if (queued < k.inbox) emit({ type: 'message', bot: bot, text: 'I read your message.', format: 'plain' });
+      if (queued < k.inbox) emit({ type: 'message', bot: bot0, text: 'I read your message.', format: 'plain' });
       k.inbox = queued;
 
       var st = mapStatus(s), task = taskOf(s);
       if (s.status === 'ended') {
         k.ended = true;
-        emit({ type: 'session.end', bot: bot, session: s.uid, ok: true });
-        emit({ type: 'status', bot: bot, status: 'resting', task: task });
-        setTimeout(function () { emit({ type: 'bot.remove', bot: bot }); delete taken[bot]; }, REMOVE_AFTER_MS);
+        emit({ type: 'session.end', bot: bot0, session: s.uid, ok: !s.error });
+        emit({ type: 'status', bot: bot0, status: 'resting', task: task });
+        setTimeout(function () { emit({ type: 'bot.remove', bot: bot0 }); delete taken[bot0]; }, REMOVE_AFTER_MS);
         return;
       }
-      if (st !== k.status) { k.status = st; k.task = task; emit({ type: 'status', bot: bot, status: st, task: task }); }
-      else if (task !== k.task) { k.task = task; emit({ type: 'status', bot: bot, status: st, task: task, quiet: true }); }
+      // a failed turn: the bot shows the error until a new turn starts, or Retry or Dismiss
+      if (s.error && s.error.id > k.errorSeen) {
+        k.errorSeen = s.error.id; k.status = 'error'; k.task = s.error.text;
+        emit({ type: 'error', bot: bot0, text: s.error.text });
+        return;
+      }
+      if (k.status === 'error' && st !== 'working') return;
+      if (st !== k.status) { k.status = st; k.task = task; emit({ type: 'status', bot: bot0, status: st, task: task }); }
+      else if (task !== k.task) { k.task = task; emit({ type: 'status', bot: bot0, status: st, task: task, quiet: true }); }
     });
     // sessions the server forgot
     Object.keys(known).forEach(function (uid) {
@@ -156,6 +237,7 @@
   window.officeAdapter = AgentOffice.adapters.create({
     name: 'Claude Code',
     subscribe: function (emit) {
+      emitRef = emit;
       es = new EventSource('/events?t=' + encodeURIComponent(TOKEN));
       es.onmessage = function (e) {
         latest = JSON.parse(e.data);
@@ -187,7 +269,15 @@
           var last = uids.length && sessionOf(uids[0]);
           return last && last.prompt ? sendAll(uids, { text: last.prompt }) : Promise.resolve({ ok: false, reason: 'Nothing to run again.' });
         }
-        case 'dismiss': return Promise.resolve({ ok: true });
+        case 'dismiss': {
+          var du = uidsOf(cmd)[0], d = du && known[du];
+          if (d && d.status === 'error' && emitRef) {
+            var last = sessionOf(du);
+            d.status = last ? mapStatus(last) : 'resting'; d.task = last ? taskOf(last) : '';
+            emitRef({ type: 'status', bot: d.name, status: d.status, task: d.task });
+          }
+          return Promise.resolve({ ok: true });
+        }
         default: return Promise.resolve({ ok: false, reason: 'Not available for Claude Code sessions.' });
       }
     },

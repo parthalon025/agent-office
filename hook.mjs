@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { slimPayload } from './payload.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -17,30 +18,10 @@ try { payload = JSON.parse(raw); } catch { process.exit(0); }
 let cfg;
 try { cfg = JSON.parse(fs.readFileSync(path.join(here, '.office-token'), 'utf8')); } catch { process.exit(0); }
 
-const clip = (v, n) => (typeof v === 'string' && v.length > n ? v.slice(0, n) + '…' : v);
-
-// Keep only small, display-worthy fields. Never forward file contents or tool output.
-const KEEP = ['command', 'file_path', 'pattern', 'url', 'description', 'path', 'query', 'subagent_type'];
-const tool_input = {};
-if (payload.tool_input && typeof payload.tool_input === 'object') {
-  for (const k of KEEP) if (payload.tool_input[k] != null) tool_input[k] = clip(String(payload.tool_input[k]), 300);
-}
-
+// Same trimmed fields as HTTP hooks (payload.mjs). The server's PowerShell helper walks up from
+// hook_ppid to find the claude process.
 const body = {
-  hook_event_name: payload.hook_event_name,
-  session_id: payload.session_id,
-  cwd: payload.cwd,
-  source: payload.source,
-  model: payload.model,
-  tool_name: payload.tool_name,
-  tool_input,
-  prompt: clip(payload.prompt, 400),
-  message: clip(payload.message, 300),
-  reason: payload.reason,
-  office_id: process.env.OFFICE_ID || null,
-  // A permission prompt needs the full input (to show the change) and Claude's "always allow" suggestions.
-  ...(payload.hook_event_name === 'PermissionRequest' ? { full_input: payload.tool_input, permission_suggestions: payload.permission_suggestions } : {}),
-  // The server's PowerShell helper walks up from this pid to find the claude process.
+  ...slimPayload(payload, process.env.OFFICE_ID || null),
   hook_ppid: payload.hook_event_name === 'SessionStart' && !process.env.OFFICE_ID ? process.ppid : null,
 };
 

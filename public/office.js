@@ -8,7 +8,8 @@
 
   var building = {
     name: 'Claude Code Office', sessions: 'agent',
-    floors: [{ key: 'ops', name: 'Sessions', rooms: [{ id: 'lab', type: 'lab', name: 'Claude Code', bots: [] }] }]
+    // The adapter adds one room per project folder as sessions arrive.
+    floors: [{ id: 1, key: 'ops', name: 'Sessions', rooms: [] }]
   };
 
   var MODELS = [
@@ -311,6 +312,7 @@
     if (sess && sess.model && !modelOpts.some(function (o) { return o.value === sess.model; })) modelOpts.unshift({ value: sess.model, label: sess.model });
     var ctxPct = sess && sess.ctxTokens && sess.ctxWindow ? Math.round(100 * sess.ctxTokens / sess.ctxWindow) : null;
     var working = sess && (sess.status === 'working' || sess.status === 'waiting');
+    var usage = sess && sess.usage && sess.usage.tokens ? sess.usage : null;
 
     return h(React.Fragment, null,
       snap && !live.length ? h('div', { className: 'welcome' }, h(A.EmptyState, { icon: 'building', title: 'No sessions yet', text: 'Open a session to seat the first bot. You can also reopen a past one.', action: { label: 'Open session', icon: 'add', onClick: p.onOpen } })) : null,
@@ -322,7 +324,8 @@
           h(A.Button, { variant: 'quiet', icon: 'terminal', onClick: p.onHooks }, 'Hooks'),
           live.length ? h('span', { className: 'strip-total mono' }, live.length + ' open · ' + money(total)) : null),
         sess ? h('div', { className: 'strip-group strip-bot' },
-          h('span', { className: 'strip-id' }, h(A.StatusDot, { status: statusOf(sess) }), h('b', null, sess.name), h('span', { className: 'mono' }, money(sess.cost) + (ctxPct != null ? ' · context ' + ctxPct + '%' : ''))),
+          h('span', { className: 'strip-id' }, h(A.StatusDot, { status: statusOf(sess) }), h('b', null, sess.name), ctxPct != null ? h('span', { className: 'mono' }, 'context ' + ctxPct + '%') : null),
+          sess.headless && (usage || sess.cost) ? h(A.CostMeter, { tokens: usage ? usage.tokens : 0, cost: sess.cost || 0, cached: usage && usage.input ? usage.cached / usage.input : undefined }) : null,
           sess.headless ? h(A.Select, { id: 'c-model', ariaLabel: 'Model of ' + sess.name, options: modelOpts, value: sess.model || '', onChange: function (v) { ctl('model', v); } }) : null,
           sess.headless ? h(A.Select, { id: 'c-mode', ariaLabel: 'Permissions of ' + sess.name, options: modeOpts, value: sess.mode || '', onChange: function (v) { ctl('mode', v); } }) : null,
           sess.headless ? h(A.Button, { variant: 'quiet', icon: 'pause', disabled: !working, onClick: stopTurn }, 'Stop turn') : null,

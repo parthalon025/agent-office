@@ -30,8 +30,9 @@ Stop the server by the pid that owns port 4317 (`netstat -ano | grep :4317`, the
 | `server.mjs` | Session state, hooks, headless sessions (stdin/stdout), permission holds, MCP routes, history, schedules, REST and SSE. |
 | `git.mjs` | Worktrees, changes, remove worktree, pull request. Argument lists only, never a shell. |
 | `hook.mjs` | Command hook. Exits 0 on every path. |
+| `payload.mjs` | Trims a hook payload to the fields the office shows. Used by `hook.mjs` and the HTTP hook route. |
 | `mcp.mjs` | stdio MCP server: `office_inbox`, `office_ask`. |
-| `public/adapter.js` | Snapshot to DS events, and DS commands to REST calls. Exposes `officeAdapter.onSnapshot / session / lookup`. |
+| `public/adapter.js` | Snapshot to DS events (rooms per project, tool calls, helpers, plan, errors, triggers), and DS commands to REST calls. Exposes `officeAdapter.onSnapshot / session / lookup`. |
 | `public/office.js` | React: control strip and dialogs. Mounts `OfficeScene` once. |
 | `public/chat-extras.js` | Chat resize grips, the `/` list, theme mirror. It depends on DS class names (`.ao-hud-chat`, `.ao-input`). |
 
@@ -55,6 +56,9 @@ Add a new file only for a distinct job. Extend the file that owns the concern fi
 - HTTP hook failures are non-blocking. Command hooks must stay silent on stdout unless they return real hook JSON.
 - "Always allow" uses `permission_suggestions` from the hook payload and returns them as `updatedPermissions`. Pass only `addRules` with `behavior: allow`. Edits get a mode suggestion, not a rule.
 - `result` with `error_during_execution` after an interrupt is not an error. Check `s.interrupted`.
+- Hooks fired inside a subagent carry `agent_id`. Use it to put the call on the helper bot, and keep it off the parent's task line.
+- `room.add` needs `floorId`. The building's floor has `id: 1` for that reason.
+- The DS weekly-limit meter shows demo numbers when no `usage` events arrive. `office.css` hides it; Claude Code hooks do not report plan usage.
 - The Bash tool mangles backslashes and quotes in long heredocs. Write patch scripts with the Write tool.
 
 ## Safety rules

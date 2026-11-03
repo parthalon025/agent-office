@@ -4,3 +4,4 @@ state.json
 office-hooks-http.json
 office-mcp.json
 history.json
+.playwright-mcp/

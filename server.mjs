@@ -9,6 +9,7 @@ import crypto from 'node:crypto';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as git from './git.mjs';
+import { slimPayload } from './payload.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -31,9 +32,10 @@ const MODEL_RE = /^(opus|sonnet|haiku|claude-[\w.-]+)$/;
 const MODES = new Set(['default', 'acceptEdits', 'plan']);
 const MAX_ATTACH_CHARS = 9_000_000; // base64 characters across all attachments of one message
 const HOOK_EVENTS = [
-  'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PermissionRequest',
-  'Notification', 'Stop', 'SubagentStop', 'SessionEnd',
+  'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest',
+  'Notification', 'Stop', 'SubagentStart', 'SubagentStop', 'SessionEnd',
 ];
+const TOOL_EVENTS = new Set(['PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest']);
 // How long the office holds a permission prompt before handing it back to the terminal dialog.
 const HEADLESS_ASK_MS = 15 * 60 * 1000; // sessions run inside the office have no terminal dialog to fall back to
 const ASK_TIMEOUT_MS = (Number(process.env.OFFICE_ASK_TIMEOUT_S) || 60) * 1000;
@@ -61,7 +63,7 @@ const PERMISSIONS = { allow: ['mcp__office__office_inbox', 'mcp__office__office_
 const commandSettings = {
   hooks: Object.fromEntries(HOOK_EVENTS.map((ev) => {
     const entry = { hooks: [{ type: 'command', command: hookCommand, timeout: ev === 'PermissionRequest' ? askSeconds : 10 }] };
-    if (ev === 'PreToolUse' || ev === 'PostToolUse' || ev === 'PermissionRequest') entry.matcher = '*';
+    if (TOOL_EVENTS.has(ev)) entry.matcher = '*';
     return [ev, [entry]];
   })),
   permissions: PERMISSIONS,
@@ -69,14 +71,14 @@ const commandSettings = {
 // HTTP hooks: Claude posts straight to the office, with no Node start-up. Session start and end stay
 // command hooks (start needs the process walk, end runs while the process exits). An HTTP failure is
 // non-blocking, so a stopped office never stalls a session.
-const HTTP_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PermissionRequest', 'Notification', 'Stop', 'SubagentStop']);
+const HTTP_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest', 'Notification', 'Stop', 'SubagentStart', 'SubagentStop']);
 const httpSettings = {
   hooks: Object.fromEntries(HOOK_EVENTS.map((ev) => {
     const hook = HTTP_EVENTS.has(ev)
       ? { type: 'http', url: `http://127.0.0.1:${PORT}/hook/http`, headers: { 'x-office-token': TOKEN, 'x-office-id': '$OFFICE_ID' }, allowedEnvVars: ['OFFICE_ID'], timeout: ev === 'PermissionRequest' ? askSeconds : 10 }
       : { type: 'command', command: hookCommand, timeout: 10 };
     const entry = { hooks: [hook] };
-    if (ev === 'PreToolUse' || ev === 'PostToolUse' || ev === 'PermissionRequest') entry.matcher = '*';
+    if (TOOL_EVENTS.has(ev)) entry.matcher = '*';
     return [ev, [entry]];
   })),
   permissions: PERMISSIONS,
@@ -130,7 +132,9 @@ function newSession(fields) {
     uid: crypto.randomBytes(4).toString('hex'),
     sid: null, officeId: null, name: '', cwd: '', model: null, status: 'idle',
     tool: null, prompt: '', note: '', pending: [], questions: [], inbox: [], replies: [], replySeq: 0, headless: false, commands: [], skills: [], cost: null, costBase: 0, live: '', mode: null,
-    ctxTokens: null, ctxWindow: null, worktree: null, budget: null, scheduleId: null, interrupted: false, helpers: 0, tools: 0, turns: 0,
+    ctxTokens: null, ctxWindow: null, worktree: null, budget: null, scheduleId: null, interrupted: false, turns: 0,
+    // calls: tool calls, newest last. agents: subagents (Task or Agent tool). todos: the TodoWrite plan.
+    calls: [], agents: [], todos: [], usage: { tokens: 0, cached: 0, input: 0 }, error: null, errorSeq: 0,
     startedAt: Date.now(), lastEvent: Date.now(), endedAt: null,
     pid: null, launched: false, ...fields,
   };
@@ -152,10 +156,33 @@ function describeTool(name, input = {}) {
     case 'WebFetch': return clip(input.url, 70);
     case 'WebSearch': return clip(input.query, 70);
     case 'Task': case 'Agent': return clip(input.description || input.subagent_type, 70);
+    case 'Skill': return clip(input.skill, 70);
     default: return clip(input.description || input.command || input.file_path || input.query || '', 70);
   }
 }
 const isAgentTool = (n) => n === 'Task' || n === 'Agent';
+const MAX_CALLS = 60;
+// One tool call: opened by PreToolUse, closed by PostToolUse or PostToolUseFailure.
+function openCall(s, p) {
+  if (!p.tool_use_id || s.calls.some((c) => c.id === p.tool_use_id)) return;
+  s.calls.push({ id: p.tool_use_id, name: p.tool_name, detail: describeTool(p.tool_name, p.tool_input), agent: p.agent_id, t: Date.now(), ms: null, ok: null, err: null });
+  if (isAgentTool(p.tool_name)) s.agents.push({ call: p.tool_use_id, id: null, type: p.tool_input.subagent_type || 'general-purpose', task: describeTool(p.tool_name, p.tool_input), done: false, ok: null });
+  // Keep every open call; drop the oldest closed ones.
+  while (s.calls.length > MAX_CALLS) { const i = s.calls.findIndex((c) => c.ok !== null); if (i < 0) break; s.calls.splice(i, 1); }
+}
+function closeCall(s, id, ok, ms, err) {
+  const c = s.calls.find((x) => x.id === id);
+  if (!c || c.ok !== null) return;
+  c.ok = ok; c.ms = ms ?? Date.now() - c.t; c.err = err || null;
+  const a = s.agents.find((x) => x.call === id);
+  if (a && !a.done) { a.done = true; a.ok = ok; }
+}
+// A turn ended: nothing is still running.
+function closeAll(s, why) {
+  for (const c of s.calls) if (c.ok === null) closeCall(s, c.id, false, null, why);
+  for (const a of s.agents) if (!a.done) { a.done = true; a.ok = false; }
+  if (s.agents.length > 20) s.agents = s.agents.slice(-20);
+}
 function riskOf(tool, input = {}) {
   if (tool === 'Bash') return /\b(rm|sudo|git\s+push|git\s+reset|del|rmdir|format|curl|wget|chmod|kill|taskkill|drop)\b/i.test(input.command || '') ? 'high' : 'medium';
   if (tool === 'WebFetch' || String(tool).startsWith('mcp__')) return 'medium';
@@ -233,18 +260,6 @@ function walkToClaude(ppid) {
 // Warm the helper now so the first session start is fast too.
 if (process.platform === 'win32') walker = startWalker();
 
-const SLIM_KEEP = ['command', 'file_path', 'pattern', 'url', 'description', 'path', 'query', 'subagent_type'];
-// HTTP hooks deliver Claude's full payload; keep only what the office displays.
-function slim(b, officeId) {
-  const tool_input = {};
-  if (b.tool_input && typeof b.tool_input === 'object') for (const k of SLIM_KEEP) if (b.tool_input[k] != null) tool_input[k] = String(b.tool_input[k]).slice(0, 300);
-  return {
-    hook_event_name: b.hook_event_name, session_id: b.session_id, cwd: b.cwd, source: b.source, model: b.model,
-    tool_name: b.tool_name, tool_input, prompt: clip(b.prompt, 400), message: clip(b.message, 300), reason: b.reason,
-    office_id: officeId || null,
-    ...(b.hook_event_name === 'PermissionRequest' ? { full_input: b.tool_input, permission_suggestions: b.permission_suggestions } : {}),
-  };
-}
 let probeSeen = null; // while probing: which events arrived over HTTP
 
 function onHook(p) {
@@ -265,38 +280,56 @@ function onHook(p) {
   let out = null;
   switch (ev) {
     case 'SessionStart':
-      s.status = 'idle'; s.tool = null; s.helpers = 0; s.note = '';
+      s.status = 'idle'; s.tool = null; s.note = ''; closeAll(s, 'The session restarted.');
       addFeed(s, 'start', `sat down (${p.source || 'startup'})`);
       break;
     case 'UserPromptSubmit':
-      s.status = 'working'; s.prompt = p.prompt || ''; s.note = ''; s.turns += 1;
+      s.status = 'working'; s.prompt = p.prompt || ''; s.note = ''; s.turns += 1; s.error = null;
       out = deliver(s, ev);
       addFeed(s, 'prompt', clip(s.prompt, 140));
       break;
     case 'PreToolUse':
       s.status = 'working'; s.note = '';
-      s.tool = { name: p.tool_name, detail: describeTool(p.tool_name, p.tool_input) };
-      if (isAgentTool(p.tool_name)) s.helpers += 1;
+      openCall(s, p);
+      // The bot's task line shows the main agent's tool; a subagent's tools show on its helper.
+      if (!p.agent_id) s.tool = { name: p.tool_name, detail: describeTool(p.tool_name, p.tool_input) };
       break;
     case 'PostToolUse':
-      s.tools += 1; s.tool = null; dropPending(s);
+      if (!p.agent_id) s.tool = null;
+      dropPending(s);
+      closeCall(s, p.tool_use_id, true, p.duration_ms);
+      if (p.tool_name === 'TodoWrite' && Array.isArray(p.tool_input.todos) && !p.agent_id) s.todos = p.tool_input.todos;
       out = deliver(s, ev);
-      if (isAgentTool(p.tool_name)) s.helpers = Math.max(0, s.helpers - 1);
       addFeed(s, 'tool', `${p.tool_name} ${describeTool(p.tool_name, p.tool_input)}`.trim());
       break;
+    case 'PostToolUseFailure':
+      if (!p.agent_id) s.tool = null;
+      dropPending(s);
+      closeCall(s, p.tool_use_id, false, p.duration_ms, p.is_interrupt ? 'Stopped' : p.error || 'Failed');
+      addFeed(s, 'tool', `${p.tool_name} failed${p.is_interrupt ? ' (stopped)' : ''}`);
+      break;
+    case 'SubagentStart': {
+      // Link the subagent to the oldest Task or Agent call of the same type that has no subagent yet.
+      const a = s.agents.find((x) => !x.id && !x.done && x.type === p.agent_type) || s.agents.find((x) => !x.id && !x.done);
+      if (a && p.agent_id) a.id = p.agent_id;
+      break;
+    }
     case 'Notification':
       s.note = p.message || '';
       addFeed(s, 'wait', clip(s.note || 'sent a notification', 140));
       break;
     case 'Stop':
-      s.status = 'idle'; s.tool = null; s.helpers = 0; s.note = ''; dropPending(s);
+      s.status = 'idle'; s.tool = null; s.note = ''; dropPending(s); closeAll(s, 'The turn ended first.');
       out = deliver(s, ev);
       if (out) s.status = 'working';
       addFeed(s, 'stop', 'finished the turn');
       break;
-    case 'SubagentStop':
+    case 'SubagentStop': {
+      const a = s.agents.find((x) => x.id && x.id === p.agent_id);
+      if (a && !a.done) { a.done = true; a.ok = true; }
       addFeed(s, 'tool', 'a helper finished');
       break;
+    }
     case 'SessionEnd':
       endSession(s, p.reason ? `left (${p.reason})` : 'left');
       break;
@@ -311,7 +344,7 @@ function endSession(s, why) {
   if (s.status === 'ended') return;
   dropPending(s);
   dropQuestions(s, 'The session ended before the user answered.');
-  s.status = 'ended'; s.endedAt = Date.now(); s.tool = null; s.helpers = 0; s.live = '';
+  s.status = 'ended'; s.endedAt = Date.now(); s.tool = null; s.live = ''; closeAll(s, 'The session ended.');
   addFeed(s, 'end', why);
   recordHistory(s);
 }
@@ -541,6 +574,14 @@ function onStream(s, line) {
     s.live = '';
     const u = m.message?.usage;
     if (u) s.ctxTokens = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+    // One API call can arrive as several assistant lines with the same id; count its usage once.
+    const mid = m.message?.id;
+    if (u && mid && mid !== s.lastUsageId) {
+      s.lastUsageId = mid;
+      s.usage.tokens += s.ctxTokens + (u.output_tokens || 0);
+      s.usage.input += s.ctxTokens;
+      s.usage.cached += u.cache_read_input_tokens || 0;
+    }
     for (const b of m.message?.content || []) if (b.type === 'text' && b.text && b.text.trim()) pushReply(s, b.text);
   } else if (m.type === 'result') {
     s.live = '';
@@ -549,10 +590,16 @@ function onStream(s, line) {
     if (mu?.contextWindow) s.ctxWindow = mu.contextWindow;
     // The turn is over: show the bot at rest even when the stop hook did not run (a stopped turn, a spending limit).
     dropPending(s);
-    if (s.status === 'working' || s.status === 'waiting') { s.status = 'idle'; s.tool = null; s.helpers = 0; }
+    if (s.status === 'working' || s.status === 'waiting') { s.status = 'idle'; s.tool = null; }
+    closeAll(s, s.interrupted ? 'Stopped' : 'The turn ended first.');
     const sub = String(m.subtype || '');
-    if (sub.startsWith('error_max_budget')) pushReply(s, `Stopped: this session reached its spending limit of $${s.budget}.`);
-    else if (m.is_error && m.result && !s.interrupted) pushReply(s, 'Stopped with an error: ' + m.result);
+    let why = null;
+    if (sub.startsWith('error_max_budget')) why = `This session reached its spending limit of $${s.budget}.`;
+    else if (m.is_error && m.result && !s.interrupted) why = String(m.result);
+    if (why) {
+      pushReply(s, 'Stopped: ' + why);
+      s.error = { id: ++s.errorSeq, text: clip(why, 200) };
+    }
     recordHistory(s);
     broadcast();
   }
@@ -891,7 +938,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, out || { ok: true });
     }
     if (url.pathname === '/hook/http') {
-      const p = slim(body, String(req.headers['x-office-id'] || '').trim() || null);
+      const p = slimPayload(body, String(req.headers['x-office-id'] || '').trim() || null);
       if (probeSeen && p.office_id === 'probe') probeSeen.add(p.hook_event_name);
       if (p.hook_event_name === 'PermissionRequest') return onPermission(p, res);
       const out = onHook(p);
