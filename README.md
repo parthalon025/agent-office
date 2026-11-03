@@ -6,7 +6,10 @@ It is built on the Agent Office design system (x1.5), which lives in this folder
 
 ## What it does
 
-- **Sessions as bots.** Each session sits at a desk in the room of its project folder. Typing means working, an amber badge means it needs you, and a red badge means the turn failed (Retry or Dismiss).
+- **Repos as buildings.** A git repository is a building, a branch is a floor and a worktree is a room. Pick the building in the control strip; a button there shows requests that wait in another building. Folders outside git share the "Other folders" building.
+- **Floors and rooms.** The Floors dialog creates a floor (a new branch with its first worktree), adds a room (one more worktree on a branch, also on a branch that has one), removes a room and deletes a floor (its worktrees and the branch). Git refusals (uncommitted changes, commits that are not merged) show with a button to go ahead anyway. The main folder and a room with an open session cannot be removed.
+- **Extensions.** The Extensions button in the chat header lists the session's connectors (MCP servers) and plugins. Turn a connector off or on for this session, reconnect it, add one (a URL or a command) or remove one. Turn a plugin off or on for this folder, install or remove one. Saved changes go to the local or project scope of the folder, never to your user settings.
+- **Sessions as bots.** Each session sits at a desk in the room of its worktree. Typing means working, an amber badge means it needs you, and a red badge means the turn failed (Retry or Dismiss).
 - **Subagents as helpers.** A Task or Agent call brings a grey helper by the elevator. The helper does its own tool calls and leaves when it returns its result.
 - **Trace every step.** Select a bot and open Trace: the plan from TodoWrite with each step's state, every tool call with its argument, time and failure, skills loaded, pages read, and the schedule that started the run.
 - **No terminal needed.** A session can run inside the office. You chat with it, and its replies appear as they are written.
@@ -15,6 +18,7 @@ It is built on the Agent Office design system (x1.5), which lives in this folder
 - **See the work.** A Changes view shows the branch, the files and a colored diff. A session can run in its own git worktree, so your main branch stays clean, and you can open a pull request from the office.
 - **Come back later.** Closed sessions are saved. Reopen one and Claude continues with its context. Search every past session.
 - **Run things on a schedule.** Save prompts as templates. Schedule a prompt daily or every N minutes.
+- **Weekly limit.** The meter shows the real 7-day plan usage and its reset time when your status line command saves Claude Code's `rate_limits` to `~/.claude/rate_limits_state.json` (or the file in `OFFICE_RATE_FILE`). Without that file the meter stays hidden.
 - **Keep an eye on cost.** The control strip shows tokens, cost and the cache hit rate of a session that runs in the office, and its context fill. A session can have a spend limit.
 - **Ask the user.** Claude can call an `office_ask` tool to ask you a question and wait for your answer.
 
@@ -131,5 +135,6 @@ python kit/check.py public/index.html public/office.css public/office.js public/
 - Only images and text files can be attached.
 - A permission rule offered for "always allow" depends on the tool. Claude offers a mode switch for edits instead of a rule.
 - The office keeps the last 60 sessions.
-- A project's room stays on the floor until you reload the page, also after its last session leaves. The design system has no event that removes a room.
-- Plan usage (the weekly limit) is not shown. Claude Code hooks do not report it.
+- The design system has no event that removes a floor or a room, so the office rebuilds the scene when one goes. Chats and the trace refill from the server; bubbles and walks in progress stop.
+- Only office sessions can turn connectors on and off. A terminal session uses /mcp.
+- The weekly limit needs the status line file (see above). The meter's per-bot rows stay hidden: a session's share of the plan is not known.

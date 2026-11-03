@@ -21,6 +21,16 @@ export async function repoTop(cwd) {
   try { return (await git(['rev-parse', '--show-toplevel'], cwd)).trim(); } catch { throw new Error('That folder is not in a git repository, so it cannot get a worktree.'); }
 }
 
+/** Where a folder sits in git: the main repository, this worktree's top folder and its branch. Null outside git. */
+export async function locate(cwd) {
+  try {
+    const [top, branch, common] = (await git(['rev-parse', '--show-toplevel', '--abbrev-ref', 'HEAD', '--git-common-dir'], cwd, 8000)).trim().split(/\r?\n/);
+    const dir = path.resolve(cwd, common);
+    const repo = path.basename(dir).toLowerCase() === '.git' ? path.dirname(dir) : dir;
+    return { repo: path.normalize(repo), root: path.normalize(top), branch: branch === 'HEAD' ? 'detached' : branch };
+  } catch { return null; }
+}
+
 const WORKTREE_ROOT = path.join(os.homedir(), '.agent-office', 'worktrees');
 
 /** Creates a branch `office/<name>-<id>` in its own folder and returns where Claude should work. */
@@ -75,4 +85,73 @@ export async function createPr(cwd, branch, title) {
   await git(['push', '-u', 'origin', branch], cwd, 120000);
   const url = (await run('gh', ['pr', 'create', '--fill', '--head', branch], cwd, 120000)).trim().split('\n').pop();
   return { url };
+}
+
+// ---------- floors (branches) and rooms (worktrees) ----------
+// The office draws a repository as a building, a branch as a floor and a worktree as a room.
+
+/** The worktrees of a repository: each one's folder, branch, and whether it is the main folder. */
+export async function layout(repo) {
+  const out = await git(['worktree', 'list', '--porcelain'], repo, 15000);
+  const list = [];
+  let cur = null;
+  for (const line of out.split(/\r?\n/)) {
+    if (line.startsWith('worktree ')) { cur = { root: path.normalize(line.slice(9)), branch: 'detached', main: list.length === 0, prunable: false }; list.push(cur); }
+    else if (cur && line.startsWith('branch ')) cur.branch = line.slice(7).replace(/^refs\/heads\//, '');
+    else if (cur && line.startsWith('prunable')) cur.prunable = true;
+    else if (cur && line === 'bare') cur.bare = true;
+  }
+  return list.filter((w) => !w.bare && !w.prunable);
+}
+
+/** Local branches, the most recent commit first. */
+export async function branches(repo) {
+  return (await git(['for-each-ref', '--sort=-committerdate', '--format=%(refname:short)', 'refs/heads'], repo, 15000)).split(/\r?\n/).filter(Boolean).slice(0, 200);
+}
+
+const BRANCH_RE = /^(?!-)(?!.*\.\.)(?!.*\/\/)(?!.*@\{)[A-Za-z0-9._\/-]{1,100}(?<![./])$/;
+const slugOf = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'branch';
+function roomFolder(repo, branch) {
+  fs.mkdirSync(WORKTREE_ROOT, { recursive: true });
+  return path.join(WORKTREE_ROOT, `${path.basename(repo)}-${slugOf(branch)}-${crypto.randomBytes(2).toString('hex')}`);
+}
+
+/** New floor: a new branch from `from` (default HEAD), checked out in a new worktree (its first room). */
+export async function createFloor(repo, branch, from = '') {
+  if (!BRANCH_RE.test(branch)) throw new Error('Use letters, digits, dots, dashes and slashes for the branch name.');
+  try { await git(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], repo); throw new Error(`The branch ${branch} exists. Add a room to its floor instead.`); }
+  catch (e) { if (/exists/.test(e.message)) throw e; }
+  const root = roomFolder(repo, branch);
+  await git(['worktree', 'add', '-b', branch, root, from || 'HEAD'], repo, 120000);
+  return { root, branch };
+}
+
+/** New room on a floor: one more worktree with the branch checked out. Git refuses a second
+ *  worktree for a branch unless --force, so a floor that has rooms gets one with --force. */
+export async function createRoom(repo, branch) {
+  if (!BRANCH_RE.test(branch)) throw new Error('Use letters, digits, dots, dashes and slashes for the branch name.');
+  const taken = (await layout(repo)).some((w) => w.branch === branch);
+  const root = roomFolder(repo, branch);
+  await git(['worktree', 'add', ...(taken ? ['--force'] : []), root, branch], repo, 120000);
+  return { root, branch, shared: taken };
+}
+
+/** Removes a room (a worktree that is not the main folder). The branch, and so the floor, stays. */
+export async function removeRoom(repo, root, force = false) {
+  const w = (await layout(repo)).find((x) => path.normalize(x.root).toLowerCase() === path.normalize(root).toLowerCase());
+  if (!w) throw new Error('That room is gone already.');
+  if (w.main) throw new Error('The main folder of the repository cannot be removed.');
+  await git(['worktree', 'remove', ...(force ? ['--force'] : []), w.root], repo, 60000)
+    .catch((e) => { throw new Error(/contains modified or untracked files|uncommitted/i.test(e.message) ? 'The room has uncommitted changes. Remove it anyway to discard them.' : e.message); });
+  return { removed: true };
+}
+
+/** Deletes a floor: removes its rooms (not the main folder) and deletes the branch. */
+export async function deleteFloor(repo, branch, force = false) {
+  const wts = await layout(repo);
+  if (wts.some((w) => w.main && w.branch === branch)) throw new Error(`The main folder has ${branch} checked out. Switch it to another branch first.`);
+  for (const w of wts.filter((x) => x.branch === branch)) await removeRoom(repo, w.root, force);
+  await git(['branch', force ? '-D' : '-d', branch], repo)
+    .catch((e) => { throw new Error(/not fully merged/i.test(e.message) ? `The branch ${branch} has commits that are not merged. Delete it anyway to lose them.` : e.message); });
+  return { deleted: true };
 }

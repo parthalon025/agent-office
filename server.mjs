@@ -135,12 +135,86 @@ function newSession(fields) {
     ctxTokens: null, ctxWindow: null, worktree: null, budget: null, scheduleId: null, interrupted: false, turns: 0,
     // calls: tool calls, newest last. agents: subagents (Task or Agent tool). todos: the TodoWrite plan.
     calls: [], agents: [], todos: [], usage: { tokens: 0, cached: 0, input: 0 }, error: null, errorSeq: 0,
+    // git: { repo, root, branch } of cwd, or null outside git. placed: git was looked up at least once.
+    git: null, placed: false, gitCwd: '', gitAt: 0,
     startedAt: Date.now(), lastEvent: Date.now(), endedAt: null,
     pid: null, launched: false, ...fields,
   };
   sessions.set(s.uid, s);
   return s;
 }
+
+// The office draws a repository as a building, a branch as a floor and a worktree as a room.
+// Look the place up when the folder changes, at the start and end of each turn, and at most every 15 s.
+function placeSession(s, force = false) {
+  if (s.status === 'ended') return;
+  if (!s.cwd) { s.placed = true; return; }
+  if (!force && s.gitCwd === s.cwd && Date.now() - s.gitAt < 15000) return;
+  s.gitCwd = s.cwd; s.gitAt = Date.now();
+  git.locate(s.cwd).then((g) => {
+    const changed = !s.placed || JSON.stringify(g) !== JSON.stringify(s.git);
+    s.git = g; s.placed = true;
+    if (g) addRepo(g.repo);
+    if (changed) broadcast();
+  });
+}
+
+// ---------- buildings: repositories and their worktrees ----------
+// A repository is known when a session works in it or it is a recent folder. Its worktrees are
+// read with `git worktree list` when it is added, after each floor or room change, and every 30 s.
+const repos = new Map(); // lower-case repo path -> { path, name, worktrees }
+const repoKey = (p) => path.normalize(p).toLowerCase();
+function addRepo(repoPath) {
+  const k = repoKey(repoPath);
+  if (repos.has(k)) return;
+  repos.set(k, { path: path.normalize(repoPath), name: basename(repoPath), worktrees: [] });
+  void refreshRepo(k);
+}
+async function refreshRepo(k) {
+  const r = repos.get(k);
+  if (!r) return;
+  let wts;
+  try { wts = await git.layout(r.path); } catch { repos.delete(k); broadcast(); return; } // not a repository any more
+  if (JSON.stringify(wts) !== JSON.stringify(r.worktrees)) { r.worktrees = wts; broadcast(); }
+}
+function knownRepo(p) {
+  const r = repos.get(repoKey(String(p || '')));
+  if (!r) throw httpError(404, 'The office does not know that repository.');
+  return r;
+}
+// Never take a room away from a session that works in it.
+function roomInUse(root) {
+  const r = repoKey(root);
+  for (const s of sessions.values()) if (s.status !== 'ended' && s.cwd && repoKey(s.cwd).startsWith(r)) return s;
+  return null;
+}
+// Git refusals (branch exists, not merged, uncommitted changes) are the user's to fix: answer 409.
+async function floorAction(action, body) {
+  try { return await floorActionRaw(action, body); } catch (e) { throw e.status ? e : httpError(409, e.message); }
+}
+async function floorActionRaw(action, body) {
+  const r = knownRepo(body.repo);
+  const branch = String(body.branch || '').trim();
+  let out;
+  if (action === 'create-floor') out = await git.createFloor(r.path, branch, String(body.from || '').trim());
+  else if (action === 'create-room') out = await git.createRoom(r.path, branch);
+  else if (action === 'remove-room') {
+    const s = roomInUse(String(body.root || ''));
+    if (s) throw httpError(409, `${s.name} works in this room. Close the session first.`);
+    out = await git.removeRoom(r.path, String(body.root || ''), body.force === true);
+  } else if (action === 'delete-floor') {
+    for (const w of r.worktrees.filter((x) => x.branch === branch)) {
+      const s = roomInUse(w.root);
+      if (s) throw httpError(409, `${s.name} works on this floor. Close the session first.`);
+    }
+    out = await git.deleteFloor(r.path, branch, body.force === true);
+  } else throw httpError(400, 'Unknown action.');
+  await refreshRepo(repoKey(r.path));
+  return out;
+}
+setInterval(() => { for (const k of repos.keys()) void refreshRepo(k); }, 30000).unref();
+// Recent folders that are in git are buildings too, so they can get floors before any session runs.
+for (const d of persisted.recent) git.locate(d).then((g) => { if (g) addRepo(g.repo); });
 
 function addFeed(s, kind, text) {
   feed.push({ t: Date.now(), uid: s.uid, name: s.name, kind, text });
@@ -336,6 +410,7 @@ function onHook(p) {
     default: break;
   }
   if (p.cwd && ev === 'SessionStart') rememberDir(p.cwd);
+  placeSession(s, ev === 'SessionStart' || ev === 'UserPromptSubmit' || ev === 'Stop');
   broadcast();
   return out;
 }
@@ -544,6 +619,102 @@ function doControl(uid, action, value) {
   } else throw httpError(400, 'Unknown action.');
 }
 
+
+// ---------- extensions: connectors (MCP servers) and plugins ----------
+// Turn on and off: the running session only (control requests mcp_toggle, mcp_reconnect).
+// Add, remove, enable and disable for good: Claude Code's own CLI (`claude mcp`, `claude plugin`) in the
+// session's folder, with scope local (this folder, not shared) or project (shared in the repo).
+// The office never writes user scope: that is ~/.claude settings, which the office does not change.
+const EXT_SCOPES = new Set(['local', 'project']);
+const NAME_RE = /^[\w.:@ -]{1,120}$/;
+const PLUGIN_RE = /^[\w.@\/-]{1,160}$/;
+function ask(s, request, ms = 15000) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(httpError(504, 'The session did not answer.')), ms);
+    try { control(s, request, (r) => { clearTimeout(t); if (r.subtype === 'error') reject(httpError(409, r.error || 'The session refused.')); else resolve(r.response || {}); }); }
+    catch (e) { clearTimeout(t); reject(e); }
+  });
+}
+function claudeCli(args, cwd) {
+  return new Promise((resolve, reject) => {
+    execFile('claude', args, { cwd, windowsHide: true, timeout: 120000, maxBuffer: 8 * 1024 * 1024 }, (err, out, stderr) => {
+      if (err) return reject(httpError(409, (String(stderr || '').trim() || String(out || '').trim() || err.message).split('\n').slice(-3).join(' ')));
+      resolve(String(out));
+    });
+  });
+}
+function extSession(uid) {
+  const s = sessions.get(String(uid));
+  if (!s || s.status === 'ended') throw httpError(404, 'That session is not open.');
+  return s;
+}
+const samePath = (a, b) => !!a && !!b && path.normalize(a).toLowerCase() === path.normalize(b).toLowerCase();
+async function extList(s) {
+  let servers = null;
+  if (s.headless) servers = ((await ask(s, { subtype: 'mcp_status' }, 45000)).mcpServers || []).map((m) => ({
+    name: m.name, status: m.status, scope: m.scope, source: m.source, error: m.error || null,
+    transport: m.transport, tools: Array.isArray(m.tools) ? m.tools.length : null,
+  }));
+  const root = s.git?.root || s.cwd;
+  let plugins = [];
+  try {
+    plugins = JSON.parse(await claudeCli(['plugin', 'list', '--json'], s.cwd || ROOT))
+      .filter((p) => p.scope === 'user' || samePath(p.projectPath, root) || samePath(p.projectPath, s.cwd))
+      .map((p) => ({ id: p.id, version: p.version, scope: p.scope, enabled: p.enabled === true }));
+  } catch { /* no plugins or an older CLI */ }
+  return { servers, plugins, folder: root, live: !!s.headless };
+}
+async function extAction(body) {
+  const s = extSession(body.uid);
+  const scope = String(body.scope || 'local');
+  const cwd = s.git?.root || s.cwd;
+  const needScope = () => { if (!EXT_SCOPES.has(scope)) throw httpError(400, 'Use the scope local or project. The office does not change user settings.'); };
+  const reload = async () => { if (s.headless) await ask(s, { subtype: 'reload_plugins' }, 60000).catch(() => null); };
+  switch (String(body.action)) {
+    case 'toggle': {
+      if (!s.headless) throw httpError(409, 'Only sessions that run in the office can turn connectors on and off.');
+      if (!NAME_RE.test(String(body.name))) throw httpError(400, 'Unknown connector.');
+      await ask(s, { subtype: 'mcp_toggle', serverName: String(body.name), enabled: body.enabled === true });
+      addFeed(s, 'tool', `${body.enabled ? 'turned on' : 'turned off'} ${body.name} for this session`);
+      return { ok: true };
+    }
+    case 'reconnect':
+      if (!s.headless) throw httpError(409, 'Only sessions that run in the office can reconnect connectors.');
+      await ask(s, { subtype: 'mcp_reconnect', serverName: String(body.name) }, 60000);
+      return { ok: true };
+    case 'mcp-add': {
+      needScope();
+      const name = String(body.name || '').trim(), target = String(body.target || '').trim();
+      if (!/^[\w.-]{1,64}$/.test(name)) throw httpError(400, 'Use letters, digits, dots and dashes for the name.');
+      if (!target) throw httpError(400, 'Give a URL or a command.');
+      const isUrl = /^https?:\/\//i.test(target);
+      const args = isUrl ? ['mcp', 'add', '--scope', scope, '--transport', body.transport === 'sse' ? 'sse' : 'http', name, target]
+        : ['mcp', 'add', '--scope', scope, name, '--', ...target.split(/\s+/)];
+      await claudeCli(args, cwd);
+      addFeed(s, 'tool', `added the connector ${name} (${scope})`);
+      return { ok: true, restart: true };
+    }
+    case 'mcp-remove': {
+      needScope();
+      if (!NAME_RE.test(String(body.name))) throw httpError(400, 'Unknown connector.');
+      await claudeCli(['mcp', 'remove', '--scope', scope, String(body.name)], cwd);
+      addFeed(s, 'tool', `removed the connector ${body.name} (${scope})`);
+      return { ok: true, restart: true };
+    }
+    case 'plugin-enable': case 'plugin-disable': case 'plugin-install': case 'plugin-uninstall': {
+      needScope();
+      const id = String(body.id || '').trim();
+      if (!PLUGIN_RE.test(id)) throw httpError(400, 'Use the plugin id, for example name@marketplace.');
+      const verb = String(body.action).slice(7);
+      await claudeCli(['plugin', verb, id, '--scope', scope], cwd);
+      addFeed(s, 'tool', `${{ enable: 'enabled', disable: 'disabled', install: 'installed', uninstall: 'removed' }[verb]} the plugin ${id} (${scope})`);
+      await reload();
+      return { ok: true };
+    }
+    default: throw httpError(400, 'Unknown action.');
+  }
+}
+
 const liveTimers = new Map();
 function pushLive(s, text) {
   s.live = (s.live + text).slice(-600);
@@ -612,6 +783,7 @@ function openHeadless({ cwd, name, prompt, worktree = null, budget = null, resum
   if (budget) args.push('--max-budget-usd', String(budget));
   const s = newSession({ uid: officeId, officeId, name, cwd, launched: true, headless: true, status: 'starting', worktree, budget, scheduleId, model,
     commands: persisted.commands?.commands || [], skills: persisted.commands?.skills || [] });
+  placeSession(s, true);
   if (prior) { s.replies = prior.replies || []; s.replySeq = s.replies.reduce((n, r) => Math.max(n, r.id || 0), 0); s.costBase = prior.cost || 0; s.cost = prior.cost || null; s.turns = prior.turns || 0; s.prompt = prior.prompt || ''; }
   const child = spawn('claude', args, {
     cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
@@ -677,6 +849,7 @@ async function openSession(opts) {
   const officeId = 'o' + crypto.randomBytes(4).toString('hex');
   const title = ('Office - ' + name).replace(/[^\w .-]/g, '');
   const s = newSession({ uid: officeId, officeId, name, cwd, launched: true, status: 'starting', model: opts.model || null });
+  placeSession(s, true);
   // `start /wait` gives the session its own console window while cmd.exe stays alive as the
   // process-tree root, so closing = taskkill /T on that one pid.
   // The quoted "Office" is the window title; unquoted, `start` would try to run a program named Office.
@@ -867,12 +1040,38 @@ function readBody(req) {
   });
 }
 
+// ---------- plan usage ----------
+// Hooks do not report plan usage, but Claude Code gives it to the status line command
+// (rate_limits: five_hour and seven_day, each used_percentage and resets_at). A status line
+// script can save that JSON to a file; the office only reads it. Set OFFICE_RATE_FILE to
+// point somewhere else. No file, or a window that has already reset, means no meter.
+const RATE_FILE = process.env.OFFICE_RATE_FILE || path.join(os.homedir(), '.claude', 'rate_limits_state.json');
+let plan = null;
+function readWindow(w, now) {
+  const pct = Number(w?.used_percentage), at = Number(w?.resets_at) * 1000;
+  return Number.isFinite(pct) && Number.isFinite(at) && at > now ? { percent: Math.max(0, Math.min(100, pct)), resetsAt: at } : null;
+}
+function readPlan() {
+  let next = null;
+  try {
+    const j = JSON.parse(fs.readFileSync(RATE_FILE, 'utf8'));
+    const now = Date.now();
+    const week = readWindow(j.rate_limits?.seven_day, now), fiveHour = readWindow(j.rate_limits?.five_hour, now);
+    if (week || fiveHour) next = { week, fiveHour, capturedAt: Number(j.captured_at) * 1000 || null };
+  } catch { /* no file: no meter */ }
+  if (JSON.stringify(next) !== JSON.stringify(plan)) { plan = next; broadcast(); }
+}
+setInterval(readPlan, 15000).unref();
+
 const snapshot = () => ({
   sessions: [...sessions.values()].map(({ ...s }) => s),
   feed: feed.slice(-80),
+  plan,
+  repos: [...repos.entries()].map(([key, r]) => ({ key, ...r })),
   now: Date.now(),
 });
 let pending = null;
+readPlan();
 function broadcast() {
   if (pending) return;
   pending = setTimeout(() => {
@@ -945,6 +1144,11 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, out ? JSON.stringify(out) : '');
     }
     if (url.pathname === '/api/probe-http') return send(res, 200, await probeHttp());
+    if (url.pathname === '/api/branches') return send(res, 200, { branches: await git.branches(knownRepo(body.repo).path) });
+    if (url.pathname === '/api/floor/create') return send(res, 200, await floorAction('create-floor', body));
+    if (url.pathname === '/api/floor/delete') return send(res, 200, await floorAction('delete-floor', body));
+    if (url.pathname === '/api/room/create') return send(res, 200, await floorAction('create-room', body));
+    if (url.pathname === '/api/room/delete') return send(res, 200, await floorAction('remove-room', body));
     if (url.pathname === '/hook/permission') return onPermission(body, res);
     if (url.pathname === '/mcp/inbox') return onMcpInbox(body, res);
     if (url.pathname === '/mcp/ask') return onMcpAsk(body, res);
@@ -953,6 +1157,8 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/open') return send(res, 200, { uid: await openSession(body) });
     if (url.pathname === '/api/reopen') return send(res, 200, { uid: await reopenSession(String(body.uid)) });
     if (url.pathname === '/api/interrupt') { doControl(String(body.uid), 'interrupt'); return send(res, 200, { ok: true }); }
+    if (url.pathname === '/api/ext/list') return send(res, 200, await extList(extSession(body.uid)));
+    if (url.pathname === '/api/ext') return send(res, 200, await extAction(body));
     if (url.pathname === '/api/control') { doControl(String(body.uid), String(body.action), body.value); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/history') return send(res, 200, { sessions: history.map(pastSummary) });
     if (url.pathname === '/api/history/forget') { history = history.filter((h) => h.uid !== String(body.uid)); saveHistory(); return send(res, 200, { ok: true }); }

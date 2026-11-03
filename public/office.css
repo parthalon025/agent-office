@@ -54,6 +54,13 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .past-meta { color: var(--muted); }
 .past-actions { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-1); flex: none; }
 
+/* the Extensions button the page adds to the DS chat header */
+.ao-chat-ext { display: inline-flex; margin-left: auto; }
+
+/* floors and rooms */
+.room-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); color: var(--muted); }
+.room-row .past-sub { flex: 1; min-width: 0; }
+
 /* changes */
 .chg-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
 .files { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
@@ -87,7 +94,9 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 @media (max-width: 820px) { .ao-hud-chat { width: auto !important; bottom: var(--space-3) !important; } .ao-grip { display: none; } }
 
 /* ---------- weekly limit meter ----------
-   The DS HUD draws a weekly-limit meter from demo numbers (31%, "Resets in 3d 14h") unless the
-   adapter sends `usage` events. Claude Code hooks do not report plan usage, so the page hides the
-   meter instead of showing numbers that are not true. Remove this rule when the office can send usage. */
-.ao-hud-use { display: none; }
+   The DS HUD draws the meter from demo numbers unless the adapter sends `usage` events. The office
+   sends the real 7-day figure when the status line file has it (server.mjs, plan usage); office.js
+   then sets .has-plan. Without it the meter stays hidden. The per-bot rows are always demo numbers
+   (a session's share of the plan is not known), so they stay hidden. */
+#office:not(.has-plan) .ao-hud-use { display: none; }
+.ao-hud-use .ao-urow { display: none; }

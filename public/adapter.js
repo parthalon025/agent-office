@@ -1,12 +1,15 @@
 /* Agent Office adapter x0.1 for Claude Code (bridge pattern, hooks in, process control out).
    The server (server.mjs) turns Claude Code hook events into session snapshots and streams them
    over SSE. This file turns each snapshot into Agent Office events:
-   - Project folder -> room (room.add). Claude Code session -> bot in its project room.
+   - Git repository -> building, branch -> floor, worktree -> room. The page shows one building at a
+     time (buildingFor); new branches and worktrees arrive as floor.add and room.add.
+     A folder outside git goes to the "Other folders" building, one room per folder.
+   - Claude Code session -> bot in the room of its worktree.
    - Tool use -> tool.call / tool.result (arguments, time, failure). Skill -> skill.load. Web reads -> knowledge.
    - Subagent (Task or Agent tool) -> delegate with a spawned helper; its own tool calls show on the helper;
      subagent.done when it returns.
    - TodoWrite -> plan and plan.step. A failed turn or a spending limit -> error (Retry, Dismiss).
-   - A run started by a schedule -> trigger.run.
+   - A run started by a schedule -> trigger.run. Plan usage from the status line file -> usage.
    - Permission prompt (PermissionRequest hook) -> request with Approve and Decline. It waits for the
      office; if nobody answers in time, the question goes back to the terminal dialog. */
 (function () {
@@ -47,22 +50,49 @@
   function argsOf(c) { if (!c.detail) return undefined; var a = {}; a[ARG[c.name] || 'input'] = c.detail; return a; }
   function hostOf(url) { return String(url).replace(/^https?:\/\//, '').split('/')[0] || String(url); }
 
+  var FLOOR_KEYS = ['ops', 'sales', 'research', 'content', 'hq'];
+  var OTHER = 'Other folders';
+  // Per mounted scene. subscribe() resets them, so a remount (another building) starts clean.
   var known = {};   // uid -> mirror of what the office was told
   var taken = {};   // bot name -> true
-  var rooms = {};   // room id -> true, for rooms this page added
-  var emitRef = null;
+  var layout = { repo: null, floors: {}, nextId: 1 };   // branch -> { id, rooms: { root: roomId } }
+  var emitRef = null, gen = 0;
   function uniqueName(base) {
     var n = base || 'session', i = 2;
     while (taken[n]) n = base + ' ' + i++;
     taken[n] = true;
     return n;
   }
-  // One room per project. A worktree session sits with its main repository.
-  function roomOf(s, emit) {
-    var name = base(s.worktree && s.worktree.repo) || base(s.cwd) || 'Claude Code';
-    var id = 'p-' + (name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'root');
-    if (!rooms[id]) { rooms[id] = true; emit({ type: 'room.add', floorId: 1, room: { id: id, type: 'lab', name: name, bots: [] } }); }
-    return id;
+  function slug(t) { return String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'x'; }
+  // Where a session sits: building (repo), floor (branch), room (worktree folder).
+  function placeOf(s) {
+    var g = s.git;
+    if (!g) return { repo: '', repoName: OTHER, branch: 'No branch', root: String(s.cwd || '').toLowerCase(), roomName: base(s.cwd) || 'Folder' };
+    return { repo: g.repo.toLowerCase(), repoName: base(g.repo), branch: g.branch, root: g.root.toLowerCase(), roomName: base(g.root) };
+  }
+  function placeKey(pl) { return pl.repo + '|' + pl.branch + '|' + pl.root; }
+  // Rooms that exist in git (worktrees), with or without a session in them.
+  function repoOf(snap, key) { return ((snap && snap.repos) || []).filter(function (r) { return r.key === key; })[0] || null; }
+  function wtPlace(r, w) { return { repo: r.key, repoName: r.name, branch: w.branch, root: w.root.toLowerCase(), roomName: base(w.root) }; }
+  function live(snap) { return (snap ? snap.sessions : []).filter(function (s) { return s.status !== 'ended' && s.placed; }); }
+  function floorDef(id, branch, rooms) { return { id: id, key: FLOOR_KEYS[(id - 1) % FLOOR_KEYS.length], name: branch, rooms: rooms }; }
+  function roomDef(pl) { return { id: 'w-' + slug(pl.root).slice(-48), type: 'lab', name: pl.roomName, bots: [] }; }
+  // The room of a session in the shown building. Adds its floor or room when it is new.
+  function roomOf(pl, emit) {
+    var f = layout.floors[pl.branch];
+    if (!f) {
+      var r = roomDef(pl);
+      f = layout.floors[pl.branch] = { id: layout.nextId++, rooms: {} };
+      f.rooms[pl.root] = r.id;
+      emit({ type: 'floor.add', floor: floorDef(f.id, pl.branch, [r]) });
+      return r.id;
+    }
+    if (!f.rooms[pl.root]) {
+      var r2 = roomDef(pl);
+      f.rooms[pl.root] = r2.id;
+      emit({ type: 'room.add', floorId: f.id, room: r2 });
+    }
+    return f.rooms[pl.root];
   }
 
   function syncHelpers(s, k, emit) {
@@ -119,18 +149,27 @@
 
   function apply(snapshot, emit) {
     var seen = {};
+    // empty rooms: worktrees of the shown repository that no session uses
+    var rp = repoOf(snapshot, layout.repo);
+    if (rp) rp.worktrees.forEach(function (w) { roomOf(wtPlace(rp, w), emit); });
     snapshot.sessions.forEach(function (s) {
+      if (!s.placed) return;   // wait until the server knows the repo and branch
+      var pl = placeOf(s), k = known[s.uid];
+      // the session checked out another branch, or moved to another folder: seat it again
+      if (k && !k.ended && k.place !== placeKey(pl)) {
+        emit({ type: 'bot.remove', bot: k.name }); delete taken[k.name]; delete known[s.uid]; k = null;
+      }
+      if (pl.repo !== layout.repo) return;   // another building
       seen[s.uid] = true;
-      var k = known[s.uid];
       if (!k) {
         if (s.status === 'ended') return;
         var name = uniqueName(s.name);
-        k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: mapStatus(s), task: taskOf(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, model: s.model, ended: false, room: roomOf(s, emit) };
+        k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: mapStatus(s), task: taskOf(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, model: s.model, ended: false, place: placeKey(pl), room: roomOf(pl, emit) };
         var bot = { name: name, role: 'coder', shape: SHAPES[hash(s.uid) % SHAPES.length], status: k.status, task: k.task, platform: 'Claude Code', identity: s.cwd };
         if (s.skills && s.skills.length) bot.skills = s.skills.slice(0, 16);
         if (s.scheduleId) bot.triggers = [s.name];
         emit({ type: 'bot.add', roomId: k.room, bot: bot });
-        emit({ type: 'session.start', bot: name, session: s.uid, title: s.worktree ? s.cwd + ' (' + s.worktree.branch + ')' : s.cwd });
+        emit({ type: 'session.start', bot: name, session: s.uid, title: s.cwd });
         if (s.model) emit({ type: 'model', bot: name, model: s.model });
         if (s.scheduleId) emit({ type: 'trigger.run', job: s.name, bot: name });
         // A page opened mid-session: fill the trace with the plan and the last calls, without bubbles.
@@ -180,7 +219,8 @@
         k.ended = true;
         emit({ type: 'session.end', bot: bot0, session: s.uid, ok: !s.error });
         emit({ type: 'status', bot: bot0, status: 'resting', task: task });
-        setTimeout(function () { emit({ type: 'bot.remove', bot: bot0 }); delete taken[bot0]; }, REMOVE_AFTER_MS);
+        var g0 = gen;
+        setTimeout(function () { if (g0 !== gen) return; emit({ type: 'bot.remove', bot: bot0 }); delete taken[bot0]; }, REMOVE_AFTER_MS);
         return;
       }
       // a failed turn: the bot shows the error until a new turn starts, or Retry or Dismiss
@@ -202,9 +242,24 @@
     });
   }
 
-  var es = null;
   var latest = null;
   var listeners = [];
+  var lastUsage = { percent: null, t: 0 };
+  // The engine adds a little usage while bots work (demo drift), so send the real figure again every 15 s.
+  function syncUsage(snap, emit) {
+    var w = snap.plan && snap.plan.week;
+    if (!w) return;
+    var now = Date.now();
+    if (w.percent === lastUsage.percent && now - lastUsage.t < 15000) return;
+    lastUsage = { percent: w.percent, t: now };
+    emit({ type: 'usage', percent: w.percent });
+  }
+  var es = new EventSource('/events?t=' + encodeURIComponent(TOKEN));
+  es.onmessage = function (e) {
+    latest = JSON.parse(e.data);
+    if (emitRef) { apply(latest, emitRef); syncUsage(latest, emitRef); }
+    listeners.forEach(function (fn) { try { fn(latest); } catch (x) { /* a bad listener must not stop the office */ } });
+  };
 
   function post(path, body) {
     return fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-office-token': TOKEN }, body: JSON.stringify(body) })
@@ -236,14 +291,11 @@
 
   window.officeAdapter = AgentOffice.adapters.create({
     name: 'Claude Code',
+    // Called each time a scene mounts. buildingFor() set the layout of the building it shows.
     subscribe: function (emit) {
-      emitRef = emit;
-      es = new EventSource('/events?t=' + encodeURIComponent(TOKEN));
-      es.onmessage = function (e) {
-        latest = JSON.parse(e.data);
-        apply(latest, emit);
-        listeners.forEach(function (fn) { try { fn(latest); } catch (x) { /* a bad listener must not stop the office */ } });
-      };
+      gen++; emitRef = emit; known = {}; taken = {}; lastUsage = { percent: null, t: 0 };
+      var g0 = gen;
+      setTimeout(function () { if (g0 === gen && latest) { apply(latest, emit); syncUsage(latest, emit); } }, 0);
     },
     send: function (cmd) {
       var uids;
@@ -281,8 +333,63 @@
         default: return Promise.resolve({ ok: false, reason: 'Not available for Claude Code sessions.' });
       }
     },
-    dispose: function () { if (es) es.close(); }
+    dispose: function () { emitRef = null; gen++; }
   });
+
+  // The buildings: one per repository with an open session, busiest first.
+  window.officeAdapter.buildings = function (snap) {
+    var by = {};
+    snap = snap || latest;
+    ((snap && snap.repos) || []).forEach(function (r) {
+      var b = by[r.key] = { key: r.key, name: r.name, path: r.path, sessions: 0, waiting: 0, last: 0, branches: {} };
+      r.worktrees.forEach(function (w) { b.branches[w.branch] = true; });
+    });
+    live(snap).forEach(function (s) {
+      var pl = placeOf(s), b = by[pl.repo] || (by[pl.repo] = { key: pl.repo, name: pl.repoName, sessions: 0, waiting: 0, last: 0, branches: {} });
+      b.sessions++; b.branches[pl.branch] = true; b.last = Math.max(b.last, s.lastEvent || 0);
+      b.waiting += (s.pending || []).length + (s.questions || []).length;
+    });
+    return Object.keys(by).map(function (k) { var b = by[k]; b.branches = Object.keys(b.branches).length; return b; })
+      .sort(function (a, b) { return b.waiting - a.waiting || b.sessions - a.sessions || b.last - a.last || a.name.localeCompare(b.name); });
+  };
+  // The building definition for one repository, with a floor per branch and a room per worktree.
+  // The default branch is the ground floor. Mount the scene right after this call.
+  window.officeAdapter.buildingFor = function (repo) {
+    layout = { repo: repo, floors: {}, nextId: 1 };
+    var byBranch = {}, order = [], name = repo ? base(repo) : OTHER;
+    var rp = repoOf(latest, repo), places = rp ? rp.worktrees.map(function (w) { return wtPlace(rp, w); }) : [];
+    live(latest).forEach(function (s) { places.push(placeOf(s)); });
+    places.forEach(function (pl) {
+      if (pl.repo !== repo) return;
+      name = pl.repoName;
+      if (!byBranch[pl.branch]) { byBranch[pl.branch] = {}; order.push(pl.branch); }
+      byBranch[pl.branch][pl.root] = pl;
+    });
+    order.sort(function (a, b) { return (/^(main|master|trunk)$/.test(b) ? 1 : 0) - (/^(main|master|trunk)$/.test(a) ? 1 : 0); });
+    var floors = order.map(function (br) {
+      var f = layout.floors[br] = { id: layout.nextId++, rooms: {} };
+      var rooms = Object.keys(byBranch[br]).map(function (root) { var r = roomDef(byBranch[br][root]); f.rooms[root] = r.id; return r; });
+      return floorDef(f.id, br, rooms);
+    });
+    // An empty building still needs a floor to stand on.
+    if (!floors.length) { floors = [floorDef(1, 'No sessions', [])]; layout.nextId = 2; }
+    return { name: name || OTHER, sessions: 'agent', floors: floors };
+  };
+  window.officeAdapter.shown = function () { return layout.repo; };
+  // Rooms in the shown scene, as "branch|root". The page rebuilds the scene when one of them is gone,
+  // because the design system has no event that removes a floor or a room.
+  window.officeAdapter.roomsShown = function () {
+    var out = [];
+    Object.keys(layout.floors).forEach(function (br) { Object.keys(layout.floors[br].rooms).forEach(function (root) { out.push(br + '|' + root); }); });
+    return out;
+  };
+  // Rooms that exist now for one repository: worktrees and the folders of open sessions.
+  window.officeAdapter.roomsNow = function (snap, repo) {
+    var rp = repoOf(snap, repo), out = {};
+    if (rp) rp.worktrees.forEach(function (w) { out[w.branch + '|' + w.root.toLowerCase()] = true; });
+    live(snap).forEach(function (s) { var pl = placeOf(s); if (pl.repo === repo) out[pl.branch + '|' + pl.root] = true; });
+    return out;
+  };
 
   // Read access for the page: the latest snapshot, one bot's session, and a change hook.
   window.officeAdapter.onSnapshot = function (fn) { listeners.push(fn); if (latest) fn(latest); return function () { listeners = listeners.filter(function (f) { return f !== fn; }); }; };
