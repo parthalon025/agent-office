@@ -131,3 +131,5 @@ python kit/check.py public/index.html public/office.css public/office.js public/
 - Only images and text files can be attached.
 - A permission rule offered for "always allow" depends on the tool. Claude offers a mode switch for edits instead of a rule.
 - The office keeps the last 60 sessions.
+- A project's room stays on the floor until you reload the page, also after its last session leaves. The design system has no event that removes a room.
+- Plan usage (the weekly limit) is not shown. Claude Code hooks do not report it.
