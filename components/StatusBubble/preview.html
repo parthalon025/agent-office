@@ -1,0 +1,9 @@
+<!-- @dsCard group="Status" height=90 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>StatusBubble</title></head><body style="margin:0">
+<div id="root"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement;
+ReactDOM.createRoot(document.getElementById("root")).render(h("div",{className:"ao-stage"},["working","waiting","error","resting","finished"].map(function(s){return h(A.StatusBubble,{key:s,status:s})})));
+</script>
+</body></html>

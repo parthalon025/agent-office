@@ -1,0 +1,21 @@
+<!-- @dsCard group="Daily" height=250 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>AmbientBar</title></head><body style="margin:0;background:var(--bg);font-family:var(--font-sans)">
+<div id="root" style="display:flex;flex-direction:column;gap:12px;padding:16px"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement;
+function bot(n,s,req){return {name:n,status:s,request:req?{id:n,text:"Approve?"}:null};}
+var FLOORS=[{id:1,key:"ops",name:"Operations",rooms:[{id:"a",bots:[bot("Ledger","error"),bot("Relay","working")]}]},
+ {id:2,key:"sales",name:"Sales",rooms:[{id:"b",bots:[bot("Scout","waiting",true),bot("Closer","working"),bot("Dialer","working")]}]},
+ {id:3,key:"content",name:"Content",rooms:[{id:"c",bots:[bot("Pixel","waiting",true),bot("Quill","working")]}]},
+ {id:4,key:"research",name:"Research",rooms:[{id:"d",bots:[bot("Sage","resting")]}]},
+ {id:5,key:"hq",name:"Headquarters",rooms:[{id:"e",bots:[bot("Hermes","waiting",true)]}]}];
+var LOG=[{time:"10:42",name:"Scout",text:"Asked to send 10 intro emails to Ohio leads."}];
+var CALM=FLOORS.map(function(f){return Object.assign({},f,{rooms:f.rooms.map(function(r){return Object.assign({},r,{bots:r.bots.map(function(b){return Object.assign({},b,{status:"working",request:null});})});})});});
+function noop(){}
+ReactDOM.createRoot(document.getElementById("root")).render(h(React.Fragment,null,
+ h("div",{style:{width:760}},h(A.AmbientBar,{floors:FLOORS,log:LOG,onOpen:noop})),
+ h("div",{style:{width:520}},h(A.AmbientBar,{floors:CALM,log:[{time:"10:44",name:"Quill",text:"Finished the blog draft."}],onOpen:noop})),
+ h("div",{style:{width:360}},h(A.AmbientBar,{floors:FLOORS,log:LOG,onOpen:noop}))));
+</script>
+</body></html>

@@ -1,0 +1,9 @@
+<!-- @dsCard group="Solutions" height=420 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>SolutionCard</title></head><body style="margin:0;background:var(--bg)">
+<div id="root"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement;
+ReactDOM.createRoot(document.getElementById("root")).render(h("div",{className:"ao-grid",style:{gridTemplateColumns:"repeat(auto-fill,minmax(300px,1fr))"}},Object.keys(A.solutions).map(function(k){return h(A.SolutionCard,{key:k,solution:A.solutions[k],onUse:function(){}});})));
+</script>
+</body></html>

@@ -1,0 +1,33 @@
+<!-- @dsCard height=288 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Cover</title>
+<style>
+html,body{margin:0;background:var(--bg)}
+.cv{position:relative;width:960px;height:288px;overflow:hidden;background:var(--bg)}
+svg{position:absolute;left:0;top:0}
+.ops{fill:var(--floor-ops)}.hq{fill:var(--floor-hq)}.sales{fill:var(--floor-sales)}.res{fill:var(--floor-research)}.con{fill:var(--floor-content)}
+.ok{fill:var(--status-working)}.wait{fill:var(--status-waiting)}.cut{fill:var(--bg)}
+.tile{rx:var(--radius-lg)}
+.txt{position:absolute;left:40px;bottom:36px;max-width:440px}
+.nm{font-family:var(--font-sans);font-weight:600;font-size:96px;line-height:.95;color:var(--ink);letter-spacing:-.02em}
+.tg{font-family:var(--font-mono);font-size:13px;color:var(--muted);margin-top:16px}
+</style></head><body>
+<div class="cv">
+<svg width="960" height="288" viewBox="0 0 960 288" aria-hidden="true">
+<!-- blocks: floor-research slab 200x300 (bleeds top), floor-content 168x148, floor-sales 92x52 + floor-hq 92x88 (bleed right), floor-ops 272x124, status-working + status-waiting 24px discs as signal -->
+<!-- arrangement: one tall slab with satellites, stacked like the four floors of the office; radius-lg corners -->
+<!-- pattern: dot grid at space-4 pitch cut from floor-ops = the desk grid of the isometric room; README "the scene is the status", 4px base, mono numerals -->
+<!-- steps and radii: space-2 gaps (8), space-4 dot pitch (16), radius-lg tiles, radius-full discs -->
+<rect class="res tile" x="496" y="-12" width="200" height="300"/>
+<rect class="con tile" x="704" y="-12" width="168" height="148"/>
+<rect class="sales tile" x="880" y="-12" width="92" height="52"/>
+<rect class="hq tile" x="880" y="48" width="92" height="88"/>
+<rect class="ops tile" x="704" y="144" width="268" height="156"/>
+<g class="cut"><circle cx="728" cy="168" r="3"/><circle cx="728" cy="200" r="3"/><circle cx="728" cy="232" r="3"/><circle cx="728" cy="264" r="3"/><circle cx="760" cy="168" r="3"/><circle cx="760" cy="200" r="3"/><circle cx="760" cy="232" r="3"/><circle cx="760" cy="264" r="3"/><circle cx="792" cy="168" r="3"/><circle cx="792" cy="200" r="3"/><circle cx="792" cy="232" r="3"/><circle cx="792" cy="264" r="3"/><circle cx="824" cy="168" r="3"/><circle cx="824" cy="200" r="3"/><circle cx="824" cy="232" r="3"/><circle cx="824" cy="264" r="3"/><circle cx="856" cy="168" r="3"/><circle cx="856" cy="200" r="3"/><circle cx="856" cy="232" r="3"/><circle cx="856" cy="264" r="3"/><circle cx="888" cy="168" r="3"/><circle cx="888" cy="200" r="3"/><circle cx="888" cy="232" r="3"/><circle cx="888" cy="264" r="3"/><circle cx="920" cy="168" r="3"/><circle cx="920" cy="200" r="3"/><circle cx="920" cy="232" r="3"/><circle cx="920" cy="264" r="3"/><circle cx="952" cy="168" r="3"/><circle cx="952" cy="200" r="3"/><circle cx="952" cy="232" r="3"/><circle cx="952" cy="264" r="3"/></g>
+
+<circle class="wait" cx="596" cy="236" r="12"/>
+</svg>
+<div class="txt"><div class="nm">Agent<br>Office</div><div class="tg">Design system x1.5 · a 3D office for agent orchestration</div></div>
+</div>
+
+</body></html>

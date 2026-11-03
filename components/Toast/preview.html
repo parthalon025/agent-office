@@ -1,0 +1,10 @@
+<!-- @dsCard group="Feedback" height=260 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Toast</title></head><body style="margin:0;background:var(--bg)">
+<div id="root"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement,R=React;
+function S(l,c){return h("div",{className:"ao-state",key:l},h("div",{className:"ao-state-l"},l),c);}
+ReactDOM.createRoot(document.getElementById("root")).render(h("div",{style:{padding:16,display:"flex",flexDirection:"column",gap:8,background:"var(--bg)"}},h(A.Toast,{tone:"warning",title:"CSAM · Contoso",text:"Approve sending the QBR deck to Contoso?",action:{label:"Open",onClick:function(){}},onClose:function(){}}),h(A.Toast,{tone:"error",title:"SE · Security",text:"Demo tenant login expired",action:{label:"Open",onClick:function(){}},onClose:function(){}}),h(A.Toast,{tone:"success",text:"Agents connected: Mock agents"}),h(A.Toast,{tone:"info",text:"Floor 6 added."})));
+</script>
+</body></html>

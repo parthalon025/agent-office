@@ -1,0 +1,12 @@
+<!-- @dsCard group="Orchestration" height=300 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>SessionList</title></head><body style="margin:0;background:var(--bg);font-family:var(--font-sans)">
+<div id="root" style="display:flex;gap:16px;padding:16px;align-items:flex-start"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement;
+var S=[{id:"s3",title:"Customer follow-up",status:"working",time:"10:12",blob:"Scout · Customer follow-up"},{id:"s2",title:"Inbox sweep",status:"working",time:"10:09"},{id:"s1",title:"Nightly report",status:"finished",time:"02:00",end:"02:06",result:"Done"},{id:"s0",title:"Code review",status:"error",time:"09:40",end:"09:41",result:"Rate limited by API"}];
+ReactDOM.createRoot(document.getElementById("root")).render(h(React.Fragment,null,
+ h("div",{className:"ao-panel",style:{width:360,padding:12}},h(A.SessionList,{sessions:S.slice().reverse(),onStop:function(){}})),
+ h("div",{className:"ao-panel",style:{width:300,padding:12}},h(A.SessionList,{sessions:[]}))));
+</script>
+</body></html>

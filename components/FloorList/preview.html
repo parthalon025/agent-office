@@ -1,0 +1,9 @@
+<!-- @dsCard group="Navigation" height=260 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>FloorList</title></head><body style="margin:0;background:var(--bg)">
+<div id="root"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement;
+ReactDOM.createRoot(document.getElementById("root")).render(h("div",{style:{width:230,padding:16,background:"var(--bg)"}},h(A.FloorList,{current:3,onAdd:function(){},floors:[{id:5,name:"HQ",rooms:1,statuses:["working","working","working","working","resting"]},{id:4,name:"Content",rooms:2,statuses:["working","working","resting","working","working","working"]},{id:3,name:"Research",rooms:2,statuses:["working","resting","finished","working","error","working"]},{id:2,name:"Sales",rooms:1,statuses:["waiting","working","resting","working"]},{id:1,name:"Ops",rooms:2,statuses:["resting","working","working","working","working"]}]})));
+</script>
+</body></html>

@@ -1,0 +1,9 @@
+<!-- @dsCard group="Orchestration" height=300 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>DelegationTree</title></head><body style="margin:0;background:var(--bg)">
+<div id="root"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement,R=React;
+ReactDOM.createRoot(document.getElementById("root")).render(h("div",{style:{width:340,padding:16}},h(A.DelegationTree,{max:3,tree:{name:"Hermes",shape:"octa",color:"#e0a030",status:"working",task:"Orchestrating the briefing",children:[{name:"Researcher",shape:"octa",color:"#3b6fe0",status:"finished",task:"Context ready"},{name:"Coder Bot 23",shape:"cone",color:"#9aa3ad",status:"working",task:"Do the work",ephemeral:true,children:[{name:"Terminal Runner",shape:"capsule",color:"#8a63d2",status:"working",task:"npm test"}]}]}})));
+</script>
+</body></html>

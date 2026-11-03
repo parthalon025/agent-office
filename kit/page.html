@@ -1,0 +1,36 @@
+<!doctype html>
+<!-- Agent Office kit x1.5: starter page. Copy it, rename it with your own x version, and change the building. -->
+<html data-theme="light"><head><meta charset="utf-8"><title>My Office x0.1</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="../tokens.css">
+<link rel="stylesheet" href="../components/bundle.css">
+<style>html,body{margin:0;height:100%;background:var(--bg)}#office{height:100vh}</style>
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="../components/lib/three.min.js"></script>
+<script src="../components/lib/three-orbit-controls.js"></script>
+<script src="../components/lib/three-postprocessing.js"></script>
+<script src="../components/bundle.js"></script>
+<script src="adapter.js"></script>
+</head><body><div id="office"></div>
+<script>
+AgentOffice.strict = true; // warn on each event that does not match kit/schema.json
+var h = React.createElement, A = window.AgentOffice;
+var building = {
+  name: "My Office", sessions: "agent",
+  floors: [{ key: "ops", name: "Ops", rooms: [
+    { type: "team", name: "Team", bots: [
+      { name: "Planner", role: "planner", shape: "capsule", orchestrator: true },
+      { name: "Scout", role: "research", shape: "blob" } ] },
+    { type: "lab", name: "Lab", bots: [ { name: "Builder", role: "coder", shape: "cone" } ] } ] }]
+};
+ReactDOM.createRoot(document.getElementById("office")).render(h(A.OfficeScene, {
+  building: building,
+  // The starter runs the built-in mock. adapter.js points to a placeholder server (wss://example.invalid).
+  // After you set your own URL in adapter.js, set window.USE_REAL_ADAPTER = true before this script.
+  adapter: window.myAdapter && window.USE_REAL_ADAPTER ? window.myAdapter : undefined,
+  height: window.innerHeight, quality: "auto", intro: true,
+  onReady: function (office) { window.office = office; }
+}));
+</script>
+</body></html>

@@ -1,0 +1,16 @@
+<!-- @dsCard group="Daily" height=230 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>TimeScrubber</title></head><body style="margin:0;background:var(--bg);font-family:var(--font-sans)">
+<div id="root" style="display:flex;flex-direction:column;gap:12px;padding:16px;max-width:760px"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement,R=React,T0=new Date(2026,10,3,8,0,0).getTime(),HIST={count:412,first:T0,last:T0+3.5*3600000};
+function Demo(){var s=R.useState(null),rp=s[0],set=s[1];
+ R.useEffect(function(){if(!rp||!rp.playing)return;var id=setInterval(function(){set(function(r){if(!r||!r.playing)return r;var t=Math.min(HIST.last,r.t+r.speed*1000);return Object.assign({},r,{t:t,playing:t<HIST.last});});},1000);return function(){clearInterval(id);};},[rp&&rp.playing]);
+ return h(A.TimeScrubber,{history:HIST,replay:rp,onPlay:function(f,sp){set({playing:true,from:f,to:HIST.last,t:f,speed:sp});},onPause:function(){set(function(r){return r&&Object.assign({},r,{playing:false});});},onStop:function(){set(null);},onSeek:function(t){set(function(r){return Object.assign({from:t,to:HIST.last,speed:10,playing:false},r||{},{t:t});});}});}
+function noop(){}
+ReactDOM.createRoot(document.getElementById("root")).render(h(React.Fragment,null,
+ h(Demo),
+ h(A.TimeScrubber,{history:HIST,replay:{playing:true,from:T0,to:HIST.last,t:T0+5400000+42000,speed:60},onPlay:noop,onStop:noop,onSeek:noop}),
+ h(A.TimeScrubber,{history:{count:0,first:0,last:0},replay:null,onPlay:noop,onStop:noop,onSeek:noop})));
+</script>
+</body></html>

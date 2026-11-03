@@ -1,0 +1,69 @@
+# CLAUDE.md: Agent Office for Claude Code
+
+A browser office for Claude Code sessions: bots at desks, a chat per bot, approvals, diffs, schedules. Node ES modules, no dependencies, Windows first. User docs are in `README.md`. The UI is the Agent Office design system (DS x1.5), documented in `DS-README.md`, `Recipes.md`, `Reference.md`, `Concepts.md`.
+
+## UI rules (the DS is law for anything visual)
+
+Read `DS-README.md`, `Recipes.md` and `Reference.md` before you change the UI, and follow the DS Rules and Definition of done.
+
+- Use DS tokens for every color, size and duration. No literal colors. Use the DS icon set and DS components (`Button`, `Dialog`, `Select`, `TextInput`, `EmptyState`, ...). No emoji.
+- Write copy in Simplified Technical English: short sentences, active voice, buttons say the result. No "Oops", "Sorry", exclamation marks, "please".
+- Keep the `x` version prefix (page `x0.1`, DS `x1.5`) in titles.
+- Never move bots yourself. The scene changes only from adapter events.
+- Before you finish a UI change: `python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js`, then look at screenshots in Day, Night and Sublevel at 1360, 1100 and 400 px.
+- The page's own styles go in `public/office.css`. The DS sets its theme on `.ao-office`, and `chat-extras.js` mirrors it to `<html data-theme>`, so page UI must read tokens only.
+
+## Commands
+
+```
+npm start            # server on http://localhost:4317
+npm run probe        # prove HTTP hooks on this Claude Code version (one tiny call)
+npm run smoke        # end-to-end test with real Haiku sessions, a few cents; needs the office running
+```
+
+Stop the server by the pid that owns port 4317 (`netstat -ano | grep :4317`, then `taskkill //PID <pid> //F`). Never kill by image name: that would kill other Claude Code sessions.
+
+## Map
+
+| File | Owns |
+| --- | --- |
+| `server.mjs` | Session state, hooks, headless sessions (stdin/stdout), permission holds, MCP routes, history, schedules, REST and SSE. |
+| `git.mjs` | Worktrees, changes, remove worktree, pull request. Argument lists only, never a shell. |
+| `hook.mjs` | Command hook. Exits 0 on every path. |
+| `mcp.mjs` | stdio MCP server: `office_inbox`, `office_ask`. |
+| `public/adapter.js` | Snapshot to DS events, and DS commands to REST calls. Exposes `officeAdapter.onSnapshot / session / lookup`. |
+| `public/office.js` | React: control strip and dialogs. Mounts `OfficeScene` once. |
+| `public/chat-extras.js` | Chat resize grips, the `/` list, theme mirror. It depends on DS class names (`.ao-hud-chat`, `.ao-input`). |
+
+Add a new file only for a distinct job. Extend the file that owns the concern first.
+
+## How data moves
+
+- Hooks (HTTP or command) post to `/hook/http` or `/hook`. `PermissionRequest` is held until `/api/answer`, or until it times out (60 s for terminal sessions, 15 min for office sessions).
+- `PostToolUse`, `UserPromptSubmit` and `Stop` can return queued office messages to the session.
+- An office session is `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages`. Messages and control requests go to stdin. `onStream()` reads stdout.
+- Every state change calls `broadcast()`. The browser gets full snapshots over `/events`.
+- Sessions are keyed by `uid`. `sid` is Claude's session id. `officeId` links hooks to a session the office opened (env `OFFICE_ID`).
+
+## Gotchas learned the hard way
+
+- `cmd /c start "Office" ...` needs the quoted title. Unquoted, `start` runs a program named Office.
+- Write `.office-token` only after `listen` succeeds. A second copy that fails with EADDRINUSE must not change it. The token is reused across restarts on purpose.
+- A headless session emits `init` (session id, commands, skills) only after its first message. The server keeps the last command list for new sessions.
+- Claude Code's default permission mode may be Auto, so no prompts appear. Tests that need a prompt must pass `permissionMode: 'default'`.
+- The hook's parent shell dies right after the hook returns, so the process walk must happen while the hook waits. A persistent PowerShell helper (`walkToClaude`) does it.
+- HTTP hook failures are non-blocking. Command hooks must stay silent on stdout unless they return real hook JSON.
+- "Always allow" uses `permission_suggestions` from the hook payload and returns them as `updatedPermissions`. Pass only `addRules` with `behavior: allow`. Edits get a mode suggestion, not a rule.
+- `result` with `error_during_execution` after an interrupt is not an error. Check `s.interrupted`.
+- The Bash tool mangles backslashes and quotes in long heredocs. Write patch scripts with the Write tool.
+
+## Safety rules
+
+- Bind to 127.0.0.1, check the Host header, require the token on every route except the page and its static files.
+- Never edit `~/.claude/settings.json` or `.credentials.json`. The office only writes files in this folder and the per-project rule a user approves.
+- Pull requests, pushes and worktree removal happen only after an explicit click and a confirm dialog.
+- Do not add dependencies without asking. The server runs on Node built-ins.
+
+## Not built
+
+Remote or phone access (needs real login and TLS; suggest Tailscale), terminal sessions taking chat input, non-Windows session launch.

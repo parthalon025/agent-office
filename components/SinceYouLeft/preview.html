@@ -1,0 +1,15 @@
+<!-- @dsCard group="Daily" height=330 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>SinceYouLeft</title></head><body style="margin:0;background:var(--bg);font-family:var(--font-sans)">
+<div id="root" style="display:flex;gap:16px;padding:16px;align-items:flex-start"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement,now=Date.now();
+var S={since:now-2.3*3600000,finished:14,waiting:3,errors:1,toolCalls:126,tokens:48210,cost:3.42,sessions:9,messages:31,
+ byBot:{Scout:{finished:5,errors:0,tokens:12040,cost:0.81},Ledger:{finished:4,errors:1,tokens:20110,cost:1.64}},
+ top:["Scout found 10 leads in Ohio.","Ledger failed: demo tenant login expired.","Hermes asks to send the QBR deck to Contoso."]};
+function noop(){}
+ReactDOM.createRoot(document.getElementById("root")).render(h(React.Fragment,null,
+ h("div",{style:{width:400}},h(A.SinceYouLeft,{summary:S,now:now,onReplay:noop,onDecisions:noop,onClose:noop})),
+ h("div",{style:{width:340}},h(A.SinceYouLeft,{summary:{since:now-40*60000,finished:0,waiting:0,errors:0,toolCalls:0,tokens:0,cost:0,sessions:0,messages:0,top:[]},now:now,onClose:noop}))));
+</script>
+</body></html>

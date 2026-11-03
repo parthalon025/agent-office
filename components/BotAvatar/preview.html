@@ -1,0 +1,9 @@
+<!-- @dsCard group="Roster" height=96 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>BotAvatar</title></head><body style="margin:0;background:var(--bg)">
+<div id="root"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement;
+ReactDOM.createRoot(document.getElementById("root")).render(h("div",{className:"ao-stage"},[["blob","#4f8cff","working"],["cone","#4cb35a","waiting"],["octa","#ff8a3d","finished"],["capsule","#9b4fd1","resting"],["blob","#f06292","error"]].map(function(x,i){return h(A.BotAvatar,{key:i,shape:x[0],color:x[1],status:x[2],size:48});})));
+</script>
+</body></html>

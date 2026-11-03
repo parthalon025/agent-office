@@ -1,0 +1,10 @@
+<!-- @dsCard group="Forms" height=150 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Select</title></head><body style="margin:0;background:var(--bg)">
+<div id="root"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement,R=React;
+function S(l,c){return h("div",{className:"ao-state",key:l},h("div",{className:"ao-state-l"},l),c);}
+ReactDOM.createRoot(document.getElementById("root")).render(h("div",{className:"ao-statesgrid"},[S("default",h(A.Select,{label:"Room type",options:[{value:"team",label:"Team floor"},{value:"lab",label:"Lab"},{value:"studio",label:"Studio"},{value:"hq",label:"War room"}]})),S("error",h(A.Select,{label:"Role",error:"Pick a role.",options:[{value:"",label:"Choose…"},{value:"csa",label:"Cloud Solution Architect"}]})),S("disabled",h(A.Select,{label:"Floor",disabled:true,options:[{value:"3",label:"3 · Architecture"}]}))]));
+</script>
+</body></html>

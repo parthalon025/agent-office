@@ -1,0 +1,18 @@
+<!-- @dsCard group="Daily" height=500 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>CommandPalette</title></head><body style="margin:0;background:var(--bg);font-family:var(--font-sans)">
+<div id="root" style="height:500px"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement,R=React;
+var BOTS=[{name:"Hermes",color:"#e0a030",shape:"octa",role:"planner",status:"working",task:"Planning the QBR",floor:5,orchestrator:true},{name:"Scout",color:"#3b6fe0",shape:"blob",role:"sales",status:"waiting",task:"Lead follow-up",floor:2},
+ {name:"Ledger",color:"#2f9a6a",shape:"cone",role:"analyst",status:"error",task:"Month-end close",floor:1},{name:"Pixel",color:"#c2477a",shape:"capsule",role:"designer",status:"working",task:"Banner set",floor:3}];
+var FLOORS=[{id:1,key:"ops",name:"Operations"},{id:2,key:"sales",name:"Sales"},{id:3,key:"content",name:"Content"},{id:5,key:"hq",name:"Headquarters"}];
+function Demo(){var o=R.useState(true),open=o[0],setOpen=o[1],l=R.useState("Press Ctrl+K or Cmd+K to open."),log=l[0],setLog=l[1];
+ var acts=A.CommandPalette.actions({approveLowRisk:function(){setLog("Approved all low-risk decisions.");},openDecisions:function(){setLog("Opened decisions.");},replay:function(){setLog("Replay started.");},
+  setView:function(v){setLog("View: "+v);},setMode:function(m){setLog("Mode: "+m);},sound:false,setSound:function(v){setLog(v?"Sound on.":"Sound off.");}});
+ return h("div",{style:{position:"relative",height:"100%"}},h("div",{style:{padding:16,display:"flex",gap:12,alignItems:"center",color:"var(--ink)",fontSize:13}},h(A.Button,{icon:"search",onClick:function(){setOpen(true);}},"Open command palette"),h("span",{id:"log",className:"ao-muted"},log)),
+  h("div",{style:{position:"absolute",top:56,left:0,right:0,bottom:0}},h(A.CommandPalette,{open:open,inline:true,onOpen:function(){setOpen(true);},onClose:function(){setOpen(false);},bots:BOTS,floors:FLOORS,managerName:"Hermes",actions:acts,
+   onBot:function(n){setLog("Jumped to "+n+".");},onFloor:function(f){setLog("Went to floor "+f+".");},onAsk:function(t){setLog("Asked the Manager: "+t);}})));}
+ReactDOM.createRoot(document.getElementById("root")).render(h(Demo));
+</script>
+</body></html>

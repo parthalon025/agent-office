@@ -1,0 +1,9 @@
+<!-- @dsCard group="Orchestration" height=220 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>CheckpointTimeline</title></head><body style="margin:0;background:var(--bg)">
+<div id="root"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement,R=React;
+ReactDOM.createRoot(document.getElementById("root")).render(h("div",{style:{width:360,padding:16}},h(A.Panel,{title:"Checkpoints",count:3},h(A.CheckpointTimeline,{onRollback:function(){},checkpoints:[{id:"1",label:"Before changes",time:"19:42",files:3},{id:"2",label:"After tests",time:"19:46",files:5},{id:"3",label:"Current",time:"19:51"}]}))));
+</script>
+</body></html>

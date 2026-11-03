@@ -1,0 +1,9 @@
+<!-- @dsCard group="Orchestration" height=230 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>ToolCall</title></head><body style="margin:0;background:var(--bg)">
+<div id="root"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement,R=React;
+ReactDOM.createRoot(document.getElementById("root")).render(h("div",{style:{padding:16,background:"var(--bg)",display:"grid",gap:12,gridTemplateColumns:"repeat(auto-fill,minmax(320px,1fr))",alignItems:"start"}},[h(A.ToolCall,{key:1,open:true,call:{id:"a",tool:"query_dataverse",kind:"connector",args:{table:"tickets",filter:"status eq open"},ok:true,ms:420,summary:"OK · 18 rows"}}),h(A.ToolCall,{key:2,call:{id:"b",tool:"terminal",kind:"terminal",args:"npm test"}}),h(A.ToolCall,{key:3,call:{id:"c",tool:"computer_use",kind:"computer",ok:false,ms:9100,summary:"Failed · element not found"}})]));
+</script>
+</body></html>

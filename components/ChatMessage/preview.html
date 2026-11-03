@@ -1,0 +1,29 @@
+<!-- @dsCard group="Conversation" height=900 width=1000 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>ChatMessage</title></head><body style="margin:0;background:var(--bg)">
+<div id="root"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement;
+/* Fixture images: PNG data URLs drawn at runtime with theme tokens (the sanitizer blocks SVG data URLs). */
+function tok(n){return getComputedStyle(document.documentElement).getPropertyValue("--"+n).trim()||"gray";}
+function png(w,hh,a,b,label){var c=document.createElement("canvas");c.width=w;c.height=hh;var x=c.getContext("2d"),g=x.createLinearGradient(0,0,w,hh);g.addColorStop(0,tok(a));g.addColorStop(1,tok(b));x.fillStyle=g;x.fillRect(0,0,w,hh);
+ x.fillStyle="rgba(255,255,255,.85)";x.beginPath();x.arc(w*.72,hh*.32,Math.min(w,hh)*.12,0,7);x.fill();x.fillStyle="rgba(0,0,0,.22)";x.beginPath();x.moveTo(0,hh);x.lineTo(w*.35,hh*.45);x.lineTo(w*.6,hh*.8);x.lineTo(w*.8,hh*.55);x.lineTo(w,hh);x.fill();
+ x.fillStyle="#fff";x.font="600 "+Math.round(hh/9)+"px sans-serif";x.fillText(label,w*.06,hh*.16);return c.toDataURL("image/png");}
+var md="Here is the brief: **3 risks** in Q3. Read [the full doc](https://example.com/brief) for detail.\n\n```js\nconst risks = await brief.top(3);\nconsole.log(risks.map(r => r.name));\n```\n\n| Risk | Owner | Level |\n| :--- | :--- | ---: |\n| Vendor delay | Ops | High |\n| Budget | Finance | Medium |\n| Hiring | People | Low |";
+function col(kids){return h("div",{className:"ao-panel",style:{display:"flex",flexDirection:"column",gap:8,padding:"10px 12px",minWidth:0}},kids);}
+function M(m,k){return h(A.ChatMessage,{key:k,message:m});}
+function App(){
+ var one=png(640,400,"floor-research","type-lab","Floor plan"),
+  three=[png(480,320,"floor-content","type-studio","Draft A"),png(480,320,"floor-ops","type-team","Draft B"),png(960,360,"floor-hq","type-hq","Draft C")],
+  shot=png(520,300,"floor-sales","status-waiting","Error screen"),thumb=png(112,112,"accent","floor-ops","Q3");
+ return h("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,padding:12,alignItems:"start"}},
+  col([M({from:"user",text:"Summarize the Q3 risks.",time:"09:12"},1),
+   M({from:"agent",text:md,time:"09:12"},2),
+   M({from:"user",text:"This error shows when I sign in:",time:"09:14",attachments:[{type:"image",url:shot,name:"Pasted image.png",alt:"Sign-in error screen",width:520,height:300}]},3),
+   M({from:"agent",text:"I cannot load the second screenshot.",time:"09:15",attachments:[{type:"image",url:"data:image/png;base64,AAAA",name:"login-2.png",alt:"Second screenshot"}]},4)]),
+  col([M({from:"agent",text:"Here is the new floor plan.",time:"10:02",attachments:[{type:"image",url:one,name:"floor-plan.png",alt:"Floor plan, version 2",width:640,height:400}]},5),
+   M({from:"agent",text:"Three drafts for the launch banner. Select one to open it.",time:"10:05",attachments:three.map(function(u,i){return {type:"image",url:u,name:"banner-"+"ABC"[i]+".png",alt:"Banner draft "+"ABC"[i],width:i===2?960:480,height:i===2?360:320};})},6),
+   M({from:"agent",text:"I attached the data and the source.",time:"10:09",attachments:[{type:"file",url:"https://example.com/files/q3-risks.csv",name:"q3-risks-by-owner-final-version.csv",size:48211,mime:"text/csv"},{type:"link",url:"https://example.com/brief",title:"Q3 brief",site:"example.com",description:"Summary of the Q3 findings: three risks, owners and the next steps for each team.",thumb:thumb}]},7)]));}
+ReactDOM.createRoot(document.getElementById("root")).render(h(App));
+</script>
+</body></html>

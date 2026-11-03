@@ -1,0 +1,9 @@
+<!-- @dsCard group="Queues" height=150 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>ApprovalItem</title></head><body style="margin:0">
+<div id="root"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement;
+ReactDOM.createRoot(document.getElementById("root")).render(h("div",{className:"ao-stage"},h("div",{style:{width:230}},h(A.Panel,{title:"Waiting on me",count:2},h(A.ApprovalItem,{name:"Lead Finder",floor:2,ask:"Approve 12 leads to contact?"}),h(A.ApprovalItem,{name:"Import Bot",floor:3,ask:"Login expired on source",status:"error"})))));
+</script>
+</body></html>

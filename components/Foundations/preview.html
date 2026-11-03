@@ -1,0 +1,18 @@
+<!-- @dsCard group="Docs" height=620 width=1000 page -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Foundations</title></head><body style="margin:0;background:var(--bg)">
+<div id="root"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement,R=React;
+function S(l,c){return h("div",{className:"ao-state",key:l},h("div",{className:"ao-state-l"},l),c);}
+ReactDOM.createRoot(document.getElementById("root")).render(h("div",{className:"ao-page"},
+  h("div",{className:"heading"},"Motion"),
+  h("div",{className:"ao-motion"},[["duration-instant","Press"],["duration-fast","Chips, tooltips"],["duration-base","Panels, toasts"],["duration-floor","Floor rises"],["duration-camera","Camera glides"]].map(function(m){return h("div",{key:m[0],className:"ao-motion-c"},h("div",{className:"ao-mono",style:{fontSize:11}},m[0]),h("div",{className:"ao-motion-t"},h("i",{style:{animationDuration:"calc(var(--"+m[0]+") * 4)",animationTimingFunction:"var(--ease-out)"}})),h("div",{className:"ao-muted",style:{fontSize:11}},m[1]));})),
+  h("div",{className:"heading"},"Layers (front to back)"),
+  h("div",{className:"ao-layers"},[["z-scene","3D canvas","0"],["z-tag","Scene labels","5"],["z-hud","HUD panels","10"],["z-sheet","Sheet, pickers","20"],["z-toast","Toasts","30"],["z-tooltip","Tooltips","40"],["z-dialog","Dialog","50"]].map(function(l){return h("div",{key:l[0],className:"ao-layer"},h("span",null,l[1]),h("span",{className:"ao-mono ao-muted"},l[0]+" · "+l[2]));})),
+  h("div",{className:"heading"},"Breakpoints (office container width)"),
+  h("table",{className:"ao-tbl"},h("tbody",null,[["bp-phone","820px","Floor chips; one bottom sheet; room list, queue, log, broadcast and usage hide"],["bp-compact","1100px","Activity log hides; broadcast moves left"],["bp-wide","1360px","Reference width; full HUD"]].map(function(r){return h("tr",{key:r[0]},h("td",{className:"ao-mono"},r[0]),h("td",{className:"ao-mono"},r[1]),h("td",null,r[2]));}))),
+  h("div",{className:"heading"},"3D units"),
+  h("table",{className:"ao-tbl"},h("tbody",null,[["scene-depth","12","Room depth"],["scene-pitch","4.6","Workstation pitch"],["scene-gap","2.6","Gap between rooms"],["scene-floor-gap","4.2","Floor height in building view"],["scene-wall-h","5.2","Wall height"],["scene-bot-h","1.1","Bot height"]].map(function(r){return h("tr",{key:r[0]},h("td",{className:"ao-mono"},r[0]),h("td",{className:"ao-mono"},r[1]),h("td",null,r[2]));})))));
+</script>
+</body></html>

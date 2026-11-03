@@ -1,0 +1,41 @@
+# OfficeScene
+
+The 3D office itself and the main component of the system. It holds a building of floors, each floor holds rooms of one office type, and each room holds bots at workstations that match their role. The full HUD sits on top.
+
+- **Expandable.** Add floors, rooms and bots from the HUD (Add floor, Add room, the bot button on a room) or with the API. A room gets wider when it gets more bots; a floor gets wider when it gets more rooms.
+- **Two views.** Building shows all floors stacked, with one status pip per bot; click a floor or a room to go in. Floor shows one floor; click a room in the room list to frame it.
+- **Data.** Pass `building` (floors → rooms → bots). Without it the example HQ runs with `simulate` on. Set `editable:false` to hide the add controls.
+- **Tokens.** Every material reads the `scene-*`, `status-*`, `type-*` and `floor-*` tokens, so Day and Night follow the theme.
+- **Agents.** Pass `adapter` to connect real agents (see README, Quickstart, and Recipes, Connect a platform). Every button sends a command to the adapter; the scene changes only when the adapter sends events back. Without an adapter, the mock adapter runs (`simulate:false` turns it off).
+- **Sessions and talk.** Sessions show as a badge and a Sessions tab, or as their own blob (Recipes, Show sessions). Agents talk with `message.agent`: they turn, walk over or send an envelope. Click a bot to open its chat. Its replies also show as speech bubbles over it. Use the broadcast bar to message a room, a floor or every floor.
+- **Solutions.** `solution:"microsoft"` loads the Microsoft customer solutions office.
+- **Cinematic.** `quality` sets the post effects (auto, high, medium, low). `intro` flies in from the tower. `sound` starts with sound on; the sound button in the zoom panel turns it on and off. Bots path around every object, ride the elevator and carry tool calls as packets (see Concepts, The scene).
+- Without React: `AgentOffice.office.mount(el, opts)`.
+
+## Props
+
+| Prop | Required | Type |
+| --- | --- | --- |
+| `onNotify` | no | `(n: { kind: "request" \| "error"; bot: string; text: string; risk?: "low" \| "medium" \| "high" \| null }) => void` |
+| `frameInset` | no | `{ left: number; right: number } \| null` |
+| `ambient` | no | `boolean` |
+| `onAmbientOpen` | no | `() => void` |
+| `sinceYouLeft` | no | `boolean` |
+| `building` | no | `BuildingDef` |
+| `solution` | no | `"hq" \| "microsoft" \| "hermes" \| "copilot"` |
+| `adapter` | no | `AgentAdapter \| null` |
+| `theme` | no | `"light" \| "dark" \| "sublevel"` |
+| `floor` | no | `number` |
+| `view` | no | `"floor" \| "building"` |
+| `mode` | no | `"auto" \| "day" \| "night" \| "sublevel"` |
+| `simulate` | no | `boolean` |
+| `editable` | no | `boolean` |
+| `hud` | no | `boolean` |
+| `toasts` | no | `boolean` |
+| `height` | no | `number` |
+| `reset` | no | `string` |
+| `quality` | no | `Quality` |
+| `intro` | no | `boolean` |
+| `sound` | no | `boolean` |
+| `onReady` | no | `(office: OfficeApi) => void` |
+| `onSelect` | no | `(botName: string \| null) => void` |

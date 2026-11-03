@@ -1,0 +1,15 @@
+<!-- @dsCard group="Docs" height=420 width=900 page -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>ColorRatio</title></head><body style="margin:0;background:var(--bg)">
+<div id="root"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement;
+function Row(p){return h("div",{style:{display:"grid",gridTemplateColumns:"90px 1fr",gap:12,alignItems:"start"}},h("div",{className:"ao-mono",style:{fontSize:22,fontFamily:"var(--font-term)"}},p.n),h("div",null,h("div",{style:{fontWeight:600,fontSize:13}},p.t),h("div",{className:"ao-muted",style:{fontSize:12,lineHeight:1.45}},p.d),h("div",{style:{display:"flex",gap:6,marginTop:6,flexWrap:"wrap"}},p.sw.map(function(s){return h("span",{key:s,className:"ao-badge ao-badge-quiet"},h("i",{className:"ao-sw",style:{background:"var(--"+s+")",margin:0}}),s);}))));}
+ReactDOM.createRoot(document.getElementById("root")).render(h("div",{className:"ao-page"},
+ h("div",{className:"ao-ratio"},h("div",{className:"ao-ratio-60"},"60 · neutral"),h("div",{className:"ao-ratio-30"},"30 · structure"),h("div",{className:"ao-ratio-10"},"10")),
+ h(Row,{n:"60%",t:"Neutral: the calm ground",d:"Background, panels, walls, desks, most text. In Sublevel: off-white walls, white desks, pale panels.",sw:["bg","panel","chip","scene-wall","scene-wood","ink"]}),
+ h(Row,{n:"30%",t:"Structure: what holds the space together",d:"Carpet, floor bands, panel heads, selected rows, the accent on primary actions. In Sublevel: green carpet and corporate blue.",sw:["scene-floor","floor-ops","floor-research","accent","type-team"]}),
+ h(Row,{n:"10%",t:"Emphasis: what must be seen now",d:"Room alert beacons, unread counts, the Approve button on a request. One emphasis item per decision. In Sublevel it is red; in Day and Night it equals the accent.",sw:["emphasis","status-waiting","status-error"]}),
+ h("div",{style:{display:"flex",gap:8,alignItems:"center"}},h(A.Button,{variant:"emphasis"},"Approve"),h(A.Button,null,"Decline"),h("span",{className:"ao-unread"},"3"),h("span",{className:"ao-muted",style:{fontSize:12}},"Emphasis in use: one key action, one count."))));
+</script>
+</body></html>

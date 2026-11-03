@@ -1,0 +1,624 @@
+{
+ "version": "x1.5",
+ "events": {
+  "status": {
+   "desc": "A bot changes state. The bot walks to rest or back to its seat when needed.",
+   "fields": {
+    "bot": "string",
+    "status": "Status",
+    "task": "string?",
+    "quiet": "boolean?"
+   }
+  },
+  "message": {
+   "desc": "A bot says something to the user: chat line and speech bubble. text is Markdown (links, images, code, tables) unless format is \"plain\". attachments: [{type: image | file | link | video | audio, url, name?, size?, mime?, alt?, title?, description?, site?, thumb?, width?, height?}].",
+   "fields": {
+    "bot": "string",
+    "text": "string",
+    "say": "boolean?",
+    "attachments": "object[]?",
+    "format": "string?"
+   }
+  },
+  "message.agent": {
+   "desc": "One agent talks to another. Same room: the bots turn to each other; a long message (over 80 characters, or walk: true) makes the sender walk over. Other room or floor: an envelope rides the cable tray or the elevator.",
+   "fields": {
+    "from": "string",
+    "to": "string",
+    "text": "string",
+    "walk": "boolean?",
+    "attachments": "object[]?"
+   }
+  },
+  "request": {
+   "desc": "A bot needs a decision. Shows in Waiting on me, the chat and a toast. Optional risk (\"low\", \"medium\" or \"high\"), cost, preview and tool help the user decide.",
+   "fields": {
+    "bot": "string",
+    "id": "string?",
+    "text": "string",
+    "actions": "string[]?",
+    "quiet": "boolean?",
+    "risk": "string?",
+    "cost": "number?",
+    "preview": "string?",
+    "tool": "string?"
+   }
+  },
+  "error": {
+   "desc": "A bot stopped on an error.",
+   "fields": {
+    "bot": "string",
+    "text": "string"
+   }
+  },
+  "usage": {
+   "desc": "Usage of the plan or limit, in percent.",
+   "fields": {
+    "percent": "number?",
+    "bots": "object?"
+   }
+  },
+  "session.start": {
+   "desc": "A session (one run or conversation) starts. With sessions: \"agent\" it shows as a count badge and a row in the Sessions tab; with sessions: \"session\" or isolated: true it gets its own grey blob from the elevator.",
+   "fields": {
+    "bot": "string",
+    "session": "string",
+    "title": "string?",
+    "isolated": "boolean?"
+   }
+  },
+  "session.end": {
+   "desc": "A session ends. Its blob, if any, walks back to the elevator.",
+   "fields": {
+    "bot": "string",
+    "session": "string",
+    "result": "string?",
+    "ok": "boolean?"
+   }
+  },
+  "plan": {
+   "desc": "An orchestrator makes a plan.",
+   "fields": {
+    "bot": "string",
+    "goal": "string",
+    "steps": "object[]"
+   }
+  },
+  "plan.step": {
+   "desc": "A plan step changes state.",
+   "fields": {
+    "bot": "string",
+    "id": "string",
+    "status": "Status",
+    "owner": "string?"
+   }
+  },
+  "delegate": {
+   "desc": "A bot gives a task to another bot, or spawns a temporary subagent (spawn).",
+   "fields": {
+    "bot": "string",
+    "to": "string?",
+    "spawn": "object?",
+    "roomId": "string?",
+    "task": "string?"
+   }
+  },
+  "subagent.done": {
+   "desc": "A subagent returns its result. A temporary subagent leaves by the elevator.",
+   "fields": {
+    "bot": "string",
+    "result": "string?",
+    "remove": "boolean?"
+   }
+  },
+  "tool.call": {
+   "desc": "A bot calls a tool. A packet rides the cable tray.",
+   "fields": {
+    "bot": "string",
+    "id": "string",
+    "tool": "string",
+    "kind": "string?",
+    "args": "object?",
+    "say": "boolean?"
+   }
+  },
+  "tool.result": {
+   "desc": "A tool call returns. The packet comes back in the result color.",
+   "fields": {
+    "bot": "string",
+    "id": "string",
+    "ok": "boolean?",
+    "ms": "number?",
+    "summary": "string?",
+    "tokens": "number?",
+    "cost": "number?"
+   }
+  },
+  "knowledge": {
+   "desc": "A bot reads a knowledge source.",
+   "fields": {
+    "bot": "string",
+    "source": "string",
+    "text": "string?"
+   }
+  },
+  "skill.load": {
+   "desc": "A bot loads a skill.",
+   "fields": {
+    "bot": "string",
+    "skill": "string"
+   }
+  },
+  "checkpoint": {
+   "desc": "A bot saves a checkpoint.",
+   "fields": {
+    "bot": "string",
+    "id": "string",
+    "label": "string",
+    "files": "number?"
+   }
+  },
+  "rollback": {
+   "desc": "A bot rolls back to a checkpoint.",
+   "fields": {
+    "bot": "string",
+    "label": "string"
+   }
+  },
+  "trigger.run": {
+   "desc": "A scheduled job or trigger runs.",
+   "fields": {
+    "job": "string",
+    "bot": "string?",
+    "next": "string?"
+   }
+  },
+  "model": {
+   "desc": "A bot changes model, or falls back to another model.",
+   "fields": {
+    "bot": "string",
+    "model": "string",
+    "fallback": "string?"
+   }
+  },
+  "floor.add": {
+   "desc": "Add a floor.",
+   "fields": {
+    "floor": "object"
+   }
+  },
+  "room.add": {
+   "desc": "Add a room to a floor.",
+   "fields": {
+    "floorId": "number",
+    "room": "object"
+   }
+  },
+  "bot.add": {
+   "desc": "Add a bot to a room.",
+   "fields": {
+    "roomId": "string",
+    "bot": "object"
+   }
+  },
+  "bot.remove": {
+   "desc": "Remove a bot.",
+   "fields": {
+    "bot": "string"
+   }
+  }
+ },
+ "commands": {
+  "message": {
+   "desc": "The user writes to one bot (bot) or broadcasts (target). attachments: images or files the user pasted, dropped or picked, as {type, url (data: or blob: or https), name, size, mime}.",
+   "fields": {
+    "bot": "string?",
+    "target": "object?",
+    "targetLabel": "string?",
+    "text": "string",
+    "attachments": "object[]?"
+   }
+  },
+  "approve": {
+   "desc": "The user approves a request.",
+   "fields": {
+    "bot": "string",
+    "requestId": "string?"
+   }
+  },
+  "decline": {
+   "desc": "The user declines a request.",
+   "fields": {
+    "bot": "string",
+    "requestId": "string?"
+   }
+  },
+  "retry": {
+   "desc": "Run the failed task again.",
+   "fields": {
+    "bot": "string"
+   }
+  },
+  "dismiss": {
+   "desc": "Clear an error.",
+   "fields": {
+    "bot": "string"
+   }
+  },
+  "pause": {
+   "desc": "Pause a bot.",
+   "fields": {
+    "bot": "string"
+   }
+  },
+  "resume": {
+   "desc": "Resume a bot.",
+   "fields": {
+    "bot": "string"
+   }
+  },
+  "assign": {
+   "desc": "Give a bot a task. The Manager sends it for each plan step (from = the Manager).",
+   "fields": {
+    "bot": "string",
+    "task": "string",
+    "from": "string?"
+   }
+  },
+  "delegate": {
+   "desc": "Ask a bot to delegate a task.",
+   "fields": {
+    "bot": "string",
+    "to": "string",
+    "task": "string"
+   }
+  },
+  "rollback": {
+   "desc": "Roll a bot back to a checkpoint.",
+   "fields": {
+    "bot": "string",
+    "checkpoint": "object"
+   }
+  },
+  "session.stop": {
+   "desc": "Stop one session of a bot.",
+   "fields": {
+    "bot": "string",
+    "session": "string"
+   }
+  },
+  "cron.pause": {
+   "desc": "Pause a scheduled job.",
+   "fields": {
+    "job": "string"
+   }
+  },
+  "cron.resume": {
+   "desc": "Resume a scheduled job.",
+   "fields": {
+    "job": "string"
+   }
+  }
+ },
+ "tokens": [
+  "accent",
+  "bg",
+  "blur-panel",
+  "bp-compact",
+  "bp-phone",
+  "bp-wide",
+  "bubble",
+  "chip",
+  "duration-base",
+  "duration-camera",
+  "duration-elevator",
+  "duration-fast",
+  "duration-floor",
+  "duration-fly",
+  "duration-handoff",
+  "duration-instant",
+  "duration-intro",
+  "duration-packet",
+  "duration-speech",
+  "duration-toast",
+  "duration-tool-label",
+  "ease-in",
+  "ease-out",
+  "ease-standard",
+  "ease-walk",
+  "emphasis",
+  "floor-content",
+  "floor-hq",
+  "floor-ops",
+  "floor-research",
+  "floor-sales",
+  "font-mono",
+  "font-sans",
+  "font-sublevel-mono",
+  "font-sublevel-sans",
+  "font-term",
+  "fx-bloom-day",
+  "fx-bloom-night",
+  "fx-bloom-radius",
+  "fx-bloom-sublevel",
+  "fx-exposure-day",
+  "fx-exposure-night",
+  "fx-exposure-sublevel",
+  "fx-fog-day",
+  "fx-fog-night",
+  "fx-fog-sublevel",
+  "fx-knee",
+  "fx-threshold-day",
+  "fx-threshold-night",
+  "fx-threshold-sublevel",
+  "fx-vignette-day",
+  "fx-vignette-night",
+  "fx-vignette-sublevel",
+  "ink",
+  "light-day-lamp",
+  "light-day-sky",
+  "light-day-sun",
+  "light-night-lamp",
+  "light-night-sky",
+  "light-night-sun",
+  "light-sublevel-lamp",
+  "light-sublevel-sky",
+  "light-sublevel-sun",
+  "line",
+  "muted",
+  "on-accent",
+  "on-emphasis",
+  "on-floor",
+  "on-status",
+  "opacity-glass",
+  "opacity-resting",
+  "panel",
+  "radius-full",
+  "radius-lg",
+  "radius-md",
+  "radius-sm",
+  "scene-bot-h",
+  "scene-chair",
+  "scene-dark",
+  "scene-depth",
+  "scene-floor",
+  "scene-floor-gap",
+  "scene-gap",
+  "scene-glass",
+  "scene-handoff-dash",
+  "scene-handoff-gap",
+  "scene-metal",
+  "scene-nav-cell",
+  "scene-nav-pad",
+  "scene-pitch",
+  "scene-rail",
+  "scene-rug",
+  "scene-slab",
+  "scene-sofa",
+  "scene-subagent",
+  "scene-wall",
+  "scene-wall-h",
+  "scene-wall-side",
+  "scene-wood",
+  "shadow-panel",
+  "space-1",
+  "space-2",
+  "space-3",
+  "space-4",
+  "space-5",
+  "space-6",
+  "status-error",
+  "status-finished",
+  "status-resting",
+  "status-waiting",
+  "status-working",
+  "type-body-line",
+  "type-body-size",
+  "type-body-weight",
+  "type-caption-line",
+  "type-caption-size",
+  "type-caption-weight",
+  "type-data-line",
+  "type-data-size",
+  "type-data-weight",
+  "type-display-line",
+  "type-display-size",
+  "type-display-tracking",
+  "type-display-weight",
+  "type-eyebrow-line",
+  "type-eyebrow-size",
+  "type-eyebrow-tracking",
+  "type-eyebrow-weight",
+  "type-figure-line",
+  "type-figure-size",
+  "type-figure-weight",
+  "type-heading-line",
+  "type-heading-size",
+  "type-heading-weight",
+  "type-hq",
+  "type-lab",
+  "type-label-line",
+  "type-label-size",
+  "type-label-weight",
+  "type-sl-body-line",
+  "type-sl-body-size",
+  "type-sl-body-weight",
+  "type-sl-name-line",
+  "type-sl-name-size",
+  "type-sl-name-tracking",
+  "type-sl-name-weight",
+  "type-sl-sign-line",
+  "type-sl-sign-size",
+  "type-sl-sign-tracking",
+  "type-sl-sign-weight",
+  "type-sl-terminal-line",
+  "type-sl-terminal-size",
+  "type-sl-terminal-tracking",
+  "type-sl-terminal-weight",
+  "type-studio",
+  "type-team",
+  "type-title-line",
+  "type-title-size",
+  "type-title-weight",
+  "z-dialog",
+  "z-hud",
+  "z-scene",
+  "z-sheet",
+  "z-tag",
+  "z-toast",
+  "z-tooltip"
+ ],
+ "icons": [
+  "add",
+  "approve",
+  "attach",
+  "bell",
+  "bot",
+  "broadcast",
+  "browser",
+  "building",
+  "channel",
+  "chat",
+  "checkpoint",
+  "chevron-down",
+  "chevron-right",
+  "close",
+  "code-run",
+  "computer-use",
+  "connector",
+  "copy",
+  "cost",
+  "day",
+  "decline",
+  "delegate",
+  "elevator",
+  "error",
+  "eval",
+  "filter",
+  "finished",
+  "floor",
+  "flow",
+  "hq",
+  "identity",
+  "info",
+  "knowledge",
+  "lab",
+  "mcp",
+  "memory",
+  "model",
+  "more",
+  "night",
+  "pause",
+  "plan",
+  "remove",
+  "resting",
+  "resume",
+  "retry",
+  "role-ae",
+  "role-analyst",
+  "role-coder",
+  "role-csa",
+  "role-csam",
+  "role-designer",
+  "role-fde",
+  "role-media",
+  "role-ops",
+  "role-partner",
+  "role-planner",
+  "role-research",
+  "role-sales",
+  "role-se",
+  "role-specialist",
+  "role-writer",
+  "rollback",
+  "room",
+  "schedule",
+  "search",
+  "send",
+  "session",
+  "settings",
+  "skill",
+  "sound",
+  "sound-off",
+  "studio",
+  "subagent",
+  "team",
+  "terminal",
+  "token",
+  "tool",
+  "tour",
+  "trace",
+  "trigger",
+  "waiting",
+  "working",
+  "zoom-in",
+  "zoom-out"
+ ],
+ "components": [
+  "OfficeScene",
+  "HermesOffice",
+  "CopilotOffice",
+  "SublevelOffice",
+  "SolutionOffice",
+  "BuildingView",
+  "RoomScene",
+  "Workstations",
+  "BotLineup",
+  "SinceYouLeft",
+  "TimeScrubber",
+  "DecisionInbox",
+  "CommandPalette",
+  "Notifier",
+  "AmbientBar",
+  "AgentPanel",
+  "SessionList",
+  "RunTrace",
+  "ToolCall",
+  "ToolKindBadge",
+  "PlanCard",
+  "DelegationTree",
+  "ScheduleList",
+  "CheckpointTimeline",
+  "ChannelList",
+  "CostMeter",
+  "ModelBadge",
+  "AgentCard",
+  "AgentRegistry",
+  "AgentChat",
+  "ChatMessage",
+  "RichText",
+  "BroadcastBar",
+  "SolutionCard",
+  "Panel",
+  "StatusCounts",
+  "FloorList",
+  "RoomList",
+  "FloorHeader",
+  "BotRow",
+  "BotAvatar",
+  "ApprovalItem",
+  "ActivityLog",
+  "UsageMeter",
+  "StatusDot",
+  "StatusBubble",
+  "OfficeTypeBadge",
+  "OfficeTypeCard",
+  "RoleBadge",
+  "Button",
+  "AddButton",
+  "ModeToggle",
+  "ViewToggle",
+  "Tooltip",
+  "Toast",
+  "ToastStack",
+  "Dialog",
+  "Tabs",
+  "TextInput",
+  "Select",
+  "EmptyState",
+  "Skeleton",
+  "Icon",
+  "Logo"
+ ],
+ "note": "The one source for events and commands. The build puts it in the bundle (AgentOffice.schema, AgentOffice.validate), in index.d.ts, in Reference.md and in kit/schema.json. Field types: string, number, boolean, object, Status, string[], object[]; a trailing ? means optional."
+}

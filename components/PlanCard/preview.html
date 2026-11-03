@@ -1,0 +1,9 @@
+<!-- @dsCard group="Orchestration" height=220 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>PlanCard</title></head><body style="margin:0;background:var(--bg)">
+<div id="root"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement,R=React;
+ReactDOM.createRoot(document.getElementById("root")).render(h("div",{style:{width:340,padding:16}},h(A.PlanCard,{goal:"Answer the escalation",steps:[{id:"1",text:"Read the ticket and history",status:"finished",owner:"Grounding Agent"},{id:"2",text:"Check entitlement in Dataverse",status:"working",owner:"Dataverse Connector"},{id:"3",text:"Draft the reply",status:"resting",owner:"Generative Orchestrator"},{id:"4",text:"Hand off if severity A",status:"resting",owner:"Human Handoff"}]})));
+</script>
+</body></html>

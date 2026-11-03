@@ -1,0 +1,119 @@
+# Recipes
+
+Each recipe does one task. Do the steps in order. Look up names in Reference.
+
+## Daily use
+
+The office HUD has these by default (set `hud: false` to hide all HUD parts):
+
+- **Since you left.** On open, a card counts what happened since the page was last hidden: finished, needs you, errors, spend, and up to 3 lines. History is kept in the browser (`localStorage`, key `ao-history:<building name>`). Set `sinceYouLeft: false` to hide the card. API: `office.summary(sinceMs)`, `office.history(sinceMs)`.
+- **Replay.** "Replay" on the card, the trace button in the zoom panel, or the palette opens the time scrubber. The office replays the recorded events at 1x, 10x or 60x. Live events wait and apply after the replay. "Live" stops it. API: `office.replay({ from, to, speed })`, `office.stopReplay()`.
+- **Decisions.** The decisions button (with the count) opens the inbox: every request, high risk first, with cost and a preview. Keys: J / K move, A approve, D decline, X select, Shift+A approve the selection. Send `risk`, `cost`, `preview` and `tool` on `request` events to fill it. API: `office.approveMany(names)`, `office.declineMany(names)`.
+- **Command palette.** Ctrl+K or Cmd+K: jump to a bot or a floor, approve all low-risk requests, open decisions, replay, change the view, the theme or the sound, or type a request for the Manager.
+- **Alerts.** The bell button turns on browser alerts for "needs you" and errors while the page is hidden. The page title shows the count, for example "(3) Agent Office". Alerts start only from that click.
+- **Ambient bar.** `ambient: true` shows only a strip with floor pips, the "needs you" count and the last activity, for a second screen or a narrow window. "Open" shows the full office (`onAmbientOpen`).
+- **Framing.** With the HUD on, the scene centers between the left and right panels, so the elevator lobby stays visible. Set `frameInset: { left, right }` (px) to override it, or `null` for none.
+
+## Show your agents
+
+1. Write a `building`: `floors[] → rooms[] → bots[]`. Give each bot a unique `name`, a `role` and a `shape` (blob, cone, octa, capsule).
+2. Put each room in the office type that fits the work: `team`, `lab`, `studio` or `hq` (war room).
+3. Pass it: `h(A.OfficeScene, { building })`. Or start from a solution: `solution: "hermes" | "copilot" | "microsoft" | "hq"`.
+
+Do not draw your own 3D bots. Do not set bot positions.
+
+## Connect a platform
+
+0. Pick the pattern: Direct, Bridge or Trace (Concepts, Connection). Use a bridge for any secret key.
+1. Copy `kit/adapter.js`. Fill the two mapping tables: platform event → Agent Office event, command → platform call.
+2. Set `AgentOffice.strict = true`. Play a recorded event log and fix each warning.
+3. Map risky steps to `request`. Send `tokens` and `cost` on `tool.result`.
+4. Run `python3 kit/check.py --events log.jsonl`.
+
+| Platform | Map these |
+| --- | --- |
+| Hermes Agent | `delegate_task` → `delegate` / `subagent.done`; tool start and end → `tool.call` / `tool.result`; checkpoints → `checkpoint`; cron → `trigger.run`; provider fallback → `model`; each conversation → `session.start` / `session.end` |
+| Copilot Studio | Plan → `plan`; connected agent call → `delegate`; connector or flow → `tool.call` / `tool.result`; knowledge lookup → `knowledge`; autonomous trigger → `trigger.run`; each conversation → `session.start` / `session.end` |
+| Claude Code, Agent SDK | Each session → `session.start` with `isolated: true`; subagent (Task) → `delegate` with `spawn`; tool use → `tool.call` / `tool.result`; permission prompt → `request` |
+
+Recipes are mappings, not drop-in code. Check the platform API before you ship.
+
+## Send rich messages
+
+Agents write Markdown, as in Claude, ChatGPT or Teams. The chat renders it; the 3D bubble and the activity log show plain text.
+
+- **Text:** `text` is Markdown: links, bare URLs, bold, italic, code blocks (with a copy button), lists, task lists, quotes, tables and images. Set `format: "plain"` to show text as is.
+- **Attachments:** `attachments: [{ type: "image" | "file" | "link" | "video" | "audio", url, name, size, mime, alt, title, description, site, thumb, width, height }]` on `message` and `message.agent`. Images show inline (a grid for two or more) and open in a viewer. Files show as a card with Download. Links show as a card from your data; the office fetches nothing.
+- **From the user:** the composer attaches files from the attach button, a paste or a drop. The `message` command then carries `attachments` with data or blob URLs; upload them on the platform side.
+- **Safety:** raw HTML never renders. Links: http, https, mailto. Images: http, https and PNG, JPEG, GIF or WebP data URLs. Send `width` and `height` for images so the chat does not jump.
+
+## Show sessions
+
+A session is one run or one conversation of an agent. The adapter chooses how it shows.
+
+| Setting | Result |
+| --- | --- |
+| `sessions: "agent"` (default) on the building or a bot | One blob per agent. Open sessions show as a count badge over the blob and as rows in the Sessions tab of the agent panel |
+| `sessions: "session"` | Each session gets its own grey blob. It arrives by the elevator, works at a seat in the agent's room and leaves when the session ends |
+| `isolated: true` on one `session.start` | Only that session gets its own blob. Use it for a session with its own context that can block on a person (for example a Claude Code session or a Hermes subagent) |
+
+Send `session.start { bot, session, title }` and `session.end { bot, session, ok, result }`. The Stop button sends the `session.stop` command.
+
+## Let agents talk to each other
+
+Send `message.agent { from, to, text }`. The engine picks the picture:
+
+- **Same room, short message:** the two bots turn to each other; a speech bubble shows over the sender.
+- **Same room, long message** (over 80 characters, or `walk: true`): the sender walks to the receiver, talks, and walks back.
+- **Other room or floor:** an envelope rides the ceiling cable tray (and the elevator between floors) to the receiver.
+
+Use `delegate` for work hand-offs (dashed line), and `message.agent` for talk. Set `walk: false` to keep a long message as a bubble.
+
+## Add a Manager
+
+The Manager is an agent: a bot with `orchestrator: true`. Messages to it go to your platform's orchestrator (Hermes main agent, Copilot Studio generative orchestration, a Claude agent with subagents). The broadcast bar lists the Manager first, so a request without a target goes to it.
+
+If your platform has no orchestrator, use the reference Manager in `kit/manager.js`. It runs in the page and wraps your adapter.
+
+1. Load `kit/manager.js` after `bundle.js`.
+2. Wrap your adapter: `adapter: AgentOffice.manager.create({ adapter: myAdapter })`. Leave out `adapter` to wrap the mock.
+3. Ask the Manager, for example: "Research the Contoso pricing, then write a summary."
+4. The Manager splits the request on "then" and ";", picks the best free bot for each step by role words, and sends `assign` commands one step at a time. A step ends when its bot sends `status: "finished"` or an error, or after `timeoutMs` (default 120 s).
+5. For better plans, pass `planner: async (text, bots) => [{ text, bot }]`, for example an LLM call. Keep risky steps as `request` events on the agent side.
+
+Ask "status" to get a summary of all bots and running plans. When no bot fits a step, the Manager asks for more detail and names the teams.
+
+## Add a role
+
+1. Before mount: `A.office.ROLES[id] = { label, short, icon: "role-" + id, tasks: [...], asks: [...] }`.
+2. Set `A.office.Work[id]` to a workstation builder. Reuse one (`A.office.Work.coder`) or write one from `kit/part.js`.
+3. Add a `role-<id>` icon. Roles have icons, not colors.
+
+## Add furniture or a workstation
+
+Copy `kit/part.js`. Build meshes with `A.office.Parts` helpers inside a workstation builder, so the nav grid sees them and bots walk around them. Set `mesh.userData.noNav = 1` only on decor that bots may cross (rugs, lights, signs). Use `scene-*` tokens through `K.t(token)`.
+
+## Add a solution or a theme
+
+- **Solution:** `A.solutions[id] = { id, label, summary, building }`. Do not change the default templates.
+- **Theme:** give every color and shadow token a value, plus `light-<theme>-*` and `fx-*-<theme>`. Check ContrastCheck in the new theme.
+- **Office type:** not supported without an engine change. Ask for a new version of the system.
+
+## Add a component
+
+Use tokens only. Write a README with a props table and a "consumer provides" line, a preview with every state, types in `index.d.ts`, and a changelog row.
+
+## Test your page
+
+1. Screenshots: Day, Night, Sublevel; 1360, 1100 and 400 px; `quality: "low"`; reduced motion. Look at each one.
+2. Walk test: `office.applyEvent({ type: "status", bot, status: "resting" })` for each bot in a room, then `"working"`. Look while they walk. For a number, use `office.inspect().nav[floor].path(from, to)`.
+3. Adapter test: click Approve and check that the scene changes only after the adapter replies.
+4. Run `python3 kit/check.py`.
+
+## Prompt templates
+
+**Build a page:** "Build <page> x0.1 with Agent Office DS x1.5 Read README, Recipes and Reference. Start from kit/page.html. Use tokens and the icon set only. Write copy in Simplified Technical English. Run kit/check.py and take the screenshots in the definition of done. Report what you checked."
+
+**Connect a platform:** "Write an Agent Office adapter x0.1 for <platform>. Read Recipes (Connect a platform) and the events and commands in Reference. Copy kit/adapter.js. Fill the mapping tables first, then the code. Set AgentOffice.strict = true and play a recorded log. Report each event type you saw."
+
+**Copilot Studio (paste into Copilot on your work account):** "List my Copilot Studio agents. For each one, give its connected agents, tools (connectors, agent flows, MCP, computer use), knowledge sources, triggers and channels, in a table with the columns Agent, Role, Connected agents, Tools, Knowledge, Triggers, Channels."

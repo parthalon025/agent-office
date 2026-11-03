@@ -1,0 +1,9 @@
+<!-- @dsCard group="Orchestration" height=520 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>RunTrace</title></head><body style="margin:0;background:var(--bg)">
+<div id="root"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement,R=React;
+ReactDOM.createRoot(document.getElementById("root")).render(h("div",{style:{width:420,padding:16}},h(A.RunTrace,{steps:[{type:"skill.load",title:"Loaded skill plan",time:"19:40"},{type:"plan",title:"Planned 3 steps",text:"Prepare the customer briefing",time:"19:40"},{type:"delegate",title:"Delegated to Researcher",text:"Gather context",time:"19:40"},{type:"tool.call",title:"Called web_search",time:"19:41",state:"done",call:{id:"t1",tool:"web_search",kind:"browser",args:{query:"Contoso Q3 results"},ok:true,ms:840,summary:"OK · 12 results"}},{type:"checkpoint",title:"Checkpoint · Before changes",time:"19:42",checkpoint:{id:"cp1",label:"Before changes"}},{type:"tool.call",title:"Called mcp:github.create_pr",time:"19:42",state:"error",call:{id:"t2",tool:"mcp:github.create_pr",kind:"mcp",args:{repo:"contoso/web"},ok:false,ms:5000,summary:"Failed · timeout"}},{type:"subagent.done",title:"Researcher returned",text:"Context ready (6 sources)",time:"19:43"}],onRollback:function(){}})));
+</script>
+</body></html>

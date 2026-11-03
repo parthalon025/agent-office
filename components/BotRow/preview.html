@@ -1,0 +1,9 @@
+<!-- @dsCard group="Roster" height=200 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>BotRow</title></head><body style="margin:0;background:var(--bg)">
+<div id="root"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement;
+ReactDOM.createRoot(document.getElementById("root")).render(h("div",{className:"ao-panel",style:{width:290,padding:6,margin:12}},h(A.BotRow,{name:"Night Researcher",shape:"octa",color:"#3b6fe0",role:"research",status:"working",task:"Writing the morning brief",selected:true}),h(A.BotRow,{name:"Deploy Bot",shape:"capsule",color:"#26a69a",role:"coder",status:"error",task:"Rate limited by API"}),h(A.BotRow,{name:"Competitor Monitor",shape:"cone",color:"#4cb35a",role:"analyst",status:"resting",task:"Waiting for next routine"})));
+</script>
+</body></html>

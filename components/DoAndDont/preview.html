@@ -1,0 +1,20 @@
+<!-- @dsCard group="Docs" height=760 width=1000 page -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>DoAndDont</title></head><body style="margin:0;background:var(--bg)">
+<div id="root"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement,R=React;
+function S(l,c){return h("div",{className:"ao-state",key:l},h("div",{className:"ao-state-l"},l),c);}
+ReactDOM.createRoot(document.getElementById("root")).render(h("div",{className:"ao-page"},h("div",{className:"ao-dd"},[
+  ["Status colors only mean status.",h(R.Fragment,null,h(A.StatusDot,{status:"error"}),h("span",null,"SE · Security · Error")),h("span",{className:"ao-badge",style:{background:"var(--status-error)",color:"#fff"}},"New feature!"),"Never use a status color for decoration or emphasis."],
+  ["Every color has a word or an icon.",h(A.OfficeTypeBadge,{type:"lab"}),h("i",{className:"ao-badge-dot",style:{background:"var(--type-lab)",width:14,height:14}}),"A type dot alone does not say which type it is."],
+  ["Buttons say the result.",h(R.Fragment,null,h(A.Button,{variant:"primary"},"Approve"),h(A.Button,null,"Decline")),h(R.Fragment,null,h(A.Button,{variant:"primary"},"OK"),h(A.Button,null,"Cancel")),"OK and Cancel do not say what happens to the bot."],
+  ["One primary action per decision.",h(R.Fragment,null,h(A.Button,{variant:"primary"},"Retry"),h(A.Button,null,"Dismiss")),h(R.Fragment,null,h(A.Button,{variant:"primary"},"Retry"),h(A.Button,{variant:"primary"},"Dismiss")),"Two primary buttons make the person stop and read."],
+  ["Status lines are State · Task.",h("span",{className:"ao-bot-s"},"Needs you · Approve the landing zone change?"),h("span",{className:"ao-bot-s"},"The bot is currently waiting for your approval on a change"),"Lead with the state. Keep the task short."],
+  ["VT323 is for figures only (Sublevel).",h("span",{style:{fontFamily:"var(--font-term)",fontSize:30}},"4 7 0 2"),h("span",{style:{fontFamily:"var(--font-term)",fontSize:18}},"Approve sending the deck?"),"Terminal type in sentences is hard to read."],
+  ["Panels float over the scene.",h("div",{className:"ao-panel",style:{padding:"8px 12px",fontSize:12}},"Waiting on me · 2"),h("div",{style:{padding:"8px 12px",fontSize:12,background:"var(--chip)",boxShadow:"0 10px 30px rgba(0,0,0,.35)",borderRadius:20}},"Waiting on me · 2"),"Only panels get the panel shadow. No heavy shadows, no pill panels."],
+  ["Emphasis is 10%: one key action per decision.",h(R.Fragment,null,h(A.Button,{variant:"emphasis"},"Approve"),h(A.Button,null,"Decline")),h(R.Fragment,null,h(A.Button,{variant:"emphasis"},"Approve"),h(A.Button,{variant:"emphasis"},"Decline"),h("span",{className:"ao-unread"},"9")),"When everything is red, nothing is urgent."],
+  ["The scene changes only from agent events.",h("span",{className:"ao-bot-s"},"Click Approve → bot stays Needs you → agent confirms → Working"),h("span",{className:"ao-bot-s"},"Click Approve → bot shows Working at once"),"A fake state change hides a failed command."]
+ ].map(function(x,i){return h(R.Fragment,{key:i},h("div",{className:"ao-dd-c"},h("div",{className:"ao-dd-v do"},h(A.Icon,{name:"approve",size:14}),"Do"),h("div",{className:"ao-dd-x"},x[1]),h("div",{className:"ao-dd-n"},x[0])),h("div",{className:"ao-dd-c"},h("div",{className:"ao-dd-v dont"},h(A.Icon,{name:"decline",size:14}),"Don't"),h("div",{className:"ao-dd-x"},x[2]),h("div",{className:"ao-dd-n"},x[3])));}))));
+</script>
+</body></html>

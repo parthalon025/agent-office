@@ -1,0 +1,9 @@
+<!-- @dsCard group="Office types" height=64 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>RoleBadge</title></head><body style="margin:0;background:var(--bg)">
+<div id="root"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement;
+ReactDOM.createRoot(document.getElementById("root")).render(h("div",{className:"ao-stage"},["research","writer","coder","analyst","designer","ops","sales","planner","media"].map(function(r){return h(A.RoleBadge,{key:r,role:r});})));
+</script>
+</body></html>

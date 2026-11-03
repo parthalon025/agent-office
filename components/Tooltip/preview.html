@@ -1,0 +1,10 @@
+<!-- @dsCard group="Foundations" height=150 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Tooltip</title></head><body style="margin:0;background:var(--bg)">
+<div id="root"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement,R=React;
+function S(l,c){return h("div",{className:"ao-state",key:l},h("div",{className:"ao-state-l"},l),c);}
+ReactDOM.createRoot(document.getElementById("root")).render(h("div",{className:"ao-statesgrid is-tall"},[S("on an icon button",h(A.Tooltip,{text:"Zoom in",open:true},h("button",{className:"ao-iconbtn","aria-label":"Zoom in"},h(A.Icon,{name:"zoom-in",size:16})))),S("below",h(A.Tooltip,{text:"Add a bot to Demo Lab",side:"bottom",open:true},h("button",{className:"ao-iconbtn","aria-label":"Add bot"},h(A.Icon,{name:"bot",size:16}))))]));
+</script>
+</body></html>

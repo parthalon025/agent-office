@@ -1,0 +1,20 @@
+<!-- @dsCard group="Daily" height=640 width=840 -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>DecisionInbox</title></head><body style="margin:0;background:var(--bg);font-family:var(--font-sans)">
+<div id="root" style="display:flex;gap:16px;padding:16px;align-items:flex-start"></div>
+<script>
+var A=window.AgentOffice,h=React.createElement,R=React;
+var BOTS=[
+ {name:"Scout",color:"#3b6fe0",shape:"blob",role:"sales",status:"waiting",task:"Lead follow-up",floor:2,room:"r1",orchestrator:false,request:{id:"q1",text:"Approve sending 10 intro emails to Ohio leads?",risk:"medium",cost:0.18,tool:"outlook.send",preview:"To: 10 contacts (Ohio, manufacturing)\nSubject: A quick question about your agent pilot\n\nHi {first_name},\nI saw your team runs field service in Dayton.\nCan we talk for 15 minutes next week?"}},
+ {name:"Ledger",color:"#2f9a6a",shape:"cone",role:"analyst",status:"waiting",task:"Month-end close",floor:1,room:"r2",request:{id:"q2",text:"Approve posting 42 journal entries to the ledger?",risk:"high",cost:1.2,tool:"erp.post_journal",preview:"42 entries · total 18,420.00 USD\nJE-1101 Accrued rent 3,200.00\nJE-1102 Payroll 9,880.00\nJE-1103 Software 1,240.00\nJE-1104 Travel 412.00"}},
+ {name:"Hermes",color:"#e0a030",shape:"octa",role:"planner",status:"waiting",task:"QBR prep",floor:5,room:"r5",orchestrator:true,request:{id:"q3",text:"Approve sending the QBR deck to Contoso?",risk:"high",cost:0.04,tool:"mail.send"}},
+ {name:"Pixel",color:"#c2477a",shape:"capsule",role:"designer",status:"waiting",task:"Banner set",floor:3,room:"r3",request:{id:"q4",text:"Approve publishing 3 banner images to the website?",risk:"low",cost:0.06,preview:"banner-hero.png 1600x600\nbanner-side.png 600x600\nbanner-mobile.png 800x400"}},
+ {name:"Quill",color:"#7a52c7",shape:"blob",role:"writer",status:"working",task:"Blog draft",floor:3,room:"r3",request:null}];
+function Demo(){var s=R.useState(BOTS),bots=s[0],set=s[1];
+ function clear(names){set(bots.map(function(b){return names.indexOf(b.name)>-1?Object.assign({},b,{request:null,status:"working"}):b;}));}
+ return h(A.DecisionInbox,{bots:bots,onApprove:function(n){clear([n]);},onDecline:function(n){clear([n]);},onApproveMany:clear,onDeclineMany:clear,onOpen:function(){}});}
+ReactDOM.createRoot(document.getElementById("root")).render(h(React.Fragment,null,
+ h("div",{style:{width:480,height:600}},h(Demo)),
+ h("div",{style:{width:300}},h(A.DecisionInbox,{bots:[BOTS[4]]}))));
+</script>
+</body></html>
