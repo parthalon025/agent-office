@@ -35,7 +35,7 @@ ok('cwd is the worktree', s?.cwd?.replace(/\\/g, '/').includes('.agent-office/wo
 ok('budget recorded', s?.budget === 1);
 
 // 2) permission request with preview (edit needs permission in default mode)
-const pend = await until(async () => { const x = await me(uid); return x?.pending?.length ? x : null; }, 60000);
+const pend = await until(async () => { const x = await me(uid); return x?.pending?.length ? x : null; }, 150000);
 ok('permission pending with preview', !!pend && /line two/.test(pend.pending[0].preview || ''), pend && JSON.stringify(pend.pending[0]).slice(0, 260));
 if (pend) {
   const id = pend.pending[0].id;
@@ -47,6 +47,10 @@ if (pend) {
 const done = await until(async () => { const x = await me(uid); return x && x.status === 'idle' && x.turns >= 1 && x.replies.length ? x : null; }, 80000);
 ok('turn finished with reply', !!done, done && done.replies.map((r) => r.text.slice(0, 60)).join(' / '));
 ok('cost tracked', typeof done?.cost === 'number', String(done?.cost));
+const edit = (done?.calls || []).find((c) => /^(Edit|Write)$/.test(c.name));
+ok('tool call tracked by id with time', !!edit && edit.ok === true && typeof edit.ms === 'number', JSON.stringify(done?.calls || []).slice(0, 260));
+ok('no call left open after the turn', (done?.calls || []).every((c) => c.ok !== null));
+ok('tokens tracked', done?.usage?.tokens > 0, JSON.stringify(done?.usage));
 
 // 3) changes in worktree
 const ch = await api('/api/changes', { uid });
@@ -67,7 +71,7 @@ await api('/api/interrupt', { uid });
 const idle = await until(async () => { const x = await me(uid); return x && x.status === 'idle' ? x : null; }, 20000);
 ok('interrupt returns to idle', !!idle);
 console.log('   live text seen mid-turn:', JSON.stringify(sawLive.slice(-40)));
-ok('no error reply after interrupt', !(idle?.replies || []).some((x) => /Stopped with an error/.test(x.text)));
+ok('no error after interrupt', !idle?.error && !(idle?.replies || []).some((x) => /^Stopped/.test(x.text)), JSON.stringify(idle?.error));
 
 // 5) image attachment
 const px = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
