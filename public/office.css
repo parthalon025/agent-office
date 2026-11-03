@@ -54,6 +54,21 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .past-meta { color: var(--muted); }
 .past-actions { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-1); flex: none; }
 
+/* extensions dialog */
+.ao-dialog .ao-tablist, .ao-dialog .ao-tabpanel { overflow: visible; }
+.ext-group { display: flex; flex-direction: column; gap: var(--space-1); }
+.ext-h { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-2) 0 0; color: var(--muted); text-transform: uppercase; letter-spacing: var(--type-eyebrow-tracking); font: var(--type-eyebrow-weight) var(--type-eyebrow-size)/var(--type-eyebrow-line) var(--font-sans); }
+.ext-n { font-family: var(--font-mono); }
+.ext-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--chip); }
+.ext-row { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); }
+.ext-row + .ext-row { border-top: 1px solid var(--line); }
+.ext-main { flex: 1; min-width: 0; }
+.ext-name { font: var(--type-title-weight) var(--type-body-size)/var(--type-body-line) var(--font-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ext-sub { color: var(--muted); font: var(--type-caption-weight) var(--type-caption-size)/var(--type-caption-line) var(--font-sans); }
+.ext-err { color: var(--status-error); font: var(--type-caption-weight) var(--type-caption-size)/var(--type-caption-line) var(--font-sans); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ext-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-1); flex: none; }
+@media (max-width: 820px) { .ext-row { flex-wrap: wrap; } .ext-actions { width: 100%; justify-content: flex-start; } }
+
 /* the Extensions button the page adds to the DS chat header */
 .ao-chat-ext { display: inline-flex; margin-left: auto; }
 

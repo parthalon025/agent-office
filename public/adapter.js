@@ -75,7 +75,7 @@
   function repoOf(snap, key) { return ((snap && snap.repos) || []).filter(function (r) { return r.key === key; })[0] || null; }
   function wtPlace(r, w) { return { repo: r.key, repoName: r.name, branch: w.branch, root: w.root.toLowerCase(), roomName: base(w.root) }; }
   function live(snap) { return (snap ? snap.sessions : []).filter(function (s) { return s.status !== 'ended' && s.placed; }); }
-  function floorDef(id, branch, rooms) { return { id: id, key: FLOOR_KEYS[(id - 1) % FLOOR_KEYS.length], name: branch, rooms: rooms }; }
+  function floorDef(id, branch, rooms) { return { id: id, key: FLOOR_KEYS[(id - 1) % FLOOR_KEYS.length], name: clip(branch, 22), rooms: rooms }; }  // long branch names overlap the floor tag
   function roomDef(pl) { return { id: 'w-' + slug(pl.root).slice(-48), type: 'lab', name: pl.roomName, bots: [] }; }
   // The room of a session in the shown building. Adds its floor or room when it is new.
   function roomOf(pl, emit) {
