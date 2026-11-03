@@ -69,6 +69,7 @@ Add a new file only for a distinct job. Extend the file that owns the concern fi
 
 - Bind to 127.0.0.1, check the Host header, require the token on every route except the page and its static files.
 - Never edit `~/.claude/settings.json` or `.credentials.json`. The office only writes files in this folder and the per-project rule a user approves.
+- Extensions change only the local or project scope of a session's folder. User scope stays out of reach, also through `claude mcp` or `claude plugin` (owner decision, 2026-11-03).
 - Pull requests, pushes and worktree removal happen only after an explicit click and a confirm dialog.
 - Do not add dependencies without asking. The server runs on Node built-ins.
 
