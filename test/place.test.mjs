@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { placeOfSession, placeOfWorktree, legacyNoteKey, legacyRoomId, roomIdOf, normPath, adoptLegacy, addRecent, cleanRecent, OTHER_NAME, OTHER_FLOOR } from '../place.mjs';
+import { placeOfSession, placeOfWorktree, legacyNoteKey, legacyRoomId, roomIdOf, normPath, adoptLegacy, addRecent, cleanRecent, recentChoices, OTHER_NAME, OTHER_FLOOR } from '../place.mjs';
 import * as git from '../git.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -146,4 +146,11 @@ test('clean recent folders drops duplicates that were stored in different forms'
   const out = cleanRecent(['E:/pensiv', 'E:\\pensiv\\', 'E:\\other', '', null]);
   assert.equal(out.length, 2);
   assert.equal(out[1], path.win32.normalize('E:\\other'));
+});
+
+test('folder choices: the shown folder first, each folder once in any case or slash, at most the cap', () => {
+  const out = recentChoices(['E:\\pensiv', 'e:/agent-office/', 'E:\\other'], 'E:/PENSIV/');
+  assert.deepEqual(out.map((d) => d.toLowerCase()), ['e:\\pensiv', 'e:\\agent-office', 'e:\\other']);
+  assert.equal(recentChoices(['E:\\a', 'E:\\b', 'E:\\c'], '', 2).length, 2);
+  assert.deepEqual(recentChoices(undefined, ''), []);
 });
