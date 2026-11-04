@@ -5,6 +5,8 @@
 :root { --strip-clear: 200px; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: var(--font-sans); }
 #office { height: 100vh; }
+/* important: the DS scene sets an inline pixel height when it mounts and the page does not render again on resize. Without this the HUD keeps the old height, and the roster at the bottom edge sits under the dock after a window gets shorter. */
+#office .ao-office { height: 100vh !important; }
 
 .mono { font-family: var(--font-mono); font-size: var(--type-data-size); line-height: var(--type-data-line); font-variant-numeric: tabular-nums; }
 
@@ -70,6 +72,8 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
   .ao-hud-syl, .ao-hud-scrub, .ao-office:has(.ao-hud-scrub) .ao-hud-scrub { bottom: var(--strip-clear, 200px); }
   /* with a chat open, the card goes back to the top so it does not cover the message box */
   .ao-office:has(.ao-hud-chat) .ao-hud-syl { top: 64px; bottom: auto; }
+  /* with no live session the welcome card is shown and the room card only repeats it (No sessions, 0 working), so the card gives way; the Decisions inbox stays */
+  #office:has(.welcome) .ao-hud-right:not(.ao-hud-inbox) { display: none; }
 }
 /* One panel at a time: the terminal, board and stats panels take the right column. */
 /* hide the column but keep its box: the DS camera reads its left edge to frame the scene */
