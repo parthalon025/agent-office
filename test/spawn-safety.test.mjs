@@ -62,6 +62,17 @@ test('resolveExe skips the current folder and relative PATH entries', { skip: !w
   } finally { process.chdir(back); s.done(); }
 });
 
+test('resolveExe reads a quoted PATH entry that has a space in it', { skip: !win }, () => {
+  const s = scratch('ao-quote-');
+  try {
+    const dir = path.join(s.dir, 'Some Dir', 'bin');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.copyFileSync(path.join(SYS32, 'HOSTNAME.EXE'), path.join(dir, 'aoquote.exe'));
+    const env = { Path: `C:\ao-no-such-folder;"${dir}"`, SystemRoot: process.env.SystemRoot };
+    assert.ok(same(resolveExe('aoquote', env), path.join(dir, 'aoquote.exe')));
+  } finally { s.done(); }
+});
+
 test('resolveExe takes cmd, powershell and taskkill from System32 only', { skip: !win }, () => {
   const s = scratch('ao-sys-');
   try {
