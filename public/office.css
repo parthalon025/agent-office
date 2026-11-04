@@ -28,7 +28,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .strip .ao-field { width: auto; min-width: 112px; }
 
 .welcome {
-  position: fixed; z-index: var(--z-hud); top: 40%; transform: translate(-50%, -50%);
+  position: fixed; z-index: var(--z-hud); top: 40%; translate: -50% -50%;
   background: var(--panel); backdrop-filter: blur(var(--blur-panel)); border: 1px solid var(--line);
   border-radius: var(--radius-lg); box-shadow: var(--shadow-panel); padding: var(--space-3);
   --rail-clear: 302px;   /* the DS right rail: 270px wide, 16px from the edge, and a gap */
