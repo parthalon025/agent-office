@@ -33,3 +33,25 @@ export function slimPayload(b, officeId = null) {
     ...(ev === 'PermissionRequest' ? { full_input: b.tool_input, permission_suggestions: b.permission_suggestions } : {}),
   };
 }
+
+// One-line label for a tool call, shared by the server's calls, requests and the settle rule.
+const basename = (v) => (v ? v.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : '');
+const short = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s || '');
+export function describeTool(name, input = {}) {
+  const base = (v) => basename(String(v || ''));
+  switch (name) {
+    case 'Bash': return short(input.command, 90);
+    case 'Read': case 'Edit': case 'Write': case 'MultiEdit': case 'NotebookEdit': return base(input.file_path);
+    case 'Grep': case 'Glob': return short(input.pattern, 60);
+    case 'WebFetch': return short(input.url, 70);
+    case 'WebSearch': return short(input.query, 70);
+    case 'Task': case 'Agent': return short(input.description || input.subagent_type, 70);
+    case 'Skill': return short(input.skill, 70);
+    default:
+      // browser tools (Playwright and the like): the page, the element or the key
+      if (/playwright|browser/i.test(name)) return short(input.url || input.element || input.key || '', 80); return short(input.description || input.command || input.file_path || input.query || '', 70);
+  }
+}
+
+// A tool result settles only the request that asked for that call: same agent, tool and label.
+export const settles = (r, p) => r.agent === (p.agent_id || null) && r.tool === p.tool_name && r.detail === describeTool(p.tool_name, p.tool_input);

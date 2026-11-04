@@ -9,7 +9,7 @@ import crypto from 'node:crypto';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as git from './git.mjs';
-import { slimPayload } from './payload.mjs';
+import { slimPayload, describeTool, settles } from './payload.mjs';
 import { riskOf } from './risk.mjs';
 import { placeOfSession, placeOfWorktree, adoptLegacy, normPath } from './place.mjs';
 import './public/vocab.js'; // session vocabulary, shared with the page (globalThis.OfficeVocab)
@@ -250,21 +250,6 @@ function addFeed(s, kind, text) {
   if (feed.length > 200) feed.splice(0, feed.length - 200);
 }
 
-function describeTool(name, input = {}) {
-  const base = (v) => basename(String(v || ''));
-  switch (name) {
-    case 'Bash': return clip(input.command, 90);
-    case 'Read': case 'Edit': case 'Write': case 'MultiEdit': case 'NotebookEdit': return base(input.file_path);
-    case 'Grep': case 'Glob': return clip(input.pattern, 60);
-    case 'WebFetch': return clip(input.url, 70);
-    case 'WebSearch': return clip(input.query, 70);
-    case 'Task': case 'Agent': return clip(input.description || input.subagent_type, 70);
-    case 'Skill': return clip(input.skill, 70);
-    default:
-      // browser tools (Playwright and the like): the page, the element or the key
-      if (/playwright|browser/i.test(name)) return clip(input.url || input.element || input.key || '', 80); return clip(input.description || input.command || input.file_path || input.query || '', 70);
-  }
-}
 const isAgentTool = (n) => n === 'Task' || n === 'Agent';
 const MAX_CALLS = 60;
 // One tool call: opened by PreToolUse, closed by PostToolUse or PostToolUseFailure.
@@ -478,7 +463,7 @@ function sendMessage(uid, text, attachments = []) {
   if (q && clean && holds.has(q.id)) { releaseHold(q.id, { text: clean }); addFeed(s, 'prompt', 'answered in the office: ' + clip(clean, 100)); return { answered: true }; }
   if (s.headless && (s.status !== 'working' || attachments.length)) {
     writeUser(s, clean, attachments);
-    s.error = null; // a new turn starts
+    s.error = null; s.status = 'working'; // a new turn starts: no Finished between Error and Working
     s.prompt = clean || '(attachment)';
     addFeed(s, 'prompt', 'sent from the office: ' + clip(clean, 100));
     broadcast();
@@ -516,10 +501,8 @@ function releaseHold(id, decision) {
 }
 // A tool call that finished settles only the request that asked for that call, not a request from another agent.
 function settlePending(s, p) {
-  const d = describeTool(p.tool_name, p.tool_input);
-  const hit = (r) => r.agent === (p.agent_id || null) && r.tool === p.tool_name && r.detail === d;
-  for (const r of s.pending.filter(hit)) releaseHold(r.id, {});
-  s.pending = s.pending.filter((r) => !hit(r));
+  for (const r of s.pending.filter((x) => settles(x, p))) releaseHold(r.id, {});
+  s.pending = s.pending.filter((r) => !settles(r, p));
 }
 function dropPending(s) { for (const r of [...s.pending]) releaseHold(r.id, {}); s.pending = []; }
 function dropQuestions(s, text) { for (const r of [...s.questions]) releaseHold(r.id, { text }); s.questions = []; }
@@ -974,7 +957,7 @@ function onStream(s, line) {
     if (mu?.contextWindow) s.ctxWindow = mu.contextWindow;
     // The turn is over: show the bot at rest even when the stop hook did not run (a stopped turn, a spending limit).
     dropPending(s);
-    if (s.status === 'working' || s.status === 'waiting') { s.status = 'idle'; s.tool = null; }
+    if (s.status === 'working' || s.status === 'waiting' || s.status === 'starting') { s.status = 'idle'; s.tool = null; }
     closeAll(s, s.interrupted ? 'Stopped' : 'The turn ended first.');
     const sub = String(m.subtype || '');
     let why = null;
