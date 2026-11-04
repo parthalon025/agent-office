@@ -174,6 +174,9 @@ test('subagents: a helper bot is spawned, its tool calls show on it, and it leav
   assert.equal(d[0].spawn.role, 'research');
   assert.match(d[0].spawn.name, /^repo /);
   assert.ok(of(m.ev, 'subagent.done').length >= 1);
+  const grep = of(m.ev, 'tool.call').find((e) => e.tool === 'Grep');
+  assert.equal(grep.bot, d[0].spawn.name, 'the subagent call shows on its helper');
+  assert.equal(of(m.ev, 'tool.result').find((e) => e.id === grep.id).bot, d[0].spawn.name);
 });
 
 test('two sessions with one name get two bot names; an ended bot leaves after the delay, and not after detach', async () => {

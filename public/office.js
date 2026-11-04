@@ -974,6 +974,8 @@
     var fd = useState({ key: wantKey, repo: shown, view: view, mount: null }), cur2 = fd[0], setCur2 = fd[1];
     var stale = !!snap && !!cur2.mount && cur2.mount.stale();
     var needsMount = !!snap && view === 'office' && !cur2.mount && cur2.view === 'office';
+    var mount = cur2.mount, def = mount ? mount.def : null;
+    var sceneKey = mount ? 'm' + mount.id : cur2.key;
     var fading = cur2.key !== wantKey || cur2.view !== view || stale || needsMount;
     useEffect(function () {
       if (!fading) return undefined;
@@ -981,9 +983,7 @@
         setCur2({ key: wantKey, repo: shown, view: view, mount: view === 'office' && window.officeAdapter.latest() ? window.officeAdapter.mount(shown) : null });
       }, reduced() ? 0 : cssMs('duration-base', 240));
       return function () { clearTimeout(t); };
-    }, [wantKey, view, stale, needsMount]);
-    var mount = cur2.mount, def = mount ? mount.def : null;
-    var sceneKey = mount ? 'm' + mount.id : cur2.key;
+    }, [wantKey, view, stale, needsMount, sceneKey]);
     var introNext = React.useRef(true);
     var intro = useMemo(function () { var i = introNext.current; if (def) introNext.current = false; return i && !ambient; }, [def]);
     function go(v) { setView(v); try { localStorage.setItem('ao-view', v); } catch (x) { /* private window */ } }
@@ -1024,7 +1024,7 @@
     }
     function roomsNow2(sn) {
       var b = boardRef.current, out = {};
-      if (!b || !mount) return null;
+      if (!b || !mount || mount.repo !== shown) return null;
       roomIds().forEach(function (id) {
         var inf = mount.roomInfo(id, sn);
         var rn = (inf.place && inf.place.roomName) || 'Room';
