@@ -159,7 +159,7 @@ const officeTools = {
   room: async (s) => describeRoom(await roomOf(s)),
   roomUpdate: async (s, args) => updateRoom(await roomOf(s), args),
 };
-const providers = createRegistry([claude, createLocal({ events, kind: 'ollama', officeTools }), createLocal({ events, kind: 'lmstudio', officeTools })]);
+const providers = createRegistry([claude, createLocal({ events, kind: 'ollama', baseUrl: process.env.OFFICE_OLLAMA_URL, officeTools }), createLocal({ events, kind: 'lmstudio', baseUrl: process.env.OFFICE_LMSTUDIO_URL, officeTools })]);
 const providerOf = (s) => providers.of(s);
 
 const basename = (p) => (p ? p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : '');

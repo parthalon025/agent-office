@@ -6,6 +6,7 @@ import http from 'node:http';
 export async function startFakeOpenAI({ script = [{ text: 'ok' }], models = ['fake-model'] } = {}) {
   const requests = [];
   let n = 0;
+  let steps = script;
   const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', (d) => { body += d; });
@@ -19,7 +20,7 @@ export async function startFakeOpenAI({ script = [{ text: 'ok' }], models = ['fa
         let json = {};
         try { json = JSON.parse(body || '{}'); } catch { /* keep {} */ }
         requests.push(json);
-        const step = script[Math.min(n++, script.length - 1)];
+        const step = steps[Math.min(n++, steps.length - 1)];
         if (step.delayMs) await new Promise((r) => setTimeout(r, step.delayMs));
         if (step.status) {
           res.writeHead(step.status, { 'content-type': 'application/json' });
@@ -58,6 +59,8 @@ export async function startFakeOpenAI({ script = [{ text: 'ok' }], models = ['fa
   return {
     url: `http://127.0.0.1:${port}/v1`,
     requests,
+    /** Start the script again with new steps (a shared server, one test after another). */
+    reset(next) { steps = next; n = 0; requests.length = 0; },
     close: () => new Promise((r) => { server.closeAllConnections?.(); server.close(r); }),
   };
 }
