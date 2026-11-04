@@ -30,6 +30,12 @@ def check_event(ev, kind="events"):
 args = sys.argv[1:]; events = None
 if "--events" in args:
     i = args.index("--events"); events = args[i + 1]; args = args[:i] + args[i + 2:]
+# Page change, not a DS change: custom properties the page itself defines (in its CSS, or with setProperty) count as
+# known too. DS issue: https://github.com/parthalon025/agent-office/issues/37. Replace this loop when the DS takes the rule.
+for p in args:
+    _t = open(p, encoding="utf-8").read()
+    TOK |= set(re.findall(r"(?<![a-z0-9-])--([a-z0-9-]+)\s*:", _t if p.endswith(".css") else ""))
+    TOK |= set(re.findall(r"setProperty\(\s*['\"]--([a-z0-9-]+)", _t))
 for p in args:
     s = open(p, encoding="utf-8").read(); n = os.path.basename(p)
     css = "\n".join(re.findall(r"<style[^>]*>(.*?)</style>", s, re.S)) if p.endswith(".html") else (s if p.endswith(".css") else "")
