@@ -31,14 +31,8 @@
   function none() { return null; }
   function empty() { return []; }
 
-  // Short names for tools on the board: mcp__plugin_playwright_playwright__browser_click -> click
-  function toolWord(name) {
-    var n = String(name || '');
-    var m = n.match(/__browser_([a-z_]+)$/i);
-    if (m) return m[1].replace(/_/g, ' ');
-    m = n.match(/^mcp__(.+?)__(.+)$/);
-    return m ? m[2].replace(/_/g, ' ') : n;
-  }
+  // Short names for tools on the board come from the shared vocabulary (vocab.js).
+  function toolWord(name) { return window.OfficeVocab.toolShort(name); }
   function isBrowser(c) { return /playwright|__browser_/i.test(c.name); }
 
   // What a room board shows, from the sessions in the room. pin: { text, by } or null.
@@ -52,7 +46,7 @@
     return {
       room: info.place ? info.place.roomName : 'Room',
       branch: info.place ? info.place.branch : '',
-      sessions: ss.map(function (s) { return { name: s.name, status: s.status === 'working' || s.status === 'waiting' ? s.status : s.turns ? 'finished' : 'resting', task: s.prompt || '' }; }),
+      sessions: ss.map(function (s) { return { name: s.name, status: window.OfficeVocab.status(s).key, task: s.prompt || '' }; }),
       todos: todosOf ? todosOf.todos : [],
       goal: todosOf ? todosOf.prompt : '',
       browser: calls.filter(isBrowser).slice(-8),
@@ -64,19 +58,7 @@
   }
 
   // The room's numbers. Used when the page gives no stats(roomId).
-  function statsFrom(info) {
-    var ss = info.sessions || [], n = { sessions: ss.length, working: 0, waiting: 0, toolCalls: 0, tokens: 0, cost: 0, todosDone: 0, todosTotal: 0, lastEvent: 0 };
-    ss.forEach(function (s) {
-      if (s.status === 'working') n.working++;
-      if (s.status === 'waiting') n.waiting++;
-      n.toolCalls += (s.calls || []).length;
-      n.tokens += (s.usage && s.usage.tokens) || 0;
-      n.cost += s.cost || 0;
-      (s.todos || []).forEach(function (t) { n.todosTotal++; if (t.status === 'completed') n.todosDone++; });
-      if ((s.lastEvent || 0) > n.lastEvent) n.lastEvent = s.lastEvent;
-    });
-    return n;
-  }
+  function statsFrom(info) { return window.OfficeVocab.figures(info.sessions || []); }
   function fmtTokens(n) { n = +n || 0; return n < 1000 ? String(Math.round(n)) : n < 1e6 ? (n / 1000).toFixed(n < 10000 ? 1 : 0) + 'k' : (n / 1e6).toFixed(1) + 'M'; }
   function fmtCost(c) { c = +c || 0; return '$' + (c < 10 ? c.toFixed(2) : c.toFixed(1)); }
   function fmtAgo(t, now) {

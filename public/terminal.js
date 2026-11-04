@@ -82,26 +82,11 @@
     return out;
   }
   // mcp__plugin_playwright_playwright__browser_click -> browser click; mcp__server__tool -> server tool
-  function toolName(name) {
-    var n = str(name), m = n.match(/__browser_([a-z_]+)$/i);
-    if (m) return 'browser ' + m[1].replace(/_/g, ' ');
-    m = n.match(/^mcp__(.+?)__(.+)$/);
-    return m ? m[1].replace(/^plugin_[^_]+_/, '').replace(/_/g, '-') + ' ' + m[2] : n;
-  }
+  function toolName(name) { return window.OfficeVocab.toolShort(str(name)); }
   function secs(ms) { ms = +ms || 0; return ms < 60000 ? (ms / 1000).toFixed(ms < 10000 ? 1 : 0) + 's' : Math.round(ms / 60000) + 'm'; }
 
   // The DS status of a session and the word the screen shows with its color.
-  function status(s) {
-    if (!s) return { key: 'resting', word: 'No session', live: false };
-    switch (s.status) {
-      case 'working': return { key: 'working', word: 'Working', live: true };
-      case 'waiting': return { key: 'waiting', word: 'Needs you', live: true };
-      case 'starting': return { key: 'resting', word: 'Starting', live: true };
-      case 'ended': return { key: 'resting', word: 'Closed', live: false };
-    }
-    if (s.error) return { key: 'error', word: 'Error', live: true };
-    return s.turns > 0 ? { key: 'finished', word: 'Finished', live: true } : { key: 'resting', word: 'Ready', live: true };
-  }
+  function status(s) { return window.OfficeVocab.status(s); }
 
   // Where the current turn starts. The snapshot has no time for a prompt, so the page remembers the
   // newest call or reply it saw before the turn count went up. A page opened mid-turn does not know it.
@@ -491,7 +476,7 @@
         calls.push({ id: c.id, name: c.tool, detail: k ? str(a[k]) : '', ok: x.state === 'run' ? null : c.ok !== false, ms: c.ms, err: c.ok === false ? (c.summary || 'Failed') : null, t: i + 1 });
       });
       var es = b.status;
-      return { pseudo: true, helper: true, name: b.name, status: es === 'working' || es === 'waiting' ? es : 'idle', turns: es === 'finished' ? 1 : 0,
+      return { pseudo: true, helper: true, name: b.name, status: es === 'working' ? 'working' : 'idle', pending: es === 'waiting' ? [{ id: 'step' }] : [], turns: es === 'finished' ? 1 : 0,
         prompt: b.task || '', calls: calls.slice(-30), replies: [], error: es === 'error' ? { text: b.task || 'The step failed.' } : null };
     }
     function sessionFor(e) {

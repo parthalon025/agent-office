@@ -70,11 +70,7 @@
   function cssMs(name, fallback) { var v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--' + name)); return isFinite(v) && v > 0 ? v : fallback; }
   function reduced() { return !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches); }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
-  function statusOf(s) {
-    if (s.status === 'working' || s.status === 'waiting') return s.status;
-    if (s.status === 'idle') return s.turns > 0 ? 'finished' : 'resting';
-    return 'resting';
-  }
+  function statusOf(s) { return window.OfficeVocab.status(s).key; }
 
   // ---------- small parts ----------
   function Area(p) {
@@ -627,24 +623,23 @@
   function clearStyle(v) { return v ? { bottom: v + 'px' } : undefined; }
 
   // ---------- the room board, read up close ----------
-  var TODO_STATUS = { pending: 'resting', in_progress: 'working', completed: 'finished' };
   function BoardPanel(p) {
     var d = p.data;
     if (!d) return null;
-    var word = window.OfficeBoard ? window.OfficeBoard.toolWord : function (n) { return n; };
+    var word = window.OfficeVocab.toolShort;
     var call = function (c, kind) { return h(A.ToolCall, { key: c.id, call: { id: c.id, tool: word(c.name), kind: kind || 'api', ok: c.ok === null ? undefined : c.ok, ms: c.ms == null ? undefined : c.ms, args: c.detail ? { target: c.detail } : undefined, summary: c.err || (c.who ? 'by ' + c.who : undefined) } }); };
     return h('aside', { className: 'board-panel', style: clearStyle(p.clear), 'aria-label': 'Board of ' + d.room },
       h(A.Panel, { title: d.room + (d.branch ? ' · ' + d.branch : ''), count: plural(d.sessions.length, 'session', 'sessions') },
         h('div', { className: 'board-b' },
           h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'chevron-right', onClick: p.onClose }, 'Back to the room'), h('span', { className: 'note' }, 'Esc also goes back.')),
           d.pin ? h('p', { className: 'note board-pin' }, 'Note from ' + d.pin.by + ': ' + d.pin.text) : null,
-          d.todos.length ? h(A.PlanCard, { title: 'To do', goal: d.goal ? clip(d.goal, 120) : undefined, steps: d.todos.map(function (t, i) { return { id: 't' + i, text: t.text, status: TODO_STATUS[t.status] || 'resting' }; }) })
+          d.todos.length ? h(A.PlanCard, { title: 'To do', goal: d.goal ? clip(d.goal, 120) : undefined, steps: d.todos.map(function (t, i) { return { id: 't' + i, text: t.text, status: window.OfficeVocab.todoStatus(t) }; }) })
             : h(A.EmptyState, { icon: 'plan', compact: true, title: 'No to-do list', text: 'A session shows its plan here when it writes one.' }),
           h('h3', { className: 'ext-h' }, 'Browser', h('span', { className: 'ext-n' }, d.browser.length)),
           d.browser.length ? h('div', { className: 'board-calls' }, d.browser.slice().reverse().map(function (c) { return call(c, 'browser'); }))
             : h('p', { className: 'note' }, 'No browser steps yet. Playwright clicks, page loads and key presses show here.'),
           h('h3', { className: 'ext-h' }, 'Last steps', h('span', { className: 'ext-n' }, d.recent.length)),
-          d.recent.length ? h('div', { className: 'board-calls' }, d.recent.slice().reverse().map(function (c) { return call(c, /^(Bash|PowerShell)$/.test(c.name) ? 'terminal' : /^(Read|Edit|Write|MultiEdit)$/.test(c.name) ? 'code' : /^(Grep|Glob)$/.test(c.name) ? 'search' : 'api'); }))
+          d.recent.length ? h('div', { className: 'board-calls' }, d.recent.slice().reverse().map(function (c) { return call(c, window.OfficeVocab.toolKind(c.name)); }))
             : h('p', { className: 'note' }, 'No tool calls yet.'),
           h('h3', { className: 'ext-h' }, 'Repository', d.tree && !d.tree.note ? h('span', { className: 'ext-n' }, plural(d.tree.total, 'file', 'files')) : null),
           d.tree && d.tree.note ? h('p', { className: 'note' }, d.tree.note + '.')   // board.js: a room outside git, or no file list
@@ -658,7 +653,7 @@
   function StatsPanel(p) {
     var snap = useSnapshot();
     var info = window.officeAdapter.roomInfo(p.roomId, snap || undefined);
-    var v = roomStats(info.sessions);
+    var v = window.officeAdapter.figures(p.roomId, snap || undefined);
     var row = function (k, val) { return h('li', { key: k }, h('span', null, k), h('b', { className: 'mono' }, val)); };
     return h('aside', { className: 'board-panel', style: clearStyle(p.clear), 'aria-label': 'Stats of ' + ((info.place && info.place.roomName) || 'this room') },
       h(A.Panel, { title: ((info.place && info.place.roomName) || 'Room') + ' · stats', count: plural(v.sessions, 'session', 'sessions') },
@@ -735,25 +730,11 @@
   }
 
   // ---------- room helpers ----------
-  function roomStats(sessions) {
-    var o = { sessions: sessions.length, working: 0, waiting: 0, toolCalls: 0, tokens: 0, cost: 0, todosDone: 0, todosTotal: 0, lastEvent: 0 };
-    sessions.forEach(function (s) {
-      if (s.status === 'working') o.working++;
-      if (s.status === 'waiting' || (s.pending && s.pending.length) || (s.questions && s.questions.length)) o.waiting++;
-      o.toolCalls += (s.calls || []).length;
-      o.tokens += (s.usage && s.usage.tokens) || 0;
-      o.cost += typeof s.cost === 'number' ? s.cost : 0;
-      (s.todos || []).forEach(function (t) { o.todosTotal++; if (t.status === 'completed') o.todosDone++; });
-      if ((s.lastEvent || 0) > o.lastEvent) o.lastEvent = s.lastEvent;
-    });
-    return o;
-  }
   function modelWord(m) {
     if (!m) return 'Default model';
     var hit = MODELS.filter(function (o) { return o.value && m.indexOf(o.value) === 0; })[0] || MODELS.filter(function (o) { return o.value && m.toLowerCase().indexOf(o.label.toLowerCase()) >= 0; })[0];
     return hit ? hit.label : m;
   }
-  var STATUS_WORD = { working: 'Working', waiting: 'Waiting for you', idle: 'Idle', starting: 'Starting', ended: 'Closed' };
 
   // ---------- the agents in one room ----------
   function RoomDialog(p) {
@@ -801,7 +782,7 @@
           list.length ? h('ul', { className: 'agent-list' }, list.map(function (s) {
             return h('li', { key: s.uid, className: 'agent-row' },
               h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: botColor(), status: statusOf(s), size: 28 }),
-              h('span', { className: 'agent-who' }, h('b', null, s.name), h('span', { className: 'agent-sub' }, (window.OfficeTerminal && window.OfficeTerminal.status ? window.OfficeTerminal.status(s).word : (STATUS_WORD[s.status] || s.status)) + ' · ' + modelWord(s.model))),
+              h('span', { className: 'agent-who' }, h('b', null, s.name), h('span', { className: 'agent-sub' }, window.OfficeVocab.status(s).word + ' · ' + modelWord(s.model))),
               h(A.Button, { variant: 'quiet', icon: 'remove', onClick: function () { setErr(''); setConfirm(s.uid); } }, 'Close session'));
           })) : h(A.EmptyState, { icon: 'identity', compact: true, title: 'No agents here', text: 'Add an agent to start work in this room.' }),
           h(A.AddButton, { label: 'Add an agent', onClick: function () { setErr(''); setAdd({ name: '', model: '', prompt: '' }); } }))));
@@ -1121,7 +1102,7 @@
             room: function (id) { return window.officeAdapter.roomInfo(id); },
             note: function (id) { var n = latestSnap.current && latestSnap.current.notes && latestSnap.current.notes[noteKey(id)]; return n ? n.text : ''; },
             tree: function (root) { return api('/api/tree', { root: root }); },
-            stats: function (id) { return roomStats(window.officeAdapter.roomInfo(id).sessions); },
+            stats: function (id) { return window.officeAdapter.figures(id); },
             pin: function (id) { var n = latestSnap.current && latestSnap.current.pins && latestSnap.current.pins[noteKey(id)]; return n && n.text ? { text: n.text, by: n.by } : null; },
             onDoor: function (id) { setTerm(null); setDlg({ name: 'room', roomId: id }); },
             onFocus: function (id, kind) { setTerm(null); setBoard({ id: id, kind: kind }); }, onBlur: function () { setBoard(null); }

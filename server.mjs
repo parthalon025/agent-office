@@ -12,6 +12,8 @@ import * as git from './git.mjs';
 import { slimPayload } from './payload.mjs';
 import { riskOf } from './risk.mjs';
 import { placeOfSession, placeOfWorktree, adoptLegacy, normPath } from './place.mjs';
+import './public/vocab.js'; // session vocabulary, shared with the page (globalThis.OfficeVocab)
+const V = globalThis.OfficeVocab;
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -391,7 +393,7 @@ function onHook(p) {
       addFeed(s, 'prompt', clip(s.prompt, 140));
       break;
     case 'PreToolUse':
-      s.status = 'working'; s.note = '';
+      if (!V.isWaiting(s)) { s.status = 'working'; s.note = ''; } // a subagent's tool call must not hide a request that waits
       openCall(s, p);
       // The bot's task line shows the main agent's tool; a subagent's tools show on its helper.
       if (!p.agent_id) s.tool = { name: p.tool_name, detail: describeTool(p.tool_name, p.tool_input) };
@@ -476,6 +478,7 @@ function sendMessage(uid, text, attachments = []) {
   if (q && clean && holds.has(q.id)) { releaseHold(q.id, { text: clean }); addFeed(s, 'prompt', 'answered in the office: ' + clip(clean, 100)); return { answered: true }; }
   if (s.headless && (s.status !== 'working' || attachments.length)) {
     writeUser(s, clean, attachments);
+    s.error = null; // a new turn starts
     s.prompt = clean || '(attachment)';
     addFeed(s, 'prompt', 'sent from the office: ' + clip(clean, 100));
     broadcast();
@@ -590,31 +593,31 @@ function ago(t) {
 }
 // One other session in the room: its state, its last prompt, its tool now, its plan step now.
 function workOf(x) {
-  const state = x.status === 'waiting' ? 'waiting for the user' : x.status === 'working' ? 'working' : x.status === 'starting' ? 'starting'
-    : x.turns > 0 ? 'finished its turn' : 'waiting for a prompt';
+  const state = { waiting: 'waiting for the user', working: 'working', error: 'stopped with an error', finished: 'finished its turn' }[V.status(x).key]
+    || (x.status === 'starting' ? 'starting' : 'waiting for a prompt');
   let t = `${x.name} (${state}, ${x.headless ? 'runs in the office' : 'runs in a terminal'})`;
   if (x.prompt) t += `. Task: "${oneLine(x.prompt, 160)}"`;
-  if (x.status === 'waiting' && x.note) t += `. Asks: ${oneLine(x.note, 120)}`;
+  if (V.isWaiting(x) && x.note) t += `. Asks: ${oneLine(x.note, 120)}`;
   else if (x.tool) t += `. Now: ${oneLine(`${x.tool.name} ${x.tool.detail || ''}`, 100)}`;
   const step = (x.todos || []).find((d) => d.status === 'in_progress');
   if (step) t += `. Plan step: ${oneLine(step.text, 100)}`;
   return t + '.';
 }
 // The figures the room's stats display is about.
-function roomFigures(list) {
-  const f = { working: 0, waiting: 0, calls: 0, tokens: 0, cost: 0, priced: 0, done: 0, steps: 0 };
-  for (const x of list) {
-    if (x.status === 'working') f.working++;
-    if (x.status === 'waiting') f.waiting++;
-    f.calls += x.calls.length; f.tokens += x.usage?.tokens || 0;
-    if (typeof x.cost === 'number') { f.cost += x.cost; f.priced++; }
-    for (const d of x.todos || []) { f.steps++; if (d.status === 'completed') f.done++; }
-  }
-  const out = [plural(list.length, 'open session', 'open sessions'), `${f.working} working`, `${f.waiting} waiting for the user`,
-    plural(f.calls, 'recent tool call', 'recent tool calls'), `${f.tokens.toLocaleString('en-US')} tokens`];
+function figuresText(f) {
+  const out = [plural(f.sessions, 'open session', 'open sessions'), `${f.working} working`, `${f.waiting} waiting for the user`,
+    plural(f.toolCalls, 'recent tool call', 'recent tool calls'), `${f.tokens.toLocaleString('en-US')} tokens`];
   if (f.priced) out.push(`$${f.cost.toFixed(2)} spent`);
-  if (f.steps) out.push(`${f.done} of ${f.steps} plan steps done`);
+  if (f.todosTotal) out.push(`${f.todosDone} of ${f.todosTotal} plan steps done`);
   return out.join(', ') + '.';
+}
+// The figures of every room that has an open session, computed once per snapshot (noteKey -> figures).
+function allFigures() {
+  const by = {};
+  for (const x of sessions.values()) if (x.status !== 'ended' && x.placed) (by[roomPlace(x).noteKey] ||= []).push(x);
+  const out = {};
+  for (const k of Object.keys(by)) out[k] = V.figures(by[k]);
+  return out;
 }
 
 // The calling session (found like /mcp/inbox finds it), with its place looked up.
@@ -648,7 +651,7 @@ function describeRoom(s) {
     'Blackboard pin',
     pin ? `  "${pin.text}", pinned by ${pin.by} ${ago(pin.at)}.` : '  Nothing is pinned.',
     '',
-    `Room figures: ${roomFigures(all.length ? all : [s])}`,
+    `Room figures: ${figuresText(V.figures(all.length ? all : [s]))}`,
     '',
     ...roomContents(pl),
     '',
@@ -799,6 +802,12 @@ function control(s, request, onDone) {
   c.stdin.write(JSON.stringify({ type: 'control_request', request_id: id, request }) + '\n');
 }
 const CONTROL_MODES = new Set(['default', 'plan', 'acceptEdits']);
+// Dismiss clears a failed turn's error for every surface at once (the snapshot no longer carries it).
+function dismissError(uid) {
+  const s = sessions.get(uid);
+  if (!s) throw httpError(404, 'That session is not open.');
+  if (s.error) { s.error = null; broadcast(); }
+}
 function doControl(uid, action, value) {
   const s = sessions.get(uid);
   if (!s || !s.headless || s.status === 'ended') throw httpError(404, 'That session is not running in the office.');
@@ -1264,6 +1273,7 @@ const snapshot = () => ({
   sessions: [...sessions.values()].map(({ ...s }) => ({ ...s, place: s.placed ? roomPlace(s) : null })),
   feed: feed.slice(-80),
   plan,
+  figures: allFigures(),    // noteKey -> room figures (sessions, working, waiting, toolCalls, tokens, cost, todosDone, todosTotal, lastEvent)
   notes: persisted.notes,   // noteKey -> { text, at, by? }: each room's notes board (by: the session that last wrote it)
   pins: persisted.pins,     // noteKey -> { text, by, at }: a short message an agent pinned on the room's blackboard
   repos: [...repos.entries()].map(([key, r]) => ({ key, ...r, worktrees: r.worktrees.map((w) => ({ ...w, place: placeOfWorktree(r.path, w) })) })),
@@ -1284,7 +1294,7 @@ setInterval(() => { for (const c of clients) c.write(': ping\n\n'); }, 20000).un
 // Static files: the page, its scripts, and the Agent Office DS runtime (tokens, bundle, three.js).
 const MIME = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
 const STATIC_FILES = new Map([
-  ['/office.js', 'public/office.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/tokens.css', 'tokens.css'],
+  ['/office.js', 'public/office.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/vocab.js', 'public/vocab.js'], ['/tokens.css', 'tokens.css'],
   ['/components/bundle.css', 'components/bundle.css'], ['/components/bundle.js', 'components/bundle.js'],
   ['/components/lib/three.min.js', 'components/lib/three.min.js'],
   ['/components/lib/three-orbit-controls.js', 'components/lib/three-orbit-controls.js'],
@@ -1373,6 +1383,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/answer') { answer(String(body.id), body.allow === true, body.always === true); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/open') return send(res, 200, { uid: await openSession(body) });
     if (url.pathname === '/api/reopen') return send(res, 200, { uid: await reopenSession(String(body.uid)) });
+    if (url.pathname === '/api/dismiss') { dismissError(String(body.uid)); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/interrupt') { doControl(String(body.uid), 'interrupt'); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/ext/list') return send(res, 200, await extList(extSession(body.uid)));
     if (url.pathname === '/api/ext') return send(res, 200, await extAction(body));

@@ -99,7 +99,8 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 | `mcp.mjs` | MCP server with `office_inbox`, `office_ask`, `office_room` and `office_room_update`. |
 | `launch.ps1` | Starts a session in a terminal window. |
 | `probe.mjs` | Tests HTTP hooks on this Claude Code version. |
-| `public/` | The page: `adapter.js`, `office.js`, `office.css`, `chat-extras.js`, `index.html`. |
+| `public/` | The page: `vocab.js` (shared status words, tool names and room figures), `adapter.js`, `office.js`, `office.css`, `chat-extras.js`, `index.html`. |
+| `test/*.test.mjs` | Offline unit tests (`npm test`): place rules, risk classifier, session vocabulary. |
 | `test/smoke.mjs` | End-to-end test against real Claude Code. |
 | `DS-README.md`, `Recipes.md`, `Reference.md`, `Concepts.md`, `kit/`, `components/`, `tokens.css` | The Agent Office design system. |
 
@@ -130,7 +131,7 @@ Generated at run time and ignored by git: `.office-token`, `office-hooks.json`, 
 ```
 npm run probe   # HTTP hooks on this Claude Code version (one tiny call)
 npm run smoke   # opens real Haiku sessions in a throwaway repo (a few cents); the office must be running
-python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js
+python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/vocab.js
 ```
 
 ## Limits

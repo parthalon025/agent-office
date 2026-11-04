@@ -10,7 +10,7 @@ Read `DS-README.md`, `Recipes.md` and `Reference.md` before you change the UI, a
 - Write copy in Simplified Technical English: short sentences, active voice, buttons say the result. No "Oops", "Sorry", exclamation marks, "please".
 - Keep the `x` version prefix (page `x0.1`, DS `x1.5`) in titles.
 - Never move bots yourself. The scene changes only from adapter events.
-- Before you finish a UI change: `python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js`, then look at screenshots in Day, Night and Sublevel at 1360, 1100 and 400 px.
+- Before you finish a UI change: `python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/vocab.js`, then look at screenshots in Day, Night and Sublevel at 1360, 1100 and 400 px.
 - The page's own styles go in `public/office.css`. The DS sets its theme on `.ao-office`, and `chat-extras.js` mirrors it to `<html data-theme>`, so page UI must read tokens only.
 
 ## Commands
@@ -33,6 +33,7 @@ Stop the server by the pid that owns port 4317 (`netstat -ano | grep :4317`, the
 | `hook.mjs` | Command hook. Exits 0 on every path. |
 | `payload.mjs` | Trims a hook payload to the fields the office shows. Used by `hook.mjs` and the HTTP hook route. |
 | `mcp.mjs` | stdio MCP server: `office_inbox`, `office_ask`, `office_room`, `office_room_update`. |
+| `public/vocab.js` | Session vocabulary, shared by the page, the server and the tests (`globalThis.OfficeVocab`). Status key and word (error included), task line, tool kind and short name, to-do status, room figures. Plain script, no I/O, no timers. |
 | `public/adapter.js` | Snapshot to DS events (repo = building, branch = floor, worktree = room; tool calls, helpers, plan, errors, triggers, usage), and DS commands to REST calls. Exposes `officeAdapter.onSnapshot / session / lookup / buildings / buildingFor / shown / roomsShown / roomsNow`. |
 | `public/city.js` | The city: all repositories as buildings on one DS stage (`AgentOffice.office.Stage`), with rise and sink effects, zoom to mouse, bounded pan, click or zoom in to enter. `OfficeCity.cameraFeel(stage)` also gives the office scene zoom to mouse. |
 | `public/board.js` | Room boards: repaints the DS chalkboard as a live screen (to-dos, browser steps, last calls, repo top), adds a notes board, raises room walls to 7 and moves the room sign above the cable tray, flies the camera to a clicked board. |
@@ -55,6 +56,10 @@ Add a new file only for a distinct job. Extend the file that owns the concern fi
 
 - Place rules live only in `place.mjs`. Room id = readable tail of the folder plus a hash of the whole normalized path, so look-alike folder names stay two rooms. Paths are normalized and lower-cased, so path case never makes a second building. A session outside git has building key `''` (name "Other folders") and notes key prefix `other`. `adoptNotes()` in `server.mjs` moves a note or pin saved under an old key (room id without hash) to the new key when its room is first seen.
 - Add a place field in `place.mjs` and read it from `s.place` in the page. Do not rebuild keys in `adapter.js`, `office.js` or `board.js`.
+
+- Status words, task lines, tool names and kinds, to-do status and room figures live only in `public/vocab.js`. Do not write a second copy in `adapter.js`, `office.js`, `terminal.js`, `board.js` or `server.mjs`. The server computes room figures once per snapshot (`snapshot.figures`, keyed by notes key); the page reads them with `officeAdapter.figures(roomId)`.
+- Waiting = a pending permission prompt or an open question (`isWaiting`). The `status` field alone does not count, and a subagent's tool call does not hide a request.
+- A failed turn shows as Error on every surface until Dismiss (`POST /api/dismiss` clears `session.error` on the server) or the next turn starts.
 
 ## Gotchas learned the hard way
 

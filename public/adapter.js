@@ -15,31 +15,16 @@
 (function () {
   var TOKEN = document.querySelector('meta[name="office-token"]').content;
   var SHAPES = ['cone', 'blob', 'octa', 'capsule'];
-  var KIND = { Bash: 'terminal', PowerShell: 'terminal', WebFetch: 'browser', WebSearch: 'search', Grep: 'search', Glob: 'search', Read: 'code', Edit: 'code', Write: 'code', MultiEdit: 'code', NotebookEdit: 'code', Task: 'flow', Agent: 'flow', Skill: 'skill', TodoWrite: 'memory' };
-  var ARG = { Bash: 'command', PowerShell: 'command', Read: 'file', Edit: 'file', Write: 'file', MultiEdit: 'file', NotebookEdit: 'file', Grep: 'pattern', Glob: 'pattern', WebFetch: 'url', WebSearch: 'query', Task: 'task', Agent: 'task', Skill: 'skill' };
-  var TODO = { pending: 'resting', in_progress: 'working', completed: 'finished' };
+  var V = window.OfficeVocab;   // vocab.js: the status, task line, tool kind and to-do words every surface shares
   var REMOVE_AFTER_MS = 6000;
   var HISTORY_CALLS = 12; // calls shown in the trace when the page opens mid-session
 
   function shapeOf(uid) { return SHAPES[hash(String(uid)) % SHAPES.length]; }
   function hash(s) { var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; }
-  function kindOf(tool) { return KIND[tool] || (String(tool).indexOf('mcp__') === 0 ? 'mcp' : 'api'); }
   function clip(t, n) { t = String(t || ''); return t.length > n ? t.slice(0, n - 1) + '…' : t; }
   function base(p) { return String(p || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() || ''; }
-  function mapStatus(s) {
-    if (s.status === 'working' || s.status === 'waiting') return s.status;
-    if (s.status === 'idle') return s.turns > 0 ? 'finished' : 'resting';
-    return 'resting';
-  }
-  // The HUD adds the state word ("Working · ..."), so the task text carries only the task.
-  function taskOf(s) {
-    if (s.status === 'waiting') return clip(s.note, 90) || 'Needs your attention';
-    if (s.status === 'working' && s.live) return clip(s.live.replace(/\s+/g, ' ').slice(-90), 90);
-    if (s.status === 'working') return s.tool ? s.tool.name + (s.tool.detail ? ' ' + clip(s.tool.detail, 60) : '') : (clip(s.prompt, 70) || 'Thinking');
-    if (s.status === 'starting') return 'Waiting for the first hook';
-    if (s.status === 'ended') return 'Left the office';
-    return s.turns > 0 ? (clip(s.prompt, 60) || 'Last turn') : 'Waiting for a prompt';
-  }
+  function mapStatus(s) { return V.status(s).key; }
+  function taskOf(s) { return V.taskLine(s); }
   // A subagent's type picks its role: the workstation and the icon.
   function helperRole(type) {
     if (/explore|research|search|guide/i.test(type)) return 'research';
@@ -48,7 +33,7 @@
     if (/doc|writ/i.test(type)) return 'writer';
     return 'coder';
   }
-  function argsOf(c) { if (!c.detail) return undefined; var a = {}; a[ARG[c.name] || 'input'] = c.detail; return a; }
+  function argsOf(c) { if (!c.detail) return undefined; var a = {}; a[V.toolArg(c.name)] = c.detail; return a; }
   function hostOf(url) { return String(url).replace(/^https?:\/\//, '').split('/')[0] || String(url); }
 
   var FLOOR_KEYS = ['ops', 'sales', 'research', 'content', 'hq'];
@@ -119,7 +104,7 @@
       if (!seen) {
         var who = (c.agent && byAgent[c.agent]) || k.name;
         seen = k.calls[c.id] = { bot: who, closed: false };
-        emit({ type: 'tool.call', bot: who, id: c.id, tool: c.name, kind: kindOf(c.name), args: argsOf(c), say: !quiet });
+        emit({ type: 'tool.call', bot: who, id: c.id, tool: c.name, kind: V.toolKind(c.name), args: argsOf(c), say: !quiet });
         if (c.name === 'Skill' && c.detail) emit({ type: 'skill.load', bot: who, skill: c.detail });
         if (c.name === 'WebFetch' && c.detail) emit({ type: 'knowledge', bot: who, source: hostOf(c.detail), text: c.detail });
         if (c.name === 'WebSearch' && c.detail) emit({ type: 'knowledge', bot: who, source: 'Web search', text: c.detail });
@@ -139,13 +124,13 @@
     var sig = todos.map(function (t) { return t.text; }).join('\n');
     if (sig !== k.planSig) {
       k.planSig = sig; k.planState = todos.map(function (t) { return t.status; });
-      emit({ type: 'plan', bot: k.name, goal: clip(s.prompt, 120) || 'Plan', steps: todos.map(function (t, i) { return { id: 't' + i, text: t.text, status: TODO[t.status] || 'resting' }; }) });
+      emit({ type: 'plan', bot: k.name, goal: clip(s.prompt, 120) || 'Plan', steps: todos.map(function (t, i) { return { id: 't' + i, text: t.text, status: V.todoStatus(t) }; }) });
       return;
     }
     todos.forEach(function (t, i) {
       if (k.planState[i] === t.status) return;
       k.planState[i] = t.status;
-      emit({ type: 'plan.step', bot: k.name, id: 't' + i, status: TODO[t.status] || 'resting' });
+      emit({ type: 'plan.step', bot: k.name, id: 't' + i, status: V.todoStatus(t) });
     });
   }
 
@@ -232,7 +217,6 @@
         emit({ type: 'error', bot: bot0, text: s.error.text });
         return;
       }
-      if (k.status === 'error' && st !== 'working') return;
       if (st !== k.status) { k.status = st; k.task = task; emit({ type: 'status', bot: bot0, status: st, task: task }); }
       else if (task !== k.task) { k.task = task; emit({ type: 'status', bot: bot0, status: st, task: task, quiet: true }); }
     });
@@ -324,14 +308,9 @@
           var last = uids.length && sessionOf(uids[0]);
           return last && last.prompt ? sendAll(uids, { text: last.prompt }) : Promise.resolve({ ok: false, reason: 'Nothing to run again.' });
         }
-        case 'dismiss': {
-          var du = uidsOf(cmd)[0], d = du && known[du];
-          if (d && d.status === 'error' && emitRef) {
-            var last = sessionOf(du);
-            d.status = last ? mapStatus(last) : 'resting'; d.task = last ? taskOf(last) : '';
-            emitRef({ type: 'status', bot: d.name, status: d.status, task: d.task });
-          }
-          return Promise.resolve({ ok: true });
+        case 'dismiss': {   // the server clears the error; the next snapshot moves every surface off Error
+          var du = uidsOf(cmd)[0];
+          return du ? post('/api/dismiss', { uid: du }) : Promise.resolve({ ok: true });
         }
         default: return Promise.resolve({ ok: false, reason: 'Not available for Claude Code sessions.' });
       }
@@ -409,6 +388,11 @@
     return out;
   };
   window.officeAdapter.shown = function () { return layout.repo; };
+  // The server's figures for one room (computed once per snapshot, keyed by the room's notes key). Zeros for a room with no session.
+  window.officeAdapter.figures = function (roomId, snap) {
+    var s = snap || latest, nk = window.officeAdapter.noteKey(roomId, s);
+    return (s && s.figures && s.figures[nk]) || V.figures([]);
+  };
   // The key of a room's notes board and blackboard pin, from the server (empty for a room it does not know).
   window.officeAdapter.noteKey = function (roomId, snap) { var p = window.officeAdapter.roomInfo(roomId, snap).place; return p ? p.noteKey : (layout.keys[roomId] || ''); };
   // The building key of a session ('' outside git).
