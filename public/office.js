@@ -21,7 +21,7 @@
   // ---------- helpers ----------
   function api(path, body) {
     return fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-office-token': TOKEN }, body: JSON.stringify(body || {}) })
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) throw new Error(j.error || 'The office could not do that (' + r.status + ').'); return j; }); });
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) { var e = new Error(j.error || 'The office could not do that (' + r.status + ').'); e.status = r.status; e.body = j; throw e; } return j; }); });
   }
   function getInfo() { return fetch('/api/info', { headers: { 'x-office-token': TOKEN } }).then(function (r) { return r.json(); }); }
   function ago(t) {
@@ -623,6 +623,9 @@
         h(A.Button, { variant: 'quiet', icon: 'building', onClick: function () { if (city.current) city.current.fit(false); } }, 'Show all')));
   }
 
+  // A side panel sits above the control strip: its bottom edge is the measured strip height.
+  function clearStyle(v) { return v ? { bottom: v + 'px' } : undefined; }
+
   // ---------- the room board, read up close ----------
   var TODO_STATUS = { pending: 'resting', in_progress: 'working', completed: 'finished' };
   function BoardPanel(p) {
@@ -630,10 +633,11 @@
     if (!d) return null;
     var word = window.OfficeBoard ? window.OfficeBoard.toolWord : function (n) { return n; };
     var call = function (c, kind) { return h(A.ToolCall, { key: c.id, call: { id: c.id, tool: word(c.name), kind: kind || 'api', ok: c.ok === null ? undefined : c.ok, ms: c.ms == null ? undefined : c.ms, args: c.detail ? { target: c.detail } : undefined, summary: c.err || (c.who ? 'by ' + c.who : undefined) } }); };
-    return h('aside', { className: 'board-panel', 'aria-label': 'Board of ' + d.room },
+    return h('aside', { className: 'board-panel', style: clearStyle(p.clear), 'aria-label': 'Board of ' + d.room },
       h(A.Panel, { title: d.room + (d.branch ? ' · ' + d.branch : ''), count: plural(d.sessions.length, 'session', 'sessions') },
         h('div', { className: 'board-b' },
           h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'chevron-right', onClick: p.onClose }, 'Back to the room'), h('span', { className: 'note' }, 'Esc also goes back.')),
+          d.pin ? h('p', { className: 'note board-pin' }, 'Note from ' + d.pin.by + ': ' + d.pin.text) : null,
           d.todos.length ? h(A.PlanCard, { title: 'To do', goal: d.goal ? clip(d.goal, 120) : undefined, steps: d.todos.map(function (t, i) { return { id: 't' + i, text: t.text, status: TODO_STATUS[t.status] || 'resting' }; }) })
             : h(A.EmptyState, { icon: 'plan', compact: true, title: 'No to-do list', text: 'A session shows its plan here when it writes one.' }),
           h('h3', { className: 'ext-h' }, 'Browser', h('span', { className: 'ext-n' }, d.browser.length)),
@@ -649,23 +653,71 @@
           })) : h(A.Skeleton, { lines: 3, label: 'Loading' }))));
   }
 
+  // The room's numbers, read beside the room when the camera faces the stats display.
+  function StatsPanel(p) {
+    var snap = useSnapshot();
+    var info = window.officeAdapter.roomInfo(p.roomId, snap || undefined);
+    var v = roomStats(info.sessions);
+    var row = function (k, val) { return h('li', { key: k }, h('span', null, k), h('b', { className: 'mono' }, val)); };
+    return h('aside', { className: 'board-panel', style: clearStyle(p.clear), 'aria-label': 'Stats of ' + ((info.place && info.place.roomName) || 'this room') },
+      h(A.Panel, { title: ((info.place && info.place.roomName) || 'Room') + ' · stats', count: plural(v.sessions, 'session', 'sessions') },
+        h('div', { className: 'board-b' },
+          h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'chevron-right', onClick: p.onClose }, 'Back to the room'), h('span', { className: 'note' }, 'Esc also goes back.')),
+          h('ul', { className: 'stats-list' },
+            row('Working', String(v.working)), row('Waiting for you', String(v.waiting)), row('Tool calls', String(v.toolCalls)),
+            row('Tokens', String(v.tokens)), row('Cost', money(v.cost)), row('To do done', v.todosDone + ' of ' + v.todosTotal),
+            row('Last event', v.lastEvent ? ago(v.lastEvent) : 'none')))));
+  }
+
   // The notes board, written on in place: a text box laid exactly over the board on screen.
   function NotesEditor(p) {
     var tx = useState(p.text || ''), text = tx[0], setText = tx[1];
     var rc = useState(null), rect = rc[0], setRect = rc[1];
     var sv = useState('saved'), state = sv[0], setState = sv[1];
     var ref = React.useRef(null), timer = React.useRef(0);
+    var base = React.useRef(p.at || 0), latest = React.useRef(p.text || '');
     useEffect(function () {
       var raf = 0;
       function follow() { var r = p.rect(); if (r) setRect(function (o) { return o && Math.abs(o.left - r.left) < 0.5 && Math.abs(o.top - r.top) < 0.5 && Math.abs(o.width - r.width) < 0.5 ? o : r; }); raf = requestAnimationFrame(follow); }
       follow();
       return function () { cancelAnimationFrame(raf); };
     }, []);
+    useEffect(function () { return function () { clearTimeout(timer.current); }; }, []);
     useEffect(function () { if (rect && !p.flying() && ref.current && document.activeElement !== ref.current) ref.current.focus(); }, [rect && Math.round(rect.width)]);
+    // An idle editor takes a change that came from outside (an agent added a line).
+    useEffect(function () {
+      if (state !== 'saved') return;
+      base.current = p.at || 0;
+      if ((p.text || '') !== latest.current) { latest.current = p.text || ''; setText(latest.current); }
+    }, [p.text, p.at, state]);
+    // The server text plus the lines of the user that it does not have.
+    function merge(server, mine) {
+      var have = {};
+      String(server).split('\n').forEach(function (l) { have[l] = true; });
+      var extra = String(mine).split('\n').filter(function (l) { return l.trim() && !have[l]; });
+      if (!extra.length) return server;
+      return server + (server && !/\n$/.test(server) ? '\n' : '') + extra.join('\n');
+    }
+    function save(v) {
+      latest.current = v;
+      return api('/api/notes/save', { key: p.noteKey, text: v, base: base.current }).then(function (res) {
+        if (res && res.at) base.current = res.at;
+        if (latest.current === v) setState('saved');
+      }, function (x) {
+        if (x.status === 409 && x.body && typeof x.body.text === 'string') {
+          var m = merge(x.body.text, latest.current).slice(0, 4000);
+          base.current = x.body.at || 0;
+          latest.current = m; setText(m);
+          p.toast({ tone: 'info', title: 'Notes', text: 'An agent changed the notes. Your text is merged.' });
+          return save(m);
+        }
+        setState('error'); p.toast({ tone: 'error', title: 'Notes', text: x.message });
+      });
+    }
     function change(v) {
-      setText(v); setState('saving');
+      setText(v); setState('saving'); latest.current = v;
       clearTimeout(timer.current);
-      timer.current = setTimeout(function () { api('/api/notes/save', { key: p.noteKey, text: v }).then(function () { setState('saved'); }, function (x) { setState('error'); p.toast({ tone: 'error', title: 'Notes', text: x.message }); }); }, 500);
+      timer.current = setTimeout(function () { save(v); }, 500);
     }
     if (!rect || rect.width < 40) return null;
     var fs = Math.max(12, rect.height / 14);
@@ -678,10 +730,6 @@
   }
 
   // ---------- room helpers ----------
-  function slugOf(t) { return String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'x'; }
-  // The room id of a session, the same way the adapter makes it.
-  function roomIdOf(s) { var root = String(s.git ? s.git.root : s.cwd || '').toLowerCase(); return 'w-' + slugOf(root).slice(-48); }
-  function repoKeyOf(s) { return s.git ? s.git.repo.toLowerCase() : ''; }
   function roomStats(sessions) {
     var o = { sessions: sessions.length, working: 0, waiting: 0, toolCalls: 0, tokens: 0, cost: 0, todosDone: 0, todosTotal: 0, lastEvent: 0 };
     sessions.forEach(function (s) {
@@ -718,7 +766,10 @@
       api('/api/close', { uid: cur.uid }).then(function () { setBusy(false); setConfirm(null); p.toast({ tone: 'success', title: cur.name, text: 'Session closed' }); }, function (x) { setBusy(false); setErr(x.message); });
     }
     function addAgent() {
-      var cwd = list.length && list[0].cwd ? list[0].cwd : place && place.root;
+      // the adapter lower-cases the room root: take the real-case folder from the snapshot
+      var rp = snap && (snap.repos || []).filter(function (r) { return place && r.key === place.repo; })[0];
+      var wt = rp && (rp.worktrees || []).filter(function (w) { return w.root.toLowerCase() === place.root; })[0];
+      var cwd = list.length && list[0].cwd ? list[0].cwd : wt ? wt.root : place && place.root;
       if (!cwd) { setErr('This room has no folder yet.'); return; }
       setBusy(true); setErr('');
       api('/api/open', { cwd: cwd, name: add.name.trim(), where: 'office', isolation: 'same', model: add.model, prompt: add.prompt })
@@ -726,14 +777,14 @@
     }
     var title = 'Agents in ' + ((place && place.roomName) || 'this room');
     if (cur) {
-      return h(A.Dialog, { open: true, title: 'Close ' + cur.name, onClose: function () { setConfirm(null); setErr(''); }, actions: [
+      return h(A.Dialog, { key: 'confirm', open: true, title: 'Close ' + cur.name, onClose: function () { setConfirm(null); setErr(''); }, actions: [
         h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setConfirm(null); setErr(''); } }, 'Keep session'),
         h(A.Button, { key: 'r', variant: 'danger', icon: 'remove', loading: busy, onClick: closeSession }, 'Close session')] },
         h('div', { className: 'form' },
           h('p', null, 'This ends the session ' + cur.name + '. Its work in the folder stays.'),
           err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
     }
-    return h(A.Dialog, { open: true, title: title, onClose: p.onClose, actions: add
+    return h(A.Dialog, { key: add ? 'add' : 'list', open: true, title: title, onClose: p.onClose, actions: add
       ? [h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setAdd(null); setErr(''); } }, 'Cancel'), h(A.Button, { key: 'a', variant: 'primary', icon: 'add', loading: busy, onClick: addAgent }, 'Add agent')]
       : [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
       h('div', { className: 'form' },
@@ -745,10 +796,10 @@
           h(Area, { id: 'ra-prompt', label: 'First instruction (optional)', value: add.prompt, rows: 4, placeholder: 'Review the open PRs and list what blocks merge.', onChange: function (v) { setAdd(Object.assign({}, add, { prompt: v })); } }),
           err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null)
         : h(React.Fragment, null,
-          list.length ? h('ul', { className: 'room-list' }, list.map(function (s) {
-            return h('li', { key: s.uid, className: 'room-row' },
+          list.length ? h('ul', { className: 'agent-list' }, list.map(function (s) {
+            return h('li', { key: s.uid, className: 'agent-row' },
               h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: botColor(), status: statusOf(s), size: 28 }),
-              h('span', { className: 'room-who' }, h('b', null, s.name), h('span', { className: 'room-sub' }, (STATUS_WORD[s.status] || s.status) + ' · ' + modelWord(s.model))),
+              h('span', { className: 'agent-who' }, h('b', null, s.name), h('span', { className: 'agent-sub' }, (window.OfficeTerminal && window.OfficeTerminal.status ? window.OfficeTerminal.status(s).word : (STATUS_WORD[s.status] || s.status)) + ' · ' + modelWord(s.model))),
               h(A.Button, { variant: 'quiet', icon: 'remove', onClick: function () { setErr(''); setConfirm(s.uid); } }, 'Close session'));
           })) : h(A.EmptyState, { icon: 'identity', compact: true, title: 'No agents here', text: 'Add an agent to start work in this room.' }),
           h(A.AddButton, { label: 'Add an agent', onClick: function () { setErr(''); setAdd({ name: '', model: '', prompt: '' }); } }))));
@@ -765,15 +816,33 @@
     useEffect(function () {
       function measure() {
         var v = vw.current, pr = probe.current;
-        if (!v || !pr || !pr.offsetWidth) return;
-        var cw = pr.offsetWidth / 10, inner = v.clientWidth - 24;
+        if (!v || !pr) return;
+        var pw = pr.getBoundingClientRect().width;
+        if (!pw) return;
+        var cs = getComputedStyle(v), cw = pw / 10, inner = v.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
         if (cw > 0 && inner > 0) setCols(function (c) { var n = Math.max(20, Math.floor(inner / cw)); return n === c ? c : n; });
       }
       measure();
       var ro = window.ResizeObserver ? new ResizeObserver(measure) : null;
       if (ro && vw.current) ro.observe(vw.current);
       window.addEventListener('resize', measure);
-      return function () { if (ro) ro.disconnect(); window.removeEventListener('resize', measure); };
+      // a theme change or a font swap changes the character width but not the box
+      var mo = new MutationObserver(measure);
+      mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+      var fonts = document.fonts;
+      if (fonts && fonts.addEventListener) fonts.addEventListener('loadingdone', measure);
+      return function () {
+        if (ro) ro.disconnect(); mo.disconnect();
+        window.removeEventListener('resize', measure);
+        if (fonts && fonts.removeEventListener) fonts.removeEventListener('loadingdone', measure);
+      };
+    }, []);
+    // focus: into the input when the panel opens, back to the opener when it closes
+    useEffect(function () {
+      var opener = document.activeElement;
+      var f = document.querySelector('.terminal-panel .term-field') || vw.current;
+      if (f && f.focus) f.focus();
+      return function () { if (opener && opener.isConnected && opener.focus) opener.focus(); };
     }, []);
     useEffect(function () {
       function onKey(e) { if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('.ao-dialog')) { e.preventDefault(); p.onClose(); } }
@@ -793,7 +862,7 @@
     function stop() { api('/api/interrupt', { uid: s.uid }).catch(function (x) { p.toast({ tone: 'error', title: s.name, text: x.message }); }); }
     var working = s && (s.status === 'working' || s.status === 'waiting');
     var ended = !s || s.status === 'ended';
-    return h('aside', { className: 'terminal-panel', 'aria-label': 'Terminal of ' + p.name },
+    return h('aside', { className: 'terminal-panel', style: clearStyle(p.clear), 'aria-label': 'Terminal of ' + p.name },
       h('div', { className: 'term-head' },
         h(A.StatusDot, { status: s ? statusOf(s) : 'resting' }),
         h('b', { className: 'term-name' }, s ? s.name : p.name),
@@ -955,27 +1024,74 @@
       if (terminalRef.current) { terminalRef.current.dispose(); terminalRef.current = null; }
       setBoard(null); setTerm(null);
     }; }, [sceneKey, cur2.view]);
-    // doors: a session that comes into a room or leaves it of the shown building
+    // doors: a session that comes into a room or leaves it of the shown building.
+    // Room ids come from the board's rooms; the adapter says who sits in each.
     var doorsRef = React.useRef(null);
+    function roomsNow2(sn) {
+      var b = boardRef.current, out = {};
+      if (!b || !b.rooms || window.officeAdapter.shown() !== shown) return null;
+      b.rooms().forEach(function (id) {
+        var inf = window.officeAdapter.roomInfo(id, sn);
+        var rn = (inf.place && inf.place.roomName) || 'Room';
+        inf.sessions.forEach(function (x) { if (x.status !== 'ended' && x.placed) out[x.uid] = { room: id, name: x.name, roomName: rn }; });
+      });
+      return out;
+    }
     useEffect(function () {
       if (!snap || cur2.view !== 'office') { doorsRef.current = null; return; }
-      var now = {};
-      snap.sessions.forEach(function (x) { if (x.status !== 'ended' && x.placed && repoKeyOf(x) === shown) now[x.uid] = { room: roomIdOf(x), name: x.name }; });
+      var now = roomsNow2(snap);
+      if (!now) { doorsRef.current = null; return; }
       var prev = doorsRef.current;
-      doorsRef.current = { key: sceneKey, shown: shown, sessions: now };
-      if (!prev || prev.key !== sceneKey || prev.shown !== shown) return;
+      doorsRef.current = { shown: shown, sessions: now };
+      if (!prev || prev.shown !== shown) return;
       var b = boardRef.current;
       Object.keys(now).forEach(function (u) {
         if (prev.sessions[u] && prev.sessions[u].room === now[u].room) return;
         if (b && b.doorPulse) b.doorPulse(now[u].room, 'in');
-        toast({ tone: 'info', title: now[u].name, text: now[u].name + ' came in' });
+        toast({ tone: 'info', title: now[u].roomName, text: now[u].name + ' came in' });
       });
       Object.keys(prev.sessions).forEach(function (u) {
         if (now[u] && now[u].room === prev.sessions[u].room) return;
         if (b && b.doorPulse) b.doorPulse(prev.sessions[u].room, 'out');
-        toast({ tone: 'info', title: prev.sessions[u].name, text: prev.sessions[u].name + ' left' });
+        toast({ tone: 'info', title: prev.sessions[u].roomName, text: prev.sessions[u].name + ' left' });
       });
     }, [snap]);
+    // tell the server what each room holds, so an agent can read it
+    useEffect(function () {
+      if (cur2.view !== 'office') return undefined;
+      function post() {
+        var b = boardRef.current, ids = b && b.rooms ? b.rooms() : [];
+        if (!b || !b.inventory) return;
+        ids.forEach(function (id) {
+          try { api('/api/room/inventory', { key: noteKey(id), items: b.inventory(id) }).catch(function () { /* ignore */ }); } catch (x) { /* ignore */ }
+        });
+      }
+      var first = setTimeout(post, 1500), iv = setInterval(post, 10000);
+      return function () { clearTimeout(first); clearInterval(iv); };
+    }, [sceneKey, cur2.view, shown]);
+    // side panels sit above the control strip, however tall it is
+    var cl2 = useState(null), clear = cl2[0], setClear = cl2[1];
+    useEffect(function () {
+      var strip = null, ro = null;
+      function set() {
+        if (!strip) return;
+        var v = Math.ceil(window.innerHeight - strip.getBoundingClientRect().top + 8);
+        setClear(function (o) { return o === v ? o : v; });
+      }
+      function find() {
+        var s2 = document.querySelector('.strip');
+        if (s2 === strip) return;
+        strip = s2;
+        if (ro) { ro.disconnect(); ro = null; }
+        if (strip && window.ResizeObserver) { ro = new ResizeObserver(set); ro.observe(strip); }
+        set();
+      }
+      var mo = new MutationObserver(find);
+      mo.observe(document.body, { childList: true, subtree: true });
+      window.addEventListener('resize', set);
+      find();
+      return function () { mo.disconnect(); if (ro) ro.disconnect(); window.removeEventListener('resize', set); };
+    }, []);
     // zoom out to leave: scrolling out at the widest zoom goes floor -> building -> city
     useEffect(function () {
       if (cur2.view !== 'office') return undefined;
@@ -1071,9 +1187,10 @@
       d === 'floors' ? h(FloorsDialog, { repo: shown, toast: toast, onClose: close }) : null,
       d === 'room' ? h(RoomDialog, { roomId: dlg.roomId, toast: toast, onClose: close }) : null,
       d === 'ext' ? h(ExtensionsDialog, { uid: dlg.uid, name: dlg.label, toast: toast, onClose: close }) : null,
-      term ? h(TerminalPanel, { key: term.uid, uid: term.uid, name: term.name, toast: toast, onClose: function () { setTerm(null); } }) : null,
-      !term && board && boardRef.current && board.kind === 'board' ? h(BoardPanel, { data: boardRef.current.dataOf(board.id), onClose: function () { boardRef.current.blur(); } }) : null,
-      !term && board && boardRef.current && board.kind === 'notes' ? h(NotesEditor, { key: board.id, noteKey: noteKey(board.id), text: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).text || '', toast: toast,
+      term ? h(TerminalPanel, { clear: clear, key: term.uid, uid: term.uid, name: term.name, toast: toast, onClose: function () { setTerm(null); } }) : null,
+      !term && board && boardRef.current && board.kind === 'board' ? h(BoardPanel, { clear: clear, data: boardRef.current.dataOf(board.id), onClose: function () { boardRef.current.blur(); } }) : null,
+      !term && board && boardRef.current && board.kind === 'stats' ? h(StatsPanel, { clear: clear, roomId: board.id, onClose: function () { boardRef.current.blur(); } }) : null,
+      !term && board && boardRef.current && board.kind === 'notes' ? h(NotesEditor, { key: board.id, noteKey: noteKey(board.id), text: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).text || '', at: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).at || 0, toast: toast,
         rect: function () { return boardRef.current ? boardRef.current.rect() : null; }, flying: function () { return boardRef.current ? boardRef.current.flying() : false; },
         onClose: function () { boardRef.current.refresh(); boardRef.current.blur(); } }) : null,
       d === 'sessions' ? h(SessionsDialog, { onClose: close, onGo: goTo }) : null,
