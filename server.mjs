@@ -10,11 +10,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
-import { spawn, execFile, execFileSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as git from './git.mjs';
 import { slimPayload } from './payload.mjs';
 import { createTracker, clip } from './tracker.mjs';
+import { createRegistry, providerEvents } from './providers/index.mjs';
+import { createClaudeCode, claudeVersion, MODEL_RE, MODES } from './providers/claude-code.mjs';
 import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, cleanRecent, recentChoices } from './place.mjs';
 import * as startup from './startup.mjs';
 import { createNotes, cleanPin, PIN_MAX } from './notes.mjs';
@@ -40,9 +42,6 @@ const STATE_FILE = path.join(ROOT, 'state.json');
 const MCP_FILE = path.join(ROOT, 'office-mcp.json');
 const HISTORY_FILE = path.join(ROOT, 'history.json');
 
-const MODEL_RE = /^(opus|sonnet|haiku|claude-[\w.-]+)$/;
-const MODES = new Set(['default', 'acceptEdits', 'plan']);
-const MAX_ATTACH_CHARS = 9_000_000; // base64 characters across all attachments of one message
 const HOOK_EVENTS = [
   'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest',
   'Notification', 'Stop', 'SubagentStart', 'SubagentStop', 'SessionEnd',
@@ -100,8 +99,7 @@ fs.writeFileSync(HOOKS_CMD_FILE, JSON.stringify(commandSettings, null, 2));
 fs.writeFileSync(HOOKS_HTTP_FILE, JSON.stringify(httpSettings, null, 2));
 
 // Use HTTP hooks only after a probe proved them on this Claude Code version (npm run probe).
-let CLAUDE_VERSION = 'unknown';
-try { CLAUDE_VERSION = execFileSync(git.resolveExe('claude'), ['--version'], { encoding: 'utf8', timeout: 8000, windowsHide: true }).trim(); } catch { /* keep unknown */ }
+const CLAUDE_VERSION = claudeVersion();
 const httpProven = () => persisted.httpHooks?.ok === true && persisted.httpHooks.version === CLAUDE_VERSION;
 let hooksMode = process.env.OFFICE_HOOKS === 'command' ? 'command' : (process.env.OFFICE_HOOKS === 'http' || httpProven() ? 'http' : 'command');
 const activeHooksFile = () => (hooksMode === 'http' ? HOOKS_HTTP_FILE : HOOKS_CMD_FILE);
@@ -138,7 +136,6 @@ const tracker = createTracker({
   locate: (cwd) => git.locate(cwd),
   onChange: () => broadcast(),
   releaseHold: (id, decision) => releaseHold(id, decision),
-  onControlResponse: (r) => { const done = controls.get(r?.request_id); if (done) { controls.delete(r.request_id); done(r); } },
   persist: {
     history: (s) => recordHistory(s),
     recentDir: (dir) => rememberDir(dir),
@@ -146,7 +143,15 @@ const tracker = createTracker({
     placed: (s, g) => { adoptNotes(roomPlace(s)); if (g) addRepo(g.repo); },
   },
 });
-const { sessions, feed, addFeed, newSession, placeSession, findSession, onHook, endSession, pushReply, onStream } = tracker;
+const { sessions, feed, addFeed, newSession, placeSession, findSession, onHook, endSession } = tracker;
+
+// ---------- providers: the agent tools behind the sessions (providers/) ----------
+// Every provider reports through the same events into the tracker. Claude Code is the only one now. Its hooks come in over
+// the hook routes below, and a permission decision goes back as the hook's answer (claude.answer gives the body).
+const events = providerEvents({ tracker, onChange: () => broadcast(), hold: (r) => { holdRequest(r); broadcast(); } });
+const claude = createClaudeCode({ events, files: () => ({ settings: activeHooksFile(), mcp: MCP_FILE, launcher: path.join(ROOT, 'launch.ps1') }) });
+const providers = createRegistry([claude]);
+const providerOf = (s) => providers.of(s);
 
 const basename = (p) => (p ? p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : '');
 
@@ -301,8 +306,10 @@ function sendMessage(uid, text, attachments = []) {
   return { queued: s.inbox.length };
 }
 
-// ---------- permission prompts (the office answers the PermissionRequest hook) ----------
-/** @type {Map<string, {uid: string, res: http.ServerResponse, timer: NodeJS.Timeout}>} */
+// ---------- held requests: permission prompts and office_ask questions wait for the user ----------
+// A hold ends with one decision: { allow, always } for a permission prompt, { text } for a question, {} for none (dropped,
+// timed out, or the turn ended). `reply` takes it to the agent: the hook's or office_ask's HTTP answer, or the provider.
+/** @type {Map<string, {uid: string, timer: NodeJS.Timeout, kind?: 'ask', suggestions?: object[], reply: (decision: object) => void}>} */
 const holds = new Map();
 
 function forget(id) {
@@ -316,19 +323,29 @@ function forget(id) {
 function releaseHold(id, decision) {
   const h = forget(id);
   if (!h) return false;
-  if (!h.res.writableEnded) { h.res.writeHead(200, { 'content-type': 'application/json' }); h.res.end(JSON.stringify(decision || {})); }
+  h.reply(decision || {});
   return true;
+}
+// The answer of a hook or an office_ask call that waits on its HTTP request.
+function replyOn(res, body) {
+  if (!res.writableEnded) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(body || {})); }
+}
+
+// A permission request waits for the user. The session's provider turns the decision into its own answer; on a hook (res)
+// that answer is the hook's reply. A terminal session's request goes back to the terminal dialog after the short hold.
+function holdRequest({ s, id, suggestions }, res = null) {
+  const hold = s.headless ? HEADLESS_ASK_MS : ASK_TIMEOUT_MS;
+  const timer = setTimeout(() => { if (releaseHold(id, {})) addFeed(s, 'wait', s.headless ? 'question timed out, Claude moved on' : 'question went back to the terminal'); }, hold);
+  const reply = (d) => { const body = providerOf(s).answer(s, { id, suggestions }, d); if (res) replyOn(res, body); };
+  holds.set(id, { uid: s.uid, timer, suggestions, reply });
 }
 
 function onPermission(p, res) {
   const r = tracker.permissionRequest(p);
   if (!r) { res.writeHead(200, { 'content-type': 'application/json' }); return res.end('{}'); }
-  const { s, id, suggestions } = r;
-  const hold = s.headless ? HEADLESS_ASK_MS : ASK_TIMEOUT_MS;
-  const timer = setTimeout(() => { if (releaseHold(id, {})) addFeed(s, 'wait', s.headless ? 'question timed out, Claude moved on' : 'question went back to the terminal'); }, hold);
-  holds.set(id, { uid: s.uid, res, timer, suggestions });
+  holdRequest(r, res);
   // The terminal answered first and Claude cancelled the hook: drop the question.
-  res.on('close', () => forget(id));
+  res.on('close', () => forget(r.id));
   broadcast();
 }
 
@@ -353,7 +370,7 @@ function onMcpAsk(p, res) {
   if (!s) return send(res, 200, { text: 'Agent Office does not recognise this session, so the question was not shown. Ask in the terminal.' });
   const id = tracker.askQuestion(s, p.question);
   const timer = setTimeout(() => releaseHold(id, { text: 'No answer from the office after 10 minutes. Continue without it, or ask in the terminal.' }), 10 * 60 * 1000);
-  holds.set(id, { uid: s.uid, res, timer, kind: 'ask' });
+  holds.set(id, { uid: s.uid, timer, kind: 'ask', reply: (d) => replyOn(res, d) });
   res.on('close', () => forget(id));
   broadcast();
 }
@@ -530,60 +547,24 @@ function answer(id, allow, always = false) {
     if (s0) addFeed(s0, 'prompt', allow ? 'answered yes in the office' : 'answered no in the office');
     return void releaseHold(id, { text: allow ? 'Yes.' : 'No.' });
   }
-  const decision = {
-    hookSpecificOutput: {
-      hookEventName: 'PermissionRequest',
-      decision: allow ? { behavior: 'allow' } : { behavior: 'deny', message: 'Declined from Agent Office.' },
-    },
-  };
-  if (allow && always && h.suggestions?.length) decision.hookSpecificOutput.decision.updatedPermissions = h.suggestions;
   const s = sessions.get(h.uid);
   if (s) addFeed(s, 'tool', allow ? (always ? 'approved and always allowed from the office' : 'approved from the office') : 'declined from the office');
-  releaseHold(id, decision);
+  releaseHold(id, { allow, always });
 }
 
 // ---------- sessions that run inside the office (no terminal) ----------
-// Claude Code runs headless in stream-json mode: prompts go in on stdin, replies come back on stdout.
-// Hooks still report activity and permission prompts, so the office behaves the same as for a terminal.
-/** @type {Map<string, import('node:child_process').ChildProcess>} */
-const procs = new Map();
-
-// Images go in as image blocks and text files inline. Anything else is refused, never silently dropped.
-function blocksFor(text, attachments) {
-  const content = [];
-  let total = 0;
-  for (const a of attachments.slice(0, 6)) {
-    const data = String(a.data || '');
-    total += data.length;
-    if (total > MAX_ATTACH_CHARS) throw httpError(413, 'The attachments are too large. The limit is about 6 MB in total.');
-    const mime = String(a.mime || ''), name = String(a.name || 'file').slice(0, 80);
-    if (/^image\/(png|jpeg|gif|webp)$/.test(mime)) content.push({ type: 'image', source: { type: 'base64', media_type: mime, data } });
-    else if (/^text\//.test(mime) || /\.(md|txt|json|jsonl|js|mjs|cjs|ts|tsx|jsx|py|css|html|csv|log|yml|yaml|toml|xml|sh|ps1|sql)$/i.test(name)) {
-      content.push({ type: 'text', text: `Attached file ${name}:\n\`\`\`\n${Buffer.from(data, 'base64').toString('utf8').slice(0, 200000)}\n\`\`\`` });
-    } else throw httpError(415, `Cannot attach ${name}. Attach images or text files.`);
-  }
-  if (text) content.push({ type: 'text', text });
-  return content;
-}
-
+// The session's provider runs the agent (providers/). The office marks the message on the session after the provider took it.
 function writeUser(s, text, attachments = []) {
-  const c = procs.get(s.uid);
-  if (!c || !c.stdin.writable) throw httpError(409, 'That session is not running.');
-  const content = attachments.length ? blocksFor(text, attachments) : [{ type: 'text', text }];
+  providerOf(s).message(s, { text, attachments });
   tracker.userMessage(s);
-  c.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n');
 }
 
-// Control requests (stop this turn, change mode or model) go down the same pipe as messages.
-const controls = new Map();
+// Control requests (change mode or model, connectors) are Claude Code's. Another provider has no `control`.
 function control(s, request, onDone) {
-  const c = procs.get(s.uid);
-  if (!c || !c.stdin.writable) throw httpError(409, 'That session is not running.');
-  const id = 'c' + crypto.randomBytes(4).toString('hex');
-  if (onDone) controls.set(id, onDone);
-  c.stdin.write(JSON.stringify({ type: 'control_request', request_id: id, request }) + '\n');
+  const p = providerOf(s);
+  if (typeof p.control !== 'function') throw httpError(409, `${p.label} does not take that request.`);
+  p.control(s, request, onDone);
 }
-const CONTROL_MODES = new Set(['default', 'plan', 'acceptEdits']);
 // Dismiss clears a failed turn's error for every surface at once (the rule is tracker.dismissError).
 function dismissError(uid) {
   const s = sessions.get(uid);
@@ -594,10 +575,10 @@ function doControl(uid, action, value) {
   const s = sessions.get(uid);
   if (!s || !s.headless || s.status === 'ended') throw httpError(404, 'That session is not running in the office.');
   if (action === 'interrupt') {
-    control(s, { subtype: 'interrupt' });
+    providerOf(s).interrupt(s);
     tracker.interrupt(s);
   } else if (action === 'mode') {
-    if (!CONTROL_MODES.has(value)) throw httpError(400, 'Unknown permission mode.');
+    if (!MODES.has(value)) throw httpError(400, 'Unknown permission mode.');
     control(s, { subtype: 'set_permission_mode', mode: value }, (r) => { if (r.response?.mode) s.mode = r.response.mode; broadcast(); });
   } else if (action === 'model') {
     if (!MODEL_RE.test(String(value))) throw httpError(400, 'Unknown model.');
@@ -622,9 +603,7 @@ function ask(s, request, ms = 15000) {
 }
 function claudeCli(args, cwd) {
   return new Promise((resolve, reject) => {
-    let exe;
-    try { exe = git.resolveExe('claude'); } catch (e) { return reject(httpError(409, e.message)); }
-    execFile(exe, args, { cwd, windowsHide: true, timeout: 120000, maxBuffer: 8 * 1024 * 1024 }, (err, out, stderr) => {
+    claude.cli(args, { cwd, windowsHide: true, timeout: 120000, maxBuffer: 8 * 1024 * 1024 }, (err, out, stderr) => {
       if (err) return reject(httpError(409, (String(stderr || '').trim() || String(out || '').trim() || err.message).split('\n').slice(-3).join(' ')));
       resolve(String(out));
     });
@@ -692,39 +671,16 @@ async function extAction(body) {
 }
 
 
-function openHeadless({ cwd, name, prompt, worktree = null, budget = null, resume = null, scheduleId = null, model = null, prior = null }, baseArgs) {
-  const exe = git.resolveExe('claude'); // before the session exists: a missing claude leaves no ghost session
+// The provider runs the agent; the office makes the session, seats it and sends the first prompt.
+function openHeadless(provider, { cwd, name, prompt, worktree = null, budget = null, resume = null, scheduleId = null, model = null, permissionMode = null, prior = null }) {
   const officeId = 'o' + crypto.randomBytes(4).toString('hex');
-  const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', ...baseArgs];
-  if (resume) args.push('--resume', resume);
-  if (budget) args.push('--max-budget-usd', String(budget));
-  const s = newSession({ uid: officeId, officeId, name, cwd, launched: true, headless: true, status: 'starting', worktree, budget, scheduleId, model,
-    commands: persisted.commands?.commands || [], skills: persisted.commands?.skills || [] });
+  // The last slash-command list came from a Claude Code init, so only a Claude Code session starts with it.
+  const known = provider === claude ? persisted.commands : null;
+  const s = newSession({ uid: officeId, officeId, provider: provider.kind, name, cwd, launched: true, headless: true, status: 'starting', worktree, budget, scheduleId, model,
+    commands: known?.commands || [], skills: known?.skills || [] });
   placeSession(s, true);
   if (prior) { s.replies = prior.replies || []; s.replySeq = s.replies.reduce((n, r) => Math.max(n, r.id || 0), 0); s.costBase = prior.cost || 0; s.cost = prior.cost || null; s.turns = prior.turns || 0; s.prompt = prior.prompt || ''; }
-  const child = spawn(exe, args, {
-    cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
-    env: { ...process.env, OFFICE_ID: officeId },
-  });
-  procs.set(officeId, child);
-  s.pid = child.pid;
-  let buf = '', err = '';
-  child.stdout.on('data', (d) => {
-    buf += d;
-    let i;
-    while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); if (line.trim()) onStream(s, line); }
-  });
-  child.stderr.on('data', (d) => { err = (err + d).slice(-1500); });
-  child.stdin.on('error', () => {});
-  child.on('error', (e) => { pushReply(s, 'Could not start Claude Code: ' + e.message); endSession(s, 'could not start'); broadcast(); });
-  child.on('exit', (code) => {
-    procs.delete(officeId);
-    if (s.status !== 'ended') {
-      if (code && !s.sid) pushReply(s, 'Claude Code stopped before it started: ' + (clip(err.trim(), 400) || 'exit code ' + code));
-      endSession(s, code ? `exited (${code})` : 'finished');
-    }
-    broadcast();
-  });
+  provider.open(s, { model, permissionMode, budget, resume });
   if (!worktree) rememberDir(cwd); // a worktree folder is an implementation detail, not a place to start from
   addFeed(s, 'start', resume ? 'reopened in the office' : worktree ? `started in the office on branch ${worktree.branch}` : 'started in the office');
   if (prompt) { s.prompt = prompt; writeUser(s, prompt); addFeed(s, 'prompt', clip(prompt, 100)); }
@@ -733,6 +689,7 @@ function openHeadless({ cwd, name, prompt, worktree = null, budget = null, resum
 }
 
 // ---------- open / close ----------
+// opts.provider: the agent kind (default Claude Code). The Open dialog offers only Claude Code until #20.
 async function openSession(opts) {
   if (process.platform !== 'win32') throw httpError(501, 'Opening sessions is only implemented for Windows.');
   const cwd = String(opts.cwd || '').trim();
@@ -740,17 +697,10 @@ async function openSession(opts) {
   try { stat = fs.statSync(cwd); } catch { /* handled below */ }
   if (!stat || !stat.isDirectory()) throw httpError(400, `Folder not found: ${cwd || '(empty)'}`);
 
-  const args = ['--settings', activeHooksFile(), '--mcp-config', MCP_FILE];
-  if (opts.model) {
-    if (!MODEL_RE.test(opts.model)) throw httpError(400, 'Unknown model.');
-    args.push('--model', opts.model);
-  }
-  if (opts.permissionMode) {
-    if (!MODES.has(opts.permissionMode)) throw httpError(400, 'Unknown permission mode.');
-    args.push('--permission-mode', opts.permissionMode);
-  }
+  const provider = providers.get(opts.provider);
+  provider.check?.(opts); // unknown model or mode: refused before a worktree is made
+  const model = opts.model || null, permissionMode = opts.permissionMode || null;
   const prompt = String(opts.prompt || '').slice(0, 8000);
-  const termArgs = prompt ? [...args, prompt] : args;
 
   const name = String(opts.name || '').trim().slice(0, 40) || basename(cwd) || 'session';
   if (opts.where !== 'terminal') {
@@ -761,45 +711,25 @@ async function openSession(opts) {
     }
     if (worktree) rememberDir(cwd);
     const budget = Number(opts.maxBudget) > 0 ? Math.min(Number(opts.maxBudget), 1000) : null;
-    return openHeadless({ cwd: workdir, name, prompt, worktree, budget, scheduleId: opts.scheduleId || null, model: opts.model || null }, args);
+    return openHeadless(provider, { cwd: workdir, name, prompt, worktree, budget, scheduleId: opts.scheduleId || null, model, permissionMode });
   }
-  // Absolute paths, found before the session exists. `start` and launch.ps1 get them too, so neither cmd.exe nor
-  // PowerShell looks for powershell.exe or claude in the session folder.
-  const cmdExe = git.resolveExe('cmd.exe'), psExe = git.resolveExe('powershell.exe'), claudeExe = git.resolveExe('claude');
+  if (typeof provider.openWindow !== 'function') throw httpError(400, `${provider.label} does not open in a terminal window.`);
   const officeId = 'o' + crypto.randomBytes(4).toString('hex');
-  const title = ('Office - ' + name).replace(/[^\w .-]/g, '');
-  const s = newSession({ uid: officeId, officeId, name, cwd, launched: true, status: 'starting', model: opts.model || null });
+  const s = newSession({ uid: officeId, officeId, provider: provider.kind, name, cwd, launched: true, status: 'starting', model });
   placeSession(s, true);
-  // `start /wait` gives the session its own console window while cmd.exe stays alive as the
-  // process-tree root, so closing = taskkill /T on that one pid.
-  // The quoted "Office" is the window title; unquoted, `start` would try to run a program named Office.
-  const launcher = path.join(ROOT, 'launch.ps1');
-  const child = spawn(cmdExe, [
-    '/d', '/s', '/c', `start "Office" /wait "${psExe}" -NoLogo -NoExit -ExecutionPolicy Bypass -File "${launcher}"`,
-  ], {
-    windowsVerbatimArguments: true,
-    cwd,
-    stdio: 'ignore',
-    windowsHide: true,
-    env: { ...process.env, OFFICE_ID: officeId, OFFICE_ARGS: JSON.stringify(termArgs), OFFICE_TITLE: title, OFFICE_CLAUDE: claudeExe },
-  });
-  s.pid = child.pid;
-  child.on('error', (e) => { addFeed(s, 'end', `could not start: ${e.message}`); endSession(s, 'could not start'); broadcast(); });
-  child.on('exit', () => { endSession(s, 'window closed'); broadcast(); });
-  child.unref();
+  provider.openWindow(s, { model, permissionMode, prompt });
   rememberDir(cwd);
   addFeed(s, 'start', 'opened a new window');
   broadcast();
   return s.uid;
 }
 
+// A past session opens again with its own conversation (Claude Code --resume). Its permission mode starts as the default.
 async function reopenSession(uid) {
   const rec = history.find((h) => h.uid === uid);
   if (!rec) throw httpError(404, 'That past session is gone.');
   if (!fs.existsSync(rec.cwd)) throw httpError(409, `Its folder is gone: ${rec.cwd}. It may have been a removed worktree.`);
-  const args = ['--settings', activeHooksFile(), '--mcp-config', MCP_FILE];
-  if (rec.model) args.push('--model', rec.model);
-  const id = openHeadless({ cwd: rec.cwd, name: rec.name, prompt: '', worktree: rec.worktree, budget: rec.budget, resume: rec.sid, model: rec.model, prior: rec }, args);
+  const id = openHeadless(claude, { cwd: rec.cwd, name: rec.name, prompt: '', worktree: rec.worktree, budget: rec.budget, resume: rec.sid, model: rec.model, prior: rec });
   history = history.filter((h) => h.uid !== uid);
   saveHistory();
   return id;
@@ -809,16 +739,9 @@ function closeSession(uid) {
   const s = sessions.get(uid);
   if (!s) throw httpError(404, 'No such session.');
   if (s.status === 'ended') { sessions.delete(uid); broadcast(); return; }
-  if (!s.pid || s.pid === process.pid) throw httpError(409, 'This session has no known process to close. Close it in its own terminal.');
-  return new Promise((resolve, reject) => {
-    execFile(git.resolveExe('taskkill'), ['/PID', String(s.pid), '/T', '/F'], { windowsHide: true }, (err, _o, stderr) => {
-      if (err && !/not found|no running instance/i.test(String(stderr))) {
-        return reject(httpError(500, `Could not close it: ${String(stderr || err.message).trim()}`));
-      }
-      endSession(s, 'closed from the office');
-      broadcast();
-      resolve();
-    });
+  return providerOf(s).close(s).then(() => {
+    endSession(s, 'closed from the office');
+    broadcast();
   });
 }
 
@@ -828,9 +751,7 @@ async function probeHttp() {
   const need = ['UserPromptSubmit', 'PostToolUse', 'Stop'];
   probeSeen = new Set();
   const run = await new Promise((resolve) => {
-    let exe;
-    try { exe = git.resolveExe('claude'); } catch (e) { return resolve({ err: e.message, out: '' }); }
-    execFile(exe, ['--settings', HOOKS_HTTP_FILE, '--model', 'haiku', '--permission-mode', 'default', '-p', 'Run the bash command: echo http-probe-ok  Then say done.'],
+    claude.cli(['--settings', HOOKS_HTTP_FILE, '--model', 'haiku', '--permission-mode', 'default', '-p', 'Run the bash command: echo http-probe-ok  Then say done.'],
       { cwd: ROOT, env: { ...process.env, OFFICE_ID: 'probe' }, timeout: 120000, windowsHide: true },
       (err, out) => resolve({ err: err && err.message, out: String(out || '').slice(0, 200) }));
   });
@@ -1044,6 +965,8 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     if (req.method === 'GET' && url.pathname === '/api/choices') return send(res, 200, { folders: recentChoices(persisted.recent, url.searchParams.get('first') || '') });
+    // Each agent kind with its readiness, what it needs and its models (providers/index.mjs status), for the settings view (#20).
+    if (req.method === 'GET' && url.pathname === '/api/providers') return send(res, 200, { providers: await providers.status() });
     if (req.method === 'GET' && url.pathname === '/api/info') {
       return send(res, 200, {
         port: PORT, hooksFile: activeHooksFile(), recent: persisted.recent, home: os.homedir(),
