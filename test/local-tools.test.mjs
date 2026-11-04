@@ -141,3 +141,57 @@ test('the fake OpenAI server streams text, tool calls and usage, and lists model
     assert.equal(fake.requests.length, 2);
   } finally { await fake.close(); }
 });
+
+test('a broken link that points outside is refused, and nothing is created there', async (c) => {
+  const s = scratch(); const t = createLocalTools(s.root);
+  try {
+    const gone = path.join(s.base, 'gone');
+    fs.mkdirSync(gone);
+    try { fs.symlinkSync(gone, path.join(s.root, 'dead'), 'junction'); } catch { c.skip('links are not allowed here'); return; }
+    fs.rmSync(gone, { recursive: true }); // the link now points at nothing, outside the folder
+    for (const args of [{ file_path: 'dead/new.txt', content: 'x' }, { file_path: 'dead/sub/new.txt', content: 'x' }, { file_path: 'dead', content: 'x' }]) {
+      const r = await t.run('Write', args);
+      assert.equal(r.ok, false, JSON.stringify(args));
+    }
+    assert.equal(fs.existsSync(gone), false, 'the missing folder was not made again through the link');
+  } finally { s.done(); }
+});
+
+test('a broken file link that points outside is refused for Write', async (c) => {
+  const s = scratch(); const t = createLocalTools(s.root);
+  try {
+    const target = path.join(s.base, 'planted.txt');
+    try { fs.symlinkSync(target, path.join(s.root, 'fl.txt'), 'file'); } catch { c.skip('file links are not allowed here'); return; }
+    const r = await t.run('Write', { file_path: 'fl.txt', content: 'x' });
+    assert.equal(r.ok, false);
+    assert.equal(fs.existsSync(target), false);
+  } finally { s.done(); }
+});
+
+test('Grep never reads secret or settings files, in a search of the whole folder or of one of them', async () => {
+  const s = scratch(); const t = createLocalTools(s.root);
+  try {
+    fs.writeFileSync(path.join(s.root, '.env'), 'API_KEY=needle-secret');
+    fs.writeFileSync(path.join(s.root, '.office-token'), 'needle-token');
+    fs.writeFileSync(path.join(s.root, 'server.pem'), 'needle-pem');
+    fs.mkdirSync(path.join(s.root, '.ssh'));
+    fs.writeFileSync(path.join(s.root, '.ssh', 'id_rsa'), 'needle-ssh');
+    fs.mkdirSync(path.join(s.root, '.claude'));
+    fs.writeFileSync(path.join(s.root, '.claude', 'settings.json'), 'needle-settings');
+    const all = await t.run('Grep', { pattern: 'needle' });
+    assert.match(all.text, /src\/b\.js:1/, 'normal files are still searched');
+    assert.doesNotMatch(all.text, /secret|token|pem|ssh|settings/);
+    for (const p of ['.env', '.office-token', '.ssh', '.claude', 'server.pem']) {
+      assert.equal((await t.run('Grep', { pattern: 'needle', path: p })).text, 'No matches.', p);
+    }
+  } finally { s.done(); }
+});
+
+test('a root under a settings folder still searches its own files', async () => {
+  const s = scratch();
+  const inner = path.join(s.base, '.claude', 'worktrees', 'wt');
+  fs.mkdirSync(inner, { recursive: true });
+  fs.writeFileSync(path.join(inner, 'f.txt'), 'findme');
+  const t = createLocalTools(inner);
+  try { assert.match((await t.run('Grep', { pattern: 'findme' })).text, /f\.txt:1/); } finally { s.done(); }
+});

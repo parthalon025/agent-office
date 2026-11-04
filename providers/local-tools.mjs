@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
-import { inside } from '../risk.mjs';
+import { inside, realInside, isProtectedPart } from '../risk.mjs';
 import { resolveExe } from '../git.mjs'; // absolute program paths: a cmd.exe planted in the worktree never runs
 
 export const LIMITS = {
@@ -53,21 +53,16 @@ export function killTree(pid, run = execFile) {
 export function createLocalTools(root, deps = {}) {
   if (!root || !path.isAbsolute(root)) throw new Error('createLocalTools needs an absolute folder');
   const kill = deps.kill || killTree;
-  const realRoot = fs.realpathSync(root);
   const running = new Set();
 
-  /** The real path of a target inside the folder, or a refusal. Checks the text path, then the symlink-free path. */
+  /** The absolute path of a target inside the folder, or a refusal. Checks the text path, then every link on the way (realInside). */
   function safe(p, { mustExist = false } = {}) {
     if (typeof p !== 'string' || !p.trim()) fail('A path is required.');
     if (p.includes('\0')) fail('The path is not valid.');
     const abs = path.resolve(root, p);
     if (!inside(root, abs)) fail(`The path is outside the working folder: ${p}`);
-    // Walk up to the first part that exists and resolve it: a link inside the folder must not lead out.
-    let probe = abs;
-    while (!fs.existsSync(probe)) { const up = path.dirname(probe); if (up === probe) break; probe = up; }
-    let real;
-    try { real = fs.realpathSync(probe); } catch { fail(`The path cannot be read: ${p}`); }
-    if (!inside(realRoot, real)) fail(`The path leads outside the working folder: ${p}`);
+    // A link that leads out, a broken link and a path that cannot be read all fail closed.
+    if (!realInside(root, abs)) fail(`The path leads outside the working folder: ${p}`);
     if (mustExist && !fs.existsSync(abs)) fail(`No such file or folder: ${p}`);
     return abs;
   }
@@ -97,14 +92,18 @@ export function createLocalTools(root, deps = {}) {
       try { re = new RegExp(String(a.pattern), 'i'); } catch (e) { fail(`The pattern is not a regular expression: ${e.message}`); }
       const start = safe(a.path || '.', { mustExist: true });
       const hits = [];
+      // Only the parts below the folder count: the folder itself may sit under a .claude folder.
+      const protectedBelowRoot = (p) => path.relative(root, p).split(/[\\/]+/).some((part) => part && isProtectedPart(part));
       const walk = (p) => {
         if (hits.length >= LIMITS.grepHits) return;
         let st; try { st = fs.lstatSync(p); } catch { return; }
         if (st.isSymbolicLink()) return; // never follow a link while searching
         if (st.isDirectory()) {
           if (SKIP_DIRS.has(path.basename(p)) && p !== start) return;
+          if (protectedBelowRoot(p)) return;
           for (const n of fs.readdirSync(p).sort()) walk(path.join(p, n));
         } else if (st.isFile() && st.size <= LIMITS.grepFileBytes) {
+          if (protectedBelowRoot(p)) return; // .env, key files, .office-token: a search never reads them
           const buf = fs.readFileSync(p);
           if (buf.includes(0)) return;
           buf.toString('utf8').split('\n').forEach((l, i) => { if (hits.length < LIMITS.grepHits && re.test(l)) hits.push(`${rel(p)}:${i + 1}: ${l.slice(0, 300)}`); });
@@ -131,7 +130,7 @@ export function createLocalTools(root, deps = {}) {
       if (fs.existsSync(f) && fs.statSync(f).isDirectory()) fail(`A folder is at ${a.file_path}.`);
       fs.mkdirSync(path.dirname(f), { recursive: true });
       // The made folders came from a checked path, but check the real parent again: a link may have been just made.
-      if (!inside(realRoot, fs.realpathSync(path.dirname(f)))) fail(`The path leads outside the working folder: ${a.file_path}`);
+      if (!realInside(root, f)) fail(`The path leads outside the working folder: ${a.file_path}`);
       fs.writeFileSync(f, a.content);
       return `Wrote ${rel(f)} (${Buffer.byteLength(a.content)} bytes).`;
     },
