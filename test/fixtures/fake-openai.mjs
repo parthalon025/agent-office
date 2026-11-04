@@ -1,6 +1,6 @@
 // A fake OpenAI-compatible chat server for provider tests. No model, no cost, 127.0.0.1 on a free port.
 // script: one entry per chat request, in order. { text } streams a reply; { toolCalls: [{ name, args }] } asks for tools;
-// { status: 500 } fails; { usage } sets the token numbers. The last entry repeats. models: ids for GET /v1/models.
+// { status: 500 } fails; { delayMs } waits before it answers; { usage } sets the token numbers. The last entry repeats. models: ids for GET /v1/models.
 import http from 'node:http';
 
 export async function startFakeOpenAI({ script = [{ text: 'ok' }], models = ['fake-model'] } = {}) {
@@ -9,7 +9,7 @@ export async function startFakeOpenAI({ script = [{ text: 'ok' }], models = ['fa
   const server = http.createServer((req, res) => {
     let body = '';
     req.on('data', (d) => { body += d; });
-    req.on('end', () => {
+    req.on('end', async () => {
       const url = new URL(req.url, 'http://x');
       if (req.method === 'GET' && url.pathname === '/v1/models') {
         res.writeHead(200, { 'content-type': 'application/json' });
@@ -20,6 +20,7 @@ export async function startFakeOpenAI({ script = [{ text: 'ok' }], models = ['fa
         try { json = JSON.parse(body || '{}'); } catch { /* keep {} */ }
         requests.push(json);
         const step = script[Math.min(n++, script.length - 1)];
+        if (step.delayMs) await new Promise((r) => setTimeout(r, step.delayMs));
         if (step.status) {
           res.writeHead(step.status, { 'content-type': 'application/json' });
           return res.end(JSON.stringify({ error: { message: 'fake failure' } }));

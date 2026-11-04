@@ -26,6 +26,17 @@ const EMBEDDING = /embed|rerank/i;     // LM Studio lists its embedding models n
 const SYSTEM = (cwd) => `You are a coding agent working in the folder ${cwd}. Use the tools to read and change files and to run commands in that folder. `
   + 'Paths are relative to the folder. Keep answers short. When the work is done, say what you did.';
 
+// The four office tools, for agents the office runs itself. The same words as the MCP server (mcp.mjs) uses.
+const OFFICE_TOOLS = [
+  { name: 'office_inbox', description: 'Read new messages the user sent to this session from Agent Office. Returns them and clears the queue.', parameters: { type: 'object', properties: {} } },
+  { name: 'office_ask', description: 'Ask the user a question in Agent Office and wait for the answer (up to 10 minutes). Use it for decisions you cannot make alone.',
+    parameters: { type: 'object', properties: { question: { type: 'string', description: 'A short, specific question. A yes or no question works best.' } }, required: ['question'] } },
+  { name: 'office_room', description: 'Describe your place in Agent Office: building, floor, room, the other sessions, the notes board and the blackboard pin. Call it first when the user talks about their room.', parameters: { type: 'object', properties: {} } },
+  { name: 'office_room_update', description: 'Change your room when the user asks: give notes_append, notes_replace (not both) or pin. Returns what changed.',
+    parameters: { type: 'object', properties: { notes_append: { type: 'string' }, notes_replace: { type: 'string' }, pin: { type: 'string' } } } },
+].map((t) => ({ type: 'function', function: t }));
+const OFFICE_NAMES = new Set(OFFICE_TOOLS.map((t) => t.function.name));
+
 const textOf = (e) => String((e && e.message) || e || 'unknown error');
 
 /**
@@ -35,6 +46,8 @@ const textOf = (e) => String((e && e.message) || e || 'unknown error');
  * @param {string} [deps.baseUrl] the chat server, a loopback address only (default per kind).
  * @param {Function} [deps.fetch] fetch.  @param {(root: string) => object} [deps.makeTools] createLocalTools.
  * @param {() => string} [deps.makeId] ids for the messages.  @param {number} [deps.stallMs]
+ * @param {{inbox: Function, ask: Function, room: Function, roomUpdate: Function}} [deps.officeTools] the office tools as in-process
+ *   calls (server.mjs officeTools): each takes the session first and answers text, or throws an error with a message.
  */
 export function createLocal(deps) {
   const spec = KINDS[deps.kind];
@@ -46,6 +59,7 @@ export function createLocal(deps) {
   const makeTools = deps.makeTools || ((root) => createLocalTools(root));
   const makeId = deps.makeId || (() => crypto.randomBytes(5).toString('hex'));
   const stallMs = deps.stallMs || STALL_MS;
+  const office = deps.officeTools || null;
   /** @type {Map<string, object>} uid -> the agent state of an open session */
   const agents = new Map();
 
@@ -71,7 +85,7 @@ export function createLocal(deps) {
     try {
       const r = await doFetch(baseUrl + '/chat/completions', {
         method: 'POST', headers: { 'content-type': 'application/json' }, signal: ctl.signal,
-        body: JSON.stringify({ model: st.model, messages: st.messages, tools: st.tools.definitions, stream: true, stream_options: { include_usage: true } }),
+        body: JSON.stringify({ model: st.model, messages: st.messages, tools: office ? [...st.tools.definitions, ...OFFICE_TOOLS] : st.tools.definitions, stream: true, stream_options: { include_usage: true } }),
       });
       if (!r.ok) {
         let why = '';
@@ -110,7 +124,11 @@ export function createLocal(deps) {
 
   // ----- the agent loop -----
   // Every report goes through emit(): after close, nothing more is reported (the seam's timing rule 2).
-  const emit = (st, fn) => { if (!st.closed) fn(); };
+  // It gives back what fn gives back: a hook answers with the office messages that waited (see note below).
+  const emit = (st, fn) => (st.closed ? undefined : fn());
+  // A message the user sent while a turn ran waits in the session's inbox. The tracker hands it back as the answer of a hook:
+  // as context on the prompt and on a tool result, and as a block on Stop (go on, here is a new message).
+  const noteOf = (back) => back?.hookSpecificOutput?.additionalContext || '';
 
   // Ask the user and wait. The server holds the request and calls answer(); a close or an interrupt drops it as a decline.
   function ask(st, s, name, input) {
@@ -124,8 +142,8 @@ export function createLocal(deps) {
   async function runTurn(s, st, prompt) {
     st.busy = true;
     st.interrupted = false;
-    st.messages.push({ role: 'user', content: prompt });
-    emit(st, () => events.hook(s, { hook_event_name: 'UserPromptSubmit', prompt }));
+    const back = emit(st, () => events.hook(s, { hook_event_name: 'UserPromptSubmit', prompt }));
+    st.messages.push({ role: 'user', content: noteOf(back) ? prompt + '\n\n' + noteOf(back) : prompt });
     let last = '', failure = null;
     try {
       for (let round = 0; ; round++) {
@@ -139,7 +157,12 @@ export function createLocal(deps) {
         emit(st, () => events.stream(s, { type: 'assistant', message: { id, content: res.text.trim() ? [{ type: 'text', text: res.text }] : [], usage: { input_tokens: u.prompt_tokens || 0, output_tokens: u.completion_tokens || 0 } } }));
         if (res.text.trim()) last = res.text;
         st.messages.push({ role: 'assistant', content: res.text || null, ...(res.toolCalls.length ? { tool_calls: res.toolCalls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.args || '{}' } })) } : {}) });
-        if (!res.toolCalls.length) break;
+        if (!res.toolCalls.length) {
+          // The turn would end. A message that came in meanwhile goes to the model first.
+          const stop = emit(st, () => events.hook(s, { hook_event_name: 'Stop', last_assistant_message: last }));
+          if (stop && stop.decision === 'block' && stop.reason) { st.messages.push({ role: 'user', content: stop.reason }); continue; }
+          break;
+        }
         for (const c of res.toolCalls) {
           if (st.interrupted || st.closed) break;
           st.messages.push({ role: 'tool', tool_call_id: c.id, content: await callTool(s, st, c) });
@@ -161,6 +184,7 @@ export function createLocal(deps) {
     const t0 = Date.now();
     const failed = (error, interrupt = false) => { emit(st, () => events.hook(s, { hook_event_name: 'PostToolUseFailure', ...base, error, is_interrupt: interrupt, duration_ms: Date.now() - t0 })); return error; };
     if (input === null) return failed('The arguments are not valid JSON.');
+    if (OFFICE_NAMES.has(c.name)) return officeCall(s, st, c, shown, base, t0, failed);
     if (riskOf(c.name, shown, s.cwd) !== 'low' && !st.closed) {
       if (!(await ask(st, s, c.name, shown))) return failed(st.interrupted || st.closed ? 'Stopped' : 'Declined from Agent Office.', st.interrupted);
     }
@@ -168,8 +192,26 @@ export function createLocal(deps) {
     const r = await st.tools.run(c.name, shown);
     if (st.interrupted || st.closed) return failed('Stopped', true);
     if (!r.ok) return failed(r.text);
-    emit(st, () => events.hook(s, { hook_event_name: 'PostToolUse', ...base, duration_ms: Date.now() - t0 }));
-    return r.text;
+    const back = emit(st, () => events.hook(s, { hook_event_name: 'PostToolUse', ...base, duration_ms: Date.now() - t0 }));
+    return noteOf(back) ? r.text + '\n\n' + noteOf(back) : r.text;
+  }
+
+  // An office tool: the office's own, so it needs no approval (office_ask asks the user itself). Not offered without deps.officeTools.
+  async function officeCall(s, st, c, input, base, t0, failed) {
+    if (!office) return failed('The office tools are not available.');
+    let text;
+    try {
+      if (c.name === 'office_inbox') text = await office.inbox(s);
+      else if (c.name === 'office_room') text = await office.room(s);
+      else if (c.name === 'office_room_update') text = await office.roomUpdate(s, input);
+      else {
+        if (typeof input.question !== 'string' || !input.question.trim()) return failed('question must be text.');
+        text = await office.ask(s, input.question.slice(0, 1000));
+      }
+    } catch (e) { return failed(textOf(e)); }
+    if (st.interrupted || st.closed) return failed('Stopped', true);
+    const back = emit(st, () => events.hook(s, { hook_event_name: 'PostToolUse', ...base, duration_ms: Date.now() - t0 }));
+    return noteOf(back) ? String(text) + '\n\n' + noteOf(back) : String(text);
   }
 
   function finishTurn(s, st, last, failure) {
@@ -182,7 +224,6 @@ export function createLocal(deps) {
     } else if (failure) {
       events.stream(s, { type: 'result', subtype: 'success', is_error: true, result: failure, total_cost_usd: 0 });
     } else {
-      events.hook(s, { hook_event_name: 'Stop', last_assistant_message: last });
       events.stream(s, { type: 'result', subtype: 'success', is_error: false, result: last, total_cost_usd: 0 });
     }
     const next = st.queue.shift();
@@ -192,6 +233,7 @@ export function createLocal(deps) {
   return {
     kind: deps.kind,
     label: spec.label,
+    canResume: false, // a local conversation lives in memory: Reopen starts a fresh session in the same folder
 
     async readiness() {
       let ids;

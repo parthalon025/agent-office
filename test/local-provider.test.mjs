@@ -21,7 +21,7 @@ async function until(fn, what, ms = 4000) {
 }
 
 // The office side: a tracker, the events, and the holds without sockets (as server.mjs holds them).
-async function rig(script, { models, kind = 'lmstudio', stallMs } = {}) {
+async function rig(script, { models, kind = 'lmstudio', stallMs, officeTools } = {}) {
   const fake = await startFakeOpenAI({ script, models });
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-local-'));
   const cwd = path.join(base, 'work');
@@ -42,7 +42,7 @@ async function rig(script, { models, kind = 'lmstudio', stallMs } = {}) {
     o.holds.delete(id); o.tracker.settle(h.s.uid, id); o.provider.answer(h.s, { id, suggestions: h.suggestions }, d || {});
     return true;
   };
-  o.provider = createLocal({ events: o.events, kind, baseUrl: fake.url, stallMs });
+  o.provider = createLocal({ events: o.events, kind, baseUrl: fake.url, stallMs, officeTools });
   o.session = () => o.tracker.newSession({ uid: 'o1', officeId: 'o1', name: 'bot', cwd, headless: true, status: 'starting', provider: kind });
   // What the server does for a user message: the provider call, then the tracker marks the turn.
   o.say = (s, text) => { o.provider.message(s, { text }); o.tracker.startTurn(s, text); };
@@ -265,4 +265,83 @@ test('attachments are refused, because local agents take text only', async () =>
     o.provider.open(s, { model: 'm' });
     assert.throws(() => o.provider.message(s, { text: 'x', attachments: [{ name: 'a.png' }] }), (e) => e.status === 415);
   } finally { await o.done(); }
+});
+
+test('a message sent during a turn reaches the model: on a tool result, and as a new message when the turn would end', async () => {
+  const o = await rig([
+    { toolCalls: [{ name: 'LS', args: {} }], delayMs: 150 },
+    { text: 'first answer', delayMs: 150 },
+    { text: 'second answer' },
+  ]);
+  try {
+    const s = o.session();
+    o.provider.open(s, { model: 'm' });
+    o.say(s, 'start');
+    await until(() => o.fake.requests.length === 1, 'the first model call');
+    s.inbox.push({ t: Date.now(), text: 'also check the tests' }); // the server queues a message while the turn runs
+    await until(() => o.fake.requests.length === 2, 'the model call after the tool');
+    s.inbox.push({ t: Date.now(), text: 'and run them' }); // a second message while the model writes its answer
+    await until(() => s.status === 'idle' && last(s) === 'second answer', 'the turn to go on and end');
+    assert.match(o.fake.requests[1].messages.at(-1).content, /Message from the user in Agent Office:\n- also check the tests/);
+    const third = o.fake.requests[2].messages.at(-1);
+    assert.equal(third.role, 'user');
+    assert.match(third.content, /and run them/);
+  } finally { await o.done(); }
+});
+
+test('the office tools run in-process, need no approval, and are offered only when the server gives them', async () => {
+  const calls = [];
+  const officeTools = {
+    inbox: async (s) => { calls.push(['inbox', s.uid]); return 'No new messages.'; },
+    ask: async (s, q) => { calls.push(['ask', q]); return 'Yes.'; },
+    room: async () => 'Room: lab',
+    roomUpdate: async (s, a) => { calls.push(['update', a]); throw Object.assign(new Error('Give notes_append, notes_replace or pin.'), { status: 400 }); },
+  };
+  const o = await rig([
+    { toolCalls: [{ name: 'office_ask', args: { question: 'Deploy now?' } }, { name: 'office_room', args: {} }, { name: 'office_room_update', args: {} }] },
+    { text: 'asked' },
+  ], { officeTools });
+  try {
+    const s = o.session();
+    o.provider.open(s, { model: 'm' });
+    o.say(s, 'ask the owner');
+    await until(() => s.status === 'idle' && last(s) === 'asked', 'the answer');
+    assert.equal(o.holds.size, 0, 'an office tool is not a permission request');
+    const names = o.fake.requests[0].tools.map((t) => t.function.name);
+    for (const n of ['office_inbox', 'office_ask', 'office_room', 'office_room_update', 'Read']) assert.ok(names.includes(n), n);
+    const back = o.fake.requests[1].messages.filter((m) => m.role === 'tool').map((m) => m.content);
+    assert.deepEqual(back, ['Yes.', 'Room: lab', 'Give notes_append, notes_replace or pin.']);
+    assert.deepEqual(calls, [['ask', 'Deploy now?'], ['update', {}]]);
+    assert.deepEqual(s.calls.map((c) => c.ok), [true, true, false]);
+  } finally { await o.done(); }
+  const bare = await rig([{ text: 'x' }]);
+  try {
+    const s = bare.session();
+    bare.provider.open(s, { model: 'm' });
+    bare.say(s, 'hi');
+    await until(() => s.status === 'idle', 'the turn');
+    assert.equal(bare.fake.requests[0].tools.some((t) => /^office_/.test(t.function.name)), false);
+  } finally { await bare.done(); }
+});
+
+test('office_ask waits for the user and an interrupt frees it', async () => {
+  let release;
+  const officeTools = { inbox() {}, room() {}, roomUpdate() {}, ask: () => new Promise((r) => { release = r; }) };
+  const o = await rig([{ toolCalls: [{ name: 'office_ask', args: { question: 'ok?' } }] }, { text: 'never' }], { officeTools });
+  try {
+    const s = o.session();
+    o.provider.open(s, { model: 'm' });
+    o.say(s, 'go');
+    await until(() => release, 'the question');
+    o.provider.interrupt(s);
+    o.tracker.interrupt(s);
+    release({ text: 'No.' }.text); // the server drops the question, which frees the waiting call
+    await until(() => s.status === 'idle', 'the stop');
+    assert.equal(s.error, null);
+    assert.equal(o.fake.requests.length, 1);
+  } finally { await o.done(); }
+});
+
+test('a local agent says it cannot resume a past session', () => {
+  assert.equal(createLocal({ events: {}, kind: 'ollama' }).canResume, false);
 });
