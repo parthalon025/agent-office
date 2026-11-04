@@ -8,9 +8,12 @@
    - A small wall display on the left wall shows the room's numbers: sessions, tool calls, tokens, cost.
    - A door on the left wall opens the "add or remove agents" dialog. It swings open when an agent comes in
      or leaves (api.doorPulse).
+   Also a chalk ledge, a marker tray, a warm lamp and two plants. api.inventory(roomId) lists all of it in words.
    Colors and fonts come from the DS tokens. The engine draws the room; this file repaints the board
    pictures, adds the decor, and moves the camera on request. The engine builds walls 5.2 high with the
-   room sign at 4.45, where the cable tray covers it, so the walls go up to WALL_H and the sign moves up. */
+   room sign at 4.45, where the cable tray covers it, so the walls go up to WALL_H and the sign moves up.
+   The engine rebuilds a floor when a bot joins or leaves and when the theme changes. The per-frame hook
+   sees that and puts the decor back before the frame draws. */
 (function () {
   'use strict';
   var T = window.THREE;
@@ -18,13 +21,15 @@
 
   var WALL_H = 7, SIGN_Y = 6.15;
   function isWall(m) { return m.isMesh && m.geometry && m.geometry.type === 'BoxGeometry' && m.geometry.parameters && Math.abs(m.geometry.parameters.height - 5.2) < 0.001; }
+  function isBackWall(m) { return isWall(m) && m.geometry.parameters.depth < 0.5 && m.geometry.parameters.width > 1; }
+  function isSideWall(m) { return isWall(m) && m.geometry.parameters.width < 0.5; }   // the solid left wall of the first room; other rooms have a glass divider there
   function isSign(m) { return m.isMesh && m.geometry && m.geometry.type === 'PlaneGeometry' && m.geometry.parameters && m.geometry.parameters.width === 4.8 && m.geometry.parameters.height === 1.2; }
   function isBoard(m) { return m.isMesh && m.geometry && m.geometry.type === 'PlaneGeometry' && m.geometry.parameters && m.geometry.parameters.width === 4 && m.geometry.parameters.height === 2.5; }
-  function isRack(m) { return m.isMesh && m.geometry && m.geometry.type === 'BoxGeometry' && m.geometry.parameters && m.geometry.parameters.width === 1.3 && m.geometry.parameters.height === 3.2; }
-  function cssMs(name, fallback) { var v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--' + name)); return isFinite(v) && v > 0 ? v : fallback; }
+  function cssNum(name, fallback) { var v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--' + name)); return isFinite(v) && v > 0 ? v : fallback; }
   function easeInOut(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
-  function clip(t, n) { t = String(t || ''); return t.length > n ? t.slice(0, n - 1) + '…' : t; }
-  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  function noop() {}
+  function none() { return null; }
+  function empty() { return []; }
 
   // Short names for tools on the board: mcp__plugin_playwright_playwright__browser_click -> click
   function toolWord(name) {
@@ -112,7 +117,7 @@
   function seeded(seed) { var s = seed; return function () { s = (s * 9301 + 49297) % 233280; return s / 233280; }; }
 
   // ---------- the blackboard: slate, wood frame, chalk ----------
-  function paint(c, w, h, d, tok, f) {
+  function paint(c, w, h, d, tok, f, look) {
     var sans = f.sans || 'sans-serif', mono = f.mono || 'monospace';
     var col = function (k, fb) { return tok[k] || fb || '#888'; };
     var slate = mix(col('scene-dark'), col('status-working'), 0.12);
@@ -147,14 +152,16 @@
     var dot = function (x, y, status) { c.fillStyle = tone(status); c.globalAlpha = 0.95; c.beginPath(); c.arc(x, y, 7, 0, 7); c.fill(); c.globalAlpha = 1; };
     var X0 = F + 30, X1 = w - F - 30, W2 = X1 - X0, y = F + 24;
     c.textBaseline = 'top'; c.textAlign = 'left';
-    // pinned note from an agent
+    // pinned note from an agent: a paper card, so the text is dark in every theme (ink is light at night)
     if (d.pin) {
       c.font = '500 24px ' + sans;
-      var msg = wrap(c, 'Note from ' + d.pin.by + ': ' + d.pin.text, W2 - 88).slice(0, 2), ch = 26 + msg.length * 30;
-      c.fillStyle = col('bubble'); c.globalAlpha = 0.96; rr(c, X0, y, W2, ch, 12); c.fill(); c.globalAlpha = 1;
+      var pw = W2 - 88, lines = wrap(c, 'Note from ' + d.pin.by + ': ' + d.pin.text, pw);
+      var msg = lines.slice(0, 2).map(function (l, i) { return clipW(c, i === 1 && lines.length > 2 ? l + '…' : l, pw); }), ch = 26 + msg.length * 30;
+      // at night the composer blooms a lit white card and the text washes out: a shade darker keeps it sharp
+      c.fillStyle = look === 'night' ? mix(col('bubble'), slate, 0.3) : col('bubble'); c.globalAlpha = 0.96; rr(c, X0, y, W2, ch, 12); c.fill(); c.globalAlpha = 1;
       c.fillStyle = col('status-error'); c.beginPath(); c.arc(X0 + 30, y + 30, 9, 0, 7); c.fill();
       c.fillStyle = mix(col('status-error'), col('bubble'), 0.55); c.beginPath(); c.arc(X0 + 27, y + 27, 3, 0, 7); c.fill();
-      c.fillStyle = col('ink'); c.font = '500 24px ' + sans;
+      c.fillStyle = col('scene-dark'); c.font = '500 24px ' + sans;
       msg.forEach(function (l, i) { c.fillText(l, X0 + 62, y + 13 + i * 30); });
       y += ch + 14;
     }
@@ -220,9 +227,10 @@
   }
 
   // ---------- the whiteboard: bright surface, thin metal frame, marker ----------
+  // The face is bubble in every theme, so the marker is scene-dark based: ink is light at night.
   function paintNotes(c, w, h, text, tok, f) {
     var col = function (k, fb) { return tok[k] || fb || '#888'; }, sans = f.sans || 'sans-serif';
-    var metal = col('scene-metal'), face = col('bubble'), ink = mix(col('ink'), col('status-finished'), 0.3);
+    var metal = col('scene-metal'), face = col('bubble'), ink = mix(col('scene-dark'), col('status-finished'), 0.3);
     c.fillStyle = mix(metal, col('scene-dark'), 0.25); rr(c, 0, 0, w, h, 14); c.fill();
     c.fillStyle = mix(metal, col('bubble'), 0.4); rr(c, 3, 3, w - 6, h - 6, 12); c.fill();
     var g = c.createLinearGradient(0, 0, w, h);
@@ -230,7 +238,7 @@
     c.fillStyle = g; rr(c, 14, 14, w - 28, h - 28, 6); c.fill();
     // ghosts of old marker
     var rnd = seeded(11);
-    c.strokeStyle = col('ink'); c.lineCap = 'round'; c.lineWidth = 7;
+    c.strokeStyle = col('scene-dark'); c.lineCap = 'round'; c.lineWidth = 7;
     for (var i = 0; i < 4; i++) { var gx = 60 + rnd() * (w - 200), gy = 150 + rnd() * (h - 240); c.globalAlpha = 0.035; c.beginPath(); c.moveTo(gx, gy); c.lineTo(gx + 40 + rnd() * 90, gy + rnd() * 16 - 8); c.stroke(); }
     c.globalAlpha = 1;
     c.textBaseline = 'top'; c.textAlign = 'left';
@@ -238,7 +246,7 @@
     c.strokeStyle = ink; c.lineWidth = 4; c.globalAlpha = 0.75; c.beginPath(); c.moveTo(52, 92);
     for (var x = 52; x < 230; x += 18) c.lineTo(x + 18, 92 + Math.sin(x * 0.09) * 2);
     c.stroke(); c.globalAlpha = 1;
-    if (!String(text || '').trim()) { c.fillStyle = col('muted'); c.font = '500 30px ' + sans; c.fillText('Click to write a reminder.', 52, 128); return; }
+    if (!String(text || '').trim()) { c.fillStyle = mix(col('scene-dark'), face, 0.4); c.font = '500 30px ' + sans; c.fillText('Click to write a reminder.', 52, 128); return; }
     c.fillStyle = ink; c.font = '500 32px ' + sans;
     wrap(c, text, w - 120).slice(0, 10).forEach(function (l, i) { c.globalAlpha = 0.95; c.fillText(l, 52, 124 + i * 40); c.globalAlpha = 0.25; c.fillText(l, 52.7, 124.6 + i * 40); c.globalAlpha = 1; });
   }
@@ -286,34 +294,60 @@
   }
 
   // ---------- hint pill (a sprite that fades in on hover) ----------
+  var HINT_W = 640, HINT_H = 140, HINT_FONT = 50;
   function hintTex(text, tok, f) {
-    var cv = document.createElement('canvas'); cv.width = 640; cv.height = 140;
+    var cv = document.createElement('canvas'); cv.width = HINT_W; cv.height = HINT_H;
     var c = cv.getContext('2d'), sans = f.sans || 'sans-serif';
     c.fillStyle = tok.bubble || '#fff'; rr(c, 6, 10, 628, 116, 58); c.fill();
     c.strokeStyle = tok.accent || tok.emphasis || '#2f6fe4'; c.lineWidth = 6; rr(c, 6, 10, 628, 116, 58); c.stroke();
-    c.fillStyle = tok.ink || '#222'; c.font = '600 50px ' + sans; c.textAlign = 'center'; c.textBaseline = 'middle';
+    c.fillStyle = tok['scene-dark'] || '#2b323b'; c.font = '600 ' + HINT_FONT + 'px ' + sans; c.textAlign = 'center'; c.textBaseline = 'middle';
     c.fillText(text, 320, 70);
     var t = new T.CanvasTexture(cv); t.encoding = T.sRGBEncoding; return t;
   }
 
+  // What board.js adds to a lab room, in words, for the page to tell the server (api.inventory).
+  function inventoryList(plants) {
+    var l = [
+      'blackboard with what the agents do: plan, browser steps, last steps, the repository and a pinned note',
+      'chalk ledge with two pieces of chalk',
+      "whiteboard with the user's notes and a marker tray",
+      'stats display on the left wall: sessions, tool calls, tokens and cost',
+      'door with an Agents sign on the left wall',
+      'warm lamp (lit at night)'
+    ];
+    if (plants) l.push(plants === 1 ? 'one plant' : plants === 2 ? 'two plants' : plants + ' plants');
+    return l;
+  }
+
   // Attach boards to a mounted office.
   // o: { room(roomId) -> info, tree(root) -> Promise, note(roomId) -> text, stats(roomId) -> numbers, pin(roomId) -> { text, by },
-  //      onFocus(roomId, kind), onBlur(), onDoor(roomId) }
+  //      onFocus(roomId, kind: 'board' | 'notes' | 'stats'), onBlur(), onDoor(roomId) }
   function attach(office, o) {
-    var ins = office.inspect && office.inspect(), st = ins && ins.stage;
-    if (!st) return { refresh: function () {}, blur: function () {}, dispose: function () {}, doorPulse: function () {}, rooms: function () { return []; } };
-    var boards = [];      // blackboards: { kind:'board', mesh, roomId, tex, canvas }
+    o = o || {};
+    var ins0 = null;
+    try { ins0 = office && office.inspect && office.inspect(); } catch (x) { ins0 = null; }
+    var st = ins0 && ins0.stage;
+    if (!st) return { refresh: noop, blur: noop, focused: none, kind: none, flying: function () { return false; }, rect: none, dataOf: none, doorPulse: noop, rooms: empty, inventory: empty, dispose: noop };
+    var K = st.K;
+    var boards = [];      // blackboards: { kind:'board', mesh, roomId, tex, canvas, ... }
     var notes = [];       // whiteboards: { kind:'notes', ... }
     var statsList = [];   // wall displays: { kind:'stats', ... }
     var doors = [];       // doors: { kind:'door', ... }
-    var decorRooms = [];  // room groups that have decor
+    var decorRooms = [];  // { rg, roomId, items, added, inv, lamp, board } for each room group that has decor
+    var pending = {};     // roomId -> { dir, at, t }: a door pulse that waits for its door (the floor is being rebuilt)
     var trees = {};       // root -> tree
     var focused = null, focusedKind = null, focusedMesh = null, saved = null, dead = false;
-    var lastTok = st.K.tok, skinVersion = 0;
-    var K = st.K;
+    var lastTok = K.tok, skinVersion = 0, lastBots = null, lastFg = null, repaint = false;
 
     function tk(k) { return K.tok[k]; }
     function themed(key, opt) { return K.t(key, opt); }
+    function inScene(m) { var p = m; while (p && p.parent) p = p.parent; return p === st.scene; }
+    // In the scene and not hidden: the engine keeps every floor in the scene and hides all but one,
+    // and the raycaster does not skip hidden objects.
+    function shown(m) { for (var p = m; p; p = p.parent) { if (!p.visible) return false; if (p === st.scene) return true; } return false; }
+    function worldX(m) { return m.getWorldPosition(new T.Vector3()).x; }
+    // The lamp light: no token names a lamp color, so take a warm tint from the tokens.
+    function warm() { return new T.Color(tk('status-waiting')).lerp(new T.Color(tk('bubble')), 0.55); }
     function noNav(obj) { obj.traverse(function (m) { m.userData.noNav = 1; }); return obj; }
     function newTex(w, h) {
       var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
@@ -333,143 +367,188 @@
       var m = new T.Mesh(new T.CylinderGeometry(r, r, len, 14), mat); m.position.set(x, y, z); m.userData.noNav = 1; m.castShadow = true;
       if (parent) parent.add(m); return m;
     }
+    function plantsOk() { var P = window.AgentOffice && window.AgentOffice.office && window.AgentOffice.office.Parts; return !!(P && P.plant); }
     function plantAt(rg, x, z, s) {
-      var P = window.AgentOffice && window.AgentOffice.office && window.AgentOffice.office.Parts;
-      if (!P || !P.plant) return;
-      var g = new T.Group(); g.position.set(x, 0, z); P.plant(K, g, 0, 0, s); noNav(g); rg.add(g);
+      if (!plantsOk()) return null;
+      var g = new T.Group(); g.position.set(x, 0, z); window.AgentOffice.office.Parts.plant(K, g, 0, 0, s); noNav(g); rg.add(g);
+      return g;
     }
 
-    // ----- scan: find the engine's boards and add the decor, once per room -----
+    // The shown floor's group: the engine hides all floors but one, and all of them in the building view.
+    // During the elevator ride to another floor both floors show for a moment: the current one holds its bots.
+    function floorOf(m) { var p = m; while (p && p.parent && p.parent !== st.scene) p = p.parent; return p && p.parent === st.scene ? p : null; }
+    function shownFloor() {
+      var vis = st.scene.children.filter(function (g) { var u = g.userData; return g.visible && u && u.LB != null && u.elev; });
+      if (vis.length < 2) return vis[0] || null;
+      var ins = office.inspect(), b = (ins.bots || []).filter(function (x) { return x && x.g && x.floor === ins.floor; })[0], g = b && floorOf(b.g);
+      return g && vis.indexOf(g) >= 0 ? g : null;
+    }
+    function onShownFloor(m, fg) { return !!fg && floorOf(m) === fg && shown(m); }
+
+    // ----- prune: drop what went with a floor rebuild, and free its GPU textures -----
+    function drop(n) {
+      if (n.tex) n.tex.dispose();
+      (n.own || []).forEach(function (m) { m.dispose(); });
+    }
+    function prune() {
+      function keep(n) { if (inScene(n.mesh)) return true; drop(n); return false; }
+      // a door that swings while its floor is rebuilt: the new door takes the swing over
+      doors.forEach(function (d) { if (d.pulse && !inScene(d.mesh)) pending[d.roomId] = { dir: d.pulse.dir, at: Date.now(), t: d.pulse.t }; });
+      boards = boards.filter(keep); notes = notes.filter(keep); statsList = statsList.filter(keep); doors = doors.filter(keep);
+      decorRooms = decorRooms.filter(function (r) { return inScene(r.rg); });
+    }
+
+    // ----- scan: find the shown floor's lab rooms and add the decor, once per room -----
     function scan() {
-      var floor = office.inspect().floor;
-      var b = office.getBuilding && office.getBuilding();
-      var fl = b && b.floors.filter(function (f) { return f.id === floor; })[0];
-      if (!fl) return;
-      // boards of the shown floor, left to right, match its rooms in order
-      var found = [];
-      st.scene.traverse(function (m) {
-        if (!isBoard(m)) return;
-        var p = m.parent, vis = true;
-        while (p) { if (!p.visible) { vis = false; break; } p = p.parent; }
-        if (vis) found.push(m);
+      prune();
+      var ins = office.inspect(), fg = shownFloor();
+      lastBots = ins.bots; lastFg = fg;
+      var b = fg && office.getBuilding && office.getBuilding();
+      var fl = b && b.floors.filter(function (f) { return f.id === ins.floor; })[0];
+      if (fl) {
+        // the engine lays the rooms out left to right in building order; each room group has a back wall
+        var rgs = fg.children.filter(function (c) { return c.isGroup && c.children.some(isBackWall); });
+        rgs.sort(function (a, c) { return a.position.x - c.position.x; });
+        if (rgs.length === fl.rooms.length) fl.rooms.forEach(function (r, i) { if (r.type === 'lab') decorate(rgs[i], r.id); });
+      }
+      // the item that is open now came back with the rebuild: follow it
+      if (focused && focusedMesh && !inScene(focusedMesh)) {
+        var it = allItems().filter(function (x) { return x.roomId === focused && x.kind === focusedKind; })[0];
+        if (it) focusedMesh = it.mesh;
+      }
+      // a door pulse that came while its floor was being rebuilt
+      Object.keys(pending).forEach(function (id) {
+        var p = pending[id];
+        if (Date.now() - p.at > 3000) { delete pending[id]; return; }
+        var d = liveDoor(id);
+        if (d) { delete pending[id]; startPulse(d, p.dir, p.t); }
       });
-      found.sort(function (a, b2) { return a.getWorldPosition(new T.Vector3()).x - b2.getWorldPosition(new T.Vector3()).x; });
-      var rooms = fl.rooms.filter(function (r) { return r.type === 'lab'; });
-      if (found.length !== rooms.length) return;   // building view or a rebuild in progress
+    }
+
+    function decorate(rg, id) {
+      var dec = decorRooms.filter(function (d) { return d.rg === rg; })[0];
+      if (dec) {
+        if (dec.roomId !== id) { dec.roomId = id; dec.items.forEach(function (x) { x.roomId = id; }); }
+        return;
+      }
+      var m = rg.children.filter(isBoard)[0];
+      if (!m) return;
+      var added = [], items = [], raised = [];   // raised: [mesh, y, scale y] to put back on dispose
       // taller walls, and the room sign above the cable tray
-      found.forEach(function (m) {
-        var rg = m.parent;
-        rg.children.forEach(function (c) {
-          if (isWall(c) && !c.userData.tall) { c.userData.tall = 1; c.scale.y = WALL_H / 5.2; c.position.y = WALL_H / 2; c.updateMatrix(); c.updateMatrixWorld(true); }
-          if (isSign(c) && !c.userData.moved) { c.userData.moved = 1; c.position.y = SIGN_Y; c.updateMatrix(); c.updateMatrixWorld(true); }
-        });
+      rg.children.forEach(function (c) {
+        if (isWall(c) && !c.userData.tall) { raised.push([c, c.position.y, c.scale.y]); c.userData.tall = 1; c.scale.y = WALL_H / 5.2; c.position.y = WALL_H / 2; c.updateMatrix(); c.updateMatrixWorld(true); }
+        if (isSign(c) && !c.userData.moved) { raised.push([c, c.position.y, c.scale.y]); c.userData.moved = 1; c.position.y = SIGN_Y; c.updateMatrix(); c.updateMatrixWorld(true); }
       });
-      found.forEach(function (m, i) {
-        var id = rooms[i].id, have = boards.filter(function (x) { return x.mesh === m; })[0];
-        if (have) { have.roomId = id; return; }
-        var t = newTex(1024, 640);
-        m.material.map = t.tex; m.material.emissive = new T.Color(0xffffff); m.material.emissiveMap = t.tex; m.material.emissiveIntensity = 0.55; m.material.needsUpdate = true;
-        m.userData.officeBoard = id;
-        var bd = { kind: 'board', mesh: m, roomId: id, tex: t.tex, canvas: t.canvas, sig: '', mat: m.material, base: 0.55, hov: 0.85, g: 0, tgt: 0, hit: [m], hint: 'Open the overview' };
-        m.userData.item = bd; boards.push(bd);
-        // a chalk ledge under the blackboard, with two pieces of chalk
-        var ledge = new T.Group(); ledge.position.set(m.position.x, m.position.y - 1.25 - 0.04, m.position.z + 0.1); m.parent.add(ledge);
-        box(3.9, 0.07, 0.2, themed('scene-wood'), 0, 0, 0, ledge);
-        box(0.22, 0.04, 0.05, themed('bubble'), -0.7, 0.055, 0.02, ledge);
-        box(0.14, 0.04, 0.05, themed('bubble'), -0.35, 0.055, 0.0, ledge).rotation.y = 0.5;
-        noNav(ledge);
-      });
-      // a whiteboard left of each blackboard, on the same wall
-      found.forEach(function (m, i) {
-        var id = rooms[i].id, have = notes.filter(function (n) { return n.mesh.parent === m.parent; })[0];
-        if (have) { have.roomId = id; return; }
-        var t = newTex(900, 560);
-        var nm = plane(3.6, 2.24, t.tex, 0.22, 'notes');
-        nm.position.set(m.position.x - 4.1, m.position.y, m.position.z + 0.005);
-        nm.userData.officeNotes = id;
-        m.parent.add(nm);
-        var nd = { kind: 'notes', mesh: nm, roomId: id, tex: t.tex, canvas: t.canvas, sig: null, mat: nm.material, base: 0.22, hov: 0.5, g: 0, tgt: 0, hit: [nm], hint: 'Write notes' };
-        nm.userData.item = nd; notes.push(nd);
-        // marker tray with two markers
-        var tray = new T.Group(); tray.position.set(nm.position.x, nm.position.y - 1.12 - 0.045, nm.position.z + 0.1); m.parent.add(tray);
-        box(2.9, 0.07, 0.2, themed('scene-metal'), 0, 0, 0, tray);
-        box(2.9, 0.1, 0.03, themed('scene-metal'), 0, 0.045, 0.085, tray);
-        var m1 = cyl(0.045, 0.4, themed('status-finished'), -0.5, 0.1, 0.0, tray); m1.rotation.z = Math.PI / 2; m1.rotation.y = 0.12;
-        var m2 = cyl(0.045, 0.4, themed('status-error'), -0.05, 0.1, 0.02, tray); m2.rotation.z = Math.PI / 2; m2.rotation.y = -0.08;
-        [[-0.7, m1], [-0.25, m2]].forEach(function (p) { cyl(0.05, 0.1, themed('ink'), p[0], 0.1, p[1].position.z, tray).rotation.z = Math.PI / 2; });
-        noNav(tray);
-      });
-      // wall display, door, lamp and plants, once per room
-      found.forEach(function (m, i) {
-        var rg = m.parent, id = rooms[i].id, dec = decorRooms.filter(function (d) { return d.rg === rg; })[0];
-        if (dec) { dec.stats.roomId = id; dec.door.roomId = id; return; }
-        var bx = m.position.x, bz = m.position.z, leftX = bx - 8;   // the left wall's inner face (the blackboard stands 8 from it)
-        var lw = new T.Group(); lw.position.set(leftX + 0.02, 0, 0); lw.rotation.y = Math.PI / 2; rg.add(lw);   // local x runs along the wall, toward the back
-        // stats display
-        var sw = 1.5, sh = 1.95, s = newTex(520, Math.round(520 * sh / sw));
-        var sm = plane(sw, sh, s.tex, 0.6, 'stats'); sm.position.set(-4.9, 2.15, 0.03); lw.add(sm);
-        var sd = { kind: 'stats', mesh: sm, roomId: id, tex: s.tex, canvas: s.canvas, sig: null, mat: sm.material, base: 0.6, hov: 0.95, g: 0, tgt: 0, hit: [sm], hint: 'Room stats' };
-        sm.userData.item = sd; statsList.push(sd);
-        // door: frame, leaf, handle, doorway, lit sign
-        var dgx = -2.9, DW = 1.3, DH = 2.1, y0 = 0.06;
-        var dg = new T.Group(); dg.position.set(dgx, 0, 0.03); lw.add(dg);
-        var frameMat = themed('scene-rug'), hit = [];
-        hit.push(box(0.1, DH + 0.2, 0.12, frameMat, -DW / 2 - 0.05, y0 + (DH + 0.1) / 2, 0, dg));
-        hit.push(box(0.1, DH + 0.2, 0.12, frameMat, DW / 2 + 0.05, y0 + (DH + 0.1) / 2, 0, dg));
-        hit.push(box(DW + 0.3, 0.12, 0.12, frameMat, 0, y0 + DH + 0.06, 0, dg));
-        var inner = new T.Mesh(new T.PlaneGeometry(DW, DH), new T.MeshStandardMaterial({ color: new T.Color(tk('scene-dark')).multiplyScalar(0.45), roughness: 1, emissive: new T.Color(tk('status-waiting')), emissiveIntensity: 0 }));
-        inner.position.set(0, y0 + DH / 2, 0.01); inner.userData.noNav = 1; dg.add(inner); hit.push(inner);
-        var pivot = new T.Group(); pivot.position.set(-DW / 2 + 0.02, y0, 0.05); dg.add(pivot);
-        var leafMat = themed('scene-wood', { emissive: new T.Color(tk('status-waiting')), emissiveIntensity: 0 });
-        var leaf = box(DW - 0.04, DH - 0.02, 0.07, leafMat, (DW - 0.04) / 2, (DH - 0.02) / 2, 0, pivot); hit.push(leaf);
-        box(DW - 0.4, 0.8, 0.02, leafMat, (DW - 0.04) / 2, 0.6, 0.045, pivot).castShadow = false;
-        box(DW - 0.4, 0.7, 0.02, leafMat, (DW - 0.04) / 2, 1.5, 0.045, pivot).castShadow = false;
-        var knob = new T.Mesh(new T.SphereGeometry(0.065, 12, 10), themed('scene-metal')); knob.position.set(DW - 0.2, 1.0, 0.1); knob.userData.noNav = 1; pivot.add(knob);
-        var sg = newTex(600, 180), sgm = plane(1.1, 0.33, sg.tex, 0.85, 'doorsign'); sgm.position.set(0, y0 + DH + 0.38, 0.02); dg.add(sgm); hit.push(sgm);
-        // lamp: warm light between the door and the boards; it also glows when an agent comes or goes
-        var lamp = st.lamp(rg, leftX + 2.4, 3.2, 1.2, 0xffc47a, 10);
-        var dr = { kind: 'door', mesh: leaf, roomId: id, tex: sg.tex, canvas: sg.canvas, sig: null, mat: leafMat, base: 0, hov: 0.3, g: 0, tgt: 0, hit: hit, hint: 'Add or remove agents',
-          pivot: pivot, inner: inner, sign: sgm, lamp: lamp, lampBase: null, pulse: null, open: 0 };
-        hit.forEach(function (x) { x.userData.item = dr; });
-        doors.push(dr);
-        lw.updateMatrixWorld(true);
-        // plants: the back-left corner, and right of the blackboard
-        plantAt(rg, leftX + 0.55, bz + 0.6, 0.9);
-        plantAt(rg, bx + 2.45, bz + 0.55, 0.75);
-        decorRooms.push({ rg: rg, stats: sd, door: dr });
-      });
-      function alive(n) { var p = n.mesh; while (p.parent) p = p.parent; return p === st.scene; }
-      notes = notes.filter(alive); boards = boards.filter(alive); statsList = statsList.filter(alive); doors = doors.filter(alive);
-      decorRooms = decorRooms.filter(function (d) { var p = d.rg; while (p.parent) p = p.parent; return p === st.scene; });
+
+      // the blackboard: the engine's board gets our picture (its own picture is freed)
+      var t = newTex(1024, 640), mt = m.material;
+      var orig = { map: mt.map, emissive: mt.emissive ? mt.emissive.clone() : null, emissiveMap: mt.emissiveMap, ei: mt.emissiveIntensity };
+      if (orig.map && orig.map !== t.tex) orig.map.dispose();
+      mt.map = t.tex; mt.emissive = new T.Color(0xffffff); mt.emissiveMap = t.tex; mt.emissiveIntensity = 0.55; mt.needsUpdate = true;
+      var bd = { kind: 'board', mesh: m, roomId: id, tex: t.tex, canvas: t.canvas, sig: '', mat: mt, base: 0.55, hov: 0.85, g: 0, tgt: 0, hit: [m], hint: 'Open the overview', orig: orig };
+      m.userData.item = bd; boards.push(bd); items.push(bd);
+      // a chalk ledge under the blackboard, with two pieces of chalk
+      var ledge = new T.Group(); ledge.position.set(m.position.x, m.position.y - 1.25 - 0.04, m.position.z + 0.1); rg.add(ledge); added.push(ledge);
+      box(3.9, 0.07, 0.2, themed('scene-wood'), 0, 0, 0, ledge);
+      box(0.22, 0.04, 0.05, themed('bubble'), -0.7, 0.055, 0.02, ledge);
+      box(0.14, 0.04, 0.05, themed('bubble'), -0.35, 0.055, 0.0, ledge).rotation.y = 0.5;
+      noNav(ledge);
+
+      // the whiteboard left of the blackboard, on the same wall, clear of the engine's clock
+      var wt = newTex(800, 560);
+      var nm = plane(3.2, 2.24, wt.tex, 0.22, 'notes');
+      nm.position.set(m.position.x - 3.9, m.position.y, m.position.z + 0.005);
+      rg.add(nm); added.push(nm);
+      var nd = { kind: 'notes', mesh: nm, roomId: id, tex: wt.tex, canvas: wt.canvas, sig: null, mat: nm.material, base: 0.22, hov: 0.5, g: 0, tgt: 0, hit: [nm], hint: 'Write notes', own: [nm.material] };
+      nm.userData.item = nd; notes.push(nd); items.push(nd);
+      // marker tray with two markers
+      var tray = new T.Group(); tray.position.set(nm.position.x, nm.position.y - 1.12 - 0.045, nm.position.z + 0.1); rg.add(tray); added.push(tray);
+      box(2.6, 0.07, 0.2, themed('scene-metal'), 0, 0, 0, tray);
+      box(2.6, 0.1, 0.03, themed('scene-metal'), 0, 0.045, 0.085, tray);
+      var m1 = cyl(0.045, 0.4, themed('status-finished'), -0.5, 0.1, 0.0, tray); m1.rotation.z = Math.PI / 2; m1.rotation.y = 0.12;
+      var m2 = cyl(0.045, 0.4, themed('status-error'), -0.05, 0.1, 0.02, tray); m2.rotation.z = Math.PI / 2; m2.rotation.y = -0.08;
+      [[-0.7, m1], [-0.25, m2]].forEach(function (p) { cyl(0.05, 0.1, themed('ink'), p[0], 0.1, p[1].position.z, tray).rotation.z = Math.PI / 2; });
+      noNav(tray);
+
+      // the left wall: stats display, door, lamp
+      var bx = m.position.x, bz = m.position.z, leftX = bx - 8;   // the left wall's inner face (the blackboard stands 8 from it)
+      var lw = new T.Group(); lw.position.set(leftX + 0.02, 0, 0); lw.rotation.y = Math.PI / 2; rg.add(lw); added.push(lw);   // local x runs along the wall, toward the back
+      // stats display: above the front plant on a solid wall; under the rail of a 3-high glass divider
+      var solid = rg.children.some(isSideWall);
+      var sw = 1.5, sh = 1.95, s = newTex(520, Math.round(520 * sh / sw));
+      var sm = plane(sw, sh, s.tex, 0.6, 'stats'); sm.position.set(-4.9, solid ? 2.7 : 1.95, 0.03); lw.add(sm);
+      var sd = { kind: 'stats', mesh: sm, roomId: id, tex: s.tex, canvas: s.canvas, sig: null, mat: sm.material, base: 0.6, hov: 0.95, g: 0, tgt: 0, hit: [sm], hint: 'Room stats', own: [sm.material] };
+      sm.userData.item = sd; statsList.push(sd); items.push(sd);
+      // door: frame, leaf, handle, doorway, lit sign
+      var dgx = -2.9, DW = 1.3, DH = 2.1, y0 = 0.06;
+      var dg = new T.Group(); dg.position.set(dgx, 0, 0.03); lw.add(dg);
+      var frameMat = themed('scene-rug'), hit = [];
+      hit.push(box(0.1, DH + 0.2, 0.12, frameMat, -DW / 2 - 0.05, y0 + (DH + 0.1) / 2, 0, dg));
+      hit.push(box(0.1, DH + 0.2, 0.12, frameMat, DW / 2 + 0.05, y0 + (DH + 0.1) / 2, 0, dg));
+      hit.push(box(DW + 0.3, 0.12, 0.12, frameMat, 0, y0 + DH + 0.06, 0, dg));
+      var inner = new T.Mesh(new T.PlaneGeometry(DW, DH), new T.MeshStandardMaterial({ color: new T.Color(tk('scene-dark')).multiplyScalar(0.45), roughness: 1, emissive: new T.Color(tk('status-waiting')), emissiveIntensity: 0 }));
+      inner.position.set(0, y0 + DH / 2, 0.01); inner.userData.noNav = 1; dg.add(inner); hit.push(inner);
+      var pivot = new T.Group(); pivot.position.set(-DW / 2 + 0.02, y0, 0.05); dg.add(pivot);
+      var leafMat = themed('scene-wood', { emissive: new T.Color(tk('status-waiting')), emissiveIntensity: 0 });
+      var leaf = box(DW - 0.04, DH - 0.02, 0.07, leafMat, (DW - 0.04) / 2, (DH - 0.02) / 2, 0, pivot); hit.push(leaf);
+      box(DW - 0.4, 0.8, 0.02, leafMat, (DW - 0.04) / 2, 0.6, 0.045, pivot).castShadow = false;
+      box(DW - 0.4, 0.7, 0.02, leafMat, (DW - 0.04) / 2, 1.5, 0.045, pivot).castShadow = false;
+      var knob = new T.Mesh(new T.SphereGeometry(0.065, 12, 10), themed('scene-metal')); knob.position.set(DW - 0.2, 1.0, 0.1); knob.userData.noNav = 1; pivot.add(knob);
+      var sg = newTex(600, 180), sgm = plane(1.1, 0.33, sg.tex, 0.85, 'doorsign'); sgm.position.set(0, y0 + DH + 0.38, 0.02); dg.add(sgm); hit.push(sgm);
+      // lamp: warm light between the door and the boards; it also glows when an agent comes or goes
+      var lamp = st.lamp(rg, leftX + 2.4, 3.2, 1.2, warm().getHex(), 10);
+      var dr = { kind: 'door', mesh: leaf, roomId: id, tex: sg.tex, canvas: sg.canvas, sig: null, mat: leafMat, base: 0, hov: 0.3, g: 0, tgt: 0, hit: hit, hint: 'Add or remove agents',
+        pivot: pivot, inner: inner, sign: sgm, lamp: lamp, lampBase: null, pulse: null, open: 0, own: [inner.material, sgm.material] };
+      hit.forEach(function (x) { x.userData.item = dr; });
+      doors.push(dr); items.push(dr);
+      lw.updateMatrixWorld(true);
+      // plants: the back-left corner, and right of the blackboard
+      var nPlants = 0;
+      [plantAt(rg, leftX + 0.55, bz + 0.6, 0.9), plantAt(rg, bx + 2.45, bz + 0.55, 0.75)].forEach(function (g) { if (g) { added.push(g); nPlants++; } });
+      decorRooms.push({ rg: rg, roomId: id, items: items, added: added, inv: inventoryList(nPlants), lamp: lamp, board: bd, raised: raised });
+      repaint = true;
     }
     function allItems() { return boards.concat(notes, statsList, doors); }
+    function liveDoor(id) { return doors.filter(function (x) { return x.roomId === id && inScene(x.mesh); })[0]; }
 
     function statsOf(roomId) {
       var s = o.stats ? o.stats(roomId) : null;
-      return Object.assign(statsFrom(o.room(roomId) || {}), s || {});
+      return Object.assign(statsFrom((o.room && o.room(roomId)) || {}), s || {});
     }
     function skin() {   // colors that read tokens and are not themed by the engine
       doors.forEach(function (d) {
         d.mat.emissive.set(tk('status-waiting'));
         d.inner.material.color.set(tk('scene-dark')).multiplyScalar(0.45);
+        // the engine set the lamps for the new theme: a swing in progress glows from the new level
+        if (d.pulse) d.lampBase = d.lamp.intensity; else d.lamp.color.copy(warm());
       });
+    }
+    function dropHints() {
+      Object.keys(hints).forEach(function (k) { hints[k].dispose(); });
+      hints = {}; hintSize = null;
+      if (hintSprite) { hintSprite.material.map = null; hintSprite.material.opacity = 0; hintSprite.visible = false; hintTarget = 0; }
+      hoverDirty = true;   // the next frame builds the hint again in the new colors
     }
     function refresh() {
       if (dead) return;
       var themeChanged = lastTok !== K.tok;
-      if (themeChanged) { lastTok = K.tok; skinVersion++; hints = {}; }
+      if (themeChanged) { lastTok = K.tok; skinVersion++; dropHints(); }
       scan();
       if (themeChanged) skin();
       var now = Date.now();
       boards.forEach(function (bd) {
-        var info = o.room(bd.roomId);
+        var info = (o.room && o.room(bd.roomId)) || {};
         var root = info.place && info.place.root;
-        if (root && !(root in trees) && o.tree) { trees[root] = null; o.tree(root).then(function (t) { trees[root] = t; refresh(); }, function () { trees[root] = { total: 0, entries: [] }; }); }
+        if (root && !(root in trees) && o.tree) {
+          trees[root] = null;
+          var pr = o.tree(root);
+          if (pr && pr.then) pr.then(function (t) { trees[root] = t; refresh(); }, function () { trees[root] = { total: 0, entries: [] }; });
+        }
         var d = boardData(info, root ? trees[root] : null, o.pin ? o.pin(bd.roomId) : null);
         var sig = skinVersion + K.look + JSON.stringify(d);
         if (sig === bd.sig) return;
         bd.sig = sig; bd.data = d;
-        paint(bd.canvas.getContext('2d'), bd.canvas.width, bd.canvas.height, d, K.tok, K.f || {});
+        paint(bd.canvas.getContext('2d'), bd.canvas.width, bd.canvas.height, d, K.tok, K.f || {}, K.look);
         bd.tex.needsUpdate = true;
       });
       notes.forEach(function (n) {
@@ -495,18 +574,33 @@
         paintSign(d.canvas.getContext('2d'), d.canvas.width, d.canvas.height, n, K.tok, K.f || {});
         d.tex.needsUpdate = true;
       });
+      repaint = false;
     }
 
     // ----- the door: swing open and shut for an agent who comes in or leaves -----
     var OPEN_ANGLE = 1.25;
-    function doorPulse(roomId, dir) {
-      var d = doors.filter(function (x) { return x.roomId === roomId; })[0];
-      if (!d) return;
-      var D = cssMs('duration-camera', 600);
-      if (d.pulse) { d.pulse.t = Math.min(d.pulse.t, D); d.pulse.dir = dir; }   // already moving: hold it open a little longer
-      else { d.pulse = { t: 0, dir: dir, D: D, H: D * 1.6 }; d.lampBase = d.lamp.intensity; }
+    function startPulse(d, dir, t0) {
+      var p = d.pulse;
+      if (p) {
+        if (p.t > p.D + p.H) p.t = p.D * (1 - (p.t - p.D - p.H) / p.D);   // closing: open again from where the leaf is now
+        else p.t = Math.min(p.t, p.D);   // opening or open: hold it open a little longer
+        p.dir = dir;
+      } else {
+        var D = cssNum('duration-camera', 600);
+        d.pulse = { t: t0 || 0, dir: dir, D: D, H: D * 1.6 }; d.lampBase = d.lamp.intensity;
+      }
       var c = new T.Color(tk(dir === 'out' ? 'status-waiting' : 'status-working'));
       d.inner.material.emissive.copy(c); d.lamp.color.copy(c);
+    }
+    // The engine rebuilds the floor when a bot joins or leaves, so scan first and swing the new door.
+    // No door yet (the floor is hidden or still being built): the swing waits up to 3 s for it.
+    function doorPulse(roomId, dir) {
+      if (dead) return;
+      dir = dir === 'out' ? 'out' : 'in';
+      try { scan(); } catch (x) { /* the door may still be found */ }
+      var d = liveDoor(roomId);
+      if (d) startPulse(d, dir, 0);
+      else pending[roomId] = { dir: dir, at: Date.now(), t: 0 };
     }
     function stepDoors(dt) {
       doors.forEach(function (d) {
@@ -517,7 +611,7 @@
           if (p.t < D) a = easeInOut(p.t / D);
           else if (p.t < D + H) a = 1;
           else if (p.t < 2 * D + H) a = 1 - easeInOut((p.t - D - H) / D);
-          else { d.pulse = null; a = 0; d.lamp.intensity = d.lampBase; d.lamp.color.set(0xffc47a); }
+          else { d.pulse = null; a = 0; d.lamp.intensity = d.lampBase; d.lamp.color.copy(warm()); }
         }
         if (p || d.open !== 0) {
           d.open = a;
@@ -530,41 +624,68 @@
     }
 
     // ----- hover: glow, pointer cursor and a hint pill -----
-    var cv = st.r.domElement, ray = new T.Raycaster(), ndc = new T.Vector2(), down = null;
-    var hints = {}, hintSprite = null, hintTarget = 0, hovered = null, hoverDirty = false, px = 0, py = 0;
+    var cv = st.r.domElement, ray = new T.Raycaster(), ndc = new T.Vector2(), down = null, downFg = null;
+    var hints = {}, hintSprite = null, hintTarget = 0, hintPoint = null, hovered = null, hoverDirty = false, px = 0, py = 0, cursorMine = false, hintSize = null;
     function hintFor(text) {
       if (!hints[text]) hints[text] = hintTex(text, K.tok, K.f || {});
       return hints[text];
     }
+    // Only clear the pointer cursor this file set: terminal.js sets it over the monitors.
+    function setCursor(on) {
+      if (on) { if (cv.style.cursor !== 'pointer') cv.style.cursor = 'pointer'; cursorMine = true; }
+      else if (cursorMine) { if (cv.style.cursor === 'pointer') cv.style.cursor = ''; cursorMine = false; }
+    }
+    // The pill has a fixed size on screen: the DS title size, a small gap above the pointer.
+    function placeHint() {
+      if (!hintSprite || !hintPoint) return;
+      var wpp = (st.cam.top - st.cam.bottom) / (st.cam.zoom || 1) / (cv.clientHeight || 1);   // world units per CSS pixel
+      if (!hintSize) hintSize = { px: cssNum('type-title-size', 14) * HINT_H / HINT_FONT, gap: cssNum('space-2', 8) };   // read once per theme, not per frame
+      var hpx = hintSize.px, gap = hintSize.gap;
+      hintSprite.scale.set(hpx * HINT_W / HINT_H * wpp, hpx * wpp, 1);
+      var up = new T.Vector3(0, 1, 0).applyQuaternion(st.cam.quaternion);
+      hintSprite.position.copy(hintPoint).addScaledVector(up, (hpx / 2 + gap) * wpp);
+    }
     function setHint(item, point) {
       if (!hintSprite) {
         hintSprite = new T.Sprite(new T.SpriteMaterial({ transparent: true, depthTest: false, depthWrite: false, opacity: 0 }));
-        hintSprite.renderOrder = 1000; hintSprite.userData.noNav = 1; st.scene.add(hintSprite);
+        hintSprite.renderOrder = 1000; hintSprite.userData.noNav = 1; hintSprite.visible = false;
+        // the engine's UI layer, like its own labels: drawn after bloom and fog
+        hintSprite.layers.set(1); hintSprite.material.fog = false; hintSprite.material.toneMapped = false;
+        st.scene.add(hintSprite);
       }
       if (!item) { hintTarget = 0; return; }
       var tex = hintFor(item.hint);
       if (hintSprite.material.map !== tex) { hintSprite.material.map = tex; hintSprite.material.needsUpdate = true; }
-      var k = 1 / clamp(st.cam.zoom, 0.4, 4);
-      hintSprite.scale.set(3.4 * k, 3.4 * 140 / 640 * k, 1);
-      hintSprite.position.copy(point).add(new T.Vector3(0, 0.55 * k, 0));
+      hintPoint = point.clone();
+      placeHint();
       hintTarget = 1;
     }
+    // The item under the pointer: on the shown floor, with no bot in front of it (then the click is the engine's).
     function pointer(e) {
       var r = cv.getBoundingClientRect();
+      if (!r.width || !r.height) return null;
       ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
       ray.setFromCamera(ndc, st.cam);
-      var meshes = []; allItems().forEach(function (it) { meshes = meshes.concat(it.hit); });
+      var meshes = [];
+      var fg = shownFloor();
+      allItems().filter(function (it) { return onShownFloor(it.mesh, fg); }).forEach(function (it) { meshes = meshes.concat(it.hit); });
+      if (!meshes.length) return null;
       var hit = ray.intersectObjects(meshes, false)[0];
-      return hit ? { item: hit.object.userData.item, point: hit.point } : null;
+      if (!hit || !hit.object.userData.item) return null;
+      var ins = office.inspect(), bl = [];
+      (ins.bots || []).forEach(function (b) { if (b && b.hit && b.floor === ins.floor) bl.push(b.hit); });
+      var bh = bl.length ? ray.intersectObjects(bl, false)[0] : null;
+      if (bh && bh.distance < hit.distance) return null;
+      return { item: hit.object.userData.item, point: hit.point };
     }
     function onMove(e) { px = e.clientX; py = e.clientY; hoverDirty = true; }
-    function onLeave() { hoverDirty = false; hovered = null; allItems().forEach(function (it) { it.tgt = 0; }); setHint(null); cv.style.cursor = ''; }
+    function onLeave() { hoverDirty = false; hovered = null; allItems().forEach(function (it) { it.tgt = 0; }); setHint(null); setCursor(false); }
     function hoverStep() {
       hoverDirty = false;
-      if (focused || fly) { if (hovered) onLeave(); return; }
+      if (focused || fly) { if (hovered || cursorMine) onLeave(); return; }
       var h = pointer({ clientX: px, clientY: py });
       hovered = h && h.item;
-      cv.style.cursor = h ? 'pointer' : '';
+      setCursor(!!h);
       allItems().forEach(function (it) { it.tgt = it === hovered ? 1 : 0; });
       setHint(hovered, h ? h.point : null);
     }
@@ -579,19 +700,14 @@
       if (hintSprite) {
         var op = hintSprite.material.opacity;
         if (op !== hintTarget) { op += (hintTarget - op) * (st.rm ? 1 : Math.min(1, dt * 9)); if (Math.abs(hintTarget - op) < 0.02) op = hintTarget; hintSprite.material.opacity = op; }
-        hintSprite.visible = hintSprite.material.opacity > 0;
+        hintSprite.visible = hintSprite.material.opacity > 0 && !!hintSprite.material.map;
+        if (hintSprite.visible) placeHint();   // the zoom can change under a still pointer
       }
     }
 
     // ----- camera: fly to face the board, and back -----
     var fly = null;
-    st.anim.push(function (dt) {
-      if (dead) return;
-      if (K.tok !== lastTok) refresh();   // the theme changed: repaint at once
-      if (focused && st.goal) st.goal = null;   // the engine must not reframe while a board is open
-      if (hoverDirty) hoverStep();
-      glowStep(dt);
-      stepDoors(dt);
+    function stepFly(dt) {
       if (!fly) return;
       fly.t = Math.min(1, fly.t + dt * 1000 / fly.ms);
       var e = easeInOut(fly.t), tg = st.ctl ? st.ctl.target : st.target;
@@ -599,10 +715,27 @@
       tg.lerpVectors(fly.t0, fly.t1, e);
       st.cam.zoom = fly.z0 + (fly.z1 - fly.z0) * e; st.cam.updateProjectionMatrix();
       if (fly.t >= 1) { var done = fly.done; fly = null; if (done) done(); }
-    });
+    }
+    // Per frame, before the engine draws. A bot joins or leaves (new bot list), the floor or view changes,
+    // or the engine rebuilds the floors (a theme change): scan and paint now, so the decor is in this frame.
+    function frame(dt) {
+      if (dead) return;
+      try {
+        var ins = office.inspect();
+        if (repaint || K.tok !== lastTok || ins.bots !== lastBots || shownFloor() !== lastFg) refresh();
+      } catch (x) { repaint = false; /* the timer tries again */ }
+      try {
+        if (focused && st.goal) st.goal = null;   // the engine must not reframe while a board is open
+        if (hoverDirty) hoverStep();
+        glowStep(dt);
+        stepDoors(dt);
+        stepFly(dt);
+      } catch (x) { /* one bad frame must not stop the office */ }
+    }
+    st.anim.push(frame);
     function flyTo(p1, t1, z1, done) {
       var tg = st.ctl ? st.ctl.target : st.target;
-      var ms = st.rm ? 1 : cssMs('duration-camera', 600) * 1.4;
+      var ms = st.rm ? 1 : cssNum('duration-camera', 600) * 1.4;
       fly = { t: 0, ms: ms, p0: st.cam.position.clone(), p1: p1, t0: tg.clone(), t1: t1, z0: st.cam.zoom, z1: z1, done: done };
     }
     function focus(bd, kind) {
@@ -633,11 +766,13 @@
     }
 
     // clicks (not drags)
-    function onDown(e) { down = [e.clientX, e.clientY]; }
+    function onDown(e) { down = [e.clientX, e.clientY]; downFg = shownFloor(); }
     function onUp(e) {
-      if (!down) return;
+      if (!down || dead) return;
       var moved = Math.hypot(e.clientX - down[0], e.clientY - down[1]); down = null;
       if (moved > 6) return;
+      // the engine handles pointerup first: a click on a floor in the building view shows that floor now
+      if (shownFloor() !== downFg) return;
       if (focused) { if (focusedKind === 'stats' && !fly) blur(); return; }   // the stats view has no page panel: a click on the scene closes it
       var h = pointer(e);
       if (!h) return;
@@ -650,13 +785,58 @@
     cv.addEventListener('pointermove', onMove);
     cv.addEventListener('pointerleave', onLeave);
     window.addEventListener('keydown', onKey);
-    var timer = setInterval(refresh, 1500);
-    refresh();
+    var timer = setInterval(function () {
+      if (st.dead) { dispose(); return; }
+      try { refresh(); } catch (x) { /* next time */ }
+    }, 1500);
+    try { refresh(); } catch (x) { /* the first frame tries again */ }
+
+    // Remove the decor and give the engine's boards their own pictures back.
+    function dispose() {
+      if (dead) return;
+      dead = true; clearInterval(timer);
+      var k = st.anim.indexOf(frame);
+      if (k >= 0) st.anim.splice(k, 1);
+      cv.removeEventListener('pointerdown', onDown); cv.removeEventListener('pointerup', onUp); cv.removeEventListener('pointermove', onMove); cv.removeEventListener('pointerleave', onLeave);
+      window.removeEventListener('keydown', onKey);
+      setCursor(false);
+      if (fly || focused) { fly = null; if (st.ctl) st.ctl.enabled = true; }
+      if (hintSprite) { if (hintSprite.parent) hintSprite.parent.remove(hintSprite); hintSprite.material.dispose(); hintSprite = null; }
+      Object.keys(hints).forEach(function (h) { hints[h].dispose(); }); hints = {};
+      decorRooms.forEach(function (r) {
+        r.added.forEach(function (x) { if (x.parent) x.parent.remove(x); });
+        r.raised.forEach(function (q) { var c = q[0]; c.position.y = q[1]; c.scale.y = q[2]; delete c.userData.tall; delete c.userData.moved; c.updateMatrix(); c.updateMatrixWorld(true); });
+        if (r.lamp) { if (r.lamp.parent) r.lamp.parent.remove(r.lamp); if (st.lamps) st.lamps = st.lamps.filter(function (l) { return l !== r.lamp; }); }
+        var b = r.board, mt = b.mat, og = b.orig;
+        mt.map = og.map; mt.emissiveMap = og.emissiveMap; mt.emissiveIntensity = og.ei; if (og.emissive) mt.emissive = og.emissive; mt.needsUpdate = true;
+        delete b.mesh.userData.item;
+      });
+      allItems().forEach(drop);
+      boards = []; notes = []; statsList = []; doors = []; decorRooms = []; pending = {};
+      focused = null; focusedKind = null; focusedMesh = null; hovered = null;
+    }
+    function inventory(roomId) {
+      if (dead) return [];
+      var dec = decorRooms.filter(function (d) { return d.roomId === roomId && inScene(d.rg); })[0];
+      if (dec) return dec.inv.slice();
+      // a lab room on a floor that is not shown (or not built yet): the decor it gets when its floor shows
+      var b = office.getBuilding && office.getBuilding(), lab = false;
+      ((b && b.floors) || []).forEach(function (f) { (f.rooms || []).forEach(function (r) { if (r.id === roomId && r.type === 'lab') lab = true; }); });
+      return lab ? inventoryList(plantsOk() ? 2 : 0) : [];
+    }
     return {
       refresh: refresh, blur: blur, focused: function () { return focused; }, kind: function () { return focusedKind; },
       flying: function () { return !!fly; },
       doorPulse: doorPulse,
-      rooms: function () { return boards.map(function (b) { return b.roomId; }); },
+      // the decorated rooms of the shown floor, left to right; none in the building view
+      rooms: function () {
+        if (dead) return [];
+        try { scan(); } catch (x) { /* the lists are still good */ }
+        var fg = shownFloor(), list = boards.filter(function (b) { return onShownFloor(b.mesh, fg); });
+        list.sort(function (a, b) { return worldX(a.mesh) - worldX(b.mesh); });
+        return list.map(function (b) { return b.roomId; });
+      },
+      inventory: inventory,
       // the open board's corners on screen, so the page can lay a text box exactly over it
       rect: function () {
         if (!focusedMesh) return null;
@@ -668,14 +848,8 @@
         });
         return { left: Math.min.apply(null, xs), top: Math.min.apply(null, ys), width: Math.max.apply(null, xs) - Math.min.apply(null, xs), height: Math.max.apply(null, ys) - Math.min.apply(null, ys) };
       },
-      dataOf: function (roomId) { var b = boards.filter(function (x) { return x.roomId === roomId; })[0]; return b && b.data; },
-      dispose: function () {
-        dead = true; clearInterval(timer);
-        cv.removeEventListener('pointerdown', onDown); cv.removeEventListener('pointerup', onUp); cv.removeEventListener('pointermove', onMove); cv.removeEventListener('pointerleave', onLeave);
-        window.removeEventListener('keydown', onKey);
-        if (hintSprite && hintSprite.parent) hintSprite.parent.remove(hintSprite);
-        cv.style.cursor = '';
-      }
+      dataOf: function (roomId) { var b = boards.filter(function (x) { return x.roomId === roomId; })[0]; return b ? b.data : null; },
+      dispose: dispose
     };
   }
 
