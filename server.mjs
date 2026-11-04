@@ -386,7 +386,7 @@ function onHook(p) {
       addFeed(s, 'start', `sat down (${p.source || 'startup'})`);
       break;
     case 'UserPromptSubmit':
-      s.status = 'working'; s.prompt = p.prompt || ''; s.note = ''; s.turns += 1; s.error = null;
+      s.status = 'working'; s.prompt = p.prompt || ''; s.note = ''; s.turns += 1; s.error = null; s.promptAt = Date.now();
       out = deliver(s, ev);
       addFeed(s, 'prompt', clip(s.prompt, 140));
       break;
@@ -1114,7 +1114,7 @@ setInterval(() => { for (const c of clients) c.write(': ping\n\n'); }, 20000).un
 // Static files: the page, its scripts, and the Agent Office DS runtime (tokens, bundle, three.js).
 const MIME = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
 const STATIC_FILES = new Map([
-  ['/office.js', 'public/office.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/tokens.css', 'tokens.css'],
+  ['/office.js', 'public/office.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/tokens.css', 'tokens.css'],
   ['/components/bundle.css', 'components/bundle.css'], ['/components/bundle.js', 'components/bundle.js'],
   ['/components/lib/three.min.js', 'components/lib/three.min.js'],
   ['/components/lib/three-orbit-controls.js', 'components/lib/three-orbit-controls.js'],
