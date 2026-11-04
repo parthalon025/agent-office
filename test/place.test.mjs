@@ -88,7 +88,7 @@ test('normPath is idempotent at a drive root', () => {
   assert.equal(normPath(normPath(root)), normPath(root));
   const pl = placeOfSession({ repo: root, root, branch: 'main' }, root);
   assert.equal(normPath(pl.buildingKey), pl.buildingKey);
-  assert.equal(legacyNoteKey(pl).split('|')[0], path.normalize(root).toLowerCase());
+  assert.equal(legacyNoteKey(pl).split('|')[0], path.win32.normalize(root).toLowerCase());
 });
 
 test('room id format is pinned', () => {
@@ -123,7 +123,7 @@ test('one repository has one building name and path whatever the cwd case', { sk
     execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: dir });
     const g = await git.locate(dir.toUpperCase());
     assert.ok(g, 'locate finds the repository');
-    assert.equal(g.repo, path.normalize(dir), 'repo path has the case git stores');
+    assert.equal(g.repo, path.win32.normalize(dir), 'repo path has the case git stores');
     const s = placeOfSession(g, dir.toUpperCase());
     const w = placeOfWorktree(g.repo, (await git.layout(g.repo))[0]);
     assert.equal(s.building, w.building);
@@ -136,14 +136,14 @@ test('recent folders: one form, no duplicates in any case or slash, newest first
   list = addRecent(list, 'E:/pensiv/');
   list = addRecent(list, 'e:\\PENSIV');
   assert.equal(list.length, 1);
-  assert.equal(list[0], path.normalize('e:\\PENSIV'));
+  assert.equal(list[0], path.win32.normalize('e:\\PENSIV'));
   list = addRecent(list, 'E:\\agent-office');
-  assert.deepEqual(list.map((d) => d.toLowerCase()), [path.normalize('E:\\agent-office').toLowerCase(), path.normalize('e:\\pensiv').toLowerCase()]);
+  assert.deepEqual(list.map((d) => d.toLowerCase()), [path.win32.normalize('E:\\agent-office').toLowerCase(), path.win32.normalize('e:\\pensiv').toLowerCase()]);
   assert.equal(addRecent(list, 'E:\\x', 2).length, 2);
 });
 
 test('clean recent folders drops duplicates that were stored in different forms', () => {
   const out = cleanRecent(['E:/pensiv', 'E:\\pensiv\\', 'E:\\other', '', null]);
   assert.equal(out.length, 2);
-  assert.equal(out[1], path.normalize('E:\\other'));
+  assert.equal(out[1], path.win32.normalize('E:\\other'));
 });

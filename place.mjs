@@ -4,7 +4,7 @@
 //   floor     a branch ('No branch' outside git)
 //   room      a worktree folder, or the folder itself outside git
 // Pure functions, no I/O, no timers: safe to import in tests.
-import path from 'node:path';
+import { win32 as path } from 'node:path'; // Windows-first: folder keys follow Windows rules on every host (non-Windows launch is not built)
 import crypto from 'node:crypto';
 
 export const OTHER_NAME = 'Other folders';
