@@ -16,15 +16,12 @@
    sees that and puts the decor back before the frame draws. */
 (function () {
   'use strict';
-  var T = window.THREE;
-  if (!T) return;
+  var T = window.THREE, H = window.OfficeSceneHost;
+  if (!T || !H) return;
 
   var WALL_H = 7, SIGN_Y = 6.15;
-  function isWall(m) { return m.isMesh && m.geometry && m.geometry.type === 'BoxGeometry' && m.geometry.parameters && Math.abs(m.geometry.parameters.height - 5.2) < 0.001; }
-  function isBackWall(m) { return isWall(m) && m.geometry.parameters.depth < 0.5 && m.geometry.parameters.width > 1; }
-  function isSideWall(m) { return isWall(m) && m.geometry.parameters.width < 0.5; }   // the solid left wall of the first room; other rooms have a glass divider there
-  function isSign(m) { return m.isMesh && m.geometry && m.geometry.type === 'PlaneGeometry' && m.geometry.parameters && m.geometry.parameters.width === 4.8 && m.geometry.parameters.height === 1.2; }
-  function isBoard(m) { return m.isMesh && m.geometry && m.geometry.type === 'PlaneGeometry' && m.geometry.parameters && m.geometry.parameters.width === 4 && m.geometry.parameters.height === 2.5; }
+  // The DS geometry finders live in the scene host, the one module that reads the DS stage.
+  var isWall = H.pure.parts.isWall, isBackWall = H.pure.parts.isBackWall, isSideWall = H.pure.parts.isSideWall, isSign = H.pure.parts.isSign, isBoard = H.pure.parts.isBoard;
   function cssNum(name, fallback) { var v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--' + name)); return isFinite(v) && v > 0 ? v : fallback; }
   function easeInOut(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
   function noop() {}
@@ -295,7 +292,8 @@
     var ins0 = null;
     try { ins0 = office && office.inspect && office.inspect(); } catch (x) { ins0 = null; }
     var st = ins0 && ins0.stage;
-    if (!st) return { refresh: noop, blur: noop, focused: none, kind: none, flying: function () { return false; }, rect: none, dataOf: none, doorPulse: noop, rooms: empty, dispose: noop };
+    var ownHost = !o.host, host = o.host || H.attach(office);
+    if (!st || !host) return { refresh: noop, blur: noop, focused: none, kind: none, flying: function () { return false; }, rect: none, dataOf: none, doorPulse: noop, rooms: empty, dispose: noop };
     var K = st.K;
     var boards = [];      // blackboards: { kind:'board', mesh, roomId, tex, canvas, ... }
     var notes = [];       // whiteboards: { kind:'notes', ... }
@@ -305,14 +303,14 @@
     var pending = {};     // roomId -> { dir, at, t }: a door pulse that waits for its door (the floor is being rebuilt)
     var trees = {};       // root -> tree
     var focused = null, focusedKind = null, focusedMesh = null, saved = null, dead = false;
-    var lastTok = K.tok, skinVersion = 0, lastBots = null, lastFg = null, repaint = false;
+    var lastTok = K.tok, skinVersion = 0, repaint = false;
 
     function tk(k) { return K.tok[k]; }
     function themed(key, opt) { return K.t(key, opt); }
-    function inScene(m) { var p = m; while (p && p.parent) p = p.parent; return p === st.scene; }
-    // In the scene and not hidden: the engine keeps every floor in the scene and hides all but one,
-    // and the raycaster does not skip hidden objects.
-    function shown(m) { for (var p = m; p; p = p.parent) { if (!p.visible) return false; if (p === st.scene) return true; } return false; }
+    // Where things are in the scene (shown floor, in the scene or not) is the scene host's to know.
+    function inScene(m) { return host.inScene(m); }
+    function shownFloor() { return host.shownFloor(); }
+    function onShownFloor(m, fg) { return host.onShownFloor(m, fg); }
     function worldX(m) { return m.getWorldPosition(new T.Vector3()).x; }
     // The lamp light: no token names a lamp color, so take a warm tint from the tokens.
     function warm() { return new T.Color(tk('status-waiting')).lerp(new T.Color(tk('bubble')), 0.55); }
@@ -342,17 +340,6 @@
       return g;
     }
 
-    // The shown floor's group: the engine hides all floors but one, and all of them in the building view.
-    // During the elevator ride to another floor both floors show for a moment: the current one holds its bots.
-    function floorOf(m) { var p = m; while (p && p.parent && p.parent !== st.scene) p = p.parent; return p && p.parent === st.scene ? p : null; }
-    function shownFloor() {
-      var vis = st.scene.children.filter(function (g) { var u = g.userData; return g.visible && u && u.LB != null && u.elev; });
-      if (vis.length < 2) return vis[0] || null;
-      var ins = office.inspect(), b = (ins.bots || []).filter(function (x) { return x && x.g && x.floor === ins.floor; })[0], g = b && floorOf(b.g);
-      return g && vis.indexOf(g) >= 0 ? g : null;
-    }
-    function onShownFloor(m, fg) { return !!fg && floorOf(m) === fg && shown(m); }
-
     // ----- prune: drop what went with a floor rebuild, and free its GPU textures -----
     function drop(n) {
       if (n.tex) n.tex.dispose();
@@ -369,16 +356,8 @@
     // ----- scan: find the shown floor's lab rooms and add the decor, once per room -----
     function scan() {
       prune();
-      var ins = office.inspect(), fg = shownFloor();
-      lastBots = ins.bots; lastFg = fg;
-      var b = fg && office.getBuilding && office.getBuilding();
-      var fl = b && b.floors.filter(function (f) { return f.id === ins.floor; })[0];
-      if (fl) {
-        // the engine lays the rooms out left to right in building order; each room group has a back wall
-        var rgs = fg.children.filter(function (c) { return c.isGroup && c.children.some(isBackWall); });
-        rgs.sort(function (a, c) { return a.position.x - c.position.x; });
-        if (rgs.length === fl.rooms.length) fl.rooms.forEach(function (r, i) { if (r.type === 'lab') decorate(rgs[i], r.id); });
-      }
+      // the host matches the shown floor's room groups to the DS rooms by order
+      host.rooms().forEach(function (x) { if (x.room.type === 'lab') decorate(x.rg, x.room.id); });
       // the item that is open now came back with the rebuild: follow it
       if (focused && focusedMesh && !inScene(focusedMesh)) {
         var it = allItems().filter(function (x) { return x.roomId === focused && x.kind === focusedKind; })[0];
@@ -494,7 +473,7 @@
       Object.keys(hints).forEach(function (k) { hints[k].dispose(); });
       hints = {}; hintSize = null;
       if (hintSprite) { hintSprite.material.map = null; hintSprite.material.opacity = 0; hintSprite.visible = false; hintTarget = 0; }
-      hoverDirty = true;   // the next frame builds the hint again in the new colors
+      host.rehover();   // the next frame builds the hint again in the new colors
     }
     function refresh() {
       if (dead) return;
@@ -595,16 +574,11 @@
     }
 
     // ----- hover: glow, pointer cursor and a hint pill -----
-    var cv = st.r.domElement, ray = new T.Raycaster(), ndc = new T.Vector2(), down = null, downFg = null;
-    var hints = {}, hintSprite = null, hintTarget = 0, hintPoint = null, hovered = null, hoverDirty = false, px = 0, py = 0, cursorMine = false, hintSize = null;
+    var cv = host.canvas;
+    var hints = {}, hintSprite = null, hintTarget = 0, hintPoint = null, hovered = null, hintSize = null;
     function hintFor(text) {
       if (!hints[text]) hints[text] = hintTex(text, K.tok, K.f || {});
       return hints[text];
-    }
-    // Only clear the pointer cursor this file set: terminal.js sets it over the monitors.
-    function setCursor(on) {
-      if (on) { if (cv.style.cursor !== 'pointer') cv.style.cursor = 'pointer'; cursorMine = true; }
-      else if (cursorMine) { if (cv.style.cursor === 'pointer') cv.style.cursor = ''; cursorMine = false; }
     }
     // The pill has a fixed size on screen: the DS title size, a small gap above the pointer.
     function placeHint() {
@@ -631,35 +605,16 @@
       placeHint();
       hintTarget = 1;
     }
-    // The item under the pointer: on the shown floor, with no bot in front of it (then the click is the engine's).
-    function pointer(e) {
-      var r = cv.getBoundingClientRect();
-      if (!r.width || !r.height) return null;
-      ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
-      ray.setFromCamera(ndc, st.cam);
-      var meshes = [];
-      var fg = shownFloor();
-      allItems().filter(function (it) { return onShownFloor(it.mesh, fg); }).forEach(function (it) { meshes = meshes.concat(it.hit); });
-      if (!meshes.length) return null;
-      var hit = ray.intersectObjects(meshes, false)[0];
-      if (!hit || !hit.object.userData.item) return null;
-      var ins = office.inspect(), bl = [];
-      (ins.bots || []).forEach(function (b) { if (b && b.hit && b.floor === ins.floor) bl.push(b.hit); });
-      var bh = bl.length ? ray.intersectObjects(bl, false)[0] : null;
-      if (bh && bh.distance < hit.distance) return null;
-      return { item: hit.object.userData.item, point: hit.point };
-    }
-    function onMove(e) { px = e.clientX; py = e.clientY; hoverDirty = true; }
-    function onLeave() { hoverDirty = false; hovered = null; allItems().forEach(function (it) { it.tgt = 0; }); setHint(null); setCursor(false); }
-    function hoverStep() {
-      hoverDirty = false;
-      if (focused || fly) { if (hovered || cursorMine) onLeave(); return; }
-      var h = pointer({ clientX: px, clientY: py });
-      hovered = h && h.item;
-      setCursor(!!h);
+    // The host picks: one raycast over the boards, the terminals and anything else registered, one winner,
+    // and it owns the pointer cursor. This file only paints the glow and the hint.
+    function clearHover() { hovered = null; allItems().forEach(function (it) { it.tgt = 0; }); setHint(null); }
+    function onHover(item, hit) {
+      if (!item) { clearHover(); return; }
+      hovered = item;
       allItems().forEach(function (it) { it.tgt = it === hovered ? 1 : 0; });
-      setHint(hovered, h ? h.point : null);
+      setHint(hovered, hit.point);
     }
+    function onLeave() { clearHover(); host.leave(); }
     function glowStep(dt) {
       var k = st.rm ? 1 : Math.min(1, dt * 10);
       allItems().forEach(function (it) {
@@ -687,23 +642,20 @@
       st.cam.zoom = fly.z0 + (fly.z1 - fly.z0) * e; st.cam.updateProjectionMatrix();
       if (fly.t >= 1) { var done = fly.done; fly = null; if (done) done(); }
     }
-    // Per frame, before the engine draws. A bot joins or leaves (new bot list), the floor or view changes,
-    // or the engine rebuilds the floors (a theme change): scan and paint now, so the decor is in this frame.
+    // Per frame, before the engine draws. The host tells us when the scene was rebuilt (a bot joins or leaves,
+    // the floor or view changes, a theme change): scan and paint now, so the decor is in this frame.
+    var offRebuild = host.onRebuild(function () { try { refresh(); } catch (x) { repaint = false; /* the timer tries again */ } });
     function frame(dt) {
       if (dead) return;
-      try {
-        var ins = office.inspect();
-        if (repaint || K.tok !== lastTok || ins.bots !== lastBots || shownFloor() !== lastFg) refresh();
-      } catch (x) { repaint = false; /* the timer tries again */ }
+      try { if (repaint || K.tok !== lastTok) refresh(); } catch (x) { repaint = false; }
       try {
         if (focused && st.goal) st.goal = null;   // the engine must not reframe while a board is open
-        if (hoverDirty) hoverStep();
         glowStep(dt);
         stepDoors(dt);
         stepFly(dt);
       } catch (x) { /* one bad frame must not stop the office */ }
     }
-    st.anim.push(frame);
+    var offFrame = host.frame(frame);
     function flyTo(p1, t1, z1, done) {
       var tg = st.ctl ? st.ctl.target : st.target;
       var ms = st.rm ? 1 : cssNum('duration-camera', 600) * 1.4;
@@ -736,25 +688,25 @@
       if (o.onBlur) o.onBlur();
     }
 
-    // clicks (not drags)
-    function onDown(e) { down = [e.clientX, e.clientY]; downFg = shownFloor(); }
-    function onUp(e) {
-      if (!down || dead) return;
-      var moved = Math.hypot(e.clientX - down[0], e.clientY - down[1]); down = null;
-      if (moved > 6) return;
-      // the engine handles pointerup first: a click on a floor in the building view shows that floor now
-      if (shownFloor() !== downFg) return;
-      if (focused) { if (focusedKind === 'stats' && !fly) blur(); return; }   // the stats view has no page panel: a click on the scene closes it
-      var h = pointer(e);
-      if (!h) return;
-      if (h.item.kind === 'door') { if (o.onDoor) o.onDoor(h.item.roomId); return; }
-      focus(h.item, h.item.kind);
+    // Clicks come from the host (not drags, one winner). The open stats view has no page panel: a click on the scene closes it.
+    function onClick(item) {
+      if (item.kind === 'door') { if (o.onDoor) o.onDoor(item.roomId); return; }
+      focus(item, item.kind);
+    }
+    function bypass() {
+      if (!focused) return false;
+      if (focusedKind === 'stats' && !fly) blur();
+      return focusedKind === 'stats';
     }
     function onKey(e) { if (e.key === 'Escape' && focused) blur(); }
-    cv.addEventListener('pointerdown', onDown);
-    cv.addEventListener('pointerup', onUp);
-    cv.addEventListener('pointermove', onMove);
-    cv.addEventListener('pointerleave', onLeave);
+    var offTarget = host.register({
+      name: 'board',
+      active: function () { return !focused && !fly && !dead; },
+      meshes: function () { var m = []; allItems().forEach(function (it) { m = m.concat(it.hit); }); return m; },
+      itemOf: function (mesh) { return mesh.userData.item || null; },
+      hover: onHover, click: onClick, bypass: bypass,
+      anchors: function () { return []; }
+    });
     window.addEventListener('keydown', onKey);
     var timer = setInterval(function () {
       if (st.dead) { dispose(); return; }
@@ -766,11 +718,9 @@
     function dispose() {
       if (dead) return;
       dead = true; clearInterval(timer);
-      var k = st.anim.indexOf(frame);
-      if (k >= 0) st.anim.splice(k, 1);
-      cv.removeEventListener('pointerdown', onDown); cv.removeEventListener('pointerup', onUp); cv.removeEventListener('pointermove', onMove); cv.removeEventListener('pointerleave', onLeave);
+      offFrame(); offRebuild(); offTarget();
       window.removeEventListener('keydown', onKey);
-      setCursor(false);
+      host.leave();
       if (fly || focused) { fly = null; if (st.ctl) st.ctl.enabled = true; }
       if (hintSprite) { if (hintSprite.parent) hintSprite.parent.remove(hintSprite); hintSprite.material.dispose(); hintSprite = null; }
       Object.keys(hints).forEach(function (h) { hints[h].dispose(); }); hints = {};
@@ -785,6 +735,7 @@
       allItems().forEach(drop);
       boards = []; notes = []; statsList = []; doors = []; decorRooms = []; pending = {};
       focused = null; focusedKind = null; focusedMesh = null; hovered = null;
+      if (ownHost) host.dispose();
     }
     return {
       refresh: refresh, blur: blur, focused: function () { return focused; }, kind: function () { return focusedKind; },

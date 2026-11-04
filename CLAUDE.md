@@ -10,7 +10,7 @@ Read `DS-README.md`, `Recipes.md` and `Reference.md` before you change the UI, a
 - Write copy in Simplified Technical English: short sentences, active voice, buttons say the result. No "Oops", "Sorry", exclamation marks, "please".
 - Keep the `x` version prefix (page `x0.1`, DS `x1.5`) in titles.
 - Never move bots yourself. The scene changes only from adapter events.
-- Before you finish a UI change: `python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/vocab.js`, then look at screenshots in Day, Night and Sublevel at 1360, 1100 and 400 px.
+- Before you finish a UI change: `python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/vocab.js public/scene-host.js`, then look at screenshots in Day, Night and Sublevel at 1360, 1100 and 400 px.
 - The page's own styles go in `public/office.css`. The DS sets its theme on `.ao-office`, and `chat-extras.js` mirrors it to `<html data-theme>`, so page UI must read tokens only.
 
 ## Commands
@@ -37,7 +37,8 @@ Stop the server by the pid that owns port 4317 (`netstat -ano | grep :4317`, the
 | `public/vocab.js` | Session vocabulary, shared by the page, the server and the tests (`globalThis.OfficeVocab`). Status key and word (error included), task line, tool kind and short name, to-do status, room figures. Plain script, no I/O, no timers. |
 | `public/adapter.js` | Snapshot to DS events (repo = building, branch = floor, worktree = room; tool calls, helpers, plan, errors, triggers, usage), and DS commands to REST calls. Exposes `officeAdapter.onSnapshot / session / lookup / buildings / buildingFor / shown / roomsShown / roomsNow`. |
 | `public/city.js` | The city: all repositories as buildings on one DS stage (`AgentOffice.office.Stage`), with rise and sink effects, zoom to mouse, bounded pan, click or zoom in to enter. `OfficeCity.cameraFeel(stage)` also gives the office scene zoom to mouse. |
-| `public/board.js` | Room boards: repaints the DS chalkboard as a live screen (to-dos, browser steps, last calls, repo top), adds a notes board, raises room walls to 7 and moves the room sign above the cable tray, flies the camera to a clicked board. |
+| `public/scene-host.js` | Scene host (`OfficeSceneHost`): the only module that reads the DS stage for the page's 3D additions. Shown floor and view, room groups matched to DS rooms, a rebuild event, a per-frame tick, one pick with bot occlusion and one winner, and the pointer cursor. The pure part runs on plain scene graphs in `test/scene-host.test.mjs`. |
+| `public/board.js` | Room boards: repaints the DS chalkboard as a live screen (to-dos, browser steps, last calls, repo top), adds a notes board, raises room walls to 7 and moves the room sign above the cable tray, flies the camera to a clicked board. A host adapter: it registers a pick target and a frame, and never raycasts or sets the cursor itself. |
 | `public/office.js` | React: control strip and dialogs. Mounts `OfficeScene` once. |
 | `public/chat-extras.js` | Chat resize grips, the `/` list, theme mirror. It depends on DS class names (`.ao-hud-chat`, `.ao-input`). |
 
@@ -80,7 +81,8 @@ Add a new file only for a distinct job. Extend the file that owns the concern fi
 - One scene shows one building. `buildingFor(repo)` sets the layout, then the scene mounts; `subscribe` resets the adapter's mapping each mount. The SSE stream belongs to the page, not to the scene.
 - The DS has no `room.remove` or `floor.remove`. The page rebuilds the scene (a new React key) when a shown room is gone.
 - Two worktrees on one branch need `git worktree add --force`.
-- Room boards are matched to rooms by order: the shown floor's lab rooms, left to right, against the chalkboards (4 x 2.5 planes) sorted by x. The engine rebuilds a floor when a bot joins, so board.js rescans every 1.5 s and patches what is new.
+- Room boards are matched to rooms by order: the shown floor's lab rooms, left to right (`OfficeSceneHost` `host.rooms()`), against the chalkboards (4 x 2.5 planes). The engine rebuilds a floor when a bot joins or the theme changes. The host sees that (new bot list, floor, floor groups, theme tokens, or a lost anchor) and fires `onRebuild` before the frame draws; board.js and terminal.js rescan then, and still on a 1.5 s timer.
+- Only `public/scene-host.js` reads the DS stage's floors, views and room geometry. A new scene decoration registers a frame (`host.frame`), a rebuild listener, and, if it can be clicked, a pick target (`host.register`). Do not add a Raycaster, pointer listeners or `canvas.style.cursor` writes in another file: two raycasts gave two actions for one click. The building view is `host.inBuilding()` (no floor group is visible), not the Building button's `aria-pressed`.
 - The scene fades out (`duration-base`) before any rebuild: another building, the city, a removed floor or room. Labels in the city sit on layer 1 so the bloom pass skips them.
 - Extensions: `mcp_status`, `mcp_toggle`, `mcp_reconnect`, `reload_plugins` are control requests on the session's stdin; they work before the first prompt. Persistent changes use `claude mcp` and `claude plugin` with scope local or project only.
 - The Bash tool mangles backslashes and quotes in long heredocs. Write patch scripts with the Write tool.

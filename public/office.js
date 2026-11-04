@@ -1000,6 +1000,8 @@
     var latestSnap = React.useRef(null); latestSnap.current = snap;
     // the terminal of one session (terminal.js), read in full beside the room
     var terminalRef = React.useRef(null);
+    // the scene host (scene-host.js): the one reader of the DS stage; board, terminal, streets and birds are its adapters
+    var hostRef = React.useRef(null);
     var tm = useState(null), term = tm[0], setTerm = tm[1];
     function openTerminal(uid, name) {
       if (boardRef.current && boardRef.current.focused && boardRef.current.focused()) boardRef.current.blur();
@@ -1010,6 +1012,7 @@
     useEffect(function () { return function () {
       if (boardRef.current) { boardRef.current.dispose(); boardRef.current = null; }
       if (terminalRef.current) { terminalRef.current.dispose(); terminalRef.current = null; }
+      if (hostRef.current) { hostRef.current.dispose(); hostRef.current = null; }
       setBoard(null); setTerm(null);
     }; }, [sceneKey, cur2.view]);
     // doors: a session that comes into a room or leaves it of the shown building.
@@ -1085,8 +1088,7 @@
         pushes = now - pushT < 800 ? pushes + 1 : 1; pushT = now;
         if (pushes < 2) return;
         pushes = 0;
-        var inBuilding = Array.prototype.some.call(document.querySelectorAll('[aria-pressed="true"]'), function (b) { return /building/i.test(b.textContent); });
-        if (inBuilding) go('city'); else o.setView('building');
+        if (hostRef.current && hostRef.current.inBuilding()) go('city'); else o.setView('building');
       }
       window.addEventListener('wheel', onWheel, { passive: true, capture: true });
       return function () { window.removeEventListener('wheel', onWheel, true); };
@@ -1096,9 +1098,13 @@
         officeRef.current = o;
         window.officeScene = o;   // the mounted office API, for the console and tests
         var st = o.inspect && o.inspect().stage;
-        if (st && window.OfficeBoard) {
-          if (boardRef.current) boardRef.current.dispose();
+        if (boardRef.current) boardRef.current.dispose();
+        if (terminalRef.current) terminalRef.current.dispose();
+        if (hostRef.current) hostRef.current.dispose();
+        var host = hostRef.current = window.OfficeSceneHost && st ? window.OfficeSceneHost.attach(o) : null;
+        if (st && host && window.OfficeBoard) {
           boardRef.current = window.OfficeBoard.attach(o, {
+            host: host,
             room: function (id) { return window.officeAdapter.roomInfo(id); },
             note: function (id) { var n = latestSnap.current && latestSnap.current.notes && latestSnap.current.notes[noteKey(id)]; return n ? n.text : ''; },
             tree: function (root) { return api('/api/tree', { root: root }); },
@@ -1108,21 +1114,20 @@
             onFocus: function (id, kind) { setTerm(null); setBoard({ id: id, kind: kind }); }, onBlur: function () { setBoard(null); }
           });
         }
-        if (st && window.OfficeTerminal) {
-          if (terminalRef.current) terminalRef.current.dispose();
+        if (st && host && window.OfficeTerminal) {
           terminalRef.current = window.OfficeTerminal.attach(o, {
+            host: host,
             session: function (botName) { return window.officeAdapter.session(botName); },
             onOpen: function (uid, name) { o.select(name); openTerminal(uid, name); }
           });
         }
-        if (!st || !window.OfficeCity) return;
+        if (!st || !host || !window.OfficeCity) return;
         window.OfficeCity.cameraFeel(st);
         // birds over the tower in the building view; none inside a floor
-        var inBuilding = function () { return Array.prototype.some.call(document.querySelectorAll('[aria-pressed="true"]'), function (b) { return /building/i.test(b.textContent); }); };
-        var seen = false, t0 = 0;
-        var outside = function () { var now = Date.now(); if (now - t0 > 500) { t0 = now; seen = inBuilding(); } return seen; };
-        window.OfficeCity.streetsAround(st, { visible: outside });
-        window.OfficeCity.birds(st, { count: 6, radius: 13, size: 0.6, visible: outside,
+        // the host knows the view from the floor groups, not from the page markup
+        var outside = function () { return host.inBuilding(); };
+        window.OfficeCity.streetsAround(st, { visible: outside, host: host });
+        window.OfficeCity.birds(st, { count: 6, radius: 13, size: 0.6, visible: outside, host: host,
           center: function () { var fl = (o.getBuilding && o.getBuilding().floors.length) || 1; return [0, fl * 4.2 + 4, 0]; } });
       },
       reset: week ? resetText(week.resetsAt) : undefined }) : null;

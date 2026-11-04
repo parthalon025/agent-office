@@ -64,6 +64,14 @@
     return function () { cv.removeEventListener('wheel', onWheel); var i = stage.anim.indexOf(clamp); if (i >= 0) stage.anim.splice(i, 1); };
   }
 
+  // A per-frame tick on a stage. With o.host (the scene host) the tick registers there; without, on the stage loop.
+  // Returns the function that removes it.
+  function addTick(stage, o, fn) {
+    if (o && o.host) return o.host.frame(fn);
+    stage.anim.push(fn);
+    return function () { var i = stage.anim.indexOf(fn); if (i >= 0) stage.anim.splice(i, 1); };
+  }
+
   // A flock that circles over a point: two thin wings per bird that flap, a slow bank as they turn.
   // center() gives [x, y, z] each frame, so the flock follows the city or the tower. Reduced motion
   // shows no birds. Returns { group, dispose }.
@@ -102,8 +110,8 @@
         u.l.rotation.z = flap; u.r.rotation.z = -flap;
       });
     };
-    stage.anim.push(tick);
-    return { group: g, dispose: function () { var i = stage.anim.indexOf(tick); if (i >= 0) stage.anim.splice(i, 1); stage.clear(g); } };
+    var off = addTick(stage, o, tick);
+    return { group: g, dispose: function () { off(); stage.clear(g); } };
   }
 
   // Streets around the lot of a DS tower (the building view): a road with lane marks along the front
@@ -151,8 +159,8 @@
       if (want && !built) built = build();
       g.visible = want && built;
     };
-    stage.anim.push(tick);
-    return { dispose: function () { var i = stage.anim.indexOf(tick); if (i >= 0) stage.anim.splice(i, 1); stage.clear(g); } };
+    var off = addTick(stage, o, tick);
+    return { dispose: function () { off(); stage.clear(g); } };
   }
 
   function City(el, opts) {

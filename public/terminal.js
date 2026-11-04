@@ -10,7 +10,8 @@
    Helpers (subagents) have no session of their own; their monitors show what the engine traced.
 
    window.OfficeTerminal
-     attach(office, { session(botName) -> session or null, onOpen(uid, name) }) -> { refresh(), dispose(), screens() }
+     attach(office, { session(botName) -> session or null, onOpen(uid, name), host? }) -> { refresh(), dispose(), screens() }
+       host: the scene host (scene-host.js). Without it, attach makes its own.
      lines(session, cols, rows?) -> [{ text, tone, mark?, ask? }]
        tone: 'prompt' | 'out' | 'tool' | 'ok' | 'err' | 'muted'. Without rows: the full transcript
        (for the page panel). With rows: what fits on a screen of that many rows, newest last.
@@ -20,7 +21,7 @@
      toolName(name) -> the short tool name the terminal shows */
 (function () {
   'use strict';
-  var T = window.THREE;
+  var T = window.THREE, H = window.OfficeSceneHost;
   var DOT = ' \u00b7 ';
 
   // ---------- text: a session as terminal lines (no DOM, no canvas) ----------
@@ -429,23 +430,26 @@
     o = o || {};
     var st = null;
     try { var ins0 = office && office.inspect && office.inspect(); st = ins0 && ins0.stage; } catch (x) { st = null; }
-    if (!T || !st || !st.scene || !st.K || !st.r || !st.cam || !st.anim) return NOOP;
-    var K = st.K, cv = st.r.domElement;
+    if (!T || !H || !st || !st.scene || !st.K || !st.r || !st.cam || !st.anim) return NOOP;
+    var ownHost = !o.host, host = o.host || H.attach(office);
+    if (!host) return NOOP;
+    var K = st.K;
     var sessionOf = typeof o.session === 'function' ? o.session
       : function (n) { var a = window.officeAdapter; return a && a.session ? a.session(n) : null; };
     var self = { dead: false };
     var entries = [];   // one per patched screen: { mesh, bot, name, kind, canvas, ctx, tex, P, sig, uid, cursor, glow, ... }
-    var lastBots = null, lastFloor = null, lastTok = K.tok, lastLook = K.look, themeN = 0, acc = 0;
-    var hover = null, ptr = null, down = null, cursorSet = false, glowTex = null;
+    var lastTok = K.tok, lastLook = K.look, themeN = 0, acc = 0;
+    var hover = null, glowTex = null;
     var realByName = {};   // the last real session of each bot, so a floor rebuild keeps a closed desk right
-    var pray = new T.Raycaster(), dray = new T.Raycaster(), ndc = new T.Vector2(), DOWN = new T.Vector3(0, -1, 0);
+    var dray = new T.Raycaster(), DOWN = new T.Vector3(0, -1, 0);
     var maxAniso = 4;
     try { maxAniso = Math.min(8, st.r.capabilities.getMaxAnisotropy()) || 4; } catch (x) { maxAniso = 4; }
 
     function inspect() { try { return office.inspect(); } catch (x) { return null; } }
-    function inScene(m) { var q = m; while (q && q.parent) q = q.parent; return q === st.scene; }
-    function shown(m) { var q = m; while (q) { if (!q.visible) return false; if (q === st.scene) return true; q = q.parent; } return false; }
-    function rootOf(m) { var q = m; while (q && q.parent && q.parent !== st.scene) q = q.parent; return q && q.parent === st.scene ? q : null; }
+    // Where things are in the scene is the scene host's to know.
+    function inScene(m) { return host.inScene(m); }
+    function shown(m) { return host.shown(m); }
+    function rootOf(m) { return host.floorOf(m); }
     function owned(m) { var e = m.userData.officeTerm; return !!(e && e.owner && !e.owner.dead); }
 
     // Each screen of a bot comes from the engine's own list (bot.screens, set when it builds the desk).
@@ -620,7 +624,6 @@
     function scan() {
       var ins = inspect();
       if (!ins) return;
-      lastBots = ins.bots; lastFloor = ins.floor;
       entries = entries.filter(function (e) { if (inScene(e.mesh)) return true; drop(e); return false; });
       var bots = (ins.bots || []).filter(function (b) { return b && b.name && b.floor === ins.floor; });
       var fromEngine = bots.some(function (b) { return Array.isArray(b.screens); });
@@ -681,54 +684,28 @@
       try { if (fam && document.fonts && document.fonts.load) document.fonts.load('20px ' + fam).then(fontsReady, function () {}); } catch (x) { /* the canvas uses the fallback font */ }
     }
 
-    // A screen under the pointer, if no bot stands in front of it (then the click is the engine's).
-    function pick(x, y) {
-      var list = entries.filter(function (e) { return e.uid && shown(e.mesh); }).map(function (e) { return e.mesh; });
-      if (!list.length) return null;
-      var r = cv.getBoundingClientRect();
-      if (!r.width || !r.height) return null;
-      ndc.set((x - r.left) / r.width * 2 - 1, -((y - r.top) / r.height) * 2 + 1);
-      pray.setFromCamera(ndc, st.cam);
-      var hit = pray.intersectObjects(list, false)[0];
-      if (!hit) return null;
-      var ins = inspect(), blockers = [];
-      if (ins) (ins.bots || []).forEach(function (b) { if (b && b.hit && b.floor === ins.floor) blockers.push(b.hit); });
-      var bh = blockers.length ? pray.intersectObjects(blockers, false)[0] : null;
-      if (bh && bh.distance < hit.distance) return null;
-      return hit.object.userData.officeTerm || null;
-    }
+    // The host picks: one raycast over all targets, a bot in front wins (then the click is the engine's), and the host owns the cursor.
     function setHover(h) {
       if (h === hover) return;
       var old = hover;
       hover = h;
       if (old) { old.hover = false; paint(old, true); }
       if (h) { h.hover = true; paint(h, true); }
-      if (!h && cursorSet) { if (cv.style.cursor === 'pointer') cv.style.cursor = ''; cursorSet = false; }
     }
-    function onDown(ev) { down = ev.button === 0 ? [ev.clientX, ev.clientY] : null; }
-    function onCancel() { down = null; }
-    function onUp(ev) {
-      if (!down || self.dead) return;
-      var moved = Math.sqrt(Math.pow(ev.clientX - down[0], 2) + Math.pow(ev.clientY - down[1], 2));
-      down = null;
-      if (moved > 6) return;
-      var e = pick(ev.clientX, ev.clientY);
-      if (e && e.uid && typeof o.onOpen === 'function') o.onOpen(e.uid, e.name);
-    }
-    function onMove(ev) { ptr = { x: ev.clientX, y: ev.clientY, dirty: true }; }
-    function onLeave() { ptr = null; try { setHover(null); } catch (x) { hover = null; } }
 
+    // The host tells us when a bot joins or leaves, the floor changes, or the engine rebuilds the floors
+    // (a theme change does that, with the same bot list): patch the new screens before this frame draws.
+    var offRebuild = host.onRebuild(function (why) {
+      if (self.dead) return;
+      try { scan(); } catch (x) { /* the timer scans again */ }
+      if (why.some(function (w) { return w === 'gone' || w === 'floors' || w === 'floor'; })) acc = 1;
+    });
     // Per frame: keep the terminal texture on the glass (a theme change puts the DS picture back),
-    // blink the cursors, follow the pointer, and repaint at most every 400 ms.
+    // blink the cursors, and repaint at most every 400 ms.
     function frame(dt, t) {
       if (self.dead) return;
       if (st.dead) { dispose(); return; }
       try {
-        var ins = inspect(), gone = false;
-        // A bot joins or leaves (new bot list), the floor changes, or the engine rebuilds the floors
-        // (a theme change does that, with the same bot list): patch the new screens before this frame draws.
-        for (var j = 0; j < entries.length && !gone; j++) gone = !inScene(entries[j].mesh);
-        if (ins && (gone || ins.bots !== lastBots || ins.floor !== lastFloor)) { var moved = gone || ins.floor !== lastFloor; scan(); if (moved) acc = 1; }
         if (K.tok !== lastTok || K.look !== lastLook) { lastTok = K.tok; lastLook = K.look; retheme(); }
         var on = st.rm || Math.floor(t / 0.53) % 2 === 0;
         for (var i = 0; i < entries.length; i++) {
@@ -737,9 +714,6 @@
           if (e.cursor) e.cursor.visible = e.curOn && on;
           if (e.glow) e.glow.material.opacity = e.glowA * (e.hover ? 1.45 : 1);
         }
-        if (ptr && ptr.dirty) { ptr.dirty = false; setHover(pick(ptr.x, ptr.y)); }
-        if (hover) { if (cv.style.cursor !== 'pointer') cv.style.cursor = 'pointer'; cursorSet = true; }
-        else if (cursorSet) { if (cv.style.cursor === 'pointer') cv.style.cursor = ''; cursorSet = false; }
         acc += dt || 0;
         if (acc >= 0.4) { acc = 0; pass(); }
       } catch (x) { /* one bad frame must not stop the office */ }
@@ -749,12 +723,16 @@
     try { if (document.fonts && document.fonts.addEventListener) { document.fonts.addEventListener('loadingdone', fontsReady); fontsHooked = true; } } catch (x) { fontsHooked = false; }
     loadFont(K.f && K.f.mono);
     if (K.look === 'sublevel') loadFont(K.f && K.f.term);
-    cv.addEventListener('pointerdown', onDown);
-    cv.addEventListener('pointerup', onUp);
-    cv.addEventListener('pointercancel', onCancel);
-    cv.addEventListener('pointermove', onMove);
-    cv.addEventListener('pointerleave', onLeave);
-    st.anim.push(frame);
+    var offFrame = host.frame(frame);
+    var offTarget = host.register({
+      name: 'terminal',
+      active: function () { return !self.dead; },
+      meshes: function () { return entries.filter(function (e) { return e.uid && shown(e.mesh); }).map(function (e) { return e.mesh; }); },
+      itemOf: function (mesh) { return mesh.userData.officeTerm || null; },
+      hover: function (e) { try { setHover(e); } catch (x) { hover = null; } },
+      click: function (e) { if (e.uid && typeof o.onOpen === 'function') o.onOpen(e.uid, e.name); },
+      anchors: function () { return entries.map(function (e) { return e.mesh; }); }
+    });
     var timer = setInterval(function () { if (st.dead) { dispose(); return; } if (!self.dead) { try { scan(); } catch (x) { /* next time */ } } }, 1500);
     try { scan(); } catch (x) { /* the first frame scans again */ }
 
@@ -762,15 +740,10 @@
       if (self.dead) return;
       self.dead = true;
       clearInterval(timer);
-      var k = st.anim.indexOf(frame);
-      if (k >= 0) st.anim.splice(k, 1);
-      cv.removeEventListener('pointerdown', onDown);
-      cv.removeEventListener('pointerup', onUp);
-      cv.removeEventListener('pointercancel', onCancel);
-      cv.removeEventListener('pointermove', onMove);
-      cv.removeEventListener('pointerleave', onLeave);
+      offFrame(); offRebuild(); offTarget();
       if (fontsHooked) { try { document.fonts.removeEventListener('loadingdone', fontsReady); } catch (x) { /* gone */ } }
-      if (cursorSet && cv.style.cursor === 'pointer') cv.style.cursor = '';
+      hover = null;
+      host.leave();
       entries.forEach(function (e) {
         e.hover = false;
         if (e.mesh.onBeforeRender === e.hook) delete e.mesh.onBeforeRender;
@@ -779,6 +752,7 @@
       });
       entries = [];
       hover = null;
+      if (ownHost) host.dispose();
     }
     return {
       refresh: function () { if (self.dead) return; scan(); entries.forEach(function (e) { e.sig = ''; }); pass(); },
