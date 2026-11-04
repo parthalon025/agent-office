@@ -19,3 +19,30 @@ for (const f of files) {
     assert.deepEqual(missing, [], `${f} renders components it does not declare`);
   });
 }
+
+// #47 and #48: the palette sits above every dialog, and the welcome card sits below both and fits a narrow screen.
+const css = readFileSync(join(pub, 'office.css'), 'utf8').replace(/\r\n/g, '\n');
+const rule = (sel) => {
+  const at = css.indexOf(`\n${sel} {`);
+  return at < 0 ? '' : css.slice(at, css.indexOf('\n}', at) + 2);
+};
+
+test('office.css: the palette overlay is above the dialog layer (#48)', () => {
+  assert.match(rule('.ao-cmdk-o'), /z-index:\s*calc\(var\(--z-dialog\)\s*\+\s*1\)/);
+});
+
+test('office.css: the page fade holds no fill, so .ao-office is no stacking context (#47 #48)', () => {
+  const m = css.match(/\n\.view > \* \{([^}]*)\}/);
+  assert.ok(m, '.view > * rule');
+  assert.match(m[1], /animation:[^;]*\bbackwards\b/);
+  assert.doesNotMatch(m[1], /\b(both|forwards)\b/);
+});
+
+test('office.css: the welcome card centres with translate (not transform), only fades and fits the viewport (#47)', () => {
+  const r = rule('.welcome');
+  assert.match(r, /z-index:\s*var\(--z-(hud|sheet|tag)\)/);
+  assert.match(r, /max-width:/);
+  assert.match(r, /translate:\s*-50%\s+-50%/);
+  assert.doesNotMatch(r, /transform:/);
+  assert.match(css, /\n\.welcome \{ animation: page-fade /);
+});

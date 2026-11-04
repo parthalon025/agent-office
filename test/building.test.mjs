@@ -431,12 +431,18 @@ test('requests: every open request and question of every building, oldest first,
   r.push();
   const list = r.store.requests();
   assert.equal(list.length, 2);
-  assert.deepEqual(list.map((x) => [x.kind, x.building, x.buildingName]), [['request', KEY_B, 'other'], ['question', KEY_A, 'repo']]);
+  assert.deepEqual(list.map((x) => [x.kind, x.building, x.buildingName]), [['permission', KEY_B, 'other'], ['question', KEY_A, 'repo']]);
   assert.ok(list[0].t < list[1].t, 'oldest first');
   assert.equal(list[1].text, 'Use the old schema?');
   assert.equal(list[1].risk, undefined, 'a question has no risk value');
   assert.ok(list[0].id && list[0].uid && list[0].bot && list[0].tool);
   assert.equal(list.length, r.store.buildings().reduce((n, b) => n + b.waiting, 0), 'the total matches the buildings');
+  // one owner: each item is the vocab item of its session, plus the place and the preview
+  const sb = r.store.latest().sessions.find((s) => s.cwd === REPO_B);
+  const own = V.requests(sb)[0];
+  assert.deepEqual({ ...list[0], uid: undefined, bot: undefined, building: undefined, buildingName: undefined, roomName: undefined, preview: undefined },
+    { ...own, uid: undefined, bot: undefined, building: undefined, buildingName: undefined, roomName: undefined, preview: undefined });
+  assert.equal(list[0].preview, sb.pending[0].preview || sb.pending[0].detail || '');
   // the same list for a snapshot passed in, and an ended session adds nothing
   r.tracker.sessions.forEach((s) => { s.status = 'ended'; });
   r.push();
@@ -454,4 +460,8 @@ test('two sessions with one name in one building get unique scene names, found b
   assert.equal(names[1], names[0] + ' 2');
   assert.equal(r.store.botName(b.uid), names[1], 'the store answers for the mounted building');
   assert.equal(m.botName('nope'), null);
+  // the preview (cards, city palette) names and identifies them the same way, so a pick can be matched by uid
+  const pv = r.store.preview(KEY_A).floors.flatMap((f) => f.rooms.flatMap((rm) => rm.bots));
+  assert.deepEqual(pv.map((x) => x.name), names);
+  assert.deepEqual(pv.map((x) => x.uid), [a.uid, b.uid]);
 });
