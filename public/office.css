@@ -5,6 +5,8 @@
 :root { --strip-clear: 200px; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: var(--font-sans); }
 #office { height: 100vh; }
+/* important: the DS scene sets an inline pixel height when it mounts and the page does not render again on resize. Without this the HUD keeps the old height, and the roster at the bottom edge sits under the dock after a window gets shorter. */
+#office .ao-office { height: 100vh !important; }
 
 .mono { font-family: var(--font-mono); font-size: var(--type-data-size); line-height: var(--type-data-line); font-variant-numeric: tabular-nums; }
 

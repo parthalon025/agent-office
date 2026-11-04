@@ -31,6 +31,11 @@ test('office.css: the palette overlay is above the dialog layer (#48)', () => {
   assert.match(rule('.ao-cmdk-o'), /z-index:\s*calc\(var\(--z-dialog\)\s*\+\s*1\)/);
 });
 
+test('office.css: the scene height follows the window, not the height at mount (#53)', () => {
+  assert.match(css, /#office \.ao-office \{ height: 100vh !important; \}/);
+  assert.match(rule('#office'), /height:\s*100vh/);
+});
+
 test('office.css: the page fade holds no fill, so .ao-office is no stacking context (#47 #48)', () => {
   const m = css.match(/\n\.view > \* \{([^}]*)\}/);
   assert.ok(m, '.view > * rule');
