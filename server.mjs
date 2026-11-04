@@ -644,13 +644,15 @@ function describeRoom(s) {
     'Other sessions in this room',
     ...(others.length ? others.map((x) => '- ' + workOf(x)) : ['- None. You are the only session here.']),
     '',
-    `Notes board: the user's notes for this room. A line that starts with a session name and a colon was added by that session.${notes ? ` Changed ${ago(notes.at)}.` : ''}`,
+    `Notes board: the user's notes for this room. A line that starts with a session name and a colon was added by that session.${notes ? ` Changed ${ago(notes.at)}.${notes.by ? ` Changed by ${notes.by}.` : ''}` : ''}`,
     notes?.text?.trim() ? indent(notes.text.replace(/\s+$/, '')) : '  The notes board is empty.',
     '',
     'Blackboard pin',
     pin ? `  "${pin.text}", pinned by ${pin.by} ${ago(pin.at)}.` : '  Nothing is pinned.',
     '',
     `Room figures: ${roomFigures(all.length ? all : [s])}`,
+    '',
+    ...roomContents(pl, key),
     '',
     'What the room has',
     '- A blackboard on the wall. The office paints on it, live, what the agents in this room do. The pin shows on it too.',
@@ -670,6 +672,48 @@ function describeRoom(s) {
   ].join('\n');
 }
 
+// ---------- what is in the room (office_room, POST /api/room/inventory) ----------
+// The page reports the decor it adds (board.js) per room key. It is kept in memory only: the page sends it
+// again on each load, so a restart loses nothing that matters.
+const INVENTORY_ITEMS = 40, INVENTORY_CHARS = 120, INVENTORY_KEYS = 200;
+const roomInventory = new Map();
+function setInventory(body) {
+  const key = String(body.key || '');
+  if (!key || key.length > 400) throw httpError(400, 'Unknown room.');
+  if (!Array.isArray(body.items)) throw httpError(400, 'items must be a list of text.');
+  if (body.items.length > INVENTORY_ITEMS) throw httpError(413, `A room can list ${INVENTORY_ITEMS} items. This list has ${body.items.length}.`);
+  const items = [];
+  for (const it of body.items) {
+    if (typeof it !== 'string') throw httpError(400, 'Each item must be text.');
+    const t = clip(it.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim(), INVENTORY_CHARS);
+    if (t) items.push(t);
+  }
+  if (!roomInventory.has(key) && roomInventory.size >= INVENTORY_KEYS) roomInventory.delete(roomInventory.keys().next().value);
+  if (items.length) roomInventory.set(key, items); else roomInventory.delete(key);
+  return { ok: true, count: items.length };
+}
+// The fixed contents of a lab room (components/bundle.js buildRoom and buildFloor), the page's decor, the street.
+function roomContents(pl, key) {
+  const reported = roomInventory.get(key) || [];
+  return [
+    'What is in the room',
+    'The room is a lab room in a 3D building. Fixed parts (the office draws them the same in every lab room):',
+    '- A floor and a back wall. The first room of a floor also has a left wall with a tall side window and a wall clock. Other rooms have a glass wall on the left.',
+    `- A room sign on the back wall with the room name (${pl.room}), the room type and the office version.`,
+    '- Server racks along the back wall, with a metal bar above them. A cable tray runs above the racks and carries data packets from the desks to the racks.',
+    '- A work table with a small test monitor and an amber block, and a chalkboard on the back wall with test figures.',
+    '- A lounge with a sofa and ceiling lamps. Plants stand in the corners.',
+    '- A desk with monitors for each bot. The desk type follows the role of the bot, for example coder, analyst or ops. The monitors show the terminal of that session.',
+    '- A beacon light on the back wall. It blinks when a bot in the room waits for the user or has an error.',
+    '- On the floor: an elevator lobby on the left side with the elevator and a railing, and a meter near the front right corner.',
+    ...(reported.length
+      ? ['The page adds these to this room:', ...reported.map((t) => '- ' + t)]
+      : ['The page adds a blackboard, a notes board, a stats display, a door, a lamp and plants. The page has not sent a list for this room yet.']),
+    'Outside the building view: a street with a road, lane marks and a curb around the lot, trees on the sidewalk, street lights that glow at night, and a flock of birds that circles over the city. The windows show this view.',
+    'You can change only the notes board and the blackboard pin (office_room_update). You cannot move furniture, desks, boards, the door or bots. The office places them.',
+  ];
+}
+
 // Changes the caller's own room. Every argument is checked before anything changes.
 function updateRoom(s, p) {
   const pl = roomPlace(s), key = pl.noteKey;
@@ -680,9 +724,10 @@ function updateRoom(s, p) {
   const cur = persisted.notes[key]?.text || '';
   let notes = null, line = null; // the next notes text, when the notes change; the line an append adds
   if (has('notes_append')) {
-    const add = p.notes_append.replace(/\r\n?/g, '\n').trim();
-    if (!add) throw httpError(400, 'notes_append is empty. Give the text to add.');
-    line = `${s.name}: ${add}`;
+    // Every line gets the session name, so no line of an agent looks like the user's own.
+    const add = p.notes_append.replace(/\r\n?/g, '\n').split('\n').map((l) => l.trim()).filter(Boolean);
+    if (!add.length) throw httpError(400, 'notes_append is empty. Give the text to add.');
+    line = add.map((l) => `${s.name}: ${l}`).join('\n');
     notes = cur ? cur + (cur.endsWith('\n') ? '' : '\n') + line : line;
   } else if (has('notes_replace')) notes = p.notes_replace.replace(/\r\n?/g, '\n');
   if (notes !== null && notes.length > NOTES_MAX) throw httpError(413, `The notes board can have ${NOTES_MAX} characters. With this change it would have ${notes.length}.`);
@@ -692,10 +737,12 @@ function updateRoom(s, p) {
 
   const now = Date.now(), done = [];
   if (notes !== null) {
-    if (notes.trim()) persisted.notes[key] = { text: notes, at: now }; else delete persisted.notes[key];
+    if (notes.trim()) persisted.notes[key] = { text: notes, at: now, by: s.name }; else delete persisted.notes[key];
     if (line !== null) { addFeed(s, 'tool', 'added to the notes board'); done.push(`Added to the notes board: "${oneLine(line, 200)}".`); }
     else if (notes.trim()) { addFeed(s, 'tool', 'rewrote the notes board'); done.push(`Replaced the notes board text (${plural(notes.length, 'character', 'characters')}).`); }
     else { addFeed(s, 'tool', 'cleared the notes board'); done.push('Cleared the notes board.'); }
+    // A rewrite has no way back in the office, so the reply keeps the old text for the agent's transcript.
+    if (line === null && cur.trim()) done.push(`The old text was:\n${cur.split('\n').map((l) => '  ' + l).join('\n')}`);
   }
   if (pin !== null) {
     if (pin) { persisted.pins[key] = { text: pin, by: s.name, at: now }; addFeed(s, 'tool', 'pinned a note on the blackboard'); done.push(`Pinned on the blackboard: "${pin}".`); }
@@ -1324,10 +1371,17 @@ const server = http.createServer(async (req, res) => {
       const key = String(body.key || ''), text = String(body.text ?? '');
       if (!key || key.length > 400) throw httpError(400, 'Unknown board.');
       if (text.length > NOTES_MAX) throw httpError(413, `A note can have ${NOTES_MAX} characters.`);
-      if (text.trim()) persisted.notes[key] = { text, at: Date.now() }; else delete persisted.notes[key];
+      // base: the "at" the editor last saw. When an agent changed the notes since, answer 409 with the current text.
+      const curNote = persisted.notes[key], curAt = curNote?.at || 0;
+      if (body.base !== undefined && body.base !== null && Number(body.base) !== curAt) {
+        return send(res, 409, { error: 'An agent changed the notes.', text: curNote?.text || '', at: curAt });
+      }
+      const at = Date.now();
+      if (text.trim()) persisted.notes[key] = { text, at }; else delete persisted.notes[key];
       savePersisted(); broadcast();
-      return send(res, 200, { ok: true });
+      return send(res, 200, { ok: true, at });
     }
+    if (url.pathname === '/api/room/inventory') return send(res, 200, setInventory(body));
     if (url.pathname === '/api/tree') return send(res, 200, await repoTree(String(body.root || '')));
     if (url.pathname === '/api/branches') return send(res, 200, { branches: await git.branches(knownRepo(body.repo).path) });
     if (url.pathname === '/api/floor/create') return send(res, 200, await floorAction('create-floor', body));
