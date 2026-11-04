@@ -227,6 +227,17 @@
     // focus: the item in focus ({ target, item, key, mesh, spec, open }), its state for focusStep, the camera the
     // first look saved, the flight, and the controls' max zoom before the look widened it
     var foc = null, focusS = { key: null, open: false }, saved = null, fly = null, maxZ = null;
+    // The engine frames a floor through st.goal (a floor change, a new HUD inset after a bot is selected, a bot that
+    // joins). It moves the camera before the page's frame runs, so clearing it there still lets one frame through.
+    // While a screen is in focus a new goal is held back where it is set. When the focus lets go because the floor
+    // or the view changed, the held goal runs, so the engine frames the new floor.
+    var goalVal = st.goal, heldGoal = null, goalHooked = false;
+    try {
+      Object.defineProperty(st, 'goal', { configurable: true, enumerable: true,
+        get: function () { return goalVal; },
+        set: function (v) { if (v && foc) { heldGoal = v; return; } goalVal = v; } });
+      goalHooked = true;
+    } catch (x) { goalHooked = false; }
 
     function inspect() { try { return office.inspect(); } catch (x) { return null; } }
     function curShownFloor() { return shownFloor(scene, inspect()); }
@@ -393,14 +404,16 @@
     function back() {
       if (!foc) return;
       var s = saved;
-      foc = null; focusS = { key: null, open: false }; saved = null; restoreZoom();
+      foc = null; focusS = { key: null, open: false }; saved = null; heldGoal = null; restoreZoom();
       if (s) flyTo({ pos: s.p, target: s.t, zoom: s.z }, cssNum('duration-camera', 600) * 1.4, s);
       notify();
     }
-    // The floor or the view changed under the item: the engine frames the new one, so the camera does not fly back.
+    // The floor or the view changed under the item: the engine frames the new one (the goal it set is let through),
+    // so the camera does not fly back.
     function drop() {
-      var had = !!foc;
-      foc = null; focusS = { key: null, open: false }; saved = null; fly = null; restoreZoom();
+      var had = !!foc, g = heldGoal;
+      foc = null; focusS = { key: null, open: false }; saved = null; fly = null; heldGoal = null; restoreZoom();
+      if (g) st.goal = g;
       if (st.ctl) st.ctl.enabled = true;
       if (had) notify();
     }
@@ -496,7 +509,7 @@
         if (why.length) follow(why);   // the adapters scanned: the item in focus has its new mesh, or it is gone
       } catch (x) { /* one bad frame must not stop the office */ }
       try {
-        if (foc && st.goal) st.goal = null;   // the engine must not reframe while an item is in focus
+        if (foc && st.goal) st.goal = null;   // a goal set before the focus began: the engine must not reframe while an item is in focus
         stepFly(dt);
         if (fly && ptr) ptr.dirty = true;     // the item under the pointer moves while the camera flies
         if (ptr && ptr.dirty) { ptr.dirty = false; hoverStep(); }
@@ -524,7 +537,8 @@
       setCursor(false);
       if (foc || fly) { fly = null; if (st.ctl) st.ctl.enabled = true; }
       restoreZoom();
-      foc = null; saved = null;
+      foc = null; saved = null; heldGoal = null;
+      if (goalHooked) { delete st.goal; st.goal = goalVal; }   // the stage's own property again
       targets = []; frames = []; rebuildFns = []; focusFns = []; hoverT = null;
     }
     return {

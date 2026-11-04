@@ -513,10 +513,17 @@ test('host: the engine does not reframe while a screen is in focus', () => {
   s.anim[0](0.016, 0);
   assert.deepEqual(s.stage.goal, { t: 1 }, 'no focus: the engine frames');
   click(s); land(s);
-  s.stage.goal = { t: 2 };
+  assert.equal(s.stage.goal, null, 'a goal from before the look is cleared');
+  s.stage.goal = { t: 2 };   // the HUD sets a new inset after a bot is selected: frameFloor()
+  assert.equal(s.stage.goal, null, 'held back where it is set, so not even one frame moves the camera');
   s.anim[0](0.016, 0);
   assert.equal(s.stage.goal, null);
+  host.blur(); land(s);
+  s.stage.goal = { t: 3 };
+  assert.deepEqual(s.stage.goal, { t: 3 }, 'no focus: the engine frames again');
   host.dispose();
+  s.stage.goal = { t: 4 };
+  assert.deepEqual(Object.getOwnPropertyDescriptor(s.stage, 'goal'), { value: { t: 4 }, writable: true, enumerable: true, configurable: true }, 'dispose gives the stage its plain property back');
 });
 
 test('host: after a rebuild the focus follows the new mesh; a screen that is gone flies back', () => {
@@ -563,10 +570,12 @@ test('host: when the floor is no longer shown the focus lets go without a flight
   host.onFocus((f) => seen.push(f ? f.key : null));
   click(s); land(s);
   s.fg.visible = false;   // the building view
+  s.stage.goal = { building: true };   // the engine frames the building: held while the screen is in focus
   s.anim[0](0.016, 0);
   assert.equal(host.focused(), null);
   assert.equal(host.flying(), false);
   assert.equal(s.stage.ctl.enabled, true);
+  assert.deepEqual(s.stage.goal, { building: true }, 'the held goal runs: the engine frames the building');
   assert.deepEqual(seen, ['k:a', null]);
   host.dispose();
 });
