@@ -29,7 +29,8 @@ Stop the server by the pid that owns port 4317 (`netstat -ano | grep :4317`, the
 | --- | --- |
 | `server.mjs` | Headless sessions (stdin/stdout), permission holds, MCP routes, history, schedules, REST and SSE. It feeds the tracker and sends its sessions as the snapshot. |
 | `tracker.mjs` | Session tracker: the session rules. Hook payloads (`onHook`, `permissionRequest`, `askQuestion`) and stream lines (`onStream`) in, `tracker.sessions` and `tracker.feed` out. Clock, id maker, git locate, persistence sink, change callback and hold release are injected (`createTracker(deps)`), so importing it starts nothing and tests need no server. This is the seam other agent providers feed. |
-| `git.mjs` | Worktrees, changes, remove worktree, pull request, `locate` (repo, worktree, branch of a folder), floors and rooms (`layout`, `branches`, `createFloor`, `createRoom`, `removeRoom`, `deleteFloor`). Argument lists only, never a shell. |
+| `git.mjs` | Worktrees, changes, remove worktree, pull request, `locate` (repo, worktree, branch of a folder), floors and rooms (`layout`, `branches`, `createFloor`, `createRoom`, `removeRoom`, `deleteFloor`), and `resolveExe(name)`, which turns a program name into an absolute path. Argument lists only, never a shell. |
+| `extensions.mjs` | Argument lists for `claude mcp` and `claude plugin`. Names start with a letter or digit, `--` comes before connector names, scope is local or project only. Pure; tested in `test/extensions.test.mjs`. |
 | `place.mjs` | Place: where a session or worktree sits. Building key and name, floor, room id and name, notes key. Pure, no I/O. The snapshot carries it as `session.place` and `worktree.place`; the page reads it and keeps no copy of the rules. |
 | `notes.mjs` | Notes board: read, the user's save with a base version, agent append and replace, the blackboard pin. The version is a counter. A three-way merge (`merge3`) keeps the user's deletions and changes. Pure: the maps and the clock are injected. |
 | `risk.mjs` | Risk of a tool call (`riskOf`): an allowlist, so only read-only tools and edits inside the session folder are low. `inside(root, target)` checks a path against a folder. Every agent provider uses this one rule. Tested in `test/risk.test.mjs`. |
@@ -113,6 +114,7 @@ Add a new file only for a distinct job. Extend the file that owns the concern fi
 - The notes editor and the City label sit on light faces in every theme (bubble, chip). Their ink is the mix `board.js` uses, not `--ink` (light at night). The City label card is the `bg` color (the DS `K.tok` has no `chip` or `line`).
 - The City's minimum zoom is Show all (`SHOW_ZOOM` times `s.D` over the fit distance), set every frame in `city.js`. Do not set `ctl.minZoom` to a constant.
 - Reduced motion in the 3D scripts: `stage.rm` is read when the stage is made. City flies and zoom steps are instant, a building lifts at once, the door stays shut and shows a still ring (`d.ring` in `board.js`), terminal cursors are solid (`terminal.js`). The DS engine's own camera moves are the DS's.
+- Start every program with `resolveExe(name)` from `git.mjs`, never a bare name. On Windows a bare name is looked up in the child's folder first, so a planted `git.exe` in a repo would run. The entry points also set `NoDefaultCurrentDirectoryInExePath`. `test/spawn-safety.test.mjs` scans the sources for bare names.
 - The Bash tool mangles backslashes and quotes in long heredocs. Write patch scripts with the Write tool.
 
 ## Safety rules
