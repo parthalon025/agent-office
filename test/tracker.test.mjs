@@ -126,6 +126,7 @@ test('a permission request waits, then the tool result clears it', () => {
   r.hook({ hook_event_name: 'PostToolUse', session_id: 'sid-1', cwd: REPO, tool_name: 'Bash', tool_use_id: 'toolu_02', tool_input: { command: 'x' } });
   assert.deepEqual(r.released, [{ id: 'p1', decision: {} }]);
   assert.deepEqual(s.pending, []);
+  assert.equal(s.status, 'working', 'the tracker alone ends the wait');
 });
 
 test('settle returns a waiting session to working only when nothing else waits', () => {
@@ -314,6 +315,19 @@ test('interrupt: the flag is set, holds are freed, and the stopped result is not
   assert.equal(s.replies.length, 0);
   assert.equal(s.status, 'idle');
   assert.deepEqual([s.calls[0].ok, s.calls[0].err], [false, 'Stopped']);
+  assert.equal(s.status, 'idle');
+});
+
+test('interrupt: after the next user message a failed turn is an error again', () => {
+  const r = rig();
+  const s = r.tracker.newSession({ officeId: 'o1', uid: 'o1', headless: true, status: 'working' });
+  r.tracker.interrupt(s);
+  r.line(s, STREAM.resultAfterInterrupt);
+  assert.equal(s.error, null);
+  r.tracker.userMessage(s);
+  assert.equal(s.interrupted, false);
+  r.line(s, STREAM.resultError);
+  assert.equal(s.error.text, 'API Error: 529 overloaded');
 });
 
 test('stream init: model, mode, session id, and the last command list is saved', () => {

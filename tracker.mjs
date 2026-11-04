@@ -151,15 +151,17 @@ export function createTracker(deps = {}) {
   }
 
   // ---------- questions and permission prompts ----------
-  function dropPending(s) { for (const r of [...s.pending]) releaseHold(r.id, {}); s.pending = []; }
-  function dropQuestions(s, text) { for (const r of [...s.questions]) releaseHold(r.id, { text }); s.questions = []; }
+  // A session stops waiting when nothing else waits.
+  function unwait(s) { if (!s.pending.length && !s.questions.length && s.status === 'waiting') s.status = 'working'; }
+  function dropPending(s) { for (const r of [...s.pending]) releaseHold(r.id, {}); s.pending = []; unwait(s); }
+  function dropQuestions(s, text) { for (const r of [...s.questions]) releaseHold(r.id, { text }); s.questions = []; unwait(s); }
   // A held request ended (answered, timed out, or cancelled): the session stops waiting when nothing else waits.
   function settle(uid, id) {
     const s = sessions.get(uid);
     if (!s) return;
     s.pending = s.pending.filter((r) => r.id !== id);
     s.questions = s.questions.filter((r) => r.id !== id);
-    if (!s.pending.length && !s.questions.length && s.status === 'waiting') s.status = 'working';
+    unwait(s);
   }
 
   function findSession(p) {
@@ -298,6 +300,9 @@ export function createTracker(deps = {}) {
     return id;
   }
 
+  // The user sent a message: a failure after this is an error again.
+  function userMessage(s, text) { s.interrupted = false; if (text !== undefined) s.prompt = text; }
+
   // The user stopped the turn.
   function interrupt(s) {
     s.interrupted = true;
@@ -375,7 +380,7 @@ export function createTracker(deps = {}) {
 
   return {
     sessions, feed, addFeed, newSession, findSession, placeSession,
-    onHook, permissionRequest, askQuestion, settle, interrupt, deliver,
-    onStream, pushReply, endSession, dropPending, dropQuestions, closeAll,
+    onHook, permissionRequest, askQuestion, settle, interrupt, userMessage,
+    onStream, pushReply, endSession, dropPending, dropQuestions,
   };
 }

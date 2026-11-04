@@ -136,7 +136,7 @@ const tracker = createTracker({
     placed: (s, g) => { adoptNotes(roomPlace(s)); if (g) addRepo(g.repo); },
   },
 });
-const { sessions, feed, addFeed, newSession, placeSession, findSession, onHook, endSession, dropPending, dropQuestions, pushReply, onStream } = tracker;
+const { sessions, feed, addFeed, newSession, placeSession, findSession, onHook, endSession, pushReply, onStream } = tracker;
 
 const basename = (p) => (p ? p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : '');
 
@@ -292,9 +292,6 @@ function sendMessage(uid, text, attachments = []) {
   broadcast();
   return { queued: s.inbox.length };
 }
-
-// ---------- messages to a session ----------
-// Queued messages are delivered by tracker.deliver, at the hooks.
 
 // ---------- permission prompts (the office answers the PermissionRequest hook) ----------
 /** @type {Map<string, {uid: string, res: http.ServerResponse, timer: NodeJS.Timeout}>} */
@@ -570,7 +567,7 @@ function writeUser(s, text, attachments = []) {
   const c = procs.get(s.uid);
   if (!c || !c.stdin.writable) throw httpError(409, 'That session is not running.');
   const content = attachments.length ? blocksFor(text, attachments) : [{ type: 'text', text }];
-  s.interrupted = false;
+  tracker.userMessage(s);
   c.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n');
 }
 
@@ -588,8 +585,8 @@ function doControl(uid, action, value) {
   const s = sessions.get(uid);
   if (!s || !s.headless || s.status === 'ended') throw httpError(404, 'That session is not running in the office.');
   if (action === 'interrupt') {
-    tracker.interrupt(s);
     control(s, { subtype: 'interrupt' });
+    tracker.interrupt(s);
   } else if (action === 'mode') {
     if (!CONTROL_MODES.has(value)) throw httpError(400, 'Unknown permission mode.');
     control(s, { subtype: 'set_permission_mode', mode: value }, (r) => { if (r.response?.mode) s.mode = r.response.mode; broadcast(); });
