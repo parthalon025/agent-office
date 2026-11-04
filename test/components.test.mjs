@@ -19,3 +19,16 @@ for (const f of files) {
     assert.deepEqual(missing, [], `${f} renders components it does not declare`);
   });
 }
+
+// #47 and #48: the palette sits above every dialog, and the welcome card sits below both and fits a narrow screen.
+const css = readFileSync(join(pub, 'office.css'), 'utf8').replace(/\r\n/g, '\n');
+const rule = (sel) => {
+  const at = css.indexOf(`\n${sel} {`);
+  return at < 0 ? '' : css.slice(at, css.indexOf('\n}', at) + 2);
+};
+
+test('office.css: the welcome card is below the dialog layer and fits the viewport (#47)', () => {
+  const r = rule('.welcome');
+  assert.match(r, /z-index:\s*var\(--z-(hud|sheet|tag)\)/);
+  assert.match(r, /max-width:/);
+});
