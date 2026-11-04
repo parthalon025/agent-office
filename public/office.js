@@ -577,7 +577,7 @@
   function cityData(snap) {
     return window.officeAdapter.buildings(snap).map(function (b) {
       var def = window.officeAdapter.preview(b.key, snap), bots = [];
-      def.floors.forEach(function (f) { f.rooms.forEach(function (r) { (r.bots || []).forEach(function (x) { bots.push({ name: x.name, status: x.status, floor: f.name }); }); }); });
+      def.floors.forEach(function (f) { f.rooms.forEach(function (r) { (r.bots || []).forEach(function (x) { bots.push({ name: x.name, status: x.status, word: x.word, shape: x.shape, floor: f.name }); }); }); });
       return { key: b.key, name: b.name, sessions: b.sessions, waiting: b.waiting, floors: def.floors.map(function (f) { return { name: f.name, key: f.key }; }), bots: bots };
     });
   }
@@ -595,7 +595,6 @@
     list.forEach(function (b) { b.bots.forEach(function (x) { c[c[x.status] != null ? x.status : 'resting']++; }); });
     return c;
   }
-  var STATE_WORD = { working: 'working', waiting: 'need you', error: 'in error', resting: 'at rest', finished: 'at rest' };
   function CityView(p) {
     var snap = useSnapshot();
     var pal = useState(false), palOpen = pal[0], setPalOpen = pal[1];
@@ -621,10 +620,10 @@
     var waiting = list.reduce(function (n, b) { return n + b.waiting; }, 0);
     var counts = cityCounts(list), total = counts.working + counts.waiting + counts.error + counts.resting;
     var palBots = [];
-    list.forEach(function (b) { b.bots.forEach(function (x) { palBots.push({ name: x.name, status: x.status, room: b.name }); }); });
+    list.forEach(function (b) { b.bots.forEach(function (x) { palBots.push({ name: x.name, status: x.status, shape: x.shape, room: b.name }); }); });
     function enterBot(name) {
       var b = list.filter(function (x) { return x.bots.some(function (y) { return y.name === name; }); })[0];
-      if (b) p.onEnter(b.key, city.current);
+      if (b) p.onEnter(b.key, city.current, name);
     }
     // Ctrl+K in the city: the page's own actions (they include Go to each building), the theme, and the city view.
     var palActions = A.CommandPalette.actions({ setMode: function (m) { if (city.current) city.current.setMode(m); } })
@@ -639,7 +638,6 @@
             h(A.ModeToggle, { value: mode, options: CITY_MODES, label: 'Theme', onChange: function (id) { if (city.current) city.current.setMode(id); } }),
             total ? h('div', { className: 'city-counts', title: 'Sessions in every building, by state' }, h(A.StatusCounts, { counts: counts })) : null,
             h(A.Button, { variant: 'quiet', icon: 'search', onClick: function () { setPalOpen(true); } }, 'Search actions', h('kbd', { className: 'ao-kbd city-kbd', 'aria-hidden': 'true' }, 'Ctrl+K'))),
-          h('p', { className: 'note' }, 'Each building is a repository. Each floor is a branch. Click a building, or zoom in on it, to go inside. In a building, zoom out to come back.'),
           !list.length ? h(A.EmptyState, { icon: 'building', compact: true, title: 'No buildings yet', text: 'Open a session in a git repository to add its building.' }) : null,
           h('ul', { className: 'city-list' }, list.map(function (b) {
             return h('li', { key: b.key },
@@ -647,13 +645,14 @@
                 h('span', { className: 'city-main' },
                   h('span', { className: 'city-name' }, b.name),
                   h('span', { className: 'city-sub mono' }, plural(b.floors.length, 'floor', 'floors') + ' · ' + plural(b.sessions, 'session', 'sessions')),
-                  b.waiting ? h('span', { className: 'city-wait' }, b.waiting + ' need you') : null),
-                b.bots.length ? h('span', { className: 'city-dots', role: 'img', 'aria-label': b.bots.map(function (x) { return x.name + ' ' + (STATE_WORD[x.status] || x.status); }).join(', ') },
-                  b.bots.slice(0, 12).map(function (x, i) { return h('span', { key: i, className: 'city-dot', title: x.name + ' · ' + (STATE_WORD[x.status] || x.status) }, h(A.StatusDot, { status: x.status })); }),
+                  b.waiting ? h('span', { className: 'city-wait' }, plural(b.waiting, 'request', 'requests')) : null),
+                b.bots.length ? h('span', { className: 'city-dots', role: 'img', 'aria-label': b.bots.map(function (x) { return x.name + ' ' + x.word; }).join(', ') },
+                  b.bots.slice(0, 12).map(function (x, i) { return h('span', { key: i, className: 'city-dot', title: x.name + ' · ' + x.word }, h(A.StatusDot, { status: x.status })); }),
                   b.bots.length > 12 ? h('span', { className: 'city-sub mono' }, '+' + (b.bots.length - 12)) : null) : null));
           })),
+          h('p', { className: 'note' }, 'Each building is a repository. Each floor is a branch. Click a building, or zoom in on it, to go inside. In a building, zoom out to come back.'),
           waiting ? h('p', { className: 'note' }, plural(waiting, 'request waits', 'requests wait') + '. Buildings with a request show a beacon.') : null)),
-      hov ? h('div', { className: 'city-tag', role: 'status' }, h('b', null, hov.name), ' · ' + plural(hov.floors.length, 'floor', 'floors') + ' · ' + plural(hov.sessions, 'session', 'sessions') + (hov.waiting ? ' · ' + hov.waiting + ' need you' : '')) : null,
+      hov ? h('div', { className: 'city-tag', role: 'status' }, h('b', null, hov.name), ' · ' + plural(hov.floors.length, 'floor', 'floors') + ' · ' + plural(hov.sessions, 'session', 'sessions') + (hov.waiting ? ' · ' + plural(hov.waiting, 'request', 'requests') : '')) : null,
       h('div', { className: 'city-zoom', role: 'toolbar', 'aria-label': 'City zoom' },
         h(A.Button, { variant: 'quiet', icon: 'zoom-in', title: 'Zoom in', onClick: function () { if (city.current) city.current.zoomBy(1.35); } }, 'Zoom in'),
         h(A.Button, { variant: 'quiet', icon: 'zoom-out', title: 'Zoom out', onClick: function () { if (city.current) city.current.zoomBy(1 / 1.35); } }, 'Zoom out'),
@@ -1057,8 +1056,9 @@
     var intro = useMemo(function () { var i = introNext.current; if (def) introNext.current = false; return i && !ambient; }, [def]);
     function go(v) { setView(v); try { localStorage.setItem('ao-view', v); } catch (x) { /* private window */ } }
     // From the city: fly to the building, then enter it with the DS intro flythrough.
-    function enter(key, city) {
-      var inside = function () { introNext.current = true; pick(key); go('office'); };
+    var selectNext = React.useRef(null);
+    function enter(key, city, bot) {
+      var inside = function () { selectNext.current = bot || null; introNext.current = true; pick(key); go('office'); };
       if (city) city.focus(key, inside); else inside();
     }
     var week = snap && snap.plan && snap.plan.week;
@@ -1154,8 +1154,12 @@
       function onWheel(e) {
         var o = officeRef.current, st = o && o.inspect && o.inspect().stage;
         var level = hostRef.current && hostRef.current.inBuilding() ? 'building' : 'floor';
-        var ok = !!(st && st.ctl && e.deltaY > 0 && e.target.closest && e.target.closest('.ao-scene') && st.cam.zoom <= st.ctl.minZoom * 1.03);
-        if (!gate.push(level, Date.now(), ok)) return;
+        var now = Date.now(), inScene = !!(e.target.closest && e.target.closest('.ao-scene'));
+        var ok = !!(st && st.ctl && e.deltaY > 0 && inScene && st.cam.zoom <= st.ctl.minZoom * 1.03);
+        var leave = gate.push(level, now, ok);
+        // keep the DS camera feel from clearing the framing the level change started
+        if (inScene && (leave || gate.holding(now))) e.stopPropagation();
+        if (!leave) return;
         if (level === 'building') go('city'); else o.setView('building');
       }
       window.addEventListener('wheel', onWheel, { passive: true, capture: true });
@@ -1189,6 +1193,7 @@
             onOpen: function (uid, name) { o.select(name); openTerminal(uid, name); }
           });
         }
+        if (selectNext.current) { var nb = selectNext.current; selectNext.current = null; setTimeout(function () { o.select(nb); }, 400); }
         if (!st || !host || !window.OfficeCity) return;
         window.OfficeCity.cameraFeel(st);
         // birds over the tower in the building view; none inside a floor

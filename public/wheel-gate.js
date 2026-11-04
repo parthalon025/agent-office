@@ -13,6 +13,8 @@
      gate.push(level, now, eligible) -> true when the push should leave the level.
        eligible false means the wheel event does not count (not zoomed out, wrong place); it still keeps
        the gesture and the pause up to date.
+     gate.holding(now) -> true during the pause after a level change and for the rest of that gesture.
+       The caller stops these events, so the DS camera does not cancel the framing the change started.
      gate.reset() clears the pushes (the view changed by other means). */
 (function (root) {
   'use strict';
@@ -32,6 +34,8 @@
         pushes = 0; spent = true; pauseUntil = now + pause;   // the rest of this gesture does nothing
         return true;
       },
+      // true while this gesture or the pause after a level change is still running
+      holding: function (now) { return spent || now < pauseUntil; },
       reset: function () { pushes = 0; }
     };
   }

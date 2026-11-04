@@ -97,7 +97,7 @@
     live(snap).forEach(function (s) {
       var pl = placeOf(s);
       places.push(pl);
-      if (withBots && pl.repo === repo) (bots[pl.root] = bots[pl.root] || []).push({ name: s.name, role: 'coder', shape: shapeOf(s.uid), status: V.status(s).key, task: V.taskLine(s) });
+      if (withBots && pl.repo === repo) (bots[pl.root] = bots[pl.root] || []).push({ name: s.name, role: 'coder', shape: shapeOf(s.uid), status: V.status(s).key, word: V.status(s).word, task: V.taskLine(s) });
     });
     places.forEach(function (pl) {
       if (pl.repo !== repo) return;

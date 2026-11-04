@@ -103,7 +103,7 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 | `launch.ps1` | Starts a session in a terminal window. |
 | `probe.mjs` | Tests HTTP hooks on this Claude Code version. |
 | `public/` | The page: `vocab.js` (shared status words, tool names and room figures), `wheel-gate.js` (one scroll-out gesture leaves one level), `scene-host.js` (the one reader of the 3D stage: floor, view, rooms, pick, cursor), `building.js` (snapshot store and building adapter), `adapter.js`, `office.js`, `office.css`, `chat-extras.js`, `index.html`. |
-| `test/*.test.mjs` | Offline unit tests (`npm test`): place rules, risk classifier, session vocabulary, hook payload, session tracker, scene host, notes merge, snapshot store and building adapter. |
+| `test/*.test.mjs` | Offline unit tests (`npm test`): place rules, risk classifier, session vocabulary, hook payload, session tracker, scene host, notes merge, snapshot store and building adapter, contrast pairs, wheel gate. |
 | `test/tracker.test.mjs` | Session tracker tests from recorded-shape hook payloads and stream lines in `test/fixtures/`. |
 | `test/smoke.mjs` | End-to-end test against real Claude Code. |
 | `DS-README.md`, `Recipes.md`, `Reference.md`, `Concepts.md`, `kit/`, `components/`, `tokens.css` | The Agent Office design system. |

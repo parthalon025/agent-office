@@ -29,9 +29,9 @@ test('notes editor: ink and placeholder on the whiteboard face', () => each((T, 
   atLeast('notes placeholder', 4.5, hint, T('bubble'), th);
 }));
 
-test('City label card: ink and muted on a solid chip', () => each((T, th) => {
-  atLeast('label name', 4.5, T('ink'), T('chip'), th);
-  atLeast('label sub', 4.5, T('muted'), T('chip'), th);
+test('City label card: ink and muted on bg', () => each((T, th) => {
+  atLeast('label name', 4.5, T('ink'), T('bg'), th);
+  atLeast('label sub', 4.5, T('muted'), T('bg'), th);
 }));
 
 test('status words: ink on the panel, the chip and the page', () => each((T, th, panel) => {
@@ -70,8 +70,8 @@ test('the CSS keeps status colors off text and uses the ink pairs above', () => 
   for (const m of css.matchAll(/(?:^|[;{\s])color: var\(--(status-[a-z]+)\)/g)) assert.fail('text colored with ' + m[1]);
 });
 
-test('the City label draws on a chip, not a bubble', () => {
+test('the City label draws on bg, not a bubble', () => {
   const city = read('public/city.js');
-  assert.match(city, /g\.fillStyle = tok\['chip'\]/);
+  assert.match(city, /g\.fillStyle = tok\['bg'\]/);
   assert.doesNotMatch(city, /g\.fillStyle = tok\['bubble'\]/);
 });

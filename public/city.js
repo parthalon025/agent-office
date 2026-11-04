@@ -237,10 +237,10 @@
     function signTex(name, sub) {
       var tok = K.tok, f = K.f || {};
       return X.canvasTex(512, 160, function (g, w, hh) {
-        // a rounded label like the DS floor tags: name, then floors and sessions. The card is a solid chip,
-        // so ink and muted read on it in every theme (bubble is light at night, and so is ink).
+        // a rounded label like the DS floor tags: name, then floors and sessions. The card is bg (opaque; K.tok
+        // has no chip or line), and ink and muted read on bg in every theme.
         var r = 28;
-        g.fillStyle = tok['chip'] || tok['bg'];
+        g.fillStyle = tok['bg'];
         g.beginPath(); g.moveTo(r, 4); g.arcTo(w - 4, 4, w - 4, hh - 4, r); g.arcTo(w - 4, hh - 4, 4, hh - 4, r); g.arcTo(4, hh - 4, 4, 4, r); g.arcTo(4, 4, w - 4, 4, r); g.closePath(); g.fill();
         g.strokeStyle = tok['line'] || tok['muted']; g.lineWidth = 3; g.stroke();
         g.textBaseline = 'middle'; g.fillStyle = tok['ink']; g.font = '600 62px ' + (f.sans || 'sans-serif');

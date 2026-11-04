@@ -80,3 +80,18 @@ test('events that are not eligible do not count and break a run', () => {
   assert.equal(g.push('building', 200, false), false);
   assert.equal(g.push('building', 300, true), false);
 });
+
+test('holding is true after a leave and false after the pause and a quiet gap', () => {
+  const g = G.create();
+  assert.equal(g.holding(0), false);
+  g.push('floor', 0, true);
+  assert.equal(g.push('floor', 50, true), true);
+  assert.equal(g.holding(60), true);
+  assert.equal(g.holding(500), true);
+  // events keep coming every 100 ms: one gesture, still held after the pause
+  for (let t = 100; t <= 900; t += 100) g.push('floor', t, true);
+  assert.equal(g.holding(900), true);
+  // quiet for more than the gap: a new gesture
+  g.push('floor', 1100, false);
+  assert.equal(g.holding(1100), false);
+});
