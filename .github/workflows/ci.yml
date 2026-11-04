@@ -17,7 +17,7 @@ jobs:
           python-version: '3.12'
       - name: Syntax check
         run: |
-          for f in *.mjs public/*.js test/*.mjs; do node --check "$f"; done
+          for f in *.mjs providers/*.mjs public/*.js test/*.mjs test/fixtures/*.mjs; do node --check "$f"; done
       - name: Tests
         run: npm test
       - name: Design system check
