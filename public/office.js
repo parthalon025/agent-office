@@ -665,6 +665,17 @@
             row('Last event', v.lastEvent ? ago(v.lastEvent) : 'none')))));
   }
 
+  // Where a caret at pos in text a goes when the text becomes b: the same place in the part both share.
+  // Text kept before the caret keeps it in place; text added before it moves it on; a caret inside a changed part
+  // goes to the end of that part.
+  function mapCaret(a, b, pos) {
+    var p = 0, s = 0;
+    while (p < a.length && p < b.length && a[p] === b[p]) p++;
+    if (pos <= p) return pos;
+    while (s < a.length - p && s < b.length - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++;
+    return pos >= a.length - s ? b.length - (a.length - pos) : b.length - s;
+  }
+
   // The notes board, written on in place: a text box laid exactly over the board on screen.
   function NotesEditor(p) {
     var tx = useState(p.text || ''), text = tx[0], setText = tx[1];
@@ -672,7 +683,19 @@
     var sv = useState('saved'), state = sv[0], setState = sv[1];
     var ref = React.useRef(null), timer = React.useRef(0);
     var base = React.useRef(p.version || 0), latest = React.useRef(p.text || ''), fromSent = React.useRef(false);
-    var edits = React.useRef(0), inflight = React.useRef(false), queued = React.useRef(null);
+    var edits = React.useRef(0), inflight = React.useRef(false), queued = React.useRef(null), caret = React.useRef(null);
+    // Text from outside (an agent's line, a merged save) replaces the box's value. The browser then puts the caret
+    // at the end, so the user's next keys would land after the agent's line. Keep the caret where the user was.
+    function showText(next) {
+      var el = ref.current;
+      if (el && document.activeElement === el && el.value !== next) caret.current = [mapCaret(el.value, next, el.selectionStart), mapCaret(el.value, next, el.selectionEnd)];
+      latest.current = next; setText(next);
+    }
+    React.useLayoutEffect(function () {
+      var c = caret.current, el = ref.current;
+      caret.current = null;
+      if (c && el && document.activeElement === el) el.setSelectionRange(c[0], c[1]);
+    }, [text]);
     useEffect(function () {
       var raf = 0;
       function follow() { var r = p.rect(); if (r) setRect(function (o) { return o && Math.abs(o.left - r.left) < 0.5 && Math.abs(o.top - r.top) < 0.5 && Math.abs(o.width - r.width) < 0.5 ? o : r; }); raf = requestAnimationFrame(follow); }
@@ -687,7 +710,7 @@
       var ver = p.version || 0;
       if (state !== 'saved' || ver <= base.current) return;   // a save is pending, or this is our own save or an older snapshot
       base.current = ver; fromSent.current = false;
-      if ((p.text || '') !== latest.current) { latest.current = p.text || ''; setText(latest.current); }
+      if ((p.text || '') !== latest.current) showText(p.text || '');
     }, [p.version, state]);
     // The server keeps the merge rules (notes.mjs). The editor sends its text and the version it started from.
     function done() {
@@ -708,7 +731,7 @@
           // text we sent as the merge base of the next save (sent), so nothing is merged twice.
           base.current = res.version;
           if (typedMore) fromSent.current = true;
-          else { fromSent.current = false; latest.current = res.text; setText(res.text); }
+          else { fromSent.current = false; showText(res.text); }
           if (!wasSent) p.toast({ tone: 'info', title: 'Notes', text: 'An agent changed the notes. Your text is merged.' });
         } else { base.current = res.version; fromSent.current = false; }
         if (!typedMore) setState('saved');
