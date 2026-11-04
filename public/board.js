@@ -442,10 +442,14 @@
       box(DW - 0.4, 0.7, 0.02, leafMat, (DW - 0.04) / 2, 1.5, 0.045, pivot).castShadow = false;
       var knob = new T.Mesh(new T.SphereGeometry(0.065, 12, 10), themed('scene-metal')); knob.position.set(DW - 0.2, 1.0, 0.1); knob.userData.noNav = 1; pivot.add(knob);
       var sg = newTex(600, 180), sgm = plane(1.1, 0.33, sg.tex, 0.85, 'doorsign'); sgm.position.set(0, y0 + DH + 0.38, 0.02); dg.add(sgm); hit.push(sgm);
+      // a still ring round the doorway: with reduced motion it says "someone came or left" in place of the swing and the glow
+      var ringMat = new T.MeshBasicMaterial({ color: new T.Color(tk('status-working')) }), ring = new T.Group(); ring.visible = false; dg.add(ring);
+      [[0, y0 + DH + 0.3, DW + 0.5, 0.08], [0, y0 - 0.02, DW + 0.5, 0.08]].forEach(function (r) { box(r[2], r[3], 0.04, ringMat, r[0], r[1], 0.12, ring).castShadow = false; });
+      [-1, 1].forEach(function (sd) { box(0.08, DH + 0.4, 0.04, ringMat, sd * (DW / 2 + 0.21), y0 + DH / 2 + 0.14, 0.12, ring).castShadow = false; });
       // lamp: warm light between the door and the boards; it also glows when an agent comes or goes
       var lamp = st.lamp(rg, leftX + 2.4, 3.2, 1.2, warm().getHex(), 10);
       var dr = { kind: 'door', mesh: leaf, roomId: id, tex: sg.tex, canvas: sg.canvas, sig: null, mat: leafMat, base: 0, hov: 0.3, g: 0, tgt: 0, hit: hit, hint: 'Add or remove agents',
-        pivot: pivot, inner: inner, sign: sgm, lamp: lamp, lampBase: null, pulse: null, open: 0, own: [inner.material, sgm.material] };
+        pivot: pivot, inner: inner, sign: sgm, lamp: lamp, lampBase: null, pulse: null, open: 0, ring: ring, ringMat: ringMat, own: [inner.material, sgm.material, ringMat] };
       hit.forEach(function (x) { x.userData.item = dr; });
       doors.push(dr); items.push(dr);
       lw.updateMatrixWorld(true);
@@ -540,7 +544,7 @@
         d.pulse = { t: t0 || 0, dir: dir, D: D, H: D * 1.6 }; d.lampBase = d.lamp.intensity;
       }
       var c = new T.Color(tk(dir === 'out' ? 'status-waiting' : 'status-working'));
-      d.inner.material.emissive.copy(c); d.lamp.color.copy(c);
+      d.inner.material.emissive.copy(c); d.lamp.color.copy(c); d.ringMat.color.copy(c);
     }
     // The engine rebuilds the floor when a bot joins or leaves, so scan first and swing the new door.
     // No door yet (the floor is hidden or still being built): the swing waits up to 3 s for it.
@@ -565,11 +569,13 @@
         }
         if (p || d.open !== 0) {
           d.open = a;
-          d.pivot.rotation.y = st.rm ? 0 : -OPEN_ANGLE * a;
-          d.inner.material.emissiveIntensity = 0.9 * a;
-          d.sign.material.emissiveIntensity = 0.85 + 0.5 * a;
-          if (d.pulse) d.lamp.intensity = d.lampBase + 2.2 * a;
+          var m = st.rm ? 0 : a;   // reduced motion: the door stays shut and nothing glows or pulses
+          d.pivot.rotation.y = -OPEN_ANGLE * m;
+          d.inner.material.emissiveIntensity = 0.9 * m;
+          d.sign.material.emissiveIntensity = 0.85 + 0.5 * m;
+          if (d.pulse) d.lamp.intensity = d.lampBase + 2.2 * m;
         }
+        d.ring.visible = !!d.pulse && !!st.rm;
       });
     }
 

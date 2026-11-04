@@ -581,8 +581,30 @@
       return { key: b.key, name: b.name, sessions: b.sessions, waiting: b.waiting, floors: def.floors.map(function (f) { return { name: f.name, key: f.key }; }), bots: bots };
     });
   }
+  var CITY_MODES = [{ id: 'day', label: 'Day', icon: 'day' }, { id: 'night', label: 'Night', icon: 'night' }, { id: 'sublevel', label: 'Sublevel', icon: 'terminal' }];
+  function themeMode() {
+    var t = document.documentElement.getAttribute('data-theme');
+    if (t === 'dark') return 'night';
+    if (t === 'sublevel') return 'sublevel';
+    if (t === 'light') return 'day';
+    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
+  }
+  // How many bots are in each state across all buildings (DS StatusCounts keys; a finished bot is at rest).
+  function cityCounts(list) {
+    var c = { working: 0, waiting: 0, error: 0, resting: 0 };
+    list.forEach(function (b) { b.bots.forEach(function (x) { c[c[x.status] != null ? x.status : 'resting']++; }); });
+    return c;
+  }
+  var STATE_WORD = { working: 'working', waiting: 'need you', error: 'in error', resting: 'at rest', finished: 'at rest' };
   function CityView(p) {
     var snap = useSnapshot();
+    var pal = useState(false), palOpen = pal[0], setPalOpen = pal[1];
+    var md = useState(themeMode), mode = md[0], setMode = md[1];
+    useEffect(function () {
+      var mo = new MutationObserver(function () { setMode(themeMode()); });
+      mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+      return function () { mo.disconnect(); };
+    }, []);
     var ref = React.useRef(null), city = React.useRef(null), fitted = React.useRef(false);
     var hv = useState(null), hov = hv[0], setHov = hv[1];
     var list = snap ? cityData(snap) : [];
@@ -597,26 +619,46 @@
       if (!fitted.current) { fitted.current = true; city.current.fit(true); }
     }, [snap]);
     var waiting = list.reduce(function (n, b) { return n + b.waiting; }, 0);
+    var counts = cityCounts(list), total = counts.working + counts.waiting + counts.error + counts.resting;
+    var palBots = [];
+    list.forEach(function (b) { b.bots.forEach(function (x) { palBots.push({ name: x.name, status: x.status, room: b.name }); }); });
+    function enterBot(name) {
+      var b = list.filter(function (x) { return x.bots.some(function (y) { return y.name === name; }); })[0];
+      if (b) p.onEnter(b.key, city.current);
+    }
+    // Ctrl+K in the city: the page's own actions (they include Go to each building), the theme, and the city view.
+    var palActions = A.CommandPalette.actions({ setMode: function (m) { if (city.current) city.current.setMode(m); } })
+      .filter(function (a) { return a.id.indexOf('page-b-') !== 0; })   // the page's Go to only picks the building; here Go to goes inside
+      .concat(list.map(function (b) { return { id: 'city-go-' + b.key, label: 'Go to ' + b.name, icon: 'building', group: 'Buildings', keywords: 'building repository ' + b.name, run: function () { p.onEnter(b.key, city.current); } }; }))
+      .concat([{ id: 'city-fit', label: 'Show all buildings', icon: 'building', group: 'City', run: function () { if (city.current) city.current.fit(false); } }]);
     return h('div', { className: 'city' },
       h('div', { ref: ref, className: 'city-scene' }),
       h('div', { className: 'city-hud' },
         h(A.Panel, { title: 'City', count: plural(list.length, 'building', 'buildings') },
+          h('div', { className: 'city-tools' },
+            h(A.ModeToggle, { value: mode, options: CITY_MODES, label: 'Theme', onChange: function (id) { if (city.current) city.current.setMode(id); } }),
+            total ? h('div', { className: 'city-counts', title: 'Sessions in every building, by state' }, h(A.StatusCounts, { counts: counts })) : null,
+            h(A.Button, { variant: 'quiet', icon: 'search', onClick: function () { setPalOpen(true); } }, 'Search actions', h('kbd', { className: 'ao-kbd city-kbd', 'aria-hidden': 'true' }, 'Ctrl+K'))),
           h('p', { className: 'note' }, 'Each building is a repository. Each floor is a branch. Click a building, or zoom in on it, to go inside. In a building, zoom out to come back.'),
           !list.length ? h(A.EmptyState, { icon: 'building', compact: true, title: 'No buildings yet', text: 'Open a session in a git repository to add its building.' }) : null,
           h('ul', { className: 'city-list' }, list.map(function (b) {
             return h('li', { key: b.key },
               h('button', { type: 'button', className: 'city-row' + (b.key === p.shown ? ' is-shown' : '') + (hov && hov.key === b.key ? ' is-hover' : ''), onClick: function () { p.onEnter(b.key, city.current); } },
-                h(A.StatusDot, { status: b.waiting ? 'waiting' : b.sessions ? 'working' : 'resting' }),
-                h('span', { className: 'city-name' }, b.name),
-                h('span', { className: 'city-sub mono' }, plural(b.floors.length, 'floor', 'floors') + ' · ' + b.sessions),
-                b.waiting ? h('span', { className: 'city-wait' }, b.waiting + ' need you') : null));
+                h('span', { className: 'city-main' },
+                  h('span', { className: 'city-name' }, b.name),
+                  h('span', { className: 'city-sub mono' }, plural(b.floors.length, 'floor', 'floors') + ' · ' + plural(b.sessions, 'session', 'sessions')),
+                  b.waiting ? h('span', { className: 'city-wait' }, b.waiting + ' need you') : null),
+                b.bots.length ? h('span', { className: 'city-dots', role: 'img', 'aria-label': b.bots.map(function (x) { return x.name + ' ' + (STATE_WORD[x.status] || x.status); }).join(', ') },
+                  b.bots.slice(0, 12).map(function (x, i) { return h('span', { key: i, className: 'city-dot', title: x.name + ' · ' + (STATE_WORD[x.status] || x.status) }, h(A.StatusDot, { status: x.status })); }),
+                  b.bots.length > 12 ? h('span', { className: 'city-sub mono' }, '+' + (b.bots.length - 12)) : null) : null));
           })),
           waiting ? h('p', { className: 'note' }, plural(waiting, 'request waits', 'requests wait') + '. Buildings with a request show a beacon.') : null)),
       hov ? h('div', { className: 'city-tag', role: 'status' }, h('b', null, hov.name), ' · ' + plural(hov.floors.length, 'floor', 'floors') + ' · ' + plural(hov.sessions, 'session', 'sessions') + (hov.waiting ? ' · ' + hov.waiting + ' need you' : '')) : null,
       h('div', { className: 'city-zoom', role: 'toolbar', 'aria-label': 'City zoom' },
         h(A.Button, { variant: 'quiet', icon: 'zoom-in', title: 'Zoom in', onClick: function () { if (city.current) city.current.zoomBy(1.35); } }, 'Zoom in'),
         h(A.Button, { variant: 'quiet', icon: 'zoom-out', title: 'Zoom out', onClick: function () { if (city.current) city.current.zoomBy(1 / 1.35); } }, 'Zoom out'),
-        h(A.Button, { variant: 'quiet', icon: 'building', onClick: function () { if (city.current) city.current.fit(false); } }, 'Show all')));
+        h(A.Button, { variant: 'quiet', icon: 'building', onClick: function () { if (city.current) city.current.fit(false); } }, 'Show all')),
+      h(A.CommandPalette, { open: palOpen, onClose: function () { setPalOpen(false); }, onOpen: function () { setPalOpen(true); }, bots: palBots, floors: [], actions: palActions, onBot: enterBot }));
   }
 
   // A side panel sits above the control strip: its bottom edge is the measured strip height.
@@ -1107,16 +1149,14 @@
     // zoom out to leave: scrolling out at the widest zoom goes floor -> building -> city
     useEffect(function () {
       if (cur2.view !== 'office') return undefined;
-      var pushes = 0, pushT = 0;
+      // One gesture leaves one level (wheel-gate.js): a pause after each change, three pushes at the building level.
+      var gate = window.OfficeWheelGate.create();
       function onWheel(e) {
         var o = officeRef.current, st = o && o.inspect && o.inspect().stage;
-        if (!st || !st.ctl || e.deltaY <= 0 || !e.target.closest || !e.target.closest('.ao-scene')) { pushes = 0; return; }
-        if (st.cam.zoom > st.ctl.minZoom * 1.03) return;
-        var now = Date.now();
-        pushes = now - pushT < 800 ? pushes + 1 : 1; pushT = now;
-        if (pushes < 2) return;
-        pushes = 0;
-        if (hostRef.current && hostRef.current.inBuilding()) go('city'); else o.setView('building');
+        var level = hostRef.current && hostRef.current.inBuilding() ? 'building' : 'floor';
+        var ok = !!(st && st.ctl && e.deltaY > 0 && e.target.closest && e.target.closest('.ao-scene') && st.cam.zoom <= st.ctl.minZoom * 1.03);
+        if (!gate.push(level, Date.now(), ok)) return;
+        if (level === 'building') go('city'); else o.setView('building');
       }
       window.addEventListener('wheel', onWheel, { passive: true, capture: true });
       return function () { window.removeEventListener('wheel', onWheel, true); };
