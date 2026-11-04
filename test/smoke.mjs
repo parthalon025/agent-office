@@ -22,7 +22,7 @@ const repo = S + '/repo1';
 fs.rmSync(repo, { recursive: true, force: true });
 fs.mkdirSync(repo, { recursive: true });
 const g = (...a) => execFileSync('git', a, { cwd: repo, encoding: 'utf8' });
-g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't');
+g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't'); g('config', 'core.autocrlf', 'false');
 fs.writeFileSync(repo + '/hello.txt', 'line one\n'); g('add', '-A'); g('commit', '-qm', 'init');
 
 // 1) open with worktree, budget; first prompt makes an edit
@@ -44,7 +44,15 @@ if (pend) {
   const a = await api('/api/answer', { id, allow: true, always: false });
   ok('approve', a.ok === true, JSON.stringify(a));
 }
-const done = await until(async () => { const x = await me(uid); return x && x.status === 'idle' && x.turns >= 1 && x.replies.length ? x : null; }, 80000);
+// The model can ask again in the same turn (a second command or edit). Approve a later prompt only when it is not high risk.
+let more = 0;
+const done = await until(async () => {
+  const x = await me(uid);
+  const r = x?.pending?.[0];
+  if (r && r.risk !== 'high') { more++; console.log('   approve a later prompt:', r.tool, r.detail); await api('/api/answer', { id: r.id, allow: true, always: false }); return null; }
+  return x && x.status === 'idle' && x.turns >= 1 && x.replies.length ? x : null;
+}, 80000);
+if (more) console.log('   later prompts approved:', more);
 ok('turn finished with reply', !!done, done && done.replies.map((r) => r.text.slice(0, 60)).join(' / '));
 ok('cost tracked', typeof done?.cost === 'number', String(done?.cost));
 const edit = (done?.calls || []).find((c) => /^(Edit|Write)$/.test(c.name));
@@ -118,7 +126,7 @@ const repo2 = S + '/repo2';
 fs.rmSync(repo2, { recursive: true, force: true });
 fs.mkdirSync(repo2, { recursive: true });
 const g2 = (...a) => execFileSync('git', a, { cwd: repo2, encoding: 'utf8' });
-g2('init', '-q'); g2('config', 'user.email', 't@t'); g2('config', 'user.name', 't');
+g2('init', '-q'); g2('config', 'user.email', 't@t'); g2('config', 'user.name', 't'); g2('config', 'core.autocrlf', 'false');
 fs.writeFileSync(repo2 + '/a.txt', 'a\n'); g2('add', '-A'); g2('commit', '-qm', 'init');
 const watcher = await api('/api/open', { cwd: repo2, name: 'watcher', model: 'haiku', where: 'office', permissionMode: 'default' });
 const failer = await api('/api/open', { cwd: repo2, name: 'failer', model: 'haiku', where: 'office', maxBudget: 0.0001, prompt: 'Say hello.' });
