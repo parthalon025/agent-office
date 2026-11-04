@@ -86,6 +86,10 @@ Each job names the control to use. Ctrl+K finds all of them.
 5. **Schedule a prompt.** Open **More**, then **Schedules**, then **Add a schedule**. Give it a name, a folder and an instruction. Run it every N minutes (5 or more) or daily at a time. A schedule opens an office session on its own. A daily slot that the office misses by more than 10 minutes is skipped. **Run now** starts one run at once and does not change the times.
 6. **Make a floor or a room.** Open **Floors**. Create a floor to make a new branch with its first worktree. Add a room to put one more worktree on a branch. Remove a room or delete a floor in the same dialog. If git refuses, the dialog says why and offers a button to go ahead anyway. The main folder cannot be removed.
 7. **Manage extensions.** Select a bot, open **More**, then **Extensions** (or use Ctrl+K). Turn connectors and plugins off or on, add them or remove them. Changes go to the local or project scope of the folder, never to your user settings. Only office sessions can turn connectors on and off.
+8. **Review the changes.** Select a bot, open **More**, then **Changes**. The same button is in **Past** for a closed session. Read the diff before you keep the work.
+9. **Stop or reopen.** **Stop turn** ends the turn that runs now. It is for office sessions only. A closed session moves to **Past**, where **Reopen** brings it back and **Forget** removes it with its history.
+
+Each job above is written for Claude Code, the only agent kind that is built. Other kinds (a local model, for example) are coming with #18 and #19. They will use the same jobs. Their own steps are not written yet.
 
 ## How it works
 
@@ -150,7 +154,7 @@ Generated at run time and ignored by git: `.office-token`, `office-hooks.json`, 
 
 ## Troubleshooting
 
-The office knows two kinds of session. A session **in the office** runs `claude -p` with a pipe. A **terminal session** is one you start yourself with the office settings. No other kind of agent is built. Find your kind below.
+The office knows two kinds of session. A session **in the office** runs `claude -p` with a pipe. A **terminal session** is one you start yourself with the office settings. No other kind of agent is built yet (see Other agent kinds). Find your kind below.
 
 ### Any session
 
@@ -166,6 +170,10 @@ The office knows two kinds of session. A session **in the office** runs `claude 
 - **A session stops at start.** The bot's chat shows Claude Code's error. The usual cause is a signed-out login. Sign in with Claude Code, then open the session again.
 - **The `/` list is empty.** Claude reports its commands after the first message. The office reuses the last known list until then.
 - **A turn failed.** The bot shows a red badge until you click Retry or Dismiss.
+
+### Other agent kinds
+
+Coming with #18 and #19. Claude Code is the only kind built today, so no other kind has troubleshooting steps yet. This section will list them when those issues merge.
 
 ### Terminal sessions
 
