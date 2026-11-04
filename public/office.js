@@ -337,8 +337,20 @@
       var no = function () { if (p.toast) p.toast({ tone: 'error', title: 'Not copied', text: 'The browser blocked the copy. Select the text and copy it by hand.' }); };
       try { navigator.clipboard.writeText(text).then(ok, no); } catch (x) { no(); }
     }
+    var su = useState(i.startup || null), startup = su[0], setStartup = su[1];
+    var sb = useState(false), startBusy = sb[0], setStartBusy = sb[1];
+    function toggleStartup() {
+      setStartBusy(true);
+      api('/api/startup', { enabled: !startup.enabled }).then(function (r) {
+        setStartup(r); setStartBusy(false);
+        if (p.toast) p.toast({ tone: 'info', title: r.enabled ? 'Start with Windows is on' : 'Start with Windows is off', text: r.enabled ? 'The office starts when you sign in.' : 'The office no longer starts when you sign in.' });
+      }, function (x) { setStartBusy(false); if (p.toast) p.toast({ tone: 'error', title: 'Not changed', text: x.message }); });
+    }
     return h(A.Dialog, { open: true, title: 'Attach sessions', onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
       h('div', { className: 'form' },
+        startup && startup.available ? h('h3', { className: 'ext-h' }, 'Start with Windows') : null,
+        startup && startup.available ? h('p', { className: 'note' }, startup.enabled ? 'The office starts when you sign in. It adds one file to your Startup folder. It needs no admin rights.' : 'Start the office when you sign in to Windows. It adds one file to your Startup folder. It needs no admin rights.') : null,
+        startup && startup.available ? h(A.Button, { variant: 'quiet', disabled: startBusy, onClick: toggleStartup }, startup.enabled ? 'Turn off start with Windows' : 'Turn on start with Windows') : null,
         h('h3', { className: 'ext-h' }, 'Where sessions come from'),
         h(A.ChannelList, { channels: channels }),
         h('p', { className: 'note' }, 'Sessions opened here are wired up for you. To seat a session you start yourself, launch it with the office settings file.'),

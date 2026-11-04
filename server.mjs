@@ -12,6 +12,7 @@ import * as git from './git.mjs';
 import { slimPayload } from './payload.mjs';
 import { createTracker, clip } from './tracker.mjs';
 import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, cleanRecent, recentChoices } from './place.mjs';
+import * as startup from './startup.mjs';
 import { createNotes, cleanPin, PIN_MAX } from './notes.mjs';
 import './public/format.js'; // money, plurals and short paths, shared with the page (globalThis.OfficeFormat)
 import './public/vocab.js'; // session vocabulary, shared with the page (globalThis.OfficeVocab)
@@ -946,6 +947,7 @@ setInterval(() => {
 }, 5000).unref();
 
 // ---------- http ----------
+const STARTUP_DIR = startup.startupDir(process.env.APPDATA); // Windows sign-in entry; see startup.mjs
 function httpError(status, message) { const e = new Error(message); e.status = status; return e; }
 function send(res, status, body, type = 'application/json') {
   res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
@@ -1046,6 +1048,7 @@ const server = http.createServer(async (req, res) => {
         port: PORT, hooksFile: activeHooksFile(), recent: persisted.recent, home: os.homedir(),
         settingsSnippet: JSON.stringify(hooksMode === 'http' ? httpSettings : commandSettings, null, 2),
         launchCommand: `claude --settings "${activeHooksFile()}" --mcp-config "${MCP_FILE}"`,
+        startup: startup.state(STARTUP_DIR),
         hooksMode, claudeVersion: CLAUDE_VERSION, templates: persisted.templates, schedules: persisted.schedules,
       });
     }
@@ -1067,6 +1070,7 @@ const server = http.createServer(async (req, res) => {
       const out = onHook(p);
       return send(res, 200, out ? JSON.stringify(out) : '');
     }
+    if (url.pathname === '/api/startup') return send(res, 200, body.enabled === true ? startup.enable(STARTUP_DIR, ROOT, process.execPath) : startup.disable(STARTUP_DIR));
     if (url.pathname === '/api/probe-http') return send(res, 200, await probeHttp());
     if (url.pathname === '/api/notes/save') {
       // the notes board of a room: the user's own reminders, kept in state.json
