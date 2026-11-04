@@ -40,7 +40,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 /* the dock stops before the HUD rail column (right 300px, up to 68px wide) and, when narrow, clears the log lane */
 @media (max-width: 1359px) { .strip { right: 380px; } }
 @media (max-width: 1100px) { .strip { left: var(--space-4); bottom: 112px; } }
-@media (max-width: 820px) { .strip { left: var(--space-4); right: var(--space-4); bottom: var(--space-3); } .welcome { top: 30%; --rail-clear: 0px; left: 50%; max-width: calc(100vw - 2 * var(--space-4)); } }
+@media (max-width: 820px) { .strip { left: var(--space-4); right: var(--space-4); bottom: var(--space-3); } .welcome { top: 50%; --rail-clear: 0px; left: 50%; max-width: calc(100vw - 2 * var(--space-4)); } }
 .strip-search { margin-left: auto; }
 .strip-kbd { margin-left: var(--space-2); }
 .strip-more-host { position: relative; display: inline-flex; }

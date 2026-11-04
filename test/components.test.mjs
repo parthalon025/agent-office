@@ -46,3 +46,10 @@ test('office.css: the welcome card centres with translate (not transform), only 
   assert.doesNotMatch(r, /transform:/);
   assert.match(css, /\n\.welcome \{ animation: page-fade /);
 });
+
+test('office.css: at 820 px and below the welcome card centres in the screen, between the top tools and the dock (#52)', () => {
+  const m = css.match(/@media \(max-width: 820px\) \{[^\n]*\.welcome \{([^}]*)\}/);
+  assert.ok(m, 'narrow .welcome rule');
+  assert.match(m[1], /top:\s*50%/);
+  assert.match(m[1], /left:\s*50%/);
+});
