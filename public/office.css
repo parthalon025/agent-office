@@ -114,6 +114,21 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 
 /* welcome card */
 .welcome-logo { display: flex; justify-content: center; padding-top: var(--space-2); }
+/* Short windows (#52 follow-up): the card keeps its copy and gives up logo size, padding and gaps, so it fits between the top tools and the dock. */
+@media (max-height: 760px) {
+  .welcome { padding: var(--space-2); }
+  .welcome-logo { padding-top: 0; }
+  .welcome-logo .ao-lockup { zoom: 0.6; }
+  .welcome .ao-empty { padding: var(--space-2) var(--space-3); gap: var(--space-1); }
+}
+@media (max-height: 640px) {
+  .welcome-logo { display: none; }
+  .welcome .ao-empty { padding: var(--space-1) var(--space-3); }
+  .welcome .ao-empty-i { display: none; }
+}
+@media (max-height: 460px) {
+  .welcome { top: calc(50% + var(--space-4)); }   /* landscape: the floor bar sits under the top tools, so the card drops into the clear band above the dock */
+}
 
 /* buildings dialog */
 .bld-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--space-3); }

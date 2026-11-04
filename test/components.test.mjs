@@ -53,3 +53,18 @@ test('office.css: at 820 px and below the welcome card centres in the screen, be
   assert.match(m[1], /top:\s*50%/);
   assert.match(m[1], /left:\s*50%/);
 });
+
+test('office.css: short windows shrink the welcome card, and landscape drops it into the band above the dock (#52 follow-up)', () => {
+  const tier = css.match(/@media \(max-height: 760px\) \{([\s\S]*?)\n\}/);
+  assert.ok(tier, 'max-height 760 query');
+  assert.match(tier[1], /\.welcome \{[^}]*padding:/);
+  assert.match(tier[1], /\.welcome-logo \.ao-lockup \{[^}]*zoom:/);
+  const tight = css.match(/@media \(max-height: 640px\) \{([\s\S]*?)\n\}/);
+  assert.ok(tight, 'max-height 640 query');
+  assert.match(tight[1], /\.welcome-logo \{ display: none/);
+  const land = css.match(/@media \(max-height: 460px\) \{\s*\.welcome \{([^}]*)\}/);
+  assert.ok(land, 'max-height 460 .welcome rule');
+  assert.match(land[1], /top:\s*calc\(50% \+ var\(--space-4\)\)/);
+  // none of the short rules touches the centring, z-index or animation (#47)
+  for (const m of [tier[1], tight[1], land[1]]) { assert.doesNotMatch(m, /z-index|animation|transform|translate/); }
+});
