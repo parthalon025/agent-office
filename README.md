@@ -73,6 +73,18 @@ claude --settings "E:\agent-office\office-hooks-http.json" --mcp-config "E:\agen
 
 The **Attach sessions** dialog (under More) shows the exact command for the active hook mode, with Copy buttons. A terminal session reports its activity and asks permission through the office, but you answer its chat in the terminal. Stop turn, mode and model switches, attachments and the command list work only in sessions that run inside the office.
 
+## Core jobs
+
+Each job names the control to use. Ctrl+K finds all of them.
+
+1. **Start the office.** Run `npm start` and open http://localhost:4317. The city has no buildings until a session exists, so open one (job 2).
+2. **Open a session.** Click **Open session**, pick a folder and start it. The folder becomes a building, its branch a floor and its worktree a room. The bot sits at a desk in that room. Click the bot to open its chat.
+3. **Approve a request.** A bot that needs you shows an amber badge, and the **Needs you** button in the dock shows a count. Open the list, read the request, then click Approve or Decline. A question has Yes and No. The office holds a request from a terminal session for 60 seconds, then the terminal dialog decides. A session in the office waits 15 minutes.
+4. **Read a room board and its notes.** Click the board on the back wall of a room. The camera flies to it and a side panel shows the same data in full. Click the notes board next to it and type. Notes save as you type and stay with the room. Press Esc or Back to return the camera.
+5. **Schedule a prompt.** Open **More**, then **Schedules**, then **Add a schedule**. Give it a name, a folder and an instruction. Run it every N minutes (5 or more) or daily at a time. A schedule opens an office session on its own. A daily slot that the office misses by more than 10 minutes is skipped. **Run now** starts one run at once and does not change the times.
+6. **Make a floor or a room.** Open **Floors**. Create a floor to make a new branch with its first worktree. Add a room to put one more worktree on a branch. Remove a room or delete a floor in the same dialog. If git refuses, the dialog says why and offers a button to go ahead anyway. The main folder cannot be removed.
+7. **Manage extensions.** Select a bot, open **More**, then **Extensions** (or use Ctrl+K). Turn connectors and plugins off or on, add them or remove them. Changes go to the local or project scope of the folder, never to your user settings. Only office sessions can turn connectors on and off.
+
 ## How it works
 
 ```
@@ -133,12 +145,30 @@ Generated at run time and ignored by git: `.office-token`, `office-hooks.json`, 
 
 ## Troubleshooting
 
-- **"Already running on port 4317."** A second `npm start` is harmless: it changes nothing. Stop the first copy to restart.
-- **A session does not appear.** Terminal sessions need the `--settings` flag above. Check the Attach sessions dialog for the mode in use.
+The office knows two kinds of session. A session **in the office** runs `claude -p` with a pipe. A **terminal session** is one you start yourself with the office settings. No other kind of agent is built. Find your kind below.
+
+### Any session
+
+- **"Already running on port 4317."** A second `npm start` is harmless: it changes nothing. To restart, stop the first copy by the process id that owns the port. Never stop it by image name: that would stop your other Claude Code sessions. Run `netstat -ano | findstr :4317`, then `taskkill /PID <pid> /F`. Or start the office on another port with `OFFICE_PORT`.
+- **A call answers 401 Unauthorized.** The token did not match. The page gets the token from `.office-token` when it loads, so reload the page. If you deleted `.office-token`, the office made a new token. Sessions that started before that keep the old token in their settings, so start them again.
+- **A call answers 403 Forbidden.** The server accepts only `127.0.0.1:<port>` and `localhost:<port>` as host name. Open the office by one of those addresses.
 - **No Approve cards.** Your Claude Code default mode may be Auto, which rarely asks. Choose Default or Plan under Permissions when you open the session.
-- **A message sits queued.** A terminal session at an idle prompt reads it when it next runs. Sessions in the office take messages at once.
+- **The scene stays empty or black.** The scene is 3D and needs WebGL. Turn on hardware acceleration in the browser. The page also loads React from jsDelivr and fonts from Google, so check the network.
+- **Remove worktree is refused.** Close the session first: the button stays off until it ends. If the room has uncommitted changes, the dialog says so and offers Remove and discard changes. In the Floors dialog, git refuses uncommitted changes and commits that are not merged in the same way, and the dialog offers to go ahead anyway. The main folder cannot be removed.
+
+### Sessions in the office
+
+- **A session stops at start.** The bot's chat shows Claude Code's error. The usual cause is a signed-out login. Sign in with Claude Code, then open the session again.
 - **The `/` list is empty.** Claude reports its commands after the first message. The office reuses the last known list until then.
-- **A session stops at start.** The bot's chat shows Claude Code's error. The usual cause is a signed-out login.
+- **A turn failed.** The bot shows a red badge until you click Retry or Dismiss.
+
+### Terminal sessions
+
+- **A session does not appear.** Start Claude Code with the `--settings` and `--mcp-config` flags shown above. The Attach sessions dialog shows the exact command for the hook mode in use.
+- **Hooks do not arrive.** Check that the office runs and that the settings file matches the hook mode (`office-hooks-http.json` or `office-hooks.json`). Run `npm run probe` after a Claude Code update to test HTTP hooks again. A stopped office never blocks Claude, and it shows no error in the terminal.
+- **A message sits queued.** A terminal session at an idle prompt reads it when it next runs.
+- **A request disappears from the office after 60 seconds.** This is the wait limit for terminal sessions. Change it with `OFFICE_ASK_TIMEOUT_S`, or answer in the terminal.
+- **Stop turn, mode and model switches and attachments do nothing.** They work only in sessions in the office.
 
 ## Tests
 
