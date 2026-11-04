@@ -114,6 +114,11 @@ export async function layout(repo) {
   return list.filter((w) => !w.bare && !w.prunable);
 }
 
+/** The files git tracks in a folder (relative, forward slashes), at most 20000. */
+export async function files(root) {
+  return (await git(['ls-files'], root, 20000)).split(/\r?\n/).filter(Boolean).slice(0, 20000);
+}
+
 /** Local branches, the most recent commit first. */
 export async function branches(repo) {
   return (await git(['for-each-ref', '--sort=-committerdate', '--format=%(refname:short)', 'refs/heads'], repo, 15000)).split(/\r?\n/).filter(Boolean).slice(0, 200);

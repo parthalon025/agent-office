@@ -3,7 +3,8 @@
 // Never forward file contents or tool output: only names, short inputs, timings and flags.
 
 const clip = (v, n) => (typeof v === 'string' && v.length > n ? v.slice(0, n) + '…' : v);
-const KEEP = ['command', 'file_path', 'pattern', 'url', 'description', 'path', 'query', 'subagent_type', 'skill'];
+// element and key: what a browser tool (Playwright) clicks or presses. Typed text is never kept.
+const KEEP = ['command', 'file_path', 'pattern', 'url', 'description', 'path', 'query', 'subagent_type', 'skill', 'element', 'key'];
 const TODO_STATES = new Set(['pending', 'in_progress', 'completed']);
 
 export function slimPayload(b, officeId = null) {

@@ -188,6 +188,28 @@ function roomInUse(root) {
   for (const s of sessions.values()) if (s.status !== 'ended' && s.cwd && repoKey(s.cwd).startsWith(r)) return s;
   return null;
 }
+// The top of a worktree for the room board: each top-level folder with its file count. Only folders
+// the office knows (a worktree of a known repository) can be listed. Cached for 30 s.
+const treeCache = new Map();
+async function repoTree(root) {
+  const k = repoKey(root || '-');
+  const known = [...repos.values()].some((r) => r.worktrees.some((w) => repoKey(w.root) === k));
+  if (!known) throw httpError(404, 'The office does not know that folder.');
+  const hit = treeCache.get(k);
+  if (hit && Date.now() - hit.t < 30000) return hit.v;
+  const files = await git.files(root);
+  const by = new Map();
+  for (const f of files) {
+    const i = f.indexOf('/');
+    const name = i < 0 ? f : f.slice(0, i);
+    const e = by.get(name) || { name, dir: i >= 0, files: 0 };
+    e.files += 1; by.set(name, e);
+  }
+  const v = { root, total: files.length, entries: [...by.values()].sort((a, b) => (b.dir - a.dir) || a.name.localeCompare(b.name)).slice(0, 60) };
+  treeCache.set(k, { t: Date.now(), v });
+  return v;
+}
+
 // Git refusals (branch exists, not merged, uncommitted changes) are the user's to fix: answer 409.
 async function floorAction(action, body) {
   try { return await floorActionRaw(action, body); } catch (e) { throw e.status ? e : httpError(409, e.message); }
@@ -231,7 +253,9 @@ function describeTool(name, input = {}) {
     case 'WebSearch': return clip(input.query, 70);
     case 'Task': case 'Agent': return clip(input.description || input.subagent_type, 70);
     case 'Skill': return clip(input.skill, 70);
-    default: return clip(input.description || input.command || input.file_path || input.query || '', 70);
+    default:
+      // browser tools (Playwright and the like): the page, the element or the key
+      if (/playwright|browser/i.test(name)) return clip(input.url || input.element || input.key || '', 80); return clip(input.description || input.command || input.file_path || input.query || '', 70);
   }
 }
 const isAgentTool = (n) => n === 'Task' || n === 'Agent';
@@ -239,7 +263,11 @@ const MAX_CALLS = 60;
 // One tool call: opened by PreToolUse, closed by PostToolUse or PostToolUseFailure.
 function openCall(s, p) {
   if (!p.tool_use_id || s.calls.some((c) => c.id === p.tool_use_id)) return;
-  s.calls.push({ id: p.tool_use_id, name: p.tool_name, detail: describeTool(p.tool_name, p.tool_input), agent: p.agent_id, t: Date.now(), ms: null, ok: null, err: null });
+  // file: the path inside the worktree, for the room board's repo view
+  const fp = p.tool_input.file_path || p.tool_input.path;
+  const top = s.git?.root || s.cwd;
+  const rel = fp && top ? path.relative(top, String(fp)).replace(/\\/g, '/') : null;
+  s.calls.push({ id: p.tool_use_id, name: p.tool_name, detail: describeTool(p.tool_name, p.tool_input), file: rel && !rel.startsWith('..') ? rel : null, agent: p.agent_id, t: Date.now(), ms: null, ok: null, err: null });
   if (isAgentTool(p.tool_name)) s.agents.push({ call: p.tool_use_id, id: null, type: p.tool_input.subagent_type || 'general-purpose', task: describeTool(p.tool_name, p.tool_input), done: false, ok: null });
   // Keep every open call; drop the oldest closed ones.
   while (s.calls.length > MAX_CALLS) { const i = s.calls.findIndex((c) => c.ok !== null); if (i < 0) break; s.calls.splice(i, 1); }
@@ -1067,6 +1095,7 @@ const snapshot = () => ({
   sessions: [...sessions.values()].map(({ ...s }) => s),
   feed: feed.slice(-80),
   plan,
+  notes: persisted.notes || {},
   repos: [...repos.entries()].map(([key, r]) => ({ key, ...r })),
   now: Date.now(),
 });
@@ -1085,7 +1114,7 @@ setInterval(() => { for (const c of clients) c.write(': ping\n\n'); }, 20000).un
 // Static files: the page, its scripts, and the Agent Office DS runtime (tokens, bundle, three.js).
 const MIME = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
 const STATIC_FILES = new Map([
-  ['/office.js', 'public/office.js'], ['/city.js', 'public/city.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/tokens.css', 'tokens.css'],
+  ['/office.js', 'public/office.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/tokens.css', 'tokens.css'],
   ['/components/bundle.css', 'components/bundle.css'], ['/components/bundle.js', 'components/bundle.js'],
   ['/components/lib/three.min.js', 'components/lib/three.min.js'],
   ['/components/lib/three-orbit-controls.js', 'components/lib/three-orbit-controls.js'],
@@ -1144,6 +1173,17 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, out ? JSON.stringify(out) : '');
     }
     if (url.pathname === '/api/probe-http') return send(res, 200, await probeHttp());
+    if (url.pathname === '/api/notes/save') {
+      // the notes board of a room: the user's own reminders, kept in state.json
+      const key = String(body.key || ''), text = String(body.text ?? '');
+      if (!key || key.length > 400) throw httpError(400, 'Unknown board.');
+      if (text.length > 4000) throw httpError(413, 'A note can have 4000 characters.');
+      persisted.notes = persisted.notes || {};
+      if (text.trim()) persisted.notes[key] = { text, at: Date.now() }; else delete persisted.notes[key];
+      savePersisted(); broadcast();
+      return send(res, 200, { ok: true });
+    }
+    if (url.pathname === '/api/tree') return send(res, 200, await repoTree(String(body.root || '')));
     if (url.pathname === '/api/branches') return send(res, 200, { branches: await git.branches(knownRepo(body.repo).path) });
     if (url.pathname === '/api/floor/create') return send(res, 200, await floorAction('create-floor', body));
     if (url.pathname === '/api/floor/delete') return send(res, 200, await floorAction('delete-floor', body));

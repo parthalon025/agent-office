@@ -623,6 +623,60 @@
         h(A.Button, { variant: 'quiet', icon: 'building', onClick: function () { if (city.current) city.current.fit(false); } }, 'Show all')));
   }
 
+  // ---------- the room board, read up close ----------
+  var TODO_STATUS = { pending: 'resting', in_progress: 'working', completed: 'finished' };
+  function BoardPanel(p) {
+    var d = p.data;
+    if (!d) return null;
+    var word = window.OfficeBoard ? window.OfficeBoard.toolWord : function (n) { return n; };
+    var call = function (c, kind) { return h(A.ToolCall, { key: c.id, call: { id: c.id, tool: word(c.name), kind: kind || 'api', ok: c.ok === null ? undefined : c.ok, ms: c.ms == null ? undefined : c.ms, args: c.detail ? { target: c.detail } : undefined, summary: c.err || (c.who ? 'by ' + c.who : undefined) } }); };
+    return h('aside', { className: 'board-panel', 'aria-label': 'Board of ' + d.room },
+      h(A.Panel, { title: d.room + (d.branch ? ' · ' + d.branch : ''), count: plural(d.sessions.length, 'session', 'sessions') },
+        h('div', { className: 'board-b' },
+          h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'chevron-right', onClick: p.onClose }, 'Back to the room'), h('span', { className: 'note' }, 'Esc also goes back.')),
+          d.todos.length ? h(A.PlanCard, { title: 'To do', goal: d.goal ? clip(d.goal, 120) : undefined, steps: d.todos.map(function (t, i) { return { id: 't' + i, text: t.text, status: TODO_STATUS[t.status] || 'resting' }; }) })
+            : h(A.EmptyState, { icon: 'plan', compact: true, title: 'No to-do list', text: 'A session shows its plan here when it writes one.' }),
+          h('h3', { className: 'ext-h' }, 'Browser', h('span', { className: 'ext-n' }, d.browser.length)),
+          d.browser.length ? h('div', { className: 'board-calls' }, d.browser.slice().reverse().map(function (c) { return call(c, 'browser'); }))
+            : h('p', { className: 'note' }, 'No browser steps yet. Playwright clicks, page loads and key presses show here.'),
+          h('h3', { className: 'ext-h' }, 'Last steps', h('span', { className: 'ext-n' }, d.recent.length)),
+          d.recent.length ? h('div', { className: 'board-calls' }, d.recent.slice().reverse().map(function (c) { return call(c, /^(Bash|PowerShell)$/.test(c.name) ? 'terminal' : /^(Read|Edit|Write|MultiEdit)$/.test(c.name) ? 'code' : /^(Grep|Glob)$/.test(c.name) ? 'search' : 'api'); }))
+            : h('p', { className: 'note' }, 'No tool calls yet.'),
+          h('h3', { className: 'ext-h' }, 'Repository', d.tree ? h('span', { className: 'ext-n' }, plural(d.tree.total, 'file', 'files')) : null),
+          d.tree ? h('ul', { className: 'board-tree mono' }, d.tree.entries.map(function (e) {
+            var hot = d.touched[e.name];
+            return h('li', { key: e.name, className: hot ? 'is-hot' : '' }, h(A.Icon, { name: e.dir ? 'floor' : 'knowledge', size: 13 }), h('span', null, e.name + (e.dir ? '/' : '')), h('span', { className: 'ext-sub' }, (e.dir ? plural(e.files, 'file', 'files') : '') + (hot ? ' · ' + hot + ' touched' : '')));
+          })) : h(A.Skeleton, { lines: 3, label: 'Loading' }))));
+  }
+
+  // The notes board, written on in place: a text box laid exactly over the board on screen.
+  function NotesEditor(p) {
+    var tx = useState(p.text || ''), text = tx[0], setText = tx[1];
+    var rc = useState(null), rect = rc[0], setRect = rc[1];
+    var sv = useState('saved'), state = sv[0], setState = sv[1];
+    var ref = React.useRef(null), timer = React.useRef(0);
+    useEffect(function () {
+      var raf = 0;
+      function follow() { var r = p.rect(); if (r) setRect(function (o) { return o && Math.abs(o.left - r.left) < 0.5 && Math.abs(o.top - r.top) < 0.5 && Math.abs(o.width - r.width) < 0.5 ? o : r; }); raf = requestAnimationFrame(follow); }
+      follow();
+      return function () { cancelAnimationFrame(raf); };
+    }, []);
+    useEffect(function () { if (rect && !p.flying() && ref.current && document.activeElement !== ref.current) ref.current.focus(); }, [rect && Math.round(rect.width)]);
+    function change(v) {
+      setText(v); setState('saving');
+      clearTimeout(timer.current);
+      timer.current = setTimeout(function () { api('/api/notes/save', { key: p.noteKey, text: v }).then(function () { setState('saved'); }, function (x) { setState('error'); p.toast({ tone: 'error', title: 'Notes', text: x.message }); }); }, 500);
+    }
+    if (!rect || rect.width < 40) return null;
+    var fs = Math.max(12, rect.height / 14);
+    return h('div', { className: 'notes-edit', style: { left: rect.left, top: rect.top, width: rect.width, height: rect.height } },
+      h('textarea', { ref: ref, className: 'notes-text', 'aria-label': 'Notes for this room', value: text, maxLength: 4000, placeholder: 'Write a reminder for this room.', style: { fontSize: fs + 'px' }, onChange: function (e) { change(e.target.value); },
+        onKeyDown: function (e) { if (e.key === 'Escape') { e.stopPropagation(); p.onClose(); } } }),
+      h('div', { className: 'notes-bar' },
+        h('span', { className: 'notes-state', role: 'status' }, state === 'saving' ? 'Saving' : state === 'error' ? 'Not saved' : 'Saved'),
+        h(A.Button, { variant: 'quiet', icon: 'approve', onClick: p.onClose }, 'Done')));
+  }
+
   // ---------- page commands in the DS command palette (Ctrl+K) ----------
   // The HUD builds its palette list with AgentOffice.CommandPalette.actions(); the page adds its own.
   var pageActions = [];
@@ -747,6 +801,12 @@
     var week = snap && snap.plan && snap.plan.week;
     useEffect(function () { var el = document.getElementById('office'); if (el) el.classList.toggle('has-plan', !!week); }, [!!week]);
     var officeRef = React.useRef(null);
+    // the room board the camera faces, if any (board.js)
+    var boardRef = React.useRef(null);
+    var bs = useState(null), board = bs[0], setBoard = bs[1];
+    var latestSnap = React.useRef(null); latestSnap.current = snap;
+    function noteKey(roomId) { return (shown || 'other') + '|' + roomId; }
+    useEffect(function () { return function () { if (boardRef.current) { boardRef.current.dispose(); boardRef.current = null; } setBoard(null); }; }, [sceneKey, cur2.view]);
     // zoom out to leave: scrolling out at the widest zoom goes floor -> building -> city
     useEffect(function () {
       if (cur2.view !== 'office') return undefined;
@@ -768,7 +828,17 @@
     var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: window.officeAdapter, height: window.innerHeight, quality: 'auto', intro: intro, editable: false, simulate: false,
       ambient: ambient, onAmbientOpen: function () { setAmbient(false); }, onReady: function (o) {
         officeRef.current = o;
+        window.officeScene = o;   // the mounted office API, for the console and tests
         var st = o.inspect && o.inspect().stage;
+        if (st && window.OfficeBoard) {
+          if (boardRef.current) boardRef.current.dispose();
+          boardRef.current = window.OfficeBoard.attach(o, {
+            room: function (id) { return window.officeAdapter.roomInfo(id); },
+            note: function (id) { var n = latestSnap.current && latestSnap.current.notes && latestSnap.current.notes[noteKey(id)]; return n ? n.text : ''; },
+            tree: function (root) { return api('/api/tree', { root: root }); },
+            onFocus: function (id, kind) { setBoard({ id: id, kind: kind }); }, onBlur: function () { setBoard(null); }
+          });
+        }
         if (!st || !window.OfficeCity) return;
         window.OfficeCity.cameraFeel(st);
         // birds over the tower in the building view; none inside a floor
@@ -821,6 +891,10 @@
       d === 'hooks' ? h(HooksDialog, { info: info, snap: snap, onClose: close }) : null,
       d === 'floors' ? h(FloorsDialog, { repo: shown, toast: toast, onClose: close }) : null,
       d === 'ext' ? h(ExtensionsDialog, { uid: dlg.uid, name: dlg.label, toast: toast, onClose: close }) : null,
+      board && boardRef.current && board.kind === 'board' ? h(BoardPanel, { data: boardRef.current.dataOf(board.id), onClose: function () { boardRef.current.blur(); } }) : null,
+      board && boardRef.current && board.kind === 'notes' ? h(NotesEditor, { key: board.id, noteKey: noteKey(board.id), text: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).text || '', toast: toast,
+        rect: function () { return boardRef.current ? boardRef.current.rect() : null; }, flying: function () { return boardRef.current ? boardRef.current.flying() : false; },
+        onClose: function () { boardRef.current.refresh(); boardRef.current.blur(); } }) : null,
       d === 'sessions' ? h(SessionsDialog, { onClose: close, onGo: goTo }) : null,
       ambient || cur2.view !== 'office' ? null : h(ChatHeaderButton, { sess: selSess, onOpen: function () { extensions(selSess.uid, selSess.name); } }),
       h('div', { className: 'page-toasts' }, h(A.ToastStack, { toasts: toasts, onClose: function (id) { setToasts(function (l) { return l.filter(function (x) { return x.id !== id; }); }); } })));

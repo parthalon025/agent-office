@@ -396,6 +396,16 @@
   // A building with its bots, for a preview. It does not change what the scene shows.
   window.officeAdapter.preview = function (repo, snap) { return describe(repo, snap || latest, true).def; };
   window.officeAdapter.shapeOf = function (uid) { return shapeOf(uid); };
+  // The open sessions in one room of the shown building (for the room board), and that room's place.
+  window.officeAdapter.roomInfo = function (roomId, snap) {
+    var out = { sessions: [], place: null };
+    live(snap || latest).forEach(function (s) { var pl = placeOf(s); if (pl.repo === layout.repo && roomDef(pl).id === roomId) { out.sessions.push(s); out.place = pl; } });
+    if (!out.place) {
+      var rp = repoOf(snap || latest, layout.repo);
+      (rp ? rp.worktrees : []).forEach(function (w) { var pl = wtPlace(rp, w); if (roomDef(pl).id === roomId) out.place = pl; });
+    }
+    return out;
+  };
   window.officeAdapter.shown = function () { return layout.repo; };
   // Rooms in the shown scene, as "branch|root". The page rebuilds the scene when one of them is gone,
   // because the design system has no event that removes a floor or a room.
