@@ -36,6 +36,12 @@ test('office.css: the scene height follows the window, not the height at mount (
   assert.match(rule('#office'), /height:\s*100vh/);
 });
 
+test('office.css: at 820 px and below the empty room card gives way to the welcome card, not the inbox (#53)', () => {
+  assert.match(css, /#office:has\(\.welcome\) \.ao-hud-right:not\(\.ao-hud-inbox\) \{ display: none; \}/);
+  const m = css.match(/@media \(max-width: 820px\) \{[^@]*?#office:has\(\.welcome\) \.ao-hud-right/);
+  assert.ok(m, 'the rule sits in the 820 px block');
+});
+
 test('office.css: the page fade holds no fill, so .ao-office is no stacking context (#47 #48)', () => {
   const m = css.match(/\n\.view > \* \{([^}]*)\}/);
   assert.ok(m, '.view > * rule');
