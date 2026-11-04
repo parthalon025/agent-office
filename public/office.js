@@ -627,7 +627,7 @@
     }
     // Ctrl+K in the city: the page's own actions (they include Go to each building), the theme, and the city view.
     var palActions = A.CommandPalette.actions({ setMode: function (m) { if (city.current) city.current.setMode(m); } })
-      .filter(function (a) { return a.id.indexOf('page-b-') !== 0; })   // the page's Go to only picks the building; here Go to goes inside
+      .filter(function (a) { return a.id.indexOf('page-b-') !== 0 && a.id !== 'page-city'; })   // the page's Go to only picks the building; here Go to goes inside
       .concat(list.map(function (b) { return { id: 'city-go-' + b.key, label: 'Go to ' + b.name, icon: 'building', group: 'Buildings', keywords: 'building repository ' + b.name, run: function () { p.onEnter(b.key, city.current); } }; }))
       .concat([{ id: 'city-fit', label: 'Show all buildings', icon: 'building', group: 'City', run: function () { if (city.current) city.current.fit(false); } }]);
     return h('div', { className: 'city' },
@@ -1058,7 +1058,7 @@
     // From the city: fly to the building, then enter it with the DS intro flythrough.
     var selectNext = React.useRef(null);
     function enter(key, city, bot) {
-      var inside = function () { selectNext.current = bot || null; introNext.current = true; pick(key); go('office'); };
+      var inside = function () { selectNext.current = bot || null; introNext.current = !bot; pick(key); go('office'); };
       if (city) city.focus(key, inside); else inside();
     }
     var week = snap && snap.plan && snap.plan.week;
@@ -1158,11 +1158,11 @@
         var ok = !!(st && st.ctl && e.deltaY > 0 && inScene && st.cam.zoom <= st.ctl.minZoom * 1.03);
         var leave = gate.push(level, now, ok);
         // keep the DS camera feel from clearing the framing the level change started
-        if (inScene && (leave || gate.holding(now))) e.stopPropagation();
+        if (inScene && (leave || gate.holding(now))) { e.preventDefault(); e.stopPropagation(); }
         if (!leave) return;
         if (level === 'building') go('city'); else o.setView('building');
       }
-      window.addEventListener('wheel', onWheel, { passive: true, capture: true });
+      window.addEventListener('wheel', onWheel, { passive: false, capture: true });
       return function () { window.removeEventListener('wheel', onWheel, true); };
     }, [cur2.view]);
     var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: mount.adapter, height: window.innerHeight, quality: 'auto', intro: intro, editable: false, simulate: false,

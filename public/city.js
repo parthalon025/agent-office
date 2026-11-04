@@ -166,7 +166,8 @@
   function City(el, opts) {
     opts = opts || {};
     var s = new O.Stage(el, { root: opts.root || null, quality: opts.quality || 'auto', label: '3D city. Each building is a repository. Click one to go inside.', D: 22 });
-    if (s.dead) return { update: function () {}, focus: function () {}, fit: function () {}, zoomBy: function () {}, dispose: function () {} };
+    if (s.dead) return { update: function () {}, focus: function () {}, fit: function () {}, zoomBy: function () {}, dispose: function () {},
+      setMode: function (m) { var t = { day: 'light', night: 'dark', sublevel: 'sublevel' }[m]; if (t && opts.root) opts.root.setAttribute('data-theme', t); }, state: function () { return null; } };
     var K = s.K, world = new T.Group(), mats = {};
     // one themed material per token, so a theme change repaints them all
     function mat(token, o) { var k = token + (o ? JSON.stringify(o) : ''); return mats[k] || (mats[k] = K.t(token, o)); }
@@ -246,6 +247,8 @@
         g.textBaseline = 'middle'; g.fillStyle = tok['ink']; g.font = '600 62px ' + (f.sans || 'sans-serif');
         g.fillText(name.length > 15 ? name.slice(0, 14) + '…' : name, 32, 62);
         g.fillStyle = tok['muted']; g.font = '500 38px ' + (f.mono || 'monospace');
+        var fs = 38; g.font = '500 ' + fs + 'px ' + (f.mono || 'monospace');
+        while (g.measureText(sub).width > w - 64 && fs > 22) { fs -= 2; g.font = '500 ' + fs + 'px ' + (f.mono || 'monospace'); }
         g.fillText(sub, 32, 124);
       });
     }
