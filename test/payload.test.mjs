@@ -13,7 +13,7 @@ const apply = (pending, p) => pending.filter((r) => !settles(r, p));
 
 test('describeTool labels a call', () => {
   assert.equal(describeTool('Bash', { command: 'npm test' }), 'npm test');
-  assert.equal(describeTool('Read', { file_path: 'C:\a\b.txt' }), 'b.txt');
+  assert.equal(describeTool('Read', { file_path: 'C:\\a\\b.txt' }), 'b.txt');
 });
 test('a subagent result does not settle the main request, and the session keeps waiting', () => {
   const pending = apply([req()], post({ agent_id: 'a1' }));
