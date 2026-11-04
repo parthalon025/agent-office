@@ -65,7 +65,7 @@ Globals: `AgentOffice.validate(event)`, `AgentOffice.schema`, `AgentOffice.stric
 | `AddButton` | Actions | A dashed, full-width button that adds one thing to a list: a floor, a room or a bot. |
 | `AgentCard` | Governance | One agent's identity and reach: platform, owner, identity, model (and fallback), tools, knowledge, skills, channels, triggers and cost. |
 | `AgentChat` | Conversation | The conversation with one bot: header with portrait, status line and role, the message log, quick actions, and a text box. |
-| `AgentPanel` | Orchestration | The panel that opens when you select a bot: a header with the bot, its role badges and model, then three tabs. |
+| `AgentPanel` | Orchestration | The panel that opens when you select a bot: a header with the bot, its role badges and model, then tabs: Chat, Trace, Sessions and Agent. Add or hide tabs with `extraTabs` and `hideTabs`. |
 | `AgentRegistry` | Governance | The inventory of every agent: platform, identity, model, tool count, access scope and last run. |
 | `AmbientBar` | Daily | A thin status strip for a second screen or a narrow window. |
 | `ApprovalItem` | Queues | One request in Waiting on me. |

@@ -10,6 +10,9 @@ The 3D office itself and the main component of the system. It holds a building o
 - **Sessions and talk.** Sessions show as a badge and a Sessions tab, or as their own blob (Recipes, Show sessions). Agents talk with `message.agent`: they turn, walk over or send an envelope. Click a bot to open its chat. Its replies also show as speech bubbles over it. Use the broadcast bar to message a room, a floor or every floor.
 - **Solutions.** `solution:"microsoft"` loads the Microsoft customer solutions office.
 - **Cinematic.** `quality` sets the post effects (auto, high, medium, low). `intro` flies in from the tower. `sound` starts with sound on; the sound button in the zoom panel turns it on and off. Bots path around every object, ride the elevator and carry tool calls as packets (see Concepts, The scene).
+- **Decisions inbox.** The inbox state is open or closed. Pass `inbox` (boolean) and `onInbox(open)` to control it from the page: the page can then close it, and read its state, with no class names. Without `inbox`, the scene keeps the state itself. `onInbox` runs in both cases when the person opens or closes the inbox.
+- **Alerts and tab title.** The scene mounts a `Notifier` that counts the open decisions of the building on screen. Pass `waitingCount` (number) to use your own total, for example the open decisions of all buildings. Pass `notifier: false` to not mount it, and mount your own `Notifier` instead (see `Notifier`, `title`).
+- **Agent panel tabs.** `extraTabs`, `hideTabs` and `onTabChange` go to the agent panel (see `AgentPanel`).
 - Without React: `AgentOffice.office.mount(el, opts)`.
 
 ## Props
@@ -39,3 +42,10 @@ The 3D office itself and the main component of the system. It holds a building o
 | `sound` | no | `boolean` |
 | `onReady` | no | `(office: OfficeApi) => void` |
 | `onSelect` | no | `(botName: string \| null) => void` |
+| `inbox` | no | `boolean` |
+| `onInbox` | no | `(open: boolean) => void` |
+| `notifier` | no | `boolean` |
+| `waitingCount` | no | `number` |
+| `extraTabs` | no | `AgentPanelTab[]` |
+| `hideTabs` | no | `("chat" \| "trace" \| "sessions" \| "agent")[]` |
+| `onTabChange` | no | `(id: string) => void` |

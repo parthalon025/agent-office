@@ -10,9 +10,19 @@ The office HUD has these by default (set `hud: false` to hide all HUD parts):
 - **Replay.** "Replay" on the card, the trace button in the zoom panel, or the palette opens the time scrubber. The office replays the recorded events at 1x, 10x or 60x. Live events wait and apply after the replay. "Live" stops it. API: `office.replay({ from, to, speed })`, `office.stopReplay()`.
 - **Decisions.** The decisions button (with the count) opens the inbox: every request, high risk first, with cost and a preview. Keys: J / K move, A approve, D decline, X select, Shift+A approve the selection. Send `risk`, `cost`, `preview` and `tool` on `request` events to fill it. API: `office.approveMany(names)`, `office.declineMany(names)`.
 - **Command palette.** Ctrl+K or Cmd+K: jump to a bot or a floor, approve all low-risk requests, open decisions, replay, change the view, the theme or the sound, or type a request for the Manager.
-- **Alerts.** The bell button turns on browser alerts for "needs you" and errors while the page is hidden. The page title shows the count, for example "(3) Agent Office". Alerts start only from that click.
+- **Alerts.** The bell button turns on browser alerts for "needs you" and errors while the page is hidden. The page title shows the count, for example "(3) Agent Office". Alerts start only from that click. The scene counts the building on screen. To count more, pass `waitingCount` to `OfficeScene`. To run your own `Notifier`, pass `notifier: false` and give your `Notifier` `title` and `count` as you need.
+- **Control the inbox.** Pass `inbox` and `onInbox` to `OfficeScene` to open or close the decisions inbox from the page and to read its state.
 - **Ambient bar.** `ambient: true` shows only a strip with floor pips, the "needs you" count and the last activity, for a second screen or a narrow window. "Open" shows the full office (`onAmbientOpen`).
 - **Framing.** With the HUD on, the scene centers between the left and right panels, so the elevator lobby stays visible. Set `frameInset: { left, right }` (px) to override it, or `null` for none.
+
+## Add a tab to the agent panel
+
+1. Pass `extraTabs` to `OfficeScene` (or `AgentPanel`): `[{ id: "terminal", label: "Terminal", icon: "terminal", after: "chat", render: function (bot) { return h(MyTerminal, { bot: bot.name }); } }]`.
+2. Give each tab a unique `id`. Do not use `chat`, `trace`, `sessions` or `agent`.
+3. To remove a built-in tab, pass `hideTabs: ["trace"]`.
+4. To learn which tab is open, use `onTabChange(id)`.
+
+The DS draws the tab, the focus and the keys. Your `render` draws only the content.
 
 ## Show your agents
 
