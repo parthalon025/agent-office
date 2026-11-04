@@ -3,6 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 import { createTracker, MAX_CALLS } from '../tracker.mjs';
 import { slimPayload } from '../payload.mjs';
 
@@ -561,4 +562,32 @@ test('the feed keeps the last 200 lines', () => {
   for (let i = 0; i < 250; i++) r.tracker.addFeed(s, 'tool', 'x' + i);
   assert.equal(r.tracker.feed.length, 200);
   assert.equal(r.tracker.feed[0].text, 'x50');
+});
+
+// Risk is rated against the session's root (worktree, else the folder it started in), never a later cwd.
+const ROOT = process.platform === 'win32' ? 'C:\\work\\repo' : '/work/repo';
+const ELSEWHERE = process.platform === 'win32' ? 'C:\\Users\\someone' : '/home/someone';
+const readAsk = (sid, cwd, file, officeId = null) => slimPayload({ hook_event_name: 'PermissionRequest', session_id: sid, cwd, tool_name: 'Read', tool_input: { file_path: file } }, officeId);
+
+test('risk uses the folder a terminal session started in, not the cwd of a later hook', () => {
+  const r = rig();
+  r.hook({ hook_event_name: 'SessionStart', session_id: 'sid-r', cwd: ROOT, source: 'startup' });
+  r.hook({ hook_event_name: 'UserPromptSubmit', session_id: 'sid-r', cwd: ELSEWHERE, prompt: 'x' });
+  const s = r.only();
+  assert.deepEqual([s.cwd, s.startDir], [ELSEWHERE, ROOT]);
+  for (const f of [path.join(ELSEWHERE, 'notes.txt'), path.join(ROOT, 'src', 'a.js'), 'src/b.js']) r.tracker.permissionRequest(readAsk('sid-r', ELSEWHERE, f));
+  assert.deepEqual(s.pending.map((p) => p.risk), ['medium', 'low', 'low'], 'a relative path is read against the root');
+});
+
+test('risk uses the whole worktree of an office worktree session, and the launch folder of another one', () => {
+  const r = rig();
+  const wt = ROOT + '-wt';
+  const s = r.tracker.newSession({ officeId: 'o1', uid: 'o1', name: 'wt', cwd: path.join(wt, 'pkg'), worktree: { root: wt, branch: 'office/wt', repo: ROOT }, headless: true, status: 'working' });
+  for (const f of [path.join(wt, 'other', 'x.js'), path.join(ROOT, 'x.js'), path.join(wt, '.git')]) r.tracker.permissionRequest(readAsk('sid-w', path.join(wt, 'pkg'), f, 'o1'));
+  assert.deepEqual(s.pending.map((p) => p.risk), ['low', 'medium', 'medium']);
+  const t = r.tracker.newSession({ officeId: 'o2', uid: 'o2', name: 'plain', cwd: ROOT, headless: true, status: 'working' });
+  assert.equal(t.startDir, ROOT);
+  r.tracker.permissionRequest(readAsk('sid-p', ELSEWHERE, path.join(ELSEWHERE, 'a.txt'), 'o2'));
+  assert.equal(t.cwd, ELSEWHERE);
+  assert.deepEqual(t.pending.map((p) => p.risk), ['medium']);
 });
