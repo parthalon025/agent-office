@@ -27,6 +27,11 @@
   function noop() {}
   // A dialog or the command palette is on top of the page. Esc belongs to it, not to the board or the terminal below.
   function layerOpen() { return !!document.querySelector('.ao-dialog, .ao-cmdk'); }
+  // A DS Dialog closes from its own keydown listener and React removes it before window bubble listeners run.
+  // So record the layer state in window capture and decide in the bubble phase with escTaken(e).
+  var escLayer = false;
+  window.addEventListener('keydown', function (e) { if (e.key === 'Escape') escLayer = layerOpen(); }, true);
+  function escTaken(e) { return e.defaultPrevented || escLayer || layerOpen(); }
   function none() { return null; }
   function empty() { return []; }
 
@@ -723,7 +728,7 @@
       return true;                                 // the click closed the stats view and does nothing else
     }
     // Esc closes the top layer only: a dialog or the palette on top of the board takes it, the board stays.
-    function onKey(e) { if (e.key === 'Escape' && focused && !e.defaultPrevented && !layerOpen()) blur(); }
+    function onKey(e) { if (e.key === 'Escape' && focused && !escTaken(e)) blur(); }
     var offTarget = host.register({
       name: 'board',
       active: function () { return !focused && !fly && !dead; },
@@ -791,5 +796,5 @@
     };
   }
 
-  window.OfficeBoard = { attach: attach, layerOpen: layerOpen, data: boardData, toolWord: toolWord };
+  window.OfficeBoard = { attach: attach, layerOpen: layerOpen, escTaken: escTaken, data: boardData, toolWord: toolWord };
 })();

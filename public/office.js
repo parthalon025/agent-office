@@ -873,7 +873,7 @@
       if (f && f.focus) f.focus();
     }, [!!s]);
     useEffect(function () {
-      function onKey(e) { if (e.key === 'Escape' && !e.defaultPrevented && !(window.OfficeBoard && window.OfficeBoard.layerOpen())) { e.preventDefault(); p.onClose(); } }
+      function onKey(e) { if (e.key === 'Escape' && !(window.OfficeBoard && window.OfficeBoard.escTaken ? window.OfficeBoard.escTaken(e) : e.defaultPrevented)) { e.preventDefault(); p.onClose(); } }
       window.addEventListener('keydown', onKey);
       return function () { window.removeEventListener('keydown', onKey); };
     }, []);
@@ -939,7 +939,7 @@
             h('div', { className: 'past-main' },
               h('div', { className: 'past-title' }, h('b', null, r.bot), h(Tag, null, r.buildingName), q ? null : h(A.RiskBadge, { risk: r.risk })),
               h('div', { className: 'past-snip' }, r.text),
-              !q && r.preview && r.preview !== r.text ? h('div', { className: 'past-sub mono', title: r.preview }, clip(String(r.preview).replace(/\s+/g, ' '), 140)) : null,
+              !q && r.preview && r.preview !== r.detail ? h('div', { className: 'past-sub mono', title: r.preview }, clip(String(r.preview).replace(/\s+/g, ' '), 140)) : null,
               h('div', { className: 'past-meta mono' }, r.roomName + ' · ' + ago(r.t))),
             h('div', { className: 'past-actions' },
               h(A.Button, { variant: 'emphasis', icon: 'approve', disabled: busy === r.id, onClick: function () { answer(r, true); } }, q ? 'Yes' : 'Approve'),
@@ -984,7 +984,7 @@
           p.needs ? h(A.Button, { variant: 'emphasis', icon: 'waiting', title: 'Every request that waits for you, in every building', onClick: p.onNeeds }, 'Needs you · ' + p.needs) : null,
           live.length ? h('span', { className: 'strip-total mono' }, live.length + ' open · ' + money(total)) : null),
         h('div', { className: 'strip-group strip-nav' },
-          p.view === 'city' ? h(A.Button, { variant: 'quiet', icon: 'floor', title: 'Go inside ' + (p.shownName || 'the building'), onClick: p.onOffice }, 'Go inside') : h(A.Button, { variant: 'quiet', icon: 'building', onClick: p.onCity }, 'City'),
+          p.view === 'city' ? h(A.Button, { variant: 'quiet', icon: 'floor', title: 'Go inside ' + (p.shownName || 'the building'), onClick: p.onOffice }, 'Go inside') : h(A.Button, { variant: 'quiet', icon: 'building', onClick: p.onCity }, p.needs ? 'City · ' + p.needs : 'City'),
           p.shown ? h(A.Button, { variant: 'quiet', icon: 'floor', onClick: p.onFloors }, 'Floors') : null,
           h(A.Button, { variant: 'quiet', icon: 'identity', onClick: p.onSessions }, 'Sessions'),
           h(A.Button, { variant: 'quiet', icon: 'session', onClick: p.onPast }, 'Past'),
@@ -1009,7 +1009,7 @@
     var s2 = useState(null), dlg = s2[0], setDlg = s2[1];
     var s3 = useState({ recent: [], templates: [], schedules: [] }), info = s3[0], setInfo = s3[1];
     // Toasts (toasts.js): an error or a toast with an action stays until closed; the others close after 8 s, and wait while the pointer or focus is on them.
-    var tt = useState([]), toasts = tt[0], setToasts = tt[1], tid = React.useRef(0), hold = React.useRef({ hover: false, focus: false });
+    var tt = useState([]), toasts = tt[0], setToasts = tt[1], tid = React.useRef(0), toastBox = React.useRef(null);
     function toast(t) {
       var id = ++tid.current;
       setToasts(function (l) { return window.OfficeToasts.add(l, t, id, Date.now()); });
@@ -1020,15 +1020,16 @@
       var last = Date.now();
       var iv = setInterval(function () {
         var now = Date.now(), before = last; last = now;
-        setToasts(function (l) { return window.OfficeToasts.tick(l, now, before, hold.current.hover || hold.current.focus); });
+        var el = toastBox.current, paused = !!el && (el.matches(':hover') || el.contains(document.activeElement));
+        setToasts(function (l) { return window.OfficeToasts.tick(l, now, before, paused); });
       }, 250);
       return function () { clearInterval(iv); };
     }, [timed]);
     function refresh() { return getInfo().then(function (i) { setInfo(i); return i; }, function () { return info; }); }
     function show(name) { refresh().then(function () { setDlg({ name: name }); }); }
     function changes(uid, name) {
-      var live = window.officeAdapter.session(name);
-      setDlg({ name: 'changes', uid: uid, label: name, ended: !live || live.uid !== uid || live.status === 'ended' });
+      var s = window.officeAdapter.sessionByUid(uid);
+      setDlg({ name: 'changes', uid: uid, label: name, ended: !s || s.status === 'ended' });
     }
     // Which building (repository) the scene shows. The choice is kept in the browser.
     var snap = useSnapshot();
@@ -1052,6 +1053,7 @@
     var stale = !!snap && !!cur2.mount && cur2.mount.stale();
     var needsMount = !!snap && view === 'office' && !cur2.mount && cur2.view === 'office';
     var mount = cur2.mount, def = mount ? mount.def : null;
+    var onScreen = cur2.view === 'office' && !ambient && mount ? mount.repo : null;   // the building a full scene shows now
     var sceneKey = mount ? 'm' + mount.id : cur2.key;
     // The Since you left card shows on the first scene of a page visit only. Every later scene is seeded with the
     // whole mirror again, so its summary would count the same sessions and calls twice (the DS request is filed).
@@ -1269,7 +1271,7 @@
       }
       ((sn && sn.sessions) || []).filter(function (s) { return s.status !== 'ended'; }).forEach(function (s) {
         var where = (s.place && s.place.building) || '', kw = 'session ' + where;
-        out.push({ id: 'page-s-go-' + s.uid, label: 'Go to ' + s.name, icon: 'chevron-right', group: 'Sessions', hint: where, keywords: kw, run: function () { goTo(s); } });
+        out.push({ id: 'page-s-go-' + s.uid, label: 'Go to session ' + s.name, icon: 'chevron-right', group: 'Sessions', hint: where, keywords: kw, run: function () { goTo(s); } });
         out.push({ id: 'page-s-term-' + s.uid, label: 'Terminal of ' + s.name, icon: 'terminal', group: 'Sessions', hint: where, keywords: kw + ' output', run: function () { openTerminal(s.uid, s.name); } });
         out.push({ id: 'page-s-chg-' + s.uid, label: 'Changes of ' + s.name, icon: 'trace', group: 'Sessions', hint: where, keywords: kw + ' diff files', run: function () { changes(s.uid, s.name); } });
         if (s.headless && (s.status === 'working' || s.status === 'waiting')) out.push({ id: 'page-s-stop-' + s.uid, label: 'Stop turn of ' + s.name, icon: 'pause', group: 'Sessions', hint: where, keywords: kw + ' interrupt', run: function () { api('/api/interrupt', { uid: s.uid }).catch(function (x) { toast({ tone: 'error', title: s.name, text: x.message }); }); } });
@@ -1299,11 +1301,10 @@
       d === 'sessions' ? h(SessionsDialog, { onClose: close, onGo: goTo }) : null,
       d === 'needs' ? h(NeedsDialog, { toast: toast, onClose: close, onGo: function (r) { var s = snap && snap.sessions.filter(function (x) { return x.uid === r.uid; })[0]; if (s) goTo(s); else close(); } }) : null,
       // Alerts for requests in buildings that are not shown. The DS alert toggle decides; they show only while the page is hidden.
-      snap ? h(A.Notifier, { enabled: alertsOn(), count: needs.length, notifications: needs.filter(function (r) { return r.building !== shown; }).map(function (r) { return { id: r.id, kind: 'request', bot: r.bot, risk: r.risk, text: r.buildingName + '. ' + r.text }; }),
+      snap ? h(A.Notifier, { enabled: alertsOn(), count: needs.length, notifications: needs.filter(function (r) { return r.building !== onScreen; }).map(function (r) { return { id: r.id, kind: 'request', bot: r.bot, risk: r.risk, text: r.buildingName + '. ' + r.text }; }),
         onClick: function (n) { var r = needs.filter(function (x) { return x.id === n.id; })[0]; if (r) { pick(r.building); if (view === 'city') go('office'); } } }) : null,
       ambient || cur2.view !== 'office' ? null : h(ChatHeaderButton, { sess: selSess, onOpen: function () { extensions(selSess.uid, selSess.name); } }),
-      h('div', { className: 'page-toasts', onMouseEnter: function () { hold.current.hover = true; }, onMouseLeave: function () { hold.current.hover = false; },
-        onFocus: function () { hold.current.focus = true; }, onBlur: function () { hold.current.focus = false; } },
+      h('div', { className: 'page-toasts', ref: toastBox },
         h(A.ToastStack, { toasts: toasts, onClose: function (id) { setToasts(function (l) { return window.OfficeToasts.remove(l, id); }); } })));
   }
 

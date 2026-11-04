@@ -96,7 +96,7 @@
     live(snap).forEach(function (s) {
       var pl = placeOf(s), base = { uid: s.uid, bot: s.name, building: pl.repo, buildingName: pl.repoName, roomName: pl.roomName };
       (s.pending || []).forEach(function (r) {
-        out.push(Object.assign({ id: r.id, kind: 'request', tool: r.tool, text: 'Allow ' + r.tool + (r.detail ? ': ' + clip(r.detail, 120) : '') + '?', risk: r.risk, preview: r.preview || r.detail || '', always: r.always || '', t: r.t || 0 }, base));
+        out.push(Object.assign({ id: r.id, kind: 'request', tool: r.tool, text: 'Allow ' + r.tool + (r.detail ? ': ' + clip(r.detail, 120) : '') + '?', risk: r.risk, preview: r.preview || r.detail || '', detail: r.detail || '', always: r.always || '', t: r.t || 0 }, base));
       });
       (s.questions || []).forEach(function (q) {
         out.push(Object.assign({ id: q.id, kind: 'question', tool: 'office_ask', text: q.text, t: q.t || 0 }, base));
