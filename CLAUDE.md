@@ -49,7 +49,7 @@ Add a new file only for a distinct job. Extend the file that owns the concern fi
 - Sessions are keyed by `uid`. `sid` is Claude's session id. `officeId` links hooks to a session the office opened (env `OFFICE_ID`).
 
 - Room awareness: `office_room` describes the room of the calling session. `office_room_update` changes only that room's notes board (`persisted.notes[key]`, kept as `{ text, at, by? }`, `by` is set when an agent wrote it) and one blackboard pin (`persisted.pins`). Each line an agent appends starts with the session name. A rewrite returns the old text in the reply.
-- `POST /api/notes/save` takes an optional `base` (the `at` the editor last saw). If the stored `at` differs, it answers 409 `{ error, text, at }`. On success it returns `{ ok: true, at }`.
+- `POST /api/notes/save` takes an optional `base` (the `at` the editor last saw). If the stored `at` differs, it answers 409 `{ error, text, at }`. On success it returns `{ ok: true, at }`. A cleared board returns `at: 0`.
 - `POST /api/room/inventory { key, items }` lets the page list the decor of a room (at most 40 items of 120 characters, in memory only). `office_room` shows it under "What is in the room", next to the fixed lab-room parts and the street.
 
 ## Gotchas learned the hard way

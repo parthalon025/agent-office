@@ -7,8 +7,8 @@
 //                       notes board, the blackboard pin, the things in the room, and what it can change
 //   office_room_update  change the room: append to or replace the notes board, pin or clear a short
 //                       message (at most 140 characters) on the blackboard
-// Room awareness: when the user talks about the office, the room, the boards, the notes, the door or the
-// desks, the agent reads its room with office_room, so it can talk about it and guide the user. It changes
+// Room awareness: when the user talks about their room in Agent Office (its blackboard, notes board, door or
+// desks), the agent reads its room with office_room, so it can talk about it and guide the user. It changes
 // the room only with office_room_update, and only its own room: the server finds the room from the calling
 // session (server.mjs callerRoom, keys from git.mjs roomKeys), never from the arguments. Notes and pins
 // live in the office's state.json and show on the room's boards at once.

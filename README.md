@@ -73,7 +73,7 @@ Claude Code ──hooks (HTTP or command)──▶ server.mjs ──SSE──▶
 
 - **Hooks** report prompts, tool calls (with their id and time), failed tool calls, subagent start and stop, and stops. `payload.mjs` trims each payload the same way for command and HTTP hooks; tool output never leaves the session. A `PermissionRequest` hook holds the prompt until you answer in the office.
 - **Sessions in the office** run `claude -p` in stream-json mode with a pipe. Messages go in on stdin, replies and control requests come out on stdout.
-- **MCP** gives a session two tools: read messages the user sent from the office, and ask the user a question.
+- **MCP** gives a session four tools: read messages the user sent from the office, ask the user a question, describe its room (`office_room`), and change the room's notes board or blackboard pin when the user asks (`office_room_update`).
 - **The adapter** (`public/adapter.js`) turns the server's session snapshots into design system events.
 
 ### Hook modes

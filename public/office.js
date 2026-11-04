@@ -675,7 +675,7 @@
     var rc = useState(null), rect = rc[0], setRect = rc[1];
     var sv = useState('saved'), state = sv[0], setState = sv[1];
     var ref = React.useRef(null), timer = React.useRef(0);
-    var base = React.useRef(p.at || 0), latest = React.useRef(p.text || '');
+    var base = React.useRef(p.at || 0), latest = React.useRef(p.text || ''), seen = React.useRef(p.at || 0);
     useEffect(function () {
       var raf = 0;
       function follow() { var r = p.rect(); if (r) setRect(function (o) { return o && Math.abs(o.left - r.left) < 0.5 && Math.abs(o.top - r.top) < 0.5 && Math.abs(o.width - r.width) < 0.5 ? o : r; }); raf = requestAnimationFrame(follow); }
@@ -686,10 +686,13 @@
     useEffect(function () { if (rect && !p.flying() && ref.current && document.activeElement !== ref.current) ref.current.focus(); }, [rect && Math.round(rect.width)]);
     // An idle editor takes a change that came from outside (an agent added a line).
     useEffect(function () {
-      if (state !== 'saved') return;
-      base.current = p.at || 0;
+      var at = p.at || 0;
+      if (at === seen.current) return;                       // the note in the snapshot did not change
+      seen.current = at;
+      if (state !== 'saved' || at === base.current) return;  // a save is pending (its 409 merges), or this is our own save
+      base.current = at;
       if ((p.text || '') !== latest.current) { latest.current = p.text || ''; setText(latest.current); }
-    }, [p.text, p.at, state]);
+    }, [p.at]);
     // The server text plus the lines of the user that it does not have.
     function merge(server, mine) {
       var have = {};
@@ -701,10 +704,11 @@
     function save(v) {
       latest.current = v;
       return api('/api/notes/save', { key: p.noteKey, text: v, base: base.current }).then(function (res) {
-        if (res && res.at) base.current = res.at;
+        if (res && 'at' in res) base.current = v.trim() ? res.at : 0;   // an empty note is deleted, so its at is 0
         if (latest.current === v) setState('saved');
       }, function (x) {
         if (x.status === 409 && x.body && typeof x.body.text === 'string') {
+          clearTimeout(timer.current);
           var m = merge(x.body.text, latest.current).slice(0, 4000);
           base.current = x.body.at || 0;
           latest.current = m; setText(m);
@@ -838,12 +842,17 @@
       };
     }, []);
     // focus: into the input when the panel opens, back to the opener when it closes
+    var opener = React.useRef(null), entered = React.useRef(false);
     useEffect(function () {
-      var opener = document.activeElement;
+      opener.current = document.activeElement;
+      return function () { var o = opener.current; if (o && o.isConnected && o.focus) o.focus(); };
+    }, []);
+    useEffect(function () {
+      if (entered.current || !s) return;   // the first render has no snapshot, so no input yet
+      entered.current = true;
       var f = document.querySelector('.terminal-panel .term-field') || vw.current;
       if (f && f.focus) f.focus();
-      return function () { if (opener && opener.isConnected && opener.focus) opener.focus(); };
-    }, []);
+    }, [!!s]);
     useEffect(function () {
       function onKey(e) { if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('.ao-dialog')) { e.preventDefault(); p.onClose(); } }
       window.addEventListener('keydown', onKey);
@@ -1027,10 +1036,16 @@
     // doors: a session that comes into a room or leaves it of the shown building.
     // Room ids come from the board's rooms; the adapter says who sits in each.
     var doorsRef = React.useRef(null);
+    // every room of the shown building, from the scene itself (DS room ids, all floors)
+    function roomIds() {
+      var o = officeRef.current, bl = o && o.getBuilding && o.getBuilding(), out = [];
+      ((bl && bl.floors) || []).forEach(function (f) { (f.rooms || []).forEach(function (r) { out.push(r.id); }); });
+      return out;
+    }
     function roomsNow2(sn) {
       var b = boardRef.current, out = {};
-      if (!b || !b.rooms || window.officeAdapter.shown() !== shown) return null;
-      b.rooms().forEach(function (id) {
+      if (!b || window.officeAdapter.shown() !== shown) return null;
+      roomIds().forEach(function (id) {
         var inf = window.officeAdapter.roomInfo(id, sn);
         var rn = (inf.place && inf.place.roomName) || 'Room';
         inf.sessions.forEach(function (x) { if (x.status !== 'ended' && x.placed) out[x.uid] = { room: id, name: x.name, roomName: rn }; });
@@ -1060,9 +1075,9 @@
     useEffect(function () {
       if (cur2.view !== 'office') return undefined;
       function post() {
-        var b = boardRef.current, ids = b && b.rooms ? b.rooms() : [];
+        var b = boardRef.current;
         if (!b || !b.inventory) return;
-        ids.forEach(function (id) {
+        roomIds().forEach(function (id) {
           try { api('/api/room/inventory', { key: noteKey(id), items: b.inventory(id) }).catch(function () { /* ignore */ }); } catch (x) { /* ignore */ }
         });
       }
