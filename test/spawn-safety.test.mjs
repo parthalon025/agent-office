@@ -73,12 +73,12 @@ test('resolveExe reads a quoted PATH entry that has a space in it', { skip: !win
   } finally { s.done(); }
 });
 
-test('resolveExe takes cmd, powershell and taskkill from System32 only', { skip: !win }, () => {
+test('resolveExe takes cmd, powershell, taskkill and icacls from System32 only', { skip: !win }, () => {
   const s = scratch('ao-sys-');
   try {
-    for (const n of ['cmd.exe', 'powershell.exe', 'taskkill.exe']) fs.copyFileSync(path.join(SYS32, 'HOSTNAME.EXE'), path.join(s.dir, n));
+    for (const n of ['cmd.exe', 'powershell.exe', 'taskkill.exe', 'icacls.exe']) fs.copyFileSync(path.join(SYS32, 'HOSTNAME.EXE'), path.join(s.dir, n));
     const env = { Path: s.dir, SystemRoot: process.env.SystemRoot };
-    for (const [name, rel] of [['cmd.exe', 'cmd.exe'], ['cmd', 'cmd.exe'], ['powershell.exe', 'WindowsPowerShell\\v1.0\\powershell.exe'], ['taskkill', 'taskkill.exe']]) {
+    for (const [name, rel] of [['cmd.exe', 'cmd.exe'], ['cmd', 'cmd.exe'], ['powershell.exe', 'WindowsPowerShell\\v1.0\\powershell.exe'], ['taskkill', 'taskkill.exe'], ['icacls', 'icacls.exe'], ['ICACLS.EXE', 'icacls.exe']]) {
       assert.ok(same(resolveExe(name, env), path.join(SYS32, rel)), name);
       assert.ok(same(resolveExe(name), path.join(SYS32, rel)), name + ' (process env)');
     }

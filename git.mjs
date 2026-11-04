@@ -11,8 +11,8 @@ import crypto from 'node:crypto';
 // On Windows a bare program name ('git') is looked up in the child's folder before PATH, unless the
 // office's own environment has NoDefaultCurrentDirectoryInExePath. A git.exe planted in a session folder
 // would then run as the user with no click. So every program the office starts (git, gh, claude, cmd.exe,
-// powershell.exe, taskkill) starts from the absolute path that resolveExe gives, never from a bare name.
-const SYSTEM32 = { cmd: 'cmd.exe', powershell: 'WindowsPowerShell\\v1.0\\powershell.exe', taskkill: 'taskkill.exe' };
+// powershell.exe, taskkill, icacls) starts from the absolute path that resolveExe gives, never from a bare name.
+const SYSTEM32 = { cmd: 'cmd.exe', powershell: 'WindowsPowerShell\\v1.0\\powershell.exe', taskkill: 'taskkill.exe', icacls: 'icacls.exe' };
 const exeCache = new Map();
 // Environment names are not case-sensitive on Windows; a plain object (a test's env) is.
 const envGet = (env, key) => env[key] ?? env[Object.keys(env).find((k) => k.toLowerCase() === key.toLowerCase())];
@@ -24,7 +24,7 @@ function isRunnable(p, win) {
 }
 
 /**
- * The absolute path of a program. Windows tools (cmd, powershell, taskkill) come from %SystemRoot%\System32.
+ * The absolute path of a program. Windows tools (cmd, powershell, taskkill, icacls) come from %SystemRoot%\System32.
  * Other names come from the absolute folders of PATH, in order; relative entries ('.', '') and the current
  * folder are never searched. On Windows only .com and .exe count: a .cmd, .bat or .ps1 shim cannot start
  * without a shell, and the office never starts programs through a shell. An absolute path is checked and
