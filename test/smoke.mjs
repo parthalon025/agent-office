@@ -133,7 +133,8 @@ const failer = await api('/api/open', { cwd: repo2, name: 'failer', model: 'haik
 ok('open the watcher and the failing session', !!watcher.uid && !!failer.uid, JSON.stringify({ watcher, failer }));
 const failed = await until(async () => { const x = await me(failer.uid); return x?.error ? x : null; }, 90000);
 ok('failed turn sets session.error', !!failed, JSON.stringify(failed?.error));
-const roomOf = (sn) => Object.values(sn.figures || {}).find((f) => f.sessions === 2);
+// The figures of the watcher's own room (by its notes key). Other open sessions in the office can also make a room of two.
+const roomOf = (sn) => { const w = sn.sessions.find((x) => x.uid === watcher.uid); return w?.place ? (sn.figures || {})[w.place.noteKey] : undefined; };
 let fig = roomOf(await snap());
 ok('failed turn: room figures show no working or waiting', !!fig && fig.working === 0 && fig.waiting === 0, JSON.stringify(fig));
 const room1 = await api('/mcp/room', { office_id: watcher.uid });
