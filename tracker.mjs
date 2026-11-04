@@ -1,5 +1,6 @@
-// Session tracker: the rules that turn Claude Code events into the office's sessions.
-// Two inputs: a hook payload (onHook, permissionRequest) and a stream line (onStream).
+// Session tracker: the rules that turn agent events into the office's sessions.
+// Two inputs: a hook payload (onHook, permissionRequest) and a stream message (onStream). Claude Code's hooks come in over
+// the server's hook routes; every provider (providers/) reports in the same vocabulary through providerEvents.
 // One output: tracker.sessions, which the server sends as the sessions snapshot.
 //
 // Everything outside the rules is injected, so a test needs no server, no timers, no git and no
@@ -50,7 +51,6 @@ const defaultId = (kind) => (ID_PREFIX[kind] ?? '') + crypto.randomBytes(ID_BYTE
  * @param {(cwd: string) => Promise<object|null>} [deps.locate] git location of a folder: { repo, root, branch } or null.
  * @param {() => void} [deps.onChange] called after a state change (the server broadcasts).
  * @param {(id: string, decision: object) => void} [deps.releaseHold] frees a held permission request or question.
- * @param {(response: object) => void} [deps.onControlResponse] a control_response stream line arrived.
  * @param {(fn: Function, ms: number) => unknown} [deps.setTimer] timer for the throttled live text.
  * @param {object} [deps.persist] persistence sink.
  * @param {(s: object) => void} [deps.persist.history] a session reached a point worth saving.
@@ -80,7 +80,8 @@ export function createTracker(deps = {}) {
     const t = now();
     const s = {
       uid: makeId('session'),
-      sid: null, officeId: null, name: '', cwd: '', model: null, status: 'idle',
+      // provider: the agent kind (providers/). A session first seen in a hook is a Claude Code session.
+      sid: null, officeId: null, provider: 'claude-code', name: '', cwd: '', model: null, status: 'idle',
       tool: null, prompt: '', note: '', pending: [], questions: [], inbox: [], replies: [], replySeq: 0, headless: false, commands: [], skills: [], cost: null, costBase: 0, live: '', mode: null,
       ctxTokens: null, ctxWindow: null, worktree: null, budget: null, scheduleId: null, interrupted: false, turns: 0,
       // calls: tool calls, newest last. agents: subagents (Task or Agent tool). todos: the TodoWrite plan.
@@ -337,12 +338,12 @@ export function createTracker(deps = {}) {
     liveTimers.set(s.uid, setTimer(() => { liveTimers.delete(s.uid); changed(); }, LIVE_MS));
   }
 
+  // A stream message, as a JSON line or an object. A control response is the provider's (providers/claude-code.mjs).
   function onStream(s, line) {
-    let m;
-    try { m = JSON.parse(line); } catch { return; }
-    if (m.type === 'control_response') {
-      deps.onControlResponse?.(m.response);
-    } else if (m.type === 'stream_event') {
+    let m = line;
+    if (typeof line === 'string') { try { m = JSON.parse(line); } catch { return; } }
+    if (!m || typeof m !== 'object') return;
+    if (m.type === 'stream_event') {
       const e = m.event || {};
       if (m.parent_tool_use_id) return;
       if (e.type === 'message_start') s.live = '';

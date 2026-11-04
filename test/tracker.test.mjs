@@ -14,14 +14,13 @@ const GIT = { repo: REPO, root: REPO, branch: 'main' };
 
 // A tracker with in-memory adapters. Time moves only when the test says so.
 function rig(over = {}) {
-  const r = { t: 1_000_000, changes: 0, released: [], history: [], dirs: [], commands: [], placed: [], controls: [], timers: [], located: [], ids: {} };
+  const r = { t: 1_000_000, changes: 0, released: [], history: [], dirs: [], commands: [], placed: [], timers: [], located: [], ids: {} };
   r.tracker = createTracker({
     now: () => r.t,
     makeId: (kind) => `${kind[0]}${(r.ids[kind] = (r.ids[kind] || 0) + 1)}`,
     locate: async (cwd) => { r.located.push(cwd); return over.git === undefined ? GIT : over.git; },
     onChange: () => { r.changes++; },
     releaseHold: (id, decision) => r.released.push({ id, decision }),
-    onControlResponse: (resp) => r.controls.push(resp),
     setTimer: (fn, ms) => { r.timers.push({ fn, ms }); return r.timers.length; },
     persist: {
       history: (s) => r.history.push({ uid: s.uid, status: s.status }),
@@ -546,14 +545,24 @@ test('a result frees held requests and closes open calls', () => {
   assert.equal(r.released.length, 1);
 });
 
-test('control responses go to the server, bad lines are ignored', () => {
+test('bad lines and non-objects are ignored; a parsed message counts like its line', () => {
   const r = rig();
   const s = r.tracker.newSession({ uid: 'o1', headless: true });
-  r.line(s, STREAM.controlResponse);
-  assert.equal(r.controls[0].request_id, 'cabc');
-  r.tracker.onStream(s, 'not json');
-  r.tracker.onStream(s, '{"type":"unknown"}');
+  for (const bad of ['not json', '{"type":"unknown"}', 'null', '5', null, 7]) r.tracker.onStream(s, bad);
   assert.equal(s.replies.length, 0);
+  // A control response is the provider's own (providers/claude-code.mjs); the tracker does nothing with one.
+  r.line(s, STREAM.controlResponse);
+  assert.equal(s.replies.length, 0);
+  r.tracker.onStream(s, STREAM.assistantA);
+  assert.deepEqual(s.replies.map((x) => x.text), ['Hello from Claude.']);
+  assert.deepEqual(s.usage, { tokens: 105, cached: 90, input: 100 });
+});
+
+test('a session is a Claude Code session unless the office opened it with another provider', () => {
+  const r = rig();
+  r.hook(HOOKS.turnWithEdit[0]);
+  assert.equal(r.only().provider, 'claude-code');
+  assert.equal(r.tracker.newSession({ uid: 'l1', provider: 'local' }).provider, 'local');
 });
 
 test('the feed keeps the last 200 lines', () => {
