@@ -59,6 +59,15 @@ function kinds(list) {
 }
 
 /**
+ * True when one path part (a folder or file name) is a secret or settings that run code: .env, .ssh, *.pem, .git,
+ * .claude and the rest of the lists above. The local-model Grep skips these, so a search never reads them.
+ */
+export function isProtectedPart(name) {
+  const k = kinds([String(name ?? '')]);
+  return k.secret || k.runs;
+}
+
+/**
  * True when target is the folder root or inside it (case-insensitive on Windows). It compares the path text
  * only and follows no link: a junction inside the folder that leads out still counts as inside. Use
  * realInside() where a link must not lead out. Paths in another form (\\?\, UNC, 8.3, trailing dots) are
