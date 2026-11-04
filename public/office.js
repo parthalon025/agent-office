@@ -350,7 +350,7 @@
       h('div', { className: 'form' },
         startup && startup.available ? h('h3', { className: 'ext-h' }, 'Start with Windows') : null,
         startup && startup.available ? h('p', { className: 'note' }, startup.enabled ? 'The office starts when you sign in. It adds one file to your Startup folder. It needs no admin rights.' : 'Start the office when you sign in to Windows. It adds one file to your Startup folder. It needs no admin rights.') : null,
-        startup && startup.available ? h(A.Button, { variant: startup.enabled ? 'quiet' : 'primary', disabled: startBusy, onClick: toggleStartup }, startup.enabled ? 'Turn off start with Windows' : 'Turn on start with Windows') : null,
+        startup && startup.available ? h(A.Button, { variant: 'quiet', disabled: startBusy, onClick: toggleStartup }, startup.enabled ? 'Turn off start with Windows' : 'Turn on start with Windows') : null,
         h('h3', { className: 'ext-h' }, 'Where sessions come from'),
         h(A.ChannelList, { channels: channels }),
         h('p', { className: 'note' }, 'Sessions opened here are wired up for you. To seat a session you start yourself, launch it with the office settings file.'),
