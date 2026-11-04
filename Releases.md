@@ -31,6 +31,7 @@ Versions keep the `x` prefix.
 - The room's waiting count is the same on the stats display, the stats panel, the room dialog and in what agents read.
 - A tool result settles only the permission request of its own call.
 - Risk rating is an allowlist. Approve all low-risk no longer approves PowerShell deletes or agent questions.
+- Reads are low risk only inside the session's worktree or start folder. Secret files (`.env`, keys, credentials, the office token) and settings folders (`.git`, `.claude`, `.vscode`, `.idea`, `.mcp.json`) are never low risk. An edit that can make a program run (git config and hooks, Claude Code settings, MCP lists, editor tasks) is high risk. A link that leads out of the folder counts as outside. Shell commands that make links, change git config, or start `cmd /c` or encoded PowerShell are high risk.
 - The calm dock. Approvals show in the panels, and only one panel is open at a time.
 - Status words and notes text are readable in Day, Night and Sublevel. Reduced motion gives a still door ring and instant City lifts.
 - Each mounted building has its own adapter. The page no longer keeps a global reset.

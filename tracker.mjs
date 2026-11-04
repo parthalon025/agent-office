@@ -87,12 +87,19 @@ export function createTracker(deps = {}) {
       calls: [], agents: [], todos: [], usage: { tokens: 0, cached: 0, input: 0 }, error: null, errorSeq: 0,
       // git: { repo, root, branch } of cwd, or null outside git. placed: git was looked up at least once.
       git: null, placed: false, gitCwd: '', gitAt: 0,
+      // startDir: the folder the session started in (the office's launch folder, or the first cwd a hook
+      // reported). It does not follow cwd, so a later cd cannot widen what counts as low risk.
+      startDir: '',
       startedAt: t, lastEvent: t, endedAt: null,
       pid: null, launched: false, ...fields,
     };
+    if (!s.startDir) s.startDir = s.cwd || '';
     sessions.set(s.uid, s);
     return s;
   }
+
+  // The folder a session's tool calls are rated against (riskOf): its worktree, else the folder it started in.
+  const rootOf = (s) => s.worktree?.root || s.startDir || s.cwd;
 
   // The office draws a repository as a building, a branch as a floor and a worktree as a room.
   // Look the place up when the folder changes, at the start and end of each turn, and at most every 15 s.
@@ -197,7 +204,7 @@ export function createTracker(deps = {}) {
       s = newSession({ name: basename(p.cwd) || 'session' });
     }
     s.sid = p.session_id;
-    if (p.cwd) s.cwd = p.cwd;
+    if (p.cwd) { s.cwd = p.cwd; if (!s.startDir) s.startDir = p.cwd; }
     if (!s.name) s.name = basename(s.cwd) || 'session';
     if (p.model) s.model = p.model;
     s.lastEvent = now();
@@ -277,7 +284,7 @@ export function createTracker(deps = {}) {
     const id = makeId('permission');
     const detail = describeTool(p.tool_name, p.tool_input);
     const suggestions = allowRules(p.permission_suggestions);
-    s.pending.push({ id, key: callKey(p), agent: p.agent_id || null, tool: p.tool_name, detail, risk: riskOf(p.tool_name, p.full_input || p.tool_input, s.cwd), preview: makePreview(p.tool_name, p.full_input || p.tool_input), always: ruleLabel(suggestions), t: now() });
+    s.pending.push({ id, key: callKey(p), agent: p.agent_id || null, tool: p.tool_name, detail, risk: riskOf(p.tool_name, p.full_input || p.tool_input, rootOf(s)), preview: makePreview(p.tool_name, p.full_input || p.tool_input), always: ruleLabel(suggestions), t: now() });
     s.status = 'waiting'; s.note = `${p.tool_name} ${detail}`.trim();
     addFeed(s, 'wait', `asks to use ${s.note}`);
     changed();
