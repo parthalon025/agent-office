@@ -82,14 +82,25 @@ Each job names the control to use. Ctrl+K finds all of them.
 1. **Start the office.** Run `npm start` and open http://localhost:4317. The city has no buildings until a session exists, so open one (job 2).
 2. **Open a session.** Click **Open session**, pick a folder and start it. The folder becomes a building, its branch a floor and its worktree a room. The bot sits at a desk in that room. Click the bot to open its chat.
 3. **Approve a request.** A bot that needs you shows an amber badge, and the **Needs you** button in the dock shows a count. Open the list, read the request, then click Approve or Decline. A question has Yes and No. The office holds a request from a terminal session for 60 seconds, then the terminal dialog decides. A session in the office waits 15 minutes.
-4. **Read a room board and its notes.** Click the board on the back wall of a room. The camera flies to it, so you can read it. Click it again, and a side panel shows the same data in full. Click the notes board next to it twice and type. Notes save as you type and stay with the room. Press Esc or Back to return the camera.
+4. **Read a room board and its notes.** The blackboard, the notes board, the stats display and each desk monitor take two clicks. The first click flies the camera to the screen, so you can read it. The second click, or the button that appears with it, opens the panel (Open the overview, Write notes, Show room stats, Open terminal). On the notes board you can then type. Notes save as you type and stay with the room. Press Esc or click Back to fly out again. The door opens the Agents dialog at once.
 5. **Schedule a prompt.** Open **More**, then **Schedules**, then **Add a schedule**. Give it a name, a folder and an instruction. Run it every N minutes (5 or more) or daily at a time. A schedule opens an office session on its own. A daily slot that the office misses by more than 10 minutes is skipped. **Run now** starts one run at once and does not change the times.
 6. **Make a floor or a room.** Open **Floors**. Create a floor to make a new branch with its first worktree. Add a room to put one more worktree on a branch. Remove a room or delete a floor in the same dialog. If git refuses, the dialog says why and offers a button to go ahead anyway. The main folder cannot be removed.
 7. **Manage extensions.** Select a bot, open **More**, then **Extensions** (or use Ctrl+K). Turn connectors and plugins off or on, add them or remove them. Changes go to the local or project scope of the folder, never to your user settings. Only office sessions can turn connectors on and off.
 8. **Review the changes.** Select a bot, open **More**, then **Changes**. The same button is in **Past** for a closed session. Read the diff before you keep the work.
-9. **Stop or reopen.** Select a bot. **Stop turn** is in the dock row next to its name. It ends the turn that runs now, and it is for office sessions only. A closed session moves to **Past**. Click **Past** in the dock, then click **Reopen** to bring a session back or **Forget** to remove it with its history.
+9. **Stop or reopen.** Select a bot. **Stop turn** is in the dock row next to its name. It ends the turn that runs now, and it is for office sessions only. A closed session moves to **Past**. Click **Past** in the dock, then click **Reopen** to bring a session back or **Forget** to remove it with its history. A Claude Code session resumes with its replies, cost and turns, and leaves **Past**. A local agent cannot resume: **Reopen** starts a new session in the same folder with the same model, and the old record stays in **Past**.
 
-Each job above is written for Claude Code, the only agent kind that is built. Other agent kinds, such as a local model, are planned. They will use the same jobs.
+### Local model agents
+
+Two more agent kinds are built: **Ollama** and **LM Studio**. They run a model on this PC at a desk, in a worktree or a folder. Most jobs above work for them. These parts differ:
+
+- **Start one with the API.** The **Open session** dialog and schedules start Claude Code only. For a local agent, send `POST /api/open` with the header `x-office-token` (the value in `.office-token`) and a JSON body with `cwd`, `provider` (`ollama` or `lmstudio`), `model` and `prompt`. `model` is required. `GET /api/providers` lists each agent kind, whether it is ready, what it still needs and its models. Opening a session works on Windows only.
+- **Tools.** The agent reads, lists, searches, edits, writes and runs commands, all inside its folder. It can also use the office tools (inbox, ask, room, room notes). One turn stops after 25 model calls.
+- **Approve a request (job 3).** The cards are the same, with the same risk rule. A local agent never offers Always allow.
+- **Cost.** The cost is always $0. The office counts tokens.
+- **Not available.** Model and permission switches and Extensions are refused for a local agent, and it takes text only (no attachments). Schedules start Claude Code.
+- **Reopen (job 9).** It starts a new session and cannot resume.
+
+The office only lists models and sends chat requests to the server. It never loads, unloads or downloads a model. See **Settings** for the server addresses.
 
 ## How it works
 
@@ -154,7 +165,7 @@ Generated at run time and ignored by git: `.office-token`, `office-hooks.json`, 
 
 ## Troubleshooting
 
-The office knows two kinds of session. A session **in the office** runs `claude -p` with a pipe. A **terminal session** is one you start yourself with the office settings. Other agent kinds, such as a local model, are planned. Find your kind below.
+The office knows three kinds of session. A session **in the office** runs `claude -p` with a pipe. A **terminal session** is one you start yourself with the office settings. A **local agent** runs a model on this PC through Ollama or LM Studio. Find your kind below.
 
 ### Any session
 
@@ -170,6 +181,18 @@ The office knows two kinds of session. A session **in the office** runs `claude 
 - **A session stops at start.** The bot's chat shows Claude Code's error. The usual cause is a signed-out login. Sign in with Claude Code, then open the session again.
 - **The `/` list is empty.** Claude reports its commands after the first message. The office reuses the last known list until then.
 - **A turn failed.** The bot shows a red badge until you click Retry or Dismiss.
+
+### Local agents
+
+- **The office stops at start with "A local model provider talks to this machine only."** The address in `OFFICE_OLLAMA_URL` or `OFFICE_LMSTUDIO_URL` is not on this PC. Use `127.0.0.1`, `localhost` or `::1`, or remove the variable.
+- **`GET /api/providers` says the kind is not ready.** The office could not list models in 3 seconds, or the list is empty. For Ollama, start it and run `ollama pull <model>`. For LM Studio, start the local server (Developer tab) and load a chat model. Check that the address matches the server.
+- **A turn fails with "API Error: fetch failed" (or another connection error).** The server is not reachable at the address. Start it, or set the right address, then send the message again.
+- **A turn fails with "API Error: Ollama answered 404" or "LM Studio answered 404".** The server does not know the model. The text after the colon is the server's own message. Use an id from the list in `/api/providers`. The list leaves out models whose id contains `embed` or `rerank`.
+- **A turn fails with "API Error: ... answered 400" and the server message says the model does not support tools.** The agent needs tool calling. Pick a model that supports tool calling.
+- **A turn fails with "Ollama stopped answering."** The server sent no data for 2 minutes. Check that the model is loaded and that the PC has enough memory.
+- **A turn fails with "The model used all 25 steps of one turn."** Send a smaller task.
+- **"Pick a model for this agent."** The open call has no `model`.
+- **"Local agents take text only."** Remove the attachment.
 
 ### Terminal sessions
 
