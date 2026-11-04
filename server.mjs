@@ -9,8 +9,8 @@ import crypto from 'node:crypto';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as git from './git.mjs';
-import { slimPayload, describeTool, settles } from './payload.mjs';
-import { riskOf } from './risk.mjs';
+import { slimPayload } from './payload.mjs';
+import { createTracker, clip } from './tracker.mjs';
 import { placeOfSession, placeOfWorktree, adoptLegacy, normPath } from './place.mjs';
 import './public/vocab.js'; // session vocabulary, shared with the page (globalThis.OfficeVocab)
 const V = globalThis.OfficeVocab;
@@ -124,47 +124,23 @@ function recordHistory(s) {
 }
 
 // ---------- state ----------
-/** @type {Map<string, any>} uid -> session */
-const sessions = new Map();
-const feed = [];
+// The session rules are in tracker.mjs. The server gives it the real clock, git, persistence and broadcast.
 const clients = new Set();
+const tracker = createTracker({
+  locate: (cwd) => git.locate(cwd),
+  onChange: () => broadcast(),
+  releaseHold: (id, decision) => releaseHold(id, decision),
+  onControlResponse: (r) => { const done = controls.get(r?.request_id); if (done) { controls.delete(r.request_id); done(r); } },
+  persist: {
+    history: (s) => recordHistory(s),
+    recentDir: (dir) => rememberDir(dir),
+    commands: (list) => { persisted.commands = list; savePersisted(); },
+    placed: (s, g) => { adoptNotes(roomPlace(s)); if (g) addRepo(g.repo); },
+  },
+});
+const { sessions, feed, addFeed, newSession, placeSession, findSession, onHook, endSession, pushReply, onStream } = tracker;
 
 const basename = (p) => (p ? p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : '');
-const clip = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s || '');
-
-function newSession(fields) {
-  const s = {
-    uid: crypto.randomBytes(4).toString('hex'),
-    sid: null, officeId: null, name: '', cwd: '', model: null, status: 'idle',
-    tool: null, prompt: '', note: '', pending: [], questions: [], inbox: [], replies: [], replySeq: 0, headless: false, commands: [], skills: [], cost: null, costBase: 0, live: '', mode: null,
-    ctxTokens: null, ctxWindow: null, worktree: null, budget: null, scheduleId: null, interrupted: false, turns: 0,
-    // calls: tool calls, newest last. agents: subagents (Task or Agent tool). todos: the TodoWrite plan.
-    calls: [], agents: [], todos: [], usage: { tokens: 0, cached: 0, input: 0 }, error: null, errorSeq: 0,
-    // git: { repo, root, branch } of cwd, or null outside git. placed: git was looked up at least once.
-    git: null, placed: false, gitCwd: '', gitAt: 0,
-    startedAt: Date.now(), lastEvent: Date.now(), endedAt: null,
-    pid: null, launched: false, ...fields,
-  };
-  sessions.set(s.uid, s);
-  return s;
-}
-
-// The office draws a repository as a building, a branch as a floor and a worktree as a room.
-// Look the place up when the folder changes, at the start and end of each turn, and at most every 15 s.
-// Resolves when s.git is current (at once when the last lookup is recent enough).
-function placeSession(s, force = false) {
-  if (s.status === 'ended') return Promise.resolve();
-  if (!s.cwd) { s.placed = true; return Promise.resolve(); }
-  if (!force && s.gitCwd === s.cwd && Date.now() - s.gitAt < 15000) return Promise.resolve();
-  s.gitCwd = s.cwd; s.gitAt = Date.now();
-  return git.locate(s.cwd).then((g) => {
-    const changed = !s.placed || JSON.stringify(g) !== JSON.stringify(s.git);
-    s.git = g; s.placed = true;
-    adoptNotes(roomPlace(s));
-    if (g) addRepo(g.repo);
-    if (changed) broadcast();
-  });
-}
 
 // ---------- buildings: repositories and their worktrees ----------
 // A repository is known when a session works in it or it is a recent folder. Its worktrees are
@@ -245,63 +221,6 @@ setInterval(() => { for (const k of repos.keys()) void refreshRepo(k); }, 30000)
 // Recent folders that are in git are buildings too, so they can get floors before any session runs.
 for (const d of persisted.recent) git.locate(d).then((g) => { if (g) addRepo(g.repo); });
 
-function addFeed(s, kind, text) {
-  feed.push({ t: Date.now(), uid: s.uid, name: s.name, kind, text });
-  if (feed.length > 200) feed.splice(0, feed.length - 200);
-}
-
-const isAgentTool = (n) => n === 'Task' || n === 'Agent';
-const MAX_CALLS = 60;
-// One tool call: opened by PreToolUse, closed by PostToolUse or PostToolUseFailure.
-function openCall(s, p) {
-  if (!p.tool_use_id || s.calls.some((c) => c.id === p.tool_use_id)) return;
-  // file: the path inside the worktree, for the room board's repo view
-  const fp = p.tool_input.file_path || p.tool_input.path;
-  const top = s.git?.root || s.cwd;
-  const rel = fp && top ? path.relative(top, String(fp)).replace(/\\/g, '/') : null;
-  s.calls.push({ id: p.tool_use_id, name: p.tool_name, detail: describeTool(p.tool_name, p.tool_input), file: rel && !rel.startsWith('..') ? rel : null, agent: p.agent_id, t: Date.now(), ms: null, ok: null, err: null });
-  if (isAgentTool(p.tool_name)) s.agents.push({ call: p.tool_use_id, id: null, type: p.tool_input.subagent_type || 'general-purpose', task: describeTool(p.tool_name, p.tool_input), done: false, ok: null });
-  // Keep every open call; drop the oldest closed ones.
-  while (s.calls.length > MAX_CALLS) { const i = s.calls.findIndex((c) => c.ok !== null); if (i < 0) break; s.calls.splice(i, 1); }
-}
-function closeCall(s, id, ok, ms, err) {
-  const c = s.calls.find((x) => x.id === id);
-  if (!c || c.ok !== null) return;
-  c.ok = ok; c.ms = ms ?? Date.now() - c.t; c.err = err || null;
-  const a = s.agents.find((x) => x.call === id);
-  if (a && !a.done) { a.done = true; a.ok = ok; }
-}
-// A turn ended: nothing is still running.
-function closeAll(s, why) {
-  for (const c of s.calls) if (c.ok === null) closeCall(s, c.id, false, null, why);
-  for (const a of s.agents) if (!a.done) { a.done = true; a.ok = false; }
-  if (s.agents.length > 20) s.agents = s.agents.slice(-20);
-}
-
-// A readable picture of what a permission prompt would change, shown on the Approve card.
-function makePreview(tool, input = {}) {
-  const cap = (t, n) => { t = String(t ?? ''); return t.length > n ? t.slice(0, n) + '\n… (' + (t.length - n) + ' more characters)' : t; };
-  const lines = (t, mark) => cap(t, 1500).split('\n').map((l) => mark + ' ' + l).join('\n');
-  try {
-    if (tool === 'Bash') return cap(input.command, 1800);
-    if (tool === 'Edit') return `${input.file_path}\n${lines(input.old_string, '-')}\n${lines(input.new_string, '+')}`;
-    if (tool === 'MultiEdit') return `${input.file_path}\n` + (input.edits || []).slice(0, 6).map((e) => `${lines(e.old_string, '-')}\n${lines(e.new_string, '+')}`).join('\n···\n');
-    if (tool === 'Write') return `${input.file_path} (new content)\n${lines(String(input.content ?? '').split('\n').slice(0, 40).join('\n'), '+')}`;
-    if (tool === 'NotebookEdit') return `${input.notebook_path || input.file_path}\n${lines(input.new_source, '+')}`;
-    if (tool === 'WebFetch') return `${input.url}\n${cap(input.prompt, 300)}`;
-    return cap(JSON.stringify(input, null, 1), 900);
-  } catch { return ''; }
-}
-// Rules Claude offers for "always allow". Only plain allow rules are ever passed back.
-const allowRules = (sug) => (Array.isArray(sug) ? sug : []).filter((x) => x && x.type === 'addRules' && x.behavior === 'allow' && Array.isArray(x.rules));
-const ruleLabel = (sug) => allowRules(sug).flatMap((x) => x.rules.map((r) => (r.ruleContent ? `${r.toolName}(${r.ruleContent})` : r.toolName))).join(', ');
-
-function findSession(p) {
-  if (p.office_id) for (const s of sessions.values()) if (s.officeId === p.office_id) return s;
-  for (const s of sessions.values()) if (s.sid === p.session_id) return s;
-  return null;
-}
-
 // Finds the claude process above a hook's parent, so the office can close sessions it did not launch.
 // The hook's parent shell dies right after the hook returns, so the walk has to happen while the hook
 // still waits. A persistent PowerShell helper makes that walk in ~100 ms instead of a ~550 ms cold start.
@@ -351,106 +270,7 @@ if (process.platform === 'win32') walker = startWalker();
 
 let probeSeen = null; // while probing: which events arrived over HTTP
 
-function onHook(p) {
-  if (!p.session_id) return null;
-  const ev = p.hook_event_name;
-  let s = findSession(p);
-  if (!s) {
-    if (ev === 'SessionEnd') return null;
-    s = newSession({ name: basename(p.cwd) || 'session' });
-  }
-  s.sid = p.session_id;
-  if (p.cwd) s.cwd = p.cwd;
-  if (!s.name) s.name = basename(s.cwd) || 'session';
-  if (p.model) s.model = p.model;
-  s.lastEvent = Date.now();
-  if (s.status === 'ended' && ev !== 'SessionEnd') { s.endedAt = null; s.status = 'idle'; }
-
-  let out = null;
-  switch (ev) {
-    case 'SessionStart':
-      s.status = 'idle'; s.tool = null; s.note = ''; closeAll(s, 'The session restarted.');
-      addFeed(s, 'start', `sat down (${p.source || 'startup'})`);
-      break;
-    case 'UserPromptSubmit':
-      s.status = 'working'; s.prompt = p.prompt || ''; s.note = ''; s.turns += 1; s.error = null; s.promptAt = Date.now();
-      out = deliver(s, ev);
-      addFeed(s, 'prompt', clip(s.prompt, 140));
-      break;
-    case 'PreToolUse':
-      if (!V.isWaiting(s)) { s.status = 'working'; s.note = ''; } // a subagent's tool call must not hide a request that waits
-      openCall(s, p);
-      // The bot's task line shows the main agent's tool; a subagent's tools show on its helper.
-      if (!p.agent_id) s.tool = { name: p.tool_name, detail: describeTool(p.tool_name, p.tool_input) };
-      break;
-    case 'PostToolUse':
-      if (!p.agent_id) s.tool = null;
-      settlePending(s, p);
-      closeCall(s, p.tool_use_id, true, p.duration_ms);
-      if (p.tool_name === 'TodoWrite' && Array.isArray(p.tool_input.todos) && !p.agent_id) s.todos = p.tool_input.todos;
-      out = deliver(s, ev);
-      addFeed(s, 'tool', `${p.tool_name} ${describeTool(p.tool_name, p.tool_input)}`.trim());
-      break;
-    case 'PostToolUseFailure':
-      if (!p.agent_id) s.tool = null;
-      settlePending(s, p);
-      closeCall(s, p.tool_use_id, false, p.duration_ms, p.is_interrupt ? 'Stopped' : p.error || 'Failed');
-      addFeed(s, 'tool', `${p.tool_name} failed${p.is_interrupt ? ' (stopped)' : ''}`);
-      break;
-    case 'SubagentStart': {
-      // Link the subagent to the oldest Task or Agent call of the same type that has no subagent yet.
-      const a = s.agents.find((x) => !x.id && !x.done && x.type === p.agent_type) || s.agents.find((x) => !x.id && !x.done);
-      if (a && p.agent_id) a.id = p.agent_id;
-      break;
-    }
-    case 'Notification':
-      s.note = p.message || '';
-      addFeed(s, 'wait', clip(s.note || 'sent a notification', 140));
-      break;
-    case 'Stop':
-      s.status = 'idle'; s.tool = null; s.note = ''; dropPending(s); closeAll(s, 'The turn ended first.');
-      out = deliver(s, ev);
-      if (out) s.status = 'working';
-      addFeed(s, 'stop', 'finished the turn');
-      break;
-    case 'SubagentStop': {
-      const a = s.agents.find((x) => x.id && x.id === p.agent_id);
-      if (a && !a.done) { a.done = true; a.ok = true; }
-      addFeed(s, 'tool', 'a helper finished');
-      break;
-    }
-    case 'SessionEnd':
-      endSession(s, p.reason ? `left (${p.reason})` : 'left');
-      break;
-    default: break;
-  }
-  if (p.cwd && ev === 'SessionStart') rememberDir(p.cwd);
-  placeSession(s, ev === 'SessionStart' || ev === 'UserPromptSubmit' || ev === 'Stop');
-  broadcast();
-  return out;
-}
-
-function endSession(s, why) {
-  if (s.status === 'ended') return;
-  dropPending(s);
-  dropQuestions(s, 'The session ended before the user answered.');
-  s.status = 'ended'; s.endedAt = Date.now(); s.tool = null; s.live = ''; closeAll(s, 'The session ended.');
-  addFeed(s, 'end', why);
-  recordHistory(s);
-}
-
-// ---------- messages to a session ----------
-// Queued messages reach a session at its next tool call (PostToolUse), its next prompt, or the end
-// of its turn (Stop). A session sitting idle at its prompt receives them when it next wakes.
-function deliver(s, ev) {
-  if (!s.inbox.length) return null;
-  const text = s.inbox.map((m) => '- ' + m.text).join('\n');
-  s.inbox = [];
-  addFeed(s, 'tool', 'read a message from the office');
-  const note = 'Message from the user in Agent Office:\n' + text;
-  if (ev === 'Stop') return { decision: 'block', reason: note + '\n\nAnswer it, then continue.' };
-  return { hookSpecificOutput: { hookEventName: ev, additionalContext: note } };
-}
+// The session rules (hook switch, tool calls, stream lines) live in tracker.mjs.
 
 function sendMessage(uid, text, attachments = []) {
   const s = sessions.get(uid);
@@ -463,10 +283,7 @@ function sendMessage(uid, text, attachments = []) {
   if (q && clean && holds.has(q.id)) { releaseHold(q.id, { text: clean }); addFeed(s, 'prompt', 'answered in the office: ' + clip(clean, 100)); return { answered: true }; }
   if (s.headless && (s.status !== 'working' || attachments.length)) {
     writeUser(s, clean, attachments);
-    s.error = null; s.status = 'working'; // a new turn starts: no Finished between Error and Working
-    s.prompt = clean || '(attachment)';
-    addFeed(s, 'prompt', 'sent from the office: ' + clip(clean, 100));
-    broadcast();
+    tracker.startTurn(s, clean || '(attachment)');
     return { sent: true };
   }
   if (!clean) throw httpError(400, 'The message is empty.');
@@ -484,12 +301,7 @@ function forget(id) {
   const h = holds.get(id);
   if (!h) return null;
   holds.delete(id); clearTimeout(h.timer);
-  const s = sessions.get(h.uid);
-  if (s) {
-    s.pending = s.pending.filter((r) => r.id !== id);
-    s.questions = s.questions.filter((r) => r.id !== id);
-    if (!s.pending.length && !s.questions.length && s.status === 'waiting') s.status = 'working';
-  }
+  tracker.settle(h.uid, id);
   broadcast();
   return h;
 }
@@ -499,27 +311,14 @@ function releaseHold(id, decision) {
   if (!h.res.writableEnded) { h.res.writeHead(200, { 'content-type': 'application/json' }); h.res.end(JSON.stringify(decision || {})); }
   return true;
 }
-// A tool call that finished settles only the request that asked for that call, not a request from another agent.
-function settlePending(s, p) {
-  for (const r of s.pending.filter((x) => settles(x, p))) releaseHold(r.id, {});
-  s.pending = s.pending.filter((r) => !settles(r, p));
-}
-function dropPending(s) { for (const r of [...s.pending]) releaseHold(r.id, {}); s.pending = []; }
-function dropQuestions(s, text) { for (const r of [...s.questions]) releaseHold(r.id, { text }); s.questions = []; }
 
 function onPermission(p, res) {
-  onHook({ ...p, hook_event_name: 'PermissionRequest' });
-  const s = findSession(p);
-  if (!s) { res.writeHead(200, { 'content-type': 'application/json' }); return res.end('{}'); }
-  const id = 'p' + crypto.randomBytes(5).toString('hex');
-  const detail = describeTool(p.tool_name, p.tool_input);
-  const sug = allowRules(p.permission_suggestions);
-  s.pending.push({ id, agent: p.agent_id || null, tool: p.tool_name, detail, risk: riskOf(p.tool_name, p.full_input || p.tool_input, s.cwd), preview: makePreview(p.tool_name, p.full_input || p.tool_input), always: ruleLabel(sug), t: Date.now() });
-  s.status = 'waiting'; s.note = `${p.tool_name} ${detail}`.trim();
-  addFeed(s, 'wait', `asks to use ${s.note}`);
+  const r = tracker.permissionRequest(p);
+  if (!r) { res.writeHead(200, { 'content-type': 'application/json' }); return res.end('{}'); }
+  const { s, id, suggestions } = r;
   const hold = s.headless ? HEADLESS_ASK_MS : ASK_TIMEOUT_MS;
   const timer = setTimeout(() => { if (releaseHold(id, {})) addFeed(s, 'wait', s.headless ? 'question timed out, Claude moved on' : 'question went back to the terminal'); }, hold);
-  holds.set(id, { uid: s.uid, res, timer, suggestions: sug });
+  holds.set(id, { uid: s.uid, res, timer, suggestions });
   // The terminal answered first and Claude cancelled the hook: drop the question.
   res.on('close', () => forget(id));
   broadcast();
@@ -544,10 +343,7 @@ function onMcpInbox(p, res) {
 function onMcpAsk(p, res) {
   const s = sessionFor(p);
   if (!s) return send(res, 200, { text: 'Agent Office does not recognise this session, so the question was not shown. Ask in the terminal.' });
-  const id = 'q' + crypto.randomBytes(5).toString('hex');
-  s.questions.push({ id, text: String(p.question || '').slice(0, 600), t: Date.now() });
-  s.status = 'waiting'; s.note = clip(String(p.question || ''), 120);
-  addFeed(s, 'wait', 'asks: ' + clip(String(p.question || ''), 120));
+  const id = tracker.askQuestion(s, p.question);
   const timer = setTimeout(() => releaseHold(id, { text: 'No answer from the office after 10 minutes. Continue without it, or ask in the terminal.' }), 10 * 60 * 1000);
   holds.set(id, { uid: s.uid, res, timer, kind: 'ask' });
   res.on('close', () => forget(id));
@@ -749,13 +545,6 @@ function answer(id, allow, always = false) {
 /** @type {Map<string, import('node:child_process').ChildProcess>} */
 const procs = new Map();
 
-function pushReply(s, text) {
-  s.replies.push({ id: ++s.replySeq, text: clip(String(text), 8000), t: Date.now() });
-  if (s.replies.length > 40) s.replies.shift();
-  addFeed(s, 'tool', 'replied: ' + clip(String(text).replace(/\s+/g, ' '), 100));
-  broadcast();
-}
-
 // Images go in as image blocks and text files inline. Anything else is refused, never silently dropped.
 function blocksFor(text, attachments) {
   const content = [];
@@ -778,7 +567,7 @@ function writeUser(s, text, attachments = []) {
   const c = procs.get(s.uid);
   if (!c || !c.stdin.writable) throw httpError(409, 'That session is not running.');
   const content = attachments.length ? blocksFor(text, attachments) : [{ type: 'text', text }];
-  s.interrupted = false;
+  tracker.userMessage(s);
   c.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content } }) + '\n');
 }
 
@@ -792,20 +581,18 @@ function control(s, request, onDone) {
   c.stdin.write(JSON.stringify({ type: 'control_request', request_id: id, request }) + '\n');
 }
 const CONTROL_MODES = new Set(['default', 'plan', 'acceptEdits']);
-// Dismiss clears a failed turn's error for every surface at once (the snapshot no longer carries it).
+// Dismiss clears a failed turn's error for every surface at once (the rule is tracker.dismissError).
 function dismissError(uid) {
   const s = sessions.get(uid);
   if (!s) throw httpError(404, 'That session is not open.');
-  if (s.error) { s.error = null; broadcast(); }
+  tracker.dismissError(s);
 }
 function doControl(uid, action, value) {
   const s = sessions.get(uid);
   if (!s || !s.headless || s.status === 'ended') throw httpError(404, 'That session is not running in the office.');
   if (action === 'interrupt') {
-    s.interrupted = true;
-    dropPending(s); dropQuestions(s, 'The user stopped this turn.');
     control(s, { subtype: 'interrupt' });
-    addFeed(s, 'stop', 'stopped the turn from the office');
+    tracker.interrupt(s);
   } else if (action === 'mode') {
     if (!CONTROL_MODES.has(value)) throw httpError(400, 'Unknown permission mode.');
     control(s, { subtype: 'set_permission_mode', mode: value }, (r) => { if (r.response?.mode) s.mode = r.response.mode; broadcast(); });
@@ -911,66 +698,6 @@ async function extAction(body) {
   }
 }
 
-const liveTimers = new Map();
-function pushLive(s, text) {
-  s.live = (s.live + text).slice(-600);
-  if (liveTimers.has(s.uid)) return;
-  liveTimers.set(s.uid, setTimeout(() => { liveTimers.delete(s.uid); broadcast(); }, 300));
-}
-
-function onStream(s, line) {
-  let m;
-  try { m = JSON.parse(line); } catch { return; }
-  if (m.type === 'control_response') {
-    const done = controls.get(m.response?.request_id);
-    if (done) { controls.delete(m.response.request_id); done(m.response); }
-  } else if (m.type === 'stream_event') {
-    const e = m.event || {};
-    if (m.parent_tool_use_id) return;
-    if (e.type === 'message_start') s.live = '';
-    else if (e.type === 'content_block_delta' && e.delta?.type === 'text_delta') pushLive(s, e.delta.text || '');
-  } else if (m.type === 'system' && m.subtype === 'init') {
-    if (m.model) s.model = m.model;
-    if (m.permissionMode) s.mode = m.permissionMode;
-    if (!s.sid && m.session_id) s.sid = m.session_id;
-    if (Array.isArray(m.slash_commands)) s.commands = m.slash_commands.filter((x) => typeof x === 'string').slice(0, 400);
-    if (Array.isArray(m.skills)) s.skills = m.skills.filter((x) => typeof x === 'string').slice(0, 400);
-    // Claude reports these only after its first message, so keep the last list for sessions that have not spoken yet.
-    if (s.commands.length) { persisted.commands = { commands: s.commands, skills: s.skills }; savePersisted(); }
-  } else if (m.type === 'assistant' && !m.parent_tool_use_id) {
-    s.live = '';
-    const u = m.message?.usage;
-    if (u) s.ctxTokens = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
-    // One API call can arrive as several assistant lines with the same id; count its usage once.
-    const mid = m.message?.id;
-    if (u && mid && mid !== s.lastUsageId) {
-      s.lastUsageId = mid;
-      s.usage.tokens += s.ctxTokens + (u.output_tokens || 0);
-      s.usage.input += s.ctxTokens;
-      s.usage.cached += u.cache_read_input_tokens || 0;
-    }
-    for (const b of m.message?.content || []) if (b.type === 'text' && b.text && b.text.trim()) pushReply(s, b.text);
-  } else if (m.type === 'result') {
-    s.live = '';
-    if (typeof m.total_cost_usd === 'number') s.cost = (s.costBase || 0) + m.total_cost_usd;
-    const mu = m.modelUsage && Object.values(m.modelUsage)[0];
-    if (mu?.contextWindow) s.ctxWindow = mu.contextWindow;
-    // The turn is over: show the bot at rest even when the stop hook did not run (a stopped turn, a spending limit).
-    dropPending(s);
-    if (s.status === 'working' || s.status === 'waiting' || s.status === 'starting') { s.status = 'idle'; s.tool = null; }
-    closeAll(s, s.interrupted ? 'Stopped' : 'The turn ended first.');
-    const sub = String(m.subtype || '');
-    let why = null;
-    if (sub.startsWith('error_max_budget')) why = `This session reached its spending limit of $${s.budget}.`;
-    else if (m.is_error && m.result && !s.interrupted) why = String(m.result);
-    if (why) {
-      pushReply(s, 'Stopped: ' + why);
-      s.error = { id: ++s.errorSeq, text: clip(why, 200) };
-    }
-    recordHistory(s);
-    broadcast();
-  }
-}
 
 function openHeadless({ cwd, name, prompt, worktree = null, budget = null, resume = null, scheduleId = null, model = null, prior = null }, baseArgs) {
   const officeId = 'o' + crypto.randomBytes(4).toString('hex');

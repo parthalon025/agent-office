@@ -34,7 +34,7 @@ export function slimPayload(b, officeId = null) {
   };
 }
 
-// One-line label for a tool call, shared by the server's calls, requests and the settle rule.
+// One-line label for a tool call, shared by the tracker's calls, task line and requests.
 const basename = (v) => (v ? v.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : '');
 const short = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s || '');
 export function describeTool(name, input = {}) {
@@ -49,9 +49,14 @@ export function describeTool(name, input = {}) {
     case 'Skill': return short(input.skill, 70);
     default:
       // browser tools (Playwright and the like): the page, the element or the key
-      if (/playwright|browser/i.test(name)) return short(input.url || input.element || input.key || '', 80); return short(input.description || input.command || input.file_path || input.query || '', 70);
+      if (/playwright|browser/i.test(name)) return short(input.url || input.element || input.key || '', 80);
+      return short(input.description || input.command || input.file_path || input.query || '', 70);
   }
 }
 
-// A tool result settles only the request that asked for that call: same agent, tool and label.
-export const settles = (r, p) => r.agent === (p.agent_id || null) && r.tool === p.tool_name && r.detail === describeTool(p.tool_name, p.tool_input);
+// The identity of one tool call: agent, tool and the trimmed input. slimPayload builds tool_input in the fixed
+// KEEP order, so the PermissionRequest and the PostToolUse of the same call give the same key. The label from
+// describeTool is not enough: it keeps only a basename or the start of a command, so two calls can share it.
+export const callKey = (p) => (p.agent_id || '') + '\n' + p.tool_name + '\n' + JSON.stringify(p.tool_input || {});
+// A tool result settles a request only when the request is for the same call (r.key = callKey of the request).
+export const settles = (r, p) => r.key === callKey(p);

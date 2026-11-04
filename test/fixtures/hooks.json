@@ -1,0 +1,36 @@
+{
+  "turnWithEdit": [
+    { "hook_event_name": "SessionStart", "session_id": "sid-1", "cwd": "C:\\work\\repo", "source": "startup", "model": "claude-sonnet-4-5" },
+    { "hook_event_name": "UserPromptSubmit", "session_id": "sid-1", "cwd": "C:\\work\\repo", "prompt": "Add a line to hello.txt" },
+    { "hook_event_name": "PreToolUse", "session_id": "sid-1", "cwd": "C:\\work\\repo", "tool_name": "Edit", "tool_use_id": "toolu_01", "tool_input": { "file_path": "C:\\work\\repo\\src\\hello.txt", "old_string": "a", "new_string": "b" } },
+    { "hook_event_name": "PostToolUse", "session_id": "sid-1", "cwd": "C:\\work\\repo", "tool_name": "Edit", "tool_use_id": "toolu_01", "duration_ms": 41, "tool_input": { "file_path": "C:\\work\\repo\\src\\hello.txt" }, "tool_response": { "filePath": "C:\\work\\repo\\src\\hello.txt" } },
+    { "hook_event_name": "Stop", "session_id": "sid-1", "cwd": "C:\\work\\repo" }
+  ],
+  "permission": {
+    "hook_event_name": "PermissionRequest", "session_id": "sid-1", "cwd": "C:\\work\\repo", "tool_name": "Bash",
+    "tool_input": { "command": "git push origin main", "description": "Push" },
+    "permission_suggestions": [
+      { "type": "addRules", "behavior": "allow", "destination": "localSettings", "rules": [{ "toolName": "Bash", "ruleContent": "git push:*" }] },
+      { "type": "setMode", "mode": "acceptEdits", "destination": "session" }
+    ]
+  },
+  "subagent": [
+    { "hook_event_name": "PreToolUse", "session_id": "sid-1", "cwd": "C:\\work\\repo", "tool_name": "Task", "tool_use_id": "toolu_t1", "tool_input": { "description": "Find the bug", "subagent_type": "Explore", "prompt": "long" } },
+    { "hook_event_name": "PreToolUse", "session_id": "sid-1", "cwd": "C:\\work\\repo", "tool_name": "Task", "tool_use_id": "toolu_t2", "tool_input": { "description": "Write the fix", "subagent_type": "general-purpose" } },
+    { "hook_event_name": "SubagentStart", "session_id": "sid-1", "cwd": "C:\\work\\repo", "agent_id": "ag-b", "agent_type": "general-purpose" },
+    { "hook_event_name": "SubagentStart", "session_id": "sid-1", "cwd": "C:\\work\\repo", "agent_id": "ag-a", "agent_type": "Explore" },
+    { "hook_event_name": "PreToolUse", "session_id": "sid-1", "cwd": "C:\\work\\repo", "tool_name": "Grep", "tool_use_id": "toolu_g1", "agent_id": "ag-a", "tool_input": { "pattern": "foo" } },
+    { "hook_event_name": "PostToolUse", "session_id": "sid-1", "cwd": "C:\\work\\repo", "tool_name": "Grep", "tool_use_id": "toolu_g1", "agent_id": "ag-a", "duration_ms": 8, "tool_input": { "pattern": "foo" } },
+    { "hook_event_name": "SubagentStop", "session_id": "sid-1", "cwd": "C:\\work\\repo", "agent_id": "ag-a" }
+  ],
+  "todoWrite": {
+    "hook_event_name": "PostToolUse", "session_id": "sid-1", "cwd": "C:\\work\\repo", "tool_name": "TodoWrite", "tool_use_id": "toolu_td", "duration_ms": 3,
+    "tool_input": { "todos": [{ "content": "Read", "status": "completed", "activeForm": "Reading" }, { "content": "Edit", "status": "in_progress", "activeForm": "Editing" }, { "content": "Bogus", "status": "weird" }] }
+  },
+  "interruptedTool": {
+    "hook_event_name": "PostToolUseFailure", "session_id": "sid-1", "cwd": "C:\\work\\repo", "tool_name": "Bash", "tool_use_id": "toolu_03", "is_interrupt": true, "error": "User interrupted", "tool_input": { "command": "sleep 100" }
+  },
+  "failedTool": {
+    "hook_event_name": "PostToolUseFailure", "session_id": "sid-1", "cwd": "C:\\work\\repo", "tool_name": "Bash", "tool_use_id": "toolu_04", "error": "exit code 2", "tool_input": { "command": "false" }
+  }
+}

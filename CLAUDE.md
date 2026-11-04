@@ -27,11 +27,12 @@ Stop the server by the pid that owns port 4317 (`netstat -ano | grep :4317`, the
 
 | File | Owns |
 | --- | --- |
-| `server.mjs` | Session state, hooks, headless sessions (stdin/stdout), permission holds, MCP routes, history, schedules, REST and SSE. |
+| `server.mjs` | Headless sessions (stdin/stdout), permission holds, MCP routes, history, schedules, REST and SSE. It feeds the tracker and sends its sessions as the snapshot. |
+| `tracker.mjs` | Session tracker: the session rules. Hook payloads (`onHook`, `permissionRequest`, `askQuestion`) and stream lines (`onStream`) in, `tracker.sessions` and `tracker.feed` out. Clock, id maker, git locate, persistence sink, change callback and hold release are injected (`createTracker(deps)`), so importing it starts nothing and tests need no server. This is the seam other agent providers feed. |
 | `git.mjs` | Worktrees, changes, remove worktree, pull request, `locate` (repo, worktree, branch of a folder), floors and rooms (`layout`, `branches`, `createFloor`, `createRoom`, `removeRoom`, `deleteFloor`). Argument lists only, never a shell. |
 | `place.mjs` | Place: where a session or worktree sits. Building key and name, floor, room id and name, notes key. Pure, no I/O. The snapshot carries it as `session.place` and `worktree.place`; the page reads it and keeps no copy of the rules. |
 | `hook.mjs` | Command hook. Exits 0 on every path. |
-| `payload.mjs` | Trims a hook payload to the fields the office shows. Used by `hook.mjs` and the HTTP hook route. |
+| `payload.mjs` | Trims a hook payload to the fields the office shows. Used by `hook.mjs` and the HTTP hook route. Also the tool label (`describeTool`) and the call key (`callKey`, `settles`) that links a tool result to its permission request. |
 | `mcp.mjs` | stdio MCP server: `office_inbox`, `office_ask`, `office_room`, `office_room_update`. |
 | `public/vocab.js` | Session vocabulary, shared by the page, the server and the tests (`globalThis.OfficeVocab`). Status key and word (error included), task line, tool kind and short name, to-do status, room figures. Plain script, no I/O, no timers. |
 | `public/adapter.js` | Snapshot to DS events (repo = building, branch = floor, worktree = room; tool calls, helpers, plan, errors, triggers, usage), and DS commands to REST calls. Exposes `officeAdapter.onSnapshot / session / lookup / buildings / buildingFor / shown / roomsShown / roomsNow`. |
@@ -55,11 +56,13 @@ Add a new file only for a distinct job. Extend the file that owns the concern fi
 - `office_room` lists the decor of a lab room under "What is in the room" from one list in `roomContents()` (server.mjs), next to the fixed lab-room parts and the street. The list is the same for every room, so the page does not report it. Keep it in step with `board.js`.
 
 - Place rules live only in `place.mjs`. Room id = readable tail of the folder plus a hash of the whole normalized path, so look-alike folder names stay two rooms. Paths are normalized and lower-cased, so path case never makes a second building. A session outside git has building key `''` (name "Other folders") and notes key prefix `other`. `adoptNotes()` in `server.mjs` moves a note or pin saved under an old key (room id without hash) to the new key when its room is first seen.
+- Session rules (status, tool calls, subagent links, the 60-call cap, errors, budget stops, interrupts) live only in `tracker.mjs`. Rules read the clock, ids and timers only through `now()`, `makeId()` and `setTimer()`. Their real defaults are at the top of `createTracker` and nowhere else. Never call `git` or `broadcast()` from the tracker: use `deps.locate` and `deps.onChange`. Test a rule in `test/tracker.test.mjs` with the fixtures in `test/fixtures/` (small stand-ins, shapes checked against a real recording; subagent `agent_id` payloads are not recorded yet; no paid call). The server keeps the parts that need a socket or a process: the permission and question holds (`holds`), `sendMessage`, `writeUser`, `control`, `taskkill`.
 - Add a place field in `place.mjs` and read it from `s.place` in the page. Do not rebuild keys in `adapter.js`, `office.js` or `board.js`.
 
 - Status words, task lines, tool names and kinds, to-do status and room figures live only in `public/vocab.js`. Do not write a second copy in `adapter.js`, `office.js`, `terminal.js`, `board.js` or `server.mjs`. The server computes room figures once per snapshot (`snapshot.figures`, keyed by notes key); the page reads them with `officeAdapter.figures(roomId)`.
 - Waiting = a pending permission prompt or an open question (`isWaiting`). The `status` field alone does not count, and a subagent's tool call does not hide a request.
-- A failed turn shows as Error on every surface until Dismiss (`POST /api/dismiss` clears `session.error` on the server) or the next turn starts.
+- A tool result settles one permission request: the oldest one with the same `callKey` (agent, tool and trimmed input). Never match on the short label from `describeTool`: it keeps only a basename or the start of a command.
+- A failed turn shows as Error on every surface until Dismiss (`POST /api/dismiss`, `tracker.dismissError`) or the next turn starts (`tracker.startTurn`, or the `UserPromptSubmit` hook).
 
 ## Gotchas learned the hard way
 
