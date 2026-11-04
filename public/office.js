@@ -920,12 +920,24 @@
     A.CommandPalette.actions = wrapped;
   })();
 
+  // The scene's own name of a session (unique per building), else its plain name.
+  function sceneName(s) { return window.officeAdapter.nameOf(s.uid) || s.name; }
+
   // ---------- Needs you: every open request and question of every building ----------
   function NeedsDialog(p) {
     var snap = useSnapshot();
     var list = snap ? window.officeAdapter.requests(snap) : [];
-    var bz = useState(''), busy = bz[0], setBusy = bz[1];
+    var bz = useState(''), busy = bz[0], setBusy = bz[1], box = React.useRef(null), lastIdx = React.useRef(0);
+    // After an answer the row goes. Keep the focus inside the dialog, on the row that took its place.
+    useEffect(function () {
+      var root = box.current && box.current.closest('.ao-dialog');
+      if (!root || root.contains(document.activeElement)) return;
+      var rows = root.querySelectorAll('.past-row'), next = rows[Math.min(lastIdx.current, rows.length - 1)];
+      var f = next ? next.querySelector('button') : root.querySelector('.ao-dialog-a button');
+      if (f) f.focus();
+    }, [list.map(function (r) { return r.id; }).join('|')]);
     function answer(r, allow) {
+      lastIdx.current = list.indexOf(r);
       setBusy(r.id);
       api('/api/answer', { id: r.id, allow: allow }).then(function () { setBusy(''); }, function (x) { setBusy(''); p.toast({ tone: 'error', title: r.bot, text: x.message }); });
     }
@@ -933,11 +945,11 @@
       h('div', { className: 'form wide' },
         list.length ? h('p', { className: 'note' }, plural(list.length, 'request waits', 'requests wait') + ' for you, oldest first. This is every building.') : null,
         !list.length ? h(A.EmptyState, { icon: 'finished', compact: true, title: 'Nothing needs you', text: 'New requests show here when an agent asks.' }) : null,
-        h('ul', { className: 'past' }, list.map(function (r) {
+        h('div', { ref: box }, h('ul', { className: 'past' }, list.map(function (r) {
           var q = r.kind === 'question';
           return h('li', { key: r.id, className: 'past-row' },
             h('div', { className: 'past-main' },
-              h('div', { className: 'past-title' }, h('b', null, r.bot), h(Tag, null, r.buildingName), q ? null : h(A.RiskBadge, { risk: r.risk })),
+              h('div', { className: 'past-title' }, h('b', null, sceneName({ uid: r.uid, name: r.bot })), h(Tag, null, r.buildingName), q ? null : h(A.RiskBadge, { risk: r.risk })),
               h('div', { className: 'past-snip' }, r.text),
               !q && r.preview && r.preview !== r.detail ? h('div', { className: 'past-sub mono', title: r.preview }, clip(String(r.preview).replace(/\s+/g, ' '), 140)) : null,
               h('div', { className: 'past-meta mono' }, r.roomName + ' · ' + ago(r.t))),
@@ -945,7 +957,7 @@
               h(A.Button, { variant: 'emphasis', icon: 'approve', disabled: busy === r.id, onClick: function () { answer(r, true); } }, q ? 'Yes' : 'Approve'),
               h(A.Button, { variant: 'quiet', icon: 'decline', disabled: busy === r.id, onClick: function () { answer(r, false); } }, q ? 'No' : 'Decline'),
               h(A.Button, { variant: 'ghost', icon: 'chevron-right', onClick: function () { p.onGo(r); } }, 'Go to')));
-        }))));
+        })))));
   }
 
   // ---------- the control strip ----------
@@ -1012,16 +1024,23 @@
     var tt = useState([]), toasts = tt[0], setToasts = tt[1], tid = React.useRef(0), toastBox = React.useRef(null);
     function toast(t) {
       var id = ++tid.current;
+      if (t.action) {   // a click on the action closes its toast
+        var act = t.action;
+        t = Object.assign({}, t, { action: { label: act.label, onClick: function () { setToasts(function (l) { return window.OfficeToasts.remove(l, id); }); act.onClick(); } } });
+      }
       setToasts(function (l) { return window.OfficeToasts.add(l, t, id, Date.now()); });
     }
     var timed = window.OfficeToasts.hasTimed(toasts);
     useEffect(function () {
       if (!timed) return undefined;
-      var last = Date.now();
+      // While the pointer or focus is on the stack, state does not change: the time held is added when it ends.
+      var last = Date.now(), held = 0;
       var iv = setInterval(function () {
-        var now = Date.now(), before = last; last = now;
+        var now = Date.now(), dt = now - last; last = now;
         var el = toastBox.current, paused = !!el && (el.matches(':hover') || el.contains(document.activeElement));
-        setToasts(function (l) { return window.OfficeToasts.tick(l, now, before, paused); });
+        if (paused) { held += dt; return; }
+        var h0 = held; held = 0;
+        setToasts(function (l) { if (h0) l = window.OfficeToasts.tick(l, now, now - h0, true); return window.OfficeToasts.tick(l, now, now, false); });
       }, 250);
       return function () { clearInterval(iv); };
     }, [timed]);
@@ -1175,7 +1194,12 @@
       window.addEventListener('wheel', onWheel, { passive: true, capture: true });
       return function () { window.removeEventListener('wheel', onWheel, true); };
     }, [cur2.view]);
-    var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: mount.adapter, height: window.innerHeight, quality: 'auto', intro: intro, editable: false, simulate: false, sinceYouLeft: sylScene.current === sceneKey,
+    var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: mount.adapter, height: window.innerHeight, quality: 'auto', intro: intro, editable: false, simulate: false, toasts: false,
+      onNotify: function (n) {   // the scene's request and error toasts go to the page stack, where they stay until closed
+        if (n.kind !== 'request' && n.kind !== 'error') return;
+        toast({ tone: n.kind === 'error' ? 'error' : 'warning', title: n.bot, text: n.text, bot: n.bot, req: n.kind === 'request', action: { label: 'Open', onClick: function () { if (officeRef.current) officeRef.current.select(n.bot); } } });
+      },
+      sinceYouLeft: sylScene.current === sceneKey,
       ambient: ambient, onAmbientOpen: function () { setAmbient(false); }, onReady: function (o) {
         officeRef.current = o;
         window.officeScene = o;   // the mounted office API, for the console and tests
@@ -1227,6 +1251,15 @@
       });
     }, [snap]);
 
+    // A request toast goes once its request is answered.
+    var needIds = needs.map(function (r) { return r.uid; }).join('|');
+    useEffect(function () {
+      setToasts(function (l) {
+        var keep = l.filter(function (t) { if (!t.req) return true; var s = mount && mount.session(t.bot); return !!s && needs.some(function (r) { return r.uid === s.uid; }); });
+        return keep.length === l.length ? l : keep;
+      });
+    }, [needIds, mount]);
+
     function close() { setDlg(null); }
     function alertsOn() { try { return localStorage.getItem('ao-alerts') === '1'; } catch (x) { return false; } }
     // The tab title counts every request of every building. The DS Notifier of the scene writes its own count (the shown building), so the page writes last.
@@ -1243,7 +1276,7 @@
       return function () { mo.disconnect(); };
     }, [needs.length]);
     function extensions(uid, name) { setDlg({ name: 'ext', uid: uid, label: name }); }
-    function goTo(s) { var key = window.officeAdapter.buildingOf(s); pick(key); setDlg(null); var wasCity = view === 'city'; if (wasCity) go('office'); setTimeout(function () { if (officeRef.current) officeRef.current.select(s.name); }, wasCity ? 1500 : 400); }
+    function goTo(s) { var key = window.officeAdapter.buildingOf(s); pick(key); setDlg(null); var wasCity = view === 'city'; if (wasCity) go('office'); setTimeout(function () { if (officeRef.current) officeRef.current.select(sceneName(s)); }, wasCity ? 1500 : 400); }
     var selSess = sel ? window.officeAdapter.session(sel) : null;
     var d = dlg && dlg.name;
 
@@ -1270,11 +1303,11 @@
         });
       }
       ((sn && sn.sessions) || []).filter(function (s) { return s.status !== 'ended'; }).forEach(function (s) {
-        var where = (s.place && s.place.building) || '', kw = 'session ' + where;
-        out.push({ id: 'page-s-go-' + s.uid, label: 'Go to session ' + s.name, icon: 'chevron-right', group: 'Sessions', hint: where, keywords: kw, run: function () { goTo(s); } });
-        out.push({ id: 'page-s-term-' + s.uid, label: 'Terminal of ' + s.name, icon: 'terminal', group: 'Sessions', hint: where, keywords: kw + ' output', run: function () { openTerminal(s.uid, s.name); } });
-        out.push({ id: 'page-s-chg-' + s.uid, label: 'Changes of ' + s.name, icon: 'trace', group: 'Sessions', hint: where, keywords: kw + ' diff files', run: function () { changes(s.uid, s.name); } });
-        if (s.headless && (s.status === 'working' || s.status === 'waiting')) out.push({ id: 'page-s-stop-' + s.uid, label: 'Stop turn of ' + s.name, icon: 'pause', group: 'Sessions', hint: where, keywords: kw + ' interrupt', run: function () { api('/api/interrupt', { uid: s.uid }).catch(function (x) { toast({ tone: 'error', title: s.name, text: x.message }); }); } });
+        var where = ((s.place && s.place.building) || '') + (s.place && s.place.room ? ' · ' + s.place.room : ''), kw = 'session ' + where, nm = sceneName(s);
+        out.push({ id: 'page-s-go-' + s.uid, label: 'Go to session ' + nm, icon: 'chevron-right', group: 'Sessions', hint: where, keywords: kw, run: function () { goTo(s); } });
+        out.push({ id: 'page-s-term-' + s.uid, label: 'Terminal of ' + nm, icon: 'terminal', group: 'Sessions', hint: where, keywords: kw + ' output', run: function () { openTerminal(s.uid, nm); } });
+        out.push({ id: 'page-s-chg-' + s.uid, label: 'Changes of ' + nm, icon: 'trace', group: 'Sessions', hint: where, keywords: kw + ' diff files', run: function () { changes(s.uid, nm); } });
+        if (s.headless && (s.status === 'working' || s.status === 'waiting')) out.push({ id: 'page-s-stop-' + s.uid, label: 'Stop turn of ' + nm, icon: 'pause', group: 'Sessions', hint: where, keywords: kw + ' interrupt', run: function () { api('/api/interrupt', { uid: s.uid }).catch(function (x) { toast({ tone: 'error', title: s.name, text: x.message }); }); } });
       });
       return out;
     }

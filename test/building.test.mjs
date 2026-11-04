@@ -416,3 +416,16 @@ test('requests: every open request and question of every building, oldest first,
   r.push();
   assert.deepEqual(r.store.requests(), []);
 });
+
+test('two sessions with one name in one building get unique scene names, found by uid', async () => {
+  const r = rig();
+  const m = r.mount(KEY_A);
+  await r.hook(fromHooks('turnWithEdit', REPO_A, 'sid-one')[0]);
+  await r.hook(fromHooks('turnWithEdit', REPO_A, 'sid-two')[0]);
+  const [a, b] = r.store.latest().sessions.filter((s) => s.status !== 'ended');
+  assert.equal(a.name, b.name, 'the page sees one name twice');
+  const names = [m.nameOf(a.uid), m.nameOf(b.uid)];
+  assert.equal(names[1], names[0] + ' 2');
+  assert.equal(r.store.nameOf(b.uid), names[1], 'the store answers for the mounted building');
+  assert.equal(m.nameOf('nope'), null);
+});

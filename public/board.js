@@ -728,7 +728,7 @@
       return true;                                 // the click closed the stats view and does nothing else
     }
     // Esc closes the top layer only: a dialog or the palette on top of the board takes it, the board stays.
-    function onKey(e) { if (e.key === 'Escape' && focused && !escTaken(e)) blur(); }
+    function onKey(e) { if (e.key === 'Escape' && focused && !escTaken(e)) { after = null; blur(); } }
     var offTarget = host.register({
       name: 'board',
       active: function () { return !focused && !fly && !dead; },
@@ -768,7 +768,7 @@
       if (ownHost) host.dispose();
     }
     return {
-      refresh: refresh, blur: blur, focused: function () { return focused; }, kind: function () { return focusedKind; },
+      refresh: refresh, blur: function () { after = null; blur(); }, focused: function () { return focused; }, kind: function () { return focusedKind; },
       flying: function () { return !!fly; },
       open: open,
       doorPulse: doorPulse,

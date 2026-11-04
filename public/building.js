@@ -167,6 +167,7 @@
     // The building that is on screen: the one attached last.
     function current() { return attached.length ? attached[attached.length - 1] : null; }
     store.session = function (botName) { var m = current(); return m ? m.session(botName) : null; };
+    store.nameOf = function (uid) { var m = current(); return m ? m.nameOf(uid) : null; };
     store.lookup = function (botName) { var m = current(); return m ? m.lookup(botName) : null; };
 
     store.mount = function (repo) {
@@ -403,6 +404,8 @@
         for (var uid in known) { if (known[uid].name === botName && !known[uid].ended) return store.sessionByUid(uid); }
         return null;
       };
+      // The scene's own (unique) name of an open session, or null.
+      m.nameOf = function (uid) { var k = known[uid]; return k && !k.ended ? k.name : null; };
       m.lookup = function (botName) {
         var s = m.session(botName);
         return s ? { uid: s.uid, commands: s.commands || [], skills: s.skills || [] } : null;
