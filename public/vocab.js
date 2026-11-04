@@ -29,10 +29,10 @@
     if (!s) return { key: 'resting', word: 'No session', live: false };
     if (s.status === 'ended') return { key: 'resting', word: 'Closed', live: false };
     if (isWaiting(s)) return { key: 'waiting', word: 'Needs you', live: true };
-    if (s.status === 'starting') return { key: 'resting', word: 'Starting', live: true };
+    if (s.status === 'starting') return { key: 'resting', word: 'Resting', live: true };
     if (s.status === 'working') return { key: 'working', word: 'Working', live: true };
     if (s.error) return { key: 'error', word: 'Error', live: true };
-    return s.turns > 0 ? { key: 'finished', word: 'Finished', live: true } : { key: 'resting', word: 'Ready', live: true };
+    return s.turns > 0 ? { key: 'finished', word: 'Finished', live: true } : { key: 'resting', word: 'Resting', live: true };
   }
 
   // The HUD adds the state word ("Working · ..."), so the task text carries only the task.
@@ -49,7 +49,7 @@
     return s.turns > 0 ? (clip(s.prompt, 60) || 'Last turn') : 'Waiting for a prompt';
   }
 
-  function toolKind(name) { return KIND[name] || (String(name).indexOf('mcp__') === 0 ? 'mcp' : 'api'); }
+  function toolKind(name) { if (/__browser_|playwright/i.test(String(name))) return 'browser'; return KIND[name] || (String(name).indexOf('mcp__') === 0 ? 'mcp' : 'api'); }
   function toolArg(name) { return ARG[name] || 'input'; }
   // mcp__plugin_playwright_playwright__browser_click -> browser click; mcp__server__tool -> server tool
   function toolShort(name) {

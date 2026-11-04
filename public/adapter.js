@@ -104,7 +104,7 @@
       if (!seen) {
         var who = (c.agent && byAgent[c.agent]) || k.name;
         seen = k.calls[c.id] = { bot: who, closed: false };
-        emit({ type: 'tool.call', bot: who, id: c.id, tool: c.name, kind: V.toolKind(c.name), args: argsOf(c), say: !quiet });
+        emit({ type: 'tool.call', bot: who, id: c.id, tool: V.toolShort(c.name), kind: V.toolKind(c.name), args: argsOf(c), say: !quiet });
         if (c.name === 'Skill' && c.detail) emit({ type: 'skill.load', bot: who, skill: c.detail });
         if (c.name === 'WebFetch' && c.detail) emit({ type: 'knowledge', bot: who, source: hostOf(c.detail), text: c.detail });
         if (c.name === 'WebSearch' && c.detail) emit({ type: 'knowledge', bot: who, source: 'Web search', text: c.detail });

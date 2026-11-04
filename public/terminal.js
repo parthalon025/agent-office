@@ -476,7 +476,7 @@
         calls.push({ id: c.id, name: c.tool, detail: k ? str(a[k]) : '', ok: x.state === 'run' ? null : c.ok !== false, ms: c.ms, err: c.ok === false ? (c.summary || 'Failed') : null, t: i + 1 });
       });
       var es = b.status;
-      return { pseudo: true, helper: true, name: b.name, status: es === 'working' ? 'working' : 'idle', pending: es === 'waiting' ? [{ id: 'step' }] : [], turns: es === 'finished' ? 1 : 0,
+      return { pseudo: true, helper: true, name: b.name, status: es === 'working' ? 'working' : 'idle', pending: [], questions: es === 'waiting' ? [{ id: 'step', text: b.task || 'This step needs you.' }] : [], turns: es === 'finished' ? 1 : 0,
         prompt: b.task || '', calls: calls.slice(-30), replies: [], error: es === 'error' ? { text: b.task || 'The step failed.' } : null };
     }
     function sessionFor(e) {

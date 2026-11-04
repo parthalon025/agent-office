@@ -400,7 +400,7 @@ function onHook(p) {
       break;
     case 'PostToolUse':
       if (!p.agent_id) s.tool = null;
-      dropPending(s);
+      settlePending(s, p);
       closeCall(s, p.tool_use_id, true, p.duration_ms);
       if (p.tool_name === 'TodoWrite' && Array.isArray(p.tool_input.todos) && !p.agent_id) s.todos = p.tool_input.todos;
       out = deliver(s, ev);
@@ -408,7 +408,7 @@ function onHook(p) {
       break;
     case 'PostToolUseFailure':
       if (!p.agent_id) s.tool = null;
-      dropPending(s);
+      settlePending(s, p);
       closeCall(s, p.tool_use_id, false, p.duration_ms, p.is_interrupt ? 'Stopped' : p.error || 'Failed');
       addFeed(s, 'tool', `${p.tool_name} failed${p.is_interrupt ? ' (stopped)' : ''}`);
       break;
@@ -514,6 +514,13 @@ function releaseHold(id, decision) {
   if (!h.res.writableEnded) { h.res.writeHead(200, { 'content-type': 'application/json' }); h.res.end(JSON.stringify(decision || {})); }
   return true;
 }
+// A tool call that finished settles only the request that asked for that call, not a request from another agent.
+function settlePending(s, p) {
+  const d = describeTool(p.tool_name, p.tool_input);
+  const hit = (r) => r.agent === (p.agent_id || null) && r.tool === p.tool_name && r.detail === d;
+  for (const r of s.pending.filter(hit)) releaseHold(r.id, {});
+  s.pending = s.pending.filter((r) => !hit(r));
+}
 function dropPending(s) { for (const r of [...s.pending]) releaseHold(r.id, {}); s.pending = []; }
 function dropQuestions(s, text) { for (const r of [...s.questions]) releaseHold(r.id, { text }); s.questions = []; }
 
@@ -524,7 +531,7 @@ function onPermission(p, res) {
   const id = 'p' + crypto.randomBytes(5).toString('hex');
   const detail = describeTool(p.tool_name, p.tool_input);
   const sug = allowRules(p.permission_suggestions);
-  s.pending.push({ id, tool: p.tool_name, detail, risk: riskOf(p.tool_name, p.full_input || p.tool_input, s.cwd), preview: makePreview(p.tool_name, p.full_input || p.tool_input), always: ruleLabel(sug), t: Date.now() });
+  s.pending.push({ id, agent: p.agent_id || null, tool: p.tool_name, detail, risk: riskOf(p.tool_name, p.full_input || p.tool_input, s.cwd), preview: makePreview(p.tool_name, p.full_input || p.tool_input), always: ruleLabel(sug), t: Date.now() });
   s.status = 'waiting'; s.note = `${p.tool_name} ${detail}`.trim();
   addFeed(s, 'wait', `asks to use ${s.note}`);
   const hold = s.headless ? HEADLESS_ASK_MS : ASK_TIMEOUT_MS;

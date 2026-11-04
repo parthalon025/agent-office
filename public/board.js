@@ -185,10 +185,10 @@
     head('Browser steps', cols[0]); head('Last steps', cols[1]); head('Repository' + (d.tree && !d.tree.note ? ' · ' + d.tree.total + ' files' : ''), cols[2]);
     var empty = function (t, x) { c.font = '400 21px ' + sans; say(t, x, top + 32, dim); };
     var step = function (x, i, status, word, detail) {
-      var yy = top + 32 + i * 31;
+      var yy = top + 32 + i * 31, cap = Math.round(cw * 0.55);
       dot(x + 8, yy + 13, status);
-      c.font = '500 20px ' + mono; var ww = Math.min(110, c.measureText(word).width);
-      say(clipW(c, word, 110), x + 26, yy);
+      c.font = '500 20px ' + mono; var ww = Math.min(cap, c.measureText(word).width);
+      say(clipW(c, word, cap), x + 26, yy);
       c.font = '400 18px ' + mono; say(clipW(c, detail, cw - 26 - ww - 12), x + 26 + ww + 10, yy + 2, dim);
     };
     var st = function (c2) { return c2.ok === null ? 'working' : c2.ok ? 'finished' : 'error'; };
@@ -247,7 +247,7 @@
     var rows = [
       ['Open sessions', String(s.sessions), null],
       ['Working now', String(s.working), s.working ? 'status-working' : null],
-      ['Waiting', String(s.waiting), s.waiting ? 'status-waiting' : null],
+      ['Needs you', String(s.waiting), s.waiting ? 'status-waiting' : null],
       ['Tool calls', String(s.toolCalls), null],
       ['Tokens', fmtTokens(s.tokens), null],
       ['Cost', fmtCost(s.cost), null],

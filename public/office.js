@@ -660,7 +660,7 @@
         h('div', { className: 'board-b' },
           h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'chevron-right', onClick: p.onClose }, 'Back to the room'), h('span', { className: 'note' }, 'Esc also goes back.')),
           h('ul', { className: 'stats-list' },
-            row('Working', String(v.working)), row('Waiting for you', String(v.waiting)), row('Tool calls', String(v.toolCalls)),
+            row('Working', String(v.working)), row('Needs you', String(v.waiting)), row('Tool calls', String(v.toolCalls)),
             row('Tokens', String(v.tokens)), row('Cost', money(v.cost)), row('To do done', v.todosDone + ' of ' + v.todosTotal),
             row('Last event', v.lastEvent ? ago(v.lastEvent) : 'none')))));
   }

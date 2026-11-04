@@ -8,8 +8,8 @@ const base = { status: 'idle', turns: 0, pending: [], questions: [], calls: [], 
 const mk = (o) => ({ ...base, ...o });
 
 const table = [
-  ['fresh idle session', mk({}), 'resting', 'Ready', 'Waiting for a prompt'],
-  ['starting', mk({ status: 'starting' }), 'resting', 'Starting', 'Waiting for the first hook'],
+  ['fresh idle session', mk({}), 'resting', 'Resting', 'Waiting for a prompt'],
+  ['starting', mk({ status: 'starting' }), 'resting', 'Resting', 'Waiting for the first hook'],
   ['working with a tool', mk({ status: 'working', tool: { name: 'Bash', detail: 'npm test' } }), 'working', 'Working', 'Bash npm test'],
   ['working, streaming text', mk({ status: 'working', live: 'Thinking about\nthe plan' }), 'working', 'Working', 'Thinking about the plan'],
   ['working, no tool', mk({ status: 'working', prompt: 'fix the bug' }), 'working', 'Working', 'fix the bug'],
@@ -53,6 +53,9 @@ test('tool names and kinds', () => {
   assert.equal(V.toolKind('Whatever'), 'api');
   assert.equal(V.toolShort('mcp__plugin_playwright_playwright__browser_click'), 'browser click');
   assert.equal(V.toolShort('mcp__office__office_room'), 'office office_room');
+  assert.equal(V.toolKind('mcp__plugin_playwright_playwright__browser_click'), 'browser');
+  const x = 'mcp__plugin_playwright_playwright__browser_click';
+  assert.equal(V.toolShort(V.toolShort(x)), V.toolShort(x));
   assert.equal(V.toolShort('Edit'), 'Edit');
   assert.equal(V.toolArg('Bash'), 'command');
   assert.equal(V.toolArg('Zzz'), 'input');
