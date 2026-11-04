@@ -41,6 +41,10 @@ export function cleanRecent(list, max = 12) {
   }
   return out.slice(0, max);
 }
+/** The folders offered as one-click choices: first (the shown building), then the recent ones, each folder once. */
+export function recentChoices(recent, first, max = 6) {
+  return cleanRecent([first, ...(Array.isArray(recent) ? recent : [])], max);
+}
 const baseName = (p) => String(p || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() || '';
 const slug = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'x';
 
