@@ -257,7 +257,7 @@
         if (ver) { g.font = '500 26px ' + mono; vw = g.measureText(ver).width + 16; }
         var fs = 38; g.font = '500 ' + fs + 'px ' + mono;
         while (g.measureText(sub).width > w - 64 - vw && fs > 18) { fs -= 2; g.font = '500 ' + fs + 'px ' + mono; }
-        g.textAlign = 'left'; g.fillText(sub, 32, 124);
+        g.fillText(sub, 32, 124, w - 64 - vw); // maxWidth: the counts never run under the version
         if (ver) { g.font = '500 26px ' + mono; g.textAlign = 'right'; g.fillText(ver, w - 32, 124); g.textAlign = 'left'; }
       });
     }
