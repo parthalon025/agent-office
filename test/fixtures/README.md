@@ -11,6 +11,11 @@ file contents are removed. What the recording showed:
 - Stream lines seen: system/init, system/status, system/hook_started, system/hook_response, stream_event,
   assistant, user, rate_limit_event, result (success and error_during_execution), control_response.
 
+Result lines: a `success` result has `result`. An API failure is `subtype: success` with `is_error: true`,
+`api_error_status` and `result: "API Error: ..."`. The `error_*` subtypes (`error_during_execution`,
+`error_max_turns`, `error_max_budget_usd`) have `errors[]` and no `result`. The raw recording from 2026-11-04 is
+not kept, so these result shapes follow the SDK type `SDKResultError` (claude-agent-sdk sdk.d.ts), not a recording.
+
 Not recorded yet: payloads from inside a subagent. The agent_id field on those events (SubagentStart,
 SubagentStop, and the tool events a subagent makes) still follows the documented shape, not a recording.
 Hook payloads go through payload.mjs slimPayload, as the server does.

@@ -153,6 +153,14 @@ export function createTracker(deps = {}) {
   // ---------- questions and permission prompts ----------
   // A session stops waiting when nothing else waits.
   function unwait(s) { if (!s.pending.length && !s.questions.length && s.status === 'waiting') s.status = 'working'; }
+  // A finished tool call settles only the request that asked for that call, not one from another agent.
+  function settlePending(s, p) {
+    const d = describeTool(p.tool_name, p.tool_input);
+    const hit = (r) => r.agent === (p.agent_id || null) && r.tool === p.tool_name && r.detail === d;
+    for (const r of s.pending.filter(hit)) releaseHold(r.id, {});
+    s.pending = s.pending.filter((r) => !hit(r));
+    unwait(s);
+  }
   function dropPending(s) { for (const r of [...s.pending]) releaseHold(r.id, {}); s.pending = []; unwait(s); }
   function dropQuestions(s, text) { for (const r of [...s.questions]) releaseHold(r.id, { text }); s.questions = []; unwait(s); }
   // A held request ended (answered, timed out, or cancelled): the session stops waiting when nothing else waits.
@@ -221,14 +229,14 @@ export function createTracker(deps = {}) {
         addFeed(s, 'prompt', clip(s.prompt, 140));
         break;
       case 'PreToolUse':
-        s.status = 'working'; s.note = '';
+        if (!s.pending.length && !s.questions.length) { s.status = 'working'; s.note = ''; }
         openCall(s, p);
         // The bot's task line shows the main agent's tool; a subagent's tools show on its helper.
         if (!p.agent_id) s.tool = { name: p.tool_name, detail: describeTool(p.tool_name, input) };
         break;
       case 'PostToolUse':
         if (!p.agent_id) s.tool = null;
-        dropPending(s);
+        settlePending(s, p);
         closeCall(s, p.tool_use_id, true, p.duration_ms);
         if (p.tool_name === 'TodoWrite' && Array.isArray(input.todos) && !p.agent_id) s.todos = input.todos;
         out = deliver(s, ev);
@@ -236,7 +244,7 @@ export function createTracker(deps = {}) {
         break;
       case 'PostToolUseFailure':
         if (!p.agent_id) s.tool = null;
-        dropPending(s);
+        settlePending(s, p);
         closeCall(s, p.tool_use_id, false, p.duration_ms, p.is_interrupt ? 'Stopped' : p.error || 'Failed');
         addFeed(s, 'tool', `${p.tool_name} failed${p.is_interrupt ? ' (stopped)' : ''}`);
         break;
@@ -282,7 +290,7 @@ export function createTracker(deps = {}) {
     const id = makeId('permission');
     const detail = describeTool(p.tool_name, p.tool_input);
     const suggestions = allowRules(p.permission_suggestions);
-    s.pending.push({ id, tool: p.tool_name, detail, risk: riskOf(p.tool_name, p.full_input || p.tool_input, s.cwd), preview: makePreview(p.tool_name, p.full_input || p.tool_input), always: ruleLabel(suggestions), t: now() });
+    s.pending.push({ id, agent: p.agent_id || null, tool: p.tool_name, detail, risk: riskOf(p.tool_name, p.full_input || p.tool_input, s.cwd), preview: makePreview(p.tool_name, p.full_input || p.tool_input), always: ruleLabel(suggestions), t: now() });
     s.status = 'waiting'; s.note = `${p.tool_name} ${detail}`.trim();
     addFeed(s, 'wait', `asks to use ${s.note}`);
     changed();
@@ -368,7 +376,7 @@ export function createTracker(deps = {}) {
       const sub = String(m.subtype || '');
       let why = null;
       if (sub.startsWith('error_max_budget')) why = `This session reached its spending limit of $${s.budget}.`;
-      else if (m.is_error && m.result && !s.interrupted) why = String(m.result);
+      else if (m.is_error && !s.interrupted) why = String(m.result || (Array.isArray(m.errors) ? m.errors.filter(Boolean).join(' ') : '') || 'The turn stopped with an error.');
       if (why) {
         pushReply(s, 'Stopped: ' + why);
         s.error = { id: ++s.errorSeq, text: clip(why, 200) };

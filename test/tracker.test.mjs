@@ -123,7 +123,7 @@ test('a permission request waits, then the tool result clears it', () => {
   assert.equal(got.suggestions.length, 1, 'only plain allow rules come back');
   assert.match(s.pending[0].preview, /git push origin main/);
   // the held request is freed when the tool finishes
-  r.hook({ hook_event_name: 'PostToolUse', session_id: 'sid-1', cwd: REPO, tool_name: 'Bash', tool_use_id: 'toolu_02', tool_input: { command: 'x' } });
+  r.hook({ hook_event_name: 'PostToolUse', session_id: 'sid-1', cwd: REPO, tool_name: 'Bash', tool_use_id: 'toolu_02', tool_input: { command: 'git push origin main' } });
   assert.deepEqual(r.released, [{ id: 'p1', decision: {} }]);
   assert.deepEqual(s.pending, []);
   assert.equal(s.status, 'working', 'the tracker alone ends the wait');
@@ -151,7 +151,11 @@ test('a subagent tool call leaves a waiting request in place', () => {
   r.tracker.permissionRequest(slimPayload(HOOKS.permission));
   r.hook({ hook_event_name: 'PreToolUse', session_id: 'sid-1', cwd: REPO, tool_name: 'Read', tool_use_id: 'toolu_s', agent_id: 'ag-a', tool_input: { file_path: 'a.js' } });
   assert.equal(s.pending.length, 1, 'the request is still on the session');
+  assert.equal(s.status, 'waiting', 'a subagent tool does not end the wait');
   assert.equal(s.tool, null, 'a subagent tool does not become the bot task line');
+  r.hook({ hook_event_name: 'PostToolUse', session_id: 'sid-1', cwd: REPO, tool_name: 'Read', tool_use_id: 'toolu_s', agent_id: 'ag-a', tool_input: { file_path: 'a.js' } });
+  assert.equal(s.pending.length, 1, 'a subagent PostToolUse leaves the main request');
+  assert.equal(s.status, 'waiting');
 });
 
 test('subagent links go to the oldest unlinked call of the same type', () => {
@@ -328,6 +332,14 @@ test('interrupt: after the next user message a failed turn is an error again', (
   assert.equal(s.interrupted, false);
   r.line(s, STREAM.resultError);
   assert.equal(s.error.text, 'API Error: 529 overloaded');
+});
+
+test('an execution error result with no interrupt is an error', () => {
+  const r = rig();
+  const s = r.tracker.newSession({ officeId: 'o1', uid: 'o1', headless: true, status: 'working' });
+  r.line(s, STREAM.resultExecError);
+  assert.equal(s.error.text, 'Tool execution failed');
+  assert.equal(s.replies.at(-1).text, 'Stopped: Tool execution failed');
 });
 
 test('stream init: model, mode, session id, and the last command list is saved', () => {
