@@ -36,8 +36,9 @@ const DANGER = [
 const RUNS = new Set(['.git', '.claude', '.vscode', '.idea', '.ssh', '.mcp.json', '.claude.json', '.gitconfig',
   'office-hooks.json', 'office-hooks-http.json', 'office-mcp.json']);
 // Credential folders and secret-looking file names. A read outside the root is high, inside it is medium.
+// office-page-<port>.json holds the office's page token for the user's own tools (auth.mjs pageFile).
 const SECRET_DIRS = new Set(['.ssh', '.gnupg', '.aws', '.azure', '.kube']);
-const SECRET_FILE = /^(\.env.*|.*\.(pem|key|pfx|p12)|id_(rsa|dsa|ecdsa|ed25519).*|\.credentials\.json|\.office-token|office-hooks-http\.json|\.npmrc|\.netrc|_netrc|\.git-credentials|\.pypirc)$/;
+const SECRET_FILE = /^(\.env.*|.*\.(pem|key|pfx|p12)|id_(rsa|dsa|ecdsa|ed25519).*|\.credentials\.json|\.office-token|office-hooks-http\.json|office-page-\d+\.json|\.npmrc|\.netrc|_netrc|\.git-credentials|\.pypirc)$/;
 
 const WIN = process.platform === 'win32';
 const norm = (p) => { const r = path.resolve(String(p)); return WIN ? r.toLowerCase() : r; };

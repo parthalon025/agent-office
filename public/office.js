@@ -3,7 +3,6 @@
 (function () {
   'use strict';
   var h = React.createElement, A = window.AgentOffice, useState = React.useState, useEffect = React.useEffect, useMemo = React.useMemo;
-  var TOKEN = document.querySelector('meta[name="office-token"]').content;
   A.strict = true;
 
   // A repository is a building, a branch is a floor and a worktree is a room. The adapter builds
@@ -19,11 +18,14 @@
   var KIND = [{ value: 'every', label: 'Every N minutes' }, { value: 'daily', label: 'Every day at' }];
 
   // ---------- helpers ----------
+  // The page holds no token: calls send the page cookie by themselves (adapter.js has the access flow). They wait
+  // until the page knows whether it has access, so a first call never runs before the launch code is traded.
+  function call(path, opts) { return window.officeAdapter.ready.then(function () { return fetch(path, opts); }); }
   function api(path, body) {
-    return fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-office-token': TOKEN }, body: JSON.stringify(body || {}) })
+    return call(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) })
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) { var e = new Error(j.error || 'The office could not do that (' + r.status + ').'); e.status = r.status; e.body = j; throw e; } return j; }); });
   }
-  function getInfo(first) { return fetch('/api/info' + (first ? '?first=' + encodeURIComponent(first) : ''), { headers: { 'x-office-token': TOKEN } }).then(function (r) { return r.json(); }); }
+  function getInfo(first) { return call('/api/info' + (first ? '?first=' + encodeURIComponent(first) : '')).then(function (r) { return r.json(); }); }
   function ago(t) {
     if (!t) return '';
     var s = Math.max(0, Math.round((Date.now() - t) / 1000));
@@ -106,7 +108,7 @@
     // The server owns the folder rules (place.mjs recentChoices); until its answer comes, show the stored list.
     var fc = useState(null), fetched = fc[0], setFetched = fc[1];
     useEffect(function () {
-      fetch('/api/choices?first=' + encodeURIComponent(p.shownPath || ''), { headers: { 'x-office-token': TOKEN } })
+      call('/api/choices?first=' + encodeURIComponent(p.shownPath || ''))
         .then(function (r) { return r.json(); }).then(function (j) { setFetched(j.folders || null); }, function () {});
     }, [p.shownPath]);
     var folders = fetched || (p.recent || []).slice(0, 6);
@@ -1192,7 +1194,17 @@
         t = Object.assign({}, t, { action: { label: act.label, onClick: function () { setToasts(function (l) { return window.OfficeToasts.remove(l, id); }); act.onClick(); } } });
       }
       setToasts(function (l) { return window.OfficeToasts.add(l, t, id, Date.now()); });
+      return id;
     }
+    // No access (no launch code, a used one, or a server restart): one error toast that stays until access is back.
+    useEffect(function () {
+      var shown = null;
+      return window.officeAdapter.onAuth(function (a) {
+        var old = shown;
+        if (old) setToasts(function (l) { return window.OfficeToasts.remove(l, old); });
+        shown = a.ok ? null : toast({ tone: 'error', title: 'No access to the office', text: a.reason });
+      });
+    }, []);
     var timed = window.OfficeToasts.hasTimed(toasts);
     useEffect(function () {
       if (!timed) return undefined;

@@ -2,6 +2,9 @@
 // against a real server.mjs. The server runs from a throwaway copy of the code, so its state, hook files and .office-token
 // stay out of this folder and a running office is never touched. A random port, a fake OpenAI server on 127.0.0.1 for the
 // local provider, no model, no Claude. Sessions are opened through /api/open, which is Windows-only, so other systems skip.
+// Two tokens (auth.mjs): the /mcp routes take the agent token from the copy's .office-token, the /api routes and the event
+// stream take the page token from the copy's page file, which goes to the test's own LOCALAPPDATA (auth.pageFile).
+// OFFICE_OPEN=0: the server opens no browser.
 // Run: npm test
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -12,10 +15,11 @@ import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startFakeOpenAI } from './fixtures/fake-openai.mjs';
+import { pageFile, routeOf } from '../auth.mjs';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SKIP = process.platform !== 'win32' ? 'opening sessions is only implemented for Windows' : false;
-let base, work, child, port, token, fake, log = '';
+let base, work, child, port, agentToken, pageToken, fake, log = '';
 
 const freePort = () => new Promise((resolve, reject) => {
   const s = net.createServer();
@@ -31,9 +35,14 @@ const until = async (fn, what, ms = 15000) => {
     await new Promise((r) => setTimeout(r, 50));
   }
 };
-const call = (route, body, { auth = true } = {}) => fetch(`http://127.0.0.1:${port}${route}`, {
-  method: 'POST', headers: { 'content-type': 'application/json', ...(auth ? { 'x-office-token': token } : {}) }, body: JSON.stringify(body || {}),
-}).then(async (r) => ({ status: r.status, json: await r.json().catch(() => ({})) }));
+// auth: true sends the token of the route's group, false sends none, a string sends that token.
+const tokenFor = (route) => (routeOf('POST', route) === 'agent' ? agentToken : pageToken);
+const call = (route, body, { auth = true } = {}) => {
+  const t = auth === true ? tokenFor(route) : auth || null;
+  return fetch(`http://127.0.0.1:${port}${route}`, {
+    method: 'POST', headers: { 'content-type': 'application/json', ...(t ? { 'x-office-token': t } : {}) }, body: JSON.stringify(body || {}),
+  }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => ({})) }));
+};
 // A local agent session, opened as the page opens one. Its uid is also its office id.
 async function open(name) {
   const r = await call('/api/open', { cwd: work, name, provider: 'ollama', model: 'fake-model', where: 'office' });
@@ -44,7 +53,7 @@ async function open(name) {
 async function snapshot() {
   const ctl = new AbortController();
   try {
-    const r = await fetch(`http://127.0.0.1:${port}/events?t=${token}`, { signal: ctl.signal });
+    const r = await fetch(`http://127.0.0.1:${port}/events`, { headers: { 'x-office-token': pageToken }, signal: ctl.signal });
     const reader = r.body.getReader();
     let buf = '';
     for (;;) {
@@ -71,13 +80,16 @@ before(async () => {
   for (const d of ['providers', 'public']) fs.cpSync(path.join(SRC, d), path.join(copy, d), { recursive: true });
   fake = await startFakeOpenAI({ script: [{ text: 'ok' }], models: ['fake-model'] });
   port = await freePort();
-  child = spawn(process.execPath, ['server.mjs'], {
-    cwd: copy, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, OFFICE_PORT: String(port), OFFICE_HOOKS: 'command', OFFICE_OLLAMA_URL: fake.url, OFFICE_RATE_FILE: path.join(base, 'no-rate.json') },
-  });
+  const env = { ...process.env, OFFICE_PORT: String(port), OFFICE_HOOKS: 'command', OFFICE_OLLAMA_URL: fake.url, OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
+    OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local') };
+  child = spawn(process.execPath, ['server.mjs'], { cwd: copy, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env });
   child.stdout.on('data', (d) => { log += d; });
   child.stderr.on('data', (d) => { log += d; });
-  token = await until(() => { try { return JSON.parse(fs.readFileSync(path.join(copy, '.office-token'), 'utf8')).token; } catch { return null; } }, 'the server to listen');
+  const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')).token; } catch { return null; } };
+  // The server writes .office-token, then the page file, once it listens.
+  agentToken = await until(() => read(path.join(copy, '.office-token')), 'the server to listen');
+  pageToken = await until(() => read(pageFile(env, port)), 'the page token file');
+  assert.notEqual(agentToken, pageToken);
 });
 after(async () => {
   if (child) child.kill();
@@ -86,8 +98,12 @@ after(async () => {
   if (base) try { fs.rmSync(base, { recursive: true, force: true }); } catch { /* a temp folder may stay */ }
 });
 
-test('every /mcp route needs the token', { skip: SKIP }, async () => {
-  for (const r of ['/mcp/inbox', '/mcp/ask', '/mcp/room', '/mcp/room/update']) assert.equal((await call(r, {}, { auth: false })).status, 401, r);
+test('every /mcp route needs the agent token; the page token does not open them, and the agent token opens no /api route', { skip: SKIP }, async () => {
+  for (const r of ['/mcp/inbox', '/mcp/ask', '/mcp/room', '/mcp/room/update']) {
+    assert.equal((await call(r, {}, { auth: false })).status, 401, r);
+    assert.equal((await call(r, {}, { auth: pageToken })).status, 401, r + ' with the page token');
+  }
+  for (const r of ['/api/open', '/api/history', '/api/reopen', '/api/message']) assert.equal((await call(r, {}, { auth: agentToken })).status, 401, r + ' with the agent token');
 });
 
 test('an unknown caller is told so: inbox and ask answer text, room answers 404', { skip: SKIP }, async () => {
@@ -108,7 +124,7 @@ test('the local providers are registered, and an unknown agent kind is refused',
   const noModel = await call('/api/open', { cwd: work, provider: 'ollama' });
   assert.equal(noModel.status, 400);
   assert.match(noModel.json.error, /Pick a model/);
-  const info = await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': token } }).then((r) => r.json());
+  const info = await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
   const kinds = info.providers.map((p) => p.kind);
   assert.deepEqual(kinds.sort(), ['claude-code', 'lmstudio', 'ollama']);
   const ollama = info.providers.find((p) => p.kind === 'ollama');

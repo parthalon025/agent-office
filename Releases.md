@@ -40,6 +40,9 @@ Versions keep the `x` prefix.
 - Each mounted building has its own adapter. The page no longer keeps a global reset.
 - Folder keys follow Windows rules on every host.
 - The room inventory pipeline is gone. The server keeps one decor list.
+- Two tokens. The agent token in `.office-token` opens only the hook and MCP routes. A new page token opens only the page routes, and no file in the office folder holds it. The page no longer holds a token: `npm start` opens a one-time launch link, and the page trades its code for a cookie that scripts cannot read. A reload keeps working. A second `npm start` opens a new link.
+- Files with a token, and the hook and MCP settings files, are readable by your Windows user only.
+- The server refuses requests from another site or port, takes changes as JSON only, and no page can show the office in a frame.
 
 ### Fixed
 

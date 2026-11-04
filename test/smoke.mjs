@@ -6,13 +6,18 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolveExe } from '../git.mjs';
+import { pageFile, routeOf } from '../auth.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+// Two tokens (auth.mjs): the agent token from .office-token for /hook* and /mcp/*, the page token from the
+// office's page file for /events and /api/*.
 const cfg = JSON.parse(fs.readFileSync(path.join(here, '..', '.office-token'), 'utf8'));
+const page = JSON.parse(fs.readFileSync(pageFile(process.env, cfg.port), 'utf8'));
+const tokenFor = (route) => (routeOf('POST', route) === 'agent' ? cfg.token : page.token);
 const S = path.join(os.tmpdir(), 'agent-office-smoke').split(path.sep).join('/');
 fs.mkdirSync(S, { recursive: true });
-const api = async (route, body) => { const r = await fetch(`http://127.0.0.1:${cfg.port}${route}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-office-token': cfg.token }, body: JSON.stringify(body || {}) }); const j = await r.json().catch(() => ({})); if (!r.ok) j._status = r.status; return j; };
-const snap = () => new Promise((res) => { fetch(`http://127.0.0.1:${cfg.port}/events?t=${cfg.token}`).then(async (r) => { const rd = r.body.getReader(); const { value } = await rd.read(); rd.cancel(); res(JSON.parse(new TextDecoder().decode(value).split('\n')[0].slice(6))); }); });
+const api = async (route, body) => { const r = await fetch(`http://127.0.0.1:${cfg.port}${route}`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-office-token': tokenFor(route) }, body: JSON.stringify(body || {}) }); const j = await r.json().catch(() => ({})); if (!r.ok) j._status = r.status; return j; };
+const snap = () => new Promise((res) => { fetch(`http://127.0.0.1:${cfg.port}/events`, { headers: { 'x-office-token': page.token } }).then(async (r) => { const rd = r.body.getReader(); const { value } = await rd.read(); rd.cancel(); res(JSON.parse(new TextDecoder().decode(value).split('\n')[0].slice(6))); }); });
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 60000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = await fn(); if (v) return v; await wait(700); } return null; };
 const me = async (uid) => (await snap()).sessions.find((x) => x.uid === uid);
