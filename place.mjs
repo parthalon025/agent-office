@@ -14,8 +14,9 @@ const OTHER_NOTE_PREFIX = 'other';
 
 /** A path as a key: normalized, no trailing separator, lower case (Windows paths ignore case). */
 export function normPath(p) {
-  const n = path.normalize(String(p || '')).replace(/[\\/]+$/, '');
-  return n.toLowerCase();
+  const n = path.normalize(String(p || ''));
+  const root = path.parse(n).root; // a root keeps its separator, so normPath(normPath(x)) === normPath(x)
+  return (n.length > root.length ? n.replace(/[\\/]+$/, '') : n).toLowerCase();
 }
 const baseName = (p) => String(p || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() || '';
 const slug = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'x';

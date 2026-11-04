@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { placeOfSession, placeOfWorktree, legacyNoteKey, legacyRoomId, normPath, OTHER_NAME, OTHER_FLOOR } from '../place.mjs';
+import { placeOfSession, placeOfWorktree, legacyNoteKey, legacyRoomId, roomIdOf, normPath, OTHER_NAME, OTHER_FLOOR } from '../place.mjs';
 
 const R = path.resolve('/work/Repo'), W = path.resolve('/work/Repo-wt');
 
@@ -77,4 +77,17 @@ test('legacy note key matches the old page rule', () => {
   const slug = normPath(W).replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   assert.equal(legacyRoomId(p.rootKey), 'w-' + slug.slice(-48));
   assert.equal(legacyNoteKey(p), p.buildingKey + '|w-' + slug.slice(-48));
+});
+
+test('normPath is idempotent at a drive root', () => {
+  const root = path.parse(process.cwd()).root;
+  assert.equal(normPath(normPath(root)), normPath(root));
+  const pl = placeOfSession({ repo: root, root, branch: 'main' }, root);
+  assert.equal(normPath(pl.buildingKey), pl.buildingKey);
+  assert.equal(legacyNoteKey(pl).split('|')[0], path.normalize(root).toLowerCase());
+});
+
+test('room id format is pinned', () => {
+  // Changing this value orphans every saved note and pin. It needs a migration in adoptNotes().
+  assert.equal(roomIdOf('e:\\agent-office'), 'w-e-agent-office-fe4d9e73');
 });

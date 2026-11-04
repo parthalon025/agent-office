@@ -106,7 +106,7 @@ export async function layout(repo) {
   const list = [];
   let cur = null;
   for (const line of out.split(/\r?\n/)) {
-    if (line.startsWith('worktree ')) { cur = { root: path.normalize(line.slice(9)), branch: 'detached', main: list.length === 0, prunable: false }; list.push(cur); }
+    if (line.startsWith('worktree ')) { cur = { root: path.normalize(/^[A-Za-z]:$/.test(line.slice(9)) ? line.slice(9) + path.sep : line.slice(9)), branch: 'detached', main: list.length === 0, prunable: false }; list.push(cur); }
     else if (cur && line.startsWith('branch ')) cur.branch = line.slice(7).replace(/^refs\/heads\//, '');
     else if (cur && line.startsWith('prunable')) cur.prunable = true;
     else if (cur && line === 'bare') cur.bare = true;
