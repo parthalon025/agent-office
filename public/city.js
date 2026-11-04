@@ -235,6 +235,11 @@
       var r = Math.floor(i / cols), c = i % cols;
       return [(c - (cols - 1) / 2) * PITCH, (r - (Math.ceil(slots.length / cols) - 1) / 2) * PITCH];
     }
+    // the page version is in the title ("Agent Office x0.1"); no second copy of it lives in the code
+    function pageVersion() {
+      var m = /x\d+(?:\.\d+)*/.exec(typeof document !== 'undefined' ? document.title : '');
+      return m ? m[0] : '';
+    }
     function signTex(name, sub) {
       var tok = K.tok, f = K.f || {};
       return X.canvasTex(512, 160, function (g, w, hh) {
@@ -246,10 +251,14 @@
         g.strokeStyle = tok['line'] || tok['muted']; g.lineWidth = 3; g.stroke();
         g.textBaseline = 'middle'; g.fillStyle = tok['ink']; g.font = '600 62px ' + (f.sans || 'sans-serif');
         g.fillText(name.length > 15 ? name.slice(0, 14) + '…' : name, 32, 62);
-        g.fillStyle = tok['muted']; g.font = '500 38px ' + (f.mono || 'monospace');
-        var fs = 38; g.font = '500 ' + fs + 'px ' + (f.mono || 'monospace');
-        while (g.measureText(sub).width > w - 64 && fs > 22) { fs -= 2; g.font = '500 ' + fs + 'px ' + (f.mono || 'monospace'); }
-        g.fillText(sub, 32, 124);
+        // the page version (x0.1, from the title) sits small and right-aligned on the count line; the counts shrink to leave it room
+        var mono = f.mono || 'monospace', ver = pageVersion(), vw = 0;
+        g.fillStyle = tok['muted'];
+        if (ver) { g.font = '500 26px ' + mono; vw = g.measureText(ver).width + 16; }
+        var fs = 38; g.font = '500 ' + fs + 'px ' + mono;
+        while (g.measureText(sub).width > w - 64 - vw && fs > 18) { fs -= 2; g.font = '500 ' + fs + 'px ' + mono; }
+        g.textAlign = 'left'; g.fillText(sub, 32, 124);
+        if (ver) { g.font = '500 26px ' + mono; g.textAlign = 'right'; g.fillText(ver, w - 32, 124); g.textAlign = 'left'; }
       });
     }
     function setSign(b) {
