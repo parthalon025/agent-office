@@ -119,8 +119,8 @@ test('adoptLegacy returns false when nothing is under the old key', () => {
 test('one repository has one building name and path whatever the cwd case', { skip: process.platform !== 'win32' }, async () => {
   const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'Ao-Case-')));
   try {
-    execFileSync('git', ['init', '-q'], { cwd: dir });
-    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: dir });
+    execFileSync(git.resolveExe('git'), ['init', '-q'], { cwd: dir });
+    execFileSync(git.resolveExe('git'), ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: dir });
     const g = await git.locate(dir.toUpperCase());
     assert.ok(g, 'locate finds the repository');
     assert.equal(g.repo, path.win32.normalize(dir), 'repo path has the case git stores');

@@ -14,6 +14,8 @@
 // live in the office's state.json and show on the room's boards at once.
 // It identifies its session by OFFICE_ID (sessions the office opened) or by its parent pid.
 // Zero dependencies; speaks newline-delimited JSON-RPC 2.0.
+// First statement: Windows never looks for a program in the current folder (git.mjs resolveExe has the reason).
+process.env.NoDefaultCurrentDirectoryInExePath = '1';
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';

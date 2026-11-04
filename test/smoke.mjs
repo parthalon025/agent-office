@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { resolveExe } from '../git.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const cfg = JSON.parse(fs.readFileSync(path.join(here, '..', '.office-token'), 'utf8'));
@@ -21,7 +22,7 @@ const ok = (name, cond, extra = '') => console.log((cond ? 'PASS ' : 'FAIL ') + 
 const repo = S + '/repo1';
 fs.rmSync(repo, { recursive: true, force: true });
 fs.mkdirSync(repo, { recursive: true });
-const g = (...a) => execFileSync('git', a, { cwd: repo, encoding: 'utf8' });
+const g = (...a) => execFileSync(resolveExe('git'), a, { cwd: repo, encoding: 'utf8' });
 g('init', '-q'); g('config', 'user.email', 't@t'); g('config', 'user.name', 't'); g('config', 'core.autocrlf', 'false');
 fs.writeFileSync(repo + '/hello.txt', 'line one\n'); g('add', '-A'); g('commit', '-qm', 'init');
 
@@ -125,7 +126,7 @@ await api('/api/template/delete', { id: t.id }); await api('/api/schedule/delete
 const repo2 = S + '/repo2';
 fs.rmSync(repo2, { recursive: true, force: true });
 fs.mkdirSync(repo2, { recursive: true });
-const g2 = (...a) => execFileSync('git', a, { cwd: repo2, encoding: 'utf8' });
+const g2 = (...a) => execFileSync(resolveExe('git'), a, { cwd: repo2, encoding: 'utf8' });
 g2('init', '-q'); g2('config', 'user.email', 't@t'); g2('config', 'user.name', 't'); g2('config', 'core.autocrlf', 'false');
 fs.writeFileSync(repo2 + '/a.txt', 'a\n'); g2('add', '-A'); g2('commit', '-qm', 'init');
 const watcher = await api('/api/open', { cwd: repo2, name: 'watcher', model: 'haiku', where: 'office', permissionMode: 'default' });

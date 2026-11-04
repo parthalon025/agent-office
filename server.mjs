@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 // Agent Office server: receives Claude Code hook events, streams office state to the
 // browser, and opens / closes Claude Code sessions. Zero dependencies. Windows-first.
+// First statement: Windows must never look for a program in a child's folder (Node reads this from the office's
+// own environment at each spawn; children inherit it). The imports load first, but none starts a process.
+// Every spawn also uses an absolute path from git.resolveExe.
+process.env.NoDefaultCurrentDirectoryInExePath = '1';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -14,6 +18,7 @@ import { createTracker, clip } from './tracker.mjs';
 import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, cleanRecent, recentChoices } from './place.mjs';
 import * as startup from './startup.mjs';
 import { createNotes, cleanPin, PIN_MAX } from './notes.mjs';
+import { mcpAddArgs, mcpRemoveArgs, pluginArgs } from './extensions.mjs';
 import './public/format.js'; // money, plurals and short paths, shared with the page (globalThis.OfficeFormat)
 import './public/vocab.js'; // session vocabulary, shared with the page (globalThis.OfficeVocab)
 const V = globalThis.OfficeVocab;
@@ -96,7 +101,7 @@ fs.writeFileSync(HOOKS_HTTP_FILE, JSON.stringify(httpSettings, null, 2));
 
 // Use HTTP hooks only after a probe proved them on this Claude Code version (npm run probe).
 let CLAUDE_VERSION = 'unknown';
-try { CLAUDE_VERSION = execFileSync('claude', ['--version'], { encoding: 'utf8', timeout: 8000, windowsHide: true }).trim(); } catch { /* keep unknown */ }
+try { CLAUDE_VERSION = execFileSync(git.resolveExe('claude'), ['--version'], { encoding: 'utf8', timeout: 8000, windowsHide: true }).trim(); } catch { /* keep unknown */ }
 const httpProven = () => persisted.httpHooks?.ok === true && persisted.httpHooks.version === CLAUDE_VERSION;
 let hooksMode = process.env.OFFICE_HOOKS === 'command' ? 'command' : (process.env.OFFICE_HOOKS === 'http' || httpProven() ? 'http' : 'command');
 const activeHooksFile = () => (hooksMode === 'http' ? HOOKS_HTTP_FILE : HOOKS_CMD_FILE);
@@ -242,7 +247,7 @@ const WALK = [
 let walker = null;
 const walks = new Map();
 function startWalker() {
-  const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', WALK], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
+  const child = spawn(git.resolveExe('powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', WALK], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
   let buf = '';
   child.stdout.on('data', (d) => {
     buf += d;
@@ -606,9 +611,8 @@ function doControl(uid, action, value) {
 // Add, remove, enable and disable for good: Claude Code's own CLI (`claude mcp`, `claude plugin`) in the
 // session's folder, with scope local (this folder, not shared) or project (shared in the repo).
 // The office never writes user scope: that is ~/.claude settings, which the office does not change.
-const EXT_SCOPES = new Set(['local', 'project']);
+// The CLI argument lists, with the scope and name rules, come from extensions.mjs.
 const NAME_RE = /^[\w.:@ -]{1,120}$/;
-const PLUGIN_RE = /^[\w.@\/-]{1,160}$/;
 function ask(s, request, ms = 15000) {
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(httpError(504, 'The session did not answer.')), ms);
@@ -618,7 +622,9 @@ function ask(s, request, ms = 15000) {
 }
 function claudeCli(args, cwd) {
   return new Promise((resolve, reject) => {
-    execFile('claude', args, { cwd, windowsHide: true, timeout: 120000, maxBuffer: 8 * 1024 * 1024 }, (err, out, stderr) => {
+    let exe;
+    try { exe = git.resolveExe('claude'); } catch (e) { return reject(httpError(409, e.message)); }
+    execFile(exe, args, { cwd, windowsHide: true, timeout: 120000, maxBuffer: 8 * 1024 * 1024 }, (err, out, stderr) => {
       if (err) return reject(httpError(409, (String(stderr || '').trim() || String(out || '').trim() || err.message).split('\n').slice(-3).join(' ')));
       resolve(String(out));
     });
@@ -649,7 +655,6 @@ async function extAction(body) {
   const s = extSession(body.uid);
   const scope = String(body.scope || 'local');
   const cwd = s.git?.root || s.cwd;
-  const needScope = () => { if (!EXT_SCOPES.has(scope)) throw httpError(400, 'Use the scope local or project. The office does not change user settings.'); };
   const reload = async () => { if (s.headless) await ask(s, { subtype: 'reload_plugins' }, 60000).catch(() => null); };
   switch (String(body.action)) {
     case 'toggle': {
@@ -664,30 +669,20 @@ async function extAction(body) {
       await ask(s, { subtype: 'mcp_reconnect', serverName: String(body.name) }, 60000);
       return { ok: true };
     case 'mcp-add': {
-      needScope();
-      const name = String(body.name || '').trim(), target = String(body.target || '').trim();
-      if (!/^[\w.-]{1,64}$/.test(name)) throw httpError(400, 'Use letters, digits, dots and dashes for the name.');
-      if (!target) throw httpError(400, 'Give a URL or a command.');
-      const isUrl = /^https?:\/\//i.test(target);
-      const args = isUrl ? ['mcp', 'add', '--scope', scope, '--transport', body.transport === 'sse' ? 'sse' : 'http', name, target]
-        : ['mcp', 'add', '--scope', scope, name, '--', ...target.split(/\s+/)];
-      await claudeCli(args, cwd);
+      const name = String(body.name || '').trim();
+      await claudeCli(mcpAddArgs({ scope, name, target: body.target, transport: body.transport }), cwd);
       addFeed(s, 'tool', `added the connector ${name} (${scope})`);
       return { ok: true, restart: true };
     }
     case 'mcp-remove': {
-      needScope();
-      if (!NAME_RE.test(String(body.name))) throw httpError(400, 'Unknown connector.');
-      await claudeCli(['mcp', 'remove', '--scope', scope, String(body.name)], cwd);
+      await claudeCli(mcpRemoveArgs({ scope, name: body.name }), cwd);
       addFeed(s, 'tool', `removed the connector ${body.name} (${scope})`);
       return { ok: true, restart: true };
     }
     case 'plugin-enable': case 'plugin-disable': case 'plugin-install': case 'plugin-uninstall': {
-      needScope();
       const id = String(body.id || '').trim();
-      if (!PLUGIN_RE.test(id)) throw httpError(400, 'Use the plugin id, for example name@marketplace.');
       const verb = String(body.action).slice(7);
-      await claudeCli(['plugin', verb, id, '--scope', scope], cwd);
+      await claudeCli(pluginArgs({ verb, scope, id }), cwd);
       addFeed(s, 'tool', `${{ enable: 'enabled', disable: 'disabled', install: 'installed', uninstall: 'removed' }[verb]} the plugin ${id} (${scope})`);
       await reload();
       return { ok: true };
@@ -698,6 +693,7 @@ async function extAction(body) {
 
 
 function openHeadless({ cwd, name, prompt, worktree = null, budget = null, resume = null, scheduleId = null, model = null, prior = null }, baseArgs) {
+  const exe = git.resolveExe('claude'); // before the session exists: a missing claude leaves no ghost session
   const officeId = 'o' + crypto.randomBytes(4).toString('hex');
   const args = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', ...baseArgs];
   if (resume) args.push('--resume', resume);
@@ -706,7 +702,7 @@ function openHeadless({ cwd, name, prompt, worktree = null, budget = null, resum
     commands: persisted.commands?.commands || [], skills: persisted.commands?.skills || [] });
   placeSession(s, true);
   if (prior) { s.replies = prior.replies || []; s.replySeq = s.replies.reduce((n, r) => Math.max(n, r.id || 0), 0); s.costBase = prior.cost || 0; s.cost = prior.cost || null; s.turns = prior.turns || 0; s.prompt = prior.prompt || ''; }
-  const child = spawn('claude', args, {
+  const child = spawn(exe, args, {
     cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, OFFICE_ID: officeId },
   });
@@ -767,6 +763,9 @@ async function openSession(opts) {
     const budget = Number(opts.maxBudget) > 0 ? Math.min(Number(opts.maxBudget), 1000) : null;
     return openHeadless({ cwd: workdir, name, prompt, worktree, budget, scheduleId: opts.scheduleId || null, model: opts.model || null }, args);
   }
+  // Absolute paths, found before the session exists. `start` and launch.ps1 get them too, so neither cmd.exe nor
+  // PowerShell looks for powershell.exe or claude in the session folder.
+  const cmdExe = git.resolveExe('cmd.exe'), psExe = git.resolveExe('powershell.exe'), claudeExe = git.resolveExe('claude');
   const officeId = 'o' + crypto.randomBytes(4).toString('hex');
   const title = ('Office - ' + name).replace(/[^\w .-]/g, '');
   const s = newSession({ uid: officeId, officeId, name, cwd, launched: true, status: 'starting', model: opts.model || null });
@@ -775,14 +774,14 @@ async function openSession(opts) {
   // process-tree root, so closing = taskkill /T on that one pid.
   // The quoted "Office" is the window title; unquoted, `start` would try to run a program named Office.
   const launcher = path.join(ROOT, 'launch.ps1');
-  const child = spawn('cmd.exe', [
-    '/d', '/s', '/c', `start "Office" /wait powershell.exe -NoLogo -NoExit -ExecutionPolicy Bypass -File "${launcher}"`,
+  const child = spawn(cmdExe, [
+    '/d', '/s', '/c', `start "Office" /wait "${psExe}" -NoLogo -NoExit -ExecutionPolicy Bypass -File "${launcher}"`,
   ], {
     windowsVerbatimArguments: true,
     cwd,
     stdio: 'ignore',
     windowsHide: true,
-    env: { ...process.env, OFFICE_ID: officeId, OFFICE_ARGS: JSON.stringify(termArgs), OFFICE_TITLE: title },
+    env: { ...process.env, OFFICE_ID: officeId, OFFICE_ARGS: JSON.stringify(termArgs), OFFICE_TITLE: title, OFFICE_CLAUDE: claudeExe },
   });
   s.pid = child.pid;
   child.on('error', (e) => { addFeed(s, 'end', `could not start: ${e.message}`); endSession(s, 'could not start'); broadcast(); });
@@ -812,7 +811,7 @@ function closeSession(uid) {
   if (s.status === 'ended') { sessions.delete(uid); broadcast(); return; }
   if (!s.pid || s.pid === process.pid) throw httpError(409, 'This session has no known process to close. Close it in its own terminal.');
   return new Promise((resolve, reject) => {
-    execFile('taskkill', ['/PID', String(s.pid), '/T', '/F'], { windowsHide: true }, (err, _o, stderr) => {
+    execFile(git.resolveExe('taskkill'), ['/PID', String(s.pid), '/T', '/F'], { windowsHide: true }, (err, _o, stderr) => {
       if (err && !/not found|no running instance/i.test(String(stderr))) {
         return reject(httpError(500, `Could not close it: ${String(stderr || err.message).trim()}`));
       }
@@ -829,7 +828,9 @@ async function probeHttp() {
   const need = ['UserPromptSubmit', 'PostToolUse', 'Stop'];
   probeSeen = new Set();
   const run = await new Promise((resolve) => {
-    execFile('claude', ['--settings', HOOKS_HTTP_FILE, '--model', 'haiku', '--permission-mode', 'default', '-p', 'Run the bash command: echo http-probe-ok  Then say done.'],
+    let exe;
+    try { exe = git.resolveExe('claude'); } catch (e) { return resolve({ err: e.message, out: '' }); }
+    execFile(exe, ['--settings', HOOKS_HTTP_FILE, '--model', 'haiku', '--permission-mode', 'default', '-p', 'Run the bash command: echo http-probe-ok  Then say done.'],
       { cwd: ROOT, env: { ...process.env, OFFICE_ID: 'probe' }, timeout: 120000, windowsHide: true },
       (err, out) => resolve({ err: err && err.message, out: String(out || '').slice(0, 200) }));
   });
