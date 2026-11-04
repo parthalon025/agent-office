@@ -22,6 +22,7 @@ import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, clea
 import * as startup from './startup.mjs';
 import { createNotes, cleanPin, PIN_MAX } from './notes.mjs';
 import { mcpAddArgs, mcpRemoveArgs, pluginArgs } from './extensions.mjs';
+import * as auth from './auth.mjs';
 import './public/format.js'; // money, plurals and short paths, shared with the page (globalThis.OfficeFormat)
 import './public/vocab.js'; // session vocabulary, shared with the page (globalThis.OfficeVocab)
 const V = globalThis.OfficeVocab;
@@ -30,13 +31,25 @@ const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
 const PORT = Number(process.env.OFFICE_PORT) || 4317;
 const HOST = '127.0.0.1';
+// Two tokens (auth.mjs has the rules). The agent token opens /hook* and /mcp/* only. It is kept in .office-token,
+// which hook.mjs and mcp.mjs read, and reused across restarts, so hooks of sessions that are already running keep
+// working. The page token opens /events and /api/* only. It is new at each start and never written in this folder:
+// the browser gets it as an HttpOnly cookie for a one-time launch code, the user's own tools read PAGE_FILE.
 const TOKEN_FILE = path.join(ROOT, '.office-token');
-// Reuse the token across restarts, so hooks of sessions that are already running keep working.
-const TOKEN = (() => {
-  try { const t = JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8')).token; if (/^[0-9a-f]{48}$/.test(t)) return t; } catch { /* first run */ }
-  return crypto.randomBytes(24).toString('hex');
+const AGENT_TOKEN = (() => {
+  try { const t = JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8')).token; if (auth.AGENT_TOKEN_RE.test(t)) return t; } catch { /* first run */ }
+  return auth.newAgentToken();
 })();
-const ALLOWED_HOSTS = new Set([`127.0.0.1:${PORT}`, `localhost:${PORT}`]);
+const PAGE_TOKEN = auth.newPageToken();
+const PAGE_FILE = auth.pageFile(process.env, PORT);
+const launchCodes = auth.createLaunchCodes();
+// Files with a token, and settings files whose commands sessions run, are readable by the user alone.
+function writeSecret(file, text) {
+  const warning = auth.writeOwnerOnly(file, text, {
+    fs, icacls: (args) => execFileSync(git.resolveExe('icacls'), args, { windowsHide: true, stdio: 'pipe', timeout: 15000 }),
+  });
+  if (warning) console.warn(warning);
+}
 const HOOKS_CMD_FILE = path.join(ROOT, 'office-hooks.json');
 const HOOKS_HTTP_FILE = path.join(ROOT, 'office-hooks-http.json');
 const STATE_FILE = path.join(ROOT, 'state.json');
@@ -88,7 +101,7 @@ const HTTP_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'P
 const httpSettings = {
   hooks: Object.fromEntries(HOOK_EVENTS.map((ev) => {
     const hook = HTTP_EVENTS.has(ev)
-      ? { type: 'http', url: `http://127.0.0.1:${PORT}/hook/http`, headers: { 'x-office-token': TOKEN, 'x-office-id': '$OFFICE_ID' }, allowedEnvVars: ['OFFICE_ID'], timeout: ev === 'PermissionRequest' ? askSeconds : 10 }
+      ? { type: 'http', url: `http://127.0.0.1:${PORT}/hook/http`, headers: { 'x-office-token': AGENT_TOKEN, 'x-office-id': '$OFFICE_ID' }, allowedEnvVars: ['OFFICE_ID'], timeout: ev === 'PermissionRequest' ? askSeconds : 10 }
       : { type: 'command', command: hookCommand, timeout: 10 };
     const entry = { hooks: [hook] };
     if (TOOL_EVENTS.has(ev)) entry.matcher = '*';
@@ -96,8 +109,8 @@ const httpSettings = {
   })),
   permissions: PERMISSIONS,
 };
-fs.writeFileSync(HOOKS_CMD_FILE, JSON.stringify(commandSettings, null, 2));
-fs.writeFileSync(HOOKS_HTTP_FILE, JSON.stringify(httpSettings, null, 2));
+writeSecret(HOOKS_CMD_FILE, JSON.stringify(commandSettings, null, 2));
+writeSecret(HOOKS_HTTP_FILE, JSON.stringify(httpSettings, null, 2));
 
 // Use HTTP hooks only after a probe proved them on this Claude Code version (npm run probe).
 const CLAUDE_VERSION = claudeVersion();
@@ -105,7 +118,7 @@ const httpProven = () => persisted.httpHooks?.ok === true && persisted.httpHooks
 let hooksMode = process.env.OFFICE_HOOKS === 'command' ? 'command' : (process.env.OFFICE_HOOKS === 'http' || httpProven() ? 'http' : 'command');
 const activeHooksFile = () => (hooksMode === 'http' ? HOOKS_HTTP_FILE : HOOKS_CMD_FILE);
 const mcpConfig = { mcpServers: { office: { command: process.execPath.replace(/\\/g, '/'), args: [path.join(ROOT, 'mcp.mjs').replace(/\\/g, '/')] } } };
-fs.writeFileSync(MCP_FILE, JSON.stringify(mcpConfig, null, 2));
+writeSecret(MCP_FILE, JSON.stringify(mcpConfig, null, 2));
 
 // ---------- past sessions ----------
 // Sessions that run inside the office are saved, so a restart or a closed session can be reopened
@@ -968,22 +981,30 @@ const STATIC_FILES = new Map([
 
 const server = http.createServer(async (req, res) => {
   try {
-    if (!ALLOWED_HOSTS.has(req.headers.host)) return send(res, 403, 'Forbidden', 'text/plain');
-    const url = new URL(req.url, `http://${req.headers.host}`);
+    // On every response, held hook answers included (setHeader merges into a later writeHead).
+    for (const [k, v] of Object.entries(auth.SECURITY_HEADERS)) res.setHeader(k, v);
+    const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
+    // Host, Origin, Sec-Fetch-Site, JSON body and the token of the route group (auth.mjs checkRequest).
+    const gate = auth.checkRequest({ method: req.method, path: url.pathname, headers: req.headers },
+      { port: PORT, agentToken: AGENT_TOKEN, pageToken: PAGE_TOKEN, isStatic: (p) => STATIC_FILES.has(p) });
+    if (!gate.ok) return send(res, gate.status, { error: gate.error });
 
-    if (req.method === 'GET' && url.pathname === '/') {
-      const html = fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8').replace('__TOKEN__', TOKEN);
-      return send(res, 200, html, 'text/html; charset=utf-8');
-    }
-    if (url.pathname === '/favicon.ico') { res.writeHead(204); return res.end(); }
-    if (req.method === 'GET' && STATIC_FILES.has(url.pathname)) {
+    if (gate.group === 'public') {
+      // The page holds no token: it gets the page cookie from POST /launch with the code of its launch link.
+      if (url.pathname === '/') return send(res, 200, fs.readFileSync(path.join(PUBLIC, 'index.html')), 'text/html; charset=utf-8');
+      if (url.pathname === '/favicon.ico') { res.writeHead(204); return res.end(); }
       const rel = STATIC_FILES.get(url.pathname);
       return send(res, 200, fs.readFileSync(path.join(ROOT, rel)), MIME[path.extname(rel)] || 'application/octet-stream');
     }
+    if (gate.group === 'launch') {
+      // A launch code works once, for 5 minutes. The cookie is HttpOnly, so page scripts never see the token.
+      const body = await readBody(req);
+      if (!launchCodes.take(body.code)) return send(res, 401, { error: auth.LINK_DEAD });
+      res.setHeader('set-cookie', auth.pageCookie(PORT, PAGE_TOKEN));
+      return send(res, 200, { ok: true });
+    }
 
-    const tok = req.headers['x-office-token'] || url.searchParams.get('t');
-    if (tok !== TOKEN) return send(res, 401, { error: 'Unauthorized' });
-
+    if (req.method === 'GET' && url.pathname === '/api/auth') return send(res, 200, { ok: true }); // the page asks: does my cookie work?
     if (req.method === 'GET' && url.pathname === '/events') {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
       res.write(`data: ${JSON.stringify(snapshot())}\n\n`);
@@ -1022,6 +1043,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, out ? JSON.stringify(out) : '');
     }
     if (url.pathname === '/api/startup') return send(res, 200, body.enabled === true ? startup.enable(STARTUP_DIR, ROOT, process.execPath) : startup.disable(STARTUP_DIR));
+    if (url.pathname === '/api/launch-link') return send(res, 200, { url: auth.launchUrl(PORT, launchCodes.mint()) }); // a second npm start asks for one
     if (url.pathname === '/api/probe-http') return send(res, 200, await probeHttp());
     if (url.pathname === '/api/notes/save') {
       // the notes board of a room: the user's own reminders, kept in state.json
@@ -1081,16 +1103,48 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.on('error', (e) => {
-  if (e.code === 'EADDRINUSE') {
-    console.error(`Agent Office is already running on port ${PORT}: http://localhost:${PORT}\nNothing was changed. Stop the other copy first, or set OFFICE_PORT.`);
-  } else console.error(e.message);
-  process.exit(1);
+// Opens a launch link in the default browser (Windows only; OFFICE_OPEN=0 turns it off). The link is printed too.
+// `start ""` needs the quoted empty title, or it would read the link as the title.
+function openBrowser(link) {
+  if (process.platform !== 'win32' || process.env.OFFICE_OPEN === '0') return;
+  if (!/^http:\/\/127\.0\.0\.1:\d+\/#n=[0-9a-f]+$/.test(link)) return; // nothing that cmd could read as a command
+  try {
+    const c = spawn(git.resolveExe('cmd.exe'), ['/d', '/s', '/c', `start "" "${link}"`], { cwd: ROOT, windowsVerbatimArguments: true, windowsHide: true, stdio: 'ignore', detached: true });
+    c.on('error', () => {});
+    c.unref();
+  } catch { /* the printed link still works */ }
+}
+// A second copy asks the running office for a new launch link with the page token from PAGE_FILE.
+async function linkFromRunningOffice() {
+  try {
+    const { token } = JSON.parse(fs.readFileSync(PAGE_FILE, 'utf8'));
+    const r = await fetch(`http://127.0.0.1:${PORT}/api/launch-link`, {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-office-token': token }, body: '{}', signal: AbortSignal.timeout(5000),
+    });
+    const j = await r.json();
+    return r.ok && typeof j.url === 'string' ? j.url : null;
+  } catch { return null; }
+}
+
+// Exit only after the text is out: a console or pipe on Windows may write it later.
+const sayAndExit = (stream, text, code) => stream.write(text + '\n', () => process.exit(code));
+server.on('error', async (e) => {
+  if (e.code !== 'EADDRINUSE') return sayAndExit(process.stderr, e.message, 1);
+  const link = await linkFromRunningOffice();
+  if (!link) return sayAndExit(process.stderr, `Agent Office is already running on port ${PORT}, and it gave no launch link to this copy.\nNothing was changed. Stop the other copy first, or set OFFICE_PORT.`, 1);
+  openBrowser(link);
+  sayAndExit(process.stdout, `Agent Office is already running on port ${PORT}. Nothing was changed.\nOpen it with this link. The link works once, for 5 minutes:\n${link}`, 0);
 });
 
 server.listen(PORT, HOST, () => {
-  // Written only once we own the port, so a second copy can never invalidate a running office's token.
-  fs.writeFileSync(TOKEN_FILE, JSON.stringify({ token: TOKEN, port: PORT }));
-  console.log(`Agent Office is open: http://localhost:${PORT}`);
+  // Written only once we own the port, so a second copy can never invalidate a running office's tokens.
+  writeSecret(TOKEN_FILE, JSON.stringify({ token: AGENT_TOKEN, port: PORT }));
+  try {
+    fs.mkdirSync(path.dirname(PAGE_FILE), { recursive: true });
+    writeSecret(PAGE_FILE, JSON.stringify({ token: PAGE_TOKEN, port: PORT }));
+  } catch (e) { console.warn(`Could not save the page token for npm run probe and a second npm start: ${e.message}`); }
+  const link = auth.launchUrl(PORT, launchCodes.mint());
+  console.log(`Agent Office is open: ${link}\nThe link works once, for 5 minutes. A reload keeps working. For a new link, run npm start again.`);
   console.log(`Hooks: ${hooksMode} (Claude Code ${CLAUDE_VERSION}). For outside sessions: claude --settings "${activeHooksFile()}" --mcp-config "${MCP_FILE}"`);
+  openBrowser(link);
 });

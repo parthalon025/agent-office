@@ -13,15 +13,51 @@
    - TodoWrite -> plan and plan.step. A failed turn or a spending limit -> error (Retry, Dismiss).
    - A run started by a schedule -> trigger.run. Plan usage from the status line file -> usage.
    - Permission prompt (PermissionRequest hook) -> request with Approve and Decline. It waits for the
-     office; if nobody answers in time, the question goes back to the terminal dialog. */
+     office; if nobody answers in time, the question goes back to the terminal dialog.
+   Access (auth.mjs on the server): the page holds no token. The launch link the server opens carries a one-time
+   code (#n=<code>). The page takes the code out of the address bar and trades it for an HttpOnly cookie with
+   POST /launch. Every later call and the event stream send the cookie by themselves, so a reload keeps working.
+   Without a working cookie the page says so (officeAdapter.onAuth) and asks again every 5 s: a launch link opened
+   in another tab gives this tab the new cookie too. */
 (function () {
-  var TOKEN = document.querySelector('meta[name="office-token"]').content;
   var store = window.OfficeBuilding.createStore();
-  var es = new EventSource('/events?t=' + encodeURIComponent(TOKEN));
-  es.onmessage = function (e) { store.set(JSON.parse(e.data)); };
+
+  var authFns = [], auth = null, es = null, retry = null;
+  function setAuth(a) {
+    if (auth && auth.ok === a.ok && auth.reason === a.reason) return;
+    auth = a;
+    authFns.forEach(function (fn) { fn(a); });
+  }
+  function answer(r) { return r.json().catch(function () { return {}; }); }
+  function check() {
+    return fetch('/api/auth').then(function (r) { return answer(r).then(function (j) { return r.ok ? { ok: true } : { ok: false, reason: j.error || 'No access.' }; }); },
+      function () { return { ok: false, reason: 'The office server is not reachable.' }; });
+  }
+  var code = /^#n=([0-9a-f]{32})$/.exec(location.hash);
+  if (code) history.replaceState(null, '', location.pathname + location.search);   // the code works once; keep it out of history
+  var ready = !code ? check() : fetch('/launch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: code[1] }) })
+    .then(function (r) {
+      return answer(r).then(function (j) {
+        // A used or old code: a cookie from an earlier link may still work.
+        return r.ok ? { ok: true } : check().then(function (c) { return c.ok ? c : { ok: false, reason: j.error || c.reason }; });
+      });
+    }, check);
+  function connect() {
+    var src = es = new EventSource('/events');
+    src.onmessage = function (e) { store.set(JSON.parse(e.data)); };
+    src.onopen = function () { setAuth({ ok: true }); };
+    // CLOSED means the server refused the stream (no access, for example after a restart). On a lost connection the
+    // browser tries again by itself, and the state stays CONNECTING.
+    src.onerror = function () { if (src.readyState === 2 && es === src) { es = null; recheck(); } };
+  }
+  function recheck() {
+    clearTimeout(retry);
+    check().then(function (a) { if (a.ok) connect(); else { setAuth(a); retry = setTimeout(recheck, 5000); } });
+  }
+  ready.then(function (a) { if (a.ok) connect(); else { setAuth(a); retry = setTimeout(recheck, 5000); } });
 
   function post(path, body) {
-    return fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-office-token': TOKEN }, body: JSON.stringify(body) })
+    return ready.then(function () { return fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); })
       .then(function (r) { return r.json().then(function (j) { return r.ok ? { ok: true } : { ok: false, reason: j.error || 'The office could not do that.' }; }); },
             function () { return { ok: false, reason: 'The office server is not reachable.' }; });
   }
@@ -79,6 +115,13 @@
   // The facade the page and the scene modules use: the store, plus mount(repo).
   // mount(repo) makes a building adapter for one scene; pass its .adapter to OfficeScene and its .def as the building.
   var facade = Object.create(store);
+  facade.ready = ready;   // settles once the page knows whether it has access: { ok, reason }
+  // fn({ ok, reason }) at once when access is known, and on each change. Returns the unsubscribe.
+  facade.onAuth = function (fn) {
+    authFns.push(fn);
+    if (auth) fn(auth);
+    return function () { authFns = authFns.filter(function (f) { return f !== fn; }); };
+  };
   facade.mount = function (repo) {
     var m = store.mount(repo);
     m.adapter = AgentOffice.adapters.create({

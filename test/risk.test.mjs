@@ -115,7 +115,7 @@ for (const [name, tool, input, want, folder] of cases) {
 
 // Secret-looking files inside the root: a read is medium, an edit is medium (high when it also runs code).
 const SECRETS = ['.env', '.env.local', 'config/.env.production', 'certs/server.pem', 'tls.key', 'id_rsa', 'id_rsa.pub', 'id_ed25519',
-  '.credentials.json', '.office-token', '.npmrc', '.netrc', '.git-credentials'];
+  '.credentials.json', '.office-token', 'office-page-4317.json', '.npmrc', '.netrc', '.git-credentials'];
 for (const f of SECRETS) {
   test(`secret inside the root is never low: ${f}`, () => {
     for (const tool of ['Read', 'Edit', 'Write', 'MultiEdit']) assert.equal(riskOf(tool, { file_path: f }, cwd), 'medium', tool);
@@ -123,6 +123,12 @@ for (const f of SECRETS) {
     assert.equal(riskOf('Glob', { pattern: f }, cwd), 'medium', 'Glob');
   });
 }
+
+test('the office page token file (auth.mjs pageFile) is a secret: a read from outside the root is high', () => {
+  const f = path.join(home, 'AppData', 'Local', 'AgentOffice', 'office-page-4317.json');
+  assert.equal(riskOf('Read', { file_path: f }, cwd), 'high');
+  assert.equal(riskOf('Read', { file_path: path.join(home, 'AppData', 'Local', 'AgentOffice', 'notes.json') }, cwd), 'medium', 'another file there');
+});
 
 // Settings that run code inside the root: a read is medium, an edit is high, in every form Windows accepts.
 const RUNS = ['.git/config', '.git/hooks/pre-commit', '.git/HEAD', 'sub/.git', '.claude/settings.json', '.claude/settings.local.json',
