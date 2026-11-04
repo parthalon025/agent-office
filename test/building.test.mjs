@@ -391,3 +391,28 @@ test('plan, skill, knowledge, message, trigger and stream error events all pass 
   assert.ok(of(m.ev, 'message').some((e) => e.format === 'plain'), 'no plain inbox line');
   assert.ok(of(m.ev, 'tool.result').some((e) => e.ok === false && e.summary), 'no failed tool.result with a summary');
 });
+
+test('requests: every open request and question of every building, oldest first, with the building named', async () => {
+  const r = rig({ repos: [{ path: REPO_B, worktrees: [{ branch: 'main', root: REPO_B }] }] });
+  assert.deepEqual(r.store.requests(), [], 'no snapshot, no requests');
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'b', cwd: REPO_B });
+  r.t += 10;
+  r.tracker.permissionRequest(slimPayload({ ...HOOKS.permission, session_id: 'b', cwd: REPO_B }, null));
+  r.t += 10;
+  const sa = [...r.tracker.sessions.values()].find((s) => s.cwd === REPO_A);
+  r.tracker.askQuestion(sa, 'Use the old schema?');
+  r.push();
+  const list = r.store.requests();
+  assert.equal(list.length, 2);
+  assert.deepEqual(list.map((x) => [x.kind, x.building, x.buildingName]), [['request', KEY_B, 'other'], ['question', KEY_A, 'repo']]);
+  assert.ok(list[0].t < list[1].t, 'oldest first');
+  assert.equal(list[1].text, 'Use the old schema?');
+  assert.equal(list[1].risk, undefined, 'a question has no risk value');
+  assert.ok(list[0].id && list[0].uid && list[0].bot && list[0].tool);
+  assert.equal(list.length, r.store.buildings().reduce((n, b) => n + b.waiting, 0), 'the total matches the buildings');
+  // the same list for a snapshot passed in, and an ended session adds nothing
+  r.tracker.sessions.forEach((s) => { s.status = 'ended'; });
+  r.push();
+  assert.deepEqual(r.store.requests(), []);
+});
