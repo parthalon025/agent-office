@@ -33,6 +33,7 @@ Stop the server by the pid that owns port 4317 (`netstat -ano | grep :4317`, the
 | `payload.mjs` | Trims a hook payload to the fields the office shows. Used by `hook.mjs` and the HTTP hook route. |
 | `mcp.mjs` | stdio MCP server: `office_inbox`, `office_ask`. |
 | `public/adapter.js` | Snapshot to DS events (repo = building, branch = floor, worktree = room; tool calls, helpers, plan, errors, triggers, usage), and DS commands to REST calls. Exposes `officeAdapter.onSnapshot / session / lookup / buildings / buildingFor / shown / roomsShown / roomsNow`. |
+| `public/city.js` | The city: all repositories as buildings on one DS stage (`AgentOffice.office.Stage`), with rise and sink effects, zoom to mouse, bounded pan, click or zoom in to enter. `OfficeCity.cameraFeel(stage)` also gives the office scene zoom to mouse. |
 | `public/office.js` | React: control strip and dialogs. Mounts `OfficeScene` once. |
 | `public/chat-extras.js` | Chat resize grips, the `/` list, theme mirror. It depends on DS class names (`.ao-hud-chat`, `.ao-input`). |
 
@@ -62,6 +63,7 @@ Add a new file only for a distinct job. Extend the file that owns the concern fi
 - One scene shows one building. `buildingFor(repo)` sets the layout, then the scene mounts; `subscribe` resets the adapter's mapping each mount. The SSE stream belongs to the page, not to the scene.
 - The DS has no `room.remove` or `floor.remove`. The page rebuilds the scene (a new React key) when a shown room is gone.
 - Two worktrees on one branch need `git worktree add --force`.
+- The scene fades out (`duration-base`) before any rebuild: another building, the city, a removed floor or room. Labels in the city sit on layer 1 so the bloom pass skips them.
 - Extensions: `mcp_status`, `mcp_toggle`, `mcp_reconnect`, `reload_plugins` are control requests on the session's stdin; they work before the first prompt. Persistent changes use `claude mcp` and `claude plugin` with scope local or project only.
 - The Bash tool mangles backslashes and quotes in long heredocs. Write patch scripts with the Write tool.
 

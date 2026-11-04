@@ -21,6 +21,7 @@
   var REMOVE_AFTER_MS = 6000;
   var HISTORY_CALLS = 12; // calls shown in the trace when the page opens mid-session
 
+  function shapeOf(uid) { return SHAPES[hash(String(uid)) % SHAPES.length]; }
   function hash(s) { var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; }
   function kindOf(tool) { return KIND[tool] || (String(tool).indexOf('mcp__') === 0 ? 'mcp' : 'api'); }
   function clip(t, n) { t = String(t || ''); return t.length > n ? t.slice(0, n - 1) + '…' : t; }
@@ -165,7 +166,7 @@
         if (s.status === 'ended') return;
         var name = uniqueName(s.name);
         k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: mapStatus(s), task: taskOf(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, model: s.model, ended: false, place: placeKey(pl), room: roomOf(pl, emit) };
-        var bot = { name: name, role: 'coder', shape: SHAPES[hash(s.uid) % SHAPES.length], status: k.status, task: k.task, platform: 'Claude Code', identity: s.cwd };
+        var bot = { name: name, role: 'coder', shape: shapeOf(s.uid), status: k.status, task: k.task, platform: 'Claude Code', identity: s.cwd };
         if (s.skills && s.skills.length) bot.skills = s.skills.slice(0, 16);
         if (s.scheduleId) bot.triggers = [s.name];
         emit({ type: 'bot.add', roomId: k.room, bot: bot });
@@ -354,11 +355,17 @@
   };
   // The building definition for one repository, with a floor per branch and a room per worktree.
   // The default branch is the ground floor. Mount the scene right after this call.
-  window.officeAdapter.buildingFor = function (repo) {
-    layout = { repo: repo, floors: {}, nextId: 1 };
-    var byBranch = {}, order = [], name = repo ? base(repo) : OTHER;
-    var rp = repoOf(latest, repo), places = rp ? rp.worktrees.map(function (w) { return wtPlace(rp, w); }) : [];
-    live(latest).forEach(function (s) { places.push(placeOf(s)); });
+  // A building definition: a floor per branch, a room per worktree, the default branch at the bottom.
+  // With bots, each room also lists its sessions (for previews such as BuildingView); the scene gets
+  // its bots from events instead. Returns { def, floors: { branch: { id, rooms: { root: roomId } } }, nextId }.
+  function describe(repo, snap, withBots) {
+    var byBranch = {}, order = [], name = repo ? base(repo) : OTHER, bots = {};
+    var rp = repoOf(snap, repo), places = rp ? rp.worktrees.map(function (w) { return wtPlace(rp, w); }) : [];
+    live(snap).forEach(function (s) {
+      var pl = placeOf(s);
+      places.push(pl);
+      if (withBots && pl.repo === repo) (bots[pl.root] = bots[pl.root] || []).push({ name: s.name, role: 'coder', shape: shapeOf(s.uid), status: mapStatus(s), task: taskOf(s) });
+    });
     places.forEach(function (pl) {
       if (pl.repo !== repo) return;
       name = pl.repoName;
@@ -366,15 +373,29 @@
       byBranch[pl.branch][pl.root] = pl;
     });
     order.sort(function (a, b) { return (/^(main|master|trunk)$/.test(b) ? 1 : 0) - (/^(main|master|trunk)$/.test(a) ? 1 : 0); });
+    var map = {}, nextId = 1;
     var floors = order.map(function (br) {
-      var f = layout.floors[br] = { id: layout.nextId++, rooms: {} };
-      var rooms = Object.keys(byBranch[br]).map(function (root) { var r = roomDef(byBranch[br][root]); f.rooms[root] = r.id; return r; });
+      var f = map[br] = { id: nextId++, rooms: {} };
+      var rooms = Object.keys(byBranch[br]).map(function (root) {
+        var r = roomDef(byBranch[br][root]); f.rooms[root] = r.id;
+        if (withBots) r.bots = bots[root] || [];
+        return r;
+      });
       return floorDef(f.id, br, rooms);
     });
     // An empty building still needs a floor to stand on.
-    if (!floors.length) { floors = [floorDef(1, 'No sessions', [])]; layout.nextId = 2; }
-    return { name: name || OTHER, sessions: 'agent', floors: floors };
+    if (!floors.length) { floors = [floorDef(1, 'No sessions', [])]; nextId = 2; }
+    return { def: { name: name || OTHER, sessions: 'agent', floors: floors }, floors: map, nextId: nextId };
+  }
+  // The building the scene shows. Mount the scene right after this call.
+  window.officeAdapter.buildingFor = function (repo) {
+    var d = describe(repo, latest, false);
+    layout = { repo: repo, floors: d.floors, nextId: d.nextId };
+    return d.def;
   };
+  // A building with its bots, for a preview. It does not change what the scene shows.
+  window.officeAdapter.preview = function (repo, snap) { return describe(repo, snap || latest, true).def; };
+  window.officeAdapter.shapeOf = function (uid) { return shapeOf(uid); };
   window.officeAdapter.shown = function () { return layout.repo; };
   // Rooms in the shown scene, as "branch|root". The page rebuilds the scene when one of them is gone,
   // because the design system has no event that removes a floor or a room.

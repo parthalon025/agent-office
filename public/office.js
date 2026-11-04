@@ -62,6 +62,13 @@
     var m = Math.max(0, Math.round((at - Date.now()) / 60000)), d = Math.floor(m / 1440), hr = Math.floor((m % 1440) / 60);
     return 'Resets in ' + (d ? d + 'd ' + hr + 'h' : hr ? hr + 'h ' + (m % 60) + 'm' : (m % 60) + 'm');
   }
+  // BotAvatar draws an SVG with a fill colour, so it needs the token's value, not var(...).
+  function botColor() {
+    var el = document.querySelector('.ao-office') || document.documentElement;
+    return getComputedStyle(el).getPropertyValue('--type-lab').trim() || getComputedStyle(el).getPropertyValue('--muted').trim();
+  }
+  function cssMs(name, fallback) { var v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--' + name)); return isFinite(v) && v > 0 ? v : fallback; }
+  function reduced() { return !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches); }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
   function statusOf(s) {
     if (s.status === 'working' || s.status === 'waiting') return s.status;
@@ -148,7 +155,7 @@
     }, [q]);
     function act(uid, fn) { setBusy(uid); setErr(''); fn().then(function () { setBusy(''); }, function (x) { setBusy(''); setErr(x.message); }); }
     function reopen(uid) { act(uid, function () { return api('/api/reopen', { uid: uid }).then(function () { p.onClose(); }); }); }
-    function forget(uid) { act(uid, function () { return api('/api/history/forget', { uid: uid }).then(load); }); }
+    function forget(uid) { act(uid, function () { return api('/api/history/forget', { uid: uid }).then(function () { if (p.toast) p.toast({ tone: 'info', title: 'Session forgotten', text: 'It is gone from Past sessions.' }); load(); }); }); }
     var hit = {};
     (results || []).forEach(function (r) { hit[r.uid] = hit[r.uid] || r; });
     var shown = results ? (list || []).filter(function (s) { return hit[s.uid]; }) : list;
@@ -181,10 +188,10 @@
     useEffect(load, []);
     function set(k) { return function (v) { var n = Object.assign({}, edit); n[k] = v; setEdit(n); }; }
     function save() {
-      api('/api/schedule/save', Object.assign({}, edit, { every: Number(edit.every) || 60, maxBudget: Number(edit.maxBudget) || 0 })).then(function () { setEdit(null); setErr(''); load(); }, function (x) { setErr(x.message); });
+      api('/api/schedule/save', Object.assign({}, edit, { every: Number(edit.every) || 60, maxBudget: Number(edit.maxBudget) || 0 })).then(function () { if (p.toast) p.toast({ tone: 'success', title: edit.id ? 'Schedule saved' : 'Schedule added', text: edit.name || cadence(edit) }); setEdit(null); setErr(''); load(); }, function (x) { setErr(x.message); });
     }
     function run(id) { api('/api/schedule/run', { id: id }).then(function () { setErr(''); }, function (x) { setErr(x.message); }); }
-    function del(id) { api('/api/schedule/delete', { id: id }).then(load, function (x) { setErr(x.message); }); }
+    function del(id) { api('/api/schedule/delete', { id: id }).then(function () { if (p.toast) p.toast({ tone: 'info', title: 'Schedule deleted', text: 'It will not run again.' }); load(); }, function (x) { setErr(x.message); }); }
     function toggle(s) { api('/api/schedule/save', Object.assign({}, s, { enabled: !s.enabled })).then(load, function (x) { setErr(x.message); }); }
     if (edit) {
       return h(A.Dialog, { open: true, title: edit.id ? 'Edit schedule' : 'New schedule', onClose: function () { setEdit(null); }, actions: [
@@ -205,12 +212,12 @@
           h(Area, { id: 's-prompt', label: 'Instruction', value: edit.prompt, rows: 4, onChange: set('prompt') })));
     }
     return h(A.Dialog, { open: true, title: 'Schedules', onClose: p.onClose, actions: [
-      h(A.Button, { key: 'n', variant: 'quiet', icon: 'add', onClick: function () { setEdit(Object.assign({}, BLANK, { cwd: (p.recent || [])[0] || '' })); } }, 'New schedule'),
       h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
       h('div', { className: 'form wide' },
         err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
         h(Busy, { on: list === null }),
         list && !list.length ? h(A.EmptyState, { icon: 'schedule', title: 'No schedules yet', text: 'A schedule opens a session on its own and runs one instruction.' }) : null,
+        list ? h(A.AddButton, { label: 'Add a schedule', onClick: function () { setEdit(Object.assign({}, BLANK, { cwd: (p.recent || [])[0] || '' })); } }) : null,
         h('ul', { className: 'past' }, (list || []).map(function (s) {
           return h('li', { key: s.id, className: 'past-row' },
             h('div', { className: 'past-main' },
@@ -243,7 +250,14 @@
     function load() { setErr(''); api('/api/changes', { uid: p.uid }).then(setData, function (x) { setErr(x.message); setData({ files: [], diff: '', branch: '', stat: '' }); }); }
     useEffect(load, [p.uid]);
     var wt = data && data.worktree;
-    function run(fn) { setBusy(true); setErr(''); fn().then(function (r) { setBusy(false); setConfirm(null); setResult(r); load(); }, function (x) { setBusy(false); setErr(x.message); }); }
+    function run(fn) {
+      setBusy(true); setErr('');
+      fn().then(function (r) {
+        setBusy(false); setConfirm(null); setResult(r); load();
+        if (p.toast && r && r.url) p.toast({ tone: 'success', title: 'Pull request created', text: r.url });
+        if (p.toast && r && r.removed) p.toast({ tone: 'info', title: 'Worktree removed', text: r.branchKept ? 'The branch was kept.' : 'The folder is gone.' });
+      }, function (x) { setBusy(false); setErr(x.message); });
+    }
     function pr() { run(function () { return api('/api/pr', { uid: p.uid }); }); }
     function remove(force) { run(function () { return api('/api/worktree/remove', { uid: p.uid, force: force }); }); }
     if (confirm === 'pr') {
@@ -280,6 +294,8 @@
           data.ahead ? h('span', { className: 'mono' }, data.ahead + ' commit' + (data.ahead > 1 ? 's' : '') + ' ahead') : null) : null,
         data && data.files.length ? h('ul', { className: 'files' }, data.files.map(function (f, i) { return h('li', { key: i }, h('span', { className: 'fcode fc-' + f.code.charAt(0) }, f.word), h('span', { className: 'mono' }, f.path)); })) : null,
         data && data.diff ? h(DiffView, { text: data.diff }) : null,
+        data && data.commits && data.commits.length ? h('h3', { className: 'ext-h' }, 'Recent commits on ' + (data.branch || 'this branch'), h('span', { className: 'ext-n' }, data.commits.length)) : null,
+        data && data.commits && data.commits.length ? h(A.CheckpointTimeline, { checkpoints: data.commits }) : null,
         data && data.truncated ? h('p', { className: 'note' }, 'The diff is long, so only the start is shown.') : null,
         data && !data.diff && data.files.length ? h('p', { className: 'note' }, 'These files are new, so git has no diff for them yet.') : null,
         data && !data.files.length && !err ? h(A.EmptyState, { icon: 'checkpoint', compact: true, title: 'Nothing changed yet', text: 'Changes show here as the session edits files.' }) : null));
@@ -288,8 +304,15 @@
   // ---------- hooks ----------
   function HooksDialog(p) {
     var i = p.info || {};
+    var live = p.snap ? p.snap.sessions.filter(function (s) { return s.status !== 'ended'; }) : [];
+    var channels = [
+      { id: 'office', name: 'Office sessions', route: 'Opened from this page', today: live.filter(function (s) { return s.headless && !s.scheduleId; }).length },
+      { id: 'schedule', name: 'Schedules', route: 'Open an office session on time', today: live.filter(function (s) { return s.scheduleId; }).length },
+      { id: 'terminal', name: 'Terminal sessions', route: (i.hooksMode || 'command') + ' hooks', today: live.filter(function (s) { return !s.headless; }).length }];
     return h(A.Dialog, { open: true, title: 'Attach other sessions', onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
       h('div', { className: 'form' },
+        h('h3', { className: 'ext-h' }, 'Where sessions come from'),
+        h(A.ChannelList, { channels: channels }),
         h('p', { className: 'note' }, 'Sessions opened here are wired up for you. To seat a session you start yourself, launch it with the office settings file:'),
         h('pre', { className: 'code' }, i.launchCommand || ''),
         h('p', { className: 'note' }, 'Hooks: ' + (i.hooksMode || '') + ' on Claude Code ' + (i.claudeVersion || '') + '. Or merge these hooks into ~/.claude/settings.json to seat every session on this machine.'),
@@ -304,9 +327,16 @@
     var cf = useState(null), confirm = cf[0], setConfirm = cf[1];    // { kind: 'floor' | 'room', branch, root }
     var bz = useState(''), busy = bz[0], setBusy = bz[1];
     var er = useState(''), err = er[0], setErr = er[1];
+    var DONE = { '/api/floor/create': ['success', 'Floor added', function (b) { return 'Branch ' + b.branch + ' with its first room.'; }],
+      '/api/floor/delete': ['info', 'Floor deleted', function (b) { return 'Branch ' + b.branch + ' and its rooms are gone.'; }],
+      '/api/room/create': ['success', 'Room added', function (b) { return 'A new worktree on ' + b.branch + '.'; }],
+      '/api/room/delete': ['info', 'Room removed', function (b) { return 'The folder ' + String(b.root).split(/[\\/]/).pop() + ' is gone. Its branch stays.'; }] };
     function run(key, path, body, after) {
       setBusy(key); setErr('');
-      api(path, Object.assign({ repo: p.repo }, body)).then(function () { setBusy(''); if (after) after(); }, function (x) { setBusy(''); setErr(x.message); });
+      api(path, Object.assign({ repo: p.repo }, body)).then(function () {
+        setBusy(''); if (after) after();
+        var t = DONE[path]; if (t && p.toast) p.toast({ tone: t[0], title: t[1], text: t[2](body) });
+      }, function (x) { setBusy(''); setErr(x.message); });
     }
     if (!repo) {
       return h(A.Dialog, { open: true, title: 'Floors and rooms', onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
@@ -335,7 +365,6 @@
 
     var branches = order.map(function (b) { return { value: b, label: b }; });
     return h(A.Dialog, { open: true, title: 'Floors and rooms in ' + repo.name, onClose: p.onClose, actions: [
-      h(A.Button, { key: 'n', variant: 'quiet', icon: 'add', disabled: !!form, onClick: function () { setErr(''); setForm({ branch: '', from: main ? main.branch : '' }); } }, 'New floor'),
       h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
       h('div', { className: 'form wide' },
         h('p', { className: 'note' }, 'A floor is a branch. A room is a worktree: a folder with the branch checked out. A floor can have more than one room. Its rooms share the branch, so a commit in one room shows in the others.'),
@@ -354,14 +383,17 @@
             h('div', { className: 'past-main' },
               h('div', { className: 'past-title' }, h(A.Icon, { name: 'floor', size: 16 }), h('b', null, b), hasMain ? h(Tag, null, 'main folder') : null),
               rooms.map(function (w) {
+                var here = (snap ? snap.sessions : []).filter(function (s) { return s.status !== 'ended' && s.git && s.git.root.toLowerCase() === w.root.toLowerCase(); });
                 return h('div', { key: w.root, className: 'room-row' },
-                  h(A.Icon, { name: 'room', size: 14 }), h('span', { className: 'past-sub mono' }, w.root),
+                  h(A.OfficeTypeBadge, { type: 'lab', label: w.root.split(/[\\/]/).pop() }), h('span', { className: 'past-sub mono', title: w.root }, w.root),
+                  here.map(function (s) { return h('span', { key: s.uid, className: 'room-bot', title: s.name }, h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: botColor(), status: statusOf(s), size: 20 }), s.name); }),
                   w.main ? null : h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setConfirm({ kind: 'room', branch: b, root: w.root }); } }, 'Remove room'));
               })),
             h('div', { className: 'past-actions' },
               h(A.Button, { variant: 'quiet', icon: 'add', loading: busy === 'room:' + b, onClick: function () { run('room:' + b, '/api/room/create', { branch: b }); } }, 'Add room'),
               hasMain ? null : h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setConfirm({ kind: 'floor', branch: b }); } }, 'Delete floor')));
         })),
+        form ? null : h(A.AddButton, { label: 'Add a floor', onClick: function () { setErr(''); setForm({ branch: '', from: main ? main.branch : '' }); } }),
         h(FloorsWithoutRooms, { repo: p.repo, busy: busy, run: run, shown: order })));
   }
   // Branches with no worktree: a room brings the floor into the building.
@@ -406,6 +438,10 @@
       setBusy(key); setErr(''); setNote('');
       api('/api/ext', Object.assign({ uid: p.uid }, body)).then(function (r) {
         setBusy(''); if (r.restart) setNote('Saved. New sessions in this folder get the change. Close and reopen this session to use it now.');
+        var said = { 'mcp-add': ['success', 'Connector added', body.name], 'mcp-remove': ['info', 'Connector removed', body.name], 'plugin-install': ['success', 'Plugin installed', body.id],
+          'plugin-uninstall': ['info', 'Plugin removed', body.id], 'plugin-enable': ['success', 'Plugin on', body.id], 'plugin-disable': ['info', 'Plugin off', body.id],
+          toggle: [body.enabled ? 'success' : 'info', body.enabled ? 'Connector on' : 'Connector off', body.name] }[body.action];
+        if (said && p.toast) p.toast({ tone: said[0], title: said[1], text: String(said[2]) });
         if (done) done(); load();
       }, function (x) { setBusy(''); setErr(x.message); });
     }
@@ -430,6 +466,7 @@
         h('div', { className: 'inline-actions' },
           h(A.Button, { variant: 'primary', icon: 'add', loading: busy === 'add', disabled: !add.name.trim() || !add.target.trim(), onClick: function () { act('add', { action: 'mcp-add', name: add.name.trim(), target: add.target.trim(), scope: add.scope }, function () { setAdd(null); }); } }, 'Add connector'),
           h(A.Button, { variant: 'quiet', onClick: function () { setAdd(null); } }, 'Cancel')))) : null,
+      data && !add ? h(A.AddButton, { label: 'Add a connector', onClick: function () { setErr(''); setAdd({ kind: 'mcp', name: '', target: '', scope: 'local' }); } }) : null,
       !data ? h('p', { className: 'note', role: 'status' }, 'Asking the session for its connectors. A session that just opened can take half a minute while they start.') : null,
       h(Busy, { on: !data }),
       servers && !servers.length ? h(A.EmptyState, { icon: 'connector', compact: true, title: 'No connectors', text: 'Add one to give the session more tools.' }) : null,
@@ -463,6 +500,7 @@
         h('div', { className: 'inline-actions' },
           h(A.Button, { variant: 'primary', icon: 'add', loading: busy === 'add', disabled: !add.id.trim(), onClick: function () { act('add', { action: 'plugin-install', id: add.id.trim(), scope: add.scope }, function () { setAdd(null); }); } }, 'Install plugin'),
           h(A.Button, { variant: 'quiet', onClick: function () { setAdd(null); } }, 'Cancel')))) : null,
+      data && !add ? h(A.AddButton, { label: 'Install a plugin', onClick: function () { setErr(''); setAdd({ kind: 'plugin', id: '', scope: 'local' }); } }) : null,
       h(Busy, { on: !data }),
       data && !plugins.length ? h(A.EmptyState, { icon: 'skill', compact: true, title: 'No plugins', text: 'Install one from a marketplace.' }) : null,
       [{ on: true, label: 'On in this folder' }, { on: false, label: 'Off in this folder' }].map(function (g) {
@@ -485,7 +523,6 @@
       h('p', { className: 'note' }, 'Turn on and Turn off save a setting for this folder only. The session reloads its plugins at once.'));
 
     return h(A.Dialog, { open: true, title: 'Extensions for ' + p.name, onClose: p.onClose, actions: [
-      h(A.Button, { key: 'a', variant: 'quiet', icon: 'add', disabled: !!add, onClick: function () { setErr(''); setAdd(tab === 'plugins' ? { kind: 'plugin', id: '', scope: 'local' } : { kind: 'mcp', name: '', target: '', scope: 'local' }); } }, tab === 'plugins' ? 'Install plugin' : 'Add connector'),
       h(A.Button, { key: 'rf', variant: 'quiet', icon: 'retry', onClick: load }, 'Refresh'),
       h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
       h('div', { className: 'form wide' },
@@ -517,18 +554,99 @@
     return ReactDOM.createPortal(h(A.Button, { variant: 'ghost', icon: 'connector', title: 'Connectors and plugins of ' + p.sess.name, onClick: p.onOpen }, 'Extensions'), host);
   }
 
+  // ---------- all sessions: registry and subagents ----------
+  function accessOf(s) { return s.mode === 'bypassPermissions' || s.mode === 'acceptEdits' || s.mode === 'auto' ? 'broad' : 'scoped'; }
+  function SessionsDialog(p) {
+    var snap = useSnapshot();
+    var live = snap ? snap.sessions.filter(function (s) { return s.status !== 'ended'; }) : [];
+    var agents = live.map(function (s) {
+      var tools = {};
+      (s.calls || []).forEach(function (c) { tools[c.name] = true; });
+      return { name: s.name, shape: window.officeAdapter.shapeOf(s.uid), color: botColor(), status: statusOf(s), platform: s.headless ? 'Office session' : 'Terminal session',
+        identity: (s.git ? s.git.branch + ' · ' : '') + (String(s.cwd || '').split(/[\/]/).pop() || ''), model: s.model || 'default', tools: Object.keys(tools), access: accessOf(s), last: ago(s.lastEvent) };
+    });
+    var teams = live.filter(function (s) { return (s.agents || []).some(function (a) { return !a.done; }); });
+    return h(A.Dialog, { open: true, title: 'All sessions', onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
+      h('div', { className: 'form wide' },
+        h('p', { className: 'note' }, 'Every open session in every building. Broad access means the session can edit files without asking (Accept edits or a bypass mode).'),
+        !agents.length ? h(A.EmptyState, { icon: 'session', compact: true, title: 'No open sessions', text: 'Open a session to see it here.' }) : h('div', { className: 'table-wrap' }, h(A.AgentRegistry, { agents: agents })),
+        teams.length ? h('h3', { className: 'ext-h' }, 'Subagents at work', h('span', { className: 'ext-n' }, teams.length)) : null,
+        teams.map(function (s) {
+          var kids = s.agents.filter(function (a) { return !a.done; }).map(function (a) { return { name: a.type, shape: 'blob', status: 'working', task: a.task, ephemeral: true }; });
+          return h(A.DelegationTree, { key: s.uid, max: Math.max(3, kids.length), tree: { name: s.name, shape: window.officeAdapter.shapeOf(s.uid), status: statusOf(s), task: s.prompt ? clip(s.prompt, 80) : '', children: kids }, onSelect: function () { p.onGo(s); } });
+        })));
+  }
+
+  // ---------- the city: every repository as a building ----------
+  function cityData(snap) {
+    return window.officeAdapter.buildings(snap).map(function (b) {
+      var def = window.officeAdapter.preview(b.key, snap), bots = [];
+      def.floors.forEach(function (f) { f.rooms.forEach(function (r) { (r.bots || []).forEach(function (x) { bots.push({ name: x.name, status: x.status, floor: f.name }); }); }); });
+      return { key: b.key, name: b.name, sessions: b.sessions, waiting: b.waiting, floors: def.floors.map(function (f) { return { name: f.name, key: f.key }; }), bots: bots };
+    });
+  }
+  function CityView(p) {
+    var snap = useSnapshot();
+    var ref = React.useRef(null), city = React.useRef(null), fitted = React.useRef(false);
+    var hv = useState(null), hov = hv[0], setHov = hv[1];
+    var list = snap ? cityData(snap) : [];
+    useEffect(function () {
+      if (!window.OfficeCity) return undefined;
+      city.current = window.OfficeCity.mount(ref.current, { root: document.documentElement, onHover: setHov, onPick: function (d) { p.onEnter(d.key, city.current); } });
+      return function () { if (city.current) city.current.dispose(); city.current = null; };
+    }, []);
+    useEffect(function () {
+      if (!city.current || !snap) return;
+      city.current.update(list);
+      if (!fitted.current) { fitted.current = true; city.current.fit(true); }
+    }, [snap]);
+    var waiting = list.reduce(function (n, b) { return n + b.waiting; }, 0);
+    return h('div', { className: 'city' },
+      h('div', { ref: ref, className: 'city-scene' }),
+      h('div', { className: 'city-hud' },
+        h(A.Panel, { title: 'City', count: plural(list.length, 'building', 'buildings') },
+          h('p', { className: 'note' }, 'Each building is a repository. Each floor is a branch. Click a building, or zoom in on it, to go inside. In a building, zoom out to come back.'),
+          !list.length ? h(A.EmptyState, { icon: 'building', compact: true, title: 'No buildings yet', text: 'Open a session in a git repository to add its building.' }) : null,
+          h('ul', { className: 'city-list' }, list.map(function (b) {
+            return h('li', { key: b.key },
+              h('button', { type: 'button', className: 'city-row' + (b.key === p.shown ? ' is-shown' : '') + (hov && hov.key === b.key ? ' is-hover' : ''), onClick: function () { p.onEnter(b.key, city.current); } },
+                h(A.StatusDot, { status: b.waiting ? 'waiting' : b.sessions ? 'working' : 'resting' }),
+                h('span', { className: 'city-name' }, b.name),
+                h('span', { className: 'city-sub mono' }, plural(b.floors.length, 'floor', 'floors') + ' · ' + b.sessions),
+                b.waiting ? h('span', { className: 'city-wait' }, b.waiting + ' need you') : null));
+          })),
+          waiting ? h('p', { className: 'note' }, plural(waiting, 'request waits', 'requests wait') + '. Buildings with a request show a beacon.') : null)),
+      hov ? h('div', { className: 'city-tag', role: 'status' }, h('b', null, hov.name), ' · ' + plural(hov.floors.length, 'floor', 'floors') + ' · ' + plural(hov.sessions, 'session', 'sessions') + (hov.waiting ? ' · ' + hov.waiting + ' need you' : '')) : null,
+      h('div', { className: 'city-zoom', role: 'toolbar', 'aria-label': 'City zoom' },
+        h(A.Button, { variant: 'quiet', icon: 'zoom-in', title: 'Zoom in', onClick: function () { if (city.current) city.current.zoomBy(1.35); } }, 'Zoom in'),
+        h(A.Button, { variant: 'quiet', icon: 'zoom-out', title: 'Zoom out', onClick: function () { if (city.current) city.current.zoomBy(1 / 1.35); } }, 'Zoom out'),
+        h(A.Button, { variant: 'quiet', icon: 'building', onClick: function () { if (city.current) city.current.fit(false); } }, 'Show all')));
+  }
+
+  // ---------- page commands in the DS command palette (Ctrl+K) ----------
+  // The HUD builds its palette list with AgentOffice.CommandPalette.actions(); the page adds its own.
+  var pageActions = [];
+  (function () {
+    var base = A.CommandPalette && A.CommandPalette.actions;
+    if (!base || base.__page) return;
+    var wrapped = function (o) { return base(o).concat(pageActions); };
+    wrapped.__page = true;
+    A.CommandPalette.actions = wrapped;
+  })();
+
   // ---------- the control strip ----------
+  function Tip(p) { return p.text ? h(A.Tooltip, { text: p.text }, p.children) : p.children; }
   function Controls(p) {
     var snap = useSnapshot();
-    var nt = useState(''), note = nt[0], setNote = nt[1];
     var sess = p.sel ? window.officeAdapter.session(p.sel) : null;
     var live = snap ? snap.sessions.filter(function (s) { return s.status !== 'ended'; }) : [];
     // spend of the sessions that are open now (closed ones are under Past)
     var total = live.reduce(function (n, s) { return n + (typeof s.cost === 'number' ? s.cost : 0); }, 0);
-    function ctl(action, value) { setNote(''); api('/api/control', { uid: sess.uid, action: action, value: value }).catch(function (x) { setNote(x.message); }); }
-    function stopTurn() { setNote(''); api('/api/interrupt', { uid: sess.uid }).catch(function (x) { setNote(x.message); }); }
+    function fail(x) { p.toast({ tone: 'error', title: sess ? sess.name : 'Office', text: x.message }); }
+    function ctl(action, value) { api('/api/control', { uid: sess.uid, action: action, value: value }).catch(fail); }
+    function stopTurn() { api('/api/interrupt', { uid: sess.uid }).catch(fail); }
     var ask = sess && (sess.pending || []).filter(function (r) { return r.always; })[0];
-    function always() { setNote(''); api('/api/answer', { id: ask.id, allow: true, always: true }).catch(function (x) { setNote(x.message); }); }
+    function always() { api('/api/answer', { id: ask.id, allow: true, always: true }).then(function () { p.toast({ tone: 'success', title: sess.name, text: 'Allowed from now on: ' + ask.always }); }, fail); }
 
     var modeOpts = [{ value: 'default', label: 'Default' }, { value: 'plan', label: 'Plan only' }, { value: 'acceptEdits', label: 'Accept edits' }];
     if (sess && sess.mode && !modeOpts.some(function (o) { return o.value === sess.mode; })) modeOpts.push({ value: sess.mode, label: sess.mode });
@@ -539,33 +657,37 @@
     var usage = sess && sess.usage && sess.usage.tokens ? sess.usage : null;
     // Requests wait in a building that is not shown: offer the way there.
     var elsewhere = p.buildings.filter(function (b) { return b.key !== p.shown && b.waiting; })[0];
+    var many = p.buildings.length > 1 || (p.buildings.length && p.buildings[0].key !== p.shown);
 
     return h(React.Fragment, null,
-      snap && !live.length ? h('div', { className: 'welcome' }, h(A.EmptyState, { icon: 'building', title: 'No sessions yet', text: 'Open a session to seat the first bot. You can also reopen a past one.', action: { label: 'Open session', icon: 'add', onClick: p.onOpen } })) : null,
+      snap && !live.length ? h('div', { className: 'welcome' },
+        h('div', { className: 'welcome-logo' }, h(A.Logo, { variant: 'lockup', height: 28 })),
+        h(A.EmptyState, { icon: 'building', title: 'No sessions yet', text: 'Open a session to seat the first bot. You can also reopen a past one.', action: { label: 'Open session', icon: 'add', onClick: p.onOpen } })) : null,
       h('div', { className: 'strip', role: 'toolbar', 'aria-label': 'Office controls' },
         h('div', { className: 'strip-group' },
           h(A.Button, { variant: 'primary', icon: 'add', onClick: p.onOpen }, 'Open session'),
-          h(A.Button, { variant: 'quiet', icon: 'session', onClick: p.onPast }, 'Past'),
-          h(A.Button, { variant: 'quiet', icon: 'schedule', onClick: p.onSchedules }, 'Schedules'),
-          h(A.Button, { variant: 'quiet', icon: 'terminal', onClick: p.onHooks }, 'Hooks'),
-          p.shown ? h(A.Button, { variant: 'quiet', icon: 'floor', onClick: p.onFloors }, 'Floors') : null,
-          p.buildings.length > 1 || (p.buildings.length && p.buildings[0].key !== p.shown)
-            ? h(A.Select, { id: 'c-building', ariaLabel: 'Building (repository)', value: p.shown, onChange: p.onBuilding,
+          many ? h(A.Select, { id: 'c-building', ariaLabel: 'Building (repository)', value: p.shown, onChange: p.onBuilding,
                 options: p.buildings.map(function (b) { return { value: b.key, label: b.name + ' · ' + plural(b.sessions, 'session', 'sessions') + (b.waiting ? ' · ' + b.waiting + ' need you' : '') }; })
-                  .concat(p.buildings.some(function (b) { return b.key === p.shown; }) ? [] : [{ value: p.shown, label: (p.shownName || 'This building') + ' · no sessions' }]) })
-            : null,
+                  .concat(p.buildings.some(function (b) { return b.key === p.shown; }) ? [] : [{ value: p.shown, label: (p.shownName || 'This building') + ' · no sessions' }]) }) : null,
           elsewhere ? h(A.Button, { variant: 'emphasis', icon: 'waiting', onClick: function () { p.onBuilding(elsewhere.key); } }, plural(elsewhere.waiting, 'request', 'requests') + ' in ' + elsewhere.name) : null,
           live.length ? h('span', { className: 'strip-total mono' }, live.length + ' open · ' + money(total)) : null),
+        h('div', { className: 'strip-group strip-nav' },
+          p.view === 'city' ? h(A.Button, { variant: 'quiet', icon: 'floor', title: 'Go inside ' + (p.shownName || 'the building'), onClick: p.onOffice }, 'Go inside') : h(A.Button, { variant: 'quiet', icon: 'building', onClick: p.onCity }, 'City'),
+          p.shown ? h(A.Button, { variant: 'quiet', icon: 'floor', onClick: p.onFloors }, 'Floors') : null,
+          h(A.Button, { variant: 'quiet', icon: 'identity', onClick: p.onSessions }, 'Sessions'),
+          h(A.Button, { variant: 'quiet', icon: 'session', onClick: p.onPast }, 'Past'),
+          h(A.Button, { variant: 'quiet', icon: 'schedule', onClick: p.onSchedules }, 'Schedules'),
+          h(A.Button, { variant: 'ghost', icon: 'terminal', onClick: p.onHooks }, 'Hooks'),
+          h(Tip, { text: 'A thin status bar for a second screen' }, h(A.Button, { variant: 'ghost', icon: 'zoom-out', onClick: p.onCompact }, 'Compact'))),
         sess ? h('div', { className: 'strip-group strip-bot' },
           h('span', { className: 'strip-id' }, h(A.StatusDot, { status: statusOf(sess) }), h('b', null, sess.name), ctxPct != null ? h('span', { className: 'mono' }, 'context ' + ctxPct + '%') : null),
           sess.headless && (usage || sess.cost) ? h(A.CostMeter, { tokens: usage ? usage.tokens : 0, cost: sess.cost || 0, cached: usage && usage.input ? usage.cached / usage.input : undefined }) : null,
           sess.headless ? h(A.Select, { id: 'c-model', ariaLabel: 'Model of ' + sess.name, options: modelOpts, value: sess.model || '', onChange: function (v) { ctl('model', v); } }) : null,
           sess.headless ? h(A.Select, { id: 'c-mode', ariaLabel: 'Permissions of ' + sess.name, options: modeOpts, value: sess.mode || '', onChange: function (v) { ctl('mode', v); } }) : null,
-          sess.headless ? h(A.Button, { variant: 'quiet', icon: 'pause', disabled: !working, onClick: stopTurn }, 'Stop turn') : null,
+          sess.headless ? h(Tip, { text: working ? '' : 'Nothing runs now' }, h(A.Button, { variant: 'quiet', icon: 'pause', disabled: !working, onClick: stopTurn }, 'Stop turn')) : null,
           h(A.Button, { variant: 'quiet', icon: 'trace', onClick: function () { p.onChanges(sess.uid, sess.name); } }, 'Changes'),
           h(A.Button, { variant: 'quiet', icon: 'connector', onClick: function () { p.onExtensions(sess.uid, sess.name); } }, 'Extensions'),
-          ask ? h(A.Button, { variant: 'emphasis', icon: 'approve', onClick: always, title: 'Approve and allow this from now on: ' + ask.always }, 'Always allow ' + clip(ask.always, 28)) : null) : null,
-        note ? h('p', { className: 'strip-note ao-err', role: 'alert' }, note) : null));
+          ask ? h(A.Button, { variant: 'emphasis', icon: 'approve', onClick: always, title: 'Approve and allow this from now on: ' + ask.always }, 'Always allow ' + clip(ask.always, 28)) : null) : null));
   }
 
   // ---------- app ----------
@@ -573,6 +695,12 @@
     var sel = useChatBot();
     var s2 = useState(null), dlg = s2[0], setDlg = s2[1];
     var s3 = useState({ recent: [], templates: [], schedules: [] }), info = s3[0], setInfo = s3[1];
+    var tt = useState([]), toasts = tt[0], setToasts = tt[1], tid = React.useRef(0);
+    function toast(t) {
+      var id = ++tid.current;
+      setToasts(function (l) { return l.concat([Object.assign({ id: id }, t)]).slice(-3); });
+      setTimeout(function () { setToasts(function (l) { return l.filter(function (x) { return x.id !== id; }); }); }, 6000);
+    }
     function refresh() { return getInfo().then(function (i) { setInfo(i); return i; }, function () { return info; }); }
     function show(name) { refresh().then(function () { setDlg({ name: name }); }); }
     function changes(uid, name) {
@@ -592,29 +720,98 @@
     // The DS has no event that removes a floor or a room, so a removal rebuilds the scene.
     var gone = !!snap && window.officeAdapter.shown() === shown && window.officeAdapter.roomsShown().some(function (k) { return !now[k]; });
     useEffect(function () { if (gone) setEpoch(function (e) { return e + 1; }); }, [gone]);
-    var sceneKey = shown + ':' + epoch + (Object.keys(now).length ? '' : ':empty');
-    var first = React.useRef(true);
+    // Compact view: the DS ambient bar, for a second screen. ?ambient=1 starts in it.
+    var am = useState(function () { return /[?&]ambient=1\b/.test(location.search); }), ambient = am[0], setAmbient = am[1];
+    var wantKey = shown + ':' + epoch + (Object.keys(now).length ? '' : ':empty') + (ambient ? ':ambient' : '');
+    // City or office. The office is the default; the choice is kept in the browser.
+    var vw = useState(function () { try { return localStorage.getItem('ao-view') === 'city' ? 'city' : 'office'; } catch (x) { return 'office'; } }), view = vw[0], setView = vw[1];
+    // Smooth changes: the shown scene fades out, then the next one mounts and fades in.
+    var fd = useState({ key: wantKey, repo: shown, view: view }), cur2 = fd[0], setCur2 = fd[1];
+    var fading = cur2.key !== wantKey || cur2.view !== view;
+    useEffect(function () {
+      if (!fading) return undefined;
+      var t = setTimeout(function () { setCur2({ key: wantKey, repo: shown, view: view }); }, reduced() ? 0 : cssMs('duration-base', 240));
+      return function () { clearTimeout(t); };
+    }, [wantKey, view]);
+    var sceneKey = cur2.key;
+    var introNext = React.useRef(true);
     // The scene mounts once per building. Re-rendering the page must not rebuild it.
-    var def = useMemo(function () { return snap ? window.officeAdapter.buildingFor(shown) : null; }, [snap ? sceneKey : null]);
-    var intro = useMemo(function () { var i = first.current; if (def) first.current = false; return i; }, [def]);
+    var def = useMemo(function () { return snap && cur2.view === 'office' ? window.officeAdapter.buildingFor(cur2.repo) : null; }, [snap ? sceneKey + cur2.view : null]);
+    var intro = useMemo(function () { var i = introNext.current; if (def) introNext.current = false; return i && !ambient; }, [def]);
+    function go(v) { setView(v); try { localStorage.setItem('ao-view', v); } catch (x) { /* private window */ } }
+    // From the city: fly to the building, then enter it with the DS intro flythrough.
+    function enter(key, city) {
+      var inside = function () { introNext.current = true; pick(key); go('office'); };
+      if (city) city.focus(key, inside); else inside();
+    }
     var week = snap && snap.plan && snap.plan.week;
     useEffect(function () { var el = document.getElementById('office'); if (el) el.classList.toggle('has-plan', !!week); }, [!!week]);
-    var scene = def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: window.officeAdapter, height: window.innerHeight, quality: 'auto', intro: intro, editable: false, simulate: false, reset: week ? resetText(week.resetsAt) : undefined }) : null;
+    var officeRef = React.useRef(null);
+    // zoom out to leave: scrolling out at the widest zoom goes floor -> building -> city
+    useEffect(function () {
+      if (cur2.view !== 'office') return undefined;
+      var pushes = 0, pushT = 0;
+      function onWheel(e) {
+        var o = officeRef.current, st = o && o.inspect && o.inspect().stage;
+        if (!st || !st.ctl || e.deltaY <= 0 || !e.target.closest || !e.target.closest('.ao-scene')) { pushes = 0; return; }
+        if (st.cam.zoom > st.ctl.minZoom * 1.03) return;
+        var now = Date.now();
+        pushes = now - pushT < 800 ? pushes + 1 : 1; pushT = now;
+        if (pushes < 2) return;
+        pushes = 0;
+        var inBuilding = Array.prototype.some.call(document.querySelectorAll('[aria-pressed="true"]'), function (b) { return /building/i.test(b.textContent); });
+        if (inBuilding) go('city'); else o.setView('building');
+      }
+      window.addEventListener('wheel', onWheel, { passive: true, capture: true });
+      return function () { window.removeEventListener('wheel', onWheel, true); };
+    }, [cur2.view]);
+    var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: window.officeAdapter, height: window.innerHeight, quality: 'auto', intro: intro, editable: false, simulate: false,
+      ambient: ambient, onAmbientOpen: function () { setAmbient(false); }, onReady: function (o) { officeRef.current = o; var st = o.inspect && o.inspect().stage; if (st && window.OfficeCity) window.OfficeCity.cameraFeel(st); },
+      reset: week ? resetText(week.resetsAt) : undefined }) : null;
+
+    // A session opened from this page that sits in another building: offer the way there.
+    var seen = React.useRef(null);
+    useEffect(function () {
+      if (!snap) return;
+      if (!seen.current) { seen.current = {}; snap.sessions.forEach(function (s) { seen.current[s.uid] = true; }); return; }
+      snap.sessions.forEach(function (s) {
+        if (seen.current[s.uid] || !s.placed) return;
+        seen.current[s.uid] = true;
+        var key = s.git ? s.git.repo.toLowerCase() : '';
+        if (s.status !== 'ended' && key !== shown) toast({ tone: 'info', title: s.name, text: 'Opened in ' + (s.git ? s.git.repo.split(/[\\/]/).pop() : 'Other folders') + '.', action: { label: 'Go there', onClick: function () { pick(key); } } });
+      });
+    }, [snap]);
+
     function close() { setDlg(null); }
     function extensions(uid, name) { setDlg({ name: 'ext', uid: uid, label: name }); }
+    function goTo(s) { var key = s.git ? s.git.repo.toLowerCase() : ''; pick(key); setDlg(null); setTimeout(function () { if (officeRef.current) officeRef.current.select(s.name); }, 400); }
     var selSess = sel ? window.officeAdapter.session(sel) : null;
     var d = dlg && dlg.name;
+
+    // the page's own commands in Ctrl+K
+    pageActions.length = 0;
+    [['open', 'Open a session', 'add', function () { show('open'); }], ['sessions', 'All sessions', 'identity', function () { setDlg({ name: 'sessions' }); }],
+     ['city', 'City view', 'building', function () { go('city'); }], ['office', 'Office view', 'floor', function () { go('office'); }], ['floors', 'Floors and rooms', 'floor', function () { setDlg({ name: 'floors' }); }],
+     ['past', 'Past sessions', 'session', function () { show('past'); }], ['schedules', 'Schedules', 'schedule', function () { show('schedules'); }],
+     ['hooks', 'Attach other sessions', 'terminal', function () { show('hooks'); }], ['compact', 'Compact view', 'zoom-out', function () { setAmbient(true); }]]
+      .forEach(function (a) { pageActions.push({ id: 'page-' + a[0], label: a[1], icon: a[2], group: 'Office', run: a[3] }); });
+    if (selSess) pageActions.push({ id: 'page-ext', label: 'Extensions of ' + selSess.name, icon: 'connector', group: 'Office', run: function () { extensions(selSess.uid, selSess.name); } });
+    list.forEach(function (b) { if (b.key !== shown) pageActions.push({ id: 'page-b-' + b.key, label: 'Go to ' + b.name, icon: 'building', group: 'Buildings', keywords: 'building repository ' + b.name, run: function () { pick(b.key); } }); });
+
     return h(React.Fragment, null,
-      scene,
-      h(Controls, { sel: sel, buildings: list, shown: shown, shownName: def && def.name, onBuilding: pick, onFloors: function () { setDlg({ name: 'floors' }); }, onExtensions: extensions, onOpen: function () { show('open'); }, onPast: function () { show('past'); }, onSchedules: function () { show('schedules'); }, onHooks: function () { show('hooks'); }, onChanges: changes }),
+      h('div', { className: 'view' + (fading ? ' is-fading' : '') }, scene),
+      ambient ? null : h(Controls, { sel: cur2.view === 'office' ? sel : null, buildings: list, shown: shown, shownName: (list.filter(function (b) { return b.key === shown; })[0] || def || {}).name, toast: toast, onBuilding: function (k) { pick(k); if (view === 'city') go('office'); }, onCity: function () { go('city'); }, onOffice: function () { introNext.current = true; go('office'); }, view: cur2.view, onSessions: function () { setDlg({ name: 'sessions' }); }, onCompact: function () { setAmbient(true); },
+        onFloors: function () { setDlg({ name: 'floors' }); }, onExtensions: extensions, onOpen: function () { show('open'); }, onPast: function () { show('past'); }, onSchedules: function () { show('schedules'); }, onHooks: function () { show('hooks'); }, onChanges: changes }),
       d === 'open' ? h(OpenDialog, { recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
-      d === 'past' ? h(PastDialog, { onClose: close, onChanges: changes }) : null,
-      d === 'schedules' ? h(SchedulesDialog, { recent: info.recent, onInfo: setInfo, onClose: close }) : null,
-      d === 'changes' ? h(ChangesDialog, { uid: dlg.uid, name: dlg.label, ended: dlg.ended, onClose: close }) : null,
-      d === 'hooks' ? h(HooksDialog, { info: info, onClose: close }) : null,
-      d === 'floors' ? h(FloorsDialog, { repo: shown, onClose: close }) : null,
-      d === 'ext' ? h(ExtensionsDialog, { uid: dlg.uid, name: dlg.label, onClose: close }) : null,
-      h(ChatHeaderButton, { sess: selSess, onOpen: function () { extensions(selSess.uid, selSess.name); } }));
+      d === 'past' ? h(PastDialog, { onClose: close, onChanges: changes, toast: toast }) : null,
+      d === 'schedules' ? h(SchedulesDialog, { recent: info.recent, onInfo: setInfo, toast: toast, onClose: close }) : null,
+      d === 'changes' ? h(ChangesDialog, { uid: dlg.uid, name: dlg.label, ended: dlg.ended, toast: toast, onClose: close }) : null,
+      d === 'hooks' ? h(HooksDialog, { info: info, snap: snap, onClose: close }) : null,
+      d === 'floors' ? h(FloorsDialog, { repo: shown, toast: toast, onClose: close }) : null,
+      d === 'ext' ? h(ExtensionsDialog, { uid: dlg.uid, name: dlg.label, toast: toast, onClose: close }) : null,
+      d === 'sessions' ? h(SessionsDialog, { onClose: close, onGo: goTo }) : null,
+      ambient || cur2.view !== 'office' ? null : h(ChatHeaderButton, { sess: selSess, onOpen: function () { extensions(selSess.uid, selSess.name); } }),
+      h('div', { className: 'page-toasts' }, h(A.ToastStack, { toasts: toasts, onClose: function (id) { setToasts(function (l) { return l.filter(function (x) { return x.id !== id; }); }); } })));
   }
 
   ReactDOM.createRoot(document.getElementById('office')).render(h(App));

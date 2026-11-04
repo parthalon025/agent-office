@@ -50,7 +50,17 @@ const STATUS_WORD = { M: 'modified', A: 'added', D: 'deleted', R: 'renamed', C: 
 
 /** Branch, changed files and a unified diff for the folder a session works in. */
 export async function changes(cwd) {
-  const out = { branch: '', ahead: 0, files: [], stat: '', diff: '', truncated: false };
+  const out = { branch: '', ahead: 0, files: [], stat: '', diff: '', truncated: false, commits: [] };
+  // The last commits of this folder's branch, newest first, for the commit timeline.
+  try {
+    const log = await git(['log', '-8', '--format=%x1e%h%x1f%s%x1f%cr', '--shortstat'], cwd);
+    out.commits = log.split('\x1e').filter((x) => x.trim()).map((rec) => {
+      const [head, ...rest] = rec.split('\n');
+      const [id, label, time] = head.split('\x1f');
+      const files = Number(((rest.join(' ').match(/(\d+) files? changed/) || [])[1]) || 0);
+      return { id, label: label || '(no message)', time: time || '', files };
+    });
+  } catch { /* no commits yet */ }
   const status = (await git(['status', '--porcelain=v1', '-b'], cwd)).split('\n').filter(Boolean);
   const head = status.shift() || '';
   out.branch = (head.match(/^## ([^.\s]+)/) || [])[1] || '';
