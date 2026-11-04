@@ -27,6 +27,10 @@ const rule = (sel) => {
   return at < 0 ? '' : css.slice(at, css.indexOf('\n}', at) + 2);
 };
 
+test('office.css: the palette overlay is above the dialog layer (#48)', () => {
+  assert.match(rule('.ao-cmdk-o'), /z-index:\s*calc\(var\(--z-dialog\)\s*\+\s*1\)/);
+});
+
 test('office.css: the welcome card is below the dialog layer and fits the viewport (#47)', () => {
   const r = rule('.welcome');
   assert.match(r, /z-index:\s*var\(--z-(hud|sheet|tag)\)/);

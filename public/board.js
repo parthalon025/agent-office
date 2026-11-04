@@ -30,7 +30,17 @@
   // A DS Dialog closes from its own keydown listener and React removes it before window bubble listeners run.
   // So record the layer state in window capture and decide in the bubble phase with escTaken(e).
   var escLayer = false;
-  window.addEventListener('keydown', function (e) { if (e.key === 'Escape') escLayer = layerOpen(); }, true);
+  // The palette opens above a dialog (office.css), so one Esc closes the palette only: the event stops here,
+  // before the dialog's own document listener, and the palette closes through its overlay.
+  window.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    escLayer = layerOpen();
+    var pal = document.querySelector('.ao-cmdk-o');
+    if (pal && document.querySelector('.ao-dialog')) {
+      e.stopPropagation();
+      pal.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    }
+  }, true);
   function escTaken(e) { return e.defaultPrevented || escLayer || layerOpen(); }
   function none() { return null; }
   function empty() { return []; }

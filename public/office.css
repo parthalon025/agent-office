@@ -34,6 +34,8 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
   --rail-clear: 302px;   /* the DS right rail: 270px wide, 16px from the edge, and a gap */
   left: calc((100vw - var(--rail-clear)) / 2); width: max-content; max-width: calc(100vw - var(--rail-clear) - var(--space-4));
 }
+/* The palette sits above every dialog (both are --z-dialog, and DOM order put the dialog on top). */
+.ao-cmdk-o { z-index: calc(var(--z-dialog) + 1); }
 
 /* the dock stops before the HUD rail column (right 300px, up to 68px wide) and, when narrow, clears the log lane */
 @media (max-width: 1359px) { .strip { right: 380px; } }
