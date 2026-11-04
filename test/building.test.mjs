@@ -233,7 +233,7 @@ test('the city round trip: leave a building, come back, and every bot is seated 
   assert.deepEqual(types(back.ev), ['bot.add', 'session.start', 'model', 'tool.call', 'tool.result']);
   assert.equal(of(back.ev, 'bot.add')[0].bot.name, 'repo');
   // attaching the same adapter again starts clean as well
-  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'sid-f', cwd: 'C:\work\repo-feat' });   // a new room appears between the attaches
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'sid-f', cwd: 'C:\\work\\repo-feat' });   // a new room appears between the attaches
   const again = [];
   back.attach((e) => again.push(e));
   const known = new Set([...back.def.floors.flatMap((f) => (f.rooms || []).map((x) => x.id)), ...again.filter((e) => e.type === 'floor.add' || e.type === 'room.add').flatMap((e) => (e.room ? [e.room.id] : (e.floor && e.floor.rooms || []).map((x) => x.id)))]);
