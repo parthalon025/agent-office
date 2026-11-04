@@ -7,6 +7,9 @@ Versions keep the `x` prefix.
 
 ### Added
 
+- Provider seam. Claude Code is now one provider behind a contract, and the office can host other agent kinds.
+- Local model agents. Ollama and LM Studio agents work at a desk with read, search, edit, write and run tools inside their worktree. Each risky call asks you first. They can use the office tools, so they can ask you a question too.
+- Two-step room screens. The first click on a desk monitor, the blackboard, the notes board or the stats display brings it into view. The second click opens it.
 - Rooms know their agents. An agent can read its room and change the notes board and the blackboard pin (`office_room`, `office_room_update`).
 - Room boards. The blackboard shows to-dos, browser steps, last calls and the repository. A notes board in each room takes your text and merges agent lines with your edits.
 - Terminal panel. Each desk monitor shows its session as a live terminal.
