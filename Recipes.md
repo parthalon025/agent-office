@@ -20,6 +20,8 @@ The office HUD has these by default (set `hud: false` to hide all HUD parts):
 2. Put each room in the office type that fits the work: `team`, `lab`, `studio` or `hq` (war room).
 3. Pass it: `h(A.OfficeScene, { building })`. Or start from a solution: `solution: "hermes" | "copilot" | "microsoft" | "hq"`.
 
+Leave `color` out and the scene picks a body color for each bot. To set it yourself, take it from `AgentOffice.BODY_COLORS` (10 colors), for example `BODY_COLORS[n % BODY_COLORS.length]`, so a list and the scene show the same color. Do not copy the hex values.
+
 Do not draw your own 3D bots. Do not set bot positions.
 
 ## Connect a platform
@@ -108,7 +110,7 @@ Use tokens only. Write a README with a props table and a "consumer provides" lin
 1. Screenshots: Day, Night, Sublevel; 1360, 1100 and 400 px; `quality: "low"`; reduced motion. Look at each one.
 2. Walk test: `office.applyEvent({ type: "status", bot, status: "resting" })` for each bot in a room, then `"working"`. Look while they walk. For a number, use `office.inspect().nav[floor].path(from, to)`.
 3. Adapter test: click Approve and check that the scene changes only after the adapter replies.
-4. Run `python3 kit/check.py`.
+4. Run `python3 kit/check.py <your files>`. A custom property that your own CSS defines, or that your script sets with `setProperty`, counts as a known token. A `var(--name)` that nothing defines is an error.
 
 ## Prompt templates
 

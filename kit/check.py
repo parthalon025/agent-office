@@ -1,6 +1,6 @@
 """Agent Office kit x1.5: checks for a page or an adapter built with the system.
 Usage: python3 kit/check.py [files...] [--events log.jsonl]
-Checks: no literal colors in CSS, only known tokens and icons, an x version mark in each title,
+Checks: no literal colors in CSS, only known tokens (DS tokens, and custom properties the checked files define) and icons, an x version mark in each title,
 no emoji, and (with --events) each event against kit/schema.json. Exit code 1 on an error."""
 import json, os, re, sys
 here = os.path.dirname(os.path.abspath(__file__))
@@ -13,28 +13,43 @@ for _d in (os.path.join(here, ".."), here, os.getcwd()):
 STATES = {"working", "waiting", "error", "resting", "finished"}
 errors, warns = [], []
 
+def check_fields(obj, fields, pre="", closed=False):
+    out = []
+    for k, t in fields.items():
+        opt = t.endswith("?"); t = t.rstrip("?"); v = obj.get(k)
+        if v is None:
+            if not opt: out.append("missing " + pre + k)
+            continue
+        if t in S.get("types", {}):
+            if isinstance(v, dict): out += check_fields(v, S["types"][t]["fields"], pre + k + ".", True)
+            else: out.append("%s%s must be %s" % (pre, k, t))
+            continue
+        if t in S.get("enums", {}):
+            if v not in S["enums"][t]: out.append("%s%s must be one of %s" % (pre, k, ", ".join(S["enums"][t])))
+            continue
+        ok = {"string": isinstance(v, str), "number": isinstance(v, (int, float)) and not isinstance(v, bool),
+              "boolean": isinstance(v, bool), "Status": isinstance(v, str) and v in STATES}.get(t, isinstance(v, list) if t.endswith("[]") else isinstance(v, dict))
+        if not ok: out.append("%s%s must be %s" % (pre, k, t))
+    if closed:   # a typed object: a field that is not listed is a typo (fields that start with _ belong to the engine)
+        for k in obj:
+            if k not in fields and not k.startswith("_"): out.append("unknown field " + pre + k)
+    return out
+
 def check_event(ev, kind="events"):
     sp = S[kind].get(ev.get("type"))
     if not sp: return ["unknown type: %s" % ev.get("type")]
-    out = []
-    for k, t in sp["fields"].items():
-        opt = t.endswith("?"); t = t.rstrip("?"); v = ev.get(k)
-        if v is None:
-            if not opt: out.append("missing " + k)
-            continue
-        ok = {"string": isinstance(v, str), "number": isinstance(v, (int, float)) and not isinstance(v, bool),
-              "boolean": isinstance(v, bool), "Status": v in STATES}.get(t, isinstance(v, list) if t.endswith("[]") else isinstance(v, dict))
-        if not ok: out.append("%s must be %s" % (k, t))
-    return out
+    return check_fields(ev, sp["fields"])
 
 args = sys.argv[1:]; events = None
 if "--events" in args:
     i = args.index("--events"); events = args[i + 1]; args = args[:i] + args[i + 2:]
-# Page change, not a DS change: custom properties the page itself defines (in its CSS, or with setProperty) count as
-# known too. DS issue: https://github.com/parthalon025/agent-office/issues/37. Replace this loop when the DS takes the rule.
+# DS rule: a custom property that a checked page defines itself also counts as a known token. It is defined in a checked
+# CSS file or HTML style block (--name: value), or in a checked JS or HTML file with setProperty('--name', ...). Page-local tokens, such as a
+# layout offset that script measures, need no entry in schema.json. A var(--name) that nothing defines is still an error.
 for p in args:
     _t = open(p, encoding="utf-8").read()
-    TOK |= set(re.findall(r"(?<![a-z0-9-])--([a-z0-9-]+)\s*:", _t if p.endswith(".css") else ""))
+    _d = _t if p.endswith(".css") else "\n".join(re.findall(r"<style[^>]*>(.*?)</style>", _t, re.S) + re.findall(r'style="([^"]*)"', _t)) if p.endswith(".html") else ""
+    TOK |= set(re.findall(r"(?<![a-z0-9-])--([a-z0-9-]+)\s*:", _d))
     TOK |= set(re.findall(r"setProperty\(\s*['\"]--([a-z0-9-]+)", _t))
 for p in args:
     s = open(p, encoding="utf-8").read(); n = os.path.basename(p)

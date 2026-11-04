@@ -8,7 +8,7 @@ export interface StatusCountsProps { counts: Partial<Record<"working" | "waiting
 export interface FloorHeaderProps { floor: FloorKey; name: string; number: number; bots: number; working: number }
 export interface ApprovalItemProps { name: string; floor?: number; ask: string; status?: "waiting" | "error"; onApprove?: () => void; onDecline?: () => void }
 export interface ActivityLogProps { entries: { time: string; name: string; text: string }[] }
-export interface UsageMeterProps { percent: number; reset: string; rows?: { name: string; color: string; percent: number }[] }
+export interface UsageMeterProps { percent?: number; cost?: number; costLimit?: number; reset: string; rows?: { name: string; color: string; percent?: number; cost?: number }[] }
 export interface StatusBubbleProps { status: Status; frame?: number }
 export interface BotLineupProps { bots?: { shape: "blob" | "cone" | "octa" | "capsule"; color: string; status: Status }[]; spin?: number; height?: number; mode?: "auto" | "day" | "night" }
 export type Role = "research" | "writer" | "coder" | "analyst" | "designer" | "ops" | "sales" | "planner" | "media" | "ae" | "specialist" | "partner" | "se" | "csa" | "csam" | "fde";
@@ -16,7 +16,7 @@ export type OfficeType = "team" | "lab" | "studio" | "hq";
 /** Render quality. "auto" picks "high" on desktop and "medium" on touch devices and narrow views. "low" turns off post effects and the extra motion. */
 export type Quality = "auto" | "high" | "medium" | "low";
 export type Shape = "blob" | "cone" | "octa" | "capsule";
-export interface BotDef { name: string; sessions?: "agent" | "session"; orchestrator?: boolean; shape?: Shape; color?: string; role?: Role; tasks?: string[]; status?: Status; task?: string }
+export interface BotDef { name: string; sessions?: "agent" | "session"; orchestrator?: boolean; ephemeral?: boolean; shape?: Shape; color?: string; role?: Role; tasks?: string[]; status?: Status; task?: string; platform?: string; identity?: string; owner?: string; model?: string; fallback?: string; tools?: string[]; knowledge?: string[]; skills?: string[]; channels?: string[]; triggers?: string[]; cost?: string; word?: string }
 export interface RoomDef { id?: string; type: OfficeType; name?: string; bots: BotDef[] }
 export interface FloorDef { id?: number; key?: FloorKey | "hq"; name?: string; rooms: RoomDef[] }
 export interface BuildingDef { name?: string; sessions?: "agent" | "session"; floors: FloorDef[] }
@@ -39,7 +39,7 @@ export type AgentEvent =
   | { type: "message.agent"; from: string; to: string; text: string; walk?: boolean; attachments?: Record<string, unknown>[] }
   | { type: "request"; bot: string; id?: string; text: string; actions?: string[]; quiet?: boolean; risk?: string; cost?: number; preview?: string; tool?: string }
   | { type: "error"; bot: string; text: string }
-  | { type: "usage"; percent?: number; bots?: Record<string, unknown> }
+  | { type: "usage"; percent?: number; bots?: Record<string, number>; cost?: number; costLimit?: number; costs?: Record<string, number> }
   | { type: "session.start"; bot: string; session: string; title?: string; isolated?: boolean }
   | { type: "session.end"; bot: string; session: string; result?: string; ok?: boolean }
   | { type: "plan"; bot: string; goal: string; steps: Record<string, unknown>[] }
@@ -80,6 +80,8 @@ export interface SessionListProps { sessions: { id: string; title: string; statu
 export interface AgentChatProps { loading?: boolean; disabled?: boolean; bot: { name: string; shape: Shape; color: string; role?: Role; status: Status; task: string }; messages: ChatMessageData[]; connected?: boolean; attach?: boolean; onSend?: (text: string, attachments?: ChatAttachment[]) => void; onAction?: (type: "approve" | "decline" | "retry", request?: unknown) => void; onClose?: () => void }
 export interface BroadcastBarProps { disabled?: boolean; targets: { id: string; label: string; target: { room?: string; floor?: number; all?: boolean } }[]; value?: string | null; onChange?: (id: string) => void; onSend?: (target: unknown, text: string) => void }
 export interface SolutionCardProps { solution: { id: string; label: string; summary: string; building: BuildingDef }; onUse?: () => void }
+/** Globals the DS adds to AgentOffice (see Reference.md, Office API). BODY_COLORS: the 10 bot body colors, in the order the scene gives them to new bots. A page that sets bot.color reads them from here, so a bot looks the same in every list. */
+export interface AgentOfficeGlobals { BODY_COLORS: readonly string[] }
 /** AgentOffice.adapters.mock(opts) and AgentOffice.adapters.create({ name, subscribe(emit), send(cmd), dispose }) build adapters. AgentOffice.office.mount(el, opts) returns OfficeApi. */
 export interface TooltipProps { text: string; side?: "top" | "bottom"; open?: boolean; children: ReactNode }
 export interface ToastProps { tone?: "info" | "success" | "warning" | "error"; title?: string; text: string; action?: { label: string; onClick: () => void }; onClose?: () => void }

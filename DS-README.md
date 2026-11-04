@@ -76,7 +76,7 @@ Start from `kit/page.html` and `kit/adapter.js`. The starter page runs the mock 
 
 Use visual inspection: take screenshots and look at them.
 
-- [ ] `python3 kit/check.py <your files>` passes (tokens, icons, version marks, event log).
+- [ ] `python3 kit/check.py <your files>` passes (tokens, icons, version marks, event log). A custom property that a checked file defines (`--name:` in CSS, or `setProperty('--name', ...)`) counts as a known token.
 - [ ] Screenshots in Day, Night and Sublevel, at 1360, 1100 and 400 px, with `quality: "low"` and with reduced motion.
 - [ ] Bots walk around objects: send `status: "resting"` to a room, then `"working"`, and look while they walk.
 - [ ] Approve, decline, chat and broadcast send commands; the scene changes only after the adapter replies.

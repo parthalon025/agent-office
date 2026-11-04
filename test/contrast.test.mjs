@@ -43,6 +43,15 @@ test('status dots next to the words read at 3:1 on the panel', () => each((T, th
   atLeast('dot emphasis', 3, T('emphasis'), panel, th);
 }));
 
+// The DS contrast pairs for status text (Reference.md, "Contrast pairs the DS checks"). The raw status-* colors fail
+// these on purpose: they are fills and dots. Text uses status-*-text (surfaces) or status-*-on-bubble (bubble faces).
+test('status text tokens: 4.5:1 on bg, panel (card) and chip; on-bubble tokens: 4.5:1 on bubble', () => each((T, th, panel) => {
+  for (const s of ['working', 'waiting', 'error', 'resting', 'finished']) {
+    for (const bg of [['bg', T('bg')], ['card', panel], ['chip', T('chip')]]) atLeast(`status-${s}-text on ${bg[0]}`, 4.5, T(`status-${s}-text`), bg[1], th);
+    atLeast(`status-${s}-on-bubble on bubble`, 4.5, T(`status-${s}-on-bubble`), T('bubble'), th);
+  }
+}));
+
 test('diff: ink on the chip, and on the added and removed lines', () => each((T, th) => {
   const add = over([...T('status-working').slice(0, 3), 0.16], T('chip')), del = over([...T('status-error').slice(0, 3), 0.16], T('chip'));
   const hunk = over([...T('accent').slice(0, 3), 0.12], T('chip'));
