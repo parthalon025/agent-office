@@ -64,6 +64,97 @@
     return function () { cv.removeEventListener('wheel', onWheel); var i = stage.anim.indexOf(clamp); if (i >= 0) stage.anim.splice(i, 1); };
   }
 
+  // A flock that circles over a point: two thin wings per bird that flap, a slow bank as they turn.
+  // center() gives [x, y, z] each frame, so the flock follows the city or the tower. Reduced motion
+  // shows no birds. Returns { group, dispose }.
+  function birds(stage, o) {
+    o = o || {};
+    var g = new T.Group(), K = stage.K, flock = [];
+    g.userData.decor = true;
+    var mat = K.t('scene-dark', { side: T.DoubleSide, roughness: 1 });
+    var wing = new T.BufferGeometry();
+    wing.setAttribute('position', new T.Float32BufferAttribute([0, 0, 0, 0.55, 0, 0.18, 0, 0, 0.32], 3));
+    wing.computeVertexNormals();
+    var n = o.count || 7;
+    for (var i = 0; i < n; i++) {
+      var b = new T.Group();
+      b.scale.setScalar(o.size || 1);
+      var l = new T.Mesh(wing, mat), r = new T.Mesh(wing, mat);
+      r.scale.x = -1;
+      l.castShadow = r.castShadow = false;
+      var body = new T.Mesh(new T.BoxGeometry(0.08, 0.06, 0.34), mat);
+      body.position.z = 0.16;
+      b.add(l, r, body);
+      b.userData = { l: l, r: r, phase: Math.random() * 6.28, rad: (o.radius || 14) * (0.75 + Math.random() * 0.5), lift: Math.random() * 2.5, speed: 0.12 + Math.random() * 0.08, dir: i % 3 === 0 ? -1 : 1 };
+      b.traverse(function (m) { m.userData.noNav = 1; });
+      flock.push(b); g.add(b);
+    }
+    stage.scene.add(g);
+    var tick = function (dt, t) {
+      g.visible = !stage.rm && (!o.visible || o.visible());
+      if (!g.visible) return;
+      var c = o.center ? o.center() : [0, 12, 0];
+      flock.forEach(function (b) {
+        var u = b.userData, a = u.phase + t * u.speed * u.dir;
+        b.position.set(c[0] + Math.cos(a) * u.rad, c[1] + u.lift + Math.sin(t * 0.7 + u.phase) * 0.6, c[2] + Math.sin(a) * u.rad);
+        b.rotation.set(0, -a + (u.dir > 0 ? Math.PI : 0), u.dir * 0.25);
+        var flap = Math.sin(t * 9 + u.phase * 3) * 0.7;
+        u.l.rotation.z = flap; u.r.rotation.z = -flap;
+      });
+    };
+    stage.anim.push(tick);
+    return { group: g, dispose: function () { var i = stage.anim.indexOf(tick); if (i >= 0) stage.anim.splice(i, 1); stage.clear(g); } };
+  }
+
+  // Streets around the lot of a DS tower (the building view): a road with lane marks along the front
+  // and the right side of everything the stage shows, a curb, trees, and two street lights.
+  // visible() hides it with the floor view. Returns { dispose }.
+  function streetsAround(stage, o) {
+    o = o || {};
+    var K = stage.K, g = new T.Group(), built = false;
+    g.userData.decor = true;
+    stage.scene.add(g);
+    var m = function (t, x) { return K.t(t, x); };
+    function build() {
+      // measure the scene without our own group
+      g.visible = false;
+      var box = new T.Box3(), mb = new T.Box3();
+      // what the stage shows now: visible meshes, not our own decor and not sprites (labels)
+      (function walk(c) {
+        if (!c.visible || c === g || (c.userData && c.userData.decor)) return;
+        if (c.isMesh && c.geometry) { if (!c.geometry.boundingBox) c.geometry.computeBoundingBox(); mb.copy(c.geometry.boundingBox).applyMatrix4(c.matrixWorld); if (isFinite(mb.min.x)) box.union(mb); }
+        c.children.forEach(walk);
+      })(stage.scene);
+      if (box.isEmpty()) return false;
+      var y = box.min.y + 0.03, W = box.max.x - box.min.x, D = box.max.z - box.min.z, R = 2.4;
+      var fz = box.max.z + R / 2 + 0.4, rx = box.max.x + R / 2 + 0.4;
+      var flat = function (mm) { mm.castShadow = false; mm.userData.noNav = 1; return mm; };
+      flat(X.mesh(X.box(W + R * 2 + 2, 0.06, R), m('scene-dark', { roughness: 0.95 }), (box.min.x + rx) / 2 + R / 2, y, fz, g));
+      flat(X.mesh(X.box(R, 0.06, D + R * 2 + 2), m('scene-dark', { roughness: 0.95 }), rx, y, (box.min.z + fz) / 2 + R / 2, g));
+      for (var x = box.min.x; x < rx; x += 1.6) flat(X.mesh(X.box(0.7, 0.07, 0.12), m('scene-rail'), x, y + 0.01, fz, g));
+      for (var z = box.min.z; z < fz; z += 1.6) flat(X.mesh(X.box(0.12, 0.07, 0.7), m('scene-rail'), rx, y + 0.01, z, g));
+      // the far sidewalks, with trees
+      flat(X.mesh(X.box(W + R * 2 + 2, 0.12, 1.4), m('scene-slab'), (box.min.x + rx) / 2 + R / 2, y + 0.03, fz + R / 2 + 0.7, g));
+      flat(X.mesh(X.box(1.4, 0.12, D + R * 2 + 2), m('scene-slab'), rx + R / 2 + 0.7, y + 0.03, (box.min.z + fz) / 2 + R / 2, g));
+      for (var tx = box.min.x + 1; tx < rx; tx += 4.5) if (O.Parts && O.Parts.tree) O.Parts.tree(K, g, tx, fz + R / 2 + 0.7, 0.8);
+      for (var tz = box.min.z + 1; tz < fz; tz += 4.5) if (O.Parts && O.Parts.tree) O.Parts.tree(K, g, rx + R / 2 + 0.7, tz, 0.8);
+      [[box.min.x + W * 0.25, fz - R / 2 - 0.3], [rx - R / 2 - 0.3, box.min.z + D * 0.3]].forEach(function (q) {
+        X.mesh(X.cyl(0.06, 0.08, 2.6), m('scene-metal'), q[0], y + 1.3, q[1], g);
+        flat(X.mesh(X.sph(0.16, 12, 8), m('bubble'), q[0], y + 2.65, q[1], g));
+        stage.lamp(g, q[0], y + 2.5, q[1], null, 9);
+      });
+      g.traverse(function (mm) { mm.userData.noNav = 1; });
+      return true;
+    }
+    var tick = function () {
+      var want = !o.visible || o.visible();
+      if (want && !built) built = build();
+      g.visible = want && built;
+    };
+    stage.anim.push(tick);
+    return { dispose: function () { var i = stage.anim.indexOf(tick); if (i >= 0) stage.anim.splice(i, 1); stage.clear(g); } };
+  }
+
   function City(el, opts) {
     opts = opts || {};
     var s = new O.Stage(el, { root: opts.root || null, quality: opts.quality || 'auto', label: '3D city. Each building is a repository. Click one to go inside.', D: 22 });
@@ -79,6 +170,51 @@
     ground.castShadow = false;
     var plaza = X.mesh(X.box(1, 0.2, 1), mat('scene-floor'), 0, -0.5, 0, world);
     plaza.castShadow = false;
+
+    // streets between the lots, trees on the lot corners, a light at each crossing (lit at night)
+    var streets = null, gridKey = '';
+    var ROAD = 2.4;
+    function buildStreets(cols, rows) {
+      if (streets) s.clear(streets);
+      streets = new T.Group();
+      world.add(streets);
+      var W = cols * PITCH, D = rows * PITCH, y = -0.38;
+      var road = mat('scene-dark', { roughness: 0.95 }), dash = mat('scene-rail'), curb = mat('scene-slab');
+      var flat = function (m) { m.castShadow = false; m.userData.noNav = 1; return m; };
+      // roads on every lot edge, the outer ring included
+      for (var c = 0; c <= cols; c++) {
+        var x = (c - cols / 2) * PITCH;
+        flat(X.mesh(X.box(ROAD, 0.06, D + ROAD), road, x, y, 0, streets));
+        for (var zz = -D / 2 + 0.8; zz < D / 2; zz += 1.6) flat(X.mesh(X.box(0.12, 0.07, 0.7), dash, x, y + 0.01, zz, streets));
+      }
+      for (var r = 0; r <= rows; r++) {
+        var z = (r - rows / 2) * PITCH;
+        flat(X.mesh(X.box(W + ROAD, 0.06, ROAD), road, 0, y, z, streets));
+        for (var xx = -W / 2 + 0.8; xx < W / 2; xx += 1.6) flat(X.mesh(X.box(0.7, 0.07, 0.12), dash, xx, y + 0.01, z, streets));
+      }
+      // lot corners: a curb square and trees
+      for (var i = 0; i < cols * rows; i++) {
+        var cx = ((i % cols) - (cols - 1) / 2) * PITCH, cz = (Math.floor(i / cols) - (rows - 1) / 2) * PITCH;
+        flat(X.mesh(X.box(PITCH - ROAD, 0.1, PITCH - ROAD), curb, cx, y + 0.02, cz, streets));
+        var e = (PITCH - ROAD) / 2 - 0.7;
+        [[-e, -e], [e, -e], [-e, e], [e, e]].forEach(function (q, j) { if (O.Parts && O.Parts.tree) O.Parts.tree(K, streets, cx + q[0], cz + q[1], 0.75 + ((i + j) % 3) * 0.12); });
+      }
+      // street lights at the crossings (a few: each is a real light)
+      var n = 0;
+      for (var a = 0; a <= cols && n < 6; a++) for (var bq = 0; bq <= rows && n < 6; bq += Math.max(1, rows)) {
+        var lx = (a - cols / 2) * PITCH + ROAD / 2 + 0.3, lz = (bq - rows / 2) * PITCH + ROAD / 2 + 0.3;
+        X.mesh(X.cyl(0.06, 0.08, 2.6), mat('scene-metal'), lx, y + 1.3, lz, streets);
+        var bulb = X.mesh(X.sph(0.16, 12, 8), mat('bubble'), lx, y + 2.65, lz, streets);
+        bulb.castShadow = false;
+        s.lamp(streets, lx, y + 2.5, lz, null, 9);
+        n++;
+      }
+      streets.traverse(function (m) { if (m.isMesh) m.userData.noNav = 1; });
+    }
+    var flock = birds(s, { count: 9, radius: 16, center: function () {
+      var tall = 2; Object.keys(items).forEach(function (k) { tall = Math.max(tall, items[k].floors.length * FLOOR_H); });
+      return [0, tall + 5, 0];
+    } });
 
     var items = {};      // key -> building
     var slots = [];      // slot index -> key
@@ -203,7 +339,8 @@
         tween(s, cssMs('duration-camera', 600), 0, 1, function (v) { b.g.position.x = x0 + (xz[0] - x0) * v; b.g.position.z = z0 + (xz[1] - z0) * v; });
       });
       var cols = Math.max(2, Math.ceil(Math.sqrt(Math.max(slots.length, 1)))), rows = Math.max(1, Math.ceil(slots.length / cols));
-      plaza.scale.set(cols * PITCH + 4, 1, rows * PITCH + 4);
+      plaza.scale.set(cols * PITCH + 6, 1, rows * PITCH + 6);
+      if (gridKey !== cols + 'x' + rows) { gridKey = cols + 'x' + rows; buildStreets(cols, rows); }
     }
 
     // list: [{ key, name, sessions, waiting, floors: [{ name, key }], bots: [{ name, status, floor }] }]
@@ -332,9 +469,9 @@
       update: update, focus: focus, fit: fit, zoomBy: zoomBy,
       // for tests and the console: the camera zoom and its limits
       state: function () { return { zoom: s.cam.zoom, max: s.ctl ? s.ctl.maxZoom : null, buildings: Object.keys(items).length, entering: entering }; },
-      dispose: function () { mo.disconnect(); s.dispose(); }
+      dispose: function () { mo.disconnect(); flock.dispose(); s.dispose(); }
     };
   }
 
-  window.OfficeCity = { cameraFeel: cameraFeel, mount: function (el, opts) { var c = City(el, opts); window.OfficeCity.last = c; return c; } };
+  window.OfficeCity = { cameraFeel: cameraFeel, birds: birds, streetsAround: streetsAround, mount: function (el, opts) { var c = City(el, opts); window.OfficeCity.last = c; return c; } };
 })();

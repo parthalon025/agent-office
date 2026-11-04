@@ -766,7 +766,19 @@
       return function () { window.removeEventListener('wheel', onWheel, true); };
     }, [cur2.view]);
     var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: window.officeAdapter, height: window.innerHeight, quality: 'auto', intro: intro, editable: false, simulate: false,
-      ambient: ambient, onAmbientOpen: function () { setAmbient(false); }, onReady: function (o) { officeRef.current = o; var st = o.inspect && o.inspect().stage; if (st && window.OfficeCity) window.OfficeCity.cameraFeel(st); },
+      ambient: ambient, onAmbientOpen: function () { setAmbient(false); }, onReady: function (o) {
+        officeRef.current = o;
+        var st = o.inspect && o.inspect().stage;
+        if (!st || !window.OfficeCity) return;
+        window.OfficeCity.cameraFeel(st);
+        // birds over the tower in the building view; none inside a floor
+        var inBuilding = function () { return Array.prototype.some.call(document.querySelectorAll('[aria-pressed="true"]'), function (b) { return /building/i.test(b.textContent); }); };
+        var seen = false, t0 = 0;
+        var outside = function () { var now = Date.now(); if (now - t0 > 500) { t0 = now; seen = inBuilding(); } return seen; };
+        window.OfficeCity.streetsAround(st, { visible: outside });
+        window.OfficeCity.birds(st, { count: 6, radius: 13, size: 0.6, visible: outside,
+          center: function () { var fl = (o.getBuilding && o.getBuilding().floors.length) || 1; return [0, fl * 4.2 + 4, 0]; } });
+      },
       reset: week ? resetText(week.resetsAt) : undefined }) : null;
 
     // A session opened from this page that sits in another building: offer the way there.
