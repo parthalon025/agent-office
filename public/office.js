@@ -383,7 +383,7 @@
             h('div', { className: 'past-main' },
               h('div', { className: 'past-title' }, h(A.Icon, { name: 'floor', size: 16 }), h('b', null, b), hasMain ? h(Tag, null, 'main folder') : null),
               rooms.map(function (w) {
-                var here = (snap ? snap.sessions : []).filter(function (s) { return s.status !== 'ended' && s.git && s.git.root.toLowerCase() === w.root.toLowerCase(); });
+                var here = (snap ? snap.sessions : []).filter(function (s) { return s.status !== 'ended' && s.place && s.place.rootKey === w.place.rootKey; });
                 return h('div', { key: w.root, className: 'room-row' },
                   h(A.OfficeTypeBadge, { type: 'lab', label: w.root.split(/[\\/]/).pop() }), h('span', { className: 'past-sub mono', title: w.root }, w.root),
                   here.map(function (s) { return h('span', { key: s.uid, className: 'room-bot', title: s.name }, h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: botColor(), status: statusOf(s), size: 20 }), s.name); }),
@@ -770,10 +770,7 @@
       api('/api/close', { uid: cur.uid }).then(function () { setBusy(false); setConfirm(null); p.toast({ tone: 'success', title: cur.name, text: 'Session closed' }); }, function (x) { setBusy(false); setErr(x.message); });
     }
     function addAgent() {
-      // the adapter lower-cases the room root: take the real-case folder from the snapshot
-      var rp = snap && (snap.repos || []).filter(function (r) { return place && r.key === place.repo; })[0];
-      var wt = rp && (rp.worktrees || []).filter(function (w) { return w.root.toLowerCase() === place.root; })[0];
-      var cwd = list.length && list[0].cwd ? list[0].cwd : wt ? wt.root : place && place.root;
+      var cwd = list.length && list[0].cwd ? list[0].cwd : place && place.path;
       if (!cwd) { setErr('This room has no folder yet.'); return; }
       setBusy(true); setErr('');
       api('/api/open', { cwd: cwd, name: add.name.trim(), where: 'office', isolation: 'same', model: add.model, prompt: add.prompt })
@@ -1027,7 +1024,7 @@
       setBoard(null);
       setTerm({ uid: uid, name: name });
     }
-    function noteKey(roomId) { return (shown || 'other') + '|' + roomId; }
+    function noteKey(roomId) { return window.officeAdapter.noteKey(roomId); }   // the server's key for the room (place.mjs)
     useEffect(function () { return function () {
       if (boardRef.current) { boardRef.current.dispose(); boardRef.current = null; }
       if (terminalRef.current) { terminalRef.current.dispose(); terminalRef.current = null; }
@@ -1048,7 +1045,7 @@
       roomIds().forEach(function (id) {
         var inf = window.officeAdapter.roomInfo(id, sn);
         var rn = (inf.place && inf.place.roomName) || 'Room';
-        inf.sessions.forEach(function (x) { if (x.status !== 'ended' && x.placed) out[x.uid] = { room: id, name: x.name, roomName: rn }; });
+        inf.sessions.forEach(function (x) { if (x.status !== 'ended' && x.place) out[x.uid] = { room: id, name: x.name, roomName: rn }; });
       });
       return out;
     }
@@ -1154,16 +1151,16 @@
       if (!snap) return;
       if (!seen.current) { seen.current = {}; snap.sessions.forEach(function (s) { seen.current[s.uid] = true; }); return; }
       snap.sessions.forEach(function (s) {
-        if (seen.current[s.uid] || !s.placed) return;
+        if (seen.current[s.uid] || !s.place) return;
         seen.current[s.uid] = true;
-        var key = s.git ? s.git.repo.toLowerCase() : '';
-        if (s.status !== 'ended' && key !== shown) toast({ tone: 'info', title: s.name, text: 'Opened in ' + (s.git ? s.git.repo.split(/[\\/]/).pop() : 'Other folders') + '.', action: { label: 'Go there', onClick: function () { pick(key); } } });
+        var key = window.officeAdapter.buildingOf(s);
+        if (s.status !== 'ended' && key !== shown) toast({ tone: 'info', title: s.name, text: 'Opened in ' + s.place.building + '.', action: { label: 'Go there', onClick: function () { pick(key); } } });
       });
     }, [snap]);
 
     function close() { setDlg(null); }
     function extensions(uid, name) { setDlg({ name: 'ext', uid: uid, label: name }); }
-    function goTo(s) { var key = s.git ? s.git.repo.toLowerCase() : ''; pick(key); setDlg(null); setTimeout(function () { if (officeRef.current) officeRef.current.select(s.name); }, 400); }
+    function goTo(s) { var key = window.officeAdapter.buildingOf(s); pick(key); setDlg(null); setTimeout(function () { if (officeRef.current) officeRef.current.select(s.name); }, 400); }
     var selSess = sel ? window.officeAdapter.session(sel) : null;
     var d = dlg && dlg.name;
 

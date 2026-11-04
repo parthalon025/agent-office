@@ -10,7 +10,7 @@
 // Room awareness: when the user talks about their room in Agent Office (its blackboard, notes board, door or
 // desks), the agent reads its room with office_room, so it can talk about it and guide the user. It changes
 // the room only with office_room_update, and only its own room: the server finds the room from the calling
-// session (server.mjs callerRoom, keys from git.mjs roomKeys), never from the arguments. Notes and pins
+// session (server.mjs callerRoom, keys from place.mjs), never from the arguments. Notes and pins
 // live in the office's state.json and show on the room's boards at once.
 // It identifies its session by OFFICE_ID (sessions the office opened) or by its parent pid.
 // Zero dependencies; speaks newline-delimited JSON-RPC 2.0.

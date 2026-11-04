@@ -94,6 +94,7 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 | --- | --- |
 | `server.mjs` | The server: state, hooks, sessions, REST, SSE, schedules, history. |
 | `git.mjs` | Worktrees, the changes view, remove worktree, pull request. |
+| `place.mjs` | Where a session or worktree sits: building, floor, room id and notes key. The snapshot carries it. |
 | `hook.mjs` | Command hook. Sends one event to the server. |
 | `mcp.mjs` | MCP server with `office_inbox`, `office_ask`, `office_room` and `office_room_update`. |
 | `launch.ps1` | Starts a session in a terminal window. |

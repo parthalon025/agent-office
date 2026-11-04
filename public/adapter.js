@@ -64,20 +64,19 @@
     taken[n] = true;
     return n;
   }
-  function slug(t) { return String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'x'; }
-  // Where a session sits: building (repo), floor (branch), room (worktree folder).
-  function placeOf(s) {
-    var g = s.git;
-    if (!g) return { repo: '', repoName: OTHER, branch: 'No branch', root: String(s.cwd || '').toLowerCase(), roomName: base(s.cwd) || 'Folder' };
-    return { repo: g.repo.toLowerCase(), repoName: base(g.repo), branch: g.branch, root: g.root.toLowerCase(), roomName: base(g.root) };
+  // Where a session sits: building (repo), floor (branch), room (worktree folder). The server computes it
+  // (place.mjs) and sends it as session.place and worktree.place; this only renames the fields.
+  function fromPlace(p) {
+    return { repo: p.buildingKey, repoName: p.building, branch: p.floor, root: p.rootKey, roomName: p.room, roomId: p.roomId, noteKey: p.noteKey, path: p.root };
   }
+  function placeOf(s) { return fromPlace(s.place); }
   function placeKey(pl) { return pl.repo + '|' + pl.branch + '|' + pl.root; }
   // Rooms that exist in git (worktrees), with or without a session in them.
   function repoOf(snap, key) { return ((snap && snap.repos) || []).filter(function (r) { return r.key === key; })[0] || null; }
-  function wtPlace(r, w) { return { repo: r.key, repoName: r.name, branch: w.branch, root: w.root.toLowerCase(), roomName: base(w.root) }; }
-  function live(snap) { return (snap ? snap.sessions : []).filter(function (s) { return s.status !== 'ended' && s.placed; }); }
+  function wtPlace(r, w) { return fromPlace(w.place); }
+  function live(snap) { return (snap ? snap.sessions : []).filter(function (s) { return s.status !== 'ended' && s.place; }); }
   function floorDef(id, branch, rooms) { return { id: id, key: FLOOR_KEYS[(id - 1) % FLOOR_KEYS.length], name: clip(branch, 22), rooms: rooms }; }  // long branch names overlap the floor tag
-  function roomDef(pl) { return { id: 'w-' + slug(pl.root).slice(-48), type: 'lab', name: pl.roomName, bots: [] }; }
+  function roomDef(pl) { return { id: pl.roomId, type: 'lab', name: pl.roomName, bots: [] }; }
   // The room of a session in the shown building. Adds its floor or room when it is new.
   function roomOf(pl, emit) {
     var f = layout.floors[pl.branch];
@@ -154,7 +153,7 @@
     var rp = repoOf(snapshot, layout.repo);
     if (rp) rp.worktrees.forEach(function (w) { roomOf(wtPlace(rp, w), emit); });
     snapshot.sessions.forEach(function (s) {
-      if (!s.placed) return;   // wait until the server knows the repo and branch
+      if (!s.place) return;   // wait until the server knows the repo and branch
       var pl = placeOf(s), k = known[s.uid];
       // the session checked out another branch, or moved to another folder: seat it again
       if (k && !k.ended && k.place !== placeKey(pl)) {
@@ -400,14 +399,18 @@
   // The open sessions in one room of the shown building (for the room board), and that room's place.
   window.officeAdapter.roomInfo = function (roomId, snap) {
     var out = { sessions: [], place: null };
-    live(snap || latest).forEach(function (s) { var pl = placeOf(s); if (pl.repo === layout.repo && roomDef(pl).id === roomId) { out.sessions.push(s); out.place = pl; } });
+    live(snap || latest).forEach(function (s) { var pl = placeOf(s); if (pl.repo === layout.repo && pl.roomId === roomId) { out.sessions.push(s); out.place = pl; } });
     if (!out.place) {
       var rp = repoOf(snap || latest, layout.repo);
-      (rp ? rp.worktrees : []).forEach(function (w) { var pl = wtPlace(rp, w); if (roomDef(pl).id === roomId) out.place = pl; });
+      (rp ? rp.worktrees : []).forEach(function (w) { var pl = wtPlace(rp, w); if (pl.roomId === roomId) out.place = pl; });
     }
     return out;
   };
   window.officeAdapter.shown = function () { return layout.repo; };
+  // The key of a room's notes board and blackboard pin, from the server (empty for a room it does not know).
+  window.officeAdapter.noteKey = function (roomId, snap) { var p = window.officeAdapter.roomInfo(roomId, snap).place; return p ? p.noteKey : ''; };
+  // The building key of a session ('' outside git).
+  window.officeAdapter.buildingOf = function (s) { return s.place ? s.place.buildingKey : ''; };
   // Rooms in the shown scene, as "branch|root". The page rebuilds the scene when one of them is gone,
   // because the design system has no event that removes a floor or a room.
   window.officeAdapter.roomsShown = function () {
@@ -418,7 +421,7 @@
   // Rooms that exist now for one repository: worktrees and the folders of open sessions.
   window.officeAdapter.roomsNow = function (snap, repo) {
     var rp = repoOf(snap, repo), out = {};
-    if (rp) rp.worktrees.forEach(function (w) { out[w.branch + '|' + w.root.toLowerCase()] = true; });
+    if (rp) rp.worktrees.forEach(function (w) { out[w.branch + '|' + w.place.rootKey] = true; });
     live(snap).forEach(function (s) { var pl = placeOf(s); if (pl.repo === repo) out[pl.branch + '|' + pl.root] = true; });
     return out;
   };

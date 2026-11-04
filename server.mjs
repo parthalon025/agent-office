@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import * as git from './git.mjs';
 import { slimPayload } from './payload.mjs';
 import { riskOf } from './risk.mjs';
+import { placeOfSession, placeOfWorktree, legacyNoteKey, normPath } from './place.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -157,6 +158,7 @@ function placeSession(s, force = false) {
   return git.locate(s.cwd).then((g) => {
     const changed = !s.placed || JSON.stringify(g) !== JSON.stringify(s.git);
     s.git = g; s.placed = true;
+    adoptNotes(roomPlace(s));
     if (g) addRepo(g.repo);
     if (changed) broadcast();
   });
@@ -166,7 +168,7 @@ function placeSession(s, force = false) {
 // A repository is known when a session works in it or it is a recent folder. Its worktrees are
 // read with `git worktree list` when it is added, after each floor or room change, and every 30 s.
 const repos = new Map(); // lower-case repo path -> { path, name, worktrees }
-const repoKey = (p) => path.normalize(p).toLowerCase();
+const repoKey = normPath; // the building key (place.mjs)
 function addRepo(repoPath) {
   const k = repoKey(repoPath);
   if (repos.has(k)) return;
@@ -178,7 +180,7 @@ async function refreshRepo(k) {
   if (!r) return;
   let wts;
   try { wts = await git.layout(r.path); } catch { repos.delete(k); broadcast(); return; } // not a repository any more
-  if (JSON.stringify(wts) !== JSON.stringify(r.worktrees)) { r.worktrees = wts; broadcast(); }
+  if (JSON.stringify(wts) !== JSON.stringify(r.worktrees)) { r.worktrees = wts; wts.forEach((w) => adoptNotes(placeOfWorktree(r.path, w))); broadcast(); }
 }
 function knownRepo(p) {
   const r = repos.get(repoKey(String(p || '')));
@@ -562,18 +564,24 @@ function onMcpAsk(p, res) {
 // ---------- the room a session sits in (office_room, office_room_update) ----------
 // An agent can read its room and change two things in it: the notes board (the user's notes,
 // persisted.notes) and one short pin on the blackboard (persisted.pins). Both use the page's key for
-// the room (git.roomKeys), so what an agent writes shows on the boards the user looks at.
+// the room (place.mjs noteKey), so what an agent writes shows on the boards the user looks at.
 // An agent changes only its own room: the room comes from the calling session, never from the arguments.
 const NOTES_MAX = 4000, PIN_MAX = 140;
 persisted.notes = persisted.notes || {};
 persisted.pins = persisted.pins || {};
 
-// Where a session sits, with the names the page shows (adapter.js placeOf) and the page's keys.
-function roomPlace(s) {
-  const g = s.git, keys = git.roomKeys(g, s.cwd);
-  return g
-    ? { ...keys, building: basename(g.repo), repoPath: g.repo, floor: g.branch, room: basename(g.root), root: g.root }
-    : { ...keys, building: 'Other folders', repoPath: '', floor: 'No branch', room: basename(s.cwd) || 'Folder', root: s.cwd };
+// Where a session sits (place.mjs). The snapshot carries it, so the page keeps no copy of the rules.
+const roomPlace = (s) => placeOfSession(s.git, s.cwd);
+// Room ids carry a hash now. A note or pin saved under the old key moves to the new one the first time its
+// room is seen, so nothing the user wrote is lost. Remove this when old state files are gone.
+function adoptNotes(pl) {
+  const old = legacyNoteKey(pl);
+  if (old === pl.noteKey) return;
+  let moved = false;
+  for (const map of [persisted.notes, persisted.pins]) {
+    if (map[old] && !map[pl.noteKey]) { map[pl.noteKey] = map[old]; delete map[old]; moved = true; }
+  }
+  if (moved) savePersisted();
 }
 // The open sessions the page seats in a room (adapter.js live()).
 const inRoom = (key) => [...sessions.values()].filter((x) => x.status !== 'ended' && x.placed && roomPlace(x).noteKey === key);
@@ -1259,12 +1267,12 @@ function readPlan() {
 setInterval(readPlan, 15000).unref();
 
 const snapshot = () => ({
-  sessions: [...sessions.values()].map(({ ...s }) => s),
+  sessions: [...sessions.values()].map(({ ...s }) => ({ ...s, place: s.placed ? roomPlace(s) : null })),
   feed: feed.slice(-80),
   plan,
   notes: persisted.notes,   // noteKey -> { text, at, by? }: each room's notes board (by: the session that last wrote it)
   pins: persisted.pins,     // noteKey -> { text, by, at }: a short message an agent pinned on the room's blackboard
-  repos: [...repos.entries()].map(([key, r]) => ({ key, ...r })),
+  repos: [...repos.entries()].map(([key, r]) => ({ key, ...r, worktrees: r.worktrees.map((w) => ({ ...w, place: placeOfWorktree(r.path, w) })) })),
   now: Date.now(),
 });
 let pending = null;

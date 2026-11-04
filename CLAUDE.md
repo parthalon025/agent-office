@@ -29,6 +29,7 @@ Stop the server by the pid that owns port 4317 (`netstat -ano | grep :4317`, the
 | --- | --- |
 | `server.mjs` | Session state, hooks, headless sessions (stdin/stdout), permission holds, MCP routes, history, schedules, REST and SSE. |
 | `git.mjs` | Worktrees, changes, remove worktree, pull request, `locate` (repo, worktree, branch of a folder), floors and rooms (`layout`, `branches`, `createFloor`, `createRoom`, `removeRoom`, `deleteFloor`). Argument lists only, never a shell. |
+| `place.mjs` | Place: where a session or worktree sits. Building key and name, floor, room id and name, notes key. Pure, no I/O. The snapshot carries it as `session.place` and `worktree.place`; the page reads it and keeps no copy of the rules. |
 | `hook.mjs` | Command hook. Exits 0 on every path. |
 | `payload.mjs` | Trims a hook payload to the fields the office shows. Used by `hook.mjs` and the HTTP hook route. |
 | `mcp.mjs` | stdio MCP server: `office_inbox`, `office_ask`, `office_room`, `office_room_update`. |
@@ -51,6 +52,9 @@ Add a new file only for a distinct job. Extend the file that owns the concern fi
 - Room awareness: `office_room` describes the room of the calling session. `office_room_update` changes only that room's notes board (`persisted.notes[key]`, kept as `{ text, at, by? }`, `by` is set when an agent wrote it) and one blackboard pin (`persisted.pins`). Each line an agent appends starts with the session name. A rewrite returns the old text in the reply.
 - `POST /api/notes/save` takes an optional `base` (the `at` the editor last saw). If the stored `at` differs, it answers 409 `{ error, text, at }`. On success it returns `{ ok: true, at }`. A cleared board returns `at: 0`.
 - `office_room` lists the decor of a lab room under "What is in the room" from one list in `roomContents()` (server.mjs), next to the fixed lab-room parts and the street. The list is the same for every room, so the page does not report it. Keep it in step with `board.js`.
+
+- Place rules live only in `place.mjs`. Room id = readable tail of the folder plus a hash of the whole normalized path, so look-alike folder names stay two rooms. Paths are normalized and lower-cased, so path case never makes a second building. A session outside git has building key `''` (name "Other folders") and notes key prefix `other`. `adoptNotes()` in `server.mjs` moves a note or pin saved under an old key (room id without hash) to the new key when its room is first seen.
+- Add a place field in `place.mjs` and read it from `s.place` in the page. Do not rebuild keys in `adapter.js`, `office.js` or `board.js`.
 
 ## Gotchas learned the hard way
 
