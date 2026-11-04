@@ -671,30 +671,38 @@
     var rc = useState(null), rect = rc[0], setRect = rc[1];
     var sv = useState('saved'), state = sv[0], setState = sv[1];
     var ref = React.useRef(null), timer = React.useRef(0);
-    var base = React.useRef(p.version || 0), latest = React.useRef(p.text || ''), seen = React.useRef(p.version || 0), fromSent = React.useRef(false);
+    var base = React.useRef(p.version || 0), latest = React.useRef(p.text || ''), fromSent = React.useRef(false);
+    var edits = React.useRef(0), inflight = React.useRef(false), queued = React.useRef(null);
     useEffect(function () {
       var raf = 0;
       function follow() { var r = p.rect(); if (r) setRect(function (o) { return o && Math.abs(o.left - r.left) < 0.5 && Math.abs(o.top - r.top) < 0.5 && Math.abs(o.width - r.width) < 0.5 ? o : r; }); raf = requestAnimationFrame(follow); }
       follow();
       return function () { cancelAnimationFrame(raf); };
     }, []);
-    useEffect(function () { return function () { clearTimeout(timer.current); }; }, []);
+    // Closing the editor sends the last edit at once, not drops it.
+    useEffect(function () { return function () { if (timer.current) { clearTimeout(timer.current); timer.current = 0; save(latest.current); } }; }, []);
     useEffect(function () { if (rect && !p.flying() && ref.current && document.activeElement !== ref.current) ref.current.focus(); }, [rect && Math.round(rect.width)]);
     // An idle editor takes a change that came from outside (an agent added a line).
     useEffect(function () {
       var ver = p.version || 0;
-      if (ver === seen.current) return;                       // the note in the snapshot did not change
-      seen.current = ver;
-      if (state !== 'saved' || ver === base.current) return;  // a save is pending (the server merges it), or this is our own save
+      if (state !== 'saved' || ver <= base.current) return;   // a save is pending, or this is our own save or an older snapshot
       base.current = ver; fromSent.current = false;
       if ((p.text || '') !== latest.current) { latest.current = p.text || ''; setText(latest.current); }
-    }, [p.version]);
+    }, [p.version, state]);
     // The server keeps the merge rules (notes.mjs). The editor sends its text and the version it started from.
+    function done() {
+      inflight.current = false;
+      var q = queued.current; queued.current = null;
+      if (q !== null) save(latest.current);
+    }
     function save(v) {
+      if (inflight.current) { queued.current = v; return; }   // one save at a time
+      inflight.current = true;
+      var mark = edits.current;
       latest.current = v;
       var wasSent = fromSent.current;
       return api('/api/notes/save', { key: p.noteKey, text: v, base: base.current, sent: wasSent }).then(function (res) {
-        var typedMore = latest.current !== v;
+        var typedMore = edits.current !== mark;
         if (res.merged && res.text !== v) {
           // An agent changed the notes. The new base is the merged version. When the user typed on, the server keeps the
           // text we sent as the merge base of the next save (sent), so nothing is merged twice.
@@ -704,14 +712,16 @@
           if (!wasSent) p.toast({ tone: 'info', title: 'Notes', text: 'An agent changed the notes. Your text is merged.' });
         } else { base.current = res.version; fromSent.current = false; }
         if (!typedMore) setState('saved');
+        done();
       }, function (x) {
         setState('error'); p.toast({ tone: 'error', title: 'Notes', text: x.message });
+        done();
       });
     }
     function change(v) {
-      setText(v); setState('saving'); latest.current = v;
+      setText(v); setState('saving'); latest.current = v; edits.current++;
       clearTimeout(timer.current);
-      timer.current = setTimeout(function () { save(v); }, 500);
+      timer.current = setTimeout(function () { timer.current = 0; save(v); }, 500);
     }
     if (!rect || rect.width < 40) return null;
     var fs = Math.max(12, rect.height / 14);
