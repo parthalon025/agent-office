@@ -52,7 +52,7 @@ cd E:\agent-office
 npm start
 ```
 
-Open http://localhost:4317 and choose **Open session**.
+The office opens in your browser with a launch link (`http://127.0.0.1:4317/#n=...`). The server also prints the link. The link works once, for 5 minutes. After that, a reload or a bookmark of http://127.0.0.1:4317 keeps working until the office or the browser stops. For a new link, run `npm start` again: a second copy changes nothing and opens a new link for the office that runs. Then choose **Open session**.
 
 1. Pick a folder.
 2. Leave **Runs** on "In the office (no terminal)".
@@ -79,7 +79,7 @@ The **Attach sessions** dialog (under More) shows the exact command for the acti
 
 Each job names the control to use. Ctrl+K finds all of them.
 
-1. **Start the office.** Run `npm start` and open http://localhost:4317. The city has no buildings until a session exists, so open one (job 2).
+1. **Start the office.** Run `npm start`. The office opens in your browser with its launch link. The city has no buildings until a session exists, so open one (job 2).
 2. **Open a session.** Click **Open session**, pick a folder and start it. The folder becomes a building, its branch a floor and its worktree a room. The bot sits at a desk in that room. Click the bot to open its chat.
 3. **Approve a request.** A bot that needs you shows an amber badge, and the **Needs you** button in the dock shows a count. Open the list, read the request, then click Approve or Decline. A question has Yes and No. The office holds a request from a terminal session for 60 seconds, then the terminal dialog decides. A session in the office waits 15 minutes.
 4. **Read a room board and its notes.** Click the board on the back wall of a room. The camera flies to it, so you can read it. Click it again, and a side panel shows the same data in full. Click the notes board next to it twice and type. Notes save as you type and stay with the room. Press Esc or Back to return the camera.
@@ -110,6 +110,7 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 | Variable | Default | Effect |
 | --- | --- | --- |
 | `OFFICE_PORT` | `4317` | Port on 127.0.0.1. |
+| `OFFICE_OPEN` | on | `0` stops the server from opening the launch link in your browser. It still prints the link. |
 | `OFFICE_HOOKS` | auto | `command` or `http` forces a hook mode. |
 | `OFFICE_ASK_TIMEOUT_S` | `60` | How long a terminal session's permission prompt waits for the office before the terminal dialog decides. Sessions in the office wait 15 minutes. |
 | `OFFICE_OLLAMA_URL` | `http://127.0.0.1:11434/v1` | Where the Ollama agents find their server. Loopback addresses only (127.0.0.1, localhost, ::1). Any other host stops the office at start. |
@@ -120,6 +121,7 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 | File | Purpose |
 | --- | --- |
 | `server.mjs` | The server: state, hooks, sessions, REST, SSE, schedules, history. |
+| `auth.mjs` | Access rules: the agent token and the page token, the launch code, the request checks, owner-only files. |
 | `git.mjs` | Worktrees, the changes view, remove worktree, pull request. |
 | `tracker.mjs` | The session rules: hook payloads and stream lines in, sessions out. No I/O of its own, so tests run offline. |
 | `place.mjs` | Where a session or worktree sits: building, floor, room id and notes key. The snapshot carries it. |
@@ -127,20 +129,23 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 | `hook.mjs` | Command hook. Sends one event to the server. |
 | `mcp.mjs` | MCP server with `office_inbox`, `office_ask`, `office_room` and `office_room_update`. |
 | `launch.ps1` | Starts a session in a terminal window. |
-| `startup.mjs` | Adds or removes the Start with Windows entry (a .cmd in your Startup folder). |
+| `startup.mjs` | Adds or removes the Start with Windows entry (a .cmd in your Startup folder). At sign-in the office starts and opens its launch link. |
 | `probe.mjs` | Tests HTTP hooks on this Claude Code version. |
 | `public/` | The page: `vocab.js` (shared status words, tool names and room figures), `wheel-gate.js` (one scroll-out gesture leaves one level), `scene-host.js` (the one reader of the 3D stage: floor, view, rooms, pick, cursor), `building.js` (snapshot store and building adapter), `toasts.js` (toast rules), `adapter.js`, `office.js`, `office.css`, `chat-extras.js`, `index.html`. |
-| `test/*.test.mjs` | Offline unit tests (`npm test`): place rules, risk classifier, session vocabulary, hook payload, session tracker, scene host, notes merge, snapshot store and building adapter, contrast pairs, wheel gate, toast rules. |
+| `test/*.test.mjs` | Offline unit tests (`npm test`): access rules (with a real server on a free port), place rules, risk classifier, session vocabulary, hook payload, session tracker, scene host, notes merge, snapshot store and building adapter, contrast pairs, wheel gate, toast rules. |
 | `test/tracker.test.mjs` | Session tracker tests from recorded-shape hook payloads and stream lines in `test/fixtures/`. |
 | `test/smoke.mjs` | End-to-end test against real Claude Code. |
 | `DS-README.md`, `Recipes.md`, `Reference.md`, `Concepts.md`, `kit/`, `components/`, `tokens.css` | The Agent Office design system. |
 
-Generated at run time and ignored by git: `.office-token`, `office-hooks.json`, `office-hooks-http.json`, `office-mcp.json`, `state.json`, `history.json`.
+Generated at run time and ignored by git: `.office-token`, `office-hooks.json`, `office-hooks-http.json`, `office-mcp.json`, `state.json`, `history.json`. Outside this folder: `%LOCALAPPDATA%\AgentOffice\office-page-<port>.json`.
 
 ## Safety
 
 - The server listens on 127.0.0.1 only and rejects other host names.
-- Every request needs a token. The token is kept in `.office-token` and reused across restarts, so running sessions keep working.
+- Two tokens keep agents and you apart. The **agent token** opens only the routes that hooks and the MCP server use (`/hook`, `/mcp/...`). It is kept in `.office-token` and in the HTTP hooks file, and reused across restarts, so running sessions keep working. The **page token** opens only the page's routes (`/events`, `/api/...`): answers, sessions, extensions, schedules. Neither token opens the other routes.
+- The page token is new at each start and is never in this folder, so an agent that reads files here cannot approve its own requests. The page itself holds no token: the launch link carries a one-time code, and the page trades it for a cookie that page scripts cannot read. Your own tools (`npm run probe`, `npm run smoke`, a second `npm start`) read the page token from `%LOCALAPPDATA%\AgentOffice\office-page-<port>.json`.
+- The files with a token, and the settings files whose commands sessions run, are readable by your Windows user only. If the office cannot set that, it prints a warning when it starts. The office folder itself keeps the permissions of its drive; on a shared computer, keep it in your user folder.
+- Requests from another site or another port of this computer are refused, and every change must be sent as JSON. No page can show the office in a frame.
 - The office sends hook data to your own machine only. Hooks forward short fields: the tool name, a path or command, and the prompt. A permission prompt also carries the full input so the card can show the change.
 - "Always allow" writes the rule Claude suggests to that project's `.claude/settings.local.json`, and only when you click it.
 - Creating a pull request runs `git push` and `gh pr create`. The office asks you to confirm and lists the steps first.
@@ -154,9 +159,12 @@ The office knows two kinds of session. A session **in the office** runs `claude 
 
 ### Any session
 
-- **"Already running on port 4317."** A second `npm start` is harmless: it changes nothing. To restart, stop the first copy by the process id that owns the port. Never stop it by image name: that would stop your other Claude Code sessions. Run `netstat -ano | findstr :4317`, then `taskkill /PID <pid> /F`. Or start the office on another port with `OFFICE_PORT`.
-- **A call answers 401 Unauthorized.** The token did not match. The page gets the token from `.office-token` when it loads, so reload the page. If you deleted `.office-token`, the office made a new token. Sessions that started before that keep the old token in their settings, so start them again.
-- **A call answers 403 Forbidden.** The server accepts only `127.0.0.1:<port>` and `localhost:<port>` as host name. Open the office by one of those addresses.
+- **"Already running on port 4317."** A second `npm start` is harmless: it changes nothing, and it opens a new launch link for the office that runs. To restart, stop the first copy by the process id that owns the port. Never stop it by image name: that would stop your other Claude Code sessions. Run `netstat -ano | findstr :4317`, then `taskkill /PID <pid> /F`. Or start the office on another port with `OFFICE_PORT`.
+- **The page says "No access to the office".** The page has no working cookie: you opened it without a launch link, the link was used or older than 5 minutes, or the office restarted (each start makes a new page token). Run `npm start` to get a new link. Other office tabs in the same browser get access again within 5 seconds.
+- **A call answers 401 Unauthorized.** The token did not match. For the page, open a new launch link (see above). For hooks: if you deleted `.office-token`, the office made a new agent token. Sessions that started before that keep the old token in their settings, so start them again.
+- **A call answers 403 Forbidden.** The server accepts only `127.0.0.1:<port>` and `localhost:<port>` as host name, and refuses requests that a page on another site or port sends. Open the office with its launch link.
+- **A call answers 415.** The office takes changes as JSON only (`content-type: application/json`).
+- **"Could not limit ... to your Windows user."** `icacls` failed, for example on a drive without permissions (FAT32, exFAT). The office still runs. Other users of this computer may read that file.
 - **No Approve cards.** Your Claude Code default mode may be Auto, which rarely asks. Choose Default or Plan under Permissions when you open the session.
 - **The scene stays empty or black.** The scene is 3D and needs WebGL. Turn on hardware acceleration in the browser. The page also loads React from jsDelivr and fonts from Google, so check the network.
 - **Remove worktree is refused.** Close the session first: the button stays off until it ends. If the room has uncommitted changes, the dialog says so and offers Remove and discard changes. In the Floors dialog, git refuses uncommitted changes and commits that are not merged in the same way, and the dialog offers to go ahead anyway. The main folder cannot be removed.
