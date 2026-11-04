@@ -1,0 +1,16 @@
+{
+  "init": { "type": "system", "subtype": "init", "session_id": "sid-9", "model": "claude-haiku-4-5", "permissionMode": "default", "slash_commands": ["compact", "review", 7], "skills": ["tdd"] },
+  "assistantA": { "type": "assistant", "message": { "id": "msg_1", "content": [{ "type": "text", "text": "Hello from Claude." }], "usage": { "input_tokens": 10, "cache_read_input_tokens": 90, "cache_creation_input_tokens": 0, "output_tokens": 5 } } },
+  "assistantADup": { "type": "assistant", "message": { "id": "msg_1", "content": [{ "type": "text", "text": "Second block of the same call." }], "usage": { "input_tokens": 10, "cache_read_input_tokens": 90, "cache_creation_input_tokens": 0, "output_tokens": 5 } } },
+  "assistantSub": { "type": "assistant", "parent_tool_use_id": "toolu_t1", "message": { "id": "msg_sub", "content": [{ "type": "text", "text": "subagent chatter" }], "usage": { "input_tokens": 1000, "output_tokens": 1000 } } },
+  "assistantB": { "type": "assistant", "message": { "id": "msg_2", "content": [{ "type": "text", "text": "   " }, { "type": "tool_use", "id": "toolu_x", "name": "Bash", "input": {} }], "usage": { "input_tokens": 20, "cache_read_input_tokens": 0, "cache_creation_input_tokens": 80, "output_tokens": 7 } } },
+  "delta1": { "type": "stream_event", "event": { "type": "content_block_delta", "delta": { "type": "text_delta", "text": "Hel" } } },
+  "delta2": { "type": "stream_event", "event": { "type": "content_block_delta", "delta": { "type": "text_delta", "text": "lo" } } },
+  "deltaSub": { "type": "stream_event", "parent_tool_use_id": "toolu_t1", "event": { "type": "content_block_delta", "delta": { "type": "text_delta", "text": "hidden" } } },
+  "messageStart": { "type": "stream_event", "event": { "type": "message_start" } },
+  "resultOk": { "type": "result", "subtype": "success", "is_error": false, "result": "done", "total_cost_usd": 0.0123, "modelUsage": { "claude-haiku-4-5": { "contextWindow": 200000 } } },
+  "resultBudget": { "type": "result", "subtype": "error_max_budget_usd", "is_error": true, "result": "budget", "total_cost_usd": 1.01 },
+  "resultError": { "type": "result", "subtype": "error_during_execution", "is_error": true, "result": "API Error: 529 overloaded", "total_cost_usd": 0.002 },
+  "resultAfterInterrupt": { "type": "result", "subtype": "error_during_execution", "is_error": true, "result": "Request was aborted", "total_cost_usd": 0.004 },
+  "controlResponse": { "type": "control_response", "response": { "request_id": "cabc", "subtype": "success", "response": { "mode": "plan" } } }
+}

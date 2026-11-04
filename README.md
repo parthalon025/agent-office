@@ -94,12 +94,14 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 | --- | --- |
 | `server.mjs` | The server: state, hooks, sessions, REST, SSE, schedules, history. |
 | `git.mjs` | Worktrees, the changes view, remove worktree, pull request. |
+| `tracker.mjs` | The session rules: hook payloads and stream lines in, sessions out. No I/O of its own, so tests run offline. |
 | `place.mjs` | Where a session or worktree sits: building, floor, room id and notes key. The snapshot carries it. |
 | `hook.mjs` | Command hook. Sends one event to the server. |
 | `mcp.mjs` | MCP server with `office_inbox`, `office_ask`, `office_room` and `office_room_update`. |
 | `launch.ps1` | Starts a session in a terminal window. |
 | `probe.mjs` | Tests HTTP hooks on this Claude Code version. |
 | `public/` | The page: `adapter.js`, `office.js`, `office.css`, `chat-extras.js`, `index.html`. |
+| `test/tracker.test.mjs` | Session tracker tests from recorded-shape hook payloads and stream lines in `test/fixtures/`. Run `npm test`. |
 | `test/smoke.mjs` | End-to-end test against real Claude Code. |
 | `DS-README.md`, `Recipes.md`, `Reference.md`, `Concepts.md`, `kit/`, `components/`, `tokens.css` | The Agent Office design system. |
 
