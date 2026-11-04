@@ -31,7 +31,7 @@ Stop the server by the pid that owns port 4317 (`netstat -ano | grep :4317`, the
 | `git.mjs` | Worktrees, changes, remove worktree, pull request, `locate` (repo, worktree, branch of a folder), floors and rooms (`layout`, `branches`, `createFloor`, `createRoom`, `removeRoom`, `deleteFloor`). Argument lists only, never a shell. |
 | `hook.mjs` | Command hook. Exits 0 on every path. |
 | `payload.mjs` | Trims a hook payload to the fields the office shows. Used by `hook.mjs` and the HTTP hook route. |
-| `mcp.mjs` | stdio MCP server: `office_inbox`, `office_ask`. |
+| `mcp.mjs` | stdio MCP server: `office_inbox`, `office_ask`, `office_room`, `office_room_update`. |
 | `public/adapter.js` | Snapshot to DS events (repo = building, branch = floor, worktree = room; tool calls, helpers, plan, errors, triggers, usage), and DS commands to REST calls. Exposes `officeAdapter.onSnapshot / session / lookup / buildings / buildingFor / shown / roomsShown / roomsNow`. |
 | `public/city.js` | The city: all repositories as buildings on one DS stage (`AgentOffice.office.Stage`), with rise and sink effects, zoom to mouse, bounded pan, click or zoom in to enter. `OfficeCity.cameraFeel(stage)` also gives the office scene zoom to mouse. |
 | `public/board.js` | Room boards: repaints the DS chalkboard as a live screen (to-dos, browser steps, last calls, repo top), adds a notes board, raises room walls to 7 and moves the room sign above the cable tray, flies the camera to a clicked board. |
@@ -47,6 +47,10 @@ Add a new file only for a distinct job. Extend the file that owns the concern fi
 - An office session is `claude -p --input-format stream-json --output-format stream-json --verbose --include-partial-messages`. Messages and control requests go to stdin. `onStream()` reads stdout.
 - Every state change calls `broadcast()`. The browser gets full snapshots over `/events`.
 - Sessions are keyed by `uid`. `sid` is Claude's session id. `officeId` links hooks to a session the office opened (env `OFFICE_ID`).
+
+- Room awareness: `office_room` describes the room of the calling session. `office_room_update` changes only that room's notes board (`persisted.notes[key]`, kept as `{ text, at, by? }`, `by` is set when an agent wrote it) and one blackboard pin (`persisted.pins`). Each line an agent appends starts with the session name. A rewrite returns the old text in the reply.
+- `POST /api/notes/save` takes an optional `base` (the `at` the editor last saw). If the stored `at` differs, it answers 409 `{ error, text, at }`. On success it returns `{ ok: true, at }`.
+- `POST /api/room/inventory { key, items }` lets the page list the decor of a room (at most 40 items of 120 characters, in memory only). `office_room` shows it under "What is in the room", next to the fixed lab-room parts and the street.
 
 ## Gotchas learned the hard way
 

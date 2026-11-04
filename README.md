@@ -24,6 +24,7 @@ It is built on the Agent Office design system (x1.5), which lives in this folder
 - **Weekly limit.** The meter shows the real 7-day plan usage and its reset time when your status line command saves Claude Code's `rate_limits` to `~/.claude/rate_limits_state.json` (or the file in `OFFICE_RATE_FILE`). Without that file the meter stays hidden.
 - **Keep an eye on cost.** The control strip shows tokens, cost and the cache hit rate of a session that runs in the office, and its context fill. A session can have a spend limit.
 - **Ask the user.** Claude can call an `office_ask` tool to ask you a question and wait for your answer.
+- **Room awareness.** Claude can read its room (`office_room`): the place, the other sessions, the notes board, the pin and what is in the room. When you ask, it can add to the notes board or pin a short message on the blackboard (`office_room_update`). It puts its session name in front of each line it adds. It cannot move furniture or bots.
 
 ## Requirements
 
@@ -67,7 +68,7 @@ The **Hooks** button shows the exact command for the active hook mode. A termina
 Claude Code ──hooks (HTTP or command)──▶ server.mjs ──SSE──▶ browser (adapter.js ▶ Agent Office DS)
      ▲  ▲                                   │  │
      │  └── stdin: messages, control ───────┘  └── REST: open, close, answer, message, history ...
-     └───── MCP (mcp.mjs): office_inbox, office_ask
+     └───── MCP (mcp.mjs): office_inbox, office_ask, office_room, office_room_update
 ```
 
 - **Hooks** report prompts, tool calls (with their id and time), failed tool calls, subagent start and stop, and stops. `payload.mjs` trims each payload the same way for command and HTTP hooks; tool output never leaves the session. A `PermissionRequest` hook holds the prompt until you answer in the office.
@@ -94,7 +95,7 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 | `server.mjs` | The server: state, hooks, sessions, REST, SSE, schedules, history. |
 | `git.mjs` | Worktrees, the changes view, remove worktree, pull request. |
 | `hook.mjs` | Command hook. Sends one event to the server. |
-| `mcp.mjs` | MCP server with `office_inbox` and `office_ask`. |
+| `mcp.mjs` | MCP server with `office_inbox`, `office_ask`, `office_room` and `office_room_update`. |
 | `launch.ps1` | Starts a session in a terminal window. |
 | `probe.mjs` | Tests HTTP hooks on this Claude Code version. |
 | `public/` | The page: `adapter.js`, `office.js`, `office.css`, `chat-extras.js`, `index.html`. |

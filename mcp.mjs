@@ -24,8 +24,8 @@ const PIN_MAX = 140; // the server checks it too (server.mjs PIN_MAX)
 const INSTRUCTIONS =
   'The user may be watching this session in Agent Office. Call office_inbox when they say they sent you a message there, ' +
   'and call office_ask when you need a decision and the user may be away from the terminal. ' +
-  'When the user talks about the office, the room, the boards, the notes, the door or the desks, call office_room first. ' +
-  'Use office_room_update when the user asks to change the notes or the blackboard.';
+  'When the user talks about their room in Agent Office (the room, its blackboard, its notes board, its door or its desks), call office_room first. ' +
+  'Use office_room_update only when the user asks to change the notes board or the blackboard pin in Agent Office.';
 
 const TOOLS = [
   {
@@ -48,17 +48,17 @@ const TOOLS = [
     description: 'Describe your place in Agent Office: the building (repository), the floor (branch) and the room (worktree folder); ' +
       'the other sessions in the room and what they work on; the notes board with the user\'s notes; the blackboard pin; ' +
       'the things in the room (blackboard, notes board, stats display, door, desks with monitors); and what office_room_update can change. ' +
-      'Call it first when the user talks about the office, the room, the boards, the notes, the door or the desks.',
+      'Call it first when the user talks about their room in Agent Office (the room, its blackboard, its notes board, its door or its desks).',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
   },
   {
     name: 'office_room_update',
-    description: 'Change your room in Agent Office when the user asks you to change the notes or the blackboard. ' +
+    description: 'Change your room in Agent Office when the user asks you to change its notes board or its blackboard pin. ' +
       'Give one or more of notes_append, notes_replace and pin (not notes_append and notes_replace together). Returns what changed.',
     inputSchema: {
       type: 'object',
       properties: {
-        notes_append: { type: 'string', description: 'Text to add as a new line at the end of the user\'s notes board. The office puts your session name in front of it, so the user sees it is from you.' },
+        notes_append: { type: 'string', description: 'Text to add at the end of the user\'s notes board. The office puts your session name in front of each line, so the user sees it is from you.' },
         notes_replace: { type: 'string', description: 'New text for the whole notes board. It replaces the user\'s notes. Use it only when the user asks you to rewrite or clear the notes. An empty string clears the board.' },
         pin: { type: 'string', maxLength: PIN_MAX, description: `A short message to pin on the room's blackboard, ${PIN_MAX} characters or less. It replaces the last pin. An empty string clears it.` },
       },
