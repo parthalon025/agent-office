@@ -197,10 +197,12 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
    and fades in when it mounts. New rows in lists slide in. Reduced motion turns all of it off. */
 .view { position: relative; transition: opacity var(--duration-base) var(--ease-in); }
 .view.is-fading { opacity: 0; }
-.view > * { animation: page-fade var(--duration-base) var(--ease-out) both; }
+/* Fill backwards, not both: a held fill keeps an opacity animation on .ao-office, which is then a stacking context that traps the DS palette (z 51) below the welcome card and the dialog overlay. */
+.view > * { animation: page-fade var(--duration-base) var(--ease-out) backwards; }
 @keyframes page-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes page-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.past-row, .ext-row, .room-row, .agent-row, .city-row, .strip-bot, .welcome { animation: page-in var(--duration-base) var(--ease-out) both; }
+.past-row, .ext-row, .room-row, .agent-row, .city-row, .strip-bot { animation: page-in var(--duration-base) var(--ease-out) both; }
+.welcome { animation: page-fade var(--duration-base) var(--ease-out) both; }
 .strip { transition: box-shadow var(--duration-base) var(--ease-standard); }
 @media (prefers-reduced-motion: reduce) {
   .view, .view > *, .past-row, .ext-row, .room-row, .agent-row, .city-row, .strip-bot, .welcome, .city-tag { animation: none; transition: none; }
