@@ -89,11 +89,11 @@ Remote or phone access (needs real login and TLS; suggest Tailscale), terminal s
 
 ### Issue tracker
 
-Issues and specs live as local markdown under `.scratch/<feature>/` (this repo has no remote). See `docs/agents/issue-tracker.md`.
+Issues and specs live as GitHub issues on parthalon025/agent-office (use `gh`). See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
-The five default roles: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`, written as a `Status:` line in each issue file. See `docs/agents/triage-labels.md`.
+The five default roles as GitHub labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
