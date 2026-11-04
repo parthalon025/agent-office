@@ -182,6 +182,18 @@ test('host: bypass consumes a click before the pick', () => {
   host.dispose();
 });
 
+test('host: a bypass that changes its own state does not let the click reach a target under the pointer', () => {
+  const s = fakeStage({ board: 3 });
+  const host = globalThis.OfficeSceneHost.attach(s.office);
+  const calls = [];
+  let open = true;
+  host.register({ name: 'board', active: () => !open, meshes: () => [s.board], itemOf: () => ({}), hover: () => {}, click: () => calls.push('board'), bypass: () => { if (!open) return false; open = false; calls.push('closed'); return true; } });
+  host.register({ name: 'terminal', active: () => true, meshes: () => [s.screen], itemOf: () => ({}), hover: () => {}, click: () => calls.push('terminal') });
+  s.handlers.pointerdown(ev()); s.handlers.pointerup(ev());
+  assert.deepEqual(calls, ['closed']);
+  host.dispose();
+});
+
 test('host: the host owns the cursor and clears only its own pointer', () => {
   const s = fakeStage({ board: 3 });
   const host = globalThis.OfficeSceneHost.attach(s.office);

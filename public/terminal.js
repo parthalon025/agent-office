@@ -609,7 +609,7 @@
       paint(e, true);
     }
     function drop(e) {
-      if (hover === e) hover = null;
+      if (hover === e) { hover = null; host.rehover(); }
       try {
         if (e.mesh.onBeforeRender === e.hook) delete e.mesh.onBeforeRender;
         if (e.mesh.userData.officeTerm === e) e.mesh.userData.officeTerm = null;
@@ -642,7 +642,7 @@
       if (!e.P) measure(e);
       var s = sessionFor(e), info = status(s), p = palette(K), night = K.look === 'night', sub = K.look === 'sublevel';
       e.uid = s && !s.pseudo && s.uid && s.status !== 'ended' ? s.uid : null;   // a closed session has no terminal to open
-      if (e.hover && !e.uid) { e.hover = false; if (hover === e) hover = null; }
+      if (e.hover && !e.uid) { e.hover = false; if (hover === e) { hover = null; host.rehover(); } }
       var closed = info.word === 'Closed', calm = info.key === 'resting' || info.key === 'finished';
       e.emI = (night ? 1 : 0.95) * (closed ? 0.5 : calm ? 0.8 : 1);
       if (e.glow) {

@@ -190,6 +190,7 @@
       try {
         var cur = state(), why = rebuilt(prev, cur);
         prev = cur;
+        if (why.length && ptr) ptr.dirty = true;   // meshes changed: pick again under the pointer
         if (why.length) rebuildFns.slice().forEach(function (fn) { try { fn(why); } catch (x) { /* one adapter must not stop the others */ } });
         if (ptr && ptr.dirty) { ptr.dirty = false; hoverStep(); }
       } catch (x) { /* one bad frame must not stop the office */ }

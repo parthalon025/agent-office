@@ -694,9 +694,9 @@
       focus(item, item.kind);
     }
     function bypass() {
-      if (!focused) return false;
-      if (focusedKind === 'stats' && !fly) blur();
-      return focusedKind === 'stats';
+      if (focusedKind !== 'stats') return false;   // an open board or notes panel: the click goes on (a monitor still opens its terminal)
+      if (!fly) blur();
+      return true;                                 // the click closed the stats view and does nothing else
     }
     function onKey(e) { if (e.key === 'Escape' && focused) blur(); }
     var offTarget = host.register({
