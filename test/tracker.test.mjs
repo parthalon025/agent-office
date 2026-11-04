@@ -600,3 +600,19 @@ test('risk uses the whole worktree of an office worktree session, and the launch
   assert.equal(t.cwd, ELSEWHERE);
   assert.deepEqual(t.pending.map((p) => p.risk), ['medium']);
 });
+
+// A local agent sends paths relative to its session folder. The call's file is read against that folder, never the server's cwd.
+test('a relative tool path is resolved against the session cwd, then made relative to the repo root', async () => {
+  const r = rig();
+  const sub = path.join(REPO, 'sub');
+  r.hook({ hook_event_name: 'SessionStart', session_id: 'sid-rel', cwd: sub, source: 'startup' });
+  await wait(); // the git place is known from here on
+  const s = r.only();
+  const pre = (id, tool, input) => r.hook({ hook_event_name: 'PreToolUse', session_id: 'sid-rel', cwd: sub, tool_name: tool, tool_use_id: id, tool_input: input });
+  pre('t1', 'Write', { file_path: 'hello.txt' });
+  pre('t2', 'Read', { path: 'notes.txt' });
+  pre('t3', 'Read', { file_path: path.join(sub, 'abs.txt') });
+  pre('t4', 'Read', { file_path: path.join('..', '..', 'outside.txt') });
+  await wait();
+  assert.deepEqual(s.calls.map((c) => c.file), ['sub/hello.txt', 'sub/notes.txt', 'sub/abs.txt', null]);
+});
