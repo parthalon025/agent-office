@@ -10,6 +10,7 @@ import { spawn, execFile, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as git from './git.mjs';
 import { slimPayload } from './payload.mjs';
+import { riskOf } from './risk.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -287,11 +288,6 @@ function closeAll(s, why) {
   for (const a of s.agents) if (!a.done) { a.done = true; a.ok = false; }
   if (s.agents.length > 20) s.agents = s.agents.slice(-20);
 }
-function riskOf(tool, input = {}) {
-  if (tool === 'Bash') return /\b(rm|sudo|git\s+push|git\s+reset|del|rmdir|format|curl|wget|chmod|kill|taskkill|drop)\b/i.test(input.command || '') ? 'high' : 'medium';
-  if (tool === 'WebFetch' || String(tool).startsWith('mcp__')) return 'medium';
-  return 'low';
-}
 
 // A readable picture of what a permission prompt would change, shown on the Approve card.
 function makePreview(tool, input = {}) {
@@ -523,7 +519,7 @@ function onPermission(p, res) {
   const id = 'p' + crypto.randomBytes(5).toString('hex');
   const detail = describeTool(p.tool_name, p.tool_input);
   const sug = allowRules(p.permission_suggestions);
-  s.pending.push({ id, tool: p.tool_name, detail, risk: riskOf(p.tool_name, p.full_input || p.tool_input), preview: makePreview(p.tool_name, p.full_input || p.tool_input), always: ruleLabel(sug), t: Date.now() });
+  s.pending.push({ id, tool: p.tool_name, detail, risk: riskOf(p.tool_name, p.full_input || p.tool_input, s.cwd), preview: makePreview(p.tool_name, p.full_input || p.tool_input), always: ruleLabel(sug), t: Date.now() });
   s.status = 'waiting'; s.note = `${p.tool_name} ${detail}`.trim();
   addFeed(s, 'wait', `asks to use ${s.note}`);
   const hold = s.headless ? HEADLESS_ASK_MS : ASK_TIMEOUT_MS;

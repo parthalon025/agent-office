@@ -202,7 +202,8 @@
       (s.questions || []).forEach(function (q) {
         if (k.asked[q.id]) return;
         k.asked[q.id] = true;
-        emit({ type: 'request', bot: bot0, id: q.id, text: q.text, risk: 'low', tool: 'office_ask' });
+        // no risk value: the DS bulk 'Approve all low-risk' must never answer a question the user did not read
+        emit({ type: 'request', bot: bot0, id: q.id, text: q.text, tool: 'office_ask' });
       });
       // what the session said (headless sessions only; a terminal session answers in its terminal)
       (s.replies || []).forEach(function (r) {
