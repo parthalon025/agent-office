@@ -57,7 +57,7 @@
   // The room's numbers. Used when the page gives no stats(roomId).
   function statsFrom(info) { return window.OfficeVocab.figures(info.sessions || []); }
   function fmtTokens(n) { n = +n || 0; return n < 1000 ? String(Math.round(n)) : n < 1e6 ? (n / 1000).toFixed(n < 10000 ? 1 : 0) + 'k' : (n / 1e6).toFixed(1) + 'M'; }
-  function fmtCost(c) { c = +c || 0; return '$' + (c < 10 ? c.toFixed(2) : c.toFixed(1)); }
+  function fmtCost(c) { return window.OfficeFormat.money(+c || 0); }
   function fmtAgo(t, now) {
     if (!t) return 'none yet';
     var s = Math.max(0, Math.round((now - t) / 1000));

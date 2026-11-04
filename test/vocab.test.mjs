@@ -77,3 +77,31 @@ test('room figures count once, with the same waiting rule', () => {
   assert.deepEqual(V.figures(list), { sessions: 3, working: 1, waiting: 1, toolCalls: 3, tokens: 2000, cost: 0.75, priced: 2, todosDone: 1, todosTotal: 2, lastEvent: 20 });
   assert.equal(V.figures([]).sessions, 0);
 });
+
+test('requests lists every permission prompt and question, oldest first', () => {
+  const s = mk({
+    pending: [{ id: 'p2', tool: 'Bash', detail: 'rm -rf x', risk: 'high', always: 'Bash(rm:*)', t: 30 }, { id: 'p1', tool: 'Read', detail: 'a.txt', risk: 'low', always: 'Read', t: 10 }],
+    questions: [{ id: 'q1', text: 'Which file?', t: 20 }],
+  });
+  const r = V.requests(s);
+  assert.deepEqual(r.map((x) => x.id), ['p1', 'q1', 'p2']);
+  assert.deepEqual(r.map((x) => x.kind), ['permission', 'question', 'permission']);
+  assert.equal(r[1].text, 'Which file?');
+  assert.equal(r[0].text, 'Allow Read: a.txt?');
+  assert.equal(r[1].risk, undefined);
+});
+
+test('requests is empty for no session, a closed session and a quiet one', () => {
+  assert.deepEqual(V.requests(null), []);
+  assert.deepEqual(V.requests(mk({})), []);
+  assert.deepEqual(V.requests(mk({ status: 'ended', pending: [{ id: 'p', tool: 'Bash', t: 1 }] })), []);
+});
+
+test('always allow is offered for low and medium risk, never for high risk or a question', () => {
+  const p = (id, risk, always) => ({ id, tool: 'Bash', detail: 'x', risk, always, t: 1 });
+  assert.equal(V.alwaysOffer(mk({ pending: [p('a', 'high', 'Bash(rm:*)')] })), null);
+  assert.equal(V.alwaysOffer(mk({ pending: [p('a', 'medium', null)] })), null);
+  assert.equal(V.alwaysOffer(mk({ questions: [{ id: 'q', text: 'x', t: 1 }] })), null);
+  assert.equal(V.alwaysOffer(mk({ pending: [p('a', 'high', 'Bash(rm:*)'), p('b', 'medium', 'Bash(ls:*)')] })).id, 'b');
+  assert.equal(V.alwaysOffer(mk({ pending: [p('a', 'low', 'Read')] })).always, 'Read');
+});

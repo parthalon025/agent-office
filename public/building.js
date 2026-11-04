@@ -11,6 +11,7 @@
      preview(repo, snap?)  a building definition with its bots (cards and the city); it mounts nothing
      session(botName)      the open session of a bot in the building that is on screen
      lookup(botName)       the commands and skills of that session
+     botName(uid)          the scene name of a seated bot
      mount(repo)           a new building adapter for one building (below)
 
    Building adapter (store.mount(repo)): made once per mounted scene. It owns the mirror of what the scene was
@@ -39,6 +40,16 @@
 
   function hash(s) { var h = 0; for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0; return h; }
   function shapeOf(uid) { return SHAPES[hash(String(uid)) % SHAPES.length]; }
+  // The body color of a bot: one of the DS shape colors, picked from the uid apart from the shape, so bots of the
+  // same shape still differ. The scene and every list read this one value, so a bot looks the same everywhere.
+  // Without the DS bundle (tests) there is no color and the DS picks its own.
+  function colorOf(uid) {
+    var c = root.AgentOffice && root.AgentOffice.BOT_COLORS;
+    if (!c) return undefined;
+    var v = Object.keys(c).map(function (k) { return c[k]; });
+    return v.length ? v[Math.floor(hash(String(uid)) / SHAPES.length) % v.length] : undefined;
+  }
+  function withColor(bot, uid) { var c = colorOf(uid); if (c) bot.color = c; return bot; }
   function clip(t, n) { t = String(t || ''); return t.length > n ? t.slice(0, n - 1) + '…' : t; }
   function base(p) { return String(p || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() || ''; }
   // A subagent's type picks its role: the workstation and the icon.
@@ -97,7 +108,7 @@
     live(snap).forEach(function (s) {
       var pl = placeOf(s);
       places.push(pl);
-      if (withBots && pl.repo === repo) (bots[pl.root] = bots[pl.root] || []).push({ name: s.name, role: 'coder', shape: shapeOf(s.uid), status: V.status(s).key, task: V.taskLine(s) });
+      if (withBots && pl.repo === repo) (bots[pl.root] = bots[pl.root] || []).push(withColor({ name: s.name, role: 'coder', shape: shapeOf(s.uid), status: V.status(s).key, task: V.taskLine(s) }, s.uid));
     });
     places.forEach(function (pl) {
       if (pl.repo !== repo) return;
@@ -144,12 +155,14 @@
     store.buildings = function (snap) { return buildings(snap || latest); };
     store.preview = function (repo, snap) { return describe(repo, snap || latest, true).def; };
     store.shapeOf = shapeOf;
+    store.colorOf = colorOf;
     store.buildingOf = function (s) { return s.place ? s.place.buildingKey : ''; };
     store.sessionByUid = function (uid) { return latest && latest.sessions.filter(function (x) { return x.uid === uid; })[0] || null; };
     // The building that is on screen: the one attached last.
     function current() { return attached.length ? attached[attached.length - 1] : null; }
     store.session = function (botName) { var m = current(); return m ? m.session(botName) : null; };
     store.lookup = function (botName) { var m = current(); return m ? m.lookup(botName) : null; };
+    store.botName = function (uid) { var m = current(); return m ? m.botName(uid) : null; };
 
     store.mount = function (repo) {
       var d = describe(repo, latest, false);
@@ -257,7 +270,7 @@
             if (s.status === 'ended') return;
             var name = uniqueName(s.name);
             k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: V.status(s).key, task: V.taskLine(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, model: s.model, ended: false, place: placeKey(pl), room: roomOf(pl, emit) };
-            var bot = { name: name, role: 'coder', shape: shapeOf(s.uid), status: k.status, task: k.task, platform: 'Claude Code', identity: s.cwd };
+            var bot = withColor({ name: name, role: 'coder', shape: shapeOf(s.uid), status: k.status, task: k.task, platform: 'Claude Code', identity: s.cwd }, s.uid);
             if (s.skills && s.skills.length) bot.skills = s.skills.slice(0, 16);
             if (s.scheduleId) bot.triggers = [s.name];
             emit({ type: 'bot.add', roomId: k.room, bot: bot });
@@ -381,6 +394,8 @@
         var s = snap || latest, nk = m.noteKey(roomId, s);
         return (s && s.figures && s.figures[nk]) || V.figures([]);
       };
+      // the name the scene gives a bot (a folder name used twice gets a number), or null when it is not seated
+      m.botName = function (uid) { var k = known[uid]; return k && !k.ended ? k.name : null; };
       m.session = function (botName) {
         for (var uid in known) { if (known[uid].name === botName && !known[uid].ended) return store.sessionByUid(uid); }
         return null;
@@ -399,5 +414,5 @@
     return store;
   }
 
-  root.OfficeBuilding = { createStore: createStore, shapeOf: shapeOf, buildings: buildings, describe: describe, roomsNow: roomsNow };
+  root.OfficeBuilding = { createStore: createStore, shapeOf: shapeOf, colorOf: colorOf, buildings: buildings, describe: describe, roomsNow: roomsNow };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

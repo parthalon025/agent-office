@@ -11,7 +11,7 @@ It is built on the Agent Office design system (x1.5), which lives in this folder
 - **Notes board.** Next to it hangs a notes board for your own reminders. Click it, the camera flies to it, and you write on the board itself. Notes save as you type and stay per room (in `state.json`). Rooms have taller walls so the room name sits above the cable tray.
 - **Repos as buildings.** A git repository is a building, a branch is a floor and a worktree is a room. Pick the building in the control strip; a button there shows requests that wait in another building. Folders outside git share the "Other folders" building.
 - **Floors and rooms.** The Floors dialog creates a floor (a new branch with its first worktree), adds a room (one more worktree on a branch, also on a branch that has one), removes a room and deletes a floor (its worktrees and the branch). Git refusals (uncommitted changes, commits that are not merged) show with a button to go ahead anyway. The main folder and a room with an open session cannot be removed.
-- **Extensions.** The Extensions button in the chat header lists the session's connectors (MCP servers) and plugins. Turn a connector off or on for this session, reconnect it, add one (a URL or a command) or remove one. Turn a plugin off or on for this folder, install or remove one. Saved changes go to the local or project scope of the folder, never to your user settings.
+- **Extensions.** The Extensions button in the dock (it shows when a bot is selected) lists the session's connectors (MCP servers) and plugins. Turn a connector off or on for this session, reconnect it, add one (a URL or a command) or remove one. Turn a plugin off or on for this folder, install or remove one. Saved changes go to the local or project scope of the folder, never to your user settings.
 - **Sessions as bots.** Each session sits at a desk in the room of its worktree. Typing means working, an amber badge means it needs you, and a red badge means the turn failed (Retry or Dismiss).
 - **Subagents as helpers.** A Task or Agent call brings a grey helper by the elevator. The helper does its own tool calls and leaves when it returns its result.
 - **Trace every step.** Select a bot and open Trace: the plan from TodoWrite with each step's state, every tool call with its argument, time and failure, skills loaded, pages read, and the schedule that started the run.
@@ -50,7 +50,11 @@ Open http://localhost:4317 and choose **Open session**.
 3. Optional: choose "New git worktree", a model, a spend limit, and a first instruction.
 4. Click a bot, then use its chat. Type `/` for commands and skills.
 
-The controls strip at the bottom holds Open session, Past, Schedules and Hooks. When a bot is selected it also shows the model, the permissions, Stop turn, Changes and Always allow.
+The dock at the bottom holds Open session, the building picker, City (or Go inside), Floors, Sessions, Past, a **More** control (Schedules, Attach sessions, Compact) and **Search actions** (Ctrl+K). When a bot is selected it adds a row with Stop turn, Open terminal, Changes, Extensions and a quiet Always allow. The model, the permissions and the cost of that bot are under More. Always allow never shows for a high-risk request. At laptop and phone widths the chat, the roster and the Since you left card stop above the dock, so the message box and Send stay clear.
+
+Only one panel takes the right column at a time. While the terminal, the board or the stats panel is open, the chat is hidden. Each of those panels shows the requests of its sessions with Approve and Decline (Yes and No for a question), so you can answer without the chat.
+
+**Open session** starts in the building you are looking at and offers your recent folders as one-click buttons. **Past sessions** and **Schedules** ask before they forget a session or delete a schedule. **All sessions** shows the folder, the state and a Go to button for each session.
 
 ### Sessions you start yourself
 
@@ -60,7 +64,7 @@ Start Claude Code with the office settings so the office can see it:
 claude --settings "E:\agent-office\office-hooks-http.json" --mcp-config "E:\agent-office\office-mcp.json"
 ```
 
-The **Hooks** button shows the exact command for the active hook mode. A terminal session reports its activity and asks permission through the office, but you answer its chat in the terminal. Stop turn, mode and model switches, attachments and the command list work only in sessions that run inside the office.
+The **Attach sessions** dialog (under More) shows the exact command for the active hook mode, with Copy buttons. A terminal session reports its activity and asks permission through the office, but you answer its chat in the terminal. Stop turn, mode and model switches, attachments and the command list work only in sessions that run inside the office.
 
 ## How it works
 
@@ -123,7 +127,7 @@ Generated at run time and ignored by git: `.office-token`, `office-hooks.json`, 
 ## Troubleshooting
 
 - **"Already running on port 4317."** A second `npm start` is harmless: it changes nothing. Stop the first copy to restart.
-- **A session does not appear.** Terminal sessions need the `--settings` flag above. Check the Hooks dialog for the mode in use.
+- **A session does not appear.** Terminal sessions need the `--settings` flag above. Check the Attach sessions dialog for the mode in use.
 - **No Approve cards.** Your Claude Code default mode may be Auto, which rarely asks. Choose Default or Plan under Permissions when you open the session.
 - **A message sits queued.** A terminal session at an idle prompt reads it when it next runs. Sessions in the office take messages at once.
 - **The `/` list is empty.** Claude reports its commands after the first message. The office reuses the last known list until then.

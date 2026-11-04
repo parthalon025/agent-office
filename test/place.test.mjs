@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { placeOfSession, placeOfWorktree, legacyNoteKey, legacyRoomId, roomIdOf, normPath, adoptLegacy, OTHER_NAME, OTHER_FLOOR } from '../place.mjs';
+import { placeOfSession, placeOfWorktree, legacyNoteKey, legacyRoomId, roomIdOf, normPath, adoptLegacy, addRecent, cleanRecent, OTHER_NAME, OTHER_FLOOR } from '../place.mjs';
 import * as git from '../git.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -129,4 +129,21 @@ test('one repository has one building name and path whatever the cwd case', { sk
     assert.equal(s.building, w.building);
     assert.equal(s.repoPath, w.repoPath);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('recent folders: one form, no duplicates in any case or slash, newest first', () => {
+  let list = [];
+  list = addRecent(list, 'E:/pensiv/');
+  list = addRecent(list, 'e:\\PENSIV');
+  assert.equal(list.length, 1);
+  assert.equal(list[0], path.normalize('e:\\PENSIV'));
+  list = addRecent(list, 'E:\\agent-office');
+  assert.deepEqual(list.map((d) => d.toLowerCase()), [path.normalize('E:\\agent-office').toLowerCase(), path.normalize('e:\\pensiv').toLowerCase()]);
+  assert.equal(addRecent(list, 'E:\\x', 2).length, 2);
+});
+
+test('clean recent folders drops duplicates that were stored in different forms', () => {
+  const out = cleanRecent(['E:/pensiv', 'E:\\pensiv\\', 'E:\\other', '', null]);
+  assert.equal(out.length, 2);
+  assert.equal(out[1], path.normalize('E:\\other'));
 });

@@ -1,20 +1,25 @@
 /* Agent Office for Claude Code x0.1: page styles. Only Agent Office DS tokens, no literal colors.
    The 3D office and its HUD come from the design system; this file styles what the page adds:
    the control strip, the dialogs, the diff, and the chat grips and slash list. */
+/* The height of the dock plus a gap. office.js measures the dock and updates it; this is the value before that. */
+:root { --strip-clear: 200px; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: var(--font-sans); }
 #office { height: 100vh; }
 
 .mono { font-family: var(--font-mono); font-size: var(--type-data-size); line-height: var(--type-data-line); font-variant-numeric: tabular-nums; }
 
 /* ---------- control strip ---------- */
+/* The dock. At 1360 px and up its edges line up with the DS broadcast bar (left 362, right 376 when a chat is open).
+   Below that it takes the full width. office.js measures it and sets --strip-clear (its height plus a gap) on <html>;
+   the DS chat, the roster, the Since you left card and the page panels stop above that line. */
 .strip {
-  position: fixed; z-index: var(--z-sheet); left: 360px; bottom: 76px; max-width: calc(100vw - 740px);
-  display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-2) var(--space-3);
+  position: fixed; z-index: var(--z-sheet); left: 362px; right: 376px; bottom: 76px;
+  display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-2) var(--space-3);
   background: var(--panel); backdrop-filter: blur(var(--blur-panel)); border: 1px solid var(--line);
   border-radius: var(--radius-lg); box-shadow: var(--shadow-panel);
 }
 .strip-group { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
-.strip-bot { padding-top: var(--space-2); border-top: 1px solid var(--line); }
+.strip-bot { padding-left: var(--space-3); border-left: 1px solid var(--line); }
 .strip-nav { gap: var(--space-1); }
 .strip-id { display: inline-flex; align-items: center; gap: var(--space-2); font: var(--type-title-weight) var(--type-title-size)/var(--type-title-line) var(--font-sans); }
 .strip-id .mono { color: var(--muted); font-weight: 400; }
@@ -28,8 +33,40 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
   border-radius: var(--radius-lg); box-shadow: var(--shadow-panel); padding: var(--space-3);
 }
 
-@media (max-width: 1100px) { .strip { left: var(--space-4); right: var(--space-4); max-width: none; bottom: 112px; } }
-@media (max-width: 820px) { .strip { bottom: var(--space-3); } .welcome { top: 30%; } }
+/* the dock stops before the HUD rail column (right 300px, up to 68px wide) and, when narrow, clears the log lane */
+@media (max-width: 1359px) { .strip { right: 380px; } }
+@media (max-width: 1100px) { .strip { left: var(--space-4); bottom: 112px; } }
+@media (max-width: 820px) { .strip { left: var(--space-4); right: var(--space-4); bottom: var(--space-3); } .welcome { top: 30%; } }
+.strip-search { margin-left: auto; }
+.kbd { margin-left: var(--space-1); padding: 0 var(--space-1); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--muted); }
+.strip-more-host { position: relative; display: inline-flex; }
+.strip-more { position: absolute; right: 0; bottom: calc(100% + var(--space-3)); z-index: var(--z-sheet); min-width: 240px; max-height: calc(100vh - var(--strip-clear, 200px) - 16px); overflow: auto; display: flex; flex-direction: column; align-items: stretch; gap: var(--space-1); padding: var(--space-2); background: var(--panel); backdrop-filter: blur(var(--blur-panel)); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-panel); }
+.strip-more .ao-btn { justify-content: flex-start; }
+.strip-more-set { display: flex; flex-direction: column; gap: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--line); }
+.strip-more-set .ao-select select { max-width: none; }
+.strip-more-h { color: var(--muted); font: var(--type-eyebrow-weight) var(--type-eyebrow-size)/var(--type-eyebrow-line) var(--font-sans); letter-spacing: var(--type-eyebrow-tracking); text-transform: uppercase; }
+@media (max-width: 1359px) {
+  /* the chat and the roster stop above the dock */
+  /* important: chat-extras.js writes a saved bottom as an inline style */
+  .ao-hud-chat { bottom: var(--strip-clear, 200px) !important; }
+  .ao-grip-b, .ao-grip-bl { display: none; }
+  .ao-hud-right:not(.ao-hud-chat) { max-height: calc(100% - 68px - var(--strip-clear, 200px)); overflow: auto; }
+}
+@media (max-width: 820px) {
+  .strip-more-host { position: static; }
+  .strip-more { left: 0; right: 0; }
+  .kbd { display: none; }
+  .strip-bot { flex-basis: 100%; padding-left: 0; border-left: 0; }
+  .strip .ao-btn, .strip .ao-select select { min-height: 40px; }
+  .strip .ao-select { min-width: 0; }
+  .ao-hud-chat { height: min(55%, calc(100% - var(--strip-clear, 200px) - 72px)); }
+  .ao-hud-right:not(.ao-hud-chat) { bottom: var(--strip-clear, 200px); }
+  .ao-hud-syl, .ao-hud-scrub, .ao-office:has(.ao-hud-scrub) .ao-hud-scrub { bottom: var(--strip-clear, 200px); }
+  /* with a chat open, the card goes back to the top so it does not cover the message box */
+  .ao-office:has(.ao-hud-chat) .ao-hud-syl { top: 64px; bottom: auto; }
+}
+/* One panel at a time: the terminal, board and stats panels take the right column. */
+#office.has-panel .ao-hud-right:not(.ao-hud-inbox) { display: none; }
 
 /* ---------- dialogs ---------- */
 .ao-dialog { width: min(560px, calc(100vw - 32px)); }
@@ -46,18 +83,19 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 
 /* past sessions and schedules */
 .past { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
-.past-row { display: flex; justify-content: space-between; gap: var(--space-3); padding: var(--space-3); background: var(--chip); border: 1px solid var(--line); border-radius: var(--radius-md); }
-.past-main { min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.past-row { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); background: var(--chip); border: 1px solid var(--line); border-radius: var(--radius-md); }
+.past-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.past-clip { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
 .past-title { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 .past-sub { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .past-snip { color: var(--ink); font: var(--type-body-weight) var(--type-body-size)/var(--type-body-line) var(--font-sans); overflow-wrap: anywhere; }
 .past-snip em { color: var(--muted); font-style: normal; text-transform: uppercase; letter-spacing: var(--type-eyebrow-tracking); font-size: var(--type-eyebrow-size); }
 .past-meta { color: var(--muted); }
-.past-actions { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-1); flex: none; }
+.past-actions { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-1); flex: none; }
 
 /* page toasts (results of page actions); the HUD's own toasts sit at the top */
-.page-toasts { position: fixed; z-index: calc(var(--z-dialog) + 1); right: var(--space-5); bottom: 180px; width: min(360px, calc(100vw - 2 * var(--space-4))); }
-@media (max-width: 820px) { .page-toasts { right: var(--space-4); bottom: 200px; } }
+.page-toasts { position: fixed; z-index: calc(var(--z-dialog) + 1); right: var(--space-5); bottom: var(--strip-clear, 180px); width: min(360px, calc(100vw - 2 * var(--space-4))); }
+@media (max-width: 820px) { .page-toasts { right: var(--space-4); bottom: var(--strip-clear, 200px); } }
 
 /* welcome card */
 .welcome-logo { display: flex; justify-content: center; padding-top: var(--space-2); }
@@ -89,9 +127,6 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .ext-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-1); flex: none; }
 @media (max-width: 820px) { .ext-row { flex-wrap: wrap; } .ext-actions { width: 100%; justify-content: flex-start; } }
 
-/* the Extensions button the page adds to the DS chat header */
-.ao-chat-ext { display: inline-flex; margin-left: auto; }
-
 /* floors and rooms */
 .room-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); color: var(--muted); }
 .room-row .past-sub { flex: 1; min-width: 0; }
@@ -111,8 +146,8 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 
 @media (max-width: 820px) {
   .row { grid-template-columns: 1fr; }
-  .past-row { flex-direction: column; }
-  .past-actions { flex-direction: row; flex-wrap: wrap; }
+  .past-row { flex-direction: column; align-items: stretch; }
+  .past-actions { justify-content: flex-start; }
 }
 
 /* ---------- chat grips and slash list (chat-extras.js) ---------- */
@@ -126,7 +161,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .ao-slash-row[aria-selected="true"] { background: var(--chip); color: var(--ink); }
 .ao-slash-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ao-slash-tag { color: var(--muted); font: var(--type-eyebrow-weight) var(--type-eyebrow-size)/var(--type-eyebrow-line) var(--font-sans); letter-spacing: var(--type-eyebrow-tracking); text-transform: uppercase; }
-@media (max-width: 820px) { .ao-hud-chat { width: auto !important; bottom: var(--space-3) !important; } .ao-grip { display: none; } }
+@media (max-width: 820px) { .ao-hud-chat { width: auto !important; } .ao-grip { display: none; } }
 
 /* ---------- weekly limit meter ----------
    The DS HUD draws the meter from demo numbers unless the adapter sends `usage` events. The office
@@ -171,7 +206,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 }
 
 /* ---------- room board, read up close (board.js) ---------- */
-.board-panel { position: fixed; z-index: var(--z-sheet); right: var(--space-5); top: 68px; bottom: 180px; width: min(420px, calc(100vw - 2 * var(--space-4))); display: flex; animation: page-in var(--duration-base) var(--ease-out) both; }
+.board-panel { position: fixed; z-index: var(--z-sheet); right: var(--space-4); top: 68px; bottom: var(--strip-clear, 180px); width: min(420px, calc(100vw - 2 * var(--space-4))); display: flex; animation: page-in var(--duration-base) var(--ease-out) both; }
 .board-panel > .ao-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .board-panel .ao-body { flex: 1; min-height: 0; overflow: auto; }
 .board-b { display: flex; flex-direction: column; gap: var(--space-2); }
@@ -180,7 +215,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .board-tree li { display: flex; align-items: center; gap: var(--space-2); color: var(--muted); }
 .board-tree li span:nth-child(2) { flex: 1; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .board-tree li.is-hot span:nth-child(2) { color: var(--status-working); font-weight: 600; }
-@media (max-width: 820px) { .board-panel { right: var(--space-4); top: auto; bottom: 200px; height: 50vh; } }
+@media (max-width: 820px) { .board-panel { top: auto; height: min(50vh, calc(100% - var(--strip-clear, 200px) - 72px)); } }
 @media (prefers-reduced-motion: reduce) { .board-panel { animation: none; } }
 
 .board-pin { padding: var(--space-2); border-left: 2px solid var(--accent); background: var(--chip); border-radius: var(--radius-sm); color: var(--ink); }
@@ -205,7 +240,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 @media (max-width: 820px) { .agent-row { flex-wrap: wrap; } .agent-who { flex-basis: 50%; } }
 
 /* ---------- terminal panel: one session as a full terminal ---------- */
-.terminal-panel { position: fixed; z-index: var(--z-sheet); right: var(--space-5); top: 68px; bottom: 180px; width: min(560px, calc(100vw - 2 * var(--space-4))); display: flex; flex-direction: column; background: var(--panel); backdrop-filter: blur(var(--blur-panel)); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-panel); overflow: hidden; animation: page-in var(--duration-base) var(--ease-out) both; }
+.terminal-panel { position: fixed; z-index: var(--z-sheet); right: var(--space-4); top: 68px; bottom: var(--strip-clear, 180px); width: min(560px, calc(100vw - 2 * var(--space-4))); display: flex; flex-direction: column; background: var(--panel); backdrop-filter: blur(var(--blur-panel)); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-panel); overflow: hidden; animation: page-in var(--duration-base) var(--ease-out) both; }
 .term-head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); }
 .term-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--type-title-weight); }
 .term-model { color: var(--muted); }
@@ -225,5 +260,30 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .term-field::placeholder { color: color-mix(in srgb, var(--bubble) 55%, var(--scene-dark)); }
 .term-field:focus-visible { box-shadow: 0 1px 0 var(--accent); }
 .term-note { margin: 0; padding: var(--space-2) var(--space-3); border-top: 1px solid var(--line); color: var(--muted); font: var(--type-caption-weight) var(--type-caption-size)/var(--type-caption-line) var(--font-sans); }
-@media (max-width: 820px) { .terminal-panel { right: var(--space-4); top: auto; bottom: 200px; height: 50vh; } }
+@media (max-width: 820px) { .terminal-panel { top: auto; height: min(50vh, calc(100% - var(--strip-clear, 200px) - 72px)); } }
 @media (prefers-reduced-motion: reduce) { .terminal-panel { animation: none; } }
+
+/* ---------- requests inside a panel (RequestBar in office.js) ---------- */
+.asks { flex: none; display: flex; flex-direction: column; gap: var(--space-2); max-height: 45%; overflow: auto; padding: var(--space-2) var(--space-3); border-top: 1px solid var(--line); background: var(--panel); }
+.board-b .asks { max-height: none; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--chip); }
+.ask { display: flex; flex-direction: column; gap: var(--space-2); }
+.ask.is-high { padding-left: var(--space-2); border-left: 3px solid var(--status-error); }
+.ask-t { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font: var(--type-body-weight) var(--type-body-size)/var(--type-body-line) var(--font-sans); }
+.ask-x { min-width: 0; overflow-wrap: anywhere; }
+.ask-a { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+@media (max-width: 820px) { .ask-a .ao-btn { min-height: 40px; } }
+
+/* a back button points back */
+.btn-back .ao-icon { transform: scaleX(-1); }
+
+/* ---------- dialogs: recent folders, copy rows, selects, sessions table ---------- */
+.chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.chips .ao-btn { max-width: 100%; }
+.copy-row { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
+.copy-row .code { width: 100%; box-sizing: border-box; }
+.ao-dialog .ao-field .ao-select { display: flex; width: 100%; }
+.ao-dialog .ao-field .ao-select select { max-width: none; }
+.sess-tbl td, .sess-tbl th { white-space: nowrap; }
+.sess-tbl td:nth-child(2) { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.sess-who, .sess-state { display: inline-flex; align-items: center; gap: var(--space-2); }
+.sess-who b { font-weight: var(--type-title-weight); }

@@ -32,7 +32,7 @@
     if (s < 86400) return Math.floor(s / 3600) + ' h ago';
     return Math.floor(s / 86400) + ' d ago';
   }
-  function money(n) { return typeof n === 'number' ? '$' + n.toFixed(n < 1 ? 3 : 2) : '–'; }
+  var F = window.OfficeFormat, money = F.money;   // one money format: $0.00, <$0.01, two decimals (format.js)
   function clip(t, n) { t = String(t || ''); return t.length > n ? t.slice(0, n - 1) + '…' : t; }
   function cadence(s) { return s.kind === 'daily' ? 'Every day at ' + s.at : 'Every ' + s.every + ' min'; }
   function useSnapshot() {
@@ -40,16 +40,18 @@
     useEffect(function () { return window.officeAdapter.onSnapshot(st[1]); }, []);
     return st[0];
   }
-  // The bot whose chat is open. The office draws that panel itself, so read the name from its message box.
+  // The bot whose chat is open, and whether the Decisions inbox is open. The office draws those panels itself,
+  // so read the name from the message box and the inbox from its class.
   function useChatBot() {
-    var st = useState(null);
+    var st = useState({ name: null, inbox: false });
     useEffect(function () {
       var raf = 0;
       function read() {
         raf = 0;
         var input = document.querySelector('.ao-hud-chat .ao-input');
         var name = input ? (input.placeholder || '').replace(/^Message\s+/, '') : null;
-        st[1](function (prev) { return prev === name ? prev : name; });
+        var inbox = !!document.querySelector('.ao-hud-inbox');
+        st[1](function (prev) { return prev.name === name && prev.inbox === inbox ? prev : { name: name, inbox: inbox }; });
       }
       var mo = new MutationObserver(function () { if (!raf) raf = requestAnimationFrame(read); });
       mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['placeholder'] });
@@ -62,14 +64,11 @@
     var m = Math.max(0, Math.round((at - Date.now()) / 60000)), d = Math.floor(m / 1440), hr = Math.floor((m % 1440) / 60);
     return 'Resets in ' + (d ? d + 'd ' + hr + 'h' : hr ? hr + 'h ' + (m % 60) + 'm' : (m % 60) + 'm');
   }
-  // BotAvatar draws an SVG with a fill colour, so it needs the token's value, not var(...).
-  function botColor() {
-    var el = document.querySelector('.ao-office') || document.documentElement;
-    return getComputedStyle(el).getPropertyValue('--type-lab').trim() || getComputedStyle(el).getPropertyValue('--muted').trim();
-  }
+  // A bot's body color, the same one the scene uses (building.js). BotAvatar draws an SVG with a fill color, so it needs the value.
+  function colorOf(uid) { return window.officeAdapter.colorOf(uid); }
   function cssMs(name, fallback) { var v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--' + name)); return isFinite(v) && v > 0 ? v : fallback; }
   function reduced() { return !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches); }
-  function plural(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+  var plural = F.plural;
   function statusOf(s) { return window.OfficeVocab.status(s).key; }
 
   // ---------- small parts ----------
@@ -84,9 +83,21 @@
   function Pair(a, b) { return h('div', { className: 'row' }, a, b); }
   function Busy(p) { return p.on ? h(A.Skeleton, { lines: p.lines || 3, label: 'Loading' }) : null; }
 
+  // The folders offered as one-click choices: the shown building first, then the recent ones, each once
+  // (the same folder in another case or slash style counts as the same folder).
+  function recentChoices(recent, first) {
+    var seen = {}, out = [];
+    [first].concat(recent || []).forEach(function (d) {
+      var k = String(d || '').replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase();
+      if (!d || seen[k]) return;
+      seen[k] = true; out.push(d);
+    });
+    return out.slice(0, 6);
+  }
+
   // ---------- open a session ----------
   function OpenDialog(p) {
-    var f = useState({ cwd: p.recent[0] || '', name: '', where: 'office', isolation: 'same', model: '', permissionMode: '', maxBudget: '', prompt: '', template: '' }), form = f[0], setForm = f[1];
+    var f = useState({ cwd: p.shownPath || p.recent[0] || '', name: '', where: 'office', isolation: 'same', model: '', permissionMode: '', maxBudget: '', prompt: '', template: '' }), form = f[0], setForm = f[1];
     var b = useState(false), busy = b[0], setBusy = b[1];
     var e = useState(''), err = e[0], setErr = e[1];
     var sv = useState(null), saving = sv[0], setSaving = sv[1];
@@ -104,6 +115,7 @@
     }
     function delTemplate() { api('/api/template/delete', { id: form.template }).then(function () { setForm(Object.assign({}, form, { template: '' })); p.onTemplates(); }, function (x) { setErr(x.message); }); }
     var terminal = form.where === 'terminal';
+    var folders = recentChoices(p.recent, p.shownPath);
     var tpl = [{ value: '', label: 'No template' }].concat(p.templates.map(function (t) { return { value: t.id, label: t.name }; }));
     return h(A.Dialog, {
       open: true, title: 'Open a session', onClose: p.onClose,
@@ -113,7 +125,8 @@
       ]
     }, h('div', { className: 'form' },
       h('p', { className: 'note' }, terminal ? 'Starts Claude Code in a new terminal window with the office hooks attached.' : 'Runs Claude Code inside the office. You talk to it in the chat and approve its steps here. It has no terminal window.'),
-      h(A.TextInput, { id: 'f-cwd', label: 'Folder', value: form.cwd, placeholder: 'E:\\pensiv', onChange: set('cwd'), error: err || undefined, hint: p.recent.length ? 'Last used: ' + p.recent.slice(0, 3).join(', ') : undefined }),
+      h(A.TextInput, { id: 'f-cwd', label: 'Folder', value: form.cwd, placeholder: 'E:\\pensiv', onChange: set('cwd'), error: err || undefined, hint: p.shownPath && form.cwd === p.shownPath ? 'The building you are looking at.' : undefined }),
+      folders.length ? h('div', { className: 'chips', role: 'group', 'aria-label': 'Recent folders' }, folders.map(function (d) { return h(A.Button, { key: d, variant: 'quiet', icon: 'floor', title: d, onClick: function () { set('cwd')(d); } }, F.shortPath(d)); })) : null,
       Pair(
         h(A.TextInput, { id: 'f-name', label: 'Bot name (optional)', value: form.name, placeholder: 'Defaults to the folder name', onChange: set('name') }),
         h(A.Select, { id: 'f-where', label: 'Runs', options: WHERE, value: form.where, onChange: set('where') })),
@@ -142,6 +155,7 @@
     var rs = useState(null), results = rs[0], setResults = rs[1];
     var er = useState(''), err = er[0], setErr = er[1];
     var bz = useState(''), busy = bz[0], setBusy = bz[1];
+    var ak = useState(null), ask = ak[0], setAsk = ak[1];   // the session the user is about to forget
     function load() { api('/api/history').then(function (j) { setList(j.sessions); }, function (x) { setErr(x.message); }); }
     useEffect(load, []);
     useEffect(function () {
@@ -151,7 +165,15 @@
     }, [q]);
     function act(uid, fn) { setBusy(uid); setErr(''); fn().then(function () { setBusy(''); }, function (x) { setBusy(''); setErr(x.message); }); }
     function reopen(uid) { act(uid, function () { return api('/api/reopen', { uid: uid }).then(function () { p.onClose(); }); }); }
-    function forget(uid) { act(uid, function () { return api('/api/history/forget', { uid: uid }).then(function () { if (p.toast) p.toast({ tone: 'info', title: 'Session forgotten', text: 'It is gone from Past sessions.' }); load(); }); }); }
+    function forget(uid) { act(uid, function () { return api('/api/history/forget', { uid: uid }).then(function () { setAsk(null); if (p.toast) p.toast({ tone: 'info', title: 'Session forgotten', text: 'It is gone from Past sessions.' }); load(); }); }); }
+    if (ask) {
+      return h(A.Dialog, { open: true, title: 'Forget ' + ask.name, onClose: function () { setAsk(null); setErr(''); }, actions: [
+        h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setAsk(null); setErr(''); } }, 'Keep it'),
+        h(A.Button, { key: 'f', variant: 'danger', icon: 'remove', loading: busy === ask.uid, onClick: function () { forget(ask.uid); } }, 'Forget session')] },
+        h('div', { className: 'form' },
+          h('p', { className: 'note' }, 'Removes this session from Past sessions, with its saved history. You cannot reopen it after that. Files in the folder stay.'),
+          err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
+    }
     var hit = {};
     (results || []).forEach(function (r) { hit[r.uid] = hit[r.uid] || r; });
     var shown = results ? (list || []).filter(function (s) { return hit[s.uid]; }) : list;
@@ -164,13 +186,13 @@
           return h('li', { key: s.uid, className: 'past-row' },
             h('div', { className: 'past-main' },
               h('div', { className: 'past-title' }, h('b', null, s.name), s.branch ? h(Tag, null, s.branch) : null, s.model ? h(A.ModelBadge, { model: s.model }) : null),
-              h('div', { className: 'past-sub mono' }, s.cwd),
-              hit[s.uid] ? h('div', { className: 'past-snip' }, h('em', null, hit[s.uid].kind + ': '), hit[s.uid].snippet) : (s.last ? h('div', { className: 'past-snip' }, s.last) : null),
-              h('div', { className: 'past-meta mono' }, ago(s.endedAt) + ' · ' + s.turns + ' turns · ' + money(s.cost))),
+              h('div', { className: 'past-sub mono', title: s.cwd }, F.shortPath(s.cwd)),
+              hit[s.uid] ? h('div', { className: 'past-snip' }, h('em', null, hit[s.uid].kind + ': '), hit[s.uid].snippet) : (s.last ? h('div', { className: 'past-snip past-clip' }, s.last) : null),
+              h('div', { className: 'past-meta mono' }, ago(s.endedAt) + ' · ' + plural(s.turns || 0, 'turn') + ' · ' + money(s.cost))),
             h('div', { className: 'past-actions' },
-              h(A.Button, { variant: 'primary', icon: 'rollback', loading: busy === s.uid, onClick: function () { reopen(s.uid); } }, 'Reopen'),
+              h(A.Button, { variant: 'quiet', icon: 'rollback', loading: busy === s.uid, onClick: function () { reopen(s.uid); } }, 'Reopen'),
               h(A.Button, { variant: 'quiet', icon: 'trace', onClick: function () { p.onChanges(s.uid, s.name); } }, 'Changes'),
-              h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { forget(s.uid); } }, 'Forget')));
+              h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setAsk(s); } }, 'Forget')));
         }))));
   }
 
@@ -186,8 +208,17 @@
     function save() {
       api('/api/schedule/save', Object.assign({}, edit, { every: Number(edit.every) || 60, maxBudget: Number(edit.maxBudget) || 0 })).then(function () { if (p.toast) p.toast({ tone: 'success', title: edit.id ? 'Schedule saved' : 'Schedule added', text: edit.name || cadence(edit) }); setEdit(null); setErr(''); load(); }, function (x) { setErr(x.message); });
     }
-    function run(id) { api('/api/schedule/run', { id: id }).then(function () { setErr(''); }, function (x) { setErr(x.message); }); }
-    function del(id) { api('/api/schedule/delete', { id: id }).then(function () { if (p.toast) p.toast({ tone: 'info', title: 'Schedule deleted', text: 'It will not run again.' }); load(); }, function (x) { setErr(x.message); }); }
+    var dl = useState(null), ask = dl[0], setAsk = dl[1];   // the schedule the user is about to delete
+    function run(s) { api('/api/schedule/run', { id: s.id }).then(function () { setErr(''); if (p.toast) p.toast({ tone: 'success', title: s.name || 'Schedule', text: 'A session is starting now.' }); }, function (x) { setErr(x.message); }); }
+    function del(id) { api('/api/schedule/delete', { id: id }).then(function () { setAsk(null); if (p.toast) p.toast({ tone: 'info', title: 'Schedule deleted', text: 'It will not run again.' }); load(); }, function (x) { setErr(x.message); }); }
+    if (ask && !edit) {
+      return h(A.Dialog, { open: true, title: 'Delete ' + (ask.name || 'this schedule'), onClose: function () { setAsk(null); setErr(''); }, actions: [
+        h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setAsk(null); setErr(''); } }, 'Keep it'),
+        h(A.Button, { key: 'd', variant: 'danger', icon: 'remove', onClick: function () { del(ask.id); } }, 'Delete schedule')] },
+        h('div', { className: 'form' },
+          h('p', { className: 'note' }, 'The schedule will not run again. Sessions it already started stay open.'),
+          err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
+    }
     function toggle(s) { api('/api/schedule/save', Object.assign({}, s, { enabled: !s.enabled })).then(load, function (x) { setErr(x.message); }); }
     if (edit) {
       return h(A.Dialog, { open: true, title: edit.id ? 'Edit schedule' : 'New schedule', onClose: function () { setEdit(null); }, actions: [
@@ -218,15 +249,16 @@
           return h('li', { key: s.id, className: 'past-row' },
             h('div', { className: 'past-main' },
               h('div', { className: 'past-title' }, h('b', null, s.name), h(Tag, null, s.enabled ? cadence(s) : 'Paused')),
-              h('div', { className: 'past-sub mono' }, s.cwd),
-              h('div', { className: 'past-snip' }, clip(s.prompt, 140)),
-              h('div', { className: 'past-meta mono' }, 'Last run ' + ago(s.lastRun))),
+              h('div', { className: 'past-sub mono', title: s.cwd }, F.shortPath(s.cwd)),
+              h('div', { className: 'past-snip past-clip' }, clip(s.prompt, 140)),
+              h('div', { className: 'past-meta mono' }, s.lastRun ? 'Last run ' + ago(s.lastRun) : 'Has not run yet')),
             h('div', { className: 'past-actions' },
-              h(A.Button, { variant: 'primary', icon: 'resume', onClick: function () { run(s.id); } }, 'Run now'),
+              h(A.Button, { variant: 'quiet', icon: 'resume', title: 'Starts a session now with this instruction. The schedule keeps its own times.', onClick: function () { run(s); } }, 'Run now'),
               h(A.Button, { variant: 'quiet', icon: s.enabled ? 'pause' : 'resume', onClick: function () { toggle(s); } }, s.enabled ? 'Pause' : 'Turn on'),
               h(A.Button, { variant: 'quiet', icon: 'settings', onClick: function () { setEdit(Object.assign({}, s, { every: String(s.every), maxBudget: s.maxBudget ? String(s.maxBudget) : '' })); } }, 'Edit'),
-              h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { del(s.id); } }, 'Delete')));
-        }))));
+              h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setAsk(s); } }, 'Delete')));
+        })),
+        list && list.length ? h('p', { className: 'note' }, 'Run now starts a session at once with the schedule’s instruction. It does not change the times.') : null));
   }
 
   // ---------- changes (diff, pull request, worktree) ----------
@@ -305,14 +337,24 @@
       { id: 'office', name: 'Office sessions', route: 'Opened from this page', today: live.filter(function (s) { return s.headless && !s.scheduleId; }).length },
       { id: 'schedule', name: 'Schedules', route: 'Open an office session on time', today: live.filter(function (s) { return s.scheduleId; }).length },
       { id: 'terminal', name: 'Terminal sessions', route: (i.hooksMode || 'command') + ' hooks', today: live.filter(function (s) { return !s.headless; }).length }];
-    return h(A.Dialog, { open: true, title: 'Attach other sessions', onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
+    // Copy needs a secure page. The office runs on localhost, which counts as one; if the browser still refuses, say so.
+    function copy(text, what) {
+      var ok = function () { if (p.toast) p.toast({ tone: 'success', title: 'Copied', text: what + ' is on your clipboard.' }); };
+      var no = function () { if (p.toast) p.toast({ tone: 'error', title: 'Not copied', text: 'The browser blocked the copy. Select the text and copy it by hand.' }); };
+      try { navigator.clipboard.writeText(text).then(ok, no); } catch (x) { no(); }
+    }
+    return h(A.Dialog, { open: true, title: 'Attach sessions', onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
       h('div', { className: 'form' },
         h('h3', { className: 'ext-h' }, 'Where sessions come from'),
         h(A.ChannelList, { channels: channels }),
-        h('p', { className: 'note' }, 'Sessions opened here are wired up for you. To seat a session you start yourself, launch it with the office settings file:'),
-        h('pre', { className: 'code' }, i.launchCommand || ''),
+        h('p', { className: 'note' }, 'Sessions opened here are wired up for you. To seat a session you start yourself, launch it with the office settings file.'),
+        h('div', { className: 'copy-row' },
+          h('pre', { className: 'code', tabIndex: 0 }, i.launchCommand || ''),
+          h(A.Button, { variant: 'quiet', icon: 'copy', disabled: !i.launchCommand, onClick: function () { copy(i.launchCommand, 'The launch command'); } }, 'Copy command')),
         h('p', { className: 'note' }, 'Hooks: ' + (i.hooksMode || '') + ' on Claude Code ' + (i.claudeVersion || '') + '. Or merge these hooks into ~/.claude/settings.json to seat every session on this machine.'),
-        h('pre', { className: 'code', style: { maxHeight: 200 } }, i.settingsSnippet || '')));
+        h('div', { className: 'copy-row' },
+          h('pre', { className: 'code', tabIndex: 0, style: { maxHeight: 200 } }, i.settingsSnippet || ''),
+          h(A.Button, { variant: 'quiet', icon: 'copy', disabled: !i.settingsSnippet, onClick: function () { copy(i.settingsSnippet, 'The hooks'); } }, 'Copy hooks'))));
   }
 
   // ---------- floors (branches) and rooms (worktrees) ----------
@@ -382,7 +424,7 @@
                 var here = (snap ? snap.sessions : []).filter(function (s) { return s.status !== 'ended' && s.place && s.place.rootKey === w.place.rootKey; });
                 return h('div', { key: w.root, className: 'room-row' },
                   h(A.OfficeTypeBadge, { type: 'lab', label: w.root.split(/[\\/]/).pop() }), h('span', { className: 'past-sub mono', title: w.root }, w.root),
-                  here.map(function (s) { return h('span', { key: s.uid, className: 'room-bot', title: s.name }, h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: botColor(), status: statusOf(s), size: 20 }), s.name); }),
+                  here.map(function (s) { return h('span', { key: s.uid, className: 'room-bot', title: s.name }, h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: colorOf(s.uid), status: statusOf(s), size: 20 }), s.name); }),
                   w.main ? null : h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setConfirm({ kind: 'room', branch: b, root: w.root }); } }, 'Remove room'));
               })),
             h('div', { className: 'past-actions' },
@@ -428,6 +470,7 @@
     var ad = useState(null), add = ad[0], setAdd = ad[1];
     var cf = useState(null), confirm = cf[0], setConfirm = cf[1];
     var qq = useState(''), q = qq[0], setQ = qq[1];
+    var pq = useState(''), pfind = pq[0], setPfind = pq[1];
     function load() { setErr(''); api('/api/ext/list', { uid: p.uid }).then(setData, function (x) { setErr(x.message); setData({ servers: null, plugins: [] }); }); }
     useEffect(load, [p.uid]);
     function act(key, body, done) {
@@ -448,7 +491,9 @@
         h('div', { className: 'form' }, h('p', { className: 'note' }, confirm.text), err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
     }
     var servers = data && data.servers, seenPl = {};
-    var plugins = ((data && data.plugins) || []).filter(function (pl) { if (seenPl[pl.id]) return false; seenPl[pl.id] = true; return true; });
+    var allPlugins = ((data && data.plugins) || []).filter(function (pl) { if (seenPl[pl.id]) return false; seenPl[pl.id] = true; return true; });
+    var pt = pfind.trim().toLowerCase();
+    var plugins = allPlugins.filter(function (pl) { return !pt || (pl.id + ' ' + (pl.scope || '')).toLowerCase().indexOf(pt) >= 0; });
     var persistent = function (scope) { return scope === 'local' || scope === 'project'; };
     var match = function (m) { var t = q.trim().toLowerCase(); return !t || (m.name + ' ' + m.status + ' ' + m.source + ' ' + m.scope).toLowerCase().indexOf(t) >= 0; };
     var shownServers = (servers || []).filter(match);
@@ -482,7 +527,7 @@
                 m.error ? h('div', { className: 'ext-err', title: m.error }, clip(m.error, 110)) : null),
               h('div', { className: 'ext-actions' },
                 m.status === 'failed' ? h(A.Button, { variant: 'quiet', icon: 'retry', loading: busy === 'r:' + m.name, onClick: function () { act('r:' + m.name, { action: 'reconnect', name: m.name }); } }, 'Reconnect') : null,
-                own ? null : h(A.Button, { variant: off ? 'primary' : 'quiet', icon: off ? 'resume' : 'pause', disabled: !data.live, loading: busy === 't:' + m.name, onClick: function () { act('t:' + m.name, { action: 'toggle', name: m.name, enabled: off }); } }, off ? 'Turn on' : 'Turn off'),
+                own ? null : h(A.Button, { variant: 'quiet', icon: off ? 'resume' : 'pause', disabled: !data.live, loading: busy === 't:' + m.name, onClick: function () { act('t:' + m.name, { action: 'toggle', name: m.name, enabled: off }); } }, off ? 'Turn on' : 'Turn off'),
                 persistent(m.scope) && !own ? h(A.Button, { variant: 'ghost', icon: 'remove', title: 'Remove ' + m.name, onClick: function () { setConfirm({ title: 'Remove the connector ' + m.name, text: 'Removes ' + m.name + ' from the ' + m.scope + ' settings of this folder. Other folders keep their own settings.', button: 'Remove connector', body: { action: 'mcp-remove', name: m.name, scope: m.scope } }); } }, 'Remove') : null));
           })));
       }),
@@ -498,7 +543,9 @@
           h(A.Button, { variant: 'quiet', onClick: function () { setAdd(null); } }, 'Cancel')))) : null,
       data && !add ? h(A.AddButton, { label: 'Install a plugin', onClick: function () { setErr(''); setAdd({ kind: 'plugin', id: '', scope: 'local' }); } }) : null,
       h(Busy, { on: !data }),
-      data && !plugins.length ? h(A.EmptyState, { icon: 'skill', compact: true, title: 'No plugins', text: 'Install one from a marketplace.' }) : null,
+      data && !allPlugins.length ? h(A.EmptyState, { icon: 'skill', compact: true, title: 'No plugins', text: 'Install one from a marketplace.' }) : null,
+      allPlugins.length > 6 ? h(A.TextInput, { id: 'x-pfilter', label: 'Find', value: pfind, placeholder: 'Plugin name or marketplace', onChange: setPfind }) : null,
+      allPlugins.length && pt && !plugins.length ? h('p', { className: 'note' }, 'No plugin matches.') : null,
       [{ on: true, label: 'On in this folder' }, { on: false, label: 'Off in this folder' }].map(function (g) {
         var rows = plugins.filter(function (pl) { return pl.enabled === g.on; });
         if (!rows.length) return null;
@@ -512,7 +559,7 @@
                 h('div', { className: 'ext-name' }, name),
                 h('div', { className: 'ext-sub' }, (from ? from + ' · ' : '') + 'installed for ' + (pl.scope === 'user' ? 'you' : 'this folder') + ' · ' + pl.version)),
               h('div', { className: 'ext-actions' },
-                h(A.Button, { variant: pl.enabled ? 'quiet' : 'primary', icon: pl.enabled ? 'pause' : 'resume', loading: busy === 'p:' + pl.id, onClick: function () { act('p:' + pl.id, { action: pl.enabled ? 'plugin-disable' : 'plugin-enable', id: pl.id, scope: 'local' }); } }, pl.enabled ? 'Turn off' : 'Turn on'),
+                h(A.Button, { variant: 'quiet', icon: pl.enabled ? 'pause' : 'resume', loading: busy === 'p:' + pl.id, onClick: function () { act('p:' + pl.id, { action: pl.enabled ? 'plugin-disable' : 'plugin-enable', id: pl.id, scope: 'local' }); } }, pl.enabled ? 'Turn off' : 'Turn on'),
                 persistent(pl.scope) ? h(A.Button, { variant: 'ghost', icon: 'remove', title: 'Remove ' + name, onClick: function () { setConfirm({ title: 'Remove the plugin ' + name, text: 'Uninstalls ' + pl.id + ' from the ' + pl.scope + ' scope of this folder.', button: 'Remove plugin', body: { action: 'plugin-uninstall', id: pl.id, scope: pl.scope } }); } }, 'Remove') : null));
           })));
       }),
@@ -520,52 +567,38 @@
 
     return h(A.Dialog, { open: true, title: 'Extensions for ' + p.name, onClose: p.onClose, actions: [
       h(A.Button, { key: 'rf', variant: 'quiet', icon: 'retry', onClick: load }, 'Refresh'),
-      h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
+      h(A.Button, { key: 'd', variant: add ? 'quiet' : 'primary', onClick: p.onClose }, 'Done')] },
       h('div', { className: 'form wide' },
         data && data.folder ? h('p', { className: 'note mono' }, data.folder) : null,
         err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
         note ? h('p', { className: 'note', role: 'status' }, note) : null,
         h(A.Tabs, { value: tab, onChange: function (v) { setTab(v); setAdd(null); }, label: 'Extension types',
-          tabs: [{ id: 'connectors', label: 'Connectors', icon: 'connector', count: servers ? servers.length : undefined }, { id: 'plugins', label: 'Plugins', icon: 'skill', count: plugins.length }],
+          tabs: [{ id: 'connectors', label: 'Connectors', icon: 'connector', count: servers ? servers.length : undefined }, { id: 'plugins', label: 'Plugins', icon: 'skill', count: allPlugins.length }],
           render: function (id) { return id === 'plugins' ? pluginList : connectors; } })));
   }
-  // A button in the chat header of the open bot. The DS draws the chat, so the page adds it with a portal.
-  function ChatHeaderButton(p) {
-    var st = useState(null), host = st[0], setHost = st[1];
-    useEffect(function () {
-      var raf = 0;
-      function find() {
-        raf = 0;
-        var head = document.querySelector('.ao-hud-chat .ao-chat-h');
-        var slot = head && head.querySelector('.ao-chat-ext');
-        if (head && !slot) { slot = document.createElement('span'); slot.className = 'ao-chat-ext'; head.appendChild(slot); }
-        setHost(function (prev) { return prev === slot ? prev : slot; });
-      }
-      var mo = new MutationObserver(function () { if (!raf) raf = requestAnimationFrame(find); });
-      mo.observe(document.body, { childList: true, subtree: true });
-      find();
-      return function () { mo.disconnect(); if (raf) cancelAnimationFrame(raf); };
-    }, []);
-    if (!host || !p.sess) return null;
-    return ReactDOM.createPortal(h(A.Button, { variant: 'ghost', icon: 'connector', title: 'Connectors and plugins of ' + p.sess.name, onClick: p.onOpen }, 'Extensions'), host);
-  }
-
   // ---------- all sessions: registry and subagents ----------
   function accessOf(s) { return s.mode === 'bypassPermissions' || s.mode === 'acceptEdits' || s.mode === 'auto' ? 'broad' : 'scoped'; }
   function SessionsDialog(p) {
     var snap = useSnapshot();
     var live = snap ? snap.sessions.filter(function (s) { return s.status !== 'ended'; }) : [];
-    var agents = live.map(function (s) {
-      var tools = {};
-      (s.calls || []).forEach(function (c) { tools[c.name] = true; });
-      return { name: s.name, shape: window.officeAdapter.shapeOf(s.uid), color: botColor(), status: statusOf(s), platform: s.headless ? 'Office session' : 'Terminal session',
-        identity: (s.git ? s.git.branch + ' · ' : '') + (String(s.cwd || '').split(/[\/]/).pop() || ''), model: s.model || 'default', tools: Object.keys(tools), access: accessOf(s), last: ago(s.lastEvent) };
-    });
+    var agents = live;
     var teams = live.filter(function (s) { return (s.agents || []).some(function (a) { return !a.done; }); });
     return h(A.Dialog, { open: true, title: 'All sessions', onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
       h('div', { className: 'form wide' },
         h('p', { className: 'note' }, 'Every open session in every building. Broad access means the session can edit files without asking (Accept edits or a bypass mode).'),
-        !agents.length ? h(A.EmptyState, { icon: 'session', compact: true, title: 'No open sessions', text: 'Open a session to see it here.' }) : h('div', { className: 'table-wrap' }, h(A.AgentRegistry, { agents: agents })),
+        !agents.length ? h(A.EmptyState, { icon: 'session', compact: true, title: 'No open sessions', text: 'Open a session to see it here.' }) : h('div', { className: 'table-wrap ao-panel' }, h('table', { className: 'ao-tbl sess-tbl' },
+          h('thead', null, h('tr', null, ['Agent', 'Folder', 'State', 'Model', 'Access', 'Last event', ''].map(function (x, i) { return h('th', { key: i, scope: 'col' }, x); }))),
+          h('tbody', null, agents.map(function (s) {
+            var st = window.OfficeVocab.status(s);
+            return h('tr', { key: s.uid },
+              h('td', null, h('span', { className: 'sess-who' }, h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: colorOf(s.uid), status: statusOf(s), size: 20 }), h('b', null, window.officeAdapter.botName(s.uid) || s.name))),
+              h('td', { className: 'mono', title: s.cwd }, (s.git && s.git.branch ? s.git.branch + ' · ' : '') + F.folderName(s.cwd)),
+              h('td', null, h('span', { className: 'sess-state' }, h(A.StatusDot, { status: st.key }), st.word)),
+              h('td', null, h(A.ModelBadge, { model: s.model || 'default' })),
+              h('td', null, h('span', { className: 'ao-badge' + (accessOf(s) === 'broad' ? ' ao-badge-warn' : '') }, accessOf(s))),
+              h('td', { className: 'mono' }, ago(s.lastEvent)),
+              h('td', null, h(A.Button, { variant: 'quiet', icon: 'chevron-right', title: 'Go to ' + (window.officeAdapter.botName(s.uid) || s.name), onClick: function () { p.onGo(s); } }, 'Go to')));
+          })))),
         teams.length ? h('h3', { className: 'ext-h' }, 'Subagents at work', h('span', { className: 'ext-n' }, teams.length)) : null,
         teams.map(function (s) {
           var kids = s.agents.filter(function (a) { return !a.done; }).map(function (a) { return { name: a.type, shape: 'blob', status: 'working', task: a.task, ephemeral: true }; });
@@ -619,19 +652,17 @@
         h(A.Button, { variant: 'quiet', icon: 'building', onClick: function () { if (city.current) city.current.fit(false); } }, 'Show all')));
   }
 
-  // A side panel sits above the control strip: its bottom edge is the measured strip height.
-  function clearStyle(v) { return v ? { bottom: v + 'px' } : undefined; }
-
   // ---------- the room board, read up close ----------
   function BoardPanel(p) {
     var d = p.data;
     if (!d) return null;
     var word = window.OfficeVocab.toolShort;
     var call = function (c, kind) { return h(A.ToolCall, { key: c.id, call: { id: c.id, tool: word(c.name), kind: kind || 'api', ok: c.ok === null ? undefined : c.ok, ms: c.ms == null ? undefined : c.ms, args: c.detail ? { target: c.detail } : undefined, summary: c.err || (c.who ? 'by ' + c.who : undefined) } }); };
-    return h('aside', { className: 'board-panel', style: clearStyle(p.clear), 'aria-label': 'Board of ' + d.room },
+    return h('aside', { className: 'board-panel', 'aria-label': 'Board of ' + d.room },
       h(A.Panel, { title: d.room + (d.branch ? ' · ' + d.branch : ''), count: plural(d.sessions.length, 'session', 'sessions') },
         h('div', { className: 'board-b' },
-          h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'chevron-right', onClick: p.onClose }, 'Back to the room'), h('span', { className: 'note' }, 'Esc also goes back.')),
+          (p.sessions || []).map(function (x) { return h(RequestBar, { key: x.uid, session: x, showName: true, toast: p.toast }); }),
+          h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onClose }, 'Back to the room'), h('span', { className: 'note' }, 'Esc also goes back.')),
           d.pin ? h('p', { className: 'note board-pin' }, 'Note from ' + d.pin.by + ': ' + d.pin.text) : null,
           d.todos.length ? h(A.PlanCard, { title: 'To do', goal: d.goal ? clip(d.goal, 120) : undefined, steps: d.todos.map(function (t, i) { return { id: 't' + i, text: t.text, status: window.OfficeVocab.todoStatus(t) }; }) })
             : h(A.EmptyState, { icon: 'plan', compact: true, title: 'No to-do list', text: 'A session shows its plan here when it writes one.' }),
@@ -655,10 +686,11 @@
     var info = p.mount.roomInfo(p.roomId, snap || undefined);
     var v = p.mount.figures(p.roomId, snap || undefined);
     var row = function (k, val) { return h('li', { key: k }, h('span', null, k), h('b', { className: 'mono' }, val)); };
-    return h('aside', { className: 'board-panel', style: clearStyle(p.clear), 'aria-label': 'Stats of ' + ((info.place && info.place.roomName) || 'this room') },
+    return h('aside', { className: 'board-panel', 'aria-label': 'Stats of ' + ((info.place && info.place.roomName) || 'this room') },
       h(A.Panel, { title: ((info.place && info.place.roomName) || 'Room') + ' · stats', count: plural(v.sessions, 'session', 'sessions') },
         h('div', { className: 'board-b' },
-          h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'chevron-right', onClick: p.onClose }, 'Back to the room'), h('span', { className: 'note' }, 'Esc also goes back.')),
+          (info.sessions || []).concat(p.extra || []).map(function (x) { return h(RequestBar, { key: x.uid, session: x, showName: true, toast: p.toast }); }),
+          h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onClose }, 'Back to the room'), h('span', { className: 'note' }, 'Esc also goes back.')),
           h('ul', { className: 'stats-list' },
             row('Working', String(v.working)), row('Needs you', String(v.waiting)), row('Tool calls', String(v.toolCalls)),
             row('Tokens', String(v.tokens)), row('Cost', money(v.cost)), row('To do done', v.todosDone + ' of ' + v.todosTotal),
@@ -808,11 +840,37 @@
         : h(React.Fragment, null,
           list.length ? h('ul', { className: 'agent-list' }, list.map(function (s) {
             return h('li', { key: s.uid, className: 'agent-row' },
-              h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: botColor(), status: statusOf(s), size: 28 }),
+              h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: colorOf(s.uid), status: statusOf(s), size: 28 }),
               h('span', { className: 'agent-who' }, h('b', null, s.name), h('span', { className: 'agent-sub' }, window.OfficeVocab.status(s).word + ' · ' + modelWord(s.model))),
               h(A.Button, { variant: 'quiet', icon: 'remove', onClick: function () { setErr(''); setConfirm(s.uid); } }, 'Close session'));
           })) : h(A.EmptyState, { icon: 'identity', compact: true, title: 'No agents here', text: 'Add an agent to start work in this room.' }),
           h(A.AddButton, { label: 'Add an agent', onClick: function () { setErr(''); setAdd({ name: '', model: '', prompt: '' }); } }))));
+  }
+
+  // ---------- requests of one session: Approve, Decline, Yes and No ----------
+  // The terminal panel and the room panels show this bar. A panel hides the DS chat (one panel at a time), so the
+  // answer must never need the chat. It uses the same answer route as the DS card (/api/answer).
+  function RequestBar(p) {
+    var an = useState(''), answering = an[0], setAnswering = an[1];   // the request being answered
+    var s = p.session, reqs = window.OfficeVocab.requests(s), who = s ? s.name : p.name;
+    if (!reqs.length) return null;
+    function answerReq(r, allow, always) {
+      setAnswering(r.id);
+      api('/api/answer', { id: r.id, allow: allow, always: !!always }).then(function () {
+        setAnswering('');
+        if (always && p.toast) p.toast({ tone: 'success', title: who, text: 'Allowed from now on: ' + r.always });
+      }, function (x) { setAnswering(''); if (p.toast) p.toast({ tone: 'error', title: who, text: x.message }); });
+    }
+    return h('div', { className: 'asks', role: 'group', 'aria-label': 'Requests of ' + who },
+      reqs.map(function (r) {
+        var q = r.kind === 'question', busyR = answering === r.id;
+        return h('div', { key: r.id, className: 'ask' + (r.risk === 'high' ? ' is-high' : ''), role: 'group', 'aria-label': q ? 'Question' : 'Request' },
+          h('div', { className: 'ask-t' }, r.risk ? h(A.RiskBadge, { risk: r.risk }) : null, p.showName ? h('b', null, who) : null, h('span', { className: 'ask-x' }, r.text)),
+          h('div', { className: 'ask-a' },
+            h(A.Button, { variant: 'primary', icon: 'approve', loading: busyR, onClick: function () { answerReq(r, true, false); } }, q ? 'Yes' : 'Approve'),
+            h(A.Button, { variant: 'quiet', icon: 'decline', disabled: busyR, onClick: function () { answerReq(r, false, false); } }, q ? 'No' : 'Decline'),
+            !q && r.always && r.risk !== 'high' ? h(A.Button, { variant: 'quiet', disabled: busyR, title: 'Approve and allow this from now on: ' + r.always, onClick: function () { answerReq(r, true, true); } }, 'Always allow') : null));
+      }));
   }
 
   // ---------- one session as a full terminal ----------
@@ -877,15 +935,16 @@
     function stop() { api('/api/interrupt', { uid: s.uid }).catch(function (x) { p.toast({ tone: 'error', title: s.name, text: x.message }); }); }
     var working = s && (s.status === 'working' || s.status === 'waiting');
     var ended = !s || s.status === 'ended';
-    return h('aside', { className: 'terminal-panel', style: clearStyle(p.clear), 'aria-label': 'Terminal of ' + p.name },
+    return h('aside', { className: 'terminal-panel', 'aria-label': 'Terminal of ' + p.name },
       h('div', { className: 'term-head' },
         h(A.StatusDot, { status: s ? statusOf(s) : 'resting' }),
         h('b', { className: 'term-name' }, s ? s.name : p.name),
         h('span', { className: 'term-model mono' }, s ? modelWord(s.model) : ''),
-        h(A.Button, { variant: 'quiet', icon: 'chevron-right', onClick: p.onClose }, 'Back')),
+        h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onClose }, 'Back')),
       h('div', { className: 'term-view', ref: vw, onScroll: onScroll, role: 'log', 'aria-live': 'off', tabIndex: 0 },
         h('span', { className: 'term-probe', ref: probe, 'aria-hidden': 'true' }, 'MMMMMMMMMM'),
         rows.map(function (r, i) { return h('div', { key: i, className: 'term-line tone-' + r.tone + (r.ask ? ' is-ask' : '') }, r.text || '\u00a0'); })),
+      h(RequestBar, { session: s, name: p.name, toast: p.toast }),
       s && s.headless && !ended
         ? h('div', { className: 'term-input' },
             h('span', { className: 'term-caret mono', 'aria-hidden': 'true' }, '>'),
@@ -918,7 +977,20 @@
     function fail(x) { p.toast({ tone: 'error', title: sess ? sess.name : 'Office', text: x.message }); }
     function ctl(action, value) { api('/api/control', { uid: sess.uid, action: action, value: value }).catch(fail); }
     function stopTurn() { api('/api/interrupt', { uid: sess.uid }).catch(fail); }
-    var ask = sess && (sess.pending || []).filter(function (r) { return r.always; })[0];
+    // "Always allow" is a lasting permission, so it is a quiet button, and never offered for a high-risk request
+    var ask = window.OfficeVocab.alwaysOffer(sess);
+    var mo = useState(false), more = mo[0], setMore = mo[1], moreRef = React.useRef(null);
+    useEffect(function () {
+      var btn = moreRef.current && moreRef.current.querySelector('.strip-more-btn');
+      if (btn) { btn.setAttribute('aria-expanded', String(more)); btn.setAttribute('aria-haspopup', 'true'); }
+      if (!more) return undefined;
+      function away(e) { if (moreRef.current && !moreRef.current.contains(e.target)) setMore(false); }
+      function esc(e) { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); setMore(false); if (btn) btn.focus(); } }
+      document.addEventListener('mousedown', away); document.addEventListener('keydown', esc);
+      return function () { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
+    }, [more]);
+    // the DS palette listens for Ctrl+K on the document, so the button sends the same key
+    function openPalette() { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true, cancelable: true })); }
     function always() { api('/api/answer', { id: ask.id, allow: true, always: true }).then(function () { p.toast({ tone: 'success', title: sess.name, text: 'Allowed from now on: ' + ask.always }); }, fail); }
 
     var modeOpts = [{ value: 'default', label: 'Default' }, { value: 'plan', label: 'Plan only' }, { value: 'acceptEdits', label: 'Accept edits' }];
@@ -949,24 +1021,31 @@
           p.shown ? h(A.Button, { variant: 'quiet', icon: 'floor', onClick: p.onFloors }, 'Floors') : null,
           h(A.Button, { variant: 'quiet', icon: 'identity', onClick: p.onSessions }, 'Sessions'),
           h(A.Button, { variant: 'quiet', icon: 'session', onClick: p.onPast }, 'Past'),
-          h(A.Button, { variant: 'quiet', icon: 'schedule', onClick: p.onSchedules }, 'Schedules'),
-          h(A.Button, { variant: 'ghost', icon: 'terminal', onClick: p.onHooks }, 'Hooks'),
-          h(Tip, { text: 'A thin status bar for a second screen' }, h(A.Button, { variant: 'ghost', icon: 'zoom-out', onClick: p.onCompact }, 'Compact'))),
+          h('span', { className: 'strip-more-host', ref: moreRef },
+            h(A.Button, { variant: 'quiet', icon: 'more', className: 'strip-more-btn', onClick: function () { setMore(!more); } }, more ? 'Less' : 'More'),
+            more ? h('div', { className: 'strip-more', role: 'group', 'aria-label': 'More controls' },
+              h(A.Button, { variant: 'quiet', icon: 'schedule', onClick: function () { setMore(false); p.onSchedules(); } }, 'Schedules'),
+              h(A.Button, { variant: 'quiet', icon: 'terminal', title: 'Seat a session you started in a terminal', onClick: function () { setMore(false); p.onHooks(); } }, 'Attach sessions'),
+              h(Tip, { text: 'A thin status bar for a second screen' }, h(A.Button, { variant: 'quiet', icon: 'zoom-out', onClick: function () { setMore(false); p.onCompact(); } }, 'Compact')),
+              sess ? h('div', { className: 'strip-more-set' },
+                h('span', { className: 'strip-more-h' }, 'Actions for ' + sess.name),
+                h(A.Button, { variant: 'quiet', icon: 'terminal', onClick: function () { setMore(false); p.onTerminal(sess.uid, sess.name); } }, 'Open terminal'),
+                h(A.Button, { variant: 'quiet', icon: 'trace', onClick: function () { setMore(false); p.onChanges(sess.uid, sess.name); } }, 'Changes'),
+                h(A.Button, { variant: 'quiet', icon: 'connector', onClick: function () { setMore(false); p.onExtensions(sess.uid, sess.name); } }, 'Extensions'),
+                ask ? h(A.Button, { variant: 'quiet', icon: 'approve', onClick: function () { setMore(false); always(); }, title: 'Approve and allow this from now on: ' + ask.always }, 'Always allow ' + clip(ask.always, 28)) : null,
+                sess.headless && (sess.cost || usage) ? h(A.CostMeter, { tokens: usage ? usage.tokens : 0, cost: sess.cost || 0, cached: usage && usage.input ? usage.cached / usage.input : undefined }) : null,
+                sess.headless ? h(A.Select, { id: 'c-model', label: 'Model', options: modelOpts, value: sess.model || '', onChange: function (v) { ctl('model', v); } }) : null,
+                sess.headless ? h(A.Select, { id: 'c-mode', label: 'Permissions', options: modeOpts, value: sess.mode || '', onChange: function (v) { ctl('mode', v); } }) : null) : null) : null),
+          // The palette lives in the office scene. The city has none yet (#16).
+          p.view === 'office' ? h(A.Button, { variant: 'quiet', icon: 'search', className: 'strip-search', title: 'Search actions, sessions and buildings', onClick: openPalette }, 'Search actions', h('span', { className: 'kbd mono' }, 'Ctrl+K')) : null),
         sess ? h('div', { className: 'strip-group strip-bot' },
           h('span', { className: 'strip-id' }, h(A.StatusDot, { status: statusOf(sess) }), h('b', null, sess.name), ctxPct != null ? h('span', { className: 'mono' }, 'context ' + ctxPct + '%') : null),
-          sess.headless && (usage || sess.cost) ? h(A.CostMeter, { tokens: usage ? usage.tokens : 0, cost: sess.cost || 0, cached: usage && usage.input ? usage.cached / usage.input : undefined }) : null,
-          sess.headless ? h(A.Select, { id: 'c-model', ariaLabel: 'Model of ' + sess.name, options: modelOpts, value: sess.model || '', onChange: function (v) { ctl('model', v); } }) : null,
-          sess.headless ? h(A.Select, { id: 'c-mode', ariaLabel: 'Permissions of ' + sess.name, options: modeOpts, value: sess.mode || '', onChange: function (v) { ctl('mode', v); } }) : null,
-          sess.headless ? h(Tip, { text: working ? '' : 'Nothing runs now' }, h(A.Button, { variant: 'quiet', icon: 'pause', disabled: !working, onClick: stopTurn }, 'Stop turn')) : null,
-          h(A.Button, { variant: 'quiet', icon: 'terminal', onClick: function () { p.onTerminal(sess.uid, sess.name); } }, 'Open terminal'),
-          h(A.Button, { variant: 'quiet', icon: 'trace', onClick: function () { p.onChanges(sess.uid, sess.name); } }, 'Changes'),
-          h(A.Button, { variant: 'quiet', icon: 'connector', onClick: function () { p.onExtensions(sess.uid, sess.name); } }, 'Extensions'),
-          ask ? h(A.Button, { variant: 'emphasis', icon: 'approve', onClick: always, title: 'Approve and allow this from now on: ' + ask.always }, 'Always allow ' + clip(ask.always, 28)) : null) : null));
+          sess.headless ? h(Tip, { text: working ? '' : 'Nothing runs now' }, h(A.Button, { variant: 'quiet', icon: 'pause', disabled: !working, onClick: stopTurn }, 'Stop turn')) : null) : null));
   }
 
   // ---------- app ----------
   function App() {
-    var sel = useChatBot();
+    var chatBot = useChatBot(), sel = chatBot.name, inbox = chatBot.inbox;
     var s2 = useState(null), dlg = s2[0], setDlg = s2[1];
     var s3 = useState({ recent: [], templates: [], schedules: [] }), info = s3[0], setInfo = s3[1];
     var tt = useState([]), toasts = tt[0], setToasts = tt[1], tid = React.useRef(0);
@@ -1082,18 +1161,18 @@
       });
     }, [snap]);
     // side panels sit above the control strip, however tall it is
-    var cl2 = useState(null), clear = cl2[0], setClear = cl2[1];
     useEffect(function () {
       var strip = null, ro = null;
       function set() {
         if (!strip) return;
         var v = Math.ceil(window.innerHeight - strip.getBoundingClientRect().top + 8);
-        setClear(function (o) { return o === v ? o : v; });
+        document.documentElement.style.setProperty('--strip-clear', v + 'px');
       }
       function find() {
         var s2 = document.querySelector('.strip');
         if (s2 === strip) return;
         strip = s2;
+        if (!strip) document.documentElement.style.removeProperty('--strip-clear');
         if (ro) { ro.disconnect(); ro = null; }
         if (strip && window.ResizeObserver) { ro = new ResizeObserver(set); ro.observe(strip); }
         set();
@@ -1102,8 +1181,22 @@
       mo.observe(document.body, { childList: true, subtree: true });
       window.addEventListener('resize', set);
       find();
-      return function () { mo.disconnect(); if (ro) ro.disconnect(); window.removeEventListener('resize', set); };
+      return function () { mo.disconnect(); if (ro) ro.disconnect(); window.removeEventListener('resize', set); document.documentElement.style.removeProperty('--strip-clear'); };
     }, []);
+    // One panel at a time: while the terminal, the board or the stats panel is open, the DS right column (chat or roster) is hidden.
+    var panelOpen = !!term || !!(board && (board.kind === 'board' || board.kind === 'stats'));
+    useEffect(function () { var el = document.getElementById('office'); if (el) el.classList.toggle('has-panel', panelOpen); }, [panelOpen]);
+    // When the office opens something new in the right column (the Decisions inbox, or the chat of another bot),
+    // the page panel steps aside. The chat of the bot the terminal belongs to is not new: the desk opens both.
+    var lastSel = React.useRef(sel);
+    useEffect(function () {
+      var prev = lastSel.current; lastSel.current = sel;
+      if (!panelOpen) return;
+      if (inbox || (sel && sel !== prev && !(term && term.name === sel))) {
+        if (board && boardRef.current) boardRef.current.blur();
+        setTerm(null);
+      }
+    }, [sel, inbox]);
     // zoom out to leave: scrolling out at the widest zoom goes floor -> building -> city
     useEffect(function () {
       if (cur2.view !== 'office') return undefined;
@@ -1123,7 +1216,8 @@
     }, [cur2.view]);
     var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: mount.adapter, height: window.innerHeight, quality: 'auto', intro: intro, editable: false, simulate: false,
       ambient: ambient, onAmbientOpen: function () { setAmbient(false); }, onReady: function (o) {
-        officeRef.current = o;
+        officeRef.current = o; readyKey.current = sceneKey;
+        selectPending(o);
         window.officeScene = o;   // the mounted office API, for the console and tests
         var st = o.inspect && o.inspect().stage;
         if (boardRef.current) boardRef.current.dispose();
@@ -1173,10 +1267,40 @@
       });
     }, [snap]);
 
+    // the folder of the shown building, for Open session to start in
+    var shownRepo = snap && (snap.repos || []).filter(function (r) { return r.key === shown; })[0];
+    var shownPath = shownRepo ? shownRepo.path : '';
     function close() { setDlg(null); }
     function extensions(uid, name) { setDlg({ name: 'ext', uid: uid, label: name }); }
-    function goTo(s) { var key = window.officeAdapter.buildingOf(s); pick(key); setDlg(null); setTimeout(function () { if (officeRef.current) officeRef.current.select(s.name); }, 400); }
+    // Go to a session: show its building (inside, from the city), then select its bot once that scene is ready.
+    var pendingSel = React.useRef(null);
+    function goTo(s) {
+      var key = window.officeAdapter.buildingOf(s);
+      pendingSel.current = s.uid; pick(key); setDlg(null);
+      if (view !== 'office') { introNext.current = true; go('office'); }
+      else if (key === shown && officeRef.current) selectPending(officeRef.current);   // the scene is already up
+    }
+    // The bot is seated a moment after the scene is ready, so this runs again on each snapshot until it is found.
+    // It stops when the session is gone.
+    var readyKey = React.useRef(null);
+    function selectPending(o, tries) {
+      var uid = pendingSel.current;
+      if (!uid) return;
+      var n = window.officeAdapter.botName(uid);
+      if (n) { pendingSel.current = null; o.select(n); return; }
+      var s = window.officeAdapter.sessionByUid(uid);
+      if (!s || s.status === 'ended') { pendingSel.current = null; return; }
+      // not seated yet: look again next frame (at most 120 frames), unless the scene went away
+      if ((tries || 0) < 120) requestAnimationFrame(function () { if (officeRef.current === o) selectPending(o, (tries || 0) + 1); });
+    }
+    useEffect(function () { if (pendingSel.current && officeRef.current && readyKey.current === sceneKey) selectPending(officeRef.current); }, [snap, sceneKey]);
     var selSess = sel ? window.officeAdapter.session(sel) : null;
+    // The sessions of a room, plus the bot whose chat is open when it sits in another room: its requests stay in view.
+    function roomAndSel(roomId, onlyExtra) {
+      var inRoom = mount ? mount.roomInfo(roomId, snap || undefined).sessions : [];
+      var extra = selSess && !inRoom.some(function (x) { return x.uid === selSess.uid; }) ? [selSess] : [];
+      return onlyExtra ? extra : inRoom.concat(extra);
+    }
     var d = dlg && dlg.name;
 
     // the page's own commands in Ctrl+K, built from this render's state and handed to the palette after the render
@@ -1184,7 +1308,7 @@
     [['open', 'Open a session', 'add', function () { show('open'); }], ['sessions', 'All sessions', 'identity', function () { setDlg({ name: 'sessions' }); }],
      ['city', 'City view', 'building', function () { go('city'); }], ['office', 'Office view', 'floor', function () { go('office'); }], ['floors', 'Floors and rooms', 'floor', function () { setDlg({ name: 'floors' }); }],
      ['past', 'Past sessions', 'session', function () { show('past'); }], ['schedules', 'Schedules', 'schedule', function () { show('schedules'); }],
-     ['hooks', 'Attach other sessions', 'terminal', function () { show('hooks'); }], ['compact', 'Compact view', 'zoom-out', function () { setAmbient(true); }]]
+     ['hooks', 'Attach sessions', 'terminal', function () { show('hooks'); }], ['compact', 'Compact view', 'zoom-out', function () { setAmbient(true); }]]
       .forEach(function (a) { actions.push({ id: 'page-' + a[0], label: a[1], icon: a[2], group: 'Office', run: a[3] }); });
     if (selSess) actions.push({ id: 'page-ext', label: 'Extensions of ' + selSess.name, icon: 'connector', group: 'Office', run: function () { extensions(selSess.uid, selSess.name); } });
     list.forEach(function (b) { if (b.key !== shown) actions.push({ id: 'page-b-' + b.key, label: 'Go to ' + b.name, icon: 'building', group: 'Buildings', keywords: 'building repository ' + b.name, run: function () { pick(b.key); } }); });
@@ -1195,22 +1319,21 @@
       h('div', { className: 'view' + (fading ? ' is-fading' : '') }, scene),
       ambient ? null : h(Controls, { sel: cur2.view === 'office' ? sel : null, buildings: list, shown: shown, shownName: (list.filter(function (b) { return b.key === shown; })[0] || def || {}).name, toast: toast, onBuilding: function (k) { pick(k); if (view === 'city') go('office'); }, onCity: function () { go('city'); }, onOffice: function () { introNext.current = true; go('office'); }, view: cur2.view, onSessions: function () { setDlg({ name: 'sessions' }); }, onCompact: function () { setAmbient(true); },
         onFloors: function () { setDlg({ name: 'floors' }); }, onExtensions: extensions, onTerminal: openTerminal, onOpen: function () { show('open'); }, onPast: function () { show('past'); }, onSchedules: function () { show('schedules'); }, onHooks: function () { show('hooks'); }, onChanges: changes }),
-      d === 'open' ? h(OpenDialog, { recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
+      d === 'open' ? h(OpenDialog, { shownPath: shownPath, recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
       d === 'past' ? h(PastDialog, { onClose: close, onChanges: changes, toast: toast }) : null,
       d === 'schedules' ? h(SchedulesDialog, { recent: info.recent, onInfo: setInfo, toast: toast, onClose: close }) : null,
       d === 'changes' ? h(ChangesDialog, { uid: dlg.uid, name: dlg.label, ended: dlg.ended, toast: toast, onClose: close }) : null,
-      d === 'hooks' ? h(HooksDialog, { info: info, snap: snap, onClose: close }) : null,
+      d === 'hooks' ? h(HooksDialog, { info: info, snap: snap, toast: toast, onClose: close }) : null,
       d === 'floors' ? h(FloorsDialog, { repo: shown, toast: toast, onClose: close }) : null,
       d === 'room' && mount ? h(RoomDialog, { mount: mount, roomId: dlg.roomId, toast: toast, onClose: close }) : null,
       d === 'ext' ? h(ExtensionsDialog, { uid: dlg.uid, name: dlg.label, toast: toast, onClose: close }) : null,
-      term ? h(TerminalPanel, { clear: clear, key: term.uid, uid: term.uid, name: term.name, toast: toast, onClose: function () { setTerm(null); } }) : null,
-      !term && board && boardRef.current && board.kind === 'board' ? h(BoardPanel, { clear: clear, data: boardRef.current.dataOf(board.id), onClose: function () { boardRef.current.blur(); } }) : null,
-      !term && board && boardRef.current && board.kind === 'stats' && mount ? h(StatsPanel, { mount: mount, clear: clear, roomId: board.id, onClose: function () { boardRef.current.blur(); } }) : null,
+      term ? h(TerminalPanel, { key: term.uid, uid: term.uid, name: term.name, toast: toast, onClose: function () { setTerm(null); } }) : null,
+      !term && board && boardRef.current && board.kind === 'board' ? h(BoardPanel, { data: boardRef.current.dataOf(board.id), sessions: roomAndSel(board.id), toast: toast, onClose: function () { boardRef.current.blur(); } }) : null,
+      !term && board && boardRef.current && board.kind === 'stats' && mount ? h(StatsPanel, { mount: mount, extra: roomAndSel(board.id, true), toast: toast, roomId: board.id, onClose: function () { boardRef.current.blur(); } }) : null,
       !term && board && boardRef.current && board.kind === 'notes' ? h(NotesEditor, { key: board.id, noteKey: noteKey(board.id), text: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).text || '', version: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).v || 0, toast: toast,
         rect: function () { return boardRef.current ? boardRef.current.rect() : null; }, flying: function () { return boardRef.current ? boardRef.current.flying() : false; },
         onClose: function () { boardRef.current.refresh(); boardRef.current.blur(); } }) : null,
       d === 'sessions' ? h(SessionsDialog, { onClose: close, onGo: goTo }) : null,
-      ambient || cur2.view !== 'office' ? null : h(ChatHeaderButton, { sess: selSess, onOpen: function () { extensions(selSess.uid, selSess.name); } }),
       h('div', { className: 'page-toasts' }, h(A.ToastStack, { toasts: toasts, onClose: function (id) { setToasts(function (l) { return l.filter(function (x) { return x.id !== id; }); }); } })));
   }
 

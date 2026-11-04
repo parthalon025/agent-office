@@ -18,6 +18,29 @@ export function normPath(p) {
   const root = path.parse(n).root; // a root keeps its separator, so normPath(normPath(x)) === normPath(x)
   return (n.length > root.length ? n.replace(/[\\/]+$/, '') : n).toLowerCase();
 }
+/** A folder as the office stores and shows it: normalized, no trailing separator, the case the user typed. */
+function dirForm(p) {
+  if (!p || !String(p).trim()) return '';
+  const n = path.normalize(String(p));
+  const root = path.parse(n).root;
+  return n.length > root.length ? n.replace(/[\\/]+$/, '') : n;
+}
+/** The recent-folders list with dir first. One form per folder, no duplicates in any case or slash style. */
+export function addRecent(list, dir, max = 12) {
+  const d = dirForm(dir);
+  if (!d) return cleanRecent(list, max);
+  return [d, ...cleanRecent(list, max + 1).filter((x) => normPath(x) !== normPath(d))].slice(0, max);
+}
+/** An older list, rewritten in the one form, without duplicates (first one wins) and without empty entries. */
+export function cleanRecent(list, max = 12) {
+  const seen = new Set(), out = [];
+  for (const x of Array.isArray(list) ? list : []) {
+    const d = typeof x === 'string' ? dirForm(x) : '';
+    if (!d || seen.has(normPath(d))) continue;
+    seen.add(normPath(d)); out.push(d);
+  }
+  return out.slice(0, max);
+}
 const baseName = (p) => String(p || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() || '';
 const slug = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'x';
 

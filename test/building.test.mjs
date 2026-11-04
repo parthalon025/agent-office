@@ -391,3 +391,29 @@ test('plan, skill, knowledge, message, trigger and stream error events all pass 
   assert.ok(of(m.ev, 'message').some((e) => e.format === 'plain'), 'no plain inbox line');
   assert.ok(of(m.ev, 'tool.result').some((e) => e.ok === false && e.summary), 'no failed tool.result with a summary');
 });
+
+test('botName gives the scene name of a seated bot, with the number of a repeated folder name', async () => {
+  const r = rig();
+  const m = r.mount(KEY_A);
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 's1' });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 's2' });
+  const [a, b] = [...r.tracker.sessions.values()];
+  assert.equal(m.botName(a.uid), 'repo');
+  assert.equal(m.botName(b.uid), 'repo 2');
+  assert.equal(m.botName('nobody'), null);
+  assert.equal(r.store.botName(b.uid), 'repo 2');
+});
+
+test('colorOf is one stable DS color per uid, and bots of one shape still get different colors', () => {
+  const prev = globalThis.AgentOffice;
+  try {
+    assert.equal((delete globalThis.AgentOffice, B.colorOf('a')), undefined);
+    const palette = {}; for (let i = 0; i < 10; i++) palette['s' + i] = '#' + i;
+    globalThis.AgentOffice = { BOT_COLORS: palette };
+    const uids = Array.from({ length: 200 }, (_, i) => 'uid-' + i);
+    for (const u of uids) assert.ok(Object.values(palette).includes(B.colorOf(u)));
+    assert.equal(B.colorOf('uid-3'), B.colorOf('uid-3'));
+    const sameShape = uids.filter((u) => B.shapeOf(u) === B.shapeOf(uids[0]));
+    assert.ok(new Set(sameShape.map(B.colorOf)).size > 3);
+  } finally { if (prev === undefined) delete globalThis.AgentOffice; else globalThis.AgentOffice = prev; }
+});

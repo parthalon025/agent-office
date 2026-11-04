@@ -214,7 +214,7 @@
   }
   function ctxPct(s) { return s && s.ctxTokens && s.ctxWindow ? Math.min(100, Math.round(100 * s.ctxTokens / s.ctxWindow)) : null; }
   function fmtTok(n) { n = +n || 0; return n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k' : String(Math.round(n)); }
-  function money(c) { return typeof c === 'number' ? '$' + c.toFixed(2) : '--'; }
+  function money(c) { return window.OfficeFormat.money(c); }
   function age(ms) { var m = Math.floor(Math.max(0, ms) / 60000); return m < 1 ? 'under 1 min' : m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60) + ' min'; }
   function failedCalls(calls) { return calls.filter(function (c) { return c.ok === false && !/^stopped$/i.test(str(c.err)); }).length; }
   function statsOf(s) {

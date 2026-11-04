@@ -10,7 +10,7 @@ Read `DS-README.md`, `Recipes.md` and `Reference.md` before you change the UI, a
 - Write copy in Simplified Technical English: short sentences, active voice, buttons say the result. No "Oops", "Sorry", exclamation marks, "please".
 - Keep the `x` version prefix (page `x0.1`, DS `x1.5`) in titles.
 - Never move bots yourself. The scene changes only from adapter events.
-- Before you finish a UI change: `python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/vocab.js public/scene-host.js public/building.js`, then look at screenshots in Day, Night and Sublevel at 1360, 1100 and 400 px.
+- Before you finish a UI change: `python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/vocab.js public/scene-host.js public/building.js public/format.js`, then look at screenshots in Day, Night and Sublevel at 1360, 1100 and 400 px.
 - The page's own styles go in `public/office.css`. The DS sets its theme on `.ao-office`, and `chat-extras.js` mirrors it to `<html data-theme>`, so page UI must read tokens only.
 
 ## Commands
@@ -41,7 +41,8 @@ Stop the server by the pid that owns port 4317 (`netstat -ano | grep :4317`, the
 | `public/city.js` | The city: all repositories as buildings on one DS stage (`AgentOffice.office.Stage`), with rise and sink effects, zoom to mouse, bounded pan, click or zoom in to enter. `OfficeCity.cameraFeel(stage)` also gives the office scene zoom to mouse. |
 | `public/scene-host.js` | Scene host (`OfficeSceneHost`): the only module that reads the DS stage for the page's 3D additions. Shown floor and view, room groups matched to DS rooms, a rebuild event, a per-frame tick, one pick with bot occlusion and one winner, and the pointer cursor. The pure part runs on plain scene graphs in `test/scene-host.test.mjs`. |
 | `public/board.js` | Room boards: repaints the DS chalkboard as a live screen (to-dos, browser steps, last calls, repo top), adds a notes board, raises room walls to 7 and moves the room sign above the cable tray, flies the camera to a clicked board. A host adapter: it registers a pick target and a frame, and never raycasts or sets the cursor itself. |
-| `public/office.js` | React: control strip and dialogs. Mounts `OfficeScene` once. |
+| `public/office.js` | React: the dock (strip), dialogs, the request bar of the terminal and room panels. Mounts `OfficeScene` once. |
+| `public/format.js` | Display formats shared by the page and the server: money (`$0.00`, `<$0.01`), plurals, short folder paths. Plain script, tested in `test/format.test.mjs`. |
 | `public/chat-extras.js` | Chat resize grips, the `/` list, theme mirror. It depends on DS class names (`.ao-hud-chat`, `.ao-input`). |
 
 Add a new file only for a distinct job. Extend the file that owns the concern first.
@@ -69,6 +70,12 @@ Add a new file only for a distinct job. Extend the file that owns the concern fi
 
 ## Gotchas learned the hard way
 
+- The dock (`.strip`) is measured by `office.js`, which sets `--strip-clear` on `<html>` (its height plus a gap). The DS chat, roster, Since you left card and the page panels use it as their bottom edge. Do not hard-code a bottom offset for them. `kit/check.py` counts custom properties that the page defines in its own CSS as known tokens, so `--strip-clear` has a default in `office.css`.
+- `backdrop-filter` on `.strip` makes it the containing block of its fixed children, so the More popover is `position: absolute`, not fixed.
+- One panel at a time: `office.js` adds `has-panel` to `#office` while the terminal, board or stats panel is open, and `office.css` hides `.ao-hud-right` (the DS chat and roster) then. Every such panel must show `RequestBar`, or an approval could hide behind the hidden chat.
+- "Always allow" and the risk of a request come from `OfficeVocab.alwaysOffer / requests`. A question has no risk and no rule. A high-risk request never offers Always allow.
+- Recent folders are kept by `place.mjs` (`addRecent`, `cleanRecent`): one form, no duplicates in any case or slash style. Do not compare folder strings by hand.
+- Bot body color comes from `OfficeBuilding.colorOf(uid)` (the DS color of its shape) and is sent to the scene in the bot definition. Lists read the same value, so a bot looks the same everywhere.
 - `cmd /c start "Office" ...` needs the quoted title. Unquoted, `start` runs a program named Office.
 - Write `.office-token` only after `listen` succeeds. A second copy that fails with EADDRINUSE must not change it. The token is reused across restarts on purpose.
 - A headless session emits `init` (session id, commands, skills) only after its first message. The server keeps the last command list for new sessions.

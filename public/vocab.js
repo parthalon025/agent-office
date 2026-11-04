@@ -13,6 +13,10 @@
      toolArg(name)    -> the argument name of the tool's detail text
      todoStatus(t)    -> a DS plan step status
      figures(list)    -> the numbers of a room, from its open sessions
+     requests(s)      -> every open request of a session, oldest first: { id, kind, tool, text, detail, risk, always, t }
+                         kind is 'permission' (Approve or Decline) or 'question' (Yes or No; no risk value)
+     alwaysOffer(s)   -> the first permission request that may offer "Always allow", or null. Never a question,
+                         never a high-risk request, never one without a rule to save.
 */
 (function (root) {
   'use strict';
@@ -77,5 +81,21 @@
     return o;
   }
 
-  root.OfficeVocab = { status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures };
+  function requests(s) {
+    if (!s || s.status === 'ended') return [];
+    var out = [];
+    (s.pending || []).forEach(function (r, i) {
+      out.push({ id: r.id, kind: 'permission', tool: r.tool, detail: r.detail || '', text: 'Allow ' + r.tool + (r.detail ? ': ' + clip(r.detail, 160) : '') + '?', risk: r.risk, always: r.always || null, t: +r.t || 0, i: i });
+    });
+    (s.questions || []).forEach(function (q, i) {
+      out.push({ id: q.id, kind: 'question', tool: 'office_ask', detail: '', text: clip(q.text, 400), risk: undefined, always: null, t: +q.t || 0, i: 1000 + i });
+    });
+    out.sort(function (a, b) { return a.t - b.t || a.i - b.i; });
+    return out.map(function (r) { delete r.i; return r; });
+  }
+  function alwaysOffer(s) {
+    return requests(s).filter(function (r) { return r.kind === 'permission' && r.always && r.risk !== 'high'; })[0] || null;
+  }
+
+  root.OfficeVocab = { requests: requests, alwaysOffer: alwaysOffer, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

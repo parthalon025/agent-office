@@ -11,8 +11,9 @@ import { fileURLToPath } from 'node:url';
 import * as git from './git.mjs';
 import { slimPayload } from './payload.mjs';
 import { createTracker, clip } from './tracker.mjs';
-import { placeOfSession, placeOfWorktree, adoptLegacy, normPath } from './place.mjs';
+import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, cleanRecent } from './place.mjs';
 import { createNotes, cleanPin, PIN_MAX } from './notes.mjs';
+import './public/format.js'; // money, plurals and short paths, shared with the page (globalThis.OfficeFormat)
 import './public/vocab.js'; // session vocabulary, shared with the page (globalThis.OfficeVocab)
 const V = globalThis.OfficeVocab;
 
@@ -49,10 +50,10 @@ const ASK_TIMEOUT_MS = (Number(process.env.OFFICE_ASK_TIMEOUT_S) || 60) * 1000;
 let persisted = { recent: [] };
 try { persisted = { ...persisted, ...JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) }; } catch { /* first run */ }
 // Drop folders that are gone, and worktree folders from older runs.
-persisted.recent = (persisted.recent || []).filter((d) => fs.existsSync(d) && !/[\\/]\.agent-office[\\/]worktrees/.test(d));
+persisted.recent = cleanRecent(persisted.recent).filter((d) => fs.existsSync(d) && !/[\\/]\.agent-office[\\/]worktrees/.test(d));
 const savePersisted = () => { try { fs.writeFileSync(STATE_FILE, JSON.stringify(persisted, null, 2)); } catch { /* ignore */ } };
 const rememberDir = (dir) => {
-  persisted.recent = [dir, ...persisted.recent.filter((d) => d.toLowerCase() !== dir.toLowerCase())].slice(0, 12);
+  persisted.recent = addRecent(persisted.recent, dir);
   savePersisted();
 };
 
@@ -397,7 +398,7 @@ function workOf(x) {
 function figuresText(f) {
   const out = [plural(f.sessions, 'open session', 'open sessions'), `${f.working} working`, `${f.waiting} waiting for the user`,
     plural(f.toolCalls, 'recent tool call', 'recent tool calls'), `${f.tokens.toLocaleString('en-US')} tokens`];
-  if (f.priced) out.push(`$${f.cost.toFixed(2)} spent`);
+  if (f.priced) out.push(`${globalThis.OfficeFormat.money(f.cost)} spent`);
   if (f.todosTotal) out.push(`${f.todosDone} of ${f.todosTotal} plan steps done`);
   return out.join(', ') + '.';
 }
@@ -1007,7 +1008,7 @@ setInterval(() => { for (const c of clients) c.write(': ping\n\n'); }, 20000).un
 // Static files: the page, its scripts, and the Agent Office DS runtime (tokens, bundle, three.js).
 const MIME = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
 const STATIC_FILES = new Map([
-  ['/office.js', 'public/office.js'], ['/scene-host.js', 'public/scene-host.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/vocab.js', 'public/vocab.js'], ['/building.js', 'public/building.js'], ['/tokens.css', 'tokens.css'],
+  ['/office.js', 'public/office.js'], ['/scene-host.js', 'public/scene-host.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/vocab.js', 'public/vocab.js'], ['/format.js', 'public/format.js'], ['/building.js', 'public/building.js'], ['/tokens.css', 'tokens.css'],
   ['/components/bundle.css', 'components/bundle.css'], ['/components/bundle.js', 'components/bundle.js'],
   ['/components/lib/three.min.js', 'components/lib/three.min.js'],
   ['/components/lib/three-orbit-controls.js', 'components/lib/three-orbit-controls.js'],
