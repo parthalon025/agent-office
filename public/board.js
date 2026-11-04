@@ -698,7 +698,7 @@
       if (!fly) blur();
       return true;                                 // the click closed the stats view and does nothing else
     }
-    function onKey(e) { if (e.key === 'Escape' && focused) blur(); }
+    function onKey(e) { if (e.key === 'Escape' && focused && !e.defaultPrevented) blur(); }
     var offTarget = host.register({
       name: 'board',
       active: function () { return !focused && !fly && !dead; },

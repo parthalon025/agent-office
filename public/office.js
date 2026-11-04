@@ -121,7 +121,7 @@
       open: true, title: 'Open a session', onClose: p.onClose,
       actions: [
         h(A.Button, { key: 'c', variant: 'quiet', onClick: p.onClose }, 'Cancel'),
-        h(A.Button, { key: 'o', variant: 'primary', icon: 'add', loading: busy, onClick: submit }, 'Open session')
+        h(A.Button, { key: 'o', variant: saving === null ? 'primary' : 'quiet', icon: 'add', loading: busy, onClick: submit }, 'Open session')
       ]
     }, h('div', { className: 'form' },
       h('p', { className: 'note' }, terminal ? 'Starts Claude Code in a new terminal window with the office hooks attached.' : 'Runs Claude Code inside the office. You talk to it in the chat and approve its steps here. It has no terminal window.'),
@@ -403,7 +403,7 @@
 
     var branches = order.map(function (b) { return { value: b, label: b }; });
     return h(A.Dialog, { open: true, title: 'Floors and rooms in ' + repo.name, onClose: p.onClose, actions: [
-      h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
+      h(A.Button, { key: 'd', variant: form ? 'quiet' : 'primary', onClick: p.onClose }, 'Done')] },
       h('div', { className: 'form wide' },
         h('p', { className: 'note' }, 'A floor is a branch. A room is a worktree: a folder with the branch checked out. A floor can have more than one room. Its rooms share the branch, so a commit in one room shows in the others.'),
         err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
@@ -423,7 +423,7 @@
               rooms.map(function (w) {
                 var here = (snap ? snap.sessions : []).filter(function (s) { return s.status !== 'ended' && s.place && s.place.rootKey === w.place.rootKey; });
                 return h('div', { key: w.root, className: 'room-row' },
-                  h(A.OfficeTypeBadge, { type: 'lab', label: w.root.split(/[\\/]/).pop() }), h('span', { className: 'past-sub mono', title: w.root }, w.root),
+                  h(A.OfficeTypeBadge, { type: 'lab', label: w.root.split(/[\\/]/).pop() }), h('span', { className: 'past-sub mono', title: w.root }, F.shortPath(w.root)),
                   here.map(function (s) { return h('span', { key: s.uid, className: 'room-bot', title: s.name }, h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: colorOf(s.uid), status: statusOf(s), size: 20 }), s.name); }),
                   w.main ? null : h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setConfirm({ kind: 'room', branch: b, root: w.root }); } }, 'Remove room'));
               })),
@@ -569,7 +569,7 @@
       h(A.Button, { key: 'rf', variant: 'quiet', icon: 'retry', onClick: load }, 'Refresh'),
       h(A.Button, { key: 'd', variant: add ? 'quiet' : 'primary', onClick: p.onClose }, 'Done')] },
       h('div', { className: 'form wide' },
-        data && data.folder ? h('p', { className: 'note mono' }, data.folder) : null,
+        data && data.folder ? h('p', { className: 'note mono', title: data.folder }, F.shortPath(data.folder)) : null,
         err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
         note ? h('p', { className: 'note', role: 'status' }, note) : null,
         h(A.Tabs, { value: tab, onChange: function (v) { setTab(v); setAdd(null); }, label: 'Extension types',
@@ -1029,7 +1029,7 @@
               h(Tip, { text: 'A thin status bar for a second screen' }, h(A.Button, { variant: 'quiet', icon: 'zoom-out', onClick: function () { setMore(false); p.onCompact(); } }, 'Compact')),
               sess ? h('div', { className: 'strip-more-set' },
                 h('span', { className: 'strip-more-h' }, 'Actions for ' + sess.name),
-                h(A.Button, { variant: 'quiet', icon: 'terminal', onClick: function () { setMore(false); p.onTerminal(sess.uid, sess.name); } }, 'Open terminal'),
+                h(A.Button, { variant: 'quiet', icon: 'terminal', onClick: function () { setMore(false); p.onTerminal(sess.uid, p.sel); } }, 'Open terminal'),
                 h(A.Button, { variant: 'quiet', icon: 'trace', onClick: function () { setMore(false); p.onChanges(sess.uid, sess.name); } }, 'Changes'),
                 h(A.Button, { variant: 'quiet', icon: 'connector', onClick: function () { setMore(false); p.onExtensions(sess.uid, sess.name); } }, 'Extensions'),
                 ask ? h(A.Button, { variant: 'quiet', icon: 'approve', onClick: function () { setMore(false); always(); }, title: 'Approve and allow this from now on: ' + ask.always }, 'Always allow ' + clip(ask.always, 28)) : null,
@@ -1189,14 +1189,21 @@
     // When the office opens something new in the right column (the Decisions inbox, or the chat of another bot),
     // the page panel steps aside. The chat of the bot the terminal belongs to is not new: the desk opens both.
     var lastSel = React.useRef(sel);
+    var selSess = sel ? window.officeAdapter.session(sel) : null;
     useEffect(function () {
       var prev = lastSel.current; lastSel.current = sel;
       if (!panelOpen) return;
-      if (inbox || (sel && sel !== prev && !(term && term.name === sel))) {
+      if (inbox || (sel && sel !== prev && !(term && selSess && term.uid === selSess.uid))) {
         if (board && boardRef.current) boardRef.current.blur();
         setTerm(null);
       }
     }, [sel, inbox]);
+    // The newest surface wins: a page panel that opens while the Decisions inbox is open closes the inbox through its own DS control.
+    var wasPanel = React.useRef(false);
+    useEffect(function () {
+      var was = wasPanel.current; wasPanel.current = panelOpen;
+      if (panelOpen && !was && inbox) { var x = document.querySelector('.ao-hud-inbox-x'); if (x) x.click(); }
+    }, [panelOpen]);
     // zoom out to leave: scrolling out at the widest zoom goes floor -> building -> city
     useEffect(function () {
       if (cur2.view !== 'office') return undefined;
@@ -1294,7 +1301,6 @@
       if ((tries || 0) < 120) requestAnimationFrame(function () { if (officeRef.current === o) selectPending(o, (tries || 0) + 1); });
     }
     useEffect(function () { if (pendingSel.current && officeRef.current && readyKey.current === sceneKey) selectPending(officeRef.current); }, [snap, sceneKey]);
-    var selSess = sel ? window.officeAdapter.session(sel) : null;
     // The sessions of a room, plus the bot whose chat is open when it sits in another room: its requests stay in view.
     function roomAndSel(roomId, onlyExtra) {
       var inRoom = mount ? mount.roomInfo(roomId, snap || undefined).sessions : [];
