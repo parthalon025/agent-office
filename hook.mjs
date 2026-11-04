@@ -2,6 +2,8 @@
 // Claude Code hook -> Agent Office. Reads the hook payload on stdin, trims it,
 // and posts it to the local office server. Never blocks or fails a session:
 // every error path exits 0 with no output.
+// First statement: Windows never looks for a program in the current folder (git.mjs resolveExe has the reason).
+process.env.NoDefaultCurrentDirectoryInExePath = '1';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

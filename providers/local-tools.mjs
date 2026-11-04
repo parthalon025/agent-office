@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
 import { inside } from '../risk.mjs';
+import { resolveExe } from '../git.mjs'; // absolute program paths: a cmd.exe planted in the worktree never runs
 
 export const LIMITS = {
   readBytes: 200_000,     // most of one file the model gets back
@@ -40,7 +41,7 @@ const clip = (s, n) => (s.length > n ? s.slice(0, n) + `\n[cut: ${s.length - n} 
 /** Kill a process and its children. Windows: taskkill /T by PID (a shell's children outlive a plain kill). */
 export function killTree(pid, run = execFile) {
   if (!pid) return;
-  if (process.platform === 'win32') run('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true }, () => {});
+  if (process.platform === 'win32') run(resolveExe('taskkill'), ['/PID', String(pid), '/T', '/F'], { windowsHide: true }, () => {});
   else { try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } } }
 }
 
@@ -141,9 +142,10 @@ export function createLocalTools(root, deps = {}) {
     const cmd = String(a.command || '').trim();
     if (!cmd) fail('command is empty.');
     const limit = Math.min(Math.max(Number(a.timeout_ms) || LIMITS.runTimeoutMs, 100), 10 * 60_000);
+    const win = process.platform === 'win32';
+    const shell = resolveExe(win ? 'cmd.exe' : 'sh'); // throws to run(), which answers "The tool failed"
     return new Promise((resolve) => {
-      const win = process.platform === 'win32';
-      const child = spawn(win ? 'cmd.exe' : 'sh', win ? ['/d', '/s', '/c', cmd] : ['-c', cmd], {
+      const child = spawn(shell, win ? ['/d', '/s', '/c', cmd] : ['-c', cmd], {
         cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], detached: !win, windowsVerbatimArguments: win,
       });
       running.add(child);

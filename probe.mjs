@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Checks that HTTP hooks work on this Claude Code version and, if so, switches the office to them.
 // Needs the office to be running. Makes one tiny Haiku call.
+// First statement: Windows never looks for a program in the current folder (git.mjs resolveExe has the reason).
+process.env.NoDefaultCurrentDirectoryInExePath = '1';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

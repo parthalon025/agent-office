@@ -1,15 +1,76 @@
 // Git helpers for Agent Office: one worktree per session, a changes view, and a pull request step.
 // Every call runs `git` as a child process with an argument list (no shell), so folder and branch names
-// can never be read as commands.
+// can never be read as commands. The program itself comes from resolveExe, an absolute path.
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
+// ---------- programs ----------
+// On Windows a bare program name ('git') is looked up in the child's folder before PATH, unless the
+// office's own environment has NoDefaultCurrentDirectoryInExePath. A git.exe planted in a session folder
+// would then run as the user with no click. So every program the office starts (git, gh, claude, cmd.exe,
+// powershell.exe, taskkill) starts from the absolute path that resolveExe gives, never from a bare name.
+const SYSTEM32 = { cmd: 'cmd.exe', powershell: 'WindowsPowerShell\\v1.0\\powershell.exe', taskkill: 'taskkill.exe' };
+const exeCache = new Map();
+// Environment names are not case-sensitive on Windows; a plain object (a test's env) is.
+const envGet = (env, key) => env[key] ?? env[Object.keys(env).find((k) => k.toLowerCase() === key.toLowerCase())];
+const isFile = (p) => { try { return fs.statSync(p).isFile(); } catch { return false; } };
+function isRunnable(p, win) {
+  if (!isFile(p)) return false;
+  if (win) return true; // Windows has no execute bit; the extension decides (.com or .exe only)
+  try { fs.accessSync(p, fs.constants.X_OK); return true; } catch { return false; }
+}
+
+/**
+ * The absolute path of a program. Windows tools (cmd, powershell, taskkill) come from %SystemRoot%\System32.
+ * Other names come from the absolute folders of PATH, in order; relative entries ('.', '') and the current
+ * folder are never searched. On Windows only .com and .exe count: a .cmd, .bat or .ps1 shim cannot start
+ * without a shell, and the office never starts programs through a shell. An absolute path is checked and
+ * returned as is. Throws when nothing is found, or for a relative path. Cached per name for process.env.
+ */
+export function resolveExe(name, env = process.env) {
+  const own = env === process.env;
+  const hit = own ? exeCache.get(name) : null;
+  if (hit && isFile(hit)) return hit;
+  const exe = findExe(String(name ?? ''), env, process.platform === 'win32');
+  if (own) exeCache.set(name, exe);
+  return exe;
+}
+
+function findExe(name, env, win) {
+  const p = win ? path.win32 : path.posix;
+  // Drive or UNC paths only on Windows: '\dir' and 'C:dir' depend on the current drive or folder.
+  const absolute = (x) => (win ? /^(?:[A-Za-z]:[\\/]|\\\\[^\\/])/.test(x) : p.isAbsolute(x));
+  if (!name || name.includes('\0')) throw new Error('A program name is required.');
+  if (absolute(name)) { if (isRunnable(name, win)) return name; throw new Error(`Program not found: ${name}`); }
+  if (/[\\/]/.test(name) || (win && name.includes(':'))) throw new Error(`Give a program name or an absolute path, not ${name}.`);
+  if (win) {
+    const sys = SYSTEM32[name.toLowerCase().replace(/\.exe$/, '')];
+    if (sys) {
+      const root = String(envGet(env, 'SystemRoot') || envGet(env, 'windir') || '');
+      const exe = absolute(root) ? p.join(root, 'System32', sys) : '';
+      if (exe && isFile(exe)) return exe;
+      throw new Error(`${name} was not found in the Windows System32 folder (SystemRoot is ${root || 'not set'}).`);
+    }
+  }
+  const dirs = String(envGet(env, 'PATH') || '').split(win ? ';' : ':')
+    .map((d) => d.trim().replace(/^"(.*)"$/, '$1')).filter(absolute);
+  const exts = !win || /\.(com|exe)$/i.test(name) ? [''] : ['.com', '.exe'];
+  for (const d of dirs) for (const x of exts) { const f = p.join(d, name + x); if (isRunnable(f, win)) return f; }
+  if (win) {
+    for (const d of dirs) for (const x of ['.cmd', '.bat', '.ps1']) {
+      const f = p.join(d, name + x);
+      if (isFile(f)) throw new Error(`${name} is installed as a script (${f}). The office starts programs without a shell, so it needs ${name}.exe on PATH.`);
+    }
+  }
+  throw new Error(`${name} was not found on PATH.`);
+}
+
 function run(cmd, args, cwd, timeout = 30000) {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, { cwd, windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout }, (err, out, stderr) => {
+    execFile(resolveExe(cmd), args, { cwd, windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout }, (err, out, stderr) => {
       if (err) return reject(new Error((String(stderr || '').trim() || err.message).split('\n').slice(-3).join(' ')));
       resolve(String(out));
     });
