@@ -200,7 +200,7 @@
     var cw = (W2 - 2 * 26) / 3, top = y + 6, rows = Math.max(1, Math.floor((h - F - 22 - (top + 32)) / 31));
     var cols = [X0, X0 + cw + 26, X0 + 2 * (cw + 26)];
     var head = function (t, x) { c.font = '600 17px ' + sans; say(t.toUpperCase(), x, top, dim); };
-    head('Browser steps', cols[0]); head('Last steps', cols[1]); head('Repository' + (d.tree ? ' · ' + d.tree.total + ' files' : ''), cols[2]);
+    head('Browser steps', cols[0]); head('Last steps', cols[1]); head('Repository' + (d.tree && !d.tree.note ? ' · ' + d.tree.total + ' files' : ''), cols[2]);
     var empty = function (t, x) { c.font = '400 21px ' + sans; say(t, x, top + 32, dim); };
     var step = function (x, i, status, word, detail) {
       var yy = top + 32 + i * 31;
@@ -215,7 +215,7 @@
     if (!d.recent.length) empty('No steps yet', cols[1]);
     d.recent.slice(-rows).forEach(function (b, i) { step(cols[1], i, st(b), toolWord(b.name), b.file || b.detail || ''); });
     var ents = d.tree ? d.tree.entries.filter(function (e) { return e.dir; }).slice(0, rows) : [];
-    if (!ents.length) empty(d.tree ? 'Only files at the top' : 'Loading', cols[2]);
+    if (!ents.length) empty(d.tree ? d.tree.note || 'Only files at the top' : 'Loading', cols[2]);
     ents.forEach(function (e, i) {
       var yy = top + 32 + i * 31, hot = d.touched[e.name];
       c.font = (hot ? '600 ' : '400 ') + '20px ' + mono;
@@ -525,9 +525,13 @@
         var info = (o.room && o.room(bd.roomId)) || {};
         var root = info.place && info.place.root;
         if (root && !(root in trees) && o.tree) {
-          trees[root] = null;
-          var pr = o.tree(root);
-          if (pr && pr.then) pr.then(function (t) { trees[root] = t; refresh(); }, function () { trees[root] = { total: 0, entries: [] }; });
+          // The server lists only worktrees of a known repository. A room outside git (building key '') has no list to ask for.
+          if (!info.place.repo) trees[root] = { total: 0, entries: [], note: 'Not a git folder' };
+          else {
+            trees[root] = null;
+            var pr = o.tree(root);
+            if (pr && pr.then) pr.then(function (t) { trees[root] = t; refresh(); }, function () { trees[root] = { total: 0, entries: [], note: 'No file list' }; refresh(); });
+          }
         }
         var d = boardData(info, root ? trees[root] : null, o.pin ? o.pin(bd.roomId) : null);
         var sig = skinVersion + K.look + JSON.stringify(d);

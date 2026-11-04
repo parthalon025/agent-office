@@ -646,8 +646,9 @@
           h('h3', { className: 'ext-h' }, 'Last steps', h('span', { className: 'ext-n' }, d.recent.length)),
           d.recent.length ? h('div', { className: 'board-calls' }, d.recent.slice().reverse().map(function (c) { return call(c, /^(Bash|PowerShell)$/.test(c.name) ? 'terminal' : /^(Read|Edit|Write|MultiEdit)$/.test(c.name) ? 'code' : /^(Grep|Glob)$/.test(c.name) ? 'search' : 'api'); }))
             : h('p', { className: 'note' }, 'No tool calls yet.'),
-          h('h3', { className: 'ext-h' }, 'Repository', d.tree ? h('span', { className: 'ext-n' }, plural(d.tree.total, 'file', 'files')) : null),
-          d.tree ? h('ul', { className: 'board-tree mono' }, d.tree.entries.map(function (e) {
+          h('h3', { className: 'ext-h' }, 'Repository', d.tree && !d.tree.note ? h('span', { className: 'ext-n' }, plural(d.tree.total, 'file', 'files')) : null),
+          d.tree && d.tree.note ? h('p', { className: 'note' }, d.tree.note + '.')   // board.js: a room outside git, or no file list
+          : d.tree ? h('ul', { className: 'board-tree mono' }, d.tree.entries.map(function (e) {
             var hot = d.touched[e.name];
             return h('li', { key: e.name, className: hot ? 'is-hot' : '' }, h(A.Icon, { name: e.dir ? 'floor' : 'knowledge', size: 13 }), h('span', null, e.name + (e.dir ? '/' : '')), h('span', { className: 'ext-sub' }, (e.dir ? plural(e.files, 'file', 'files') : '') + (hot ? ' · ' + hot + ' touched' : '')));
           })) : h(A.Skeleton, { lines: 3, label: 'Loading' }))));
