@@ -1071,19 +1071,6 @@
         toast({ tone: 'info', title: prev.sessions[u].roomName, text: prev.sessions[u].name + ' left' });
       });
     }, [snap]);
-    // tell the server what each room holds, so an agent can read it
-    useEffect(function () {
-      if (cur2.view !== 'office') return undefined;
-      function post() {
-        var b = boardRef.current;
-        if (!b || !b.inventory) return;
-        roomIds().forEach(function (id) {
-          try { api('/api/room/inventory', { key: noteKey(id), items: b.inventory(id) }).catch(function () { /* ignore */ }); } catch (x) { /* ignore */ }
-        });
-      }
-      var first = setTimeout(post, 1500), iv = setInterval(post, 10000);
-      return function () { clearTimeout(first); clearInterval(iv); };
-    }, [sceneKey, cur2.view, shown]);
     // side panels sit above the control strip, however tall it is
     var cl2 = useState(null), clear = cl2[0], setClear = cl2[1];
     useEffect(function () {

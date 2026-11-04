@@ -8,7 +8,7 @@
    - A small wall display on the left wall shows the room's numbers: sessions, tool calls, tokens, cost.
    - A door on the left wall opens the "add or remove agents" dialog. It swings open when an agent comes in
      or leaves (api.doorPulse).
-   Also a chalk ledge, a marker tray, a warm lamp and two plants. api.inventory(roomId) lists all of it in words.
+   Also a chalk ledge, a marker tray, a warm lamp and two plants. The server's room description (server.mjs roomContents) lists it in words; keep the two in step.
    Colors and fonts come from the DS tokens. The engine draws the room; this file repaints the board
    pictures, adds the decor, and moves the camera on request. The engine builds walls 5.2 high with the
    room sign at 4.45, where the cable tray covers it, so the walls go up to WALL_H and the sign moves up.
@@ -305,20 +305,6 @@
     var t = new T.CanvasTexture(cv); t.encoding = T.sRGBEncoding; return t;
   }
 
-  // What board.js adds to a lab room, in words, for the page to tell the server (api.inventory).
-  function inventoryList(plants) {
-    var l = [
-      'blackboard with what the agents do: plan, browser steps, last steps, the repository and a pinned note',
-      'chalk ledge with two pieces of chalk',
-      "whiteboard with the user's notes and a marker tray",
-      'stats display on the left wall: sessions, tool calls, tokens and cost',
-      'door with an Agents sign on the left wall',
-      'warm lamp (lit at night)'
-    ];
-    if (plants) l.push(plants === 1 ? 'one plant' : plants === 2 ? 'two plants' : plants + ' plants');
-    return l;
-  }
-
   // Attach boards to a mounted office.
   // o: { room(roomId) -> info, tree(root) -> Promise, note(roomId) -> text, stats(roomId) -> numbers, pin(roomId) -> { text, by },
   //      onFocus(roomId, kind: 'board' | 'notes' | 'stats'), onBlur(), onDoor(roomId) }
@@ -327,13 +313,13 @@
     var ins0 = null;
     try { ins0 = office && office.inspect && office.inspect(); } catch (x) { ins0 = null; }
     var st = ins0 && ins0.stage;
-    if (!st) return { refresh: noop, blur: noop, focused: none, kind: none, flying: function () { return false; }, rect: none, dataOf: none, doorPulse: noop, rooms: empty, inventory: empty, dispose: noop };
+    if (!st) return { refresh: noop, blur: noop, focused: none, kind: none, flying: function () { return false; }, rect: none, dataOf: none, doorPulse: noop, rooms: empty, dispose: noop };
     var K = st.K;
     var boards = [];      // blackboards: { kind:'board', mesh, roomId, tex, canvas, ... }
     var notes = [];       // whiteboards: { kind:'notes', ... }
     var statsList = [];   // wall displays: { kind:'stats', ... }
     var doors = [];       // doors: { kind:'door', ... }
-    var decorRooms = [];  // { rg, roomId, items, added, inv, lamp, board } for each room group that has decor
+    var decorRooms = [];  // { rg, roomId, items, added, lamp, board } for each room group that has decor
     var pending = {};     // roomId -> { dir, at, t }: a door pulse that waits for its door (the floor is being rebuilt)
     var trees = {};       // root -> tree
     var focused = null, focusedKind = null, focusedMesh = null, saved = null, dead = false;
@@ -503,9 +489,8 @@
       doors.push(dr); items.push(dr);
       lw.updateMatrixWorld(true);
       // plants: the back-left corner, and right of the blackboard
-      var nPlants = 0;
-      [plantAt(rg, leftX + 0.55, bz + 0.6, 0.9), plantAt(rg, bx + 2.45, bz + 0.55, 0.75)].forEach(function (g) { if (g) { added.push(g); nPlants++; } });
-      decorRooms.push({ rg: rg, roomId: id, items: items, added: added, inv: inventoryList(nPlants), lamp: lamp, board: bd, raised: raised });
+      [plantAt(rg, leftX + 0.55, bz + 0.6, 0.9), plantAt(rg, bx + 2.45, bz + 0.55, 0.75)].forEach(function (g) { if (g) added.push(g); });
+      decorRooms.push({ rg: rg, roomId: id, items: items, added: added, lamp: lamp, board: bd, raised: raised });
       repaint = true;
     }
     function allItems() { return boards.concat(notes, statsList, doors); }
@@ -815,15 +800,6 @@
       boards = []; notes = []; statsList = []; doors = []; decorRooms = []; pending = {};
       focused = null; focusedKind = null; focusedMesh = null; hovered = null;
     }
-    function inventory(roomId) {
-      if (dead) return [];
-      var dec = decorRooms.filter(function (d) { return d.roomId === roomId && inScene(d.rg); })[0];
-      if (dec) return dec.inv.slice();
-      // a lab room on a floor that is not shown (or not built yet): the decor it gets when its floor shows
-      var b = office.getBuilding && office.getBuilding(), lab = false;
-      ((b && b.floors) || []).forEach(function (f) { (f.rooms || []).forEach(function (r) { if (r.id === roomId && r.type === 'lab') lab = true; }); });
-      return lab ? inventoryList(plantsOk() ? 2 : 0) : [];
-    }
     return {
       refresh: refresh, blur: blur, focused: function () { return focused; }, kind: function () { return focusedKind; },
       flying: function () { return !!fly; },
@@ -836,7 +812,6 @@
         list.sort(function (a, b) { return worldX(a.mesh) - worldX(b.mesh); });
         return list.map(function (b) { return b.roomId; });
       },
-      inventory: inventory,
       // the open board's corners on screen, so the page can lay a text box exactly over it
       rect: function () {
         if (!focusedMesh) return null;

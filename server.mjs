@@ -648,7 +648,7 @@ function describeRoom(s) {
     '',
     `Room figures: ${roomFigures(all.length ? all : [s])}`,
     '',
-    ...roomContents(pl, key),
+    ...roomContents(pl),
     '',
     'What the room has',
     '- A blackboard on the wall. The office paints on it, live, what the agents in this room do. The pin shows on it too.',
@@ -667,29 +667,10 @@ function describeRoom(s) {
   ].join('\n');
 }
 
-// ---------- what is in the room (office_room, POST /api/room/inventory) ----------
-// The page reports the decor it adds (board.js) per room key. It is kept in memory only: the page sends it
-// again on each load, so a restart loses nothing that matters.
-const INVENTORY_ITEMS = 40, INVENTORY_CHARS = 120, INVENTORY_KEYS = 200;
-const roomInventory = new Map();
-function setInventory(body) {
-  const key = String(body.key || '');
-  if (!key || key.length > 400) throw httpError(400, 'Unknown room.');
-  if (!Array.isArray(body.items)) throw httpError(400, 'items must be a list of text.');
-  if (body.items.length > INVENTORY_ITEMS) throw httpError(413, `A room can list ${INVENTORY_ITEMS} items. This list has ${body.items.length}.`);
-  const items = [];
-  for (const it of body.items) {
-    if (typeof it !== 'string') throw httpError(400, 'Each item must be text.');
-    const t = clip(it.replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim(), INVENTORY_CHARS);
-    if (t) items.push(t);
-  }
-  roomInventory.delete(key); // re-insert, so the oldest key is the least recently reported
-  if (items.length) { if (roomInventory.size >= INVENTORY_KEYS) roomInventory.delete(roomInventory.keys().next().value); roomInventory.set(key, items); }
-  return { ok: true, count: items.length };
-}
-// The fixed contents of a lab room (components/bundle.js buildRoom and buildFloor), the page's decor, the street.
-function roomContents(pl, key) {
-  const reported = roomInventory.get(key) || [];
+// ---------- what is in the room (office_room) ----------
+// The fixed contents of a lab room (components/bundle.js buildRoom and buildFloor), the decor board.js adds (the same in
+// every lab room), the street. Keep the decor lines in step with board.js.
+function roomContents(pl) {
   return [
     'What is in the room',
     'The room is a lab room in a 3D building. Fixed parts (the office draws them the same in every lab room):',
@@ -701,9 +682,7 @@ function roomContents(pl, key) {
     '- A desk with monitors for each bot. A session gets a coder desk. A subagent gets a desk for its type (research, planner, analyst, writer or coder). The monitors show the terminal of that session.',
     '- A beacon light on the back wall. It blinks when a bot in the room waits for the user or has an error.',
     '- On the floor: an elevator lobby on the left side with the elevator and a railing, and a meter near the front right corner.',
-    ...(reported.length
-      ? ['The page adds these to this room:', ...reported.map((t) => '- ' + t)]
-      : ['The page paints the live overview on the blackboard on the back wall, and adds the notes board with a marker tray, a chalk ledge, the stats display and the door on the left wall, two plants and a warm light by the door. The page has not sent a list for this room yet.']),
+    'The page adds to every lab room: a blackboard on the back wall with what the agents do (plan, browser steps, last steps, the repository and a pinned note), a chalk ledge with two pieces of chalk, a whiteboard with the user notes and a marker tray, a stats display on the left wall (sessions, tool calls, tokens and cost), a door with an Agents sign on the left wall, a warm lamp that is lit at night, and two plants.',
     'The window of the first room is a picture: by day a blue sky with clouds over a low skyline, at night a dark sky with a moon over a skyline with lit windows, in Sublevel a lit corridor. It does not show the street.',
     'In the building view (outside the floors) the office draws a road with lane marks along the front and the right side of the building, sidewalks with trees, two street lights that glow at night, and a flock of birds that circles over the tower.',
     'You can change only the notes board and the blackboard pin (office_room_update). You cannot move furniture, desks, boards, the door or bots. The office places them.',
@@ -1377,7 +1356,6 @@ const server = http.createServer(async (req, res) => {
       savePersisted(); broadcast();
       return send(res, 200, { ok: true, at });
     }
-    if (url.pathname === '/api/room/inventory') return send(res, 200, setInventory(body));
     if (url.pathname === '/api/tree') return send(res, 200, await repoTree(String(body.root || '')));
     if (url.pathname === '/api/branches') return send(res, 200, { branches: await git.branches(knownRepo(body.repo).path) });
     if (url.pathname === '/api/floor/create') return send(res, 200, await floorAction('create-floor', body));
