@@ -6,7 +6,8 @@ It is built on the Agent Office design system (x1.5), which lives in this folder
 
 ## What it does
 
-- **City.** Every repository stands as a building in one city: a floor per branch, a pip per session, a beacon when a session needs you. Scroll to zoom toward the mouse, right-drag or Shift-drag to move sideways, drag to turn. Click a building, or zoom in on it, to fly in; inside, zoom out past the widest view to go from floor to building to city. New buildings rise, removed ones sink, floors grow and shrink, sessions pop in and out. Streets with lane marks, trees and street lights run between the lots (the lights glow at night), and birds circle over the city. The building view of the office gets the same street, trees and birds around its lot; the floor view, which is inside, gets none.
+- **City.** Every repository stands as a building in one city: a floor per branch, a pip per session, a beacon when a session needs you. Scroll to zoom toward the mouse, right-drag or Shift-drag to move sideways, drag to turn. Click a building, or zoom in on it, to fly in. Inside, zoom out past the widest view to go from floor to building to city: one scroll gesture leaves one level, with a short pause after each, and the building level needs three pushes. The City does not zoom out past Show all. The City panel has the Day, Night and Sublevel switch, the number of sessions by state across all buildings, a Search actions button (Ctrl+K works too), and a status dot for each session in each building row. New buildings rise, removed ones sink, floors grow and shrink, sessions pop in and out. Streets with lane marks, trees and street lights run between the lots (the lights glow at night), and birds circle over the city. The building view of the office gets the same street, trees and birds around its lot; the floor view, which is inside, gets none.
+- **Reduced motion.** With the system setting on, City flies and zoom steps cut at once, buildings do not lift, a door that an agent uses stays shut and shows a still ring, and terminal cursors do not blink.
 - **Room boards.** The board on the back wall of each room is a live screen: the session's to-do list, the browser steps (Playwright page loads, clicks, key presses), the last tool calls, and the top folders of the repository with the ones the agents touched. Click it and the camera flies up to it; a side panel shows the same in full. The camera stays yours: turn, zoom and move, then press Esc or Back.
 - **Notes board.** Next to it hangs a notes board for your own reminders. Click it, the camera flies to it, and you write on the board itself. Notes save as you type and stay per room (in `state.json`). Rooms have taller walls so the room name sits above the cable tray.
 - **Repos as buildings.** A git repository is a building, a branch is a floor and a worktree is a room. Pick the building in the control strip; a button there shows requests that wait in another building. Folders outside git share the "Other folders" building.
@@ -105,8 +106,8 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 | `mcp.mjs` | MCP server with `office_inbox`, `office_ask`, `office_room` and `office_room_update`. |
 | `launch.ps1` | Starts a session in a terminal window. |
 | `probe.mjs` | Tests HTTP hooks on this Claude Code version. |
-| `public/` | The page: `vocab.js` (shared status words, tool names and room figures), `scene-host.js` (the one reader of the 3D stage: floor, view, rooms, pick, cursor), `building.js` (snapshot store and building adapter), `adapter.js`, `office.js`, `office.css`, `chat-extras.js`, `index.html`. |
-| `test/*.test.mjs` | Offline unit tests (`npm test`): place rules, risk classifier, session vocabulary, hook payload, session tracker, scene host, notes merge, snapshot store and building adapter. |
+| `public/` | The page: `vocab.js` (shared status words, tool names and room figures), `wheel-gate.js` (one scroll-out gesture leaves one level), `scene-host.js` (the one reader of the 3D stage: floor, view, rooms, pick, cursor), `building.js` (snapshot store and building adapter), `adapter.js`, `office.js`, `office.css`, `chat-extras.js`, `index.html`. |
+| `test/*.test.mjs` | Offline unit tests (`npm test`): place rules, risk classifier, session vocabulary, hook payload, session tracker, scene host, notes merge, snapshot store and building adapter, contrast pairs, wheel gate. |
 | `test/tracker.test.mjs` | Session tracker tests from recorded-shape hook payloads and stream lines in `test/fixtures/`. |
 | `test/smoke.mjs` | End-to-end test against real Claude Code. |
 | `DS-README.md`, `Recipes.md`, `Reference.md`, `Concepts.md`, `kit/`, `components/`, `tokens.css` | The Agent Office design system. |
@@ -138,7 +139,7 @@ Generated at run time and ignored by git: `.office-token`, `office-hooks.json`, 
 ```
 npm run probe   # HTTP hooks on this Claude Code version (one tiny call)
 npm run smoke   # opens real Haiku sessions in a throwaway repo (a few cents); the office must be running
-python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/vocab.js public/scene-host.js public/building.js
+python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/wheel-gate.js public/vocab.js public/scene-host.js public/building.js
 ```
 
 ## Limits

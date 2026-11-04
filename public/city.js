@@ -166,12 +166,14 @@
   function City(el, opts) {
     opts = opts || {};
     var s = new O.Stage(el, { root: opts.root || null, quality: opts.quality || 'auto', label: '3D city. Each building is a repository. Click one to go inside.', D: 22 });
-    if (s.dead) return { update: function () {}, focus: function () {}, fit: function () {}, zoomBy: function () {}, dispose: function () {} };
+    if (s.dead) return { update: function () {}, focus: function () {}, fit: function () {}, zoomBy: function () {}, dispose: function () {},
+      setMode: function (m) { var t = { day: 'light', night: 'dark', sublevel: 'sublevel' }[m]; if (t && opts.root) opts.root.setAttribute('data-theme', t); }, state: function () { return null; } };
     var K = s.K, world = new T.Group(), mats = {};
     // one themed material per token, so a theme change repaints them all
     function mat(token, o) { var k = token + (o ? JSON.stringify(o) : ''); return mats[k] || (mats[k] = K.t(token, o)); }
     s.scene.add(world);
-    if (s.ctl) { s.ctl.minZoom = 0.35; s.ctl.maxZoom = 5; }
+    var SHOW_ZOOM = 1.35;   // the zoom that Show all gives
+    if (s.ctl) { s.ctl.minZoom = SHOW_ZOOM; s.ctl.maxZoom = 5; }
 
     // ground: a wide slab and a plaza that grows with the city
     var ground = X.mesh(X.box(400, 0.4, 400), mat('scene-slab'), 0, -0.8, 0, world);
@@ -236,14 +238,17 @@
     function signTex(name, sub) {
       var tok = K.tok, f = K.f || {};
       return X.canvasTex(512, 160, function (g, w, hh) {
-        // a rounded label like the DS floor tags: name, then floors and sessions
+        // a rounded label like the DS floor tags: name, then floors and sessions. The card is bg (opaque; K.tok
+        // has no chip or line), and ink and muted read on bg in every theme.
         var r = 28;
-        g.fillStyle = tok['bubble'] || tok['bg'];
+        g.fillStyle = tok['bg'];
         g.beginPath(); g.moveTo(r, 4); g.arcTo(w - 4, 4, w - 4, hh - 4, r); g.arcTo(w - 4, hh - 4, 4, hh - 4, r); g.arcTo(4, hh - 4, 4, 4, r); g.arcTo(4, 4, w - 4, 4, r); g.closePath(); g.fill();
         g.strokeStyle = tok['line'] || tok['muted']; g.lineWidth = 3; g.stroke();
         g.textBaseline = 'middle'; g.fillStyle = tok['ink']; g.font = '600 62px ' + (f.sans || 'sans-serif');
         g.fillText(name.length > 15 ? name.slice(0, 14) + '…' : name, 32, 62);
         g.fillStyle = tok['muted']; g.font = '500 38px ' + (f.mono || 'monospace');
+        var fs = 38; g.font = '500 ' + fs + 'px ' + (f.mono || 'monospace');
+        while (g.measureText(sub).width > w - 64 && fs > 22) { fs -= 2; g.font = '500 ' + fs + 'px ' + (f.mono || 'monospace'); }
         g.fillText(sub, 32, 124);
       });
     }
@@ -372,12 +377,27 @@
       layout();
     }
 
+    // The widest view is Show all: the city never shrinks to a small shape at the ground edge. The zoom that
+    // shows all of it depends on how far the camera stands (s.D) against how far Show all would stand.
+    function showAllExt() {
+      var cols = Math.max(2, Math.ceil(Math.sqrt(Math.max(slots.length, 1)))), rows = Math.max(1, Math.ceil(slots.length / cols));
+      var tall = 2;
+      Object.keys(items).forEach(function (k) { tall = Math.max(tall, items[k].floors.length * FLOOR_H + 2); });
+      return { tall: tall, ext: [cols * PITCH, tall, rows * PITCH] };
+    }
+    function minZoom() {
+      if (!s.ctl) return SHOW_ZOOM;
+      var d = s.fitD ? s.fitD(showAllExt().ext) : s.D;
+      return Math.max(0.2, Math.min(s.ctl.maxZoom * 0.5, d > 0 ? SHOW_ZOOM * s.D / d : SHOW_ZOOM));
+    }
+    s.anim.push(function () { if (s.ctl) s.ctl.minZoom = minZoom(); });
+
     // living city: working pips bob, the beacon of a building that needs you pulses, hover lifts
     s.anim.push(function (dt, t) {
       Object.keys(items).forEach(function (k) {
         var b = items[k];
         var lift = hover === k ? 0.35 : 0;
-        b.body.position.y += (lift - b.body.position.y) * Math.min(1, dt * 10);
+        b.body.position.y += (lift - b.body.position.y) * (s.rm ? 1 : Math.min(1, dt * 10));
         if (b.beacon.visible && !s.rm) b.beacon.scale.setScalar(1 + 0.25 * Math.sin(t * 5));
         Object.keys(b.pips).forEach(function (n) {
           var p = b.pips[n], h0 = p.userData.home;
@@ -391,18 +411,16 @@
     var zoomGoal = null;
     s.anim.push(function (dt) {
       if (zoomGoal == null) return;
-      s.cam.zoom += (zoomGoal - s.cam.zoom) * Math.min(1, dt * 8);
+      s.cam.zoom += (zoomGoal - s.cam.zoom) * (s.rm ? 1 : Math.min(1, dt * 8));
       s.cam.updateProjectionMatrix();
       if (Math.abs(zoomGoal - s.cam.zoom) < 0.002) zoomGoal = null;
     });
-    function zoomBy(f) { zoomGoal = Math.max(0.35, Math.min(5, (zoomGoal || s.cam.zoom) * f)); }
+    function zoomBy(f) { zoomGoal = Math.max(s.ctl ? s.ctl.minZoom : SHOW_ZOOM, Math.min(5, (zoomGoal || s.cam.zoom) * f)); }
 
     function fit(now) {
-      var cols = Math.max(2, Math.ceil(Math.sqrt(Math.max(slots.length, 1)))), rows = Math.max(1, Math.ceil(slots.length / cols));
-      var tall = 2;
-      Object.keys(items).forEach(function (k) { tall = Math.max(tall, items[k].floors.length * FLOOR_H + 2); });
-      zoomGoal = 1.35;
-      s.frame([0, tall / 3, 0], 20, 1, !!now, [cols * PITCH, tall, rows * PITCH], cssMs('duration-camera', 600));
+      var a = showAllExt();
+      zoomGoal = SHOW_ZOOM;
+      s.frame([0, a.tall / 3, 0], 20, 1, !!now || s.rm, a.ext, cssMs('duration-camera', 600));
     }
     // Fly to a building, then call done (the page goes inside).
     function focus(key, done) {
@@ -410,7 +428,7 @@
       if (!b) { if (done) done(); return; }
       var hgt = b.floors.length * FLOOR_H;
       zoomGoal = 1;
-      s.frame([b.g.position.x, hgt / 2, b.g.position.z], 4.5, 1, false, [BW + 2, hgt + 2, BD + 2], cssMs('duration-camera', 600));
+      s.frame([b.g.position.x, hgt / 2, b.g.position.z], 4.5, 1, s.rm, [BW + 2, hgt + 2, BD + 2], cssMs('duration-camera', 600));
       if (done) setTimeout(done, s.rm ? 0 : cssMs('duration-camera', 600) + 80);
     }
 
@@ -475,8 +493,10 @@
 
     return {
       update: update, focus: focus, fit: fit, zoomBy: zoomBy,
+      // the theme of the page: day, night or sublevel (the stage sets data-theme on the root)
+      setMode: function (m) { s.setMode(m); },
       // for tests and the console: the camera zoom and its limits
-      state: function () { return { zoom: s.cam.zoom, max: s.ctl ? s.ctl.maxZoom : null, buildings: Object.keys(items).length, entering: entering }; },
+      state: function () { return { zoom: s.cam.zoom, min: s.ctl ? s.ctl.minZoom : null, max: s.ctl ? s.ctl.maxZoom : null, buildings: Object.keys(items).length, entering: entering }; },
       dispose: function () { mo.disconnect(); flock.dispose(); s.dispose(); }
     };
   }
