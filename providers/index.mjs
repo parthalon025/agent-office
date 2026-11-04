@@ -20,8 +20,11 @@
 //                                      request waits on a hook (Claude Code), else nothing.
 //   interrupt(s)                       stop the turn that runs.
 //   close(s) -> Promise                stop the agent. The office then ends the session.
-//   check(opts)            (optional)  throws a status error (400) for options the provider does not take. The office calls it
-//                                      before it makes a worktree.
+//   check(opts)            (optional)  throws a status error for options the provider does not take (400) or a program it
+//                                      cannot find (409). The office calls it before it makes a worktree or a session;
+//                                      check({}) checks only that a session can start (Reopen).
+//   canResume              (optional)  true when open(s, { resume }) continues a past conversation (Claude Code). Without it,
+//                                      Reopen starts a fresh session in the same folder with the same model (reopenPlan).
 //   Two timing rules. (1) A method returns before the events that follow from it: report them on a later tick. The office
 //   marks the turn after the call (startTurn after message, tracker.interrupt after interrupt), so a stopped turn reported
 //   inside interrupt() would read as an error. (2) After close, or after events.end, report nothing more for that session:
@@ -33,6 +36,8 @@
 //                       tool_name, tool_use_id, tool_input, agent_id, agent_type, duration_ms, error, is_interrupt, prompt,
 //                       message, reason. A PostToolUse of TodoWrite with tool_input.todos is the plan.
 //                       Returns the tracker's answer: queued office messages for the agent, or null.
+//                       A provider must deliver hook()'s return value (queued office messages: additionalContext, or
+//                       decision:block on Stop) to its agent.
 //   permission(s, p)    a request the provider holds itself (no hook): tool_name, tool_input, agent_id, permission_suggestions.
 //                       Returns the request id. The office holds it until the user answers, then calls provider.answer.
 //   stream(s, m)        a stream message, as an object or a JSON line: system init (model, permissionMode, session_id,
@@ -62,6 +67,7 @@ export function checkProvider(p) {
   for (const k of ['kind', 'label']) if (typeof p[k] !== 'string' || !p[k]) missing.push(k);
   for (const m of PROVIDER_METHODS) if (typeof p[m] !== 'function') missing.push(m + '()');
   if (p.check !== undefined && typeof p.check !== 'function') missing.push('check() (optional, but then a function)');
+  if (p.canResume !== undefined && typeof p.canResume !== 'boolean') missing.push('canResume (optional, but then true or false)');
   if (missing.length) throw new Error(`The provider ${p.kind || '(no kind)'} lacks: ${missing.join(', ')}.`);
   if (!KIND_RE.test(p.kind)) throw new Error(`The provider kind ${p.kind} must be lower-case letters, digits and dashes.`);
   return p;
@@ -119,6 +125,18 @@ export function createRegistry(list) {
     /** The provider of a session. A session the tracker first saw in a hook is a Claude Code session. */
     of: (s) => get(s.provider),
     list: () => [...by.values()],
+    /**
+     * How the office opens a past session (a history record) again. A provider that can resume continues the conversation
+     * with its replies, cost and turns; the record leaves the past list, because the reopened session records itself.
+     * Any other provider starts a fresh session in the same folder with the same model; the record stays.
+     * A record from before providers (no `provider`) is Claude Code's.
+     */
+    reopenPlan(rec) {
+      const provider = get(rec.provider);
+      const opts = { cwd: rec.cwd, name: rec.name, prompt: '', worktree: rec.worktree || null, budget: rec.budget || null, model: rec.model || null };
+      if (provider.canResume === true) return { provider, opts: { ...opts, resume: rec.sid, prior: rec }, fresh: false, note: null };
+      return { provider, opts, fresh: true, note: 'A new session started. This agent kind cannot resume a past session.' };
+    },
     /**
      * Readiness and models of every provider, for the settings view (#20). A provider that fails or does not answer in
      * time is not ready, and the reason is its need. Models are asked only of a ready provider.

@@ -11,7 +11,8 @@ import { PassThrough } from 'node:stream';
 import { createTracker } from '../tracker.mjs';
 import { slimPayload } from '../payload.mjs';
 import { createRegistry, providerEvents, checkProvider, providerError, DEFAULT_PROVIDER, PROVIDER_METHODS } from '../providers/index.mjs';
-import { createClaudeCode, claudeVersion, exePath, MODEL_RE } from '../providers/claude-code.mjs';
+import { createClaudeCode, claudeVersion, programPath, MODEL_RE } from '../providers/claude-code.mjs';
+import { resolveExe } from '../git.mjs';
 
 const load = (f) => JSON.parse(fs.readFileSync(new URL('./fixtures/' + f, import.meta.url), 'utf8'));
 const HOOKS = load('hooks.json'), STREAM = load('stream.json');
@@ -52,7 +53,7 @@ function createFake(events) {
   const waiting = new Map(); // request id -> session
   const BASH = { command: 'git push origin main' };
   return {
-    kind: 'fake', label: 'Fake agent', opened: [],
+    kind: 'fake', label: 'Fake agent', canResume: false, opened: [],
     async readiness() { return { ready: true, version: '1.0', needs: [] }; },
     async models() { return [{ id: 'fake-1', label: 'Fake 1' }]; },
     open(s, opts) {
@@ -258,7 +259,8 @@ function claudeRig(over = {}) {
     files: () => FILES,
     spawn: (file, args, opts) => { const child = fakeChild(); r.spawned.push({ file, args, opts, child }); return child; },
     execFile: (file, args, opts, cb) => { r.execs.push({ file, args, opts }); (over.exec || ((_f, _a, done) => done(null, '', '')))(file, args, cb); },
-    exe: (name) => ((over.missing || []).includes(name) ? null : `C:/bin/${name}`),
+    // resolveExe's contract: an absolute path, or it throws
+    exe: over.exe || ((name) => { if ((over.missing || []).includes(name)) throw new Error(`${name} was not found on PATH.`); return `C:/bin/${name}`; }),
     env: { PATH: 'C:/bin', ...(over.env || {}) },
     makeId: () => 'c' + (++r.n),
   });
@@ -387,7 +389,8 @@ test('claude-code process end: a failed start, an early exit with its stderr, a 
   r.p.open(s, {});
   assert.equal(r.spawned.length, 0, 'no bare name is ever started');
   await tick();
-  assert.deepEqual([s.replies[0].text, s.status], ['Could not start Claude Code: claude is not on the PATH.', 'ended']);
+  assert.match(s.replies[0].text, /^Could not start Claude Code: .*claude\.exe is not on the PATH/);
+  assert.equal(s.status, 'ended');
 });
 
 test('claude-code close: taskkill on the process tree by full path; not found counts as closed', async () => {
@@ -422,7 +425,7 @@ test('claude-code check: unknown model or mode is 400; a missing program is 409,
   p.check({}); p.check({ model: 'haiku', permissionMode: 'plan' }); p.check({ model: 'claude-sonnet-4-5', permissionMode: 'acceptEdits', where: 'terminal' });
   assert.throws(() => p.check({ model: 'gpt-4' }), (e) => e.status === 400 && e.message === 'Unknown model.');
   assert.throws(() => p.check({ permissionMode: 'bypassPermissions' }), (e) => e.status === 400 && e.message === 'Unknown permission mode.');
-  assert.throws(() => claudeRig({ missing: ['claude'] }).p.check({}), (e) => e.status === 409 && /claude is not on the PATH/.test(e.message));
+  assert.throws(() => claudeRig({ missing: ['claude'] }).p.check({}), (e) => e.status === 409 && /claude\.exe is not on the PATH/.test(e.message));
   const noPs = claudeRig({ missing: ['powershell.exe'] }).p;
   noPs.check({});
   assert.throws(() => noPs.check({ where: 'terminal' }), (e) => e.status === 409 && /powershell\.exe/.test(e.message));
@@ -452,6 +455,7 @@ test('claude-code openWindow: cmd.exe and PowerShell by full path, the options i
   assert.equal(file, 'C:/bin/cmd.exe');
   assert.deepEqual(args, ['/d', '/s', '/c', 'start "Office" /wait "C:/bin/powershell.exe" -NoLogo -NoExit -ExecutionPolicy Bypass -File "C:/office/launch.ps1"']);
   assert.deepEqual([opts.windowsVerbatimArguments, opts.cwd, opts.stdio, opts.env.OFFICE_ID, opts.env.OFFICE_TITLE], [true, REPO, 'ignore', 'o1', 'Office - my bot']);
+  assert.equal(opts.env.OFFICE_CLAUDE, 'C:/bin/claude', 'launch.ps1 runs claude from this full path');
   assert.deepEqual(JSON.parse(opts.env.OFFICE_ARGS), ['--settings', FILES.settings, '--mcp-config', FILES.mcp, '--model', 'opus', 'Fix it']);
   assert.equal(child.unrefed, true);
   assert.equal(s.pid, 4242);
@@ -476,30 +480,109 @@ test('claude-code cli: one claude job by full path; with no claude the callback 
 test('claudeVersion: the trimmed version, or unknown', () => {
   assert.equal(claudeVersion(() => '2.1.318 (Claude Code)\n', () => 'C:/bin/claude.exe'), '2.1.318 (Claude Code)');
   assert.equal(claudeVersion(() => { throw new Error('x'); }, () => 'C:/bin/claude.exe'), 'unknown');
-  assert.equal(claudeVersion(() => 'never', () => null), 'unknown');
+  assert.equal(claudeVersion(() => 'never', () => { throw new Error('claude was not found on PATH.'); }), 'unknown');
 });
 
-test('exePath: absolute folders on PATH only, so a program planted in the current folder never runs', () => {
-  const here = process.cwd();
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-exe-'));
+test('programPath: a missing claude says claude.exe; another program keeps the resolver message', () => {
+  assert.equal(programPath('claude', () => 'C:/bin/claude.exe'), 'C:/bin/claude.exe');
+  const none = () => { throw new Error('claude was not found on PATH.'); };
+  assert.throws(() => programPath('claude', none), (e) => e.status === 409 && e.message === 'The office cannot find Claude Code: claude.exe is not on the PATH. Install it, then try again.');
+  assert.throws(() => programPath('taskkill', () => { throw new Error('taskkill was not found in the Windows System32 folder.'); }), (e) => e.status === 409 && /System32/.test(e.message));
+});
+
+test('only claude.cmd on PATH (an npm install): the office says it needs claude.exe and names the file it found', { skip: process.platform !== 'win32' }, async () => {
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-npm-')));
   try {
-    const bin = path.join(base, 'bin'), planted = path.join(base, 'repo');
-    fs.mkdirSync(bin); fs.mkdirSync(planted); fs.mkdirSync(path.join(bin, 'dir.exe'));
-    const win = process.platform === 'win32';
-    const file = win ? 'tool.exe' : 'tool';
-    fs.writeFileSync(path.join(bin, file), '');
-    fs.writeFileSync(path.join(planted, file), '');
-    if (win) fs.writeFileSync(path.join(bin, 'script.cmd'), '');
-    // The current folder is the planted repository, and PATH names it twice in relative form.
-    process.chdir(planted);
-    const env = { PATH: ['.', path.join('..', 'repo'), '', bin].join(path.delimiter) };
-    assert.equal(exePath('tool', env), path.join(bin, file));
-    assert.equal(exePath('absent', env), null);
-    assert.equal(exePath(path.join(planted, file), env), path.join(planted, file), 'an absolute path stays');
-    if (win) {
-      assert.equal(exePath('tool.exe', env), path.join(bin, 'tool.exe'));
-      assert.equal(exePath('script', env), null, '.cmd needs a shell: never picked');
-      assert.equal(exePath('dir', env), null, 'a folder is not a program');
-    }
-  } finally { process.chdir(here); fs.rmSync(base, { recursive: true, force: true }); }
+    const shim = path.join(dir, 'claude.cmd');
+    fs.writeFileSync(shim, '@echo off\r\n');
+    const env = { Path: dir, SystemRoot: process.env.SystemRoot };
+    const want = `The office needs claude.exe. It found only ${shim} (an npm install). Install the native Claude Code, then try again.`;
+    assert.throws(() => programPath('claude', (n) => resolveExe(n, env)), (e) => e.status === 409 && e.message === want);
+    const r = claudeRig({ exe: (n) => resolveExe(n, env) });
+    assert.throws(() => r.p.check({}), (e) => e.status === 409 && e.message === want, 'check refuses before a worktree or a session');
+    assert.deepEqual(await r.p.readiness(), { ready: false, version: null, needs: [want] });
+    assert.equal(r.execs.length, 0, 'nothing ran');
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('claude-code close: the process exit does not end the session; the office does, as closed from the office', async () => {
+  // what server.mjs closeSession does once close resolves
+  const closeLikeTheOffice = (r, s) => r.p.close(s).then(() => r.o.tracker.endSession(s, 'closed from the office'));
+  const ends = (r) => r.o.tracker.feed.filter((f) => f.kind === 'end').map((f) => f.text);
+
+  // taskkill answers first, the exit comes after
+  let r = claudeRig(); let s = r.o.session();
+  r.p.open(s, {});
+  await closeLikeTheOffice(r, s);
+  r.child().emit('exit', 1);
+  assert.deepEqual([ends(r), s.replies.length], [['closed from the office'], 0]);
+
+  // the exit comes while taskkill runs
+  r = claudeRig({ exec: (_f, _a, done) => { r.child().emit('exit', 1); done(null, '', ''); } }); s = r.o.session();
+  r.p.open(s, {});
+  await closeLikeTheOffice(r, s);
+  assert.deepEqual([ends(r), s.replies.length], [['closed from the office'], 0]);
+
+  // taskkill fails: the process still runs, so its later exit is the session's end again
+  r = claudeRig({ exec: (_f, _a, done) => done(new Error('x'), '', 'ERROR: Access is denied.') }); s = r.o.session();
+  r.p.open(s, {});
+  await assert.rejects(closeLikeTheOffice(r, s));
+  r.child().emit('exit', 1);
+  assert.deepEqual(ends(r), ['exited (1)']);
+
+  // a terminal window too
+  r = claudeRig(); s = r.o.session({ headless: false });
+  r.p.openWindow(s, {});
+  await closeLikeTheOffice(r, s);
+  r.child().emit('exit', 0);
+  assert.deepEqual(ends(r), ['closed from the office']);
+});
+
+test('claude-code: when the process ends, a control request that waits fails at once', async () => {
+  const r = claudeRig();
+  const s = r.o.session();
+  r.p.open(s, {});
+  const got = [];
+  r.p.control(s, { subtype: 'mcp_status' }, (x) => got.push(x));
+  r.p.control(s, { subtype: 'interrupt' }); // no callback: nothing to fail
+  r.child().emit('exit', 0);
+  assert.deepEqual(got, [{ subtype: 'error', error: 'The session ended.' }]);
+  const r2 = claudeRig();
+  const s2 = r2.o.session();
+  r2.p.open(s2, {});
+  const got2 = [];
+  r2.p.control(s2, { subtype: 'mcp_status' }, (x) => got2.push(x));
+  r2.child().emit('error', new Error('broken pipe'));
+  assert.deepEqual(got2, [{ subtype: 'error', error: 'The session ended.' }]);
+  assert.throws(() => r2.p.message(s2, { text: 'x' }), (e) => e.status === 409, 'a failed process takes no message');
+});
+
+test('reopen: Claude Code resumes; a provider that cannot resume opens a fresh session in the same folder with the same model', () => {
+  const o = office();
+  const claude = createClaudeCode({ events: o.events, files: () => ({}) });
+  const fake = createFake(o.events);
+  const reg = createRegistry([claude, fake]);
+  assert.equal(claude.canResume, true);
+  const rec = { uid: 'old', sid: 'sid-7', name: 'bot', cwd: REPO, model: 'haiku', budget: 2, worktree: { root: REPO, branch: 'office/x' }, replies: [{ id: 1, text: 'hi' }], cost: 0.5, turns: 3 };
+  const a = reg.reopenPlan(rec); // a record from before providers: Claude Code
+  assert.equal(a.provider, claude);
+  assert.deepEqual([a.fresh, a.note, a.opts.resume, a.opts.prior, a.opts.model, a.opts.cwd], [false, null, 'sid-7', rec, 'haiku', REPO]);
+  const b = reg.reopenPlan({ ...rec, provider: 'fake', model: 'fake-1' });
+  assert.equal(b.provider, fake);
+  assert.deepEqual([b.fresh, b.opts.resume, b.opts.prior, b.opts.model, b.opts.cwd, b.opts.budget, b.opts.worktree], [true, undefined, undefined, 'fake-1', REPO, 2, rec.worktree]);
+  assert.equal(b.note, 'A new session started. This agent kind cannot resume a past session.');
+  assert.throws(() => reg.reopenPlan({ ...rec, provider: 'gone' }), (e) => e.status === 400);
+  assert.throws(() => checkProvider({ ...fake, canResume: 'yes' }), /canResume/);
+  // the fresh session runs like any new one: open with the plan's options, no conversation carried over
+  const s = o.session({ provider: 'fake', model: b.opts.model });
+  fake.open(s, { model: b.opts.model, resume: b.opts.resume });
+  assert.deepEqual(fake.opened, [{ model: 'fake-1', resume: undefined }]);
+  assert.deepEqual(s.replies, []);
+});
+
+test('a provider session keeps its launch folder as startDir; a later cwd does not move it', () => {
+  const o = office();
+  const s = o.session({ startDir: REPO });
+  o.events.hook(s, { hook_event_name: 'PreToolUse', cwd: REPO + '\\sub', tool_name: 'Read', tool_use_id: 'r1', tool_input: { file_path: 'a.js' } });
+  assert.deepEqual([s.cwd, s.startDir], [REPO + '\\sub', REPO]);
 });

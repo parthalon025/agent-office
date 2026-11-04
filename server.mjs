@@ -120,7 +120,7 @@ function saveHistory() {
 function recordHistory(s) {
   if (!s.headless || !s.sid) return;
   const rec = {
-    uid: s.uid, sid: s.sid, name: s.name, cwd: s.cwd, model: s.model, mode: s.mode, cost: s.cost, turns: s.turns,
+    uid: s.uid, sid: s.sid, provider: s.provider, name: s.name, cwd: s.cwd, model: s.model, mode: s.mode, cost: s.cost, turns: s.turns,
     startedAt: s.startedAt, endedAt: s.endedAt, worktree: s.worktree, replies: s.replies.slice(-40), prompt: s.prompt, budget: s.budget,
   };
   const i = history.findIndex((h) => h.uid === s.uid);
@@ -335,7 +335,7 @@ function replyOn(res, body) {
 // that answer is the hook's reply. A terminal session's request goes back to the terminal dialog after the short hold.
 function holdRequest({ s, id, suggestions }, res = null) {
   const hold = s.headless ? HEADLESS_ASK_MS : ASK_TIMEOUT_MS;
-  const timer = setTimeout(() => { if (releaseHold(id, {})) addFeed(s, 'wait', s.headless ? 'question timed out, Claude moved on' : 'question went back to the terminal'); }, hold);
+  const timer = setTimeout(() => { if (releaseHold(id, {})) addFeed(s, 'wait', s.headless ? `question timed out, ${providerOf(s).label} moved on` : 'question went back to the terminal'); }, hold);
   const reply = (d) => { const body = providerOf(s).answer(s, { id, suggestions }, d); if (res) replyOn(res, body); };
   holds.set(id, { uid: s.uid, timer, suggestions, reply });
 }
@@ -673,10 +673,12 @@ async function extAction(body) {
 
 // The provider runs the agent; the office makes the session, seats it and sends the first prompt.
 function openHeadless(provider, { cwd, name, prompt, worktree = null, budget = null, resume = null, scheduleId = null, model = null, permissionMode = null, prior = null }) {
+  provider.check?.({}); // before the session exists: a missing program (claude.exe) leaves no ghost session
   const officeId = 'o' + crypto.randomBytes(4).toString('hex');
   // The last slash-command list came from a Claude Code init, so only a Claude Code session starts with it.
   const known = provider === claude ? persisted.commands : null;
-  const s = newSession({ uid: officeId, officeId, provider: provider.kind, name, cwd, launched: true, headless: true, status: 'starting', worktree, budget, scheduleId, model,
+  // startDir: the launch folder (the worktree when there is one). Requests are rated against it, never against a later cd.
+  const s = newSession({ uid: officeId, officeId, provider: provider.kind, name, cwd, startDir: cwd, launched: true, headless: true, status: 'starting', worktree, budget, scheduleId, model,
     commands: known?.commands || [], skills: known?.skills || [] });
   placeSession(s, true);
   if (prior) { s.replies = prior.replies || []; s.replySeq = s.replies.reduce((n, r) => Math.max(n, r.id || 0), 0); s.costBase = prior.cost || 0; s.cost = prior.cost || null; s.turns = prior.turns || 0; s.prompt = prior.prompt || ''; }
@@ -715,7 +717,7 @@ async function openSession(opts) {
   }
   if (typeof provider.openWindow !== 'function') throw httpError(400, `${provider.label} does not open in a terminal window.`);
   const officeId = 'o' + crypto.randomBytes(4).toString('hex');
-  const s = newSession({ uid: officeId, officeId, provider: provider.kind, name, cwd, launched: true, status: 'starting', model });
+  const s = newSession({ uid: officeId, officeId, provider: provider.kind, name, cwd, startDir: cwd, launched: true, status: 'starting', model });
   placeSession(s, true);
   provider.openWindow(s, { model, permissionMode, prompt });
   rememberDir(cwd);
@@ -724,14 +726,17 @@ async function openSession(opts) {
   return s.uid;
 }
 
-// A past session opens again with its own conversation (Claude Code --resume). Its permission mode starts as the default.
+// A past session opens again with its own provider (providers.reopenPlan). A provider that can resume continues the
+// conversation (Claude Code --resume); another one starts a fresh session in the same folder, and the record stays.
+// The permission mode starts as the default.
 async function reopenSession(uid) {
   const rec = history.find((h) => h.uid === uid);
   if (!rec) throw httpError(404, 'That past session is gone.');
   if (!fs.existsSync(rec.cwd)) throw httpError(409, `Its folder is gone: ${rec.cwd}. It may have been a removed worktree.`);
-  const id = openHeadless(claude, { cwd: rec.cwd, name: rec.name, prompt: '', worktree: rec.worktree, budget: rec.budget, resume: rec.sid, model: rec.model, prior: rec });
-  history = history.filter((h) => h.uid !== uid);
-  saveHistory();
+  const plan = providers.reopenPlan(rec);
+  const id = openHeadless(plan.provider, plan.opts);
+  if (plan.note) { const s = sessions.get(id); if (s) { addFeed(s, 'start', plan.note); broadcast(); } }
+  if (!plan.fresh) { history = history.filter((h) => h.uid !== uid); saveHistory(); }
   return id;
 }
 
