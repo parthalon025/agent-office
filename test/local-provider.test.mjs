@@ -78,8 +78,9 @@ test('readiness and models: embedding models are hidden, and a down server says 
 
 test('check() asks for a model before a worktree is made', () => {
   const p = createLocal({ events: {}, kind: 'ollama' });
-  assert.throws(() => p.check({}), (e) => e.status === 400 && /Pick a model/.test(e.message));
+  assert.throws(() => p.check({ cwd: 'x' }), (e) => e.status === 400 && /Pick a model/.test(e.message));
   assert.doesNotThrow(() => p.check({ model: 'llama3' }));
+  assert.doesNotThrow(() => p.check({}), 'check({}) only asks whether a session can start (Reopen)');
 });
 
 test('a text turn: working, then at rest with the reply, real tokens and no cost', async () => {

@@ -244,8 +244,10 @@ export function createLocal(deps) {
 
     async models() { return (await listModels()).map((id) => ({ id, label: id })); },
 
-    // Before the office makes a worktree: a local agent needs a model.
+    // Before the office makes a worktree: a local agent needs a model. check({}) asks only whether a session can start
+    // (Reopen), and a local agent needs no program for that, so an empty option object passes.
     check(o = {}) {
+      if (Object.keys(o).length === 0) return;
       if (!o.model || typeof o.model !== 'string' || o.model.length > 200) throw providerError(400, 'Pick a model for this agent.');
     },
 

@@ -165,3 +165,25 @@ test('a local agent calls office_ask in-process: the user answers, and the model
   assert.equal(fake.requests[1].messages.at(-1).role, 'tool');
   assert.equal(fake.requests[1].messages.at(-1).content, 'yes');
 });
+
+test('a past local session reopens as a fresh local session in the same folder', { skip: SKIP }, async () => {
+  fake.reset([{ text: 'hello there' }]);
+  const uid = await open('past');
+  await call('/api/message', { uid, text: 'hi' });
+  await until(async () => (await sessionOf(uid)).status === 'idle', 'the turn to end');
+  assert.equal((await call('/api/close', { uid })).status, 200);
+  const rec = await until(async () => {
+    const h = await call('/api/history', {});
+    return (h.json.sessions || []).find((x) => x.uid === uid);
+  }, 'the past session in the history');
+  assert.ok(rec, 'the closed local session is in the history');
+  const re = await call('/api/reopen', { uid });
+  assert.equal(re.status, 200, JSON.stringify(re.json));
+  const s = await sessionOf(re.json.uid);
+  assert.notEqual(re.json.uid, uid);
+  assert.equal(s.provider, 'ollama');
+  assert.equal(s.model, 'fake-model', 'the same model as the past session');
+  assert.equal(s.cwd.toLowerCase(), work.toLowerCase());
+  const snap = await snapshot();
+  assert.ok(snap.feed.some((f) => /cannot resume a past session/.test(f.text || '')), 'the feed says why it is a new session');
+});
