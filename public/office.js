@@ -677,6 +677,141 @@
         h(A.Button, { variant: 'quiet', icon: 'approve', onClick: p.onClose }, 'Done')));
   }
 
+  // ---------- room helpers ----------
+  function slugOf(t) { return String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'x'; }
+  // The room id of a session, the same way the adapter makes it.
+  function roomIdOf(s) { var root = String(s.git ? s.git.root : s.cwd || '').toLowerCase(); return 'w-' + slugOf(root).slice(-48); }
+  function repoKeyOf(s) { return s.git ? s.git.repo.toLowerCase() : ''; }
+  function roomStats(sessions) {
+    var o = { sessions: sessions.length, working: 0, waiting: 0, toolCalls: 0, tokens: 0, cost: 0, todosDone: 0, todosTotal: 0, lastEvent: 0 };
+    sessions.forEach(function (s) {
+      if (s.status === 'working') o.working++;
+      if (s.status === 'waiting' || (s.pending && s.pending.length) || (s.questions && s.questions.length)) o.waiting++;
+      o.toolCalls += (s.calls || []).length;
+      o.tokens += (s.usage && s.usage.tokens) || 0;
+      o.cost += typeof s.cost === 'number' ? s.cost : 0;
+      (s.todos || []).forEach(function (t) { o.todosTotal++; if (t.status === 'completed') o.todosDone++; });
+      if ((s.lastEvent || 0) > o.lastEvent) o.lastEvent = s.lastEvent;
+    });
+    return o;
+  }
+  function modelWord(m) {
+    if (!m) return 'Default model';
+    var hit = MODELS.filter(function (o) { return o.value && m.indexOf(o.value) === 0; })[0] || MODELS.filter(function (o) { return o.value && m.toLowerCase().indexOf(o.label.toLowerCase()) >= 0; })[0];
+    return hit ? hit.label : m;
+  }
+  var STATUS_WORD = { working: 'Working', waiting: 'Waiting for you', idle: 'Idle', starting: 'Starting', ended: 'Closed' };
+
+  // ---------- the agents in one room ----------
+  function RoomDialog(p) {
+    var snap = useSnapshot();
+    var info = window.officeAdapter.roomInfo(p.roomId, snap || undefined);
+    var list = info.sessions, place = info.place;
+    var cf = useState(null), confirm = cf[0], setConfirm = cf[1];
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var ad = useState(null), add = ad[0], setAdd = ad[1];
+    var er = useState(''), err = er[0], setErr = er[1];
+    var cur = confirm ? list.filter(function (s) { return s.uid === confirm; })[0] : null;
+    useEffect(function () { if (confirm && !cur) setConfirm(null); }, [confirm, !!cur]);
+    function closeSession() {
+      setBusy(true);
+      api('/api/close', { uid: cur.uid }).then(function () { setBusy(false); setConfirm(null); p.toast({ tone: 'success', title: cur.name, text: 'Session closed' }); }, function (x) { setBusy(false); setErr(x.message); });
+    }
+    function addAgent() {
+      var cwd = list.length && list[0].cwd ? list[0].cwd : place && place.root;
+      if (!cwd) { setErr('This room has no folder yet.'); return; }
+      setBusy(true); setErr('');
+      api('/api/open', { cwd: cwd, name: add.name.trim(), where: 'office', isolation: 'same', model: add.model, prompt: add.prompt })
+        .then(function () { setBusy(false); setAdd(null); p.toast({ tone: 'success', title: 'Office', text: 'Agent added' }); }, function (x) { setBusy(false); setErr(x.message); });
+    }
+    var title = 'Agents in ' + ((place && place.roomName) || 'this room');
+    if (cur) {
+      return h(A.Dialog, { open: true, title: 'Close ' + cur.name, onClose: function () { setConfirm(null); setErr(''); }, actions: [
+        h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setConfirm(null); setErr(''); } }, 'Keep session'),
+        h(A.Button, { key: 'r', variant: 'danger', icon: 'remove', loading: busy, onClick: closeSession }, 'Close session')] },
+        h('div', { className: 'form' },
+          h('p', null, 'This ends the session ' + cur.name + '. Its work in the folder stays.'),
+          err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
+    }
+    return h(A.Dialog, { open: true, title: title, onClose: p.onClose, actions: add
+      ? [h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setAdd(null); setErr(''); } }, 'Cancel'), h(A.Button, { key: 'a', variant: 'primary', icon: 'add', loading: busy, onClick: addAgent }, 'Add agent')]
+      : [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
+      h('div', { className: 'form' },
+        add ? h(React.Fragment, null,
+          h('p', { className: 'note' }, 'The agent runs in the office, in the folder of this room.'),
+          Pair(
+            h(A.TextInput, { id: 'ra-name', label: 'Name (optional)', value: add.name, placeholder: 'Defaults to the folder name', onChange: function (v) { setAdd(Object.assign({}, add, { name: v })); } }),
+            h(A.Select, { id: 'ra-model', label: 'Model', options: MODELS, value: add.model, onChange: function (v) { setAdd(Object.assign({}, add, { model: v })); } })),
+          h(Area, { id: 'ra-prompt', label: 'First instruction (optional)', value: add.prompt, rows: 4, placeholder: 'Review the open PRs and list what blocks merge.', onChange: function (v) { setAdd(Object.assign({}, add, { prompt: v })); } }),
+          err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null)
+        : h(React.Fragment, null,
+          list.length ? h('ul', { className: 'room-list' }, list.map(function (s) {
+            return h('li', { key: s.uid, className: 'room-row' },
+              h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: botColor(), status: statusOf(s), size: 28 }),
+              h('span', { className: 'room-who' }, h('b', null, s.name), h('span', { className: 'room-sub' }, (STATUS_WORD[s.status] || s.status) + ' · ' + modelWord(s.model))),
+              h(A.Button, { variant: 'quiet', icon: 'remove', onClick: function () { setErr(''); setConfirm(s.uid); } }, 'Close session'));
+          })) : h(A.EmptyState, { icon: 'identity', compact: true, title: 'No agents here', text: 'Add an agent to start work in this room.' }),
+          h(A.AddButton, { label: 'Add an agent', onClick: function () { setErr(''); setAdd({ name: '', model: '', prompt: '' }); } }))));
+  }
+
+  // ---------- one session as a full terminal ----------
+  function TerminalPanel(p) {
+    var snap = useSnapshot();
+    var s = snap ? snap.sessions.filter(function (x) { return x.uid === p.uid; })[0] : null;
+    var vw = React.useRef(null), stick = React.useRef(true), probe = React.useRef(null);
+    var cl = useState(60), cols = cl[0], setCols = cl[1];
+    var tx = useState(''), text = tx[0], setText = tx[1];
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    useEffect(function () {
+      function measure() {
+        var v = vw.current, pr = probe.current;
+        if (!v || !pr || !pr.offsetWidth) return;
+        var cw = pr.offsetWidth / 10, inner = v.clientWidth - 24;
+        if (cw > 0 && inner > 0) setCols(function (c) { var n = Math.max(20, Math.floor(inner / cw)); return n === c ? c : n; });
+      }
+      measure();
+      var ro = window.ResizeObserver ? new ResizeObserver(measure) : null;
+      if (ro && vw.current) ro.observe(vw.current);
+      window.addEventListener('resize', measure);
+      return function () { if (ro) ro.disconnect(); window.removeEventListener('resize', measure); };
+    }, []);
+    useEffect(function () {
+      function onKey(e) { if (e.key === 'Escape' && !e.defaultPrevented && !document.querySelector('.ao-dialog')) { e.preventDefault(); p.onClose(); } }
+      window.addEventListener('keydown', onKey);
+      return function () { window.removeEventListener('keydown', onKey); };
+    }, []);
+    var rows = window.OfficeTerminal ? window.OfficeTerminal.lines(s, cols) : [{ text: 'The terminal view is not loaded.', tone: 'muted' }];
+    if (s && s.headless && rows.length && rows[rows.length - 1].text === '> ') rows = rows.slice(0, -1);
+    useEffect(function () { var v = vw.current; if (v && stick.current) v.scrollTop = v.scrollHeight; });
+    function onScroll() { var v = vw.current; if (v) stick.current = v.scrollHeight - v.scrollTop - v.clientHeight < 24; }
+    function send() {
+      var t = text.trim();
+      if (!t || !s || busy) return;
+      setBusy(true);
+      api('/api/message', { uid: s.uid, text: t }).then(function () { setBusy(false); setText(''); stick.current = true; }, function (x) { setBusy(false); p.toast({ tone: 'error', title: s.name, text: x.message }); });
+    }
+    function stop() { api('/api/interrupt', { uid: s.uid }).catch(function (x) { p.toast({ tone: 'error', title: s.name, text: x.message }); }); }
+    var working = s && (s.status === 'working' || s.status === 'waiting');
+    var ended = !s || s.status === 'ended';
+    return h('aside', { className: 'terminal-panel', 'aria-label': 'Terminal of ' + p.name },
+      h('div', { className: 'term-head' },
+        h(A.StatusDot, { status: s ? statusOf(s) : 'resting' }),
+        h('b', { className: 'term-name' }, s ? s.name : p.name),
+        h('span', { className: 'term-model mono' }, s ? modelWord(s.model) : ''),
+        h(A.Button, { variant: 'quiet', icon: 'chevron-right', onClick: p.onClose }, 'Back')),
+      h('div', { className: 'term-view', ref: vw, onScroll: onScroll, role: 'log', 'aria-live': 'off', tabIndex: 0 },
+        h('span', { className: 'term-probe', ref: probe, 'aria-hidden': 'true' }, 'MMMMMMMMMM'),
+        rows.map(function (r, i) { return h('div', { key: i, className: 'term-line tone-' + r.tone + (r.ask ? ' is-ask' : '') }, r.text || '\u00a0'); })),
+      s && s.headless && !ended
+        ? h('div', { className: 'term-input' },
+            h('span', { className: 'term-caret mono', 'aria-hidden': 'true' }, '>'),
+            h('input', { className: 'term-field', type: 'text', value: text, placeholder: 'Message ' + s.name, 'aria-label': 'Message ' + s.name, autoComplete: 'off', spellCheck: false,
+              onChange: function (e) { setText(e.target.value); },
+              onKeyDown: function (e) { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } } }),
+            working ? h(A.Button, { variant: 'quiet', icon: 'pause', onClick: stop }, 'Stop turn') : null)
+        : s && !s.headless && !ended ? h('p', { className: 'term-note' }, 'This session runs in its own terminal window. Type there.') : null);
+  }
+
   // ---------- page commands in the DS command palette (Ctrl+K) ----------
   // The HUD builds its palette list with AgentOffice.CommandPalette.actions(); the page adds its own.
   var pageActions = [];
@@ -739,6 +874,7 @@
           sess.headless ? h(A.Select, { id: 'c-model', ariaLabel: 'Model of ' + sess.name, options: modelOpts, value: sess.model || '', onChange: function (v) { ctl('model', v); } }) : null,
           sess.headless ? h(A.Select, { id: 'c-mode', ariaLabel: 'Permissions of ' + sess.name, options: modeOpts, value: sess.mode || '', onChange: function (v) { ctl('mode', v); } }) : null,
           sess.headless ? h(Tip, { text: working ? '' : 'Nothing runs now' }, h(A.Button, { variant: 'quiet', icon: 'pause', disabled: !working, onClick: stopTurn }, 'Stop turn')) : null,
+          h(A.Button, { variant: 'quiet', icon: 'terminal', onClick: function () { p.onTerminal(sess.uid, sess.name); } }, 'Open terminal'),
           h(A.Button, { variant: 'quiet', icon: 'trace', onClick: function () { p.onChanges(sess.uid, sess.name); } }, 'Changes'),
           h(A.Button, { variant: 'quiet', icon: 'connector', onClick: function () { p.onExtensions(sess.uid, sess.name); } }, 'Extensions'),
           ask ? h(A.Button, { variant: 'emphasis', icon: 'approve', onClick: always, title: 'Approve and allow this from now on: ' + ask.always }, 'Always allow ' + clip(ask.always, 28)) : null) : null));
@@ -805,8 +941,41 @@
     var boardRef = React.useRef(null);
     var bs = useState(null), board = bs[0], setBoard = bs[1];
     var latestSnap = React.useRef(null); latestSnap.current = snap;
+    // the terminal of one session (terminal.js), read in full beside the room
+    var terminalRef = React.useRef(null);
+    var tm = useState(null), term = tm[0], setTerm = tm[1];
+    function openTerminal(uid, name) {
+      if (boardRef.current && boardRef.current.focused && boardRef.current.focused()) boardRef.current.blur();
+      setBoard(null);
+      setTerm({ uid: uid, name: name });
+    }
     function noteKey(roomId) { return (shown || 'other') + '|' + roomId; }
-    useEffect(function () { return function () { if (boardRef.current) { boardRef.current.dispose(); boardRef.current = null; } setBoard(null); }; }, [sceneKey, cur2.view]);
+    useEffect(function () { return function () {
+      if (boardRef.current) { boardRef.current.dispose(); boardRef.current = null; }
+      if (terminalRef.current) { terminalRef.current.dispose(); terminalRef.current = null; }
+      setBoard(null); setTerm(null);
+    }; }, [sceneKey, cur2.view]);
+    // doors: a session that comes into a room or leaves it of the shown building
+    var doorsRef = React.useRef(null);
+    useEffect(function () {
+      if (!snap || cur2.view !== 'office') { doorsRef.current = null; return; }
+      var now = {};
+      snap.sessions.forEach(function (x) { if (x.status !== 'ended' && x.placed && repoKeyOf(x) === shown) now[x.uid] = { room: roomIdOf(x), name: x.name }; });
+      var prev = doorsRef.current;
+      doorsRef.current = { key: sceneKey, shown: shown, sessions: now };
+      if (!prev || prev.key !== sceneKey || prev.shown !== shown) return;
+      var b = boardRef.current;
+      Object.keys(now).forEach(function (u) {
+        if (prev.sessions[u] && prev.sessions[u].room === now[u].room) return;
+        if (b && b.doorPulse) b.doorPulse(now[u].room, 'in');
+        toast({ tone: 'info', title: now[u].name, text: now[u].name + ' came in' });
+      });
+      Object.keys(prev.sessions).forEach(function (u) {
+        if (now[u] && now[u].room === prev.sessions[u].room) return;
+        if (b && b.doorPulse) b.doorPulse(prev.sessions[u].room, 'out');
+        toast({ tone: 'info', title: prev.sessions[u].name, text: prev.sessions[u].name + ' left' });
+      });
+    }, [snap]);
     // zoom out to leave: scrolling out at the widest zoom goes floor -> building -> city
     useEffect(function () {
       if (cur2.view !== 'office') return undefined;
@@ -836,7 +1005,17 @@
             room: function (id) { return window.officeAdapter.roomInfo(id); },
             note: function (id) { var n = latestSnap.current && latestSnap.current.notes && latestSnap.current.notes[noteKey(id)]; return n ? n.text : ''; },
             tree: function (root) { return api('/api/tree', { root: root }); },
-            onFocus: function (id, kind) { setBoard({ id: id, kind: kind }); }, onBlur: function () { setBoard(null); }
+            stats: function (id) { return roomStats(window.officeAdapter.roomInfo(id).sessions); },
+            pin: function (id) { var n = latestSnap.current && latestSnap.current.pins && latestSnap.current.pins[noteKey(id)]; return n && n.text ? { text: n.text, by: n.by } : null; },
+            onDoor: function (id) { setTerm(null); setDlg({ name: 'room', roomId: id }); },
+            onFocus: function (id, kind) { setTerm(null); setBoard({ id: id, kind: kind }); }, onBlur: function () { setBoard(null); }
+          });
+        }
+        if (st && window.OfficeTerminal) {
+          if (terminalRef.current) terminalRef.current.dispose();
+          terminalRef.current = window.OfficeTerminal.attach(o, {
+            session: function (botName) { return window.officeAdapter.session(botName); },
+            onOpen: function (uid, name) { o.select(name); openTerminal(uid, name); }
           });
         }
         if (!st || !window.OfficeCity) return;
@@ -883,16 +1062,18 @@
     return h(React.Fragment, null,
       h('div', { className: 'view' + (fading ? ' is-fading' : '') }, scene),
       ambient ? null : h(Controls, { sel: cur2.view === 'office' ? sel : null, buildings: list, shown: shown, shownName: (list.filter(function (b) { return b.key === shown; })[0] || def || {}).name, toast: toast, onBuilding: function (k) { pick(k); if (view === 'city') go('office'); }, onCity: function () { go('city'); }, onOffice: function () { introNext.current = true; go('office'); }, view: cur2.view, onSessions: function () { setDlg({ name: 'sessions' }); }, onCompact: function () { setAmbient(true); },
-        onFloors: function () { setDlg({ name: 'floors' }); }, onExtensions: extensions, onOpen: function () { show('open'); }, onPast: function () { show('past'); }, onSchedules: function () { show('schedules'); }, onHooks: function () { show('hooks'); }, onChanges: changes }),
+        onFloors: function () { setDlg({ name: 'floors' }); }, onExtensions: extensions, onTerminal: openTerminal, onOpen: function () { show('open'); }, onPast: function () { show('past'); }, onSchedules: function () { show('schedules'); }, onHooks: function () { show('hooks'); }, onChanges: changes }),
       d === 'open' ? h(OpenDialog, { recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
       d === 'past' ? h(PastDialog, { onClose: close, onChanges: changes, toast: toast }) : null,
       d === 'schedules' ? h(SchedulesDialog, { recent: info.recent, onInfo: setInfo, toast: toast, onClose: close }) : null,
       d === 'changes' ? h(ChangesDialog, { uid: dlg.uid, name: dlg.label, ended: dlg.ended, toast: toast, onClose: close }) : null,
       d === 'hooks' ? h(HooksDialog, { info: info, snap: snap, onClose: close }) : null,
       d === 'floors' ? h(FloorsDialog, { repo: shown, toast: toast, onClose: close }) : null,
+      d === 'room' ? h(RoomDialog, { roomId: dlg.roomId, toast: toast, onClose: close }) : null,
       d === 'ext' ? h(ExtensionsDialog, { uid: dlg.uid, name: dlg.label, toast: toast, onClose: close }) : null,
-      board && boardRef.current && board.kind === 'board' ? h(BoardPanel, { data: boardRef.current.dataOf(board.id), onClose: function () { boardRef.current.blur(); } }) : null,
-      board && boardRef.current && board.kind === 'notes' ? h(NotesEditor, { key: board.id, noteKey: noteKey(board.id), text: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).text || '', toast: toast,
+      term ? h(TerminalPanel, { key: term.uid, uid: term.uid, name: term.name, toast: toast, onClose: function () { setTerm(null); } }) : null,
+      !term && board && boardRef.current && board.kind === 'board' ? h(BoardPanel, { data: boardRef.current.dataOf(board.id), onClose: function () { boardRef.current.blur(); } }) : null,
+      !term && board && boardRef.current && board.kind === 'notes' ? h(NotesEditor, { key: board.id, noteKey: noteKey(board.id), text: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).text || '', toast: toast,
         rect: function () { return boardRef.current ? boardRef.current.rect() : null; }, flying: function () { return boardRef.current ? boardRef.current.flying() : false; },
         onClose: function () { boardRef.current.refresh(); boardRef.current.blur(); } }) : null,
       d === 'sessions' ? h(SessionsDialog, { onClose: close, onGo: goTo }) : null,
