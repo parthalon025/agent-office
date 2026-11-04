@@ -48,6 +48,7 @@ function rig(over = {}) {
     makeId: (kind) => `${kind[0]}${(r.n = (r.n || 0) + 1)}`,
     locate: async (cwd) => GITS[cwd] || null,
     onChange: () => {},
+    setTimer: () => 0,
   });
   r.store = B.createStore({ now: () => r.t, defer: (fn) => fn(), setTimer: (fn, ms) => { r.timers.push({ fn, ms }); } });
   r.snap = () => {
@@ -232,9 +233,11 @@ test('the city round trip: leave a building, come back, and every bot is seated 
   assert.deepEqual(types(back.ev), ['bot.add', 'session.start', 'model', 'tool.call', 'tool.result']);
   assert.equal(of(back.ev, 'bot.add')[0].bot.name, 'repo');
   // attaching the same adapter again starts clean as well
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'sid-f', cwd: 'C:\work\repo-feat' });   // a new room appears between the attaches
   const again = [];
   back.attach((e) => again.push(e));
-  assert.deepEqual(types(again), types(back.ev));
+  const known = new Set([...back.def.floors.flatMap((f) => (f.rooms || []).map((x) => x.id)), ...again.filter((e) => e.type === 'floor.add' || e.type === 'room.add').flatMap((e) => (e.room ? [e.room.id] : (e.floor && e.floor.rooms || []).map((x) => x.id)))]);
+  for (const e of of(again, 'bot.add')) assert.ok(known.has(e.roomId), `bot.add into unknown room ${e.roomId}`);
 });
 
 test('removing rooms: a worktree that goes makes the adapter stale; its replacement is not', async () => {
@@ -363,4 +366,28 @@ test('onSnapshot calls at once with the latest snapshot, and stops after unsubsc
 test('the schema check itself rejects a bad event', () => {
   assert.deepEqual(problems({ type: 'status', bot: 'x', status: 'nope' }), ['status must be Status']);
   assert.deepEqual(problems({ type: 'nope' }), ['unknown type: nope']);
+});
+
+test('plan, skill, knowledge, message, trigger and stream error events all pass the schema', async () => {
+  const r = rig();
+  const m = r.mount(KEY_A);
+  await r.play(HOOKS.turnWithEdit.slice(0, 2));
+  await r.hook(HOOKS.todoWrite);
+  const s = [...r.tracker.sessions.values()][0];
+  s.todos[1].status = 'completed'; r.push();
+  await r.hook({ hook_event_name: 'PreToolUse', session_id: 'sid-1', cwd: REPO_A, tool_name: 'Skill', tool_use_id: 'toolu_sk', tool_input: { skill: 'tdd' } });
+  await r.hook({ hook_event_name: 'PreToolUse', session_id: 'sid-1', cwd: REPO_A, tool_name: 'WebFetch', tool_use_id: 'toolu_wf', tool_input: { url: 'https://example.com/a', prompt: 'x' } });
+  await r.hook({ hook_event_name: 'PreToolUse', session_id: 'sid-1', cwd: REPO_A, tool_name: 'Bash', tool_use_id: 'toolu_04', tool_input: { command: 'false' } });
+  await r.hook(HOOKS.failedTool);
+  r.tracker.pushReply(s, 'Hello there.'); r.push();
+  s.inbox.push({ text: 'hi' }); r.push();
+  s.inbox.length = 0; r.push();
+  const h = r.tracker.newSession({ name: 'nightly', cwd: REPO_A, headless: true, scheduleId: 'job1' });
+  await r.tracker.placeSession(h); r.push();
+  for (const k of ['init', 'assistantA', 'resultBudget']) r.tracker.onStream(h, JSON.stringify(STREAM[k]));
+  r.push();
+  const seen = types(m.ev);
+  for (const t of ['plan', 'plan.step', 'skill.load', 'knowledge', 'message', 'trigger.run', 'error']) assert.ok(seen.includes(t), `no ${t} event`);
+  assert.ok(of(m.ev, 'message').some((e) => e.format === 'plain'), 'no plain inbox line');
+  assert.ok(of(m.ev, 'tool.result').some((e) => e.ok === false && e.summary), 'no failed tool.result with a summary');
 });

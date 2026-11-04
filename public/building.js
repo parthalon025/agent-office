@@ -153,7 +153,8 @@
 
     store.mount = function (repo) {
       var d = describe(repo, latest, false);
-      var layout = { floors: d.floors, nextId: d.nextId, keys: d.keys };
+      function freshLayout() { return { floors: JSON.parse(JSON.stringify(d.floors)), nextId: d.nextId, keys: Object.assign({}, d.keys) }; }
+      var layout = freshLayout();
       var startedEmpty = d.empty;
       var known = {};   // uid -> mirror of what the scene was told
       var taken = {};   // bot name -> true
@@ -343,7 +344,7 @@
 
       m._follow = function (snap) { if (emitRef) { apply(snap, emitRef); syncUsage(snap, emitRef); } };
       m.attach = function (emit) {
-        known = {}; taken = {}; lastUsage = { percent: null, t: 0 };
+        known = {}; taken = {}; layout = freshLayout(); lastUsage = { percent: null, t: 0 };
         emitRef = emit;
         if (attached.indexOf(m) < 0) attached.push(m);
         defer(function () { if (emitRef === emit && latest) { apply(latest, emit); syncUsage(latest, emit); } });
