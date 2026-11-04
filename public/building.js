@@ -94,38 +94,45 @@
     live(snap).forEach(function (s) {
       var pl = placeOf(s), b = by[pl.repo] || (by[pl.repo] = { key: pl.repo, name: pl.repoName, sessions: 0, waiting: 0, last: 0, branches: {} });
       b.sessions++; b.branches[pl.branch] = true; b.last = Math.max(b.last, s.lastEvent || 0);
-      b.waiting += (s.pending || []).length + (s.questions || []).length;
+      b.waiting += V.requests(s).length;
     });
     return Object.keys(by).map(function (k) { var b = by[k]; b.branches = Object.keys(b.branches).length; return b; })
       .sort(function (a, b) { return b.waiting - a.waiting || b.sessions - a.sessions || b.last - a.last || a.name.localeCompare(b.name); });
   }
 
   // Every open request and question of every building, oldest first. This is the Needs you list.
-  // A question carries no risk value, so a bulk action never answers one. kind is 'request' or 'question'.
+  // The rule for one session's items is OfficeVocab.requests (one owner); this adds who and where, and the
+  // preview of a request. kind is 'permission' or 'question'; a question has no risk, so a bulk action never answers one.
   function requests(snap) {
     var out = [];
     live(snap).forEach(function (s) {
       var pl = placeOf(s), base = { uid: s.uid, bot: s.name, building: pl.repo, buildingName: pl.repoName, roomName: pl.roomName };
-      (s.pending || []).forEach(function (r) {
-        out.push(Object.assign({ id: r.id, kind: 'request', tool: r.tool, text: 'Allow ' + r.tool + (r.detail ? ': ' + clip(r.detail, 120) : '') + '?', risk: r.risk, preview: r.preview || r.detail || '', detail: r.detail || '', always: r.always || '', t: r.t || 0 }, base));
-      });
-      (s.questions || []).forEach(function (q) {
-        out.push(Object.assign({ id: q.id, kind: 'question', tool: 'office_ask', text: q.text, t: q.t || 0 }, base));
+      V.requests(s).forEach(function (r) {
+        var pend = (s.pending || []).filter(function (x) { return x.id === r.id; })[0];
+        out.push(Object.assign({}, r, base, { preview: pend ? (pend.preview || pend.detail || '') : '' }));
       });
     });
     return out.sort(function (a, b) { return a.t - b.t; });
+  }
+
+  // A name no other bot of the building has (a folder name used twice gets a number): the rule of a scene's bot names.
+  function previewName(taken, base) {
+    var n = base || 'session', i = 2;
+    while (taken[n]) n = base + ' ' + i++;
+    taken[n] = true;
+    return n;
   }
 
   // A building definition: a floor per branch, a room per worktree, the default branch at the bottom.
   // With bots, each room also lists its sessions (for previews); the scene gets its bots from events instead.
   // Returns { def, floors: { branch: { id, rooms: { root: roomId } } }, nextId, keys: { roomId: noteKey }, empty }.
   function describe(repo, snap, withBots) {
-    var byBranch = {}, order = [], name = repo ? '' : OTHER, bots = {};
+    var byBranch = {}, order = [], name = repo ? '' : OTHER, bots = {}, taken = {};
     var rp = repoOf(snap, repo), places = rp ? rp.worktrees.map(function (w) { return fromPlace(w.place); }) : [];
     live(snap).forEach(function (s) {
       var pl = placeOf(s);
       places.push(pl);
-      if (withBots && pl.repo === repo) (bots[pl.root] = bots[pl.root] || []).push(withColor({ name: s.name, role: 'coder', shape: shapeOf(s.uid), status: V.status(s).key, word: V.status(s).word, task: V.taskLine(s) }, s.uid));
+      if (withBots && pl.repo === repo) (bots[pl.root] = bots[pl.root] || []).push(withColor({ uid: s.uid, name: previewName(taken, s.name), role: 'coder', shape: shapeOf(s.uid), status: V.status(s).key, word: V.status(s).word, task: V.taskLine(s) }, s.uid));
     });
     places.forEach(function (pl) {
       if (pl.repo !== repo) return;
@@ -193,10 +200,7 @@
       var m = { repo: repo, id: ++mountSeq, def: d.def };
 
       function uniqueName(b) {
-        var n = b || 'session', i = 2;
-        while (taken[n]) n = b + ' ' + i++;
-        taken[n] = true;
-        return n;
+        return previewName(taken, b);
       }
       // The room of a session in this building. Adds its floor or room when it is new.
       function roomOf(pl, emit) {
@@ -418,7 +422,7 @@
         for (var uid in known) { if (known[uid].name === botName && !known[uid].ended) return store.sessionByUid(uid); }
         return null;
       };
-      // The scene's own (unique) name of an open session, or null.
+      // The uid, commands and skills of the open session a bot name stands for, or null.
       m.lookup = function (botName) {
         var s = m.session(botName);
         return s ? { uid: s.uid, commands: s.commands || [], skills: s.skills || [] } : null;

@@ -23,7 +23,7 @@
     return fetch(path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-office-token': TOKEN }, body: JSON.stringify(body || {}) })
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) { var e = new Error(j.error || 'The office could not do that (' + r.status + ').'); e.status = r.status; e.body = j; throw e; } return j; }); });
   }
-  function getInfo() { return fetch('/api/info', { headers: { 'x-office-token': TOKEN } }).then(function (r) { return r.json(); }); }
+  function getInfo(first) { return fetch('/api/info' + (first ? '?first=' + encodeURIComponent(first) : ''), { headers: { 'x-office-token': TOKEN } }).then(function (r) { return r.json(); }); }
   function ago(t) {
     if (!t) return '';
     var s = Math.max(0, Math.round((Date.now() - t) / 1000));
@@ -83,6 +83,7 @@
   function Pair(a, b) { return h('div', { className: 'row' }, a, b); }
   function Busy(p) { return p.on ? h(A.Skeleton, { lines: p.lines || 3, label: 'Loading' }) : null; }
 
+  // ---------- open a session ----------
   function OpenDialog(p) {
     var f = useState({ cwd: p.shownPath || p.recent[0] || '', name: '', where: 'office', isolation: 'same', model: '', permissionMode: '', maxBudget: '', prompt: '', template: '' }), form = f[0], setForm = f[1];
     var b = useState(false), busy = b[0], setBusy = b[1];
@@ -584,13 +585,13 @@
           h('tbody', null, agents.map(function (s) {
             var st = window.OfficeVocab.status(s);
             return h('tr', { key: s.uid },
-              h('td', null, h('span', { className: 'sess-who' }, h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: colorOf(s.uid), status: statusOf(s), size: 20 }), h('b', null, window.officeAdapter.botName(s.uid) || s.name))),
+              h('td', null, h('span', { className: 'sess-who' }, h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: colorOf(s.uid), status: statusOf(s), size: 20 }), h('b', null, sceneName(s)))),
               h('td', { className: 'mono', title: s.cwd }, (s.git && s.git.branch ? s.git.branch + ' · ' : '') + F.folderName(s.cwd)),
               h('td', null, h('span', { className: 'sess-state' }, h(A.StatusDot, { status: st.key }), st.word)),
               h('td', null, h(A.ModelBadge, { model: s.model || 'default' })),
               h('td', null, h('span', { className: 'ao-badge' + (accessOf(s) === 'broad' ? ' ao-badge-warn' : '') }, accessOf(s))),
               h('td', { className: 'mono' }, ago(s.lastEvent)),
-              h('td', null, h(A.Button, { variant: 'quiet', icon: 'chevron-right', title: 'Go to ' + (window.officeAdapter.botName(s.uid) || s.name), onClick: function () { p.onGo(s); } }, 'Go to')));
+              h('td', null, h(A.Button, { variant: 'quiet', icon: 'chevron-right', title: 'Go to ' + sceneName(s), onClick: function () { p.onGo(s); } }, 'Go to')));
           })))),
         teams.length ? h('h3', { className: 'ext-h' }, 'Subagents at work', h('span', { className: 'ext-n' }, teams.length)) : null,
         teams.map(function (s) {
@@ -603,7 +604,7 @@
   function cityData(snap) {
     return window.officeAdapter.buildings(snap).map(function (b) {
       var def = window.officeAdapter.preview(b.key, snap), bots = [];
-      def.floors.forEach(function (f) { f.rooms.forEach(function (r) { (r.bots || []).forEach(function (x) { bots.push({ name: x.name, status: x.status, word: x.word, shape: x.shape, floor: f.name }); }); }); });
+      def.floors.forEach(function (f) { f.rooms.forEach(function (r) { (r.bots || []).forEach(function (x) { bots.push({ uid: x.uid, name: x.name, status: x.status, word: x.word, shape: x.shape, floor: f.name }); }); }); });
       return { key: b.key, name: b.name, sessions: b.sessions, waiting: b.waiting, floors: def.floors.map(function (f) { return { name: f.name, key: f.key }; }), bots: bots };
     });
   }
@@ -645,15 +646,18 @@
     }, [snap]);
     var waiting = list.reduce(function (n, b) { return n + b.waiting; }, 0);
     var counts = cityCounts(list), total = counts.working + counts.waiting + counts.error + counts.resting;
-    var palBots = [];
-    list.forEach(function (b) { b.bots.forEach(function (x) { palBots.push({ name: x.name, status: x.status, shape: x.shape, room: b.name }); }); });
-    function enterBot(name) {
-      var b = list.filter(function (x) { return x.bots.some(function (y) { return y.name === name; }); })[0];
-      if (b) p.onEnter(b.key, city.current, name);
-    }
+    // Palette bots: the name the palette shows and returns must be unique over all buildings, and it maps back to a building and a session uid.
+    var palBots = [], palPick = {};
+    list.forEach(function (b) { b.bots.forEach(function (x) {
+      var nm = x.name, i = 2;
+      while (palPick[nm]) nm = x.name + ' ' + i++;
+      palPick[nm] = { key: b.key, uid: x.uid };
+      palBots.push({ name: nm, status: x.status, shape: x.shape, room: b.name });
+    }); });
+    function enterBot(name) { var t = palPick[name]; if (t) p.onEnter(t.key, city.current, t.uid); }
     // Ctrl+K in the city: the page's own actions (they include Go to each building), the theme, and the city view.
     var palActions = A.CommandPalette.actions({ setMode: function (m) { if (city.current) city.current.setMode(m); } })
-      .filter(function (a) { return a.id.indexOf('page-b-') !== 0 && a.id !== 'page-city'; })   // the page's Go to only picks the building; here Go to goes inside
+      .filter(function (a) { return a.id.indexOf('page-b-') !== 0 && a.id.indexOf('page-s-go-') !== 0 && a.id !== 'page-city'; })   // the page's Go to only picks the building, and the bot rows already go to a session
       .concat(list.map(function (b) { return { id: 'city-go-' + b.key, label: 'Go to ' + b.name, icon: 'building', group: 'Buildings', keywords: 'building repository ' + b.name, run: function () { p.onEnter(b.key, city.current); } }; }))
       .concat([{ id: 'city-fit', label: 'Show all buildings', icon: 'building', group: 'City', run: function () { if (city.current) city.current.fit(false); } }]);
     return h('div', { className: 'city' },
@@ -777,7 +781,7 @@
       function tick() {
         raf = requestAnimationFrame(tick);
         var el = ref.current;
-        if (!el || (window.OfficeBoard && window.OfficeBoard.layerOpen())) return;
+        if (!el || (window.OfficeBoard && window.OfficeBoard.layerOpen()) || document.querySelector('.strip-more')) return;   // a layer or the open More menu keeps its focus
         if (!shown) { shown = true; el.focus({ preventScroll: true }); }
         if (!landed && !p.flying()) { landed = true; if (document.activeElement !== el) el.focus({ preventScroll: true }); }
       }
@@ -914,7 +918,7 @@
         return h('div', { key: r.id, className: 'ask' + (r.risk === 'high' ? ' is-high' : ''), role: 'group', 'aria-label': q ? 'Question' : 'Request' },
           h('div', { className: 'ask-t' }, r.risk ? h(A.RiskBadge, { risk: r.risk }) : null, p.showName ? h('b', null, who) : null, h('span', { className: 'ask-x' }, r.text)),
           h('div', { className: 'ask-a' },
-            h(A.Button, { variant: 'primary', icon: 'approve', loading: busyR, onClick: function () { answerReq(r, true, false); } }, q ? 'Yes' : 'Approve'),
+            h(A.Button, { variant: 'emphasis', icon: 'approve', loading: busyR, onClick: function () { answerReq(r, true, false); } }, q ? 'Yes' : 'Approve'),
             h(A.Button, { variant: 'quiet', icon: 'decline', disabled: busyR, onClick: function () { answerReq(r, false, false); } }, q ? 'No' : 'Decline'),
             !q && r.always && r.risk !== 'high' ? h(A.Button, { variant: 'quiet', disabled: busyR, title: 'Approve and allow this from now on: ' + r.always, onClick: function () { answerReq(r, true, true); } }, 'Always allow') : null));
       }));
@@ -1072,7 +1076,8 @@
       if (btn) { btn.setAttribute('aria-expanded', String(more)); btn.setAttribute('aria-haspopup', 'true'); }
       if (!more) return undefined;
       function away(e) { if (moreRef.current && !moreRef.current.contains(e.target)) setMore(false); }
-      function esc(e) { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); setMore(false); if (btn) btn.focus(); } }
+      function esc(e) { if (e.key === 'Escape' && !(window.OfficeBoard ? window.OfficeBoard.escTaken(e) : e.defaultPrevented)) {   // a dialog or the palette opened later is the top layer: Esc is its
+         e.preventDefault(); setMore(false); if (btn) btn.focus(); } }
       document.addEventListener('mousedown', away); document.addEventListener('keydown', esc);
       return function () { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
     }, [more]);
@@ -1095,7 +1100,7 @@
         h(A.EmptyState, { icon: 'building', title: 'No sessions yet', text: 'Open a session to seat the first bot. You can also reopen a past one.', action: { label: 'Open session', icon: 'add', onClick: p.onOpen } })) : null,
       h('div', { className: 'strip', role: 'toolbar', 'aria-label': 'Office controls' },
         h('div', { className: 'strip-group' },
-          h(A.Button, { variant: 'primary', icon: 'add', onClick: p.onOpen }, 'Open session'),
+          h(A.Button, { variant: snap && !live.length ? 'quiet' : 'primary', icon: 'add', onClick: p.onOpen }, 'Open session'),   // the welcome card holds the primary one while there is no session
           many ? h(A.Select, { id: 'c-building', ariaLabel: 'Building (repository)', value: p.shown, onChange: p.onBuilding,
                 options: p.buildings.map(function (b) { return { value: b.key, label: b.name + ' · ' + plural(b.sessions, 'session', 'sessions') + (b.waiting ? ' · ' + b.waiting + ' need you' : '') }; })
                   .concat(p.buildings.some(function (b) { return b.key === p.shown; }) ? [] : [{ value: p.shown, label: (p.shownName || 'This building') + ' · no sessions' }]) }) : null,
@@ -1121,8 +1126,8 @@
                 sess.headless && (sess.cost || usage) ? h(A.CostMeter, { tokens: usage ? usage.tokens : 0, cost: sess.cost || 0, cached: usage && usage.input ? usage.cached / usage.input : undefined }) : null,
                 sess.headless ? h(A.Select, { id: 'c-model', label: 'Model', options: modelOpts, value: sess.model || '', onChange: function (v) { ctl('model', v); } }) : null,
                 sess.headless ? h(A.Select, { id: 'c-mode', label: 'Permissions', options: modeOpts, value: sess.mode || '', onChange: function (v) { ctl('mode', v); } }) : null) : null) : null),
-          // The palette lives in the office scene. The city has none yet (#16).
-          p.view === 'office' ? h(A.Button, { variant: 'quiet', icon: 'search', className: 'strip-search', title: 'Search actions, sessions and buildings', onClick: openPalette }, 'Search actions', h('span', { className: 'kbd mono' }, 'Ctrl+K')) : null),
+          // The city HUD has its own Search actions button, so the dock shows this one in the office only.
+          p.view === 'office' ? h(A.Button, { variant: 'quiet', icon: 'search', className: 'strip-search', title: 'Search actions, sessions and buildings', onClick: openPalette }, 'Search actions', h('kbd', { className: 'ao-kbd strip-kbd', 'aria-hidden': 'true' }, 'Ctrl+K')) : null),
         sess ? h('div', { className: 'strip-group strip-bot' },
           h('span', { className: 'strip-id' }, h(A.StatusDot, { status: statusOf(sess) }), h('b', null, sess.name), ctxPct != null ? h('span', { className: 'mono' }, 'context ' + ctxPct + '%') : null),
           sess.headless ? h(Tip, { text: working ? '' : 'Nothing runs now' }, h(A.Button, { variant: 'quiet', icon: 'pause', disabled: !working, onClick: stopTurn }, 'Stop turn')) : null) : null));
@@ -1157,7 +1162,7 @@
       }, 250);
       return function () { clearInterval(iv); };
     }, [timed]);
-    function refresh() { return getInfo().then(function (i) { setInfo(i); return i; }, function () { return info; }); }
+    function refresh() { return getInfo(shownPath).then(function (i) { setInfo(i); return i; }, function () { return info; }); }
     function show(name) { refresh().then(function () { setDlg({ name: name }); }); }
     function changes(uid, name) {
       var s = window.officeAdapter.sessionByUid(uid);
@@ -1203,9 +1208,8 @@
     var intro = useMemo(function () { var i = introNext.current; if (def) introNext.current = false; return i && !ambient; }, [def]);
     function go(v) { setView(v); try { localStorage.setItem('ao-view', v); } catch (x) { /* private window */ } }
     // From the city: fly to the building, then enter it with the DS intro flythrough.
-    var selectNext = React.useRef(null);
-    function enter(key, city, bot) {
-      var inside = function () { selectNext.current = bot || null; introNext.current = !bot; pick(key); go('office'); };
+    function enter(key, city, uid) {   // uid: the session to select once inside (no intro then, as in goTo)
+      var inside = function () { if (uid) pendingSel.current = uid; introNext.current = !uid; pick(key); go('office'); };
       if (city) city.focus(key, inside); else inside();
     }
     var week = snap && snap.plan && snap.plan.week;
@@ -1334,7 +1338,8 @@
     var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: mount.adapter, height: window.innerHeight, quality: 'auto', intro: intro, editable: false, simulate: false, toasts: false,
       onNotify: function (n) {   // the scene's request and error toasts go to the page stack, where they stay until closed
         if (n.kind !== 'request' && n.kind !== 'error') return;
-        toast({ tone: n.kind === 'error' ? 'error' : 'warning', title: n.bot, text: n.text, bot: n.bot, req: n.kind === 'request', action: { label: 'Open', onClick: function () { if (officeRef.current) officeRef.current.select(n.bot); } } });
+        var ns = mount ? mount.session(n.bot) : null;   // the session, so the toast and its Open outlive a scene change
+        toast({ tone: n.kind === 'error' ? 'error' : 'warning', title: n.bot, text: n.text, bot: n.bot, req: n.kind === 'request', uid: ns ? ns.uid : '', action: { label: 'Open', onClick: function () { if (ns) goTo(ns); else if (officeRef.current) officeRef.current.select(n.bot); } } });
       },
       sinceYouLeft: sylScene.current === sceneKey,
       ambient: ambient, onAmbientOpen: function () { setAmbient(false); }, onReady: function (o) {
@@ -1365,7 +1370,6 @@
             onOpen: function (uid, name) { o.select(name); openTerminal(uid, name); }
           });
         }
-        if (selectNext.current) { var nb = selectNext.current; selectNext.current = null; setTimeout(function () { o.select(nb); }, 400); }
         if (!st || !host || !window.OfficeCity) return;
         window.OfficeCity.cameraFeel(st);
         // birds over the tower in the building view; none inside a floor
@@ -1398,10 +1402,11 @@
     var needIds = needs.map(function (r) { return r.uid; }).join('|');
     useEffect(function () {
       setToasts(function (l) {
-        var keep = l.filter(function (t) { if (!t.req) return true; var s = mount && mount.session(t.bot); return !!s && needs.some(function (r) { return r.uid === s.uid; }); });
+        // by session uid, against the requests of every building (not the scene on screen); a toast with no uid goes when nothing waits
+        var keep = l.filter(function (t) { if (!t.req) return true; return needs.some(function (r) { return !t.uid || r.uid === t.uid; }); });
         return keep.length === l.length ? l : keep;
       });
-    }, [needIds, mount]);
+    }, [needIds]);
     function close() { setDlg(null); }
     function alertsOn() { try { return localStorage.getItem('ao-alerts') === '1'; } catch (x) { return false; } }
     // The tab title counts every request of every building. The DS Notifier of the scene writes its own count (the shown building), so the page writes last.
@@ -1423,7 +1428,7 @@
     function goTo(s) {
       var key = window.officeAdapter.buildingOf(s);
       pendingSel.current = s.uid; pick(key); setDlg(null);
-      if (view !== 'office') { introNext.current = true; go('office'); }
+      if (view !== 'office') { introNext.current = false; go('office'); }   // a bot is the target: the intro would end by clearing its selection
       else if (key === shown && officeRef.current) selectPending(officeRef.current);   // the scene is already up
     }
     // The bot is seated a moment after the scene is ready, so this runs again on each snapshot until it is found.
