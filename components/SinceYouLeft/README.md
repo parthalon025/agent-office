@@ -3,6 +3,7 @@
 A summary card for the person who comes back. It tells what happened while they were away: what finished, what needs them, what failed and what it cost. Show it once when the person returns, above the HUD.
 
 - **Consumer provides:** `summary` from the office snapshot, and the time the person left in `summary.since`.
+- In `OfficeScene`, `summary.since` is the last time the person saw this building: the page was hidden, or the scene was disposed. Events with `seeded: true` do not count, except a seeded event with `at` after `since` (Reference, Scene mount).
 - The title is "Since you left (<relative time>)", for example "Since you left (2 hours ago)".
 - Four figures: Finished, Needs you, Errors, Spend. Each status figure has a dot and a word.
 - Up to 3 top lines from `summary.top`.
