@@ -12,7 +12,8 @@ export const ENTRY_NAME = 'Agent Office.cmd';
 export function startupDir(appData) {
   return appData ? path.win32.join(appData, 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup') : '';
 }
-export function entryPath(dir) { return path.win32.join(dir, ENTRY_NAME); }
+// The file goes in a real folder on this machine, so it is joined with this platform's rules (CI runs the tests on Linux).
+export function entryPath(dir) { return path.join(dir, ENTRY_NAME); }
 
 /** The .cmd text. root = the office folder, node = the node.exe path. CRLF lines. % is doubled so cmd keeps it. */
 export function entryContent(root, node) {

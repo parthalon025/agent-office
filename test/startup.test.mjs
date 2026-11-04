@@ -8,7 +8,7 @@ import { startupDir, entryPath, entryContent, state, enable, disable, ENTRY_NAME
 test('startup folder is under APPDATA; unknown without it', () => {
   assert.equal(startupDir('C:\\Users\\a\\AppData\\Roaming'), 'C:\\Users\\a\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup');
   assert.equal(startupDir(''), '');
-  assert.equal(entryPath('C:\\S'), 'C:\\S\\' + ENTRY_NAME);
+  assert.equal(entryPath('C:\\S'), path.join('C:\\S', ENTRY_NAME)); // this platform's rules: the folder is a real local one
 });
 
 test('entry content: quoted title, quoted paths, CRLF, no kill', () => {
