@@ -936,6 +936,39 @@
       }));
   }
 
+  // ---------- a screen in the room, looked at up close (scene-host.js focus) ----------
+  // The page's boxes over the 3D scene. The scene host frames a screen in the part of the view they leave free.
+  var COVERS = '.ao-hud-top, .ao-hud-left, .ao-hud-right, .ao-hud-zoom, .ao-hud-syl, .ao-hud-scrub, .ao-hud-cast, .ao-hud-log, .strip, .board-panel, .terminal-panel, .look-bar';
+  function sceneCovers(skip) {
+    return [].slice.call(document.querySelectorAll(COVERS)).filter(function (el) {
+      if (el === skip) return false;
+      var cs = getComputedStyle(el);
+      return cs.visibility !== 'hidden' && cs.display !== 'none';
+    }).map(function (el) { return el.getBoundingClientRect(); });
+  }
+  var LOOK_ICON = { board: 'plan', notes: 'memory', stats: 'cost', terminal: 'terminal' };
+  // While the camera looks at a screen: back to the room, or the screen's second step (the same as a second click).
+  // It sits at the bottom of the free part of the view, and the screen is framed above it.
+  function LookBar(p) {
+    var ref = React.useRef(null);
+    var ps = useState(null), pos = ps[0], setPos = ps[1];
+    React.useLayoutEffect(function () {
+      function place() {
+        var el = ref.current, f = el && p.free(el);
+        if (!f) return;
+        var n = { left: Math.round(Math.max(f.left, (f.left + f.right - el.offsetWidth) / 2)), top: Math.round(f.bottom - el.offsetHeight) };
+        setPos(function (o) { return o && o.left === n.left && o.top === n.top ? o : n; });
+      }
+      place();
+      window.addEventListener('resize', place);
+      return function () { window.removeEventListener('resize', place); };
+    }, []);
+    useEffect(function () { if (pos) p.onPlaced(); }, [pos]);
+    return h('div', { ref: ref, className: 'look-bar', role: 'group', 'aria-label': 'Screen in view', style: pos ? { left: pos.left, top: pos.top } : { visibility: 'hidden' } },
+      h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onBack }, 'Back to the room'),
+      h(A.Button, { variant: 'quiet', icon: p.icon, onClick: p.onOpen }, p.verb));
+  }
+
   // ---------- one session as a full terminal ----------
   function TerminalPanel(p) {
     var snap = useSnapshot();
@@ -1236,8 +1269,13 @@
     // the scene host (scene-host.js): the one reader of the DS stage; board, terminal, streets and birds are its adapters
     var hostRef = React.useRef(null);
     var tm = useState(null), term = tm[0], setTerm = tm[1];
+    // the screen the camera looks at (step 1 of a screen: scene-host.js focus), or null
+    var lk = useState(null), look = lk[0], setLook = lk[1];
+    function blurScene() { if (hostRef.current) hostRef.current.blur(); }   // fly back from a screen; nothing when none is in focus
+    function closeBoard() { blurScene(); setBoard(null); }
+    // the terminal from the More list: a screen in focus flies back first
     function openTerminal(uid, name) {
-      if (boardRef.current && boardRef.current.focused && boardRef.current.focused()) boardRef.current.blur();
+      blurScene();
       setBoard(null);
       setTerm({ uid: uid, name: name });
     }
@@ -1246,7 +1284,7 @@
       if (boardRef.current) { boardRef.current.dispose(); boardRef.current = null; }
       if (terminalRef.current) { terminalRef.current.dispose(); terminalRef.current = null; }
       if (hostRef.current) { hostRef.current.dispose(); hostRef.current = null; }
-      setBoard(null); setTerm(null);
+      setBoard(null); setTerm(null); setLook(null);
     }; }, [sceneKey, cur2.view]);
     // doors: a session that comes into a room or leaves it of the shown building.
     // Room ids come from the board's rooms; the adapter says who sits in each.
@@ -1310,6 +1348,24 @@
     // One panel at a time: while the terminal, the board or the stats panel is open, the DS right column (chat or roster) is hidden.
     var panelOpen = !!term || !!(board && (board.kind === 'board' || board.kind === 'stats'));
     useEffect(function () { var el = document.getElementById('office'); if (el) el.classList.toggle('has-panel', panelOpen); }, [panelOpen]);
+    // A side panel changes the free part of the view: the screen in focus is framed again beside it. The window too.
+    useEffect(function () { if (hostRef.current) hostRef.current.refit(); }, [panelOpen]);
+    useEffect(function () {
+      function refit() { if (hostRef.current) hostRef.current.refit(); }
+      window.addEventListener('resize', refit);
+      return function () { window.removeEventListener('resize', refit); };
+    }, []);
+    // Esc flies back from a screen (a look or an open panel). Esc closes the top layer only: a dialog or the palette
+    // on top takes it (board.js escTaken), and so does an open panel's own handler that ran first.
+    useEffect(function () {
+      function onKey(e) {
+        var host = hostRef.current, B = window.OfficeBoard;
+        if (e.key !== 'Escape' || !host || !host.focused() || (B && B.escTaken ? B.escTaken(e) : e.defaultPrevented)) return;
+        e.preventDefault(); host.blur();
+      }
+      window.addEventListener('keydown', onKey);
+      return function () { window.removeEventListener('keydown', onKey); };
+    }, []);
     // When the office opens something new in the right column (the Decisions inbox, or the chat of another bot),
     // the page panel steps aside. The chat of the bot the terminal belongs to is not new: the desk opens both.
     var lastSel = React.useRef(sel);
@@ -1318,8 +1374,8 @@
       var prev = lastSel.current; lastSel.current = sel;
       if (!panelOpen) return;
       if (inbox || (sel && sel !== prev && !(term && selSess && term.uid === selSess.uid))) {
-        if (board && boardRef.current) boardRef.current.blur();
-        setTerm(null);
+        blurScene();
+        setBoard(null); setTerm(null);
       }
     }, [sel, inbox]);
     // The newest surface wins: a page panel that opens while the Decisions inbox is open closes the inbox through its own DS control.
@@ -1335,9 +1391,11 @@
       var gate = window.OfficeWheelGate.create();
       function onWheel(e) {
         var o = officeRef.current, st = o && o.inspect && o.inspect().stage;
-        var level = hostRef.current && hostRef.current.inBuilding() ? 'building' : 'floor';
+        var host = hostRef.current, level = host && host.inBuilding() ? 'building' : 'floor';
+        // a screen in focus (or a flight to it or back) holds the floor: Esc or Back leaves it first
+        var held = !!(host && (host.focused() || host.flying()));
         var now = Date.now(), inScene = !!(e.target.closest && e.target.closest('.ao-scene'));
-        var ok = !!(st && st.ctl && e.deltaY > 0 && inScene && st.cam.zoom <= st.ctl.minZoom * 1.03);
+        var ok = !!(st && st.ctl && e.deltaY > 0 && inScene && !held && st.cam.zoom <= st.ctl.minZoom * 1.03);
         var leave = gate.push(level, now, ok);
         // keep the DS camera feel from clearing the framing the level change started
         if (inScene && (leave || gate.holding(now))) { e.preventDefault(); e.stopPropagation(); }
@@ -1362,7 +1420,14 @@
         if (boardRef.current) boardRef.current.dispose();
         if (terminalRef.current) terminalRef.current.dispose();
         if (hostRef.current) hostRef.current.dispose();
-        var host = hostRef.current = window.OfficeSceneHost && st ? window.OfficeSceneHost.attach(o) : null;
+        var host = hostRef.current = window.OfficeSceneHost && st ? window.OfficeSceneHost.attach(o, { covers: sceneCovers }) : null;
+        window.officeHost = host;   // the scene host (focus, flights), for the console and tests
+        // A screen in focus: a look shows the look bar; a look, a look at another screen or a way back closes the panels.
+        // The second step opens a panel through the board's or the terminal's onOpen.
+        if (host) host.onFocus(function (f) {
+          setLook(f && !f.open ? f : null);
+          if (!f || !f.open) { setBoard(null); setTerm(null); }
+        });
         if (st && host && window.OfficeBoard) {
           boardRef.current = window.OfficeBoard.attach(o, {
             host: host,
@@ -1372,14 +1437,15 @@
             stats: function (id) { return mount.figures(id); },
             pin: function (id) { var n = latestSnap.current && latestSnap.current.pins && latestSnap.current.pins[noteKey(id)]; return n && n.text ? { text: n.text, by: n.by } : null; },
             onDoor: function (id) { setTerm(null); setDlg({ name: 'room', roomId: id }); },
-            onFocus: function (id, kind) { setTerm(null); setBoard({ id: id, kind: kind }); }, onBlur: function () { setBoard(null); }
+            onOpen: function (id, kind) { setTerm(null); setBoard({ id: id, kind: kind }); }
           });
         }
         if (st && host && window.OfficeTerminal) {
           terminalRef.current = window.OfficeTerminal.attach(o, {
             host: host,
             session: function (botName) { return mount.session(botName); },
-            onOpen: function (uid, name) { o.select(name); openTerminal(uid, name); }
+            // the second click on a monitor: its screen stays in focus beside the terminal
+            onOpen: function (uid, name) { o.select(name); setBoard(null); setTerm({ uid: uid, name: name }); }
           });
         }
         if (!st || !host || !window.OfficeCity) return;
@@ -1510,12 +1576,16 @@
       d === 'floors' ? h(FloorsDialog, { repo: shown, toast: toast, onClose: close }) : null,
       d === 'room' && mount ? h(RoomDialog, { mount: mount, roomId: dlg.roomId, toast: toast, onClose: close }) : null,
       d === 'ext' ? h(ExtensionsDialog, { uid: dlg.uid, name: dlg.label, toast: toast, onClose: close }) : null,
-      term ? h(TerminalPanel, { key: term.uid, uid: term.uid, name: term.name, toast: toast, onClose: function () { setTerm(null); } }) : null,
-      !term && board && boardRef.current && board.kind === 'board' ? h(BoardPanel, { data: boardRef.current.dataOf(board.id), sessions: roomAndSel(board.id), toast: toast, onClose: function () { boardRef.current.blur(); } }) : null,
-      !term && board && boardRef.current && board.kind === 'stats' && mount ? h(StatsPanel, { mount: mount, extra: roomAndSel(board.id, true), toast: toast, roomId: board.id, onClose: function () { boardRef.current.blur(); } }) : null,
+      term ? h(TerminalPanel, { key: term.uid, uid: term.uid, name: term.name, toast: toast, onClose: function () { setTerm(null); blurScene(); } }) : null,
+      !term && board && boardRef.current && board.kind === 'board' ? h(BoardPanel, { data: boardRef.current.dataOf(board.id), sessions: roomAndSel(board.id), toast: toast, onClose: closeBoard }) : null,
+      !term && board && boardRef.current && board.kind === 'stats' && mount ? h(StatsPanel, { mount: mount, extra: roomAndSel(board.id, true), toast: toast, roomId: board.id, onClose: closeBoard }) : null,
       !term && board && boardRef.current && board.kind === 'notes' ? h(NotesEditor, { key: board.id, noteKey: noteKey(board.id), text: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).text || '', version: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).v || 0, toast: toast,
-        rect: function () { return boardRef.current ? boardRef.current.rect() : null; }, flying: function () { return boardRef.current ? boardRef.current.flying() : false; },
-        onClose: function () { boardRef.current.refresh(); boardRef.current.blur(); } }) : null,
+        rect: function () { return hostRef.current ? hostRef.current.rect() : null; }, flying: function () { return hostRef.current ? hostRef.current.flying() : false; },
+        onClose: function () { if (boardRef.current) boardRef.current.refresh(); blurScene(); } }) : null,
+      look && !term && !board && hostRef.current ? h(LookBar, { key: look.key, verb: look.verb, icon: LOOK_ICON[look.kind] || 'zoom-in',
+        free: function (el) { return hostRef.current ? hostRef.current.free(sceneCovers(el)) : null; },
+        onPlaced: function () { if (hostRef.current) hostRef.current.refit(); },
+        onBack: blurScene, onOpen: function () { if (hostRef.current) hostRef.current.open(); } }) : null,
       d === 'sessions' ? h(SessionsDialog, { onClose: close, onGo: goTo }) : null,
       d === 'needs' ? h(NeedsDialog, { toast: toast, onClose: close, onGo: function (r) { var s = snap && snap.sessions.filter(function (x) { return x.uid === r.uid; })[0]; if (s) goTo(s); else close(); } }) : null,
       // Alerts for requests in buildings that are not shown. The DS alert toggle decides; they show only while the page is hidden.

@@ -272,6 +272,10 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .stats-list li { display: flex; justify-content: space-between; gap: var(--space-3); color: var(--muted); }
 .stats-list b { color: var(--ink); }
 
+/* ---------- look bar: the camera looks at a screen (office.js LookBar; scene-host.js places the screen above it) ---------- */
+.look-bar { position: fixed; z-index: var(--z-hud); display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); background: var(--panel); backdrop-filter: blur(var(--blur-panel)); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-panel); animation: page-fade var(--duration-base) var(--ease-out) both; }
+@media (prefers-reduced-motion: reduce) { .look-bar { animation: none; } }
+
 /* ---------- notes board, written on in place ---------- */
 .notes-edit { position: fixed; z-index: var(--z-sheet); display: flex; flex-direction: column; animation: page-fade var(--duration-base) var(--ease-out) both; }
 .notes-text { flex: 1; min-height: 0; resize: none; box-sizing: border-box; margin: 0; padding: 6% 6% 0; border: 0; border-radius: var(--radius-sm); background: var(--bubble); color: color-mix(in srgb, var(--scene-dark) 70%, var(--status-finished)); caret-color: color-mix(in srgb, var(--scene-dark) 70%, var(--status-finished)); box-shadow: inset 0 0 0 4px var(--scene-wood); font-family: var(--font-sans); line-height: 1.35; outline: none; }

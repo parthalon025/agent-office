@@ -1,16 +1,19 @@
 /* Agent Office for Claude Code x0.1: the room's boards, stats display and door.
    Each lab room gets four things that the user can see and click:
    - The blackboard on the back wall is the agents' overview: plan progress, browser steps, last steps
-     and the top of the repository. An agent can pin a note on it. A click flies the camera to it and the
-     page shows the same data in full (office.js, BoardPanel). Esc or Back flies out again.
-   - The whiteboard left of it holds the user's own notes. A click flies to it and the page lays a text box
-     over the board itself, so the user writes on the board.
+     and the top of the repository. An agent can pin a note on it. The page shows the same data in full
+     (office.js, BoardPanel).
+   - The whiteboard left of it holds the user's own notes. The page lays a text box over the board itself,
+     so the user writes on the board.
    - A small wall display on the left wall shows the room's numbers: sessions, tool calls, tokens, cost.
-   - A door on the left wall opens the "add or remove agents" dialog. It swings open when an agent comes in
-     or leaves (api.doorPulse).
+   - A door on the left wall opens the "add or remove agents" dialog at once. It swings open when an agent
+     comes in or leaves (api.doorPulse).
+   The three screens take two clicks (the scene host runs the steps and flies the camera): the first click
+   flies to the screen so the user can read it, a second click opens its input (o.onOpen). Esc, Back or a
+   click on empty scene flies out again.
    Also a chalk ledge, a marker tray, a warm lamp and two plants. The server's room description (server.mjs roomContents) lists it in words; keep the two in step.
    Colors and fonts come from the DS tokens. The engine draws the room; this file repaints the board
-   pictures, adds the decor, and moves the camera on request. The engine builds walls 5.2 high with the
+   pictures and adds the decor. The engine builds walls 5.2 high with the
    room sign at 4.45, where the cable tray covers it, so the walls go up to WALL_H and the sign moves up.
    The engine rebuilds a floor when a bot joins or leaves and when the theme changes. The per-frame hook
    sees that and puts the decor back before the frame draws. */
@@ -290,7 +293,7 @@
   }
 
   // ---------- hint pill (a sprite that fades in on hover) ----------
-  var HINT_W = 640, HINT_H = 140, HINT_FONT = 50;
+  var HINT_W = 640, HINT_H = 140, HINT_FONT = 50, LOOK_HINT = 'Look closer';
   function hintTex(text, tok, f) {
     var cv = document.createElement('canvas'); cv.width = HINT_W; cv.height = HINT_H;
     var c = cv.getContext('2d'), sans = f.sans || 'sans-serif';
@@ -303,7 +306,8 @@
 
   // Attach boards to a mounted office.
   // o: { room(roomId) -> info, tree(root) -> Promise, note(roomId) -> text, stats(roomId) -> numbers, pin(roomId) -> { text, by },
-  //      onFocus(roomId, kind: 'board' | 'notes' | 'stats'), onBlur(), onDoor(roomId) }
+  //      onOpen(roomId, kind: 'board' | 'notes' | 'stats'), onDoor(roomId), host? }
+  //   The page learns from the host (host.onFocus) when the screen in focus changes (look, back).
   //   The returned object has open(roomId, kind) for the keyboard path (Ctrl+K), and OfficeBoard.layerOpen() for the Esc rule.
   function attach(office, o) {
     o = o || {};
@@ -311,7 +315,7 @@
     try { ins0 = office && office.inspect && office.inspect(); } catch (x) { ins0 = null; }
     var st = ins0 && ins0.stage;
     var ownHost = !o.host, host = o.host || H.attach(office);
-    if (!st || !host) return { open: function () { return false; }, refresh: noop, blur: noop, focused: none, kind: none, flying: function () { return false; }, rect: none, dataOf: none, doorPulse: noop, rooms: empty, dispose: noop };
+    if (!st || !host) return { open: function () { return false; }, refresh: noop, dataOf: none, doorPulse: noop, rooms: empty, dispose: noop };
     var K = st.K;
     var boards = [];      // blackboards: { kind:'board', mesh, roomId, tex, canvas, ... }
     var notes = [];       // whiteboards: { kind:'notes', ... }
@@ -320,7 +324,7 @@
     var decorRooms = [];  // { rg, roomId, items, added, lamp, board } for each room group that has decor
     var pending = {};     // roomId -> { dir, at, t }: a door pulse that waits for its door (the floor is being rebuilt)
     var trees = {};       // root -> tree
-    var focused = null, focusedKind = null, focusedMesh = null, saved = null, dead = false, after = null;
+    var dead = false;
     var lastTok = K.tok, skinVersion = 0, repaint = false;
 
     function tk(k) { return K.tok[k]; }
@@ -376,11 +380,6 @@
       prune();
       // the host matches the shown floor's room groups to the DS rooms by order
       host.rooms().forEach(function (x) { if (x.room.type === 'lab') decorate(x.rg, x.room.id); });
-      // the item that is open now came back with the rebuild: follow it
-      if (focused && focusedMesh && !inScene(focusedMesh)) {
-        var it = allItems().filter(function (x) { return x.roomId === focused && x.kind === focusedKind; })[0];
-        if (it) focusedMesh = it.mesh;
-      }
       // a door pulse that came while its floor was being rebuilt
       Object.keys(pending).forEach(function (id) {
         var p = pending[id];
@@ -442,7 +441,7 @@
       var solid = rg.children.some(isSideWall);
       var sw = 1.5, sh = 1.95, s = newTex(520, Math.round(520 * sh / sw));
       var sm = plane(sw, sh, s.tex, 0.6, 'stats'); sm.position.set(-4.9, solid ? 2.7 : 1.95, 0.03); lw.add(sm);
-      var sd = { kind: 'stats', mesh: sm, roomId: id, tex: s.tex, canvas: s.canvas, sig: null, mat: sm.material, base: 0.6, hov: 0.95, g: 0, tgt: 0, hit: [sm], hint: 'Room stats', own: [sm.material] };
+      var sd = { kind: 'stats', mesh: sm, roomId: id, tex: s.tex, canvas: s.canvas, sig: null, mat: sm.material, base: 0.6, hov: 0.95, g: 0, tgt: 0, hit: [sm], hint: 'Show room stats', own: [sm.material] };
       sm.userData.item = sd; statsList.push(sd); items.push(sd);
       // door: frame, leaf, handle, doorway, lit sign
       var dgx = -2.9, DW = 1.3, DH = 2.1, y0 = 0.06;
@@ -623,7 +622,7 @@
         st.scene.add(hintSprite);
       }
       if (!item) { hintTarget = 0; return; }
-      var tex = hintFor(item.hint);
+      var tex = hintFor(hintOf(item));
       if (hintSprite.material.map !== tex) { hintSprite.material.map = tex; hintSprite.material.needsUpdate = true; }
       hintPoint = point.clone();
       placeHint();
@@ -631,6 +630,13 @@
     }
     // The host picks: one raycast over the boards, the terminals and anything else registered, one winner,
     // and it owns the pointer cursor. This file only paints the glow and the hint.
+    // The hint says what the next click does: look closer at a screen, or its own verb when it is in focus.
+    function keyOf(item) { return item.kind + ':' + item.roomId; }
+    function hintOf(item) {
+      if (item.kind === 'door') return item.hint;
+      var f = host.focused();
+      return f && f.key === keyOf(item) ? item.hint : LOOK_HINT;
+    }
     function clearHover() { hovered = null; allItems().forEach(function (it) { it.tgt = 0; }); setHint(null); }
     function onHover(item, hit) {
       if (!item) { clearHover(); return; }
@@ -638,7 +644,6 @@
       allItems().forEach(function (it) { it.tgt = it === hovered ? 1 : 0; });
       setHint(hovered, hit.point);
     }
-    function onLeave() { clearHover(); host.leave(); }
     function glowStep(dt) {
       var k = st.rm ? 1 : Math.min(1, dt * 10);
       allItems().forEach(function (it) {
@@ -655,17 +660,6 @@
       }
     }
 
-    // ----- camera: fly to face the board, and back -----
-    var fly = null;
-    function stepFly(dt) {
-      if (!fly) return;
-      fly.t = Math.min(1, fly.t + dt * 1000 / fly.ms);
-      var e = easeInOut(fly.t), tg = st.ctl ? st.ctl.target : st.target;
-      st.cam.position.lerpVectors(fly.p0, fly.p1, e);
-      tg.lerpVectors(fly.t0, fly.t1, e);
-      st.cam.zoom = fly.z0 + (fly.z1 - fly.z0) * e; st.cam.updateProjectionMatrix();
-      if (fly.t >= 1) { var done = fly.done; fly = null; if (done) done(); }
-    }
     // Per frame, before the engine draws. The host tells us when the scene was rebuilt (a bot joins or leaves,
     // the floor or view changes, a theme change): scan and paint now, so the decor is in this frame.
     var offRebuild = host.onRebuild(function () { try { refresh(); } catch (x) { repaint = false; /* the timer tries again */ } });
@@ -673,87 +667,40 @@
       if (dead) return;
       try { if (repaint || K.tok !== lastTok) refresh(); } catch (x) { repaint = false; }
       try {
-        if (focused && st.goal) st.goal = null;   // the engine must not reframe while a board is open
         glowStep(dt);
         stepDoors(dt);
-        stepFly(dt);
       } catch (x) { /* one bad frame must not stop the office */ }
     }
     var offFrame = host.frame(frame);
-    function flyTo(p1, t1, z1, done) {
-      var tg = st.ctl ? st.ctl.target : st.target;
-      var ms = st.rm ? 1 : cssNum('duration-camera', 600) * 1.4;
-      fly = { t: 0, ms: ms, p0: st.cam.position.clone(), p1: p1, t0: tg.clone(), t1: t1, z0: st.cam.zoom, z1: z1, done: done };
-    }
-    function focus(bd, kind) {
-      if (focused) return;
-      onLeave();
-      var tg = st.ctl ? st.ctl.target : st.target;
-      saved = { p: st.cam.position.clone(), t: tg.clone(), z: st.cam.zoom };
-      var c = bd.mesh.getWorldPosition(new T.Vector3());
-      var n = new T.Vector3(0, 0, 1).applyQuaternion(bd.mesh.getWorldQuaternion(new T.Quaternion()));
-      var dist = saved.p.distanceTo(saved.t);
-      // face the board, a little from above, close enough to read it
-      var p1 = c.clone().addScaledVector(n, dist).add(new T.Vector3(0, dist * 0.12, 0));
-      var span = (st.cam.top - st.cam.bottom) || 1;
-      var vis = kind === 'stats' ? bd.mesh.geometry.parameters.height * 1.8 : 4.4;
-      var z1 = Math.min(st.ctl ? st.ctl.maxZoom * 1.6 : 6, span / vis);   // the item fills most of the view, with room around it
-      focused = bd.roomId; focusedKind = kind || 'board'; focusedMesh = bd.mesh;
-      if (st.ctl) st.ctl.enabled = false;
-      // after the flight the camera is the user's again: turn, zoom and move as usual
-      flyTo(p1, c, z1, landed);
-      if (o.onFocus) o.onFocus(bd.roomId, focusedKind);
-    }
-    function blur() {
-      if (!focused || !saved) return;
-      focused = null; focusedKind = null; focusedMesh = null;
-      if (st.ctl) st.ctl.enabled = false;
-      flyTo(saved.p, saved.t, saved.z, landed);
-      if (o.onBlur) o.onBlur();
-    }
-    // A flight ended. The camera is the user's again; a request that came during the flight runs now.
-    function landed() {
-      if (st.ctl) st.ctl.enabled = true;
-      if (!after || dead) return;
-      var a = after; after = null;
-      open(a[0], a[1]);
-    }
-    // Open one tool of a room without the pointer: kind is 'board', 'notes' or 'stats' (the camera flies there),
-    // or 'door' (the agents of the room). It works on the shown floor. While another board is open or a flight is
-    // on, it waits for the camera to come back and then flies to the new one. Returns false when the room has no such tool.
+
+    // Clicks come from the host (not drags, one winner). The blackboard, the notes board and the stats display are
+    // screens: the host flies to one on the first click and calls open() on the second. The door has no look: one click.
+    var LOOK = { board: true, notes: true, stats: true };
+    // Open one tool of a room without the pointer (the keyboard path, Ctrl+K): kind is 'board', 'notes' or 'stats' (the host
+    // flies there and opens it, both steps at once; from another screen it flies straight on), or 'door' (the agents of the room).
+    // It works on the shown floor. Returns false when the room has no such tool.
     function open(roomId, kind) {
       if (dead) return false;
       try { scan(); } catch (x) { /* the lists are still good */ }
       if (kind === 'door') { if (!liveDoor(roomId)) return false; if (o.onDoor) o.onDoor(roomId); return true; }
       var fg = shownFloor();
-      var it = allItems().filter(function (x) { return x.roomId === roomId && x.kind === kind && x.kind !== 'door' && onShownFloor(x.mesh, fg); })[0];
-      if (!it) return false;
-      if (focused || fly) { after = [roomId, kind]; if (focused && !fly) blur(); return true; }
-      focus(it, kind);
-      return true;
+      var it = allItems().filter(function (x) { return x.roomId === roomId && x.kind === kind && LOOK[x.kind] && onShownFloor(x.mesh, fg); })[0];
+      return !!it && host.show(target, it, true);
     }
-
-    // Clicks come from the host (not drags, one winner). The open stats view has no page panel: a click on the scene closes it.
-    function onClick(item) {
-      if (item.kind === 'door') { if (o.onDoor) o.onDoor(item.roomId); return; }
-      focus(item, item.kind);
-    }
-    function bypass() {
-      if (focusedKind !== 'stats') return false;   // an open board or notes panel: the click goes on (a monitor still opens its terminal)
-      if (!fly) blur();
-      return true;                                 // the click closed the stats view and does nothing else
-    }
-    // Esc closes the top layer only: a dialog or the palette on top of the board takes it, the board stays.
-    function onKey(e) { if (e.key === 'Escape' && focused && !escTaken(e)) { after = null; blur(); } }
-    var offTarget = host.register({
+    var target = {
       name: 'board',
-      active: function () { return !focused && !fly && !dead; },
+      active: function () { return !dead; },
       meshes: function () { var m = []; allItems().forEach(function (it) { m = m.concat(it.hit); }); return m; },
       itemOf: function (mesh) { return mesh.userData.item || null; },
-      hover: onHover, click: onClick, bypass: bypass,
+      hover: onHover,
+      look: function (item) { return LOOK[item.kind] ? { key: keyOf(item), mesh: item.mesh, verb: item.hint, kind: item.kind } : null; },
+      open: function (item) { if (o.onOpen) o.onOpen(item.roomId, item.kind); },
+      click: function (item) { if (item.kind === 'door' && o.onDoor) o.onDoor(item.roomId); },
+      // after a floor rebuild the screen in focus is a new mesh
+      find: function (key) { var it = allItems().filter(function (x) { return keyOf(x) === key && inScene(x.mesh); })[0]; return it ? { item: it, mesh: it.mesh } : null; },
       anchors: function () { return []; }
-    });
-    window.addEventListener('keydown', onKey);
+    };
+    var offTarget = host.register(target);
     var timer = setInterval(function () {
       if (st.dead) { dispose(); return; }
       try { refresh(); } catch (x) { /* next time */ }
@@ -765,9 +712,7 @@
       if (dead) return;
       dead = true; clearInterval(timer);
       offFrame(); offRebuild(); offTarget();
-      window.removeEventListener('keydown', onKey);
       host.leave();
-      if (fly || focused) { fly = null; if (st.ctl) st.ctl.enabled = true; }
       if (hintSprite) { if (hintSprite.parent) hintSprite.parent.remove(hintSprite); hintSprite.material.dispose(); hintSprite = null; }
       Object.keys(hints).forEach(function (h) { hints[h].dispose(); }); hints = {};
       decorRooms.forEach(function (r) {
@@ -780,12 +725,11 @@
       });
       allItems().forEach(drop);
       boards = []; notes = []; statsList = []; doors = []; decorRooms = []; pending = {};
-      focused = null; focusedKind = null; focusedMesh = null; hovered = null;
+      hovered = null;
       if (ownHost) host.dispose();
     }
     return {
-      refresh: refresh, blur: function () { after = null; blur(); }, focused: function () { return focused; }, kind: function () { return focusedKind; },
-      flying: function () { return !!fly; },
+      refresh: refresh,
       open: open,
       doorPulse: doorPulse,
       // the decorated rooms of the shown floor, left to right; none in the building view
@@ -795,17 +739,6 @@
         var fg = shownFloor(), list = boards.filter(function (b) { return onShownFloor(b.mesh, fg); });
         list.sort(function (a, b) { return worldX(a.mesh) - worldX(b.mesh); });
         return list.map(function (b) { return b.roomId; });
-      },
-      // the open board's corners on screen, so the page can lay a text box exactly over it
-      rect: function () {
-        if (!focusedMesh) return null;
-        var g = focusedMesh.geometry.parameters, r = cv.getBoundingClientRect(), xs = [], ys = [];
-        [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(function (q) {
-          var v = new T.Vector3(q[0] * g.width / 2, q[1] * g.height / 2, 0);
-          focusedMesh.localToWorld(v); v.project(st.cam);
-          xs.push(r.left + (v.x + 1) / 2 * r.width); ys.push(r.top + (1 - v.y) / 2 * r.height);
-        });
-        return { left: Math.min.apply(null, xs), top: Math.min.apply(null, ys), width: Math.max.apply(null, xs) - Math.min.apply(null, xs), height: Math.max.apply(null, ys) - Math.min.apply(null, ys) };
       },
       dataOf: function (roomId) { var b = boards.filter(function (x) { return x.roomId === roomId; })[0]; return b ? b.data : null; },
       dispose: dispose

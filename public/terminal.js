@@ -4,7 +4,9 @@
    monitors (the coder desk) shows the terminal on the left and the session's stats on the right
    (model, context, spend, time, to-do list). A desk with one monitor shows a stats line at the bottom.
    At night a soft pool of screen light falls on the desk; it turns amber when the bot needs you and
-   red after an error. A click on a monitor calls onOpen(uid, name), so the page opens the terminal.
+   red after an error. A monitor takes two clicks (the scene host runs the steps): the first click flies
+   the camera to it so the user can read the screen, a second click calls onOpen(uid, name), so the page
+   opens the terminal.
    The engine builds the desks and walks the bots. This file only repaints the screens and adds the
    cursor and the light pool (decor, noNav). Colors and fonts come from the DS tokens (stage.K).
    Helpers (subagents) have no session of their own; their monitors show what the engine traced.
@@ -398,12 +400,12 @@
     } else if (S.note && left > 0) { ink(c, P, p.fg, 0.5); c.fillText(clipCols(S.note, P.cols), lx, row()); }
     c.restore();
   }
-  // Hover: a focus ring in the action color and a badge that says what a click does.
-  function paintHover(c, W, H, P, p) {
+  // Hover: a focus ring in the action color and a badge that says what a click does (look closer, or open).
+  function paintHover(c, W, H, P, p, label) {
     c.save();
     c.strokeStyle = p.accent; c.lineWidth = 6; rr(c, 5, 5, W - 10, H - 10, 15); c.stroke();
     c.font = P.small; c.textBaseline = 'middle';
-    var label = 'Open terminal', bh = 30, bw = c.measureText(label).width + 28, bx = W - 16 - bw, by = H - (P.footH || 0) - bh - 12;
+    var bh = 30, bw = c.measureText(label).width + 28, bx = W - 16 - bw, by = H - (P.footH || 0) - bh - 12;
     c.fillStyle = p.accent; rr(c, bx, by, bw, bh, bh / 2); c.fill();
     c.fillStyle = p.onAccent; c.fillText(label, bx + 14, by + bh / 2 + 1);
     c.restore();
@@ -419,7 +421,7 @@
     paintHead(c, W, v, P, p);
     if (v.k === 'term') { cur = paintLines(c, v, P, p); paintFoot(c, W, H, v, P, p); }
     else paintStats(c, W, v, P, p);
-    if (v.hover) paintHover(c, W, H, P, p);
+    if (v.hover) paintHover(c, W, H, P, p, v.hover);
     c.restore();
     return cur;
   }
@@ -512,7 +514,7 @@
       e.P = P;
     }
     function viewOf(e, s, info) {
-      var v = { k: e.kind, name: e.name, word: info.word, key: info.key, live: info.live, hover: !!(e.hover && e.uid), look: K.look, th: themeN };
+      var v = { k: e.kind, name: e.name, word: info.word, key: info.key, live: info.live, hover: e.hover && e.uid ? e.hover : '', look: K.look, th: themeN };
       if (e.kind === 'term') {
         v.sub = s && s.helper ? 'subagent' : shortModel(s && s.model);
         v.lines = lines(s, e.P.cols, e.P.rows);
@@ -589,8 +591,9 @@
       var ctx = canvas.getContext('2d');
       if (!ctx) return;
       var tex = new T.CanvasTexture(canvas); tex.encoding = T.sRGBEncoding; tex.anisotropy = maxAniso;
+      // hover: '' or the badge text while the pointer is on the screen
       var e = { owner: self, mesh: m, bot: b, name: b.name, kind: ss.length > 1 && i === 1 ? 'stats' : 'term', footer: ss.length < 2,
-        canvas: canvas, ctx: ctx, tex: tex, W: W, H: H, P: null, sig: '', uid: null, hover: false, cursor: null, curOn: false,
+        canvas: canvas, ctx: ctx, tex: tex, W: W, H: H, P: null, sig: '', uid: null, hover: '', cursor: null, curOn: false,
         glow: null, glowA: 0, em: new T.Color(K.tok.bubble), emI: 0.95, hook: null };
       // The engine tints each screen in the bot's status color every frame. A terminal needs its own
       // colors, so the screen's light is set again right before it draws.
@@ -642,7 +645,7 @@
       if (!e.P) measure(e);
       var s = sessionFor(e), info = status(s), p = palette(K), night = K.look === 'night', sub = K.look === 'sublevel';
       e.uid = s && !s.pseudo && s.uid && s.status !== 'ended' ? s.uid : null;   // a closed session has no terminal to open
-      if (e.hover && !e.uid) { e.hover = false; if (hover === e) { hover = null; host.rehover(); } }
+      if (e.hover && !e.uid) { e.hover = ''; if (hover === e) { hover = null; host.rehover(); } }
       var closed = info.word === 'Closed', calm = info.key === 'resting' || info.key === 'finished';
       e.emI = (night ? 1 : 0.95) * (closed ? 0.5 : calm ? 0.8 : 1);
       if (e.glow) {
@@ -685,12 +688,16 @@
     }
 
     // The host picks: one raycast over all targets, a bot in front wins (then the click is the engine's), and the host owns the cursor.
+    // The badge says the next click: look closer, or open the terminal when this screen is in focus.
+    function keyOf(e) { return 'screen:' + e.name + ':' + e.kind; }
+    function labelOf(e) { var f = host.focused(); return f && f.key === keyOf(e) ? 'Open terminal' : 'Look closer'; }
     function setHover(h) {
-      if (h === hover) return;
+      var lb = h ? labelOf(h) : '';
+      if (h === hover && (!h || h.hover === lb)) return;
       var old = hover;
       hover = h;
-      if (old) { old.hover = false; paint(old, true); }
-      if (h) { h.hover = true; paint(h, true); }
+      if (old && old !== h) { old.hover = ''; paint(old, true); }
+      if (h) { h.hover = lb; paint(h, true); }
     }
 
     // The host tells us when a bot joins or leaves, the floor changes, or the engine rebuilds the floors
@@ -730,7 +737,11 @@
       meshes: function () { return entries.filter(function (e) { return e.uid && shown(e.mesh); }).map(function (e) { return e.mesh; }); },
       itemOf: function (mesh) { return mesh.userData.officeTerm || null; },
       hover: function (e) { try { setHover(e); } catch (x) { hover = null; } },
-      click: function (e) { if (e.uid && typeof o.onOpen === 'function') o.onOpen(e.uid, e.name); },
+      // a monitor is a screen: the first click looks at it, the second opens the terminal
+      look: function (e) { return { key: keyOf(e), mesh: e.mesh, verb: 'Open terminal', kind: 'terminal' }; },
+      open: function (e) { if (e.uid && typeof o.onOpen === 'function') o.onOpen(e.uid, e.name); },
+      // after a floor rebuild the screen in focus is a new mesh
+      find: function (key) { var e = entries.filter(function (x) { return keyOf(x) === key && inScene(x.mesh); })[0]; return e ? { item: e, mesh: e.mesh } : null; },
       anchors: function () { return entries.map(function (e) { return e.mesh; }); }
     });
     var timer = setInterval(function () { if (st.dead) { dispose(); return; } if (!self.dead) { try { scan(); } catch (x) { /* next time */ } } }, 1500);
@@ -745,7 +756,7 @@
       hover = null;
       host.leave();
       entries.forEach(function (e) {
-        e.hover = false;
+        e.hover = '';
         if (e.mesh.onBeforeRender === e.hook) delete e.mesh.onBeforeRender;
         if (e.cursor && e.cursor.parent) e.cursor.parent.remove(e.cursor);
         if (e.glow && e.glow.parent) e.glow.parent.remove(e.glow);

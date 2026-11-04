@@ -117,7 +117,7 @@ test('choose: one winner, the nearest; a bot in front wins the click', () => {
 // ---------- the browser part, with a fake THREE and a fake canvas ----------
 function fakeStage(hitsFor) {
   const handlers = {};
-  const cv = { style: { cursor: '' }, addEventListener: (n, f) => { handlers[n] = f; }, removeEventListener: (n) => { delete handlers[n]; }, getBoundingClientRect: () => ({ left: 0, top: 0, width: 100, height: 100 }) };
+  const cv = { style: { cursor: '' }, addEventListener: (n, f) => { handlers[n] = f; }, removeEventListener: (n) => { delete handlers[n]; }, clientHeight: 100, getBoundingClientRect: () => ({ left: 0, top: 0, right: 100, bottom: 100, width: 100, height: 100 }) };
   const anim = [];
   const mesh = (name) => node({ name, isMesh: true });
   const board = mesh('board'), screen = mesh('screen'), botHit = mesh('bot');
@@ -133,7 +133,7 @@ function fakeStage(hitsFor) {
       intersectObjects(list) { return list.map((m) => ({ object: m, distance: hitsFor[m.name], point: { x: 0 } })).filter((h) => h.distance != null).sort((a, b) => a.distance - b.distance); }
     }
   };
-  return { office: { inspect: () => ins }, handlers, cv, anim, board, screen, botHit, K, scene, ins };
+  return { office: { inspect: () => ins }, handlers, cv, anim, board, screen, botHit, K, scene, ins, fg, hitsFor };
 }
 const ev = (x = 10, y = 10, button = 0) => ({ clientX: x, clientY: y, button });
 
@@ -169,28 +169,6 @@ test('host: a drag is not a click, and an inactive target is not picked', () => 
   boardOn = false;
   s.handlers.pointerdown(ev()); s.handlers.pointerup(ev());
   assert.deepEqual(calls, ['terminal']);
-  host.dispose();
-});
-
-test('host: bypass consumes a click before the pick', () => {
-  const s = fakeStage({ board: 3 });
-  const host = globalThis.OfficeSceneHost.attach(s.office);
-  const calls = [];
-  host.register({ name: 'board', active: () => true, meshes: () => [s.board], itemOf: () => ({}), hover: () => {}, click: () => calls.push('click'), bypass: () => { calls.push('bypass'); return true; } });
-  s.handlers.pointerdown(ev()); s.handlers.pointerup(ev());
-  assert.deepEqual(calls, ['bypass']);
-  host.dispose();
-});
-
-test('host: a bypass that changes its own state does not let the click reach a target under the pointer', () => {
-  const s = fakeStage({ board: 3 });
-  const host = globalThis.OfficeSceneHost.attach(s.office);
-  const calls = [];
-  let open = true;
-  host.register({ name: 'board', active: () => !open, meshes: () => [s.board], itemOf: () => ({}), hover: () => {}, click: () => calls.push('board'), bypass: () => { if (!open) return false; open = false; calls.push('closed'); return true; } });
-  host.register({ name: 'terminal', active: () => true, meshes: () => [s.screen], itemOf: () => ({}), hover: () => {}, click: () => calls.push('terminal') });
-  s.handlers.pointerdown(ev()); s.handlers.pointerup(ev());
-  assert.deepEqual(calls, ['closed']);
   host.dispose();
 });
 
@@ -250,5 +228,312 @@ test('host: view and rooms come from the floor groups and the building', () => {
   fg.visible = false;
   assert.equal(host.inBuilding(), true);
   assert.deepEqual(host.rooms(), []);
+  host.dispose();
+});
+
+// ---------- focus: look first, then open ----------
+const plain = (key, open = false) => ({ key, open });
+
+test('focus steps: a click looks, a second click on the same screen opens, another screen is looked at', () => {
+  let r = P.focusStep(null, { type: 'click', key: 'board:r1' });
+  assert.deepEqual(r, { state: plain('board:r1'), act: 'look' });
+  r = P.focusStep(r.state, { type: 'click', key: 'board:r1' });
+  assert.deepEqual(r, { state: plain('board:r1', true), act: 'open' });
+  r = P.focusStep(r.state, { type: 'click', key: 'board:r1' });   // open: a click shows it again
+  assert.deepEqual(r, { state: plain('board:r1', true), act: 'open' });
+  r = P.focusStep(r.state, { type: 'click', key: 'notes:r1' });   // another screen: step 1 for that one
+  assert.deepEqual(r, { state: plain('notes:r1'), act: 'look' });
+});
+
+test('focus steps: Esc or Back and a click on empty scene go back; nothing to do without a screen in focus', () => {
+  const looking = plain('stats:r1'), open = plain('stats:r1', true);
+  assert.deepEqual(P.focusStep(looking, { type: 'back' }), { state: plain(null), act: 'back' });
+  assert.deepEqual(P.focusStep(open, { type: 'back' }), { state: plain(null), act: 'back' });
+  assert.deepEqual(P.focusStep(looking, { type: 'empty' }), { state: plain(null), act: 'back' });
+  assert.deepEqual(P.focusStep(plain(null), { type: 'back' }), { state: plain(null), act: null });
+  assert.deepEqual(P.focusStep(null, { type: 'empty' }), { state: plain(null), act: null });
+  assert.deepEqual(P.focusStep(looking, { type: 'click', key: null }), { state: looking, act: null });
+});
+
+test('free rect: a side column cuts its side, a band cuts its edge, with the gap; a cover off the view does nothing', () => {
+  const view = { left: 0, top: 0, right: 1000, bottom: 800 };
+  const covers = [
+    { left: 10, top: 10, right: 990, bottom: 50 },     // top bar
+    { left: 10, top: 60, right: 200, bottom: 500 },    // left column
+    { left: 800, top: 60, right: 990, bottom: 300 },   // right column
+    { left: 300, top: 700, right: 700, bottom: 780 },  // dock
+    { left: 1100, top: 0, right: 1200, bottom: 800 }   // off the view
+  ];
+  assert.deepEqual(P.freeRect(view, covers, 8), { left: 208, top: 58, right: 792, bottom: 692 });
+  assert.deepEqual(P.freeRect(view, [], 8), view);
+  assert.deepEqual(P.freeRect(view, null, 8), view);
+});
+
+test('free rect: the box that shows the item largest, not the largest box; covers in any order', () => {
+  const view = { left: 0, top: 0, right: 1000, bottom: 1000 };
+  const block = { left: 500, top: 0, right: 1000, bottom: 600 };
+  assert.deepEqual(P.freeRect(view, [block], 0), { left: 0, top: 0, right: 500, bottom: 1000 }, 'no aspect: the largest area (the column)');
+  assert.deepEqual(P.freeRect(view, [block], 0, 1.6), { left: 0, top: 600, right: 1000, bottom: 1000 }, 'a wide board: the band below');
+  // a small column in a corner and a short panel: the result does not depend on the order of the covers
+  const covers = [{ left: 1072, top: 68, right: 1344, bottom: 226 }, { left: 1024, top: 645, right: 1060, bottom: 886 }, { left: 16, top: 12, right: 1344, bottom: 52 }, { left: 16, top: 68, right: 236, bottom: 583 }, { left: 362, top: 743, right: 984, bottom: 824 }];
+  const v2 = { left: 0, top: 0, right: 1360, bottom: 900 };
+  const one = P.freeRect(v2, covers, 8, 1.7), two = P.freeRect(v2, covers.slice().reverse(), 8, 1.7);
+  assert.deepEqual(one, two);
+  assert.deepEqual(one, { left: 244, top: 60, right: 1064, bottom: 637 }, 'above the zoom column: a wider box beats a taller one');
+});
+
+test('free rect: on a phone the panels are bands, so they cut the top and the bottom', () => {
+  const view = { left: 0, top: 0, right: 400, bottom: 860 };
+  const covers = [{ left: 16, top: 12, right: 384, bottom: 144 }, { left: 16, top: 154, right: 384, bottom: 201 }, { left: 16, top: 477, right: 384, bottom: 690 }, { left: 16, top: 698, right: 384, bottom: 848 }];
+  assert.deepEqual(P.freeRect(view, covers, 8), { left: 0, top: 209, right: 400, bottom: 469 });
+});
+
+// A plane facing +z: half width along x, half height along y.
+const board = { c: [5, 2, -3], n: [0, 0, 1], ax: [2, 0, 0], ay: [0, 1.25, 0] };
+const camOf = (extra = {}) => ({ dist: 60, span: 20, h: 900, minPolar: 0.35, maxPolar: 1.25, back: [1, 1, 1], ...extra });
+const view = { left: 0, top: 0, right: 1360, bottom: 900 };
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+// where a world point lands on screen for a pose (an orthographic camera looks at the target, centered in the view)
+function screenOf(pose, cam, p) {
+  const wpp = cam.span / (pose.zoom * cam.h), d = [p[0] - pose.target[0], p[1] - pose.target[1], p[2] - pose.target[2]];
+  return [(view.left + view.right) / 2 + dot(d, pose.right) / wpp, (view.top + view.bottom) / 2 - dot(d, pose.up) / wpp];
+}
+const near = (a, b, eps = 1e-6) => Math.abs(a - b) < eps;
+
+test('frame pose: the screen fills the fill share of the limiting side, faces the camera, inside the polar range', () => {
+  const cam = camOf(), pose = P.framePose(board, cam, view, view, 0.88);
+  const left = screenOf(pose, cam, [3, 2, -3]), right = screenOf(pose, cam, [7, 2, -3]);
+  assert.ok(near(right[0] - left[0], 0.88 * 1360, 1e-6), 'width is 88% of the view: ' + (right[0] - left[0]));
+  assert.ok(near(screenOf(pose, cam, board.c)[0], 680) && near(screenOf(pose, cam, board.c)[1], 450), 'centered');
+  assert.ok(near(Math.acos(pose.dir[1]), 1.25), 'polar clamped to the controls max');
+  assert.ok(pose.dir[2] > 0.9, 'in front of the board');
+  assert.ok(near(Math.hypot(pose.pos[0] - pose.target[0], pose.pos[1] - pose.target[1], pose.pos[2] - pose.target[2]), 60), 'the camera keeps its distance');
+  // a tall view: the width still limits; a wide flat view: the height limits
+  const flat = P.framePose(board, cam, view, { left: 0, top: 0, right: 1360, bottom: 300 }, 0.88);
+  const top = screenOf(flat, cam, [5, 3.25, -3]), bottom = screenOf(flat, cam, [5, 0.75, -3]);
+  assert.ok(near(bottom[1] - top[1], 0.88 * 300, 1e-6), 'height is 88% of the free height: ' + (bottom[1] - top[1]));
+});
+
+test('frame pose: the screen sits in the middle of the free part, not of the view', () => {
+  const cam = camOf(), free = { left: 244, top: 60, right: 1016, bottom: 735 };
+  const pose = P.framePose(board, cam, view, free, 0.88);
+  const c = screenOf(pose, cam, board.c);
+  assert.ok(near(c[0], (244 + 1016) / 2) && near(c[1], (60 + 735) / 2), 'center ' + c);
+  const w = screenOf(pose, cam, [7, 2, -3])[0] - screenOf(pose, cam, [3, 2, -3])[0];
+  assert.ok(near(w, 0.88 * 772), 'width ' + w);
+  // a free part too small to use: the view
+  const tiny = P.framePose(board, cam, view, { left: 0, top: 0, right: 40, bottom: 40 }, 0.88);
+  assert.ok(near(screenOf(tiny, cam, board.c)[0], 680));
+});
+
+test('frame pose: a screen that tilts back is seen inside the polar range; a flat one uses the camera side', () => {
+  const t = 0.2, tilted = { ...board, n: [0, Math.sin(t), Math.cos(t)], ay: [0, 1.25 * Math.cos(t), -1.25 * Math.sin(t)] };
+  const cam = camOf({ maxPolar: 1.5 });
+  assert.ok(near(Math.acos(P.framePose(tilted, cam, view, view, 0.88).dir[1]), Math.PI / 2 - t), 'face on when the range allows it');
+  const flat = { ...board, n: [0, 1, 0] };
+  const pose = P.framePose(flat, camOf({ back: [0, 1, -1] }), view, view, 0.88);
+  assert.ok(near(Math.acos(pose.dir[1]), 0.35) && pose.dir[2] < 0, 'from the camera side, at the min polar');
+});
+
+// ---------- the browser part: clicks run the steps, the host flies the camera ----------
+const v3 = (x, y, z) => ({ x, y, z, set(a, b, c) { this.x = a; this.y = b; this.z = c; return this; } });
+// a plane mesh centered at (x, y, z), facing +z
+function screenMesh(name, x = 0, y = 2, z = 0, w = 4, h = 2.5) {
+  return node({ name, isMesh: true, geometry: { type: 'PlaneGeometry', parameters: { width: w, height: h } }, matrixWorld: { elements: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, y, z, 1] }, updateWorldMatrix() {} });
+}
+function focusStage(hitsFor) {
+  const s = fakeStage(hitsFor);
+  const a = screenMesh('a', 0), b = screenMesh('b', 10);
+  [a, b].forEach((m) => { m.parent = s.fg; s.fg.children.push(m); });
+  Object.assign(s.ins.stage.cam, { position: v3(30, 40, 60), zoom: 1, top: 10, bottom: -10, updateProjectionMatrix() {} });
+  s.ins.stage.ctl = { target: v3(0, 0, 0), enabled: true, minPolarAngle: 0.35, maxPolarAngle: 1.25, maxZoom: 4 };
+  s.ins.stage.goal = null;
+  return Object.assign(s, { a, b, stage: s.ins.stage });
+}
+// two screens and a door; look() gives a spec for the screens
+function screens(s, log) {
+  const items = { a: { id: 'a', mesh: s.a }, b: { id: 'b', mesh: s.b }, door: { id: 'door', mesh: s.board } };
+  const t = {
+    name: 'board', active: () => true, meshes: () => [s.a, s.b, s.board], itemOf: (m) => items[m.name === 'board' ? 'door' : m.name],
+    hover: () => {}, click: (it) => log.push('click:' + it.id), open: (it) => log.push('open:' + it.id),
+    look: (it) => (it.id === 'door' ? null : { key: 'k:' + it.id, mesh: it.mesh, verb: 'Open ' + it.id, kind: 'board' }),
+    find: (key) => { const it = items[key.slice(2)]; return it ? { item: it, mesh: it.mesh } : null; }
+  };
+  return { t, items };
+}
+const click = (s) => { s.handlers.pointerdown(ev()); s.handlers.pointerup(ev()); };
+const land = (s) => { for (let i = 0; i < 3; i++) s.anim[0](1, i); };   // 1 s frames: any flight lands
+
+test('host: the first click on a screen flies to it, the second opens it', () => {
+  const s = focusStage({ a: 5 }), log = [];
+  const host = globalThis.OfficeSceneHost.attach(s.office);
+  host.register(screens(s, log).t);
+  const seen = [];
+  host.onFocus((f) => seen.push(f && [f.key, f.open, f.verb]));
+  click(s);
+  assert.deepEqual(log, []);
+  assert.equal(host.focused().key, 'k:a');
+  assert.equal(host.focused().open, false);
+  assert.equal(host.flying(), true);
+  assert.equal(s.stage.ctl.enabled, false, 'the controls wait for the landing');
+  land(s);
+  assert.equal(host.flying(), false);
+  assert.equal(s.stage.ctl.enabled, true, 'after the flight the camera is the user\'s again');
+  assert.ok(s.stage.cam.zoom > 1, 'zoomed in on the screen');
+  assert.ok(s.stage.ctl.maxZoom >= s.stage.cam.zoom, 'the wheel can zoom on from there');
+  click(s);
+  assert.deepEqual(log, ['open:a']);
+  assert.equal(host.focused().open, true);
+  assert.deepEqual(seen, [['k:a', false, 'Open a'], ['k:a', true, 'Open a']]);
+  host.dispose();
+});
+
+test('host: another screen is looked at, and Back flies to the camera of the room', () => {
+  const s = focusStage({ a: 5 }), log = [];
+  const host = globalThis.OfficeSceneHost.attach(s.office);
+  host.register(screens(s, log).t);
+  const room = [s.stage.cam.position.x, s.stage.cam.position.y, s.stage.cam.position.z, s.stage.cam.zoom];
+  click(s); land(s);
+  const atA = s.stage.ctl.target.x;
+  s.hitsFor.a = undefined; s.hitsFor.b = 5;
+  click(s); land(s);
+  assert.equal(host.focused().key, 'k:b');
+  assert.equal(host.focused().open, false);
+  assert.ok(s.stage.ctl.target.x > atA + 5, 'the camera moved to b');
+  host.blur();
+  assert.equal(host.focused(), null);
+  land(s);
+  assert.deepEqual([s.stage.cam.position.x, s.stage.cam.position.y, s.stage.cam.position.z, s.stage.cam.zoom], room);
+  assert.equal(s.stage.ctl.maxZoom, 4, 'the max zoom is the DS value again');
+  assert.deepEqual(log, []);
+  host.dispose();
+});
+
+test('host: a click on empty scene flies back; a click on a bot is the engine\'s', () => {
+  const s = focusStage({ a: 5 }), log = [];
+  const host = globalThis.OfficeSceneHost.attach(s.office);
+  host.register(screens(s, log).t);
+  click(s); land(s);
+  s.hitsFor.a = undefined; s.hitsFor.bot = 3;
+  click(s);
+  assert.equal(host.focused().key, 'k:a', 'a bot under the pointer: the focus stays');
+  s.hitsFor.bot = undefined;
+  click(s);
+  assert.equal(host.focused(), null);
+  assert.equal(host.flying(), true);
+  host.dispose();
+});
+
+test('host: the door is one click, and the open button is the second step', () => {
+  const s = focusStage({ board: 5 }), log = [];
+  const host = globalThis.OfficeSceneHost.attach(s.office);
+  host.register(screens(s, log).t);
+  click(s);
+  assert.deepEqual(log, ['click:door']);
+  assert.equal(host.focused(), null);
+  host.open();
+  assert.deepEqual(log, ['click:door'], 'nothing in focus: nothing to open');
+  s.hitsFor.board = undefined; s.hitsFor.a = 5;
+  click(s);
+  host.open();
+  assert.deepEqual(log, ['click:door', 'open:a']);
+  host.dispose();
+});
+
+test('host: the keyboard path takes both steps at once, and from another screen flies straight on', () => {
+  const s = focusStage({}), log = [];
+  const host = globalThis.OfficeSceneHost.attach(s.office);
+  const sc = screens(s, log);
+  host.register(sc.t);
+  const room = s.stage.cam.position.x;
+  assert.equal(host.show(sc.t, sc.items.a, true), true);
+  assert.deepEqual(log, ['open:a']);
+  assert.equal(host.focused().key, 'k:a');
+  assert.equal(host.focused().open, true);
+  land(s);
+  assert.equal(host.show(sc.t, sc.items.b, true), true);
+  assert.deepEqual(log, ['open:a', 'open:b']);
+  assert.equal(host.focused().key, 'k:b');
+  assert.equal(host.show(sc.t, sc.items.door, true), false, 'the door has no screen');
+  assert.equal(host.show({ look: () => null }, sc.items.a, true), false, 'not a registered target');
+  host.blur(); land(s);
+  assert.equal(s.stage.cam.position.x, room, 'Back goes to the room, not to a');
+  host.dispose();
+});
+
+test('host: the engine does not reframe while a screen is in focus', () => {
+  const s = focusStage({ a: 5 }), log = [];
+  const host = globalThis.OfficeSceneHost.attach(s.office);
+  host.register(screens(s, log).t);
+  s.stage.goal = { t: 1 };
+  s.anim[0](0.016, 0);
+  assert.deepEqual(s.stage.goal, { t: 1 }, 'no focus: the engine frames');
+  click(s); land(s);
+  s.stage.goal = { t: 2 };
+  s.anim[0](0.016, 0);
+  assert.equal(s.stage.goal, null);
+  host.dispose();
+});
+
+test('host: after a rebuild the focus follows the new mesh; a screen that is gone flies back', () => {
+  const s = focusStage({ a: 5 }), log = [];
+  const host = globalThis.OfficeSceneHost.attach(s.office);
+  const sc = screens(s, log);
+  host.register(sc.t);
+  click(s); land(s);
+  const a2 = screenMesh('a', 0);
+  a2.parent = s.fg; s.fg.children.push(a2);
+  sc.items.a = { id: 'a2', mesh: a2 };
+  s.ins.bots = [...s.ins.bots];   // a bot joined: the engine rebuilt the floor
+  s.anim[0](0.016, 0);
+  assert.equal(host.focused().item.id, 'a2');
+  assert.equal(host.flying(), false);
+  delete sc.items.a;
+  s.ins.bots = [...s.ins.bots];
+  s.anim[0](0.016, 0);
+  assert.equal(host.focused(), null);
+  assert.equal(host.flying(), true, 'same floor: back to the room camera');
+  host.dispose();
+});
+
+test('host: a theme change frames the floor at once; the camera goes back on the screen in the same frame', () => {
+  const s = focusStage({ a: 5 }), log = [];
+  const host = globalThis.OfficeSceneHost.attach(s.office);
+  host.register(screens(s, log).t);
+  click(s); land(s);
+  const z = s.stage.cam.zoom, x = s.stage.ctl.target.x;
+  s.stage.cam.zoom = 1; s.stage.ctl.target.set(-5, 1, 0);   // the engine's rebuildAll: frameFloor(true)
+  s.K.tok = {};                                             // new theme tokens
+  s.anim[0](0.016, 0);
+  assert.equal(host.flying(), false);
+  assert.ok(Math.abs(s.stage.cam.zoom - z) < 1e-9 && Math.abs(s.stage.ctl.target.x - x) < 1e-9, 'back on the screen');
+  assert.equal(host.focused().key, 'k:a');
+  host.dispose();
+});
+
+test('host: when the floor is no longer shown the focus lets go without a flight', () => {
+  const s = focusStage({ a: 5 }), log = [];
+  const host = globalThis.OfficeSceneHost.attach(s.office);
+  host.register(screens(s, log).t);
+  const seen = [];
+  host.onFocus((f) => seen.push(f ? f.key : null));
+  click(s); land(s);
+  s.fg.visible = false;   // the building view
+  s.anim[0](0.016, 0);
+  assert.equal(host.focused(), null);
+  assert.equal(host.flying(), false);
+  assert.equal(s.stage.ctl.enabled, true);
+  assert.deepEqual(seen, ['k:a', null]);
+  host.dispose();
+});
+
+test('host: with reduced motion a flight lands in one frame', () => {
+  const s = focusStage({ a: 5 }), log = [];
+  s.stage.rm = true;
+  const host = globalThis.OfficeSceneHost.attach(s.office);
+  host.register(screens(s, log).t);
+  click(s);
+  s.anim[0](0.016, 0);
+  assert.equal(host.flying(), false);
   host.dispose();
 });
