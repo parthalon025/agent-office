@@ -83,19 +83,6 @@
   function Pair(a, b) { return h('div', { className: 'row' }, a, b); }
   function Busy(p) { return p.on ? h(A.Skeleton, { lines: p.lines || 3, label: 'Loading' }) : null; }
 
-  // The folders offered as one-click choices: the shown building first, then the recent ones, each once
-  // (the same folder in another case or slash style counts as the same folder).
-  function recentChoices(recent, first) {
-    var seen = {}, out = [];
-    [first].concat(recent || []).forEach(function (d) {
-      var k = String(d || '').replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase();
-      if (!d || seen[k]) return;
-      seen[k] = true; out.push(d);
-    });
-    return out.slice(0, 6);
-  }
-
-  // ---------- open a session ----------
   function OpenDialog(p) {
     var f = useState({ cwd: p.shownPath || p.recent[0] || '', name: '', where: 'office', isolation: 'same', model: '', permissionMode: '', maxBudget: '', prompt: '', template: '' }), form = f[0], setForm = f[1];
     var b = useState(false), busy = b[0], setBusy = b[1];
@@ -115,7 +102,13 @@
     }
     function delTemplate() { api('/api/template/delete', { id: form.template }).then(function () { setForm(Object.assign({}, form, { template: '' })); p.onTemplates(); }, function (x) { setErr(x.message); }); }
     var terminal = form.where === 'terminal';
-    var folders = recentChoices(p.recent, p.shownPath);
+    // The server owns the folder rules (place.mjs recentChoices); until its answer comes, show the stored list.
+    var fc = useState(null), fetched = fc[0], setFetched = fc[1];
+    useEffect(function () {
+      fetch('/api/choices?first=' + encodeURIComponent(p.shownPath || ''), { headers: { 'x-office-token': TOKEN } })
+        .then(function (r) { return r.json(); }).then(function (j) { setFetched(j.folders || null); }, function () {});
+    }, [p.shownPath]);
+    var folders = fetched || (p.recent || []).slice(0, 6);
     var tpl = [{ value: '', label: 'No template' }].concat(p.templates.map(function (t) { return { value: t.id, label: t.name }; }));
     return h(A.Dialog, {
       open: true, title: 'Open a session', onClose: p.onClose,
