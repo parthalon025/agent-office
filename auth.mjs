@@ -142,13 +142,18 @@ export function ownerOnlyArgs(file, env = process.env) {
  * be set (the file is written anyway; best effort). On Windows the file is made empty first, then icacls limits
  * it, then the text goes in, so the text is never in a file other users can read. A later plain write keeps the
  * limit. Elsewhere: mode 0600. deps: { fs, icacls(args), platform, env }.
+ * Only a failed or missing icacls (or no USERNAME) is best effort. A bug in the caller (a TypeError or ReferenceError,
+ * for example an import that is gone) is thrown, never turned into a warning.
  */
 export function writeOwnerOnly(file, text, { fs, icacls, platform = process.platform, env = process.env }) {
   let warning = null;
   if (platform === 'win32') {
     fs.closeSync(fs.openSync(file, 'a')); // make it if missing; keep what is there until the limit is set
     try { icacls(ownerOnlyArgs(file, env)); }
-    catch (e) { warning = `Could not limit ${file} to your Windows user (${String(e.stderr || e.message).trim().split(/\r?\n/)[0]}). Other users of this computer may read it.`; }
+    catch (e) {
+      if (e instanceof TypeError || e instanceof ReferenceError || e instanceof SyntaxError) throw e;
+      warning = `Could not limit ${file} to your Windows user (${String(e.stderr || e.message).trim().split(/\r?\n/)[0]}). Other users of this computer may read it.`;
+    }
     fs.writeFileSync(file, text);
   } else {
     fs.writeFileSync(file, text, { mode: 0o600 });

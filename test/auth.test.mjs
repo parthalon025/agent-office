@@ -150,6 +150,19 @@ test('Host, Origin, Sec-Fetch-Site and content type are checked before the token
   assert.equal(check('GET', '/nothing', H()).status, 404);
 });
 
+test('no Origin header and no Sec-Fetch-Site is fine on every group: Claude Code hooks, hook.mjs, mcp.mjs and command-line tools send none', () => {
+  const plain = (more) => ({ host: `127.0.0.1:${PORT}`, 'content-type': 'application/json', ...more });
+  for (const p of ['/hook', '/hook/http', '/hook/permission', '/mcp/inbox', '/mcp/ask', '/mcp/room', '/mcp/room/update']) {
+    const h = plain({ 'x-office-token': AG });
+    assert.equal('origin' in h || 'sec-fetch-site' in h, false);
+    assert.deepEqual(check('POST', p, h), { ok: true, group: 'agent' }, p);
+  }
+  for (const p of ['/api/answer', '/api/open', '/api/history', '/api/probe-http', '/api/launch-link']) assert.deepEqual(check('POST', p, plain({ 'x-office-token': PG })), { ok: true, group: 'page' }, p);
+  assert.deepEqual(check('GET', '/events', { host: `127.0.0.1:${PORT}`, 'x-office-token': PG }), { ok: true, group: 'page' });
+  assert.deepEqual(check('POST', '/launch', plain({})), { ok: true, group: 'launch' });
+  assert.deepEqual(check('GET', '/', { host: `localhost:${PORT}` }), { ok: true, group: 'public' });
+});
+
 test('cookies: the page cookie is HttpOnly, SameSite=Strict, for the whole site; values are read by exact name', () => {
   const c = auth.pageCookie(PORT, PG);
   assert.equal(c, `ao_${PORT}=${PG}; Path=/; HttpOnly; SameSite=Strict`);
@@ -199,6 +212,12 @@ test('writeOwnerOnly on Windows: make the file empty, limit it, then write the t
   const f3 = fakeFs();
   assert.equal(auth.writeOwnerOnly('/o/t', 'T', { fs: f3, icacls: () => assert.fail('no icacls off Windows'), platform: 'linux', env }), null);
   assert.deepEqual(f3.log, [['write', 'T', 0o600], ['chmod', 0o600]]);
+  // A missing USERNAME is best effort too; a bug in the runner (an import that is gone) is not hidden as a warning.
+  assert.match(auth.writeOwnerOnly('C:\\o\\y', 'T', { fs: fakeFs(), icacls: () => {}, platform: 'win32', env: {} }), /USERNAME is not set/);
+  const f4 = fakeFs();
+  // eslint-disable-next-line no-undef
+  assert.throws(() => auth.writeOwnerOnly('C:\\o\\z', 'SECRET', { fs: f4, icacls: () => execFileSyncThatIsGone(), platform: 'win32', env }), ReferenceError);
+  assert.ok(!f4.log.some((l) => l[0] === 'write'), 'nothing is written after a bug');
 });
 
 // ---------- sources ----------
@@ -267,7 +286,7 @@ test('route matrix, launch code and owner-only files on a real server', { timeou
   fs.mkdirSync(dir);
   fs.mkdirSync(lad);
   for (const f of fs.readdirSync(ROOT)) if (f.endsWith('.mjs') || f === 'package.json') fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
-  fs.cpSync(path.join(ROOT, 'public'), path.join(dir, 'public'), { recursive: true });
+  for (const d of ['providers', 'public']) fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true });
   const port = await freePort();
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toLowerCase() !== 'path'));
   Object.assign(env, {
