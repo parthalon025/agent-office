@@ -76,7 +76,16 @@ function run(cmd, args, cwd, timeout = 30000) {
     });
   });
 }
-const git = (args, cwd, timeout) => run('git', args, cwd, timeout);
+// An untrusted agent can write .git/config, .git/hooks and .gitattributes in the repos the office runs git in.
+// These options go before every git subcommand so none of those files can start a program of the agent's choice:
+// no fsmonitor command, no hooks (post-checkout, pre-commit, pre-push), no pager, no external diff, no ext:: remote.
+const NULL_DEVICE = process.platform === 'win32' ? 'NUL' : '/dev/null';
+export const GIT_HARDENING = ['-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${NULL_DEVICE}`, '-c', 'core.pager=cat', '-c', 'diff.external=', '-c', 'protocol.ext.allow=never'];
+// Read-only subcommands also skip the optional index refresh, so a look never writes to the repository.
+const READ_ONLY = new Set(['status', 'diff', 'log', 'ls-files']);
+/** The full argument list for a git call: hardening, then --no-optional-locks for read-only commands, then the command. */
+export const gitArgs = (args) => [...GIT_HARDENING, ...(READ_ONLY.has(args[0]) ? ['--no-optional-locks'] : []), ...args];
+const git = (args, cwd, timeout) => run('git', gitArgs(args), cwd, timeout);
 
 export async function repoTop(cwd) {
   try { return (await git(['rev-parse', '--show-toplevel'], cwd)).trim(); } catch { throw new Error('That folder is not in a git repository, so it cannot get a worktree.'); }
@@ -127,9 +136,9 @@ export async function changes(cwd) {
   out.branch = (head.match(/^## ([^.\s]+)/) || [])[1] || '';
   out.ahead = Number((head.match(/ahead (\d+)/) || [])[1] || 0);
   out.files = status.map((l) => ({ code: l.slice(0, 2).trim() || '?', word: STATUS_WORD[(l.slice(0, 2).trim() || '?')[0]] || 'changed', path: l.slice(3) }));
-  try { out.stat = (await git(['diff', 'HEAD', '--shortstat'], cwd)).trim(); } catch { /* no commits yet */ }
+  try { out.stat = (await git(['diff', 'HEAD', '--no-ext-diff', '--shortstat'], cwd)).trim(); } catch { /* no commits yet */ }
   try {
-    const diff = await git(['diff', 'HEAD', '--no-color', '--unified=3'], cwd);
+    const diff = await git(['diff', 'HEAD', '--no-color', '--no-ext-diff', '--no-textconv', '--unified=3'], cwd);
     out.truncated = diff.length > 120000;
     out.diff = diff.slice(0, 120000);
   } catch { /* no commits yet */ }
@@ -146,10 +155,29 @@ export async function removeWorktree({ root, repo, branch }, force = false) {
   return { removed: true, branchKept };
 }
 
+/**
+ * Refuses when the repository config defines a filter driver (filter.<name>.clean, smudge or process).
+ * `git add` and `git commit` run it for any path that .gitattributes names, and an agent can write both.
+ * Filters from the user's own global or system config (git-lfs) are trusted and do not count.
+ */
+export async function assertNoFilters(cwd) {
+  let out = '';
+  try { out = await git(['config', '--show-scope', '--get-regexp', '^filter\\.'], cwd, 8000); }
+  catch (e) { if (!/^Command failed/.test(e.message)) throw e; } // exit code 1 with no output = none set
+  const names = new Set();
+  for (const line of out.split(/\r?\n/).filter(Boolean)) {
+    const [scope, rest = ''] = line.split('\t');
+    if (scope === 'global' || scope === 'system') continue;
+    names.add((rest.match(/^filter\.(.+)\.[^.\s]+(?:\s|$)/) || [])[1] || rest.split(/\s/)[0]);
+  }
+  if (names.size) throw new Error(`This repository sets the git filter ${[...names].join(', ')}. A filter runs a program when git adds files. The office commits nothing. Remove the filter, or commit by hand.`);
+}
+
 /** Commits what is there, pushes the branch and opens a pull request with `gh`. Only called after the user confirms. */
 export async function createPr(cwd, branch, title) {
   const dirty = (await git(['status', '--porcelain'], cwd)).trim();
   if (dirty) {
+    await assertNoFilters(cwd);
     await git(['add', '-A'], cwd);
     await git(['commit', '-m', `Agent Office: ${title}`], cwd);
   }
