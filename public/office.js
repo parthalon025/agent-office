@@ -671,7 +671,7 @@
     var rc = useState(null), rect = rc[0], setRect = rc[1];
     var sv = useState('saved'), state = sv[0], setState = sv[1];
     var ref = React.useRef(null), timer = React.useRef(0);
-    var base = React.useRef(p.version || 0), latest = React.useRef(p.text || ''), seen = React.useRef(p.version || 0);
+    var base = React.useRef(p.version || 0), latest = React.useRef(p.text || ''), seen = React.useRef(p.version || 0), fromSent = React.useRef(false);
     useEffect(function () {
       var raf = 0;
       function follow() { var r = p.rect(); if (r) setRect(function (o) { return o && Math.abs(o.left - r.left) < 0.5 && Math.abs(o.top - r.top) < 0.5 && Math.abs(o.width - r.width) < 0.5 ? o : r; }); raf = requestAnimationFrame(follow); }
@@ -686,19 +686,23 @@
       if (ver === seen.current) return;                       // the note in the snapshot did not change
       seen.current = ver;
       if (state !== 'saved' || ver === base.current) return;  // a save is pending (the server merges it), or this is our own save
-      base.current = ver;
+      base.current = ver; fromSent.current = false;
       if ((p.text || '') !== latest.current) { latest.current = p.text || ''; setText(latest.current); }
     }, [p.version]);
     // The server keeps the merge rules (notes.mjs). The editor sends its text and the version it started from.
     function save(v) {
       latest.current = v;
-      return api('/api/notes/save', { key: p.noteKey, text: v, base: base.current }).then(function (res) {
+      var wasSent = fromSent.current;
+      return api('/api/notes/save', { key: p.noteKey, text: v, base: base.current, sent: wasSent }).then(function (res) {
         var typedMore = latest.current !== v;
         if (res.merged && res.text !== v) {
-          // An agent changed the notes: show the merged text. Keep the old base while the user types on, so the next save merges again.
-          if (!typedMore) { base.current = res.version; latest.current = res.text; setText(res.text); }
-          p.toast({ tone: 'info', title: 'Notes', text: 'An agent changed the notes. Your text is merged.' });
-        } else base.current = res.version;
+          // An agent changed the notes. The new base is the merged version. When the user typed on, the server keeps the
+          // text we sent as the merge base of the next save (sent), so nothing is merged twice.
+          base.current = res.version;
+          if (typedMore) fromSent.current = true;
+          else { fromSent.current = false; latest.current = res.text; setText(res.text); }
+          if (!wasSent) p.toast({ tone: 'info', title: 'Notes', text: 'An agent changed the notes. Your text is merged.' });
+        } else { base.current = res.version; fromSent.current = false; }
         if (!typedMore) setState('saved');
       }, function (x) {
         setState('error'); p.toast({ tone: 'error', title: 'Notes', text: x.message });

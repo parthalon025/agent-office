@@ -987,7 +987,7 @@ const snapshot = () => ({
   feed: feed.slice(-80),
   plan,
   figures: allFigures(),    // noteKey -> room figures (sessions, working, waiting, toolCalls, tokens, cost, todosDone, todosTotal, lastEvent)
-  notes: persisted.notes,   // noteKey -> { text, at, by? }: each room's notes board (by: the session that last wrote it)
+  notes: persisted.notes,   // noteKey -> { text, at, v, by? }: each room's notes board (v: version counter; a cleared board stays with text '' and at 0; by: the agent session that last wrote it)
   pins: persisted.pins,     // noteKey -> { text, by, at }: a short message an agent pinned on the room's blackboard
   repos: [...repos.entries()].map(([key, r]) => ({ key, ...r, worktrees: r.worktrees.map((w) => ({ ...w, place: placeOfWorktree(r.path, w) })) })),
   now: Date.now(),
@@ -1072,7 +1072,7 @@ const server = http.createServer(async (req, res) => {
       if (!key || key.length > 400) throw httpError(400, 'Unknown board.');
       // base: the version the editor started from. When the board moved on, notes.mjs merges three ways and
       // returns the merged text; the editor shows it.
-      const r = board.save(key, String(body.text ?? ''), body.base);
+      const r = board.save(key, String(body.text ?? ''), body.base, body.sent === true);
       savePersisted(); broadcast();
       return send(res, 200, { ok: true, version: r.version, text: r.text, merged: r.merged });
     }

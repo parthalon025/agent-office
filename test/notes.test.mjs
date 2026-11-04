@@ -151,8 +151,10 @@ test('delete merge: both sides delete the same line', () => {
 
 test('delete merge: user deletes one line, agent changes another', () => {
   assert.equal(merge3('a\nb\nc\nd', 'a\nc\nd', 'a\nb\nc\nD'), 'a\nc\nD');
-  // next to each other the two edits meet: the user result stays and the agent line follows
-  assert.equal(merge3('a\nb\nc', 'a\nc', 'a\nb\nC'), 'a\nc\nC');
+  // next to each other the two edits meet: the user's deleted line stays deleted
+  assert.equal(merge3('a\nb\nc', 'a\nc', 'a\nb\nC'), 'a\nC');
+  // an adjacent edit does not undo the other side's deletion
+  assert.equal(merge3('a\nb', 'a\nb\nc', 'a'), 'a\nc');
 });
 
 test('change merge: user changes one line, agent changes another', () => {
@@ -203,4 +205,34 @@ test('boards are separate per key', () => {
   const { n } = make();
   n.save(K, 'a', 0);
   assert.equal(n.read('other|x').text, '');
+});
+
+test('merge3: a long note with a change at the end is fast', () => {
+  const base = Array.from({ length: 4000 }, (_, i) => 'l' + (i % 7)).join('\n');
+  assert.equal(merge3(base, base, base + '\nx'), base + '\nx');
+});
+
+function mergedSetup() {
+  const { n } = make();
+  n.save(K, 'a', 0);                       // v1
+  n.append(K, 'Ada', 'x');                 // v2
+  const r = n.save(K, 'a\nb', 1);          // merged v3
+  assert.equal(r.text, 'a\nb\nAda: x');
+  return { n, r };
+}
+
+test('save after a merged answer: base is the text the editor sent', () => {
+  const { n, r } = mergedSetup();
+  assert.equal(n.save(K, 'a\nbc', r.version, true).text, 'a\nbc\nAda: x');
+});
+
+test('save after a merged answer: the user deletion holds', () => {
+  const { n, r } = mergedSetup();
+  assert.equal(n.save(K, 'a', r.version, true).text, 'a\nAda: x');
+});
+
+test('save after a merged answer: another agent line in between stays', () => {
+  const { n, r } = mergedSetup();
+  n.append(K, 'Bo', 'y');
+  assert.equal(n.save(K, 'a\nbc', r.version, true).text, 'a\nbc\nAda: x\nBo: y');
 });

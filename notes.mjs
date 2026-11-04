@@ -3,6 +3,8 @@
 // The version is a counter that only goes up. A cleared board keeps its counter (text ''), so a
 // version never comes back with other text. A save with an old base is merged three ways against the
 // text the user started from, so the user's deletions and changes stay and an agent's new lines stay.
+// Each version also keeps `sent`, the text the user sent from it. It is the merge base for the next save of
+// an editor that typed on while a merged answer came back.
 //
 // Pure: the two maps it changes (notes, pins) and the clock are injected. No timers, no I/O. The
 // server saves the maps after a change (state.json). Importing this module starts nothing.
@@ -21,12 +23,17 @@ const norm = (t) => String(t ?? '').replace(/\r\n?/g, '\n');
 // Longest common subsequence of two line lists: for each index of a, the matching index in b or -1.
 function match(a, b) {
   const n = a.length, m = b.length;
-  const L = Array.from({ length: n + 1 }, () => new Int32Array(m + 1));
-  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = a[i] === b[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
   const out = new Array(n).fill(-1);
+  // The common start and end need no table, so an append or one changed line builds an almost empty one.
+  let p = 0, s = 0;
+  while (p < n && p < m && a[p] === b[p]) { out[p] = p; p++; }
+  while (s < n - p && s < m - p && a[n - 1 - s] === b[m - 1 - s]) { out[n - 1 - s] = m - 1 - s; s++; }
+  const x = a.slice(p, n - s), y = b.slice(p, m - s), xn = x.length, ym = y.length;
+  const L = Array.from({ length: xn + 1 }, () => new Int32Array(ym + 1));
+  for (let i = xn - 1; i >= 0; i--) for (let j = ym - 1; j >= 0; j--) L[i][j] = x[i] === y[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
   let i = 0, j = 0;
-  while (i < n && j < m) {
-    if (a[i] === b[j]) { out[i] = j; i++; j++; } else if (L[i + 1][j] >= L[i][j + 1]) i++; else j++;
+  while (i < xn && j < ym) {
+    if (x[i] === y[j]) { out[p + i] = p + j; i++; j++; } else if (L[i + 1][j] >= L[i][j + 1]) i++; else j++;
   }
   return out;
 }
@@ -35,7 +42,9 @@ const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
 /**
  * Three-way merge by lines. base: the text the user started from. mine: the user's text.
  * theirs: the text on the server now. Where only one side changed, that side wins. Where both
- * changed the same lines, the user's lines win and the other side's new lines follow them.
+ * changed the same lines, the user's lines win and the other side's new lines follow them. A base
+ * line that the other side removed stays removed. So when an agent rewrites the board (notes_replace)
+ * while the user edits, the agent's removal of lines the user did not touch holds.
  */
 export function merge3(base, mine, theirs) {
   const B = lines(base), M = lines(mine), T = lines(theirs);
@@ -46,7 +55,12 @@ export function merge3(base, mine, theirs) {
     const b = B.slice(bi, bEnd), m = M.slice(mi, mEnd), t = T.slice(ti, tEnd);
     if (same(m, b)) out.push(...t);
     else if (same(t, b) || same(t, m)) out.push(...m);
-    else { out.push(...m); const seen = new Set([...b, ...m]); out.push(...t.filter((l) => !seen.has(l))); }
+    else {
+      // Both sides changed these lines. Base lines the other side removed stay removed; the user's lines win.
+      const bs = new Set(b), ms = new Set(m), ts = new Set(t);
+      out.push(...m.filter((l) => !(bs.has(l) && !ts.has(l))));
+      out.push(...t.filter((l) => !bs.has(l) && !ms.has(l)));
+    }
     bi = bEnd; mi = mEnd; ti = tEnd;
   };
   for (let i = 0; i < B.length; i++) {
@@ -112,22 +126,26 @@ export function createNotes({ notes, pins, now = Date.now }) {
     /**
      * The user's save. base: the version the editor started from (omit it to overwrite).
      * When the board moved on, the text is merged three ways. Returns { version, text, merged }.
-     * The editor shows `text` when `merged` is true.
+     * The editor shows `text` when `merged` is true. sent: the editor started from the text it sent
+     * with this version (it typed on while a merged answer came back), so merge against that text.
      */
-    save(key, text, base) {
+    save(key, text, base, sent = false) {
       text = norm(text);
       checkCap(text, 'A note');
       const cur = versionOf(key);
       const hasBase = base !== undefined && base !== null;
-      if (!hasBase || Number(base) === cur) {
+      if (!hasBase || (Number(base) === cur && !sent)) {
         if (text === textOf(key) || (!text.trim() && !textOf(key).trim())) return { version: cur, text: textOf(key), merged: false };
         return { version: write(key, text), text, merged: false };
       }
       const old = (past.get(key) || []).find((x) => x.v === Number(base));
-      const merged = old ? merge3(old.text, text, textOf(key)) : union(textOf(key), text);
+      const baseText = old ? (sent ? (old.sent ?? old.text) : old.text) : undefined;
+      const merged = baseText !== undefined ? merge3(baseText, text, textOf(key)) : union(textOf(key), text);
       checkCap(merged, 'The notes board');
-      if (merged === textOf(key)) return { version: cur, text: merged, merged: true };
-      return { version: write(key, merged), text: merged, merged: true };
+      const v = merged === textOf(key) ? cur : write(key, merged);
+      remember(key);
+      past.get(key).find((x) => x.v === v).sent = text;
+      return { version: v, text: merged, merged: true };
     },
 
     /** An agent adds lines at the end. Each line starts with the session name. Returns the added text. */
