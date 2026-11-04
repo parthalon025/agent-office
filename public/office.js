@@ -671,7 +671,7 @@
     var rc = useState(null), rect = rc[0], setRect = rc[1];
     var sv = useState('saved'), state = sv[0], setState = sv[1];
     var ref = React.useRef(null), timer = React.useRef(0);
-    var base = React.useRef(p.at || 0), latest = React.useRef(p.text || ''), seen = React.useRef(p.at || 0);
+    var base = React.useRef(p.version || 0), latest = React.useRef(p.text || ''), seen = React.useRef(p.version || 0);
     useEffect(function () {
       var raf = 0;
       function follow() { var r = p.rect(); if (r) setRect(function (o) { return o && Math.abs(o.left - r.left) < 0.5 && Math.abs(o.top - r.top) < 0.5 && Math.abs(o.width - r.width) < 0.5 ? o : r; }); raf = requestAnimationFrame(follow); }
@@ -682,35 +682,25 @@
     useEffect(function () { if (rect && !p.flying() && ref.current && document.activeElement !== ref.current) ref.current.focus(); }, [rect && Math.round(rect.width)]);
     // An idle editor takes a change that came from outside (an agent added a line).
     useEffect(function () {
-      var at = p.at || 0;
-      if (at === seen.current) return;                       // the note in the snapshot did not change
-      seen.current = at;
-      if (state !== 'saved' || at === base.current) return;  // a save is pending (its 409 merges), or this is our own save
-      base.current = at;
+      var ver = p.version || 0;
+      if (ver === seen.current) return;                       // the note in the snapshot did not change
+      seen.current = ver;
+      if (state !== 'saved' || ver === base.current) return;  // a save is pending (the server merges it), or this is our own save
+      base.current = ver;
       if ((p.text || '') !== latest.current) { latest.current = p.text || ''; setText(latest.current); }
-    }, [p.at]);
-    // The server text plus the lines of the user that it does not have.
-    function merge(server, mine) {
-      var have = {};
-      String(server).split('\n').forEach(function (l) { have[l] = true; });
-      var extra = String(mine).split('\n').filter(function (l) { return l.trim() && !have[l]; });
-      if (!extra.length) return server;
-      return server + (server && !/\n$/.test(server) ? '\n' : '') + extra.join('\n');
-    }
+    }, [p.version]);
+    // The server keeps the merge rules (notes.mjs). The editor sends its text and the version it started from.
     function save(v) {
       latest.current = v;
       return api('/api/notes/save', { key: p.noteKey, text: v, base: base.current }).then(function (res) {
-        if (res && 'at' in res) base.current = v.trim() ? res.at : 0;   // an empty note is deleted, so its at is 0
-        if (latest.current === v) setState('saved');
-      }, function (x) {
-        if (x.status === 409 && x.body && typeof x.body.text === 'string') {
-          clearTimeout(timer.current);
-          var m = merge(x.body.text, latest.current).slice(0, 4000);
-          base.current = x.body.at || 0;
-          latest.current = m; setText(m);
+        var typedMore = latest.current !== v;
+        if (res.merged && res.text !== v) {
+          // An agent changed the notes: show the merged text. Keep the old base while the user types on, so the next save merges again.
+          if (!typedMore) { base.current = res.version; latest.current = res.text; setText(res.text); }
           p.toast({ tone: 'info', title: 'Notes', text: 'An agent changed the notes. Your text is merged.' });
-          return save(m);
-        }
+        } else base.current = res.version;
+        if (!typedMore) setState('saved');
+      }, function (x) {
         setState('error'); p.toast({ tone: 'error', title: 'Notes', text: x.message });
       });
     }
@@ -1171,7 +1161,7 @@
       term ? h(TerminalPanel, { clear: clear, key: term.uid, uid: term.uid, name: term.name, toast: toast, onClose: function () { setTerm(null); } }) : null,
       !term && board && boardRef.current && board.kind === 'board' ? h(BoardPanel, { clear: clear, data: boardRef.current.dataOf(board.id), onClose: function () { boardRef.current.blur(); } }) : null,
       !term && board && boardRef.current && board.kind === 'stats' ? h(StatsPanel, { clear: clear, roomId: board.id, onClose: function () { boardRef.current.blur(); } }) : null,
-      !term && board && boardRef.current && board.kind === 'notes' ? h(NotesEditor, { key: board.id, noteKey: noteKey(board.id), text: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).text || '', at: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).at || 0, toast: toast,
+      !term && board && boardRef.current && board.kind === 'notes' ? h(NotesEditor, { key: board.id, noteKey: noteKey(board.id), text: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).text || '', version: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).v || 0, toast: toast,
         rect: function () { return boardRef.current ? boardRef.current.rect() : null; }, flying: function () { return boardRef.current ? boardRef.current.flying() : false; },
         onClose: function () { boardRef.current.refresh(); boardRef.current.blur(); } }) : null,
       d === 'sessions' ? h(SessionsDialog, { onClose: close, onGo: goTo }) : null,

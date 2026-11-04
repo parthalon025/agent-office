@@ -12,6 +12,7 @@ import * as git from './git.mjs';
 import { slimPayload } from './payload.mjs';
 import { createTracker, clip } from './tracker.mjs';
 import { placeOfSession, placeOfWorktree, adoptLegacy, normPath } from './place.mjs';
+import { createNotes, cleanPin, PIN_MAX } from './notes.mjs';
 import './public/vocab.js'; // session vocabulary, shared with the page (globalThis.OfficeVocab)
 const V = globalThis.OfficeVocab;
 
@@ -354,10 +355,13 @@ function onMcpAsk(p, res) {
 // An agent can read its room and change two things in it: the notes board (the user's notes,
 // persisted.notes) and one short pin on the blackboard (persisted.pins). Both use the page's key for
 // the room (place.mjs noteKey), so what an agent writes shows on the boards the user looks at.
+// notes.mjs owns the rules (versions, merge, caps); this file only calls it and saves the maps.
 // An agent changes only its own room: the room comes from the calling session, never from the arguments.
-const NOTES_MAX = 4000, PIN_MAX = 140;
 persisted.notes = persisted.notes || {};
 persisted.pins = persisted.pins || {};
+const board = createNotes({ notes: persisted.notes, pins: persisted.pins });
+for (const e of Object.values(persisted.notes)) if (!Number.isInteger(e.v)) e.v = 1; // notes saved before versions were counters
+// notes.mjs rule errors carry a status; the HTTP layer reads `status`.
 
 // Where a session sits (place.mjs). The snapshot carries it, so the page keeps no copy of the rules.
 const roomPlace = (s) => placeOfSession(s.git, s.cwd);
@@ -418,7 +422,7 @@ async function callerRoom(p) {
 function describeRoom(s) {
   const pl = roomPlace(s), key = pl.noteKey;
   const all = inRoom(key), others = all.filter((x) => x.uid !== s.uid);
-  const notes = persisted.notes[key], pin = persisted.pins[key];
+  const nb = board.read(key), notes = nb.text.trim() ? nb : null, pin = board.pinOf(key);
   const indent = (t) => t.split('\n').map((l) => '  ' + l).join('\n');
   return [
     `You are ${s.name} in Agent Office. The office shows each repository as a building, each branch as a floor and each worktree folder as a room. Your bot sits at a desk in your room.`,
@@ -487,32 +491,24 @@ function updateRoom(s, p) {
   for (const k of ['notes_append', 'notes_replace', 'pin']) if (has(k) && typeof p[k] !== 'string') throw httpError(400, `${k} must be text.`);
   if (!has('notes_append') && !has('notes_replace') && !has('pin')) throw httpError(400, 'Give notes_append, notes_replace or pin.');
   if (has('notes_append') && has('notes_replace')) throw httpError(400, 'Use notes_append or notes_replace, not both.');
-  const cur = persisted.notes[key]?.text || '';
-  let notes = null, line = null; // the next notes text, when the notes change; the line an append adds
-  if (has('notes_append')) {
-    // Every line gets the session name, so no line of an agent looks like the user's own.
-    const add = p.notes_append.replace(/\r\n?/g, '\n').split('\n').map((l) => l.trim()).filter(Boolean);
-    if (!add.length) throw httpError(400, 'notes_append is empty. Give the text to add.');
-    line = add.map((l) => `${s.name}: ${l}`).join('\n');
-    notes = cur ? cur + (cur.endsWith('\n') ? '' : '\n') + line : line;
-  } else if (has('notes_replace')) notes = p.notes_replace.replace(/\r\n?/g, '\n');
-  if (notes !== null && notes.length > NOTES_MAX) throw httpError(413, `The notes board can have ${NOTES_MAX} characters. With this change it would have ${notes.length}.`);
-  // The pin is one line on the blackboard: whitespace runs become one space, control characters go.
-  const pin = has('pin') ? p.pin.replace(/\s+/g, ' ').replace(/[\u0000-\u001f\u007f]/g, '').trim() : null;
-  if (pin !== null && pin.length > PIN_MAX) throw httpError(413, `A pin can have ${PIN_MAX} characters. This one has ${pin.length}.`);
+  // Check the pin before the notes change, so a refused call changes nothing.
+  const pin = has('pin') ? cleanPin(p.pin) : null;
 
-  const now = Date.now(), done = [];
-  if (notes !== null) {
-    if (notes.trim()) persisted.notes[key] = { text: notes, at: now, by: s.name }; else delete persisted.notes[key];
-    if (line !== null) { addFeed(s, 'tool', 'added to the notes board'); done.push(`Added to the notes board: "${oneLine(line, 200)}".`); }
-    else if (notes.trim()) { addFeed(s, 'tool', 'rewrote the notes board'); done.push(`Replaced the notes board text (${plural(notes.length, 'character', 'characters')}).`); }
-    else { addFeed(s, 'tool', 'cleared the notes board'); done.push('Cleared the notes board.'); }
+  const done = [];
+  if (has('notes_append')) {
+    const { line } = board.append(key, s.name, p.notes_append);
+    addFeed(s, 'tool', 'added to the notes board'); done.push(`Added to the notes board: "${oneLine(line, 200)}".`);
+  } else if (has('notes_replace')) {
+    const { old, cleared, text } = board.replace(key, s.name, p.notes_replace);
+    if (cleared) { addFeed(s, 'tool', 'cleared the notes board'); done.push('Cleared the notes board.'); }
+    else { addFeed(s, 'tool', 'rewrote the notes board'); done.push(`Replaced the notes board text (${plural(text.length, 'character', 'characters')}).`); }
     // A rewrite has no way back in the office, so the reply keeps the old text for the agent's transcript.
-    if (line === null && cur.trim()) done.push(`The old text was:\n${cur.split('\n').map((l) => '  ' + l).join('\n')}`);
+    if (old.trim()) done.push(`The old text was:\n${old.split('\n').map((l) => '  ' + l).join('\n')}`);
   }
   if (pin !== null) {
-    if (pin) { persisted.pins[key] = { text: pin, by: s.name, at: now }; addFeed(s, 'tool', 'pinned a note on the blackboard'); done.push(`Pinned on the blackboard: "${pin}".`); }
-    else if (persisted.pins[key]) { delete persisted.pins[key]; addFeed(s, 'tool', 'cleared the blackboard pin'); done.push('Cleared the blackboard pin.'); }
+    const r = board.pin(key, s.name, pin);
+    if (r === 'set') { addFeed(s, 'tool', 'pinned a note on the blackboard'); done.push(`Pinned on the blackboard: "${pin}".`); }
+    else if (r === 'cleared') { addFeed(s, 'tool', 'cleared the blackboard pin'); done.push('Cleared the blackboard pin.'); }
     else done.push('The blackboard had no pin, so nothing changed there.');
   }
   savePersisted(); broadcast();
@@ -1072,18 +1068,13 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/probe-http') return send(res, 200, await probeHttp());
     if (url.pathname === '/api/notes/save') {
       // the notes board of a room: the user's own reminders, kept in state.json
-      const key = String(body.key || ''), text = String(body.text ?? '');
+      const key = String(body.key || '');
       if (!key || key.length > 400) throw httpError(400, 'Unknown board.');
-      if (text.length > NOTES_MAX) throw httpError(413, `A note can have ${NOTES_MAX} characters.`);
-      // base: the "at" the editor last saw. When an agent changed the notes since, answer 409 with the current text.
-      const curNote = persisted.notes[key], curAt = curNote?.at || 0;
-      if (body.base !== undefined && body.base !== null && Number(body.base) !== curAt) {
-        return send(res, 409, { error: 'An agent changed the notes.', text: curNote?.text || '', at: curAt });
-      }
-      const at = text.trim() ? Date.now() : 0; // a missing note counts as 0, so a cleared board gives the editor base 0
-      if (text.trim()) persisted.notes[key] = { text, at }; else delete persisted.notes[key];
+      // base: the version the editor started from. When the board moved on, notes.mjs merges three ways and
+      // returns the merged text; the editor shows it.
+      const r = board.save(key, String(body.text ?? ''), body.base);
       savePersisted(); broadcast();
-      return send(res, 200, { ok: true, at });
+      return send(res, 200, { ok: true, version: r.version, text: r.text, merged: r.merged });
     }
     if (url.pathname === '/api/tree') return send(res, 200, await repoTree(String(body.root || '')));
     if (url.pathname === '/api/branches') return send(res, 200, { branches: await git.branches(knownRepo(body.repo).path) });
