@@ -18,6 +18,7 @@ import { createTracker, clip } from './tracker.mjs';
 import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, cleanRecent, recentChoices } from './place.mjs';
 import * as startup from './startup.mjs';
 import { createNotes, cleanPin, PIN_MAX } from './notes.mjs';
+import { mcpAddArgs, mcpRemoveArgs, pluginArgs } from './extensions.mjs';
 import './public/format.js'; // money, plurals and short paths, shared with the page (globalThis.OfficeFormat)
 import './public/vocab.js'; // session vocabulary, shared with the page (globalThis.OfficeVocab)
 const V = globalThis.OfficeVocab;
@@ -610,9 +611,8 @@ function doControl(uid, action, value) {
 // Add, remove, enable and disable for good: Claude Code's own CLI (`claude mcp`, `claude plugin`) in the
 // session's folder, with scope local (this folder, not shared) or project (shared in the repo).
 // The office never writes user scope: that is ~/.claude settings, which the office does not change.
-const EXT_SCOPES = new Set(['local', 'project']);
+// The CLI argument lists, with the scope and name rules, come from extensions.mjs.
 const NAME_RE = /^[\w.:@ -]{1,120}$/;
-const PLUGIN_RE = /^[\w.@\/-]{1,160}$/;
 function ask(s, request, ms = 15000) {
   return new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(httpError(504, 'The session did not answer.')), ms);
@@ -655,7 +655,6 @@ async function extAction(body) {
   const s = extSession(body.uid);
   const scope = String(body.scope || 'local');
   const cwd = s.git?.root || s.cwd;
-  const needScope = () => { if (!EXT_SCOPES.has(scope)) throw httpError(400, 'Use the scope local or project. The office does not change user settings.'); };
   const reload = async () => { if (s.headless) await ask(s, { subtype: 'reload_plugins' }, 60000).catch(() => null); };
   switch (String(body.action)) {
     case 'toggle': {
@@ -670,30 +669,20 @@ async function extAction(body) {
       await ask(s, { subtype: 'mcp_reconnect', serverName: String(body.name) }, 60000);
       return { ok: true };
     case 'mcp-add': {
-      needScope();
-      const name = String(body.name || '').trim(), target = String(body.target || '').trim();
-      if (!/^[\w.-]{1,64}$/.test(name)) throw httpError(400, 'Use letters, digits, dots and dashes for the name.');
-      if (!target) throw httpError(400, 'Give a URL or a command.');
-      const isUrl = /^https?:\/\//i.test(target);
-      const args = isUrl ? ['mcp', 'add', '--scope', scope, '--transport', body.transport === 'sse' ? 'sse' : 'http', name, target]
-        : ['mcp', 'add', '--scope', scope, name, '--', ...target.split(/\s+/)];
-      await claudeCli(args, cwd);
+      const name = String(body.name || '').trim();
+      await claudeCli(mcpAddArgs({ scope, name, target: body.target, transport: body.transport }), cwd);
       addFeed(s, 'tool', `added the connector ${name} (${scope})`);
       return { ok: true, restart: true };
     }
     case 'mcp-remove': {
-      needScope();
-      if (!NAME_RE.test(String(body.name))) throw httpError(400, 'Unknown connector.');
-      await claudeCli(['mcp', 'remove', '--scope', scope, String(body.name)], cwd);
+      await claudeCli(mcpRemoveArgs({ scope, name: body.name }), cwd);
       addFeed(s, 'tool', `removed the connector ${body.name} (${scope})`);
       return { ok: true, restart: true };
     }
     case 'plugin-enable': case 'plugin-disable': case 'plugin-install': case 'plugin-uninstall': {
-      needScope();
       const id = String(body.id || '').trim();
-      if (!PLUGIN_RE.test(id)) throw httpError(400, 'Use the plugin id, for example name@marketplace.');
       const verb = String(body.action).slice(7);
-      await claudeCli(['plugin', verb, id, '--scope', scope], cwd);
+      await claudeCli(pluginArgs({ verb, scope, id }), cwd);
       addFeed(s, 'tool', `${{ enable: 'enabled', disable: 'disabled', install: 'installed', uninstall: 'removed' }[verb]} the plugin ${id} (${scope})`);
       await reload();
       return { ok: true };
