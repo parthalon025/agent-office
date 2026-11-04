@@ -84,3 +84,17 @@ Add a new file only for a distinct job. Extend the file that owns the concern fi
 ## Not built
 
 Remote or phone access (needs real login and TLS; suggest Tailscale), terminal sessions taking chat input, non-Windows session launch.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as local markdown under `.scratch/<feature>/` (this repo has no remote). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five default roles: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`, written as a `Status:` line in each issue file. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root, created when terms or decisions are settled. See `docs/agents/domain.md`.
