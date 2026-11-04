@@ -7,7 +7,7 @@
   A.strict = true;
 
   // A repository is a building, a branch is a floor and a worktree is a room. The adapter builds
-  // the shown building (officeAdapter.buildingFor) and adds floors and rooms as sessions arrive.
+  // the shown building (a building adapter from officeAdapter.mount) and adds floors and rooms as sessions arrive.
 
   var MODELS = [
     { value: '', label: 'Default' }, { value: 'opus', label: 'Opus' }, { value: 'sonnet', label: 'Sonnet' },
@@ -652,8 +652,8 @@
   // The room's numbers, read beside the room when the camera faces the stats display.
   function StatsPanel(p) {
     var snap = useSnapshot();
-    var info = window.officeAdapter.roomInfo(p.roomId, snap || undefined);
-    var v = window.officeAdapter.figures(p.roomId, snap || undefined);
+    var info = p.mount.roomInfo(p.roomId, snap || undefined);
+    var v = p.mount.figures(p.roomId, snap || undefined);
     var row = function (k, val) { return h('li', { key: k }, h('span', null, k), h('b', { className: 'mono' }, val)); };
     return h('aside', { className: 'board-panel', style: clearStyle(p.clear), 'aria-label': 'Stats of ' + ((info.place && info.place.roomName) || 'this room') },
       h(A.Panel, { title: ((info.place && info.place.roomName) || 'Room') + ' · stats', count: plural(v.sessions, 'session', 'sessions') },
@@ -743,7 +743,7 @@
   // ---------- the agents in one room ----------
   function RoomDialog(p) {
     var snap = useSnapshot();
-    var info = window.officeAdapter.roomInfo(p.roomId, snap || undefined);
+    var info = p.mount.roomInfo(p.roomId, snap || undefined);
     var list = info.sessions, place = info.place;
     var cf = useState(null), confirm = cf[0], setConfirm = cf[1];
     var bz = useState(false), busy = bz[0], setBusy = bz[1];
@@ -875,7 +875,7 @@
 
   // ---------- page commands in the DS command palette (Ctrl+K) ----------
   // The HUD builds its palette list with AgentOffice.CommandPalette.actions(); the page adds its own.
-  var pageActions = [];
+  var pageActions = [];   // set by App in an effect, from its state
   (function () {
     var base = A.CommandPalette && A.CommandPalette.actions;
     if (!base || base.__page) return;
@@ -966,28 +966,29 @@
     var hasCur = list.some(function (b) { return b.key === cur; });
     // Show the chosen building while it has sessions; when it empties, go where the work is.
     var shown = hasCur || (!list.length && cur != null) ? cur : (list.length ? list[0].key : '');
-    var now = snap ? window.officeAdapter.roomsNow(snap, shown) : {};
-    var ep = useState(0), epoch = ep[0], setEpoch = ep[1];
-    // The DS has no event that removes a floor or a room, so a removal rebuilds the scene.
-    var gone = !!snap && window.officeAdapter.shown() === shown && window.officeAdapter.roomsShown().some(function (k) { return !now[k]; });
-    useEffect(function () { if (gone) setEpoch(function (e) { return e + 1; }); }, [gone]);
     // Compact view: the DS ambient bar, for a second screen. ?ambient=1 starts in it.
     var am = useState(function () { return /[?&]ambient=1\b/.test(location.search); }), ambient = am[0], setAmbient = am[1];
-    var wantKey = shown + ':' + epoch + (Object.keys(now).length ? '' : ':empty') + (ambient ? ':ambient' : '');
+    var wantKey = shown + (ambient ? ':ambient' : '');
     // City or office. The office is the default; the choice is kept in the browser.
     var vw = useState(function () { try { return localStorage.getItem('ao-view') === 'city' ? 'city' : 'office'; } catch (x) { return 'office'; } }), view = vw[0], setView = vw[1];
     // Smooth changes: the shown scene fades out, then the next one mounts and fades in.
-    var fd = useState({ key: wantKey, repo: shown, view: view }), cur2 = fd[0], setCur2 = fd[1];
-    var fading = cur2.key !== wantKey || cur2.view !== view;
+    // cur2.mount is the building adapter of the scene on screen (null in the city, or before the first snapshot).
+    // A scene gets a new one when the building changes, and when the adapter says it is stale: the DS has no
+    // event that removes a floor or a room, so a removal mounts the building again.
+    var fd = useState({ key: wantKey, repo: shown, view: view, mount: null }), cur2 = fd[0], setCur2 = fd[1];
+    var stale = !!snap && !!cur2.mount && cur2.mount.stale();
+    var needsMount = !!snap && view === 'office' && !cur2.mount && cur2.view === 'office';
+    var mount = cur2.mount, def = mount ? mount.def : null;
+    var sceneKey = mount ? 'm' + mount.id : cur2.key;
+    var fading = cur2.key !== wantKey || cur2.view !== view || stale || needsMount;
     useEffect(function () {
       if (!fading) return undefined;
-      var t = setTimeout(function () { setCur2({ key: wantKey, repo: shown, view: view }); }, reduced() ? 0 : cssMs('duration-base', 240));
+      var t = setTimeout(function () {
+        setCur2({ key: wantKey, repo: shown, view: view, mount: view === 'office' && window.officeAdapter.latest() ? window.officeAdapter.mount(shown) : null });
+      }, reduced() ? 0 : cssMs('duration-base', 240));
       return function () { clearTimeout(t); };
-    }, [wantKey, view]);
-    var sceneKey = cur2.key;
+    }, [wantKey, view, stale, needsMount, sceneKey]);
     var introNext = React.useRef(true);
-    // The scene mounts once per building. Re-rendering the page must not rebuild it.
-    var def = useMemo(function () { return snap && cur2.view === 'office' ? window.officeAdapter.buildingFor(cur2.repo) : null; }, [snap ? sceneKey + cur2.view : null]);
     var intro = useMemo(function () { var i = introNext.current; if (def) introNext.current = false; return i && !ambient; }, [def]);
     function go(v) { setView(v); try { localStorage.setItem('ao-view', v); } catch (x) { /* private window */ } }
     // From the city: fly to the building, then enter it with the DS intro flythrough.
@@ -1012,7 +1013,7 @@
       setBoard(null);
       setTerm({ uid: uid, name: name });
     }
-    function noteKey(roomId) { return window.officeAdapter.noteKey(roomId); }   // the server's key for the room (place.mjs)
+    function noteKey(roomId) { return mount ? mount.noteKey(roomId) : ''; }   // the server's key for the room (place.mjs)
     useEffect(function () { return function () {
       if (boardRef.current) { boardRef.current.dispose(); boardRef.current = null; }
       if (terminalRef.current) { terminalRef.current.dispose(); terminalRef.current = null; }
@@ -1030,9 +1031,9 @@
     }
     function roomsNow2(sn) {
       var b = boardRef.current, out = {};
-      if (!b || window.officeAdapter.shown() !== shown) return null;
+      if (!b || !mount || mount.repo !== shown) return null;
       roomIds().forEach(function (id) {
-        var inf = window.officeAdapter.roomInfo(id, sn);
+        var inf = mount.roomInfo(id, sn);
         var rn = (inf.place && inf.place.roomName) || 'Room';
         inf.sessions.forEach(function (x) { if (x.status !== 'ended' && x.place) out[x.uid] = { room: id, name: x.name, roomName: rn }; });
       });
@@ -1097,7 +1098,7 @@
       window.addEventListener('wheel', onWheel, { passive: true, capture: true });
       return function () { window.removeEventListener('wheel', onWheel, true); };
     }, [cur2.view]);
-    var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: window.officeAdapter, height: window.innerHeight, quality: 'auto', intro: intro, editable: false, simulate: false,
+    var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: mount.adapter, height: window.innerHeight, quality: 'auto', intro: intro, editable: false, simulate: false,
       ambient: ambient, onAmbientOpen: function () { setAmbient(false); }, onReady: function (o) {
         officeRef.current = o;
         window.officeScene = o;   // the mounted office API, for the console and tests
@@ -1109,10 +1110,10 @@
         if (st && host && window.OfficeBoard) {
           boardRef.current = window.OfficeBoard.attach(o, {
             host: host,
-            room: function (id) { return window.officeAdapter.roomInfo(id); },
+            room: function (id) { return mount.roomInfo(id); },
             note: function (id) { var n = latestSnap.current && latestSnap.current.notes && latestSnap.current.notes[noteKey(id)]; return n ? n.text : ''; },
             tree: function (root) { return api('/api/tree', { root: root }); },
-            stats: function (id) { return window.officeAdapter.figures(id); },
+            stats: function (id) { return mount.figures(id); },
             pin: function (id) { var n = latestSnap.current && latestSnap.current.pins && latestSnap.current.pins[noteKey(id)]; return n && n.text ? { text: n.text, by: n.by } : null; },
             onDoor: function (id) { setTerm(null); setDlg({ name: 'room', roomId: id }); },
             onFocus: function (id, kind) { setTerm(null); setBoard({ id: id, kind: kind }); }, onBlur: function () { setBoard(null); }
@@ -1121,7 +1122,7 @@
         if (st && host && window.OfficeTerminal) {
           terminalRef.current = window.OfficeTerminal.attach(o, {
             host: host,
-            session: function (botName) { return window.officeAdapter.session(botName); },
+            session: function (botName) { return mount.session(botName); },
             onOpen: function (uid, name) { o.select(name); openTerminal(uid, name); }
           });
         }
@@ -1155,15 +1156,17 @@
     var selSess = sel ? window.officeAdapter.session(sel) : null;
     var d = dlg && dlg.name;
 
-    // the page's own commands in Ctrl+K
-    pageActions.length = 0;
+    // the page's own commands in Ctrl+K, built from this render's state and handed to the palette after the render
+    var actions = [];
     [['open', 'Open a session', 'add', function () { show('open'); }], ['sessions', 'All sessions', 'identity', function () { setDlg({ name: 'sessions' }); }],
      ['city', 'City view', 'building', function () { go('city'); }], ['office', 'Office view', 'floor', function () { go('office'); }], ['floors', 'Floors and rooms', 'floor', function () { setDlg({ name: 'floors' }); }],
      ['past', 'Past sessions', 'session', function () { show('past'); }], ['schedules', 'Schedules', 'schedule', function () { show('schedules'); }],
      ['hooks', 'Attach other sessions', 'terminal', function () { show('hooks'); }], ['compact', 'Compact view', 'zoom-out', function () { setAmbient(true); }]]
-      .forEach(function (a) { pageActions.push({ id: 'page-' + a[0], label: a[1], icon: a[2], group: 'Office', run: a[3] }); });
-    if (selSess) pageActions.push({ id: 'page-ext', label: 'Extensions of ' + selSess.name, icon: 'connector', group: 'Office', run: function () { extensions(selSess.uid, selSess.name); } });
-    list.forEach(function (b) { if (b.key !== shown) pageActions.push({ id: 'page-b-' + b.key, label: 'Go to ' + b.name, icon: 'building', group: 'Buildings', keywords: 'building repository ' + b.name, run: function () { pick(b.key); } }); });
+      .forEach(function (a) { actions.push({ id: 'page-' + a[0], label: a[1], icon: a[2], group: 'Office', run: a[3] }); });
+    if (selSess) actions.push({ id: 'page-ext', label: 'Extensions of ' + selSess.name, icon: 'connector', group: 'Office', run: function () { extensions(selSess.uid, selSess.name); } });
+    list.forEach(function (b) { if (b.key !== shown) actions.push({ id: 'page-b-' + b.key, label: 'Go to ' + b.name, icon: 'building', group: 'Buildings', keywords: 'building repository ' + b.name, run: function () { pick(b.key); } }); });
+
+    useEffect(function () { pageActions = actions; return function () { pageActions = []; }; });
 
     return h(React.Fragment, null,
       h('div', { className: 'view' + (fading ? ' is-fading' : '') }, scene),
@@ -1175,11 +1178,11 @@
       d === 'changes' ? h(ChangesDialog, { uid: dlg.uid, name: dlg.label, ended: dlg.ended, toast: toast, onClose: close }) : null,
       d === 'hooks' ? h(HooksDialog, { info: info, snap: snap, onClose: close }) : null,
       d === 'floors' ? h(FloorsDialog, { repo: shown, toast: toast, onClose: close }) : null,
-      d === 'room' ? h(RoomDialog, { roomId: dlg.roomId, toast: toast, onClose: close }) : null,
+      d === 'room' && mount ? h(RoomDialog, { mount: mount, roomId: dlg.roomId, toast: toast, onClose: close }) : null,
       d === 'ext' ? h(ExtensionsDialog, { uid: dlg.uid, name: dlg.label, toast: toast, onClose: close }) : null,
       term ? h(TerminalPanel, { clear: clear, key: term.uid, uid: term.uid, name: term.name, toast: toast, onClose: function () { setTerm(null); } }) : null,
       !term && board && boardRef.current && board.kind === 'board' ? h(BoardPanel, { clear: clear, data: boardRef.current.dataOf(board.id), onClose: function () { boardRef.current.blur(); } }) : null,
-      !term && board && boardRef.current && board.kind === 'stats' ? h(StatsPanel, { clear: clear, roomId: board.id, onClose: function () { boardRef.current.blur(); } }) : null,
+      !term && board && boardRef.current && board.kind === 'stats' && mount ? h(StatsPanel, { mount: mount, clear: clear, roomId: board.id, onClose: function () { boardRef.current.blur(); } }) : null,
       !term && board && boardRef.current && board.kind === 'notes' ? h(NotesEditor, { key: board.id, noteKey: noteKey(board.id), text: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).text || '', version: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).v || 0, toast: toast,
         rect: function () { return boardRef.current ? boardRef.current.rect() : null; }, flying: function () { return boardRef.current ? boardRef.current.flying() : false; },
         onClose: function () { boardRef.current.refresh(); boardRef.current.blur(); } }) : null,
