@@ -42,7 +42,7 @@
 
    A pick target: { name, active() -> bool, meshes() -> [mesh], itemOf(mesh) -> item,
                     hover(item|null, hit), click(item, hit, event),
-                    look(item) -> { key, mesh, verb, kind, fill? } or null, open(item, hit, event),
+                    look(item) -> { key, mesh, verb, kind, fill?, clear? } or null, open(item, hit, event),
                     find(key) -> { item, mesh } or null,
                     anchors() -> [mesh] that must stay in the scene (a rebuild when one is gone) }.
    The host raycasts all active targets together, so there is one winner. A bot in front of it wins the click
@@ -50,7 +50,9 @@
    Two steps: an item whose look() gives a spec is a screen. The first click looks at it: the camera flies so the
    plane fills most of the free part of the screen. A second click on it calls open(). An item without a spec (the
    door) calls click() at once. A click on another screen looks at that one; a click on empty scene, Esc (the
-   page) or Back flies back. The camera flies here only, and the engine does not reframe while an item is in focus. */
+   page) or Back flies back. The camera flies here only, and the engine does not reframe while an item is in focus.
+   fill: the share of the free part the plane fills (default 0.88). clear: after the landing the camera stands this
+   far in front of the plane, so what stands closer to the viewer (a bot, its bubble, a desk) is clipped away. */
 (function (root) {
   'use strict';
 
@@ -177,9 +179,10 @@
     var ax = v3(it.ax), ay = v3(it.ay);
     return { dir: dir, right: right, up: up, sx: Math.abs(vdot(ax, right)) + Math.abs(vdot(ay, right)), sy: Math.abs(vdot(ax, up)) + Math.abs(vdot(ay, up)) };
   }
+  var MIN_FREE = 60;   // px: a free part smaller than this is no place to show a screen; the whole view is used
   function framePose(it, cam, view, free, fill) {
     var fc = facing(it, cam), dir = fc.dir, right = fc.right, up = fc.up, sx = fc.sx, sy = fc.sy;
-    var fr = free && free.right - free.left >= 60 && free.bottom - free.top >= 60 ? free : view;
+    var fr = free && free.right - free.left >= MIN_FREE && free.bottom - free.top >= MIN_FREE ? free : view;
     var fw = fr.right - fr.left, fh = fr.bottom - fr.top, h = cam.h || 1, span = cam.span || 1;
     var px = Math.min(sx > 1e-6 ? fw / (2 * sx) : Infinity, sy > 1e-6 ? fh / (2 * sy) : Infinity);   // CSS px per world unit at fill 1
     if (!isFinite(px)) px = h / span;
@@ -305,20 +308,32 @@
       return { dist: saved ? saved.dist : now.dist, span: (st.cam.top - st.cam.bottom) || 1, h: cv.clientHeight || (vr.bottom - vr.top),
         minPolar: ctl ? ctl.minPolarAngle : 0, maxPolar: ctl ? ctl.maxPolarAngle : Math.PI, back: now.back };
     }
-    function poseOf(spec) {
+    // strict: null when the covers leave no usable free part (a phone with a panel open), so a refit keeps the camera
+    function poseOf(spec, strict) {
       var it = planeOf(spec.mesh);
       if (!it) return null;
-      var cam = camOf(), fc = facing(it, cam);
-      return framePose(it, cam, viewRect(), free(null, fc.sy > 0 ? fc.sx / fc.sy : 0), spec.fill || FILL);
+      var cam = camOf(), fc = facing(it, cam), fr = free(null, fc.sy > 0 ? fc.sx / fc.sy : 0);
+      if (strict && !(fr.right - fr.left >= MIN_FREE && fr.bottom - fr.top >= MIN_FREE)) return null;
+      var pose = framePose(it, cam, viewRect(), fr, spec.fill || FILL);
+      // clear: after the landing the camera stands this close to the screen. The view is orthographic, so only the
+      // clipping changes: a bot, its bubble or a desk in front of the screen is cut away and the whole screen shows.
+      if (spec.clear > 0) pose.near = vadd(pose.target, pose.dir, spec.clear);
+      return pose;
     }
     // The wheel (city.js cameraFeel) keeps the zoom under the controls' max: while an item is in focus the max is above its zoom.
     function widenZoom(z) { if (!st.ctl) return; if (maxZ == null) maxZ = st.ctl.maxZoom; st.ctl.maxZoom = Math.max(maxZ, z * 1.5); }
     function restoreZoom() { if (st.ctl && maxZ != null) st.ctl.maxZoom = maxZ; maxZ = null; }
     // A flight: camera, controls target and zoom ease from where they are now. The controls are off until it lands.
     // home: the camera a look saved, while the flight goes back to it.
+    // A camera close to a screen first steps back out on its line of sight (the picture does not change), so the cut
+    // does not sweep through the room during the flight.
     function flyTo(pose, ms, home) {
-      var now = camNow();
-      fly = { t: 0, ms: st.rm ? 1 : ms, p0: now.p, p1: pose.pos, t0: now.t, t1: pose.target, z0: now.z, z1: pose.zoom, home: home || null };
+      var now = camNow(), far = (saved && saved.dist) || (home && home.dist) || 60;
+      if (now.dist < far * 0.5) {
+        var out = vadd(now.t, vnorm(now.back) || [0, 1, 0], far);
+        st.cam.position.set(out[0], out[1], out[2]); now.p = out;
+      }
+      fly = { t: 0, ms: st.rm ? 1 : ms, p0: now.p, p1: pose.pos, t0: now.t, t1: pose.target, z0: now.z, z1: pose.zoom, near: pose.near || null, home: home || null };
       if (st.ctl) st.ctl.enabled = false;
     }
     function stepFly(dt) {
@@ -329,7 +344,11 @@
       st.cam.position.set(L(f.p0[0], f.p1[0]), L(f.p0[1], f.p1[1]), L(f.p0[2], f.p1[2]));
       ctlTarget().set(L(f.t0[0], f.t1[0]), L(f.t0[1], f.t1[1]), L(f.t0[2], f.t1[2]));
       st.cam.zoom = L(f.z0, f.z1); st.cam.updateProjectionMatrix();
-      if (f.t >= 1) { fly = null; if (st.ctl) st.ctl.enabled = true; }   // after the flight the camera is the user's again
+      if (f.t >= 1) {
+        fly = null;
+        if (f.near) st.cam.position.set(f.near[0], f.near[1], f.near[2]);
+        if (st.ctl) st.ctl.enabled = true;   // after the flight the camera is the user's again
+      }
     }
     function info() {
       return foc ? { key: foc.key, name: foc.target.name, open: foc.open, item: foc.item, verb: foc.spec.verb || '', kind: foc.spec.kind || foc.target.name } : null;
@@ -404,13 +423,14 @@
     // Frame the item in focus again. now: at once (no flight), unless a flight to it still runs.
     function refit(now) {
       if (!foc) return;
-      var pose = poseOf(foc.spec);
+      var pose = poseOf(foc.spec, true);
       if (!pose) return;
       widenZoom(pose.zoom);
-      if (fly && !fly.home) { fly.p1 = pose.pos; fly.t1 = pose.target; fly.z1 = pose.zoom; return; }   // still flying in: land on the new frame
+      if (fly && !fly.home) { fly.p1 = pose.pos; fly.t1 = pose.target; fly.z1 = pose.zoom; fly.near = pose.near || null; return; }   // still flying in: land on the new frame
       if (now === true) {
         fly = null;
-        st.cam.position.set(pose.pos[0], pose.pos[1], pose.pos[2]); ctlTarget().set(pose.target[0], pose.target[1], pose.target[2]);
+        var p = pose.near || pose.pos;
+        st.cam.position.set(p[0], p[1], p[2]); ctlTarget().set(pose.target[0], pose.target[1], pose.target[2]);
         st.cam.zoom = pose.zoom; st.cam.updateProjectionMatrix();
         if (st.ctl) st.ctl.enabled = true;
         return;

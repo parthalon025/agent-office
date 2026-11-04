@@ -738,7 +738,8 @@
       itemOf: function (mesh) { return mesh.userData.officeTerm || null; },
       hover: function (e) { try { setHover(e); } catch (x) { hover = null; } },
       // a monitor is a screen: the first click looks at it, the second opens the terminal
-      look: function (e) { return { key: keyOf(e), mesh: e.mesh, verb: 'Open terminal', kind: 'terminal' }; },
+      // clear: the bot sits in front of its screen; the cut keeps the desk top and drops the bot and its bubble
+      look: function (e) { return { key: keyOf(e), mesh: e.mesh, verb: 'Open terminal', kind: 'terminal', clear: 0.5 }; },
       open: function (e) { if (e.uid && typeof o.onOpen === 'function') o.onOpen(e.uid, e.name); },
       // after a floor rebuild the screen in focus is a new mesh
       find: function (key) { var e = entries.filter(function (x) { return keyOf(x) === key && inScene(x.mesh); })[0]; return e ? { item: e, mesh: e.mesh } : null; },

@@ -938,7 +938,7 @@
 
   // ---------- a screen in the room, looked at up close (scene-host.js focus) ----------
   // The page's boxes over the 3D scene. The scene host frames a screen in the part of the view they leave free.
-  var COVERS = '.ao-hud-top, .ao-hud-left, .ao-hud-right, .ao-hud-zoom, .ao-hud-syl, .ao-hud-scrub, .ao-hud-cast, .ao-hud-log, .strip, .board-panel, .terminal-panel, .look-bar';
+  var COVERS = '.ao-hud-top, .ao-hud-left, .ao-hud-right, .ao-hud-zoom, .ao-hud-use, .ao-hud-syl, .ao-hud-scrub, .ao-hud-cast, .ao-hud-log, .strip, .board-panel, .terminal-panel, .look-bar';
   function sceneCovers(skip) {
     return [].slice.call(document.querySelectorAll(COVERS)).filter(function (el) {
       if (el === skip) return false;
@@ -1328,7 +1328,9 @@
       function set() {
         if (!strip) return;
         var v = Math.ceil(window.innerHeight - strip.getBoundingClientRect().top + 8);
+        var was = document.documentElement.style.getPropertyValue('--strip-clear');
         document.documentElement.style.setProperty('--strip-clear', v + 'px');
+        if (was && was !== v + 'px' && hostRef.current) hostRef.current.refit();   // a taller dock: the screen in focus is framed above it
       }
       function find() {
         var s2 = document.querySelector('.strip');

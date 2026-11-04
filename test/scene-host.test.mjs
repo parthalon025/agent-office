@@ -461,6 +461,50 @@ test('host: the keyboard path takes both steps at once, and from another screen 
   host.dispose();
 });
 
+test('host: with clear the camera lands close to the screen, and steps back out before it flies home', () => {
+  const s = focusStage({ a: 5 }), log = [];
+  const host = globalThis.OfficeSceneHost.attach(s.office);
+  const sc = screens(s, log), look0 = sc.t.look;
+  sc.t.look = (it) => Object.assign(look0(it), { clear: 0.5 });
+  host.register(sc.t);
+  const p = s.stage.cam.position, t = s.stage.ctl.target, dist = () => Math.hypot(p.x - t.x, p.y - t.y, p.z - t.z);
+  const room = [p.x, p.y, p.z], far = dist();
+  click(s);
+  s.anim[0](0.001, 0);
+  assert.ok(dist() > far * 0.9, 'far during the flight: nothing is cut on the way');
+  land(s);
+  assert.ok(Math.abs(dist() - 0.5) < 1e-9, 'close after the landing: ' + dist());
+  const zoomed = s.stage.cam.zoom;
+  host.blur();
+  s.anim[0](0.001, 0);
+  assert.ok(dist() > far * 0.9, 'out on the line of sight first');
+  assert.ok(Math.abs(s.stage.cam.zoom - zoomed) < 0.01, 'the picture did not jump');
+  land(s);
+  assert.deepEqual([p.x, p.y, p.z], room);
+  host.dispose();
+});
+
+test('host: a side panel frames the screen again beside it; a panel over the view keeps the camera', () => {
+  const s = focusStage({ a: 5 }), log = [];
+  s.cv.clientHeight = 800; s.cv.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1000, bottom: 800, width: 1000, height: 800 });
+  let covers = [];
+  const host = globalThis.OfficeSceneHost.attach(s.office, { covers: () => covers });
+  host.register(screens(s, log).t);
+  click(s); land(s);
+  const z = s.stage.cam.zoom, x = s.stage.ctl.target.x;
+  covers = [{ left: 0, top: 0, right: 1000, bottom: 780 }];   // a phone: the panel takes the view
+  host.refit();
+  assert.equal(host.flying(), false);
+  assert.equal(s.stage.cam.zoom, z);
+  covers = [{ left: 600, top: 0, right: 1000, bottom: 800 }];   // a side panel on the right
+  host.refit();
+  assert.equal(host.flying(), true);
+  land(s);
+  assert.ok(s.stage.cam.zoom < z, 'smaller, so it fits beside the panel');
+  assert.ok(s.stage.ctl.target.x > x, 'the screen moves left on screen: the camera target moves right');
+  host.dispose();
+});
+
 test('host: the engine does not reframe while a screen is in focus', () => {
   const s = focusStage({ a: 5 }), log = [];
   const host = globalThis.OfficeSceneHost.attach(s.office);

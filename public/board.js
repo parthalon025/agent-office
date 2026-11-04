@@ -693,7 +693,8 @@
       meshes: function () { var m = []; allItems().forEach(function (it) { m = m.concat(it.hit); }); return m; },
       itemOf: function (mesh) { return mesh.userData.item || null; },
       hover: onHover,
-      look: function (item) { return LOOK[item.kind] ? { key: keyOf(item), mesh: item.mesh, verb: item.hint, kind: item.kind } : null; },
+      // clear: the chalk ledge, the marker tray and the plant next to the boards stay in view; the desks and the bots in front are cut away
+      look: function (item) { return LOOK[item.kind] ? { key: keyOf(item), mesh: item.mesh, verb: item.hint, kind: item.kind, clear: 1.4 } : null; },
       open: function (item) { if (o.onOpen) o.onOpen(item.roomId, item.kind); },
       click: function (item) { if (item.kind === 'door' && o.onDoor) o.onDoor(item.roomId); },
       // after a floor rebuild the screen in focus is a new mesh
