@@ -622,6 +622,8 @@
         st.scene.add(hintSprite);
       }
       if (!item) { hintTarget = 0; return; }
+      var f = host.focused();
+      if (f && f.open && f.key === keyOf(item)) { hintTarget = 0; return; }   // its panel is open: no next click to name
       var tex = hintFor(hintOf(item));
       if (hintSprite.material.map !== tex) { hintSprite.material.map = tex; hintSprite.material.needsUpdate = true; }
       hintPoint = point.clone();
