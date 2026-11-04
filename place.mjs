@@ -51,6 +51,15 @@ export function placeOfWorktree(repoPath, wt) {
   return make(normPath(repoPath), baseName(repoPath), repoPath, wt.branch, wt.root);
 }
 
+/** Moves a note or pin from the legacy key to the current key. Never overwrites a current entry. Returns true if anything moved. */
+export function adoptLegacy(maps, place) {
+  const old = legacyNoteKey(place);
+  if (old === place.noteKey) return false;
+  let moved = false;
+  for (const m of maps) if (m[old] && !m[place.noteKey]) { m[place.noteKey] = m[old]; delete m[old]; moved = true; }
+  return moved;
+}
+
 /** The notes key a room had before room ids carried a hash. */
 export function legacyNoteKey(place) {
   return (place.buildingKey || OTHER_NOTE_PREFIX) + '|' + legacyRoomId(place.rootKey);

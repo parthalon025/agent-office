@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url';
 import * as git from './git.mjs';
 import { slimPayload } from './payload.mjs';
 import { riskOf } from './risk.mjs';
-import { placeOfSession, placeOfWorktree, legacyNoteKey, normPath } from './place.mjs';
+import { placeOfSession, placeOfWorktree, adoptLegacy, normPath } from './place.mjs';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -190,7 +190,7 @@ function knownRepo(p) {
 // Never take a room away from a session that works in it.
 function roomInUse(root) {
   const r = repoKey(root);
-  for (const s of sessions.values()) if (s.status !== 'ended' && s.cwd && repoKey(s.cwd).startsWith(r)) return s;
+  for (const s of sessions.values()) if (s.status !== 'ended' && s.cwd) { const k = repoKey(s.cwd); if (k === r || k.startsWith(r.endsWith(path.sep) ? r : r + path.sep)) return s; }
   return null;
 }
 // The top of a worktree for the room board: each top-level folder with its file count. Only folders
@@ -575,13 +575,7 @@ const roomPlace = (s) => placeOfSession(s.git, s.cwd);
 // Room ids carry a hash now. A note or pin saved under the old key moves to the new one the first time its
 // room is seen, so nothing the user wrote is lost. Remove this when old state files are gone.
 function adoptNotes(pl) {
-  const old = legacyNoteKey(pl);
-  if (old === pl.noteKey) return;
-  let moved = false;
-  for (const map of [persisted.notes, persisted.pins]) {
-    if (map[old] && !map[pl.noteKey]) { map[pl.noteKey] = map[old]; delete map[old]; moved = true; }
-  }
-  if (moved) savePersisted();
+  if (adoptLegacy([persisted.notes, persisted.pins], pl)) savePersisted();
 }
 // The open sessions the page seats in a room (adapter.js live()).
 const inRoom = (key) => [...sessions.values()].filter((x) => x.status !== 'ended' && x.placed && roomPlace(x).noteKey === key);

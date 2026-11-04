@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { placeOfSession, placeOfWorktree, legacyNoteKey, legacyRoomId, roomIdOf, normPath, OTHER_NAME, OTHER_FLOOR } from '../place.mjs';
+import { placeOfSession, placeOfWorktree, legacyNoteKey, legacyRoomId, roomIdOf, normPath, adoptLegacy, OTHER_NAME, OTHER_FLOOR } from '../place.mjs';
+import * as git from '../git.mjs';
+import fs from 'node:fs';
+import os from 'node:os';
+import { execFileSync } from 'node:child_process';
 
 const R = path.resolve('/work/Repo'), W = path.resolve('/work/Repo-wt');
 
@@ -90,4 +94,39 @@ test('normPath is idempotent at a drive root', () => {
 test('room id format is pinned', () => {
   // Changing this value orphans every saved note and pin. It needs a migration in adoptNotes().
   assert.equal(roomIdOf('e:\\agent-office'), 'w-e-agent-office-fe4d9e73');
+});
+
+test('adoptLegacy moves a note and a pin to the new key', () => {
+  const p = placeOfSession({ repo: R, root: R, branch: 'main' }, R), old = legacyNoteKey(p);
+  const notes = { [old]: 'n' }, pins = { [old]: 'p' };
+  assert.equal(adoptLegacy([notes, pins], p), true);
+  assert.deepEqual(notes, { [p.noteKey]: 'n' });
+  assert.deepEqual(pins, { [p.noteKey]: 'p' });
+});
+
+test('adoptLegacy keeps an existing new-key entry and leaves the old one', () => {
+  const p = placeOfSession({ repo: R, root: R, branch: 'main' }, R), old = legacyNoteKey(p);
+  const notes = { [old]: 'old', [p.noteKey]: 'new' };
+  assert.equal(adoptLegacy([notes], p), false);
+  assert.deepEqual(notes, { [old]: 'old', [p.noteKey]: 'new' });
+});
+
+test('adoptLegacy returns false when nothing is under the old key', () => {
+  const p = placeOfSession({ repo: R, root: R, branch: 'main' }, R);
+  assert.equal(adoptLegacy([{}, { other: 'x' }], p), false);
+});
+
+test('one repository has one building name and path whatever the cwd case', { skip: process.platform !== 'win32' }, async () => {
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'Ao-Case-')));
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: dir });
+    execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: dir });
+    const g = await git.locate(dir.toUpperCase());
+    assert.ok(g, 'locate finds the repository');
+    assert.equal(g.repo, path.normalize(dir), 'repo path has the case git stores');
+    const s = placeOfSession(g, dir.toUpperCase());
+    const w = placeOfWorktree(g.repo, (await git.layout(g.repo))[0]);
+    assert.equal(s.building, w.building);
+    assert.equal(s.repoPath, w.repoPath);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

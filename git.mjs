@@ -24,7 +24,7 @@ export async function repoTop(cwd) {
 /** Where a folder sits in git: the main repository, this worktree's top folder and its branch. Null outside git. */
 export async function locate(cwd) {
   try {
-    const [top, branch, common] = (await git(['rev-parse', '--show-toplevel', '--abbrev-ref', 'HEAD', '--git-common-dir'], cwd, 8000)).trim().split(/\r?\n/);
+    const [top, branch, common] = (await git(['rev-parse', '--show-toplevel', '--abbrev-ref', 'HEAD', '--path-format=absolute', '--git-common-dir'], cwd, 8000)).trim().split(/\r?\n/);
     const dir = path.resolve(cwd, common);
     const repo = path.basename(dir).toLowerCase() === '.git' ? path.dirname(dir) : dir;
     return { repo: path.normalize(repo), root: path.normalize(top), branch: branch === 'HEAD' ? 'detached' : branch };

@@ -56,7 +56,7 @@
   // Per mounted scene. subscribe() resets them, so a remount (another building) starts clean.
   var known = {};   // uid -> mirror of what the office was told
   var taken = {};   // bot name -> true
-  var layout = { repo: null, floors: {}, nextId: 1 };   // branch -> { id, rooms: { root: roomId } }
+  var layout = { repo: null, floors: {}, nextId: 1, keys: {} };   // branch -> { id, rooms: { root: roomId } }
   var emitRef = null, gen = 0;
   function uniqueName(base) {
     var n = base || 'session', i = 2;
@@ -82,6 +82,7 @@
     var f = layout.floors[pl.branch];
     if (!f) {
       var r = roomDef(pl);
+      layout.keys[r.id] = pl.noteKey;
       f = layout.floors[pl.branch] = { id: layout.nextId++, rooms: {} };
       f.rooms[pl.root] = r.id;
       emit({ type: 'floor.add', floor: floorDef(f.id, pl.branch, [r]) });
@@ -89,6 +90,7 @@
     }
     if (!f.rooms[pl.root]) {
       var r2 = roomDef(pl);
+      layout.keys[r2.id] = pl.noteKey;
       f.rooms[pl.root] = r2.id;
       emit({ type: 'room.add', floorId: f.id, room: r2 });
     }
@@ -373,11 +375,11 @@
       byBranch[pl.branch][pl.root] = pl;
     });
     order.sort(function (a, b) { return (/^(main|master|trunk)$/.test(b) ? 1 : 0) - (/^(main|master|trunk)$/.test(a) ? 1 : 0); });
-    var map = {}, nextId = 1;
+    var map = {}, nextId = 1, keys = {};
     var floors = order.map(function (br) {
       var f = map[br] = { id: nextId++, rooms: {} };
       var rooms = Object.keys(byBranch[br]).map(function (root) {
-        var r = roomDef(byBranch[br][root]); f.rooms[root] = r.id;
+        var r = roomDef(byBranch[br][root]); f.rooms[root] = r.id; keys[r.id] = byBranch[br][root].noteKey;
         if (withBots) r.bots = bots[root] || [];
         return r;
       });
@@ -385,12 +387,12 @@
     });
     // An empty building still needs a floor to stand on.
     if (!floors.length) { floors = [floorDef(1, 'No sessions', [])]; nextId = 2; }
-    return { def: { name: name || OTHER, sessions: 'agent', floors: floors }, floors: map, nextId: nextId };
+    return { def: { name: name || OTHER, sessions: 'agent', floors: floors }, floors: map, nextId: nextId, keys: keys };
   }
   // The building the scene shows. Mount the scene right after this call.
   window.officeAdapter.buildingFor = function (repo) {
     var d = describe(repo, latest, false);
-    layout = { repo: repo, floors: d.floors, nextId: d.nextId };
+    layout = { repo: repo, floors: d.floors, nextId: d.nextId, keys: d.keys };
     return d.def;
   };
   // A building with its bots, for a preview. It does not change what the scene shows.
@@ -408,7 +410,7 @@
   };
   window.officeAdapter.shown = function () { return layout.repo; };
   // The key of a room's notes board and blackboard pin, from the server (empty for a room it does not know).
-  window.officeAdapter.noteKey = function (roomId, snap) { var p = window.officeAdapter.roomInfo(roomId, snap).place; return p ? p.noteKey : ''; };
+  window.officeAdapter.noteKey = function (roomId, snap) { var p = window.officeAdapter.roomInfo(roomId, snap).place; return p ? p.noteKey : (layout.keys[roomId] || ''); };
   // The building key of a session ('' outside git).
   window.officeAdapter.buildingOf = function (s) { return s.place ? s.place.buildingKey : ''; };
   // Rooms in the shown scene, as "branch|root". The page rebuilds the scene when one of them is gone,
