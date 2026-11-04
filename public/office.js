@@ -1511,7 +1511,6 @@
       // Alerts for requests in buildings that are not shown. The DS alert toggle decides; they show only while the page is hidden.
       snap ? h(A.Notifier, { enabled: alertsOn(), count: needs.length, notifications: needs.filter(function (r) { return r.building !== onScreen; }).map(function (r) { return { id: r.id, kind: 'request', bot: r.bot, risk: r.risk, text: r.buildingName + '. ' + r.text }; }),
         onClick: function (n) { var r = needs.filter(function (x) { return x.id === n.id; })[0]; if (r) { pick(r.building); if (view === 'city') go('office'); } } }) : null,
-      ambient || cur2.view !== 'office' ? null : h(ChatHeaderButton, { sess: selSess, onOpen: function () { extensions(selSess.uid, selSess.name); } }),
       h('div', { className: 'page-toasts', ref: toastBox },
         h(A.ToastStack, { toasts: toasts, onClose: function (id) { setToasts(function (l) { return window.OfficeToasts.remove(l, id); }); } })));
   }
