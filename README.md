@@ -112,6 +112,8 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 | `OFFICE_PORT` | `4317` | Port on 127.0.0.1. |
 | `OFFICE_HOOKS` | auto | `command` or `http` forces a hook mode. |
 | `OFFICE_ASK_TIMEOUT_S` | `60` | How long a terminal session's permission prompt waits for the office before the terminal dialog decides. Sessions in the office wait 15 minutes. |
+| `OFFICE_OLLAMA_URL` | `http://127.0.0.1:11434/v1` | Where the Ollama agents find their server. Loopback addresses only (127.0.0.1, localhost, ::1). Any other host stops the office at start. |
+| `OFFICE_LMSTUDIO_URL` | `http://127.0.0.1:1234/v1` | The same for LM Studio agents. The office only lists models and sends chat requests. It never loads or unloads a model. |
 
 ## Files
 

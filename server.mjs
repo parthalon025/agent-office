@@ -16,6 +16,7 @@ import * as git from './git.mjs';
 import { slimPayload } from './payload.mjs';
 import { createTracker, clip } from './tracker.mjs';
 import { createRegistry, providerEvents } from './providers/index.mjs';
+import { createLocal } from './providers/local.mjs';
 import { createClaudeCode, claudeVersion, MODEL_RE, MODES } from './providers/claude-code.mjs';
 import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, cleanRecent, recentChoices } from './place.mjs';
 import * as startup from './startup.mjs';
@@ -150,7 +151,15 @@ const { sessions, feed, addFeed, newSession, placeSession, findSession, onHook, 
 // the hook routes below, and a permission decision goes back as the hook's answer (claude.answer gives the body).
 const events = providerEvents({ tracker, onChange: () => broadcast(), hold: (r) => { holdRequest(r); broadcast(); } });
 const claude = createClaudeCode({ events, files: () => ({ settings: activeHooksFile(), mcp: MCP_FILE, launcher: path.join(ROOT, 'launch.ps1') }) });
-const providers = createRegistry([claude]);
+// The four office tools for agents the office runs itself (no MCP process): the same handlers the /mcp/* routes call.
+// They answer text or throw httpError. Function declarations are hoisted, so they are ready when a local agent calls one.
+const officeTools = {
+  inbox: (s) => inboxText(s),
+  ask: async (s, question) => (await askUser(s, question).done).text,
+  room: async (s) => describeRoom(await roomOf(s)),
+  roomUpdate: async (s, args) => updateRoom(await roomOf(s), args),
+};
+const providers = createRegistry([claude, createLocal({ events, kind: 'ollama', baseUrl: process.env.OFFICE_OLLAMA_URL, officeTools }), createLocal({ events, kind: 'lmstudio', baseUrl: process.env.OFFICE_LMSTUDIO_URL, officeTools })]);
 const providerOf = (s) => providers.of(s);
 
 const basename = (p) => (p ? p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : '');
@@ -355,24 +364,34 @@ function sessionFor(p) {
   return null;
 }
 
+// The text office_inbox answers with. The MCP route and the local-model provider (officeTools below) both call it.
+function inboxText(s) {
+  if (!s.inbox.length) return 'No new messages.';
+  const text = s.inbox.map((m) => '- ' + m.text).join('\n');
+  s.inbox = []; addFeed(s, 'tool', 'read the office inbox'); broadcast();
+  return text;
+}
 function onMcpInbox(p, res) {
   const s = sessionFor(p);
-  let text = 'Agent Office does not recognise this session. Start it from the office or with the office settings file.';
-  if (s) {
-    if (!s.inbox.length) text = 'No new messages.';
-    else { text = s.inbox.map((m) => '- ' + m.text).join('\n'); s.inbox = []; addFeed(s, 'tool', 'read the office inbox'); broadcast(); }
-  }
-  send(res, 200, { text });
+  send(res, 200, { text: s ? inboxText(s) : 'Agent Office does not recognise this session. Start it from the office or with the office settings file.' });
 }
 
 function onMcpAsk(p, res) {
   const s = sessionFor(p);
   if (!s) return send(res, 200, { text: 'Agent Office does not recognise this session, so the question was not shown. Ask in the terminal.' });
-  const id = tracker.askQuestion(s, p.question);
+  const a = askUser(s, p.question);
+  a.done.then((d) => replyOn(res, d));
+  res.on('close', () => forget(a.id));
+}
+// A question to the user (office_ask). { id, done }: done resolves to { text } when the user answers, or after 10 minutes.
+function askUser(s, question) {
+  const id = tracker.askQuestion(s, question);
+  let resolve;
+  const done = new Promise((r) => { resolve = r; });
   const timer = setTimeout(() => releaseHold(id, { text: 'No answer from the office after 10 minutes. Continue without it, or ask in the terminal.' }), 10 * 60 * 1000);
-  holds.set(id, { uid: s.uid, timer, kind: 'ask', reply: (d) => replyOn(res, d) });
-  res.on('close', () => forget(id));
+  holds.set(id, { uid: s.uid, timer, kind: 'ask', reply: (d) => resolve(d) });
   broadcast();
+  return { id, done };
 }
 
 // ---------- the room a session sits in (office_room, office_room_update) ----------
@@ -438,6 +457,9 @@ function allFigures() {
 async function callerRoom(p) {
   const s = sessionFor(p);
   if (!s) throw httpError(404, 'Agent Office does not recognise this session, so it cannot find your room. Start the session from the office, or with the office settings file.');
+  return roomOf(s);
+}
+async function roomOf(s) {
   if (!s.cwd) throw httpError(409, 'The office does not know the folder of this session yet. Try again after your next tool call.');
   await placeSession(s, !s.placed);
   return s;
