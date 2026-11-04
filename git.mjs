@@ -31,6 +31,19 @@ export async function locate(cwd) {
   } catch { return null; }
 }
 
+/** The page's keys for a session's room, from locate()'s result (null outside git) and the session's folder.
+ *  Must match public/adapter.js (placeOf, roomDef) and office.js noteKey():
+ *    repoKey  lower-case normalized repository path, or 'other' outside git (the page's `shown || 'other'`)
+ *    roomId   'w-' + slug(worktree root, or the folder outside git).slice(-48)
+ *    noteKey  repoKey + '|' + roomId: the key of the room's notes board and blackboard pin
+ *  The server has the only Node copy; adapter.js keeps the browser copy. Change both together. */
+export function roomKeys(g, cwd) {
+  const repoKey = g ? path.normalize(g.repo).toLowerCase() : 'other';
+  const slug = String(g ? g.root : cwd || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'x';
+  const roomId = 'w-' + slug.slice(-48);
+  return { repoKey, roomId, noteKey: repoKey + '|' + roomId };
+}
+
 const WORKTREE_ROOT = path.join(os.homedir(), '.agent-office', 'worktrees');
 
 /** Creates a branch `office/<name>-<id>` in its own folder and returns where Claude should work. */
