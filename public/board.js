@@ -25,6 +25,13 @@
   function cssNum(name, fallback) { var v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--' + name)); return isFinite(v) && v > 0 ? v : fallback; }
   function easeInOut(t) { return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2; }
   function noop() {}
+  // A dialog or the command palette is on top of the page. Esc belongs to it, not to the board or the terminal below.
+  function layerOpen() { return !!document.querySelector('.ao-dialog, .ao-cmdk'); }
+  // A DS Dialog closes from its own keydown listener and React removes it before window bubble listeners run.
+  // So record the layer state in window capture and decide in the bubble phase with escTaken(e).
+  var escLayer = false;
+  window.addEventListener('keydown', function (e) { if (e.key === 'Escape') escLayer = layerOpen(); }, true);
+  function escTaken(e) { return e.defaultPrevented || escLayer || layerOpen(); }
   function none() { return null; }
   function empty() { return []; }
 
@@ -287,13 +294,14 @@
   // Attach boards to a mounted office.
   // o: { room(roomId) -> info, tree(root) -> Promise, note(roomId) -> text, stats(roomId) -> numbers, pin(roomId) -> { text, by },
   //      onFocus(roomId, kind: 'board' | 'notes' | 'stats'), onBlur(), onDoor(roomId) }
+  //   The returned object has open(roomId, kind) for the keyboard path (Ctrl+K), and OfficeBoard.layerOpen() for the Esc rule.
   function attach(office, o) {
     o = o || {};
     var ins0 = null;
     try { ins0 = office && office.inspect && office.inspect(); } catch (x) { ins0 = null; }
     var st = ins0 && ins0.stage;
     var ownHost = !o.host, host = o.host || H.attach(office);
-    if (!st || !host) return { refresh: noop, blur: noop, focused: none, kind: none, flying: function () { return false; }, rect: none, dataOf: none, doorPulse: noop, rooms: empty, dispose: noop };
+    if (!st || !host) return { open: function () { return false; }, refresh: noop, blur: noop, focused: none, kind: none, flying: function () { return false; }, rect: none, dataOf: none, doorPulse: noop, rooms: empty, dispose: noop };
     var K = st.K;
     var boards = [];      // blackboards: { kind:'board', mesh, roomId, tex, canvas, ... }
     var notes = [];       // whiteboards: { kind:'notes', ... }
@@ -302,7 +310,7 @@
     var decorRooms = [];  // { rg, roomId, items, added, lamp, board } for each room group that has decor
     var pending = {};     // roomId -> { dir, at, t }: a door pulse that waits for its door (the floor is being rebuilt)
     var trees = {};       // root -> tree
-    var focused = null, focusedKind = null, focusedMesh = null, saved = null, dead = false;
+    var focused = null, focusedKind = null, focusedMesh = null, saved = null, dead = false, after = null;
     var lastTok = K.tok, skinVersion = 0, repaint = false;
 
     function tk(k) { return K.tok[k]; }
@@ -683,15 +691,36 @@
       focused = bd.roomId; focusedKind = kind || 'board'; focusedMesh = bd.mesh;
       if (st.ctl) st.ctl.enabled = false;
       // after the flight the camera is the user's again: turn, zoom and move as usual
-      flyTo(p1, c, z1, function () { if (st.ctl) st.ctl.enabled = true; });
+      flyTo(p1, c, z1, landed);
       if (o.onFocus) o.onFocus(bd.roomId, focusedKind);
     }
     function blur() {
       if (!focused || !saved) return;
       focused = null; focusedKind = null; focusedMesh = null;
       if (st.ctl) st.ctl.enabled = false;
-      flyTo(saved.p, saved.t, saved.z, function () { if (st.ctl) st.ctl.enabled = true; });
+      flyTo(saved.p, saved.t, saved.z, landed);
       if (o.onBlur) o.onBlur();
+    }
+    // A flight ended. The camera is the user's again; a request that came during the flight runs now.
+    function landed() {
+      if (st.ctl) st.ctl.enabled = true;
+      if (!after || dead) return;
+      var a = after; after = null;
+      open(a[0], a[1]);
+    }
+    // Open one tool of a room without the pointer: kind is 'board', 'notes' or 'stats' (the camera flies there),
+    // or 'door' (the agents of the room). It works on the shown floor. While another board is open or a flight is
+    // on, it waits for the camera to come back and then flies to the new one. Returns false when the room has no such tool.
+    function open(roomId, kind) {
+      if (dead) return false;
+      try { scan(); } catch (x) { /* the lists are still good */ }
+      if (kind === 'door') { if (!liveDoor(roomId)) return false; if (o.onDoor) o.onDoor(roomId); return true; }
+      var fg = shownFloor();
+      var it = allItems().filter(function (x) { return x.roomId === roomId && x.kind === kind && x.kind !== 'door' && onShownFloor(x.mesh, fg); })[0];
+      if (!it) return false;
+      if (focused || fly) { after = [roomId, kind]; if (focused && !fly) blur(); return true; }
+      focus(it, kind);
+      return true;
     }
 
     // Clicks come from the host (not drags, one winner). The open stats view has no page panel: a click on the scene closes it.
@@ -704,7 +733,8 @@
       if (!fly) blur();
       return true;                                 // the click closed the stats view and does nothing else
     }
-    function onKey(e) { if (e.key === 'Escape' && focused && !e.defaultPrevented) blur(); }
+    // Esc closes the top layer only: a dialog or the palette on top of the board takes it, the board stays.
+    function onKey(e) { if (e.key === 'Escape' && focused && !escTaken(e)) { after = null; blur(); } }
     var offTarget = host.register({
       name: 'board',
       active: function () { return !focused && !fly && !dead; },
@@ -744,8 +774,9 @@
       if (ownHost) host.dispose();
     }
     return {
-      refresh: refresh, blur: blur, focused: function () { return focused; }, kind: function () { return focusedKind; },
+      refresh: refresh, blur: function () { after = null; blur(); }, focused: function () { return focused; }, kind: function () { return focusedKind; },
       flying: function () { return !!fly; },
+      open: open,
       doorPulse: doorPulse,
       // the decorated rooms of the shown floor, left to right; none in the building view
       rooms: function () {
@@ -771,5 +802,5 @@
     };
   }
 
-  window.OfficeBoard = { attach: attach, data: boardData, toolWord: toolWord };
+  window.OfficeBoard = { attach: attach, layerOpen: layerOpen, escTaken: escTaken, data: boardData, toolWord: toolWord };
 })();

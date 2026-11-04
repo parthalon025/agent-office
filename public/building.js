@@ -8,6 +8,7 @@
      latest()              the newest snapshot, or null
      onSnapshot(fn)        fn(snap) now (when there is one) and on each snapshot; returns an unsubscribe function
      buildings(snap?)      the buildings, busiest first
+     requests(snap?)       every open request and question of every building, oldest first (Needs you)
      preview(repo, snap?)  a building definition with its bots (cards and the city); it mounts nothing
      session(botName)      the open session of a bot in the building that is on screen
      lookup(botName)       the commands and skills of that session
@@ -99,6 +100,22 @@
       .sort(function (a, b) { return b.waiting - a.waiting || b.sessions - a.sessions || b.last - a.last || a.name.localeCompare(b.name); });
   }
 
+  // Every open request and question of every building, oldest first. This is the Needs you list.
+  // A question carries no risk value, so a bulk action never answers one. kind is 'request' or 'question'.
+  function requests(snap) {
+    var out = [];
+    live(snap).forEach(function (s) {
+      var pl = placeOf(s), base = { uid: s.uid, bot: s.name, building: pl.repo, buildingName: pl.repoName, roomName: pl.roomName };
+      (s.pending || []).forEach(function (r) {
+        out.push(Object.assign({ id: r.id, kind: 'request', tool: r.tool, text: 'Allow ' + r.tool + (r.detail ? ': ' + clip(r.detail, 120) : '') + '?', risk: r.risk, preview: r.preview || r.detail || '', detail: r.detail || '', always: r.always || '', t: r.t || 0 }, base));
+      });
+      (s.questions || []).forEach(function (q) {
+        out.push(Object.assign({ id: q.id, kind: 'question', tool: 'office_ask', text: q.text, t: q.t || 0 }, base));
+      });
+    });
+    return out.sort(function (a, b) { return a.t - b.t; });
+  }
+
   // A building definition: a floor per branch, a room per worktree, the default branch at the bottom.
   // With bots, each room also lists its sessions (for previews); the scene gets its bots from events instead.
   // Returns { def, floors: { branch: { id, rooms: { root: roomId } } }, nextId, keys: { roomId: noteKey }, empty }.
@@ -153,6 +170,7 @@
       return function () { listeners = listeners.filter(function (f) { return f !== fn; }); };
     };
     store.buildings = function (snap) { return buildings(snap || latest); };
+    store.requests = function (snap) { return requests(snap || latest); };
     store.preview = function (repo, snap) { return describe(repo, snap || latest, true).def; };
     store.shapeOf = shapeOf;
     store.colorOf = colorOf;
@@ -400,6 +418,7 @@
         for (var uid in known) { if (known[uid].name === botName && !known[uid].ended) return store.sessionByUid(uid); }
         return null;
       };
+      // The scene's own (unique) name of an open session, or null.
       m.lookup = function (botName) {
         var s = m.session(botName);
         return s ? { uid: s.uid, commands: s.commands || [], skills: s.skills || [] } : null;
@@ -414,5 +433,5 @@
     return store;
   }
 
-  root.OfficeBuilding = { createStore: createStore, shapeOf: shapeOf, colorOf: colorOf, buildings: buildings, describe: describe, roomsNow: roomsNow };
+  root.OfficeBuilding = { createStore: createStore, shapeOf: shapeOf, colorOf: colorOf, buildings: buildings, requests: requests, describe: describe, roomsNow: roomsNow };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

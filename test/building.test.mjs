@@ -417,3 +417,41 @@ test('colorOf is one stable DS color per uid, and bots of one shape still get di
     assert.ok(new Set(sameShape.map(B.colorOf)).size > 3);
   } finally { if (prev === undefined) delete globalThis.AgentOffice; else globalThis.AgentOffice = prev; }
 });
+
+test('requests: every open request and question of every building, oldest first, with the building named', async () => {
+  const r = rig({ repos: [{ path: REPO_B, worktrees: [{ branch: 'main', root: REPO_B }] }] });
+  assert.deepEqual(r.store.requests(), [], 'no snapshot, no requests');
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'b', cwd: REPO_B });
+  r.t += 10;
+  r.tracker.permissionRequest(slimPayload({ ...HOOKS.permission, session_id: 'b', cwd: REPO_B }, null));
+  r.t += 10;
+  const sa = [...r.tracker.sessions.values()].find((s) => s.cwd === REPO_A);
+  r.tracker.askQuestion(sa, 'Use the old schema?');
+  r.push();
+  const list = r.store.requests();
+  assert.equal(list.length, 2);
+  assert.deepEqual(list.map((x) => [x.kind, x.building, x.buildingName]), [['request', KEY_B, 'other'], ['question', KEY_A, 'repo']]);
+  assert.ok(list[0].t < list[1].t, 'oldest first');
+  assert.equal(list[1].text, 'Use the old schema?');
+  assert.equal(list[1].risk, undefined, 'a question has no risk value');
+  assert.ok(list[0].id && list[0].uid && list[0].bot && list[0].tool);
+  assert.equal(list.length, r.store.buildings().reduce((n, b) => n + b.waiting, 0), 'the total matches the buildings');
+  // the same list for a snapshot passed in, and an ended session adds nothing
+  r.tracker.sessions.forEach((s) => { s.status = 'ended'; });
+  r.push();
+  assert.deepEqual(r.store.requests(), []);
+});
+
+test('two sessions with one name in one building get unique scene names, found by uid', async () => {
+  const r = rig();
+  const m = r.mount(KEY_A);
+  await r.hook(fromHooks('turnWithEdit', REPO_A, 'sid-one')[0]);
+  await r.hook(fromHooks('turnWithEdit', REPO_A, 'sid-two')[0]);
+  const [a, b] = r.store.latest().sessions.filter((s) => s.status !== 'ended');
+  assert.equal(a.name, b.name, 'the page sees one name twice');
+  const names = [m.botName(a.uid), m.botName(b.uid)];
+  assert.equal(names[1], names[0] + ' 2');
+  assert.equal(r.store.botName(b.uid), names[1], 'the store answers for the mounted building');
+  assert.equal(m.botName('nope'), null);
+});
