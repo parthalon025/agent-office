@@ -729,6 +729,16 @@ test('events.fresh: a provider that could not continue a past conversation says 
   assert.doesNotThrow(() => providerEvents({ tracker: o.tracker }).fresh(s, 'x'), 'without the callback it only writes the feed');
 });
 
+test('events.permission: the Security room check hears that a provider asks, and whether the request is firm (the user must answer)', () => {
+  const seen = [];
+  const tracker = createTracker({ now: () => 1, locate: async () => null, screen: (s, p, opts) => { seen.push(opts); return null; } });
+  const events = providerEvents({ tracker, hold: () => {} });
+  const s = tracker.newSession({ uid: 'o1', officeId: 'o1', provider: 'hermes', name: 'a', cwd: 'C:\\w', headless: true, status: 'working' });
+  events.permission(s, { tool_name: 'Write', tool_input: { file_path: 'C:\\w\\a.txt' } });
+  events.permission(s, { tool_name: 'Write', tool_input: { file_path: 'C:\\w\\b.txt' } }, { firm: true });
+  assert.deepEqual(seen, [{ provider: true, firm: false }, { provider: true, firm: true }]);
+});
+
 test('events.drop: the provider frees a request its agent no longer waits for, and the feed says why', () => {
   const released = [];
   const o = office();

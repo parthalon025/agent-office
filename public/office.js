@@ -103,6 +103,19 @@
       if (toast) toast({ tone: 'success', title: 'Exported', text: j.filename });
     }, function (x) { if (toast) toast({ tone: 'error', title: 'Export failed', text: x.message }); });
   }
+  // An agent that reports no cost asks once before it runs while its Security room cell is Ask (security.mjs costAsk): the
+  // server answers 409 with confirm: 'cost' and the question; the page asks, then sends the same call with confirmCost: true.
+  function costAsked(x) { return !!(x && x.body && x.body.confirm === 'cost'); }
+  // p: { title, text (the server's question), busy, err, onCancel, onRun }
+  function CostDialog(p) {
+    return h(A.Dialog, { open: true, title: p.title, onClose: p.onCancel, actions: [
+      h(A.Button, { key: 'c', variant: 'quiet', onClick: p.onCancel }, 'Cancel'),
+      h(A.Button, { key: 'r', variant: 'primary', icon: 'approve', loading: !!p.busy, onClick: p.onRun }, 'Run it')] },
+      h('div', { className: 'form' },
+        h('p', { className: 'note' }, p.text),
+        h('p', { className: 'note' }, 'The office shows its cost as unknown, and no spend limit can stop it. The Security room can run such agents without this question.'),
+        p.err ? h('p', { className: 'ao-err', role: 'alert' }, p.err) : null));
+  }
   // The words of what an agent kind has beyond the seam (vocab.js featuresOf): only the ones it declares.
   function FeatureTags(p) {
     var list = window.OfficeVocab.featuresOf(p.session);
@@ -208,14 +221,19 @@
       var t = p.templates.filter(function (x) { return x.id === id; })[0];
       setForm(Object.assign({}, form, { template: id, prompt: t ? t.text : form.prompt }));
     }
-    function submit() {
+    var cq = useState(null), costQ = cq[0], setCostQ = cq[1];   // the cost question of an agent that reports no cost, or null
+    function submit(confirmed) {
       setBusy(true); setErr('');
       // Each agent gets its own room (a new worktree) unless the user keeps the folder. A terminal window always uses the folder.
       // Only the options the kind takes go to the server: a local model has no spend limit, window or permission mode.
       var where = canWindow ? form.where : 'office';
-      var body = Object.assign({}, form, { where: where, isolation: form.useFolder || where === 'terminal' ? 'same' : 'worktree', permissionMode: hasModes ? form.permissionMode : '', maxBudget: paid ? limitSent(form.maxBudget, p.spendLimit !== undefined) : undefined });
+      var body = Object.assign({}, form, { where: where, isolation: form.useFolder || where === 'terminal' ? 'same' : 'worktree', permissionMode: hasModes ? form.permissionMode : '', maxBudget: paid ? limitSent(form.maxBudget, p.spendLimit !== undefined) : undefined, confirmCost: confirmed === true });
       delete body.useFolder;
-      api('/api/open', body).then(function () { setBusy(false); p.onClose(); }, function (x) { setBusy(false); setErr(x.message); });
+      api('/api/open', body).then(function () { setBusy(false); setCostQ(null); p.onClose(); }, function (x) {
+        setBusy(false);
+        if (costAsked(x) && confirmed !== true) { setCostQ(x.message); return; }
+        setErr(x.message);
+      });
     }
     function saveTemplate() {
       api('/api/template/save', { name: saving, text: form.prompt }).then(function (t) { setSaving(null); p.onTemplates(); setForm(Object.assign({}, form, { template: t.id })); }, function (x) { setErr(x.message); });
@@ -231,6 +249,7 @@
     }, [p.shownPath]);
     var folders = fetched || (p.recent || []).slice(0, 6);
     var tpl = [{ value: '', label: 'No template' }].concat(p.templates.map(function (t) { return { value: t.id, label: t.name }; }));
+    if (costQ) return h(CostDialog, { title: 'Run ' + (k ? k.label : 'the agent'), text: costQ, busy: busy, err: err, onCancel: function () { setCostQ(null); setErr(''); }, onRun: function () { submit(true); } });
     return h(A.Dialog, {
       open: true, title: 'Open a session', onClose: p.onClose,
       actions: [
@@ -349,7 +368,7 @@
     function reopen(s, confirmed) {
       act(s.uid, function () {
         return api('/api/reopen', { uid: s.uid, confirmCost: confirmed === true }).then(function () { setRunAsk(null); p.onClose(); }, function (x) {
-          if (x.body && x.body.confirm === 'cost' && !confirmed) { setRunAsk({ s: s, text: x.message }); return; }
+          if (costAsked(x) && !confirmed) { setRunAsk({ s: s, text: x.message }); return; }
           throw x;
         });
       });
@@ -383,16 +402,7 @@
           h('p', { className: 'note' }, forkAsk.text),
           err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
     }
-    if (runAsk) {
-      var close = function () { setRunAsk(null); setErr(''); };
-      return h(A.Dialog, { open: true, title: 'Reopen ' + runAsk.s.name, onClose: close, actions: [
-        h(A.Button, { key: 'c', variant: 'quiet', onClick: close }, 'Cancel'),
-        h(A.Button, { key: 'r', variant: 'primary', icon: 'rollback', loading: busy === runAsk.s.uid, onClick: function () { reopen(runAsk.s, true); } }, 'Run it')] },
-        h('div', { className: 'form' },
-          h('p', { className: 'note' }, runAsk.text),
-          h('p', { className: 'note' }, 'The office shows its cost as unknown, and no spend limit can stop it.'),
-          err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
-    }
+    if (runAsk) return h(CostDialog, { title: 'Reopen ' + runAsk.s.name, text: runAsk.text, busy: busy === runAsk.s.uid, err: err, onCancel: function () { setRunAsk(null); setErr(''); }, onRun: function () { reopen(runAsk.s, true); } });
     var hit = {};
     (results || []).forEach(function (r) { hit[r.uid] = hit[r.uid] || r; });
     var shown = results ? (list || []).filter(function (s) { return hit[s.uid]; }) : list;
@@ -1204,20 +1214,28 @@
     var skillKinds = [];
     list.forEach(function (s) { if (window.OfficeVocab.hasFeature(s, 'skills') && s.provider && !skillKinds.some(function (k) { return k.kind === s.provider; })) skillKinds.push({ kind: s.provider, agent: window.officeAdapter.kindWord(s) }); });
     useEffect(function () { if (confirm && !cur) setConfirm(null); }, [confirm, !!cur]);
-    var K = useKinds(!!add), addKind = add ? kindOf(K.list, add.provider) : null;
+    // An ungated kind (ADR 0001) opens only in a room of its own, so a room's Add agent does not offer it.
+    var KA = useKinds(!!add), K = Object.assign({}, KA, { list: KA.list.filter(function (x) { return x.gated !== false; }) });
+    var addKind = add ? kindOf(K.list, add.provider) : null;
+    var cq = useState(null), costQ = cq[0], setCostQ = cq[1];   // the cost question of an agent that reports no cost, or null
     useFirstModel(addKind, add || {}, function (fn) { setAdd(function (a) { return a ? fn(a) : a; }); });
     function closeSession() {
       setBusy(true);
       api('/api/close', { uid: cur.uid }).then(function () { setBusy(false); setConfirm(null); p.toast({ tone: 'success', title: cur.name, text: 'Session closed' }); }, function (x) { setBusy(false); setErr(x.message); });
     }
-    function addAgent() {
+    function addAgent(confirmed) {
       var cwd = list.length && list[0].cwd ? list[0].cwd : place && place.path;
       if (!cwd) { setErr('This room has no folder yet.'); return; }
       setBusy(true); setErr('');
-      api('/api/open', { cwd: cwd, name: add.name.trim(), provider: add.provider, where: 'office', isolation: 'same', model: add.model, prompt: add.prompt })
-        .then(function () { setBusy(false); setAdd(null); p.toast({ tone: 'success', title: 'Office', text: 'Agent added' }); }, function (x) { setBusy(false); setErr(x.message); });
+      api('/api/open', { cwd: cwd, name: add.name.trim(), provider: add.provider, where: 'office', isolation: 'same', model: add.model, prompt: add.prompt, confirmCost: confirmed === true })
+        .then(function () { setBusy(false); setCostQ(null); setAdd(null); p.toast({ tone: 'success', title: 'Office', text: 'Agent added' }); }, function (x) {
+          setBusy(false);
+          if (costAsked(x) && confirmed !== true) { setCostQ(x.message); return; }
+          setErr(x.message);
+        });
     }
     var title = 'Agents in ' + ((place && place.roomName) || 'this room');
+    if (costQ) return h(CostDialog, { title: 'Run ' + (addKind ? addKind.label : 'the agent'), text: costQ, busy: busy, err: err, onCancel: function () { setCostQ(null); setErr(''); }, onRun: function () { addAgent(true); } });
     if (skills) return h(SkillsDialog, { kind: skills.kind, agent: skills.agent, toast: p.toast, onClose: function () { setSkills(null); } });
     if (cur) {
       return h(A.Dialog, { key: 'confirm', open: true, title: 'Close ' + cur.name, onClose: function () { setConfirm(null); setErr(''); }, actions: [

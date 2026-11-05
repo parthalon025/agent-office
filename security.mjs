@@ -9,12 +9,13 @@
 //                                    Ask on a row Claude Code does not ask about by itself makes it ask
 //   permissionModeFor(rules, b, m)   the permission mode of a new Claude Code office session ('default' while any cell is Ask)
 //   openRefusal(rules, provider)     why the office does not open an agent kind now (ungated and off, no cost reports and Deny)
+//   costAsk(rules, provider)         an agent without cost reports asks once per session unless its cell is Allow
 //   enforcement(providers)           per agent kind: why a cell is not enforced ('' = it is), for "Not enforced for this agent",
 //                                    and why an Ask cell is only partly enforced (asks), for "Partly enforced"
 //   addCost(ledger, at, col, $), costThisMonth(ledger, at)   the Spend screen's cost per agent kind this month
 // rules: { office: { 'row|col': value }, buildings: { buildingKey: { 'row|col': value } } }. A default is not stored.
 // A provider may list the rows its agent's own config takes (enforces: ['shell']) when it is ungated (gated: false, ADR 0001).
-// call: { building, kind, tool, input, root, worktree, provider? }. building: the session's building key, or null while the
+// call: { building, kind, tool, input, root, worktree, provider?, firm? }. building: the session's building key, or null while the
 // session is not placed (git not looked up yet). worktree: true when root is inside a git worktree. The rows Read inside
 // and Edit inside apply only then, and never for a wide root (risk.mjs wideRoot: the home folder, a drive): any other root
 // has no worktree, so its reads and edits are Read or edit outside it (default Ask).
@@ -129,7 +130,9 @@ function verdict(rules, call) {
  */
 export function decide(rules, call) {
   const v = verdict(rules, call);
-  if (v.value === 'allow') return { allow: true, line: `allowed by Security: ${label(v.action)}`, quiet: !!call.provider && v.risk === 'low' };
+  // call.firm: the provider must ask the user about this call (an ACP write after a declined or unanswered edit): an Allow
+  // rule does not answer it, a Deny rule still does.
+  if (v.value === 'allow' && !call.firm) return { allow: true, line: `allowed by Security: ${label(v.action)}`, quiet: !!call.provider && v.risk === 'low' };
   if (v.value === 'deny') return { allow: false, line: `denied by Security: ${label(v.action)}`, message: `Denied by the Security room: ${label(v.action)}.`, quiet: false };
   return null;
 }
@@ -173,17 +176,29 @@ export function openRefusal(rules, provider) {
   return null;
 }
 
+/**
+ * True when the office asks the user once before this session runs: its agent reports no cost (provider.cost 'unknown',
+ * owner decision Q22) and its "Run without cost reports" cell is not Allow. Ask asks; Allow runs it without the question;
+ * Deny never gets here (openRefusal refuses it first), and it still asks if a caller skips that check. An agent kind with
+ * no such cell asks. provider: { kind, cost? }.
+ */
+export function costAsk(rules, provider) {
+  if (!provider || provider.cost !== 'unknown') return false;
+  const col = S.columnOf(provider.kind);
+  if (!col || !S.applies('no-cost', col)) return true;
+  return S.valueOf(rules, null, 'no-cost', col) !== 'allow';
+}
+
 // The reasons name no agent kind, so a screen can say one reason once for several kinds ("Not enforced for Hermes, dsh.").
 const NOT_SET_UP = 'The office has no provider for this agent kind yet. The rule applies when it has one.';
 const UNGATED = 'This agent runs this kind of call without asking the office.';
 // Short enough for one line on the wall (public/security.js footer). The agent: Claude Code, the only kind with these rows.
 const CLAUDE_DECIDES = 'The agent asks only when its own allow rules and permission mode say so.';
-const NO_COST_ASK = 'The office does not ask about cost yet: Ask lets the agent run, like Allow.';
 /**
  * Per agent kind (column): { reason, rows, asks }. reason '' means the office enforces the cells of that kind; else every
  * cell shows "Not enforced for this agent" with the reason. rows: a reason for one row only. asks: a reason for one row
- * while its cell is Ask ("Partly enforced"): Claude Code decides itself whether to ask on some rows (CLAUDE_ASKS), and
- * the office does not ask about cost yet (no-cost). Allow and Deny on those rows are enforced.
+ * while its cell is Ask ("Partly enforced"): Claude Code decides itself whether to ask on some rows (CLAUDE_ASKS). Allow and
+ * Deny on those rows are enforced. The no-cost cell is enforced: Ask asks once per session (costAsk), Deny refuses (openRefusal).
  * providers: the office's providers ({ kind, label, gated?, enforces? }). Paperclip is not built: its row says so.
  */
 export function enforcement(providers) {
@@ -200,7 +215,6 @@ export function enforcement(providers) {
     if (S.applies('supervise', c.id)) rows.supervise = 'Paperclip is not connected to this office.';
     const asks = {};
     if (c.id === 'claude-code') for (const row of CLAUDE_ASKS) asks[row] = CLAUDE_DECIDES;
-    if (S.applies('no-cost', c.id)) asks['no-cost'] = NO_COST_ASK;
     out[c.id] = { reason, rows, asks };
   }
   return out;

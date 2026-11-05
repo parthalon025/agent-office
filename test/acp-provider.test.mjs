@@ -14,6 +14,8 @@ import { createTracker } from '../tracker.mjs';
 import { providerEvents, createRegistry, checkProvider, spendLimitFor, isPaid, isGated, supervisionOf } from '../providers/index.mjs';
 import { createAcp, AGENTS, commandLine } from '../providers/acp.mjs';
 import { createLocalTools } from '../providers/local-tools.mjs';
+import { decide, cleanRules } from '../security.mjs';
+import '../public/vocab.js';
 
 // A fake OpenClaw config: path -> value. A path that is not there is unset.
 const configOf = (o) => async (p) => (p in o ? { state: 'set', value: o[p] } : { state: 'unset' });
@@ -29,9 +31,17 @@ async function until(fn, what, ms = 10_000) {
   }
 }
 
+// The Security room rules the rig's office applies before a hold (#70, security.mjs decide), as server.mjs does. DEFAULTS: what a
+// new office has (reads and edits inside the worktree are Allow, the rest is Ask). ASK_ALL: every call row of every agent kind
+// is Ask, so each request waits for the user: the tests of the hold itself run with it.
+const SEC = globalThis.OfficeVocab.security;
+const DEFAULTS = cleanRules(null);
+const ASK_ALL = cleanRules({ office: Object.fromEntries(SEC.columns.flatMap((c) => Object.keys(SEC.rows)
+  .filter((row) => !SEC.rows[row].office && SEC.applies(row, c.id) && SEC.options(row).includes('ask')).map((row) => [SEC.key(row, c.id), 'ask']))) });
+
 // One office with one ACP provider and a fake agent. fake: the fixture's environment (FAKE_ACP_*).
 // OpenClaw gets the opt-in switch on and a version that relays shell approvals, unless a test says otherwise.
-function rig({ kind = 'hermes', fake = {}, ...over } = {}) {
+function rig({ kind = 'hermes', fake = {}, rules = ASK_ALL, ...over } = {}) {
   if (kind === 'openclaw') fake = { FAKE_ACP_VERSION: '2026.10.10', ...fake };
   const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-acp-')));
   const root = path.join(base, 'work'), outside = path.join(base, 'outside');
@@ -41,7 +51,10 @@ function rig({ kind = 'hermes', fake = {}, ...over } = {}) {
   fs.writeFileSync(path.join(root, '.claude', 'settings.json'), '{}');
   const logFile = path.join(base, 'agent-log.jsonl');
   const r = { base, root, outside, logFile, holds: new Map(), spawned: [], timers: [], t: 1_000_000 };
-  r.tracker = createTracker({ now: () => r.t, locate: async () => null, releaseHold: (id, d) => r.release(id, d), setTimer: (fn) => { fn(); return 0; } });
+  r.rules = rules;
+  // The session runs in a worktree the office made (an ACP agent's room), so the inside rows apply.
+  const screen = (s, p, opts) => decide(r.rules, { building: null, kind: s.provider, tool: p.tool_name, input: p.full_input || p.tool_input, root: r.tracker.rootOf(s), worktree: true, provider: opts.provider === true, firm: opts.firm === true });
+  r.tracker = createTracker({ now: () => r.t, locate: async () => null, releaseHold: (id, d) => r.release(id, d), setTimer: (fn) => { fn(); return 0; }, screen });
   r.release = (id, d) => {
     const h = r.holds.get(id);
     if (!h) return false;
@@ -50,7 +63,8 @@ function rig({ kind = 'hermes', fake = {}, ...over } = {}) {
   };
   r.events = providerEvents({
     tracker: r.tracker,
-    hold: (q) => r.holds.set(q.id, { uid: q.s.uid, reply: (d) => r.p.answer(q.s, { id: q.id, suggestions: q.suggestions }, d) }),
+    // A request the rules decided (q.auto) is answered on a later tick, as server.mjs holdRequest does; nothing waits.
+    hold: (q) => (q.auto ? setImmediate(() => r.p.answer(q.s, { id: q.id, suggestions: [] }, q.auto)) : r.holds.set(q.id, { uid: q.s.uid, reply: (d) => r.p.answer(q.s, { id: q.id, suggestions: q.suggestions }, d) })),
     release: (id) => r.release(id, {}),
     fresh: (s) => r.freshened.push(s.uid),
   });
@@ -58,7 +72,7 @@ function rig({ kind = 'hermes', fake = {}, ...over } = {}) {
   r.shown = [];
   r.freshened = [];
   const permission = r.events.permission;
-  r.events.permission = (s, p) => { r.shown.push({ tool: p.tool_name, input: { ...p.tool_input } }); return permission(s, p); };
+  r.events.permission = (s, p, opts) => { r.shown.push({ tool: p.tool_name, input: { ...p.tool_input } }); return permission(s, p, opts); };
   r.p = createAcp({
     events: r.events, kind,
     exe: (name) => `C:/bin/${name}.exe`,
@@ -177,8 +191,8 @@ test('an agent that offers only Always allow is never given it: Approve declines
 
 // ---------- the office serves files (fs) ----------
 
-test('fs: a read and a write inside the worktree run at once; the text comes back raw', async () => {
-  const r = rig();
+test('fs: a read and a write inside the worktree run at once under the default rules; the text comes back raw', async () => {
+  const r = rig({ rules: DEFAULTS });
   const s = await started(r, r.session());
   try {
     r.steps(s, [{ read: { path: path.join(r.root, 'a.txt') } }, { read: { path: path.join(r.root, 'a.txt'), line: 2, limit: 1 } }, { write: { path: path.join(r.root, 'new', 'b.txt'), content: 'bee' } }]);
@@ -189,6 +203,34 @@ test('fs: a read and a write inside the worktree run at once; the text comes bac
   } finally { await r.done(s); }
 });
 
+// Every call the office serves for the agent goes to the Security room first (#70), like a local agent's: no second copy of
+// the rules in the provider. A Deny refuses with the reason; a tightened row holds what the default lets run.
+test('fs: the Security room decides each served call: Deny on reads refuses with the reason, Ask on edits holds a write', async () => {
+  const deny = cleanRules({ office: { 'read-inside|hermes': 'deny', 'edit-inside|hermes': 'ask' } });
+  const r = rig({ rules: deny });
+  const s = await started(r, r.session());
+  try {
+    r.steps(s, [{ read: { path: path.join(r.root, 'a.txt') } }, { write: { path: path.join(r.root, 'a.txt'), content: 'x' } }]);
+    await until(() => s.pending.length === 1, 'the write to wait');
+    assert.equal(s.pending[0].tool, 'Write');
+    r.release(s.pending[0].id, { allow: false });
+    await r.idle(s);
+    assert.deepEqual(r.replies(s), ['read error: Denied by the Security room: Read inside the worktree.', 'write error: Declined from Agent Office.']);
+    assert.equal(fs.readFileSync(path.join(r.root, 'a.txt'), 'utf8'), 'one\ntwo\n');
+  } finally { await r.done(s); }
+});
+
+test('a request the agent raises is answered by an Allow rule at once (allow once), and a Deny rule rejects it', async () => {
+  const r = rig({ rules: cleanRules({ office: { 'shell|hermes': 'deny' } }) });
+  const s = await started(r, r.session());
+  try {
+    r.steps(s, [{ ask: { toolCall: EDIT_CALL(r.root), options: OPTIONS } },
+      { ask: { toolCall: { toolCallId: 'tc9', title: 'npm test', kind: 'execute', rawInput: { command: 'npm test' } }, options: OPTIONS } }]);
+    await r.idle(s);
+    assert.deepEqual(r.replies(s), ['asked: selected once', 'asked: selected no'], 'the edit inside is Allow by default; the command is denied');
+    assert.equal(r.holds.size, 0, 'nothing waited');
+  } finally { await r.done(s); }
+});
 test('fs: a write outside the worktree is refused before anyone is asked, and nothing is written', async () => {
   const r = rig();
   const s = await started(r, r.session());
@@ -235,8 +277,11 @@ test('fs: an edit the user declined cannot come back through fs/write_text_file 
     assert.match(r.replies(s)[1], /^write error: .*declined/i);
     assert.equal(fs.readFileSync(file, 'utf8'), 'one\ntwo\n', 'the file is unchanged, though a write inside the root is low risk');
     assert.equal(r.holds.size, 0, 'refused at once, not asked again');
-    // The next turn starts fresh: the decline was for that edit in that turn.
+    // The next turn starts fresh: the decline was for that edit in that turn. The write goes to the office like any other
+    // (every row is Ask here), and no refusal comes first.
     r.steps(s, [{ write: { path: file, content: 'next turn' } }]);
+    await until(() => s.pending.length === 1, 'the next write to ask');
+    r.release(s.pending[0].id, { allow: true });
     await until(() => r.replies(s).length === 3, 'the next turn');
     assert.equal(r.replies(s)[2], 'write: ok');
   } finally { await r.done(s); }
@@ -260,8 +305,8 @@ test('fs: the declined file is refused under another spelling of its path too', 
   } finally { await r.done(s); }
 });
 
-test('fs: after a declined edit that names no file, every write in that turn asks first', async () => {
-  const r = rig();
+test('fs: after a declined edit that names no file, every write in that turn asks first, also where the rules allow edits', async () => {
+  const r = rig({ rules: DEFAULTS });
   const s = await started(r, r.session());
   try {
     const vague = { toolCallId: 'v1', title: 'Apply the patch', kind: 'edit' };

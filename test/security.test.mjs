@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { cleanRules, setRule, decide, permissionModeFor, openRefusal, enforcement, preToolDecision, addCost, costThisMonth } from '../security.mjs';
+import { cleanRules, setRule, decide, permissionModeFor, openRefusal, costAsk, enforcement, preToolDecision, addCost, costThisMonth } from '../security.mjs';
 
 const WIN = process.platform === 'win32';
 const root = WIN ? 'C:\\work\\repo' : '/work/repo';
@@ -152,7 +152,19 @@ test('enforcement: an Ask that only Claude Code decides is partly enforced, and 
   for (const row of ['files-outside', 'shell', 'web', 'mcp']) assert.match(e['claude-code'].asks[row], /allow rules and permission mode/, row);
   for (const row of ['read-inside', 'edit-inside', 'settings', 'secrets']) assert.equal(e['claude-code'].asks[row], undefined, `${row}: the office makes Claude Code ask`);
   assert.deepEqual(e.local.asks, {}, 'a local agent asks the office about every call');
-  assert.match(e.hermes.asks['no-cost'], /does not ask about cost yet/);
+  assert.equal(e.hermes.asks['no-cost'], undefined, 'the office asks once per session (costAsk), so Ask is enforced');
+});
+
+test('costAsk: an agent without cost reports asks once before it runs while its cell is Ask; Allow runs it; Deny never skips the question', () => {
+  const hermes = { kind: 'hermes', label: 'Hermes Agent', cost: 'unknown' };
+  assert.equal(costAsk(none(), hermes), true, 'the default is Ask');
+  const allow = setRule(none(), { scope: 'office', row: 'no-cost', col: 'hermes', value: 'allow', confirmed: true }).rules;
+  assert.equal(costAsk(allow, hermes), false, 'Allow: it runs without the question');
+  assert.equal(costAsk(allow, { ...hermes, kind: 'dsh', label: 'DeepSeek Harness' }), true, 'the rule is per agent kind');
+  const deny = setRule(none(), { scope: 'office', row: 'no-cost', col: 'hermes', value: 'deny' }).rules;
+  assert.equal(costAsk(deny, hermes), true, 'Deny: openRefusal refuses it first; the question is never skipped');
+  assert.equal(costAsk(allow, { kind: 'claude-code', label: 'Claude Code' }), false, 'an agent that reports cost is never asked');
+  assert.equal(costAsk(none(), { kind: 'copilot', label: 'Copilot', cost: 'unknown' }), true, 'a kind with no cell asks');
 });
 
 test('decide: a provider asks about every call; a low call it may run is allowed without a feed line', () => {
@@ -161,6 +173,14 @@ test('decide: a provider asks about every call; a low call it may run is allowed
   assert.equal(decide(r, call('Read', { file_path: inside }, { kind: 'claude-code' })).quiet, false, 'Claude Code asked: the answer is news');
   const tight = setRule(r, { scope: 'office', row: 'read-inside', col: 'local', value: 'ask' }).rules;
   assert.equal(decide(tight, call('Read', { file_path: inside }, { kind: 'ollama', provider: true })), null, 'a tightened read is held');
+});
+
+test('decide: a firm request (the provider must ask the user) is held under an Allow rule; a Deny still refuses it', () => {
+  const firm = (tool, input) => call(tool, input, { kind: 'hermes', provider: true, firm: true });
+  assert.equal(decide(none(), firm('Write', { file_path: inside, content: 'x' })), null, 'Edit inside is Allow by default, but this one asks');
+  const deny = setRule(none(), { scope: 'office', row: 'edit-inside', col: 'hermes', value: 'deny' }).rules;
+  assert.equal(decide(deny, firm('Write', { file_path: inside, content: 'x' })).allow, false);
+  assert.equal(decide(none(), call('Write', { file_path: inside, content: 'x' }, { kind: 'hermes', provider: true })).allow, true, 'not firm: the Allow rule answers');
 });
 
 test('preToolDecision: Claude Code refuses a Deny before its own permission check, and asks for a tightened low row', () => {

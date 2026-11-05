@@ -70,11 +70,12 @@
 //                       SubagentStop (agent_id). The office then shows it as a helper bot in the parent's room: it never gets a
 //                       room, a desk or a count of its own (the room sign counts top-level sessions only), and its calls and
 //                       requests stay on the helper. A provider with no subagents reports no agent_id.
-//   permission(s, p)    a request the provider holds itself (no hook): tool_name, tool_input, agent_id, permission_suggestions.
+//   permission(s, p, { firm }?) a request the provider holds itself (no hook): tool_name, tool_input, agent_id, permission_suggestions.
 //                       Returns the request id. The office checks the Security room rules first (#70): an Allow or Deny rule
 //                       answers through provider.answer on a later tick ({ allow, message }: message says why it refused), and
 //                       nothing waits. Else the office holds it until the user answers, then calls provider.answer.
-//                       A provider that runs tools itself asks about every call, so the rules decide all of them.
+//                       A provider that runs tools itself asks about every call, so the rules decide all of them. firm: true when the
+//                       user must answer this call (an Allow rule does not answer it; a Deny rule still does).
 //   stream(s, m)        a stream message, as an object or a JSON line: system init (model, permissionMode, session_id,
 //                       slash_commands, skills), stream_event text deltas (live text), assistant (text blocks and usage),
 //                       result (total_cost_usd, the turn ends, errors).
@@ -170,10 +171,11 @@ export function providerEvents({ tracker, onChange = () => {}, hold = () => {}, 
   const tag = (s, p) => slimPayload({ session_id: s.sid || s.uid, cwd: s.cwd, ...p }, s.officeId);
   return {
     hook: (s, p) => tracker.onHook(tag(s, p)),
-    permission: (s, p) => {
+    permission: (s, p, opts = {}) => {
       // { provider: true }: the Security room check knows the provider asks about every call (security.mjs decide, quiet).
+      // firm: the provider must hear the user on this call, so an Allow rule does not answer it (a Deny rule still does).
       // A decided request (r.auto) goes to hold too: the server answers it at once on a later tick (holdRequest).
-      const r = tracker.permissionRequest(tag(s, { ...p, hook_event_name: 'PermissionRequest' }), { provider: true });
+      const r = tracker.permissionRequest(tag(s, { ...p, hook_event_name: 'PermissionRequest' }), { provider: true, firm: opts.firm === true });
       if (!r) return null;
       hold(r);
       return r.id;

@@ -439,6 +439,33 @@ test('an ACP agent asks once before it runs: no cost report, so the open is refu
   assert.equal(model.status, 400, 'the agent picks its own model');
 });
 
+// The Security room's "Run without cost reports" cell (#70) drives that question: Ask asks, Allow skips it, Deny refuses.
+test('the no-cost cell of the Security room: Allow opens an agent without cost reports with no question, Deny refuses it', { skip: SKIP }, async () => {
+  const rule = (value, confirmed) => call('/api/security/set', { scope: 'office', row: 'no-cost', col: 'hermes', value, confirmed });
+  try {
+    assert.equal((await rule('allow')).status, 409, 'Allow loosens: it needs the painted Confirm');
+    assert.equal((await rule('allow', true)).status, 200);
+    const r = await call('/api/open', { cwd: acpRepo, name: 'hermes-allowed', provider: 'hermes', where: 'office' });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    await until(async () => { const x = await sessionOf(r.json.uid); return x && x.sid ? x : null; }, 'the session to start');
+    assert.equal((await call('/api/close', { uid: r.json.uid })).status, 200);
+    const again = await until(async () => (await call('/api/history', {})).json.sessions.find((x) => x.uid === r.json.uid), 'the past record');
+    const re = await call('/api/reopen', { uid: again.uid });
+    assert.equal(re.status, 200, 'Reopen asks no question either: ' + JSON.stringify(re.json));
+    await until(async () => { const x = await sessionOf(re.json.uid); return x && x.sid ? x : null; }, 'the reopened session to start');
+    await call('/api/close', { uid: re.json.uid });
+    assert.equal((await rule('deny')).status, 200);
+    const no = await call('/api/open', { cwd: acpRepo, name: 'hermes-denied', provider: 'hermes', where: 'office', confirmCost: true });
+    assert.equal(no.status, 409);
+    assert.match(no.json.error, /does not report cost, and the Security room denies agents without cost reports/);
+    assert.equal(no.json.confirm, undefined, 'a refusal, not a question');
+  } finally {
+    await rule('ask');
+  }
+  const asked = await call('/api/open', { cwd: acpRepo, name: 'hermes-asked', provider: 'hermes', where: 'office' });
+  assert.deepEqual([asked.status, asked.json.confirm], [409, 'cost'], 'Ask asks again');
+});
+
 test('an ungated agent (ADR 0001) opens and reopens only in a new worktree of its own: not in the folder, not in a terminal', { skip: SKIP }, async () => {
   const before = (await snapshot()).sessions.length;
   // Use this folder, a terminal window and a folder outside git give it no room of its own (#69).

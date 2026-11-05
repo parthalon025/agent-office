@@ -23,7 +23,7 @@ import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, clea
 import * as startup from './startup.mjs';
 import { createNotes, cleanPin, PIN_MAX, NOTES_MAX, AGENT_WRITE_MAX } from './notes.mjs';
 import { createSkills } from './skills.mjs';
-import { cleanRules, setRule, decide, preToolDecision, permissionModeFor, openRefusal, enforcement, addCost, costThisMonth } from './security.mjs';
+import { cleanRules, setRule, decide, preToolDecision, permissionModeFor, openRefusal, costAsk, enforcement, addCost, costThisMonth } from './security.mjs';
 import { inside } from './risk.mjs';
 import { mcpAddArgs, mcpRemoveArgs, pluginArgs } from './extensions.mjs';
 import * as auth from './auth.mjs';
@@ -253,7 +253,7 @@ function inWorktree(s, root) {
 }
 function callOf(s, p, opts = {}) {
   const root = tracker.rootOf(s);
-  return { building: buildingOfSession(s), kind: s.provider, tool: p.tool_name, input: p.full_input || p.rate_input || p.tool_input, root, worktree: inWorktree(s, root), provider: opts.provider === true };
+  return { building: buildingOfSession(s), kind: s.provider, tool: p.tool_name, input: p.full_input || p.rate_input || p.tool_input, root, worktree: inWorktree(s, root), provider: opts.provider === true, firm: opts.firm === true };
 }
 // Claude Code's PreToolUse: a Deny rule refuses the call before Claude Code's own permission check (its allow rules and
 // modes cannot run it), and a tightened read or edit inside makes Claude Code ask. Returns the hook's answer, or null.
@@ -957,11 +957,13 @@ async function openSession(opts) {
   return s.uid;
 }
 
-// An agent that reports no cost (cost 'unknown') runs only after the user said yes for this session (owner decision Q22).
-// The answer is 409 with confirm: 'cost'; the caller asks the user and sends the same request again with confirmCost: true.
-// An ungated agent's label goes in the question too, so the yes is for what it does (ADR 0001).
+// An agent that reports no cost (cost 'unknown') runs only after the user said yes for this session (owner decision Q22),
+// while its "Run without cost reports" cell in the Security room is Ask (security.mjs costAsk); Allow runs it without the
+// question, Deny never gets here (checkOpen). The answer is 409 with confirm: 'cost'; the caller asks the user and sends
+// the same request again with confirmCost: true. An ungated agent's label goes in the question too, so the yes is for what
+// it does (ADR 0001).
 function confirmCost(provider, confirmed) {
-  if (costOf(provider) !== 'unknown' || confirmed === true) return;
+  if (confirmed === true || !costAsk(persisted.security, provider)) return;
   const label = supervisionOf(provider);
   const e = httpError(409, `This agent does not report cost. ${label ? label + '. ' : ''}Run it?`);
   e.confirm = 'cost';

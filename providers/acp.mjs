@@ -13,8 +13,8 @@
 //                                     agent changes while it waits is declined at once, and nothing approved moves to it.
 //   interrupt                      -> session/cancel
 // The office also serves the agent's files and terminals (clientCapabilities fs and terminal, owner decision Q24) with
-// providers/local-tools.mjs: limited to the session's root, rated with riskOf, and held like any other call when not low
-// risk. A path outside the root is refused before anyone is asked. So an agent that uses them is held more strictly than one
+// providers/local-tools.mjs: limited to the session's root, and each call goes to the office like any other request (the
+// Security room rules, then a hold). A path outside the root is refused before anyone is asked. So an agent that uses them is held more strictly than one
 // that only asks: an edit the user declined in a turn cannot come back through fs/write_text_file (Hermes issue #31682).
 // An agent may ignore those capabilities and use its own tools (Hermes does): the office then sees a call only in its
 // updates, cannot stop it, and says so in the feed. Such an agent is not gated (ADR 0001; AGENTS gated and supervision).
@@ -26,7 +26,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn as realSpawn, execFile as realExecFile } from 'node:child_process';
 import { resolveExe } from '../git.mjs';
-import { riskOf, fileKey } from '../risk.mjs';
+import { fileKey } from '../risk.mjs';
 import { clip } from '../tracker.mjs';
 import { providerError } from './index.mjs';
 import { createLocalTools, killTree } from './local-tools.mjs';
@@ -446,11 +446,13 @@ export function createAcp(deps) {
     ask.done('withdraw');
     emit(st, () => events.drop(s, id, why));
   }
-  // Hold a request until the user answers. done(verdict) gets 'allow', 'deny', 'cancel' or 'withdraw'.
-  function hold(s, st, toolName, input, done, reason = null) {
-    const id = emit(st, () => events.permission(s, { tool_name: toolName, tool_input: input, permission_suggestions: [], ask_reason: reason }));
+  // Ask the office about a request: the Security room rules answer it at once (on a later tick), else it is held until the
+  // user answers. done(verdict, message) gets 'allow', 'deny', 'cancel' or 'withdraw', and why the office refused (a Deny rule).
+  // firm: the user must answer this one, so an Allow rule does not (events.permission).
+  function hold(s, st, toolName, input, done, reason = null, firm = false) {
+    const id = emit(st, () => events.permission(s, { tool_name: toolName, tool_input: input, permission_suggestions: [], ask_reason: reason }, { firm }));
     if (!id) { done('deny'); return null; }
-    const ask = { gaveUp: false, timer: null, done: (v) => { if (st.asks.get(id) !== ask) return; st.asks.delete(id); if (ask.timer) clearTimer(ask.timer); done(v); } };
+    const ask = { gaveUp: false, timer: null, done: (v, why) => { if (st.asks.get(id) !== ask) return; st.asks.delete(id); if (ask.timer) clearTimer(ask.timer); done(v, why); } };
     st.asks.set(id, ask);
     return id;
   }
@@ -520,26 +522,29 @@ export function createAcp(deps) {
   }
 
   // ----- what the office serves: files and terminals (local-tools.mjs, limited to the root) -----
-  // A call the office runs for the agent is refused when its path is outside the root (before anyone is asked), runs at once
-  // when riskOf rates it low or the user just approved that same call, and is held otherwise.
+  // A call the office runs for the agent is refused when its path is outside the root (before anyone is asked), and runs at once
+  // when the user just approved that same call. Every other call goes to the office like a local agent's (#70): the Security
+  // room rules decide (by default a read or edit inside the worktree runs with no question, riskOf's low), else it is held. So
+  // this file keeps no approval rule of its own. Returns { ok, why }: why the office refused, for the agent.
   function allowed(s, st, toolName, input) {
     const file = toolName === 'Write' ? norm(st, input.file_path) : null;
-    // The user declined an edit of a file the office could not name, or a request for this file went unanswered.
+    // The user declined an edit of a file the office could not name, or a request for this file went unanswered: the user
+    // answers this write (firm), whatever an Allow rule says.
     const strict = toolName === 'Write' && (st.deniedVague || st.askFirst.has(file));
-    if (!strict && riskOf(toolName, input, st.root) === 'low') return Promise.resolve(true);
     const key = toolName === 'Bash' ? 'Bash\n' + input.command : 'Write\n' + file;
-    if ((toolName === 'Bash' || toolName === 'Write') && st.grants.delete(key)) return Promise.resolve(true);
-    if (st.closed || st.interrupted) return Promise.resolve(false);
-    return new Promise((resolve) => { hold(s, st, toolName, input, (v) => resolve(v === 'allow')); });
+    if ((toolName === 'Bash' || toolName === 'Write') && st.grants.delete(key)) return Promise.resolve({ ok: true });
+    if (st.closed || st.interrupted) return Promise.resolve({ ok: false });
+    return new Promise((resolve) => { hold(s, st, toolName, input, (v, why) => resolve({ ok: v === 'allow', why }), null, strict); });
   }
-  const declined = () => rpcError(REFUSED, 'Declined from Agent Office.');
+  const declined = (why) => rpcError(REFUSED, why || 'Declined from Agent Office.');
   const short = (p) => clip(String(p), 120);
 
   async function serveRead(s, st, p) {
     const input = { file_path: String(p.path || '') };
     const no = st.tools.guard('Read', input);
     if (no) { emit(st, () => events.feed(s, 'tool', `refused a read outside the worktree: ${short(input.file_path)}`)); throw rpcError(REFUSED, no); }
-    if (!(await allowed(s, st, 'Read', input))) throw declined();
+    const a = await allowed(s, st, 'Read', input);
+    if (!a.ok) throw declined(a.why);
     const r = st.tools.readText(input.file_path, { line: p.line, limit: p.limit });
     if (!r.ok) throw rpcError(REFUSED, r.text);
     return { content: r.text };
@@ -555,7 +560,8 @@ export function createAcp(deps) {
       emit(st, () => events.feed(s, 'tool', `refused a write to ${path.basename(input.file_path)}: you declined that edit in this turn`));
       throw rpcError(REFUSED, 'You declined the edit of this file in this turn. The office does not write it another way.');
     }
-    if (!(await allowed(s, st, 'Write', input))) throw declined();
+    const a = await allowed(s, st, 'Write', input);
+    if (!a.ok) throw declined(a.why);
     const r = await st.tools.run('Write', input);
     if (!r.ok) throw rpcError(REFUSED, r.text);
     st.wrote.add(norm(st, input.file_path));
@@ -563,14 +569,15 @@ export function createAcp(deps) {
     return {};
   }
 
-  // terminal/create: the command line the user sees is the line that runs, variables included. Every command is held
-  // (riskOf never rates a shell command low) unless the user just approved that same line in a request.
+  // terminal/create: the command line the user sees is the line that runs, variables included. Every command goes to the office
+  // (the Shell commands rule: Ask by default holds it) unless the user just approved that same line in a request.
   async function serveTerminal(s, st, p) {
     const line = commandLine(p);
     const cwd = p.cwd ? String(p.cwd) : st.root;
     const no = st.tools.guard('LS', { path: cwd });
     if (no) { emit(st, () => events.feed(s, 'tool', `refused a command outside the worktree: ${short(cwd)}`)); throw rpcError(REFUSED, no); }
-    if (!(await allowed(s, st, 'Bash', { command: line })) || st.closed) throw declined();
+    const a = await allowed(s, st, 'Bash', { command: line });
+    if (!a.ok || st.closed) throw declined(a.why);
     let h;
     try {
       h = st.tools.start(line, { cwd, timeoutMs: TERMINAL_MS, keep: 'end', limitBytes: Number(p.outputByteLimit) > 0 ? Number(p.outputByteLimit) : undefined });
@@ -912,7 +919,8 @@ export function createAcp(deps) {
       const st = agents.get(s.uid);
       const ask = st && st.asks.get(request?.id);
       if (!ask) return;
-      ask.done(d.allow === true ? 'allow' : d.allow === false ? 'deny' : ask.gaveUp || st.interrupted || st.closed ? 'cancel' : 'deny');
+      // d.message: why the Security room refused it (a Deny rule), for the agent.
+      ask.done(d.allow === true ? 'allow' : d.allow === false ? 'deny' : ask.gaveUp || st.interrupted || st.closed ? 'cancel' : 'deny', typeof d.message === 'string' ? d.message : '');
     },
 
     interrupt(s) {
