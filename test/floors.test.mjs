@@ -546,3 +546,110 @@ test('locateOrKeep, with real git: a repo, no commit yet, a plain folder under a
     for (const d of [dir, empty, plainDir]) fs.rmSync(d, { recursive: true, force: true });
   }
 });
+
+// #119: createFloor and createRoom take their turn in the per-repository queue (perRepo), like createWorktree, and a room folder
+// is claimed with mkdir, so two repositories never take one name under the shared worktree folder. Rooms are real folders in
+// the home folder: every test records them as they come and removes them in a finally block, also when an assert fails.
+const settled = (results, rooms) => { for (const r of results) if (r.status === 'fulfilled') rooms.push(r.value); return results; };
+const nothingFailed = (results) => assert.deepEqual(results.filter((r) => r.status === 'rejected').map((r) => String(r.reason?.message || r.reason)), []);
+async function dropRooms(dir, rooms) {
+  for (const w of rooms) {
+    await git.removeRoom(dir, w.root, true).catch(() => {});
+    fs.rmSync(w.root, { recursive: true, force: true });   // also when git could not remove it
+  }
+}
+
+test('#119: parallel createRoom calls with one name get the folders name, name-2, name-3 and all succeed', async () => {
+  const dir = repo();
+  const tag = 'aoq' + crypto.randomBytes(3).toString('hex');
+  const rooms = [];
+  try {
+    const first = await git.createFloor(dir, 'feat/q', '', tag + 'f');
+    rooms.push(first);
+    const spell = [dir, dir + path.sep, path.join(dir, '.')];
+    const res = settled(await Promise.allSettled([0, 1, 2, 3, 4].map((i) => git.createRoom(spell[i % 3], 'feat/q', tag))), rooms);
+    nothingFailed(res);
+    const made = res.map((r) => r.value);
+    assert.deepEqual(made.map((r) => path.basename(r.root)).sort(), [tag, `${tag}-2`, `${tag}-3`, `${tag}-4`, `${tag}-5`]);
+    assert.ok(made.every((r) => r.shared === true), 'the floor had a room already, so each new room is shared');
+    assert.equal((await git.layout(dir)).filter((w) => w.branch === 'feat/q').length, 6, 'git lists all six rooms');
+  } finally {
+    await dropRooms(dir, rooms);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('#119: a room made from the path of another room and one made from the main folder take one turn', async () => {
+  const dir = repo();
+  const tag = 'aoq' + crypto.randomBytes(3).toString('hex');
+  const rooms = [];
+  try {
+    const first = await git.createFloor(dir, 'feat/w', '', tag + 'f');
+    rooms.push(first);
+    // The queue key of a room's folder is the main folder of its repository, so both calls wait in one queue.
+    assert.equal(await git.queueKey(first.root), await git.queueKey(dir));
+    const res = settled(await Promise.allSettled([git.createRoom(first.root, 'feat/w', tag), git.createRoom(dir, 'feat/w', tag), git.createRoom(first.root, 'feat/w', tag)]), rooms);
+    nothingFailed(res);
+    assert.deepEqual(res.map((r) => path.basename(r.value.root)).sort(), [tag, `${tag}-2`, `${tag}-3`]);
+  } finally {
+    await dropRooms(dir, rooms);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('#119: parallel createFloor calls with one room name all succeed, and a floor and a room made together do not race', async () => {
+  const dir = repo();
+  const tag = 'aoq' + crypto.randomBytes(3).toString('hex');
+  const rooms = [];
+  try {
+    const floors = settled(await Promise.allSettled(['f1', 'f2', 'f3', 'f4'].map((b) => git.createFloor(dir, b, '', tag))), rooms);
+    nothingFailed(floors);
+    assert.deepEqual(floors.map((f) => path.basename(f.value.root)).sort(), [tag, `${tag}-2`, `${tag}-3`, `${tag}-4`]);
+    const both = settled(await Promise.allSettled([git.createFloor(dir, 'f5', '', tag + 'x'), git.createRoom(dir, 'f1', tag + 'y')]), rooms);
+    nothingFailed(both);
+    assert.equal(both[1].value.shared, true);
+    // A failure in the queue does not stop the next task.
+    const [bad, ok] = settled(await Promise.allSettled([git.createFloor(dir, 'f1'), git.createFloor(dir, 'f6', '', tag + 'z')]), rooms);
+    assert.equal(bad.status, 'rejected');
+    assert.match(bad.reason.message, /exists/);
+    assert.equal(ok.status, 'fulfilled');
+  } finally {
+    await dropRooms(dir, rooms);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('#119: two repositories that make a room with one name at once get two folders, and both rooms stay', async () => {
+  const a = repo(), b = repo();
+  const tag = 'aoq' + crypto.randomBytes(3).toString('hex');
+  const roomsA = [], roomsB = [];
+  try {
+    for (let round = 0; round < 4; round++) {
+      const [ra, rb] = await Promise.allSettled([git.createFloor(a, `fa${round}`, '', tag), git.createFloor(b, `fb${round}`, '', tag)]);
+      settled([ra], roomsA); settled([rb], roomsB);
+      nothingFailed([ra, rb]);
+      assert.notEqual(path.resolve(ra.value.root).toLowerCase(), path.resolve(rb.value.root).toLowerCase(), 'one folder for two rooms');
+      assert.ok(fs.existsSync(path.join(ra.value.root, '.git')) && fs.existsSync(path.join(rb.value.root, '.git')), 'both folders are worktrees');
+    }
+    assert.equal((await git.layout(a)).filter((w) => !w.main).length, 4, 'repository A lists its four rooms');
+    assert.equal((await git.layout(b)).filter((w) => !w.main).length, 4, 'repository B lists its four rooms');
+  } finally {
+    await dropRooms(a, roomsA); await dropRooms(b, roomsB);
+    fs.rmSync(a, { recursive: true, force: true }); fs.rmSync(b, { recursive: true, force: true });
+  }
+});
+
+test('#119: a room that git cannot make leaves no folder behind, and its name is free again', async () => {
+  const dir = repo();
+  const tag = 'aoq' + crypto.randomBytes(3).toString('hex');
+  const rooms = [];
+  try {
+    await assert.rejects(git.createRoom(dir, 'no/such-branch', tag));
+    const ok = await git.createFloor(dir, 'feat/free', '', tag);
+    rooms.push(ok);
+    assert.equal(path.basename(ok.root), tag, 'the failed room did not keep the name');
+  } finally {
+    await dropRooms(dir, rooms);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
