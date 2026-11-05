@@ -51,7 +51,7 @@
   'use strict';
   var KIND = { code_interpreter: 'terminal', file_search: 'search', bing_grounding: 'search', Knowledge: 'search', Connector: 'mcp', Topic: 'flow', Bash: 'terminal', PowerShell: 'terminal', WebFetch: 'browser', WebSearch: 'search', Grep: 'search', Glob: 'search', Read: 'code', Edit: 'code', Write: 'code', MultiEdit: 'code', NotebookEdit: 'code', Task: 'flow', Agent: 'flow', Skill: 'skill', TodoWrite: 'memory' };
   var ARG = { Bash: 'command', PowerShell: 'command', Read: 'file', Edit: 'file', Write: 'file', MultiEdit: 'file', NotebookEdit: 'file', Grep: 'pattern', Glob: 'pattern', WebFetch: 'url', WebSearch: 'query', Task: 'task', Agent: 'task', Skill: 'skill' };
-  var TODO = { pending: 'resting', in_progress: 'working', completed: 'finished' };
+  var TODO = { pending: 'resting', in_progress: 'working', completed: 'finished', error: 'error' };
 
   function clip(t, n) { t = String(t || ''); return t.length > n ? t.slice(0, n - 1) + '…' : t; }
   function has(a) { return !!(a && a.length); }

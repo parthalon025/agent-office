@@ -526,8 +526,43 @@ test('floorScroll: the current floor is centered in a strip that scrolls; no scr
 test('FloorList scrolls the current floor into view when the floor or the list changes (#64)', () => {
   const fl = source('function FloorList(p){var fl=p.floors', '));}\n');
   assert.match(fl, /h\("div",\{className:"ao-floors",ref:box\}/);
-  assert.match(fl, /R\.useEffect\(function\(\)\{[^}]*querySelector\('\[aria-current="true"\]'\)[\s\S]*?floorScroll\(/);
+  assert.match(fl, /R\.useEffect\(function\(\)\{function fit\(\)\{keepInView\(box\.current\);\}/);
   assert.match(fl, /\},\[p\.current,fl\.length\]\);/);
+});
+
+// The left menu above 820 px: the floor and room lists scroll inside a cap, the current row is scrolled into view, and Add floor / Add room stay outside the scrolling rows.
+test('keepInView: the current row is centered down a capped list and along a strip; nothing moves when the list fits', () => {
+  const keepInView = new Function('floorScroll', source('function keepInView(') + 'return keepInView;')(new Function(source('function floorScroll(') + 'return floorScroll;')());
+  const list = (o) => {
+    const row = { offsetWidth: 200, offsetHeight: 40, getBoundingClientRect: () => ({ left: o.rowLeft ?? 0, top: o.rowTop ?? 0 }) };
+    return { scrollWidth: o.sw ?? 200, clientWidth: o.cw ?? 200, scrollHeight: o.sh ?? 150, clientHeight: o.ch ?? 150, scrollLeft: 0, scrollTop: o.st ?? 0,
+      getBoundingClientRect: () => ({ left: 0, top: 0 }), querySelector: (q) => (o.none ? null : (assert.equal(q, '[aria-current="true"]'), row)) };
+  };
+  const down = list({ sh: 800, ch: 150, rowTop: 500 });           // row 500 px down in a 150 px window
+  keepInView(down);
+  assert.equal(down.scrollTop, 445, 'centered: 500 + 20 - 75');
+  assert.equal(down.scrollLeft, 0, 'no sideways move in a list that fits across');
+  const along = list({ sw: 1200, cw: 300, rowLeft: 600 });
+  keepInView(along);
+  assert.equal(along.scrollLeft, 550, 'centered along the narrow strip: 600 + 100 - 150');
+  assert.equal(along.scrollTop, 0);
+  const fits = list({ sh: 150, ch: 150 });
+  keepInView(fits);
+  assert.equal(fits.scrollTop, 0);
+  assert.doesNotThrow(() => keepInView(list({ none: true })), 'no current row: nothing to do');
+  assert.doesNotThrow(() => keepInView(null));
+});
+
+test('the left menu lists: the cap above 820 px, the lists use keepInView, the Add rows are outside the scrolling rows', () => {
+  assert.match(dsCss, /@container \(min-width:821px\)\{\.ao-hud-left \.ao-floors\{max-height:150px;overflow-y:auto;[^}]*\}\.ao-hud-left>\.ao-panel:nth-child\(2\) \.ao-floors\{max-height:96px\}\}/);
+  const fl = source('function FloorList(p){var fl=p.floors', '));}\n');
+  const rl = source('function RoomList(p){', '));}\n');
+  for (const [name, src] of [['FloorList', fl], ['RoomList', rl]]) {
+    assert.match(src, /R\.useEffect\(function\(\)\{function fit\(\)\{keepInView\(box\.current\);\}/, `${name} keeps its current row in view`);
+    assert.match(src, /h\("div",\{className:"ao-floors",ref:box\}/, `${name} has the scrolling rows`);
+  }
+  assert.match(fl, /\}\)\),p\.onAdd&&h\("div",\{className:"ao-addrow"\}/, 'Add floor follows the scrolling rows, it is not inside them');
+  assert.match(rl, /\}\)\),\n\s+p\.onAddRoom&&h\("div",\{className:"ao-addrow"\}/, 'Add room follows the scrolling rows, it is not inside them');
 });
 
 // #66: the page lays its own cards out around Since you left, so the scene says when the card shows and when it goes.

@@ -121,6 +121,7 @@
 
 /* x0.3 chat */
 .ao-hud-left>*{flex:none}
+@container (min-width:821px){.ao-hud-left .ao-floors{max-height:150px;overflow-y:auto;scrollbar-width:thin}.ao-hud-left>.ao-panel:nth-child(2) .ao-floors{max-height:96px}}
 .ao-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 .ao-conn{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);margin-left:4px}
 .ao-conn i{width:6px;height:6px;border-radius:var(--radius-full);background:var(--status-resting)}

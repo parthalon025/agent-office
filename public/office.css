@@ -60,6 +60,10 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
   .ao-grip-b, .ao-grip-bl { display: none; }
   .ao-hud-right:not(.ao-hud-chat) { max-height: calc(100% - 68px - var(--strip-clear, 200px)); overflow: auto; }
 }
+/* from 1100 px down to 821 px the dock sits on the left edge: the left menu (floors, rooms, queue) stops above it */
+@media (min-width: 821px) and (max-width: 1100px) {
+  .ao-hud-left { max-height: calc(100% - 68px - var(--strip-clear, 200px)); }
+}
 @media (max-width: 820px) {
   .strip-more-host { position: static; }
   .strip-more { left: 0; right: 0; }

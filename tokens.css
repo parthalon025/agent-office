@@ -1,4 +1,4 @@
-/* Agent Office DS x1.7.4: tokens.css. Edited by hand. Keep it in step with tokens.json (test/ds-kit.test.mjs checks every token). */
+/* Agent Office DS x1.7.5: tokens.css. Edited by hand. Keep it in step with tokens.json (test/ds-kit.test.mjs checks every token). */
 :root, [data-theme="light"] {
   color-scheme: light;
   --bg: #e9edf1;

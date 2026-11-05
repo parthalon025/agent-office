@@ -1,6 +1,6 @@
 # RoomList
 
-The rooms on the current floor: type icon, name, type, and working over total. Click a room to frame it; click again to see the whole floor. The bot button adds a bot with a role that fits the type. Add room opens a type picker.
+The rooms on the current floor: type icon, name, type, and working over total. Click a room to frame it; click again to see the whole floor. The bot button adds a bot with a role that fits the type. Add room opens a type picker and stays below the rows. In the office HUD above 820 px the list scrolls inside 96 px, and the current room scrolls into the middle.
 
 ## Props
 
