@@ -387,7 +387,7 @@ export function createTracker(deps = {}) {
       else if (m.is_error && !s.interrupted) why = String(m.result || (Array.isArray(m.errors) ? m.errors.filter(Boolean).join(' ') : '') || 'The turn stopped with an error.');
       if (why) {
         pushReply(s, 'Stopped: ' + why);
-        s.error = { id: ++s.errorSeq, text: clip(why, 200) };
+        s.error = { id: ++s.errorSeq, text: clip(why, 200), at: now() };
       }
       persist.history?.(s);
       changed();

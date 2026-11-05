@@ -9,6 +9,7 @@
      onSnapshot(fn)        fn(snap) now (when there is one) and on each snapshot; returns an unsubscribe function
      buildings(snap?)      the buildings, busiest first
      requests(snap?)       every open request and question of every building, oldest first (Needs you)
+     alerts(snap?)         those requests and the error of each session, as DS Notifier notifications
      preview(repo, snap?)  a building definition with its bots (cards and the city); it mounts nothing
      session(botName)      the open session of a bot in the building that is on screen
      lookup(botName)       the commands and skills of that session
@@ -20,7 +21,10 @@
    new building starts clean and there is no reset call.
      repo, id              the building key and a number that is new for each mount
      def                   the building definition for the scene (fixed at mount time)
-     attach(emit)          the scene starts: replay the latest snapshot as DS events, then follow the store
+     attach(emit)          the scene starts: replay the latest snapshot as DS events, then follow the store.
+                           The replay is one pass with seeded: true on each event (and at, the real time, where
+                           the snapshot has it), so the scene restores it with no toast, sound or onNotify.
+                           A bot seated again on another floor is seeded too. Later news is not seeded.
      detach()              the scene stops: later snapshots and timers do nothing
      stale(snap?)          true when the scene shows a room that is gone, or was empty and now has rooms.
                            The DS has no event that removes a floor or a room, so the page mounts a new adapter.
@@ -62,6 +66,8 @@
     return 'coder';
   }
   function argsOf(c) { if (!c.detail) return undefined; var a = {}; a[V.toolArg(c.name)] = c.detail; return a; }
+  // at: the real time of an event, where the snapshot has it (DS common field; Since you left counts a seeded event by it)
+  function stamp(e, t) { if (typeof t === 'number' && t > 0) e.at = t; return e; }
   function hostOf(url) { return String(url).replace(/^https?:\/\//, '').split('/')[0] || String(url); }
 
   // Where a session sits: building (repo), floor (branch), room (worktree folder). The server computes it
@@ -113,6 +119,17 @@
       });
     });
     return out.sort(function (a, b) { return a.t - b.t; });
+  }
+  // Browser alerts for the page's one Notifier: each open request and each failed turn of every building.
+  // An error id holds the error's own id, so a new failure is a new alert.
+  function alerts(snap) {
+    var out = requests(snap).map(function (r) { return { id: r.id, kind: 'request', bot: r.bot, risk: r.risk, text: r.buildingName + '. ' + r.text, uid: r.uid, building: r.building }; });
+    live(snap).forEach(function (s) {
+      if (!s.error) return;
+      var pl = placeOf(s);
+      out.push({ id: 'error:' + s.uid + ':' + s.error.id, kind: 'error', bot: s.name, text: pl.repoName + '. ' + s.error.text, uid: s.uid, building: pl.repo });
+    });
+    return out;
   }
 
   // A name no other bot of the building has (a folder name used twice gets a number): the rule of a scene's bot names.
@@ -178,6 +195,7 @@
     };
     store.buildings = function (snap) { return buildings(snap || latest); };
     store.requests = function (snap) { return requests(snap || latest); };
+    store.alerts = function (snap) { return alerts(snap || latest); };
     store.preview = function (repo, snap) { return describe(repo, snap || latest, true).def; };
     store.shapeOf = shapeOf;
     store.colorOf = colorOf;
@@ -197,6 +215,7 @@
       var known = {};   // uid -> mirror of what the scene was told
       var taken = {};   // bot name -> true
       var emitRef = null, lastUsage = { percent: null, t: 0 };
+      var primed = false, seedSnap = null;   // the first pass ran; the snapshot it restores (the store's at attach)
       var m = { repo: repo, id: ++mountSeq, def: d.def };
 
       function uniqueName(b) {
@@ -236,25 +255,27 @@
           }
         });
       }
-      function syncCalls(s, k, emit, quiet) {
+      // seat: for a bot seated again, { prev, out }: the mirror of its old seat and the live emitter. A call (or a
+      // result) the old seat never showed is news and goes out live; the rest is a restore.
+      function syncCalls(s, k, emit, quiet, seat) {
         var byAgent = {};
         (s.agents || []).forEach(function (a) { if (a.id && k.helpers[a.call] && !k.helpersDone[a.call]) byAgent[a.id] = k.helpers[a.call]; });
         (s.calls || []).forEach(function (c) {
-          var seen = k.calls[c.id];
+          var seen = k.calls[c.id], old = seat && seat.prev.calls[c.id];
           if (!seen) {
-            var who = (c.agent && byAgent[c.agent]) || k.name;
+            var who = (c.agent && byAgent[c.agent]) || k.name, fresh = !!seat && !old, ec = fresh ? seat.out : emit;
             seen = k.calls[c.id] = { bot: who, closed: false };
-            emit({ type: 'tool.call', bot: who, id: c.id, tool: V.toolShort(c.name), kind: V.toolKind(c.name), args: argsOf(c), say: !quiet });
-            if (c.name === 'Skill' && c.detail) emit({ type: 'skill.load', bot: who, skill: c.detail });
-            if (c.name === 'WebFetch' && c.detail) emit({ type: 'knowledge', bot: who, source: hostOf(c.detail), text: c.detail });
-            if (c.name === 'WebSearch' && c.detail) emit({ type: 'knowledge', bot: who, source: 'Web search', text: c.detail });
+            ec(stamp({ type: 'tool.call', bot: who, id: c.id, tool: V.toolShort(c.name), kind: V.toolKind(c.name), args: argsOf(c), say: !quiet || fresh }, c.t));
+            if (c.name === 'Skill' && c.detail) ec(stamp({ type: 'skill.load', bot: who, skill: c.detail }, c.t));
+            if (c.name === 'WebFetch' && c.detail) ec(stamp({ type: 'knowledge', bot: who, source: hostOf(c.detail), text: c.detail }, c.t));
+            if (c.name === 'WebSearch' && c.detail) ec(stamp({ type: 'knowledge', bot: who, source: 'Web search', text: c.detail }, c.t));
           }
           if (!seen.closed && c.ok !== null) {
             seen.closed = true;
             var r = { type: 'tool.result', bot: seen.bot, id: c.id, ok: c.ok };
-            if (typeof c.ms === 'number') r.ms = c.ms;
+            if (typeof c.ms === 'number') { r.ms = c.ms; stamp(r, c.t + c.ms); }
             if (c.err) r.summary = c.err;
-            emit(r);
+            (seat && !(old && old.closed) ? seat.out : emit)(r);
           }
         });
       }
@@ -274,68 +295,82 @@
         });
       }
 
-      function apply(snapshot, emit) {
+      // seedAll: the first pass of a newly attached scene. Every event of it restores state the office already had,
+      // so it carries seeded: true, with its real time (at) where the snapshot has one (DS Reference, Scene mount).
+      // A restore inside a live pass (a bot seated again on another floor, an error a bot had before the scene saw it)
+      // is seeded without at: a seeded event with at after the last visit is news to the DS, so it would be recorded twice.
+      // out: the emitter of this pass.
+      function apply(snapshot, out, seedAll) {
         var seen = {};
+        var seeded = function (e) { e.seeded = true; out(e); };
+        var restore = function (e) { delete e.at; seeded(e); };
+        var base = seedAll ? seeded : out;
         // empty rooms: worktrees of this building that no session uses
         var rp = repoOf(snapshot, repo);
-        if (rp) rp.worktrees.forEach(function (w) { roomOf(fromPlace(w.place), emit); });
+        if (rp) rp.worktrees.forEach(function (w) { roomOf(fromPlace(w.place), base); });
         snapshot.sessions.forEach(function (s) {
           if (!s.place) return;   // wait until the server knows the repo and branch
-          var pl = placeOf(s), k = known[s.uid];
+          var pl = placeOf(s), k = known[s.uid], emit = base, prev = null, firstSight = false;
           // the session checked out another branch, or moved to another folder: seat it again
           if (k && !k.ended && k.place !== placeKey(pl)) {
-            emit({ type: 'bot.remove', bot: k.name }); delete taken[k.name]; delete known[s.uid]; k = null;
+            emit({ type: 'bot.remove', bot: k.name }); delete taken[k.name]; delete known[s.uid];
+            prev = k; k = null;
+            emit = restore;   // the scene showed this bot and what its old seat lists (prev) already
           }
           if (pl.repo !== repo) return;   // another building
           seen[s.uid] = true;
+          // Per item of a bot seated again: what the old seat showed is a restore, anything else is news.
+          var pick = function (old) { return prev && !old ? out : emit; };
           if (!k) {
             if (s.status === 'ended') return;
+            firstSight = true;
             var name = uniqueName(s.name);
             k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: V.status(s).key, task: V.taskLine(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, model: s.model, ended: false, place: placeKey(pl), room: roomOf(pl, emit) };
             var bot = withColor({ name: name, role: 'coder', shape: shapeOf(s.uid), status: k.status, task: k.task, platform: 'Claude Code', identity: s.cwd }, s.uid);
             if (s.skills && s.skills.length) bot.skills = s.skills.slice(0, 16);
             if (s.scheduleId) bot.triggers = [s.name];
-            emit({ type: 'bot.add', roomId: k.room, bot: bot });
-            emit({ type: 'session.start', bot: name, session: s.uid, title: s.cwd });
+            emit(stamp({ type: 'bot.add', roomId: k.room, bot: bot }, s.startedAt));
+            emit(stamp({ type: 'session.start', bot: name, session: s.uid, title: s.cwd }, s.startedAt));
             if (s.model) emit({ type: 'model', bot: name, model: s.model });
-            if (s.scheduleId) emit({ type: 'trigger.run', job: s.name, bot: name });
+            if (s.scheduleId) emit(stamp({ type: 'trigger.run', job: s.name, bot: name }, s.startedAt));
             // A page opened mid-session: fill the trace with the plan and the last calls, without bubbles.
-            // Older calls and finished subagents are history, not news.
+            // Older calls and finished subagents are history, not news. Open requests, replies and the error follow below.
             var calls = s.calls || [], from = Math.max(0, calls.length - HISTORY_CALLS);
             calls.forEach(function (c, i) { if (i < from && c.ok !== null) k.calls[c.id] = { bot: name, closed: true }; });
             (s.agents || []).forEach(function (a) { if (a.done) k.helpersDone[a.call] = true; });
-            if (s.error) k.errorSeen = s.error.id;
             syncHelpers(s, k, emit);
-            syncCalls(s, k, emit, true);
+            syncCalls(s, k, emit, true, prev && { prev: prev, out: out });
             syncPlan(s, k, emit);
-            return;
+          } else {
+            if (k.ended) return;
+            if (s.model && s.model !== k.model) { k.model = s.model; emit({ type: 'model', bot: k.name, model: s.model }); }
+            syncHelpers(s, k, emit);
+            syncCalls(s, k, emit);
+            syncPlan(s, k, emit);
           }
-          if (k.ended) return;
           var bot0 = k.name;
-          if (s.model && s.model !== k.model) { k.model = s.model; emit({ type: 'model', bot: bot0, model: s.model }); }
-
-          syncHelpers(s, k, emit);
-          syncCalls(s, k, emit);
-          syncPlan(s, k, emit);
 
           // permission prompts: each pending question becomes one request with Approve and Decline
           (s.pending || []).forEach(function (r) {
             if (k.asked[r.id]) return;
             k.asked[r.id] = true;
-            emit({ type: 'request', bot: bot0, id: r.id, text: 'Allow ' + r.tool + (r.detail ? ': ' + clip(r.detail, 80) : '') + '?', risk: r.risk, tool: r.tool, preview: r.preview || r.detail });
+            pick(prev && prev.asked[r.id])(stamp({ type: 'request', bot: bot0, id: r.id, text: 'Allow ' + r.tool + (r.detail ? ': ' + clip(r.detail, 80) : '') + '?', risk: r.risk, tool: r.tool, preview: r.preview || r.detail }, r.t));
           });
           // free-form questions from the session (office_ask): answer with Yes or No, or reply in the chat
           (s.questions || []).forEach(function (q) {
             if (k.asked[q.id]) return;
             k.asked[q.id] = true;
             // no risk value: the DS bulk 'Approve all low-risk' must never answer a question the user did not read
-            emit({ type: 'request', bot: bot0, id: q.id, text: q.text, tool: 'office_ask' });
+            pick(prev && prev.asked[q.id])(stamp({ type: 'request', bot: bot0, id: q.id, text: q.text, tool: 'office_ask' }, q.t));
           });
-          // what the session said (headless sessions only; a terminal session answers in its terminal)
+          // what the session said (headless sessions only; a terminal session answers in its terminal).
+          // Restored replies fill the chat without speech bubbles, like restored tool calls.
           (s.replies || []).forEach(function (r) {
             if (r.id <= k.replySeen) return;
             k.replySeen = r.id;
-            emit({ type: 'message', bot: bot0, text: r.text });
+            var e = pick(prev && r.id <= prev.replySeen), msg = stamp({ type: 'message', bot: bot0, text: r.text }, r.t);
+            if (e !== out) msg.say = false;
+            e(msg);
           });
           // a queued message was read by the session
           var queued = (s.inbox || []).length;
@@ -345,15 +380,18 @@
           var st = V.status(s).key, task = V.taskLine(s);
           if (s.status === 'ended') {
             k.ended = true;
-            emit({ type: 'session.end', bot: bot0, session: s.uid, ok: !s.error });
+            emit(stamp({ type: 'session.end', bot: bot0, session: s.uid, ok: !s.error }, s.endedAt));
             emit({ type: 'status', bot: bot0, status: 'resting', task: task });
-            later(function () { if (emitRef !== emit) return; emit({ type: 'bot.remove', bot: bot0 }); delete taken[bot0]; }, REMOVE_AFTER_MS);
+            later(function () { if (emitRef !== out) return; out({ type: 'bot.remove', bot: bot0 }); delete taken[bot0]; }, REMOVE_AFTER_MS);
             return;
           }
-          // a failed turn: the bot shows the error until a new turn starts, or Retry or Dismiss
+          // a failed turn: the bot shows the error until a new turn starts, or Retry or Dismiss.
+          // A bot first seen in a live pass (it moved in from another building) had its error before this scene saw it:
+          // the error is restored, not news. A bot seated again restores the error its old seat showed.
           if (s.error && s.error.id > k.errorSeen) {
             k.errorSeen = s.error.id; k.status = 'error'; k.task = s.error.text;
-            emit({ type: 'error', bot: bot0, text: s.error.text });
+            var ee = prev ? pick(s.error.id <= prev.errorSeen) : (firstSight && !seedAll ? restore : emit);
+            ee(stamp({ type: 'error', bot: bot0, text: s.error.text }, s.error.at));
             return;
           }
           if (st !== k.status) { k.status = st; k.task = task; emit({ type: 'status', bot: bot0, status: st, task: task }); }
@@ -363,7 +401,7 @@
         Object.keys(known).forEach(function (uid) {
           if (seen[uid]) return;
           var k = known[uid];
-          if (!k.ended) { emit({ type: 'bot.remove', bot: k.name }); delete taken[k.name]; }
+          if (!k.ended) { base({ type: 'bot.remove', bot: k.name }); delete taken[k.name]; }
           delete known[uid];
         });
       }
@@ -377,12 +415,21 @@
         emit({ type: 'usage', percent: w.percent });
       }
 
-      m._follow = function (snap) { if (emitRef) { apply(snap, emitRef); syncUsage(snap, emitRef); } };
+      // The first pass restores the scene: the snapshot the store had at attach, every event seeded (DS Reference,
+      // Scene mount). It runs once, from the deferred call or from the first snapshot that arrives before it, whichever
+      // comes first; a snapshot after attach is applied live on top of it, so only what changed since then is news.
+      function prime(emit) {
+        if (primed) return;
+        primed = true;
+        var s0 = seedSnap; seedSnap = null;
+        if (s0) { apply(s0, emit, true); syncUsage(s0, function (e) { e.seeded = true; emit(e); }); }
+      }
+      m._follow = function (snap) { if (emitRef) { prime(emitRef); apply(snap, emitRef); syncUsage(snap, emitRef); } };
       m.attach = function (emit) {
         known = {}; taken = {}; layout = freshLayout(); lastUsage = { percent: null, t: 0 };
-        emitRef = emit;
+        emitRef = emit; primed = false; seedSnap = latest;
         if (attached.indexOf(m) < 0) attached.push(m);
-        defer(function () { if (emitRef === emit && latest) { apply(latest, emit); syncUsage(latest, emit); } });
+        defer(function () { if (emitRef === emit) prime(emit); });
       };
       m.detach = function () {
         emitRef = null;

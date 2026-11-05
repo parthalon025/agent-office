@@ -57,6 +57,13 @@ test('muted text: 4.5:1 on bg, panel (card) and chip', () => each((T, th, panel)
   for (const bg of [['bg', T('bg')], ['card', panel], ['chip', T('chip')]]) atLeast('muted on ' + bg[0], 4.5, T('muted'), bg[1], th);
 }));
 
+// The terminal panel is a scene-dark face in every theme: status-*-text is for theme surfaces and fails there, so the
+// tones are a status color mixed into bubble (office.css, .term-line).
+test('terminal tones: 4.5:1 on the scene-dark face', () => each((T, th) => {
+  for (const s of ['status-working', 'status-finished', 'status-error', 'emphasis']) atLeast('terminal ' + s, 4.5, mix(T(s), T('bubble'), 0.55), T('scene-dark'), th);
+  atLeast('terminal muted', 4.5, mix(T('bubble'), T('scene-dark'), 0.55), T('scene-dark'), th);
+}));
+
 test('diff: ink on the chip, and on the added and removed lines', () => each((T, th) => {
   const add = over([...T('status-working').slice(0, 3), 0.16], T('chip')), del = over([...T('status-error').slice(0, 3), 0.16], T('chip'));
   const hunk = over([...T('accent').slice(0, 3), 0.12], T('chip'));
@@ -74,14 +81,26 @@ test('the CSS keeps status colors off text and uses the ink pairs above', () => 
   };
   assert.match(rule('.notes-text'), /color: color-mix\(in srgb, var\(--scene-dark\) 70%, var\(--status-finished\)\)/);
   assert.match(css, /\.notes-text::placeholder \{ color: color-mix\(in srgb, var\(--scene-dark\) 82%, var\(--bubble\)\)/);
-  assert.match(rule('.ext-err'), /color: var\(--ink\)/);
+  assert.match(rule('.ext-err'), /color: var\(--status-error-text\)/);
   assert.match(rule('.city-wait'), /color: var\(--ink\)/);
   assert.match(rule('.dl.hunk'), /color: var\(--ink\)/);
   assert.match(rule('.dl.meta'), /color: var\(--ink\)/);
   assert.match(rule('.board-tree li.is-hot span:nth-child(2)'), /color: var\(--ink\)/);
   assert.match(rule('.fcode'), /color: var\(--muted\)|color: var\(--ink\)/);
-  // no rule colors text with a status token (dots and tints use them as backgrounds only)
-  for (const m of css.matchAll(/(?:^|[;{\s])color: var\(--(status-[a-z]+)\)/g)) assert.fail('text colored with ' + m[1]);
+  assert.match(css, /\.fc-M \{ color: var\(--status-waiting-text\); \} \.fc-A, \.fc-\\\? \{ color: var\(--status-working-text\); \} \.fc-D \{ color: var\(--status-error-text\); \}/);
+  // Text takes status-*-text or status-*-on-bubble. A raw status-* token (a fill and a dot) is on text only in the
+  // mixes pinned above: the notes ink and the terminal tones.
+  const MIXES = new Set(['color-mix(in srgb, var(--scene-dark) 70%, var(--status-finished))']
+    .concat(['working', 'finished', 'error'].map((s) => `color-mix(in srgb, var(--status-${s}) 55%, var(--bubble))`)));
+  let words = 0;
+  for (const m of css.matchAll(/(?:^|[;{\s])(?:caret-)?color: ([^;}]+)/g)) {
+    const v = m[1].trim();
+    for (const t of v.matchAll(/var\(--(status-[a-z-]+)\)/g)) {
+      if (/^status-(working|waiting|error|resting|finished)-(text|on-bubble)$/.test(t[1])) { words++; continue; }
+      if (!MIXES.has(v)) assert.fail('text colored with ' + t[1] + ': ' + v);
+    }
+  }
+  assert.ok(words >= 4, 'the status words use the text tokens');
 });
 
 test('the City label draws on bg, not a bubble', () => {

@@ -30,7 +30,7 @@ function problems(ev) {
   const sp = SCHEMA.events[ev.type];
   if (!sp) return ['unknown type: ' + ev.type];
   const out = [];
-  for (const [k, t0] of Object.entries(sp.fields)) {
+  for (const [k, t0] of Object.entries({ ...SCHEMA.common.fields, ...sp.fields })) {   // common: seeded, at (every event)
     const opt = t0.endsWith('?'), t = t0.replace(/\?$/, ''), v = ev[k];
     if (v === undefined || v === null) { if (!opt) out.push('missing ' + k); continue; }
     const ok = { string: typeof v === 'string', number: typeof v === 'number', boolean: typeof v === 'boolean', Status: STATES.has(v) }[t]
@@ -50,7 +50,7 @@ function rig(over = {}) {
     onChange: () => {},
     setTimer: () => 0,
   });
-  r.store = B.createStore({ now: () => r.t, defer: (fn) => fn(), setTimer: (fn, ms) => { r.timers.push({ fn, ms }); } });
+  r.store = B.createStore({ now: () => r.t, defer: over.defer || ((fn) => fn()), setTimer: (fn, ms) => { r.timers.push({ fn, ms }); } });
   r.snap = () => {
     const sessions = [...r.tracker.sessions.values()].map((s) => ({ ...s, place: s.placed ? placeOfSession(s.git, s.cwd) : null }));
     const by = {};
@@ -463,6 +463,177 @@ test('requests: every open request and question of every building, oldest first,
   r.tracker.sessions.forEach((s) => { s.status = 'ended'; });
   r.push();
   assert.deepEqual(r.store.requests(), []);
+});
+
+// A new scene starts empty, so the adapter sends the state again (DS Reference, Scene mount). Those events are
+// seeded: the scene applies them, but plays no sound and sends no toast or onNotify. Live events after that are not.
+test('a scene mounted later gets the whole state in one seeded pass: open requests and the error too, with their times', async () => {
+  const r = rig();
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'b', cwd: REPO_A });
+  await r.hook({ ...HOOKS.turnWithEdit[1], session_id: 'a', cwd: REPO_A });
+  await r.hook({ ...HOOKS.turnWithEdit[2], session_id: 'a', cwd: REPO_A });   // a tool call that is still open
+  r.t += 10;
+  r.tracker.permissionRequest(slimPayload({ ...HOOKS.permission, session_id: 'a', cwd: REPO_A }, null));
+  r.t += 10;
+  const [sa, sb] = [...r.tracker.sessions.values()];
+  r.tracker.askQuestion(sa, 'Use the old schema?');
+  sb.error = { id: 1, text: 'Out of budget.', at: r.t };
+  r.push();
+  const m = r.mount(KEY_A);
+  assert.ok(m.ev.length > 0);
+  for (const e of m.ev) assert.equal(e.seeded, true, `${e.type} is seeded`);
+  // the open requests and the error are in the first pass, not one snapshot later
+  const reqs = of(m.ev, 'request');
+  assert.deepEqual(reqs.map((e) => e.id).sort(), [...sa.pending.map((x) => x.id), ...sa.questions.map((x) => x.id)].sort());
+  assert.equal(reqs.find((e) => e.tool === 'Bash').at, sa.pending[0].t);
+  assert.equal(reqs.find((e) => e.tool === 'office_ask').at, sa.questions[0].t);
+  assert.deepEqual(of(m.ev, 'error').map((e) => [e.bot, e.text, e.at]), [['repo 2', 'Out of budget.', sb.error.at]]);
+  assert.equal(of(m.ev, 'bot.add').find((e) => e.bot.name === 'repo').at, sa.startedAt);
+  assert.equal(of(m.ev, 'tool.call')[0].at, sa.calls[0].t);
+  // the next snapshot says nothing new, and live news after that is not seeded
+  const n = m.ev.length;
+  r.push();
+  assert.equal(m.ev.length, n, 'nothing is sent twice');
+  r.t += 10;
+  r.tracker.permissionRequest(slimPayload({ ...HOOKS.permission, tool_input: { command: 'npm test' }, session_id: 'b', cwd: REPO_A }, null));
+  r.push();
+  const live = m.ev.slice(n);
+  assert.ok(of(live, 'request').length === 1);
+  for (const e of live) assert.equal(e.seeded, undefined, `live ${e.type} is not seeded`);
+});
+
+test('a bot seated again after a branch change is seeded: its open request does not toast a second time', async () => {
+  const r = rig();
+  const m = r.mount(KEY_A);
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  r.tracker.permissionRequest(slimPayload({ ...HOOKS.permission, session_id: 'a', cwd: REPO_A }, null));
+  r.push();
+  assert.equal(of(m.ev, 'request').filter((e) => !e.seeded).length, 1, 'the new request is live news');
+  const s = [...r.tracker.sessions.values()][0];
+  s.git = { ...s.git, branch: 'feat/y' };   // the session checked out another branch
+  const n = m.ev.length;
+  r.push();
+  const again = m.ev.slice(n);
+  assert.deepEqual(types(again).slice(0, 3), ['bot.remove', 'floor.add', 'bot.add']);
+  assert.equal(again[0].seeded, undefined, 'the bot leaving its old floor is news');
+  for (const e of again.slice(1)) assert.equal(e.seeded, true, `${e.type} restores state the scene had`);
+  assert.equal(of(again, 'request').length, 1, 'the open request is shown on the new floor');
+});
+
+test('a snapshot that lands before the deferred first pass: what the scene mounted with is seeded, only later news is live', async () => {
+  const queued = [];
+  const r = rig({ defer: (fn) => queued.push(fn) });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  r.tracker.permissionRequest(slimPayload({ ...HOOKS.permission, session_id: 'a', cwd: REPO_A }, null));
+  r.push();
+  const old = r.store.requests()[0];
+  const m = r.mount(KEY_A);
+  assert.deepEqual(m.ev, [], 'the first pass waits for the deferred call');
+  // an SSE snapshot is handled before the timer: a broadcast follows every hook
+  r.t += 10;
+  r.tracker.permissionRequest(slimPayload({ ...HOOKS.permission, tool_input: { command: 'npm test' }, session_id: 'a', cwd: REPO_A }, null));
+  r.push();
+  const fresh = r.store.requests().find((x) => x.id !== old.id);
+  // first the restore (all seeded), then the live pass on top of it (none seeded)
+  const cut = m.ev.findIndex((e) => !e.seeded);
+  assert.ok(cut > 0, 'the restore comes first');
+  const restore = m.ev.slice(0, cut), news = m.ev.slice(cut);
+  for (const e of news) assert.equal(e.seeded, undefined, `live ${e.type} after the restore is not seeded`);
+  assert.equal(of(restore, 'bot.add').length, 1, 'the state at mount is restored');
+  assert.deepEqual(of(restore, 'request').map((e) => e.id), [old.id]);
+  assert.deepEqual(of(news, 'request').map((e) => e.id), [fresh.id], 'the request that came after the mount is news');
+  const n = m.ev.length;
+  queued.forEach((f) => f());
+  assert.equal(m.ev.length, n, 'the deferred pass sends nothing twice');
+});
+
+test('restored replies fill the chat without speech bubbles; a new reply is live and speaks', async () => {
+  const r = rig();
+  await r.play(HOOKS.turnWithEdit.slice(0, 2));
+  const s = [...r.tracker.sessions.values()][0];
+  r.tracker.pushReply(s, 'Earlier answer.'); r.push();
+  const m = r.mount(KEY_A);
+  const old = of(m.ev, 'message').filter((e) => e.text === 'Earlier answer.');
+  assert.equal(old.length, 1);
+  assert.deepEqual([old[0].seeded, old[0].say, old[0].at], [true, false, s.replies[0].t]);
+  r.t += 10;
+  r.tracker.pushReply(s, 'New answer.'); r.push();
+  const nw = of(m.ev, 'message').filter((e) => e.text === 'New answer.');
+  assert.equal(nw.length, 1);
+  assert.deepEqual([nw[0].seeded, nw[0].say], [undefined, undefined], 'a live reply shows its bubble');
+});
+
+test('a re-seat restores without times, so the DS records nothing twice; news in the same snapshot stays live', async () => {
+  const r = rig();
+  const m = r.mount(KEY_A);
+  await r.play(HOOKS.turnWithEdit.slice(0, 3).map((p) => ({ ...p, session_id: 'a', cwd: REPO_A })));   // an open tool call
+  const s = [...r.tracker.sessions.values()][0];
+  r.tracker.permissionRequest(slimPayload({ ...HOOKS.permission, session_id: 'a', cwd: REPO_A }, null));
+  r.tracker.pushReply(s, 'Earlier answer.');
+  r.push();
+  const oldReq = s.pending[0].id;
+  // the session checks out another branch, and in the same snapshot asks a new question and says something new
+  s.git = { ...s.git, branch: 'feat/y' };
+  r.t += 10;
+  r.tracker.askQuestion(s, 'Use the old schema?');
+  r.tracker.pushReply(s, 'New answer.');
+  const n = m.ev.length;
+  r.push();
+  const again = m.ev.slice(n);
+  const isNews = (e) => (e.type === 'request' && e.tool === 'office_ask') || (e.type === 'message' && e.text === 'New answer.');
+  for (const e of again.slice(1).filter((e) => !isNews(e))) {
+    assert.equal(e.seeded, true, `${e.type} restores state the scene had`);
+    assert.equal(e.at, undefined, `restored ${e.type} has no time: it is not news`);
+  }
+  assert.deepEqual(of(again, 'request').filter((e) => e.seeded).map((e) => e.id), [oldReq]);
+  const q = of(again, 'request').filter((e) => e.tool === 'office_ask');
+  assert.equal(q.length, 1);
+  assert.equal(q[0].seeded, undefined, 'a question asked in the re-seat snapshot is news');
+  const said = of(again, 'message');
+  assert.deepEqual(said.map((e) => [e.text, e.seeded, e.say]), [['Earlier answer.', true, false], ['New answer.', undefined, undefined]]);
+  assert.ok(of(again, 'tool.call').length === 1 && of(again, 'tool.call')[0].seeded, 'the open tool call is restored');
+});
+
+test('a bot first seen in a live pass with an error it already had restores the error, and does not toast it', async () => {
+  const r = rig();
+  const m = r.mount(KEY_A);
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'b', cwd: REPO_B });
+  const s = [...r.tracker.sessions.values()][0];
+  s.error = { id: 1, text: 'Out of budget.', at: r.t }; r.push();
+  assert.deepEqual(of(m.ev, 'error'), [], 'another building');
+  // the session moves to a folder of this building while it is in Error
+  r.t += 10;
+  s.git = GITS[REPO_A]; s.cwd = REPO_A; r.push();
+  const errs = of(m.ev, 'error');
+  assert.equal(errs.length, 1, 'the bot shows its error');
+  assert.deepEqual([errs[0].seeded, errs[0].at], [true, undefined], 'an old failure is not news');
+  // a new failure later is news
+  s.error = { id: 2, text: 'Stopped again.', at: r.t }; r.push();
+  const e2 = of(m.ev, 'error').at(-1);
+  assert.deepEqual([e2.text, e2.seeded], ['Stopped again.', undefined]);
+});
+
+test('alerts: the requests and errors of every building, for the page Notifier', async () => {
+  const r = rig();
+  assert.deepEqual(r.store.alerts(), [], 'no snapshot, no alerts');
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'b', cwd: REPO_B });
+  r.tracker.permissionRequest(slimPayload({ ...HOOKS.permission, session_id: 'b', cwd: REPO_B }, null));
+  const sa = [...r.tracker.sessions.values()].find((s) => s.cwd === REPO_A);
+  sa.error = { id: 3, text: 'Out of budget.', at: r.t };
+  r.push();
+  const list = r.store.alerts();
+  const req = r.store.requests()[0];
+  assert.deepEqual(list, [
+    { id: req.id, kind: 'request', bot: req.bot, risk: req.risk, text: 'other. ' + req.text, uid: req.uid, building: KEY_B },
+    { id: 'error:' + sa.uid + ':3', kind: 'error', bot: sa.name, text: 'repo. Out of budget.', uid: sa.uid, building: KEY_A },
+  ]);
+  // a new error is a new alert (a new id); a dismissed one is gone
+  sa.error = { id: 4, text: 'Out of budget.', at: r.t }; r.push();
+  assert.equal(r.store.alerts()[1].id, 'error:' + sa.uid + ':4');
+  r.tracker.dismissError(sa); r.push();
+  assert.deepEqual(r.store.alerts().map((x) => x.kind), ['request']);
 });
 
 test('two sessions with one name in one building get unique scene names, found by uid', async () => {
