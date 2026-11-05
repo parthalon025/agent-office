@@ -56,6 +56,22 @@ async function open(name) {
 // One session with all its data (provider, budget, ...) and its feed lines: the snapshot carries only what the page reads.
 const fullOf = async (uid) => { const r = await fetch(`http://127.0.0.1:${port}/api/session?uid=${encodeURIComponent(uid)}`, { headers: { 'x-office-token': pageToken } }); return r.ok ? r.json() : null; };
 const sessionOf = async (uid) => (await fullOf(uid))?.session;
+// The lean snapshot the page gets first on the event stream (room figures, repos, the Security room).
+async function snapshot() {
+  const ctl = new AbortController();
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/events`, { headers: { 'x-office-token': pageToken }, signal: ctl.signal });
+    const reader = r.body.getReader();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return null;
+      buf += Buffer.from(value).toString('utf8');
+      const m = /data: (.*)\n\n/.exec(buf);
+      if (m) return JSON.parse(m[1]);
+    }
+  } finally { ctl.abort(); }
+}
 
 before(async () => {
   if (SKIP) return;
@@ -242,7 +258,11 @@ test('info gives the agent token to the page token only', { skip: SKIP }, async 
 test('the default spend limit shows in info, can be changed or cleared, and a bad value is refused', { skip: SKIP }, async () => {
   assert.equal((await call('/api/settings/spend', { limit: 5 })).json.spendLimit, 5);
   assert.equal((await info()).spendLimit, 5);
-  assert.equal((await call('/api/settings/spend', { limit: '' })).json.spendLimit, 0, 'cleared: no default limit');
+  // No limit is the loosest setting: it needs confirmed (the wall's painted Confirm, the dialog's Save) (#70)
+  const loose = await call('/api/settings/spend', { limit: '' });
+  assert.equal(loose.status, 409, 'No limit without a confirm is refused');
+  assert.equal((await info()).spendLimit, 5, 'and changes nothing');
+  assert.equal((await call('/api/settings/spend', { limit: '', confirmed: true })).json.spendLimit, 0, 'cleared: no default limit');
   assert.equal((await info()).spendLimit, 0);
   for (const bad of ['abc', -1, 1001]) {
     const r = await call('/api/settings/spend', { limit: bad });
@@ -353,8 +373,7 @@ test('/api/open gives each agent a worktree on the base floor; isolation "same" 
   assert.equal((await snapshot()).figures[sc.place.noteKey].sessions, 2, 'the shared room counts two agents');
   // a folder outside git has no room to make: the agent works in the folder, and the feed says so
   const e = await openIn(work, 'no-git-e');
-  const snap = await snapshot();
-  assert.equal(snap.sessions.find((s) => s.uid === e).worktree, null);
-  assert.ok(snap.feed.some((x) => x.uid === e && /not in git/.test(x.text)), JSON.stringify(snap.feed.slice(-5)));
+  const full = await until(async () => { const f = await fullOf(e); return f && f.feed.some((x) => /not in git/.test(x.text)) ? f : null; }, 'the feed line of the agent outside git');
+  assert.equal(full.session.worktree, null);
   for (const u of [a, b, c, d, e]) await call('/api/close', { uid: u });
 });

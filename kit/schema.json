@@ -1,5 +1,5 @@
 {
- "version": "x1.6.7",
+ "version": "x1.6.8",
  "events": {
   "status": {
    "desc": "A bot changes state. The bot walks to rest or back to its seat when needed.",
@@ -191,7 +191,7 @@
    }
   },
   "room.add": {
-   "desc": "Add a room to a floor.",
+   "desc": "Add a room to a floor. A room of type security has no bots and six wall screens that a page repaints; room.screens gives their six titles.",
    "fields": {
     "floorId": "number",
     "room": "object"
@@ -519,6 +519,7 @@
   "type-label-line",
   "type-label-size",
   "type-label-weight",
+  "type-security",
   "type-sl-body-line",
   "type-sl-body-size",
   "type-sl-body-weight",
@@ -613,6 +614,7 @@
   "room",
   "schedule",
   "search",
+  "security",
   "send",
   "session",
   "settings",

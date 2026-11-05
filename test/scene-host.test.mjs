@@ -671,3 +671,44 @@ test('host: with reduced motion a flight lands in one frame', () => {
   assert.equal(host.flying(), false);
   host.dispose();
 });
+
+// ---------- the screen point (uv) in the pick result (#70): in-scene controls know where on a screen the click is ----------
+test('uvOn: the point on a plane, x from its left edge, y from its bottom edge (0 to 1)', () => {
+  const it = { c: [5, 2, -3], ax: [2, 0, 0], ay: [0, 1.25, 0], n: [0, 0, 1] };
+  assert.deepEqual(P.uvOn(it, [5, 2, -3]), { x: 0.5, y: 0.5 });
+  assert.deepEqual(P.uvOn(it, [3, 0.75, -3]), { x: 0, y: 0 });
+  assert.deepEqual(P.uvOn(it, [6, 2.625, -3]), { x: 0.75, y: 0.75 });
+  // a screen on a right side wall faces -x: its right edge points to +z
+  const side = { c: [0, 2, 0], ax: [0, 0, 2], ay: [0, 1, 0], n: [-1, 0, 0] };
+  assert.deepEqual(P.uvOn(side, [0, 2, 1]), { x: 0.75, y: 0.5 });
+  assert.equal(P.uvOn(null, [0, 0, 0]), null);
+  assert.equal(P.uvOn({ c: [0, 0, 0], ax: [0, 0, 0], ay: [0, 1, 0] }, [0, 0, 0]), null, 'a plane with no width has no point');
+});
+
+test('host: click, hover and open get the screen point of a plane hit in hit.uv; a box hit has none', () => {
+  const s = focusStage({ a: 5, board: 7 });
+  const R0 = globalThis.THREE.Raycaster;
+  globalThis.THREE.Raycaster = class extends R0 { intersectObjects(list) { return super.intersectObjects(list).map((h) => ({ ...h, point: { x: 1, y: 2.625, z: 0 } })); } };
+  const host = globalThis.OfficeSceneHost.attach(s.office);
+  const got = [];
+  const item = { id: 'a' };
+  host.register({ name: 'security', active: () => true, meshes: () => [s.a], itemOf: () => item,
+    hover: (it, hit) => { if (it) got.push(['hover', hit.uv]); }, open: (it, hit) => got.push(['open', hit.uv]),
+    look: () => ({ key: 'sec:a', mesh: s.a, verb: 'Change a rule', kind: 'security' }) });
+  click(s); land(s);   // look
+  click(s);            // open, with the point
+  click(s);            // every later click on the screen in focus opens again, with its point
+  assert.deepEqual(got.filter((g) => g[0] === 'open'), [['open', { x: 0.75, y: 0.75 }], ['open', { x: 0.75, y: 0.75 }]]);
+  s.handlers.pointermove(ev()); s.anim[0](0.016, 9);
+  assert.deepEqual(got.at(-1), ['hover', { x: 0.75, y: 0.75 }]);
+  host.dispose();
+  // a box (the door frame) is no screen: no point
+  const s2 = fakeStage({ board: 3 });
+  s2.board.geometry = { type: 'BoxGeometry', parameters: { width: 1, height: 2, depth: 0.1 } };
+  const host2 = globalThis.OfficeSceneHost.attach(s2.office);
+  const hits = [];
+  host2.register({ name: 'board', active: () => true, meshes: () => [s2.board], itemOf: () => ({}), hover: () => {}, click: (it, hit) => hits.push(hit.uv) });
+  s2.handlers.pointerdown(ev()); s2.handlers.pointerup(ev());
+  assert.deepEqual(hits, [null]);
+  host2.dispose();
+});

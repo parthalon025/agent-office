@@ -21,6 +21,7 @@ This page tells why the system works as it does. For values, see Reference. For 
 | Lab (`lab`) | Server racks, cable tray, test bench | Bench sofa | coder, ops, analyst |
 | Studio (`studio`) | Round stage, cyc wall, softboxes, camera | Green-room sofa | media, designer, writer |
 | War room (`hq`) | Long table with a live map, wall of screens | Sofa | planner, analyst |
+| Security (`security`) | Six wall screens: two on the back wall, two on each side wall (`room.screens` names them; a page repaints them), a solid left wall and a glass right wall | None | No bots: the engine refuses `bot.add` into it |
 
 Roles: research, writer, coder, analyst, designer, ops, sales, planner, media, and the Microsoft customer solutions roles ae, specialist, partner, se, csa, csam, fde.
 

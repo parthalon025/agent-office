@@ -6,6 +6,14 @@ const clip = (v, n) => (typeof v === 'string' && v.length > n ? v.slice(0, n) + 
 // element and key: what a browser tool (Playwright) clicks or presses. Typed text is never kept.
 const KEEP = ['command', 'file_path', 'pattern', 'url', 'description', 'path', 'query', 'subagent_type', 'skill', 'element', 'key'];
 const TODO_STATES = new Set(['pending', 'in_progress', 'completed']);
+// The fields riskOf and actionOf read (risk.mjs), kept whole on PreToolUse: the Security room rates the call before it runs
+// (#70), and a clipped path or a missing glob would rate it wrong. Paths and patterns only, never contents.
+const RATE = ['file_path', 'notebook_path', 'path', 'pattern', 'glob'];
+function rateInput(ti) {
+  const o = {};
+  for (const k of RATE) if (typeof ti[k] === 'string') o[k] = ti[k];
+  return o;
+}
 
 export function slimPayload(b, officeId = null) {
   const ev = b.hook_event_name;
@@ -31,6 +39,7 @@ export function slimPayload(b, officeId = null) {
     office_id: officeId,
     // A permission prompt needs the full input (to show the change) and Claude's "always allow" suggestions.
     ...(ev === 'PermissionRequest' ? { full_input: b.tool_input, permission_suggestions: b.permission_suggestions } : {}),
+    ...(ev === 'PreToolUse' && b.tool_input && typeof b.tool_input === 'object' ? { rate_input: rateInput(b.tool_input) } : {}),
   };
 }
 

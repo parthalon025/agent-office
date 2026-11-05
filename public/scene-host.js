@@ -17,6 +17,8 @@
      freeRect(view, covers, gap, aspect) -> the part of the view that no cover hides (client px)
      facing(it, cam)                   -> how an item faces the camera: direction, camera axes, half size of its picture
      framePose(it, cam, view, free, fill) -> { target, pos, zoom }: the camera that shows an item in the free part
+     uvOn(it, point)                   -> { x, y } the point on a plane (0 to 1, x from its left edge, y from its bottom
+                                          edge), or null: where on a screen a click is (in-scene controls, #70)
      parts                             -> finders for the DS geometry: isWall, isBackWall, isSideWall, isSign, isBoard
 
    Browser part: attach(office, { covers() -> [rect] }) -> host, one per mounted office.
@@ -43,6 +45,7 @@
 
    A pick target: { name, active() -> bool, meshes() -> [mesh], itemOf(mesh) -> item,
                     hover(item|null, hit), click(item, hit, event),
+                    (hit: the raycast hit, with uv: { x, y } where it is on a plane mesh (uvOn), else uv null)
                     look(item) -> { key, mesh, verb, kind, fill?, clear? } or null, open(item, hit, event),
                     find(key) -> { item, mesh } or null,
                     anchors() -> [mesh] that must stay in the scene (a rebuild when one is gone) }.
@@ -194,6 +197,16 @@
     return { target: target, pos: vadd(target, dir, cam.dist || 60), zoom: zoom, dir: dir, right: right, up: up };
   }
 
+  // Where a world point lies on a plane: it = { c, ax, ay } (center, half width and half height vectors, as planeOf gives).
+  // x runs from the left edge (0) to the right edge (1), y from the bottom edge (0) to the top edge (1), like a texture.
+  function uvOn(it, point) {
+    if (!it || !point) return null;
+    var ax = v3(it.ax), ay = v3(it.ay), wx = vdot(ax, ax), wy = vdot(ay, ay);
+    if (!(wx > 1e-12) || !(wy > 1e-12)) return null;
+    var d = vadd(v3(point), v3(it.c), -1);
+    return { x: 0.5 + vdot(d, ax) / (2 * wx), y: 0.5 + vdot(d, ay) / (2 * wy) };
+  }
+
   // The DS geometry the page's decor looks for.
   function geo(m, type) { return m && m.isMesh && m.geometry && m.geometry.type === type && m.geometry.parameters; }
   function isWall(m) { var p = geo(m, 'BoxGeometry'); return !!p && Math.abs(p.height - 5.2) < 0.001; }
@@ -206,7 +219,7 @@
   };
 
   var pure = { inScene: inScene, shown: shown, floorOf: floorOf, floorGroups: floorGroups, shownFloor: shownFloor, viewOf: viewOf, roomGroups: roomGroups, rebuilt: rebuilt, choose: choose,
-    focusStep: focusStep, freeRect: freeRect, facing: facing, framePose: framePose, parts: parts };
+    focusStep: focusStep, freeRect: freeRect, facing: facing, framePose: framePose, uvOn: uvOn, parts: parts };
 
   // ---------- browser ----------
   // A token in px or ms from the page's CSS (no DOM in the tests: the fallback).
@@ -275,8 +288,15 @@
       var hits = ray.intersectObjects(meshes, false);
       if (!hits.length) return null;
       var bh = botHits()[0];
-      var cands = hits.map(function (h) { return { distance: h.distance, hit: h, target: owner.get(h.object), item: owner.get(h.object).itemOf(h.object) }; }).filter(function (c) { return c.item; });
+      var cands = hits.map(function (h) { return { distance: h.distance, hit: withUv(h), target: owner.get(h.object), item: owner.get(h.object).itemOf(h.object) }; }).filter(function (c) { return c.item; });
       return choose(cands, bh ? bh.distance : null);
+    }
+    // The hit with the screen point: uv is where it lies on a plane mesh (a screen), else null. A copy: three's own hit
+    // object (and its texture uv) is not changed.
+    function withUv(h) {
+      var g = h.object && h.object.geometry, it = g && g.type === 'PlaneGeometry' ? planeOf(h.object) : null;
+      var p = h.point;
+      return Object.assign({}, h, { uv: it && p ? uvOn(it, [p.x, p.y, p.z]) : null });
     }
     // a click on no item: empty scene, unless a bot is under the pointer (that click is the engine's)
     function emptyAt(x, y) { return !!curShownFloor() && aim(x, y) && !botHits().length; }

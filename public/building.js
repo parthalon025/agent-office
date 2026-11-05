@@ -84,7 +84,13 @@
   // Where a session sits: building (repo), floor (branch), room (worktree folder). The server computes it
   // (place.mjs) and sends it as session.place and worktree.place; this only renames the fields.
   function fromPlace(p) {
-    return { repo: p.buildingKey, repoName: p.building, branch: p.floor, root: p.rootKey, roomName: p.room, roomId: p.roomId, noteKey: p.noteKey, path: p.root };
+    return { repo: p.buildingKey, repoName: p.building, branch: p.floor, root: p.rootKey, roomName: p.room, roomId: p.roomId, noteKey: p.noteKey, path: p.root, securityRoomId: p.securityRoomId };
+  }
+  // The Security room (#70): first on the ground floor of every building, no bots, never a worktree (no layout entry, no
+  // notes key, never stale). Its id comes from the server (place.mjs securityRoomIdOf, in each place and repo entry).
+  function securityDef(id) {
+    var S = V.security;
+    return { id: id, type: 'security', name: S.roomName, bots: [], screens: S.screens.map(function (x) { return x.title; }) };
   }
   function placeOf(s) { return fromPlace(s.place); }
   function placeKey(pl) { return pl.repo + '|' + pl.branch + '|' + pl.root; }
@@ -183,7 +189,10 @@
     var empty = !floors.length;
     // It holds one spare room: the first session renames the floor and the room in place (floor.update, room.update), so the scene is not mounted again.
     if (empty) { floors = [floorDef(1, 'No sessions', [{ id: SPARE_ROOM, type: 'lab', name: 'Empty room', bots: [] }])]; nextId = 2; }
-    return { def: { name: name || (repo ? base(repo) : OTHER), sessions: 'agent', floors: floors }, floors: map, nextId: nextId, keys: keys, empty: empty };
+    var mine = places.filter(function (pl) { return pl.repo === repo && pl.securityRoomId; })[0];
+    var sec = (rp && rp.securityRoomId) || (mine && mine.securityRoomId) || null;
+    if (sec) floors[0].rooms.unshift(securityDef(sec));
+    return { def: { name: name || (repo ? base(repo) : OTHER), sessions: 'agent', floors: floors }, floors: map, nextId: nextId, keys: keys, empty: empty, security: sec };
   }
 
   function createStore(opts) {
@@ -475,6 +484,8 @@
         attached = attached.filter(function (x) { return x !== m; });
       };
 
+      // The id of this building's Security room, or null (the server gave none: a building with no place yet).
+      m.securityRoom = function () { return d.security; };
       m.roomsShown = function () {
         var out = [];
         Object.keys(layout.floors).forEach(function (br) { Object.keys(layout.floors[br].rooms).forEach(function (root) { out.push(br + '|' + root); }); });

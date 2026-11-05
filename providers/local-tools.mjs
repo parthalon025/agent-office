@@ -1,6 +1,6 @@
 // The built-in tools of a local-model agent: read, list, search, edit, write and run, all limited to one folder (the worktree).
 // Names and argument names follow Claude Code's (Read, LS, Grep, Edit, Write, Bash), so risk.mjs rates a call the same way
-// and payload.mjs labels it the same way. This module never decides about approval: the caller asks riskOf first.
+// and payload.mjs labels it the same way. This module never decides about approval: the caller asks the office first (the Security room rules, then a hold).
 // A path outside the folder is refused here also when the user approved the call: the tools are the last fence.
 import fs from 'node:fs';
 import path from 'node:path';

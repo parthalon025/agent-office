@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { placeOfSession, placeOfWorktree, legacyNoteKey, legacyRoomId, roomIdOf, normPath, adoptLegacy, addRecent, cleanRecent, recentChoices, OTHER_NAME, OTHER_FLOOR } from '../place.mjs';
+import { placeOfSession, placeOfWorktree, legacyNoteKey, legacyRoomId, roomIdOf, normPath, adoptLegacy, addRecent, cleanRecent, recentChoices, OTHER_NAME, OTHER_FLOOR, securityRoomIdOf, isSecurityRoom } from '../place.mjs';
 import * as git from '../git.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -200,4 +200,29 @@ test('a base equal to the branch is no base', () => {
   const p = placeOfSession({ repo: R, root: R, branch: 'main', base: 'main' }, R);
   assert.equal(p.baseBranch, '');
   assert.equal(p.room, 'Repo');
+});
+
+// ---------- the Security room (#70): one per building, never a worktree ----------
+test('every place carries its building\'s Security room id; it is never a worktree room id', () => {
+  const p = placeOfSession({ repo: R, root: R, branch: 'main' }, R);
+  const w = placeOfWorktree(R, { root: W, branch: 'feat' });
+  assert.equal(p.securityRoomId, w.securityRoomId, 'one Security room per building');
+  assert.equal(p.securityRoomId, securityRoomIdOf(p.buildingKey));
+  assert.match(p.securityRoomId, /^s-[a-z0-9-]+-[0-9a-f]{8}$/);
+  assert.ok(!p.securityRoomId.startsWith('w-'), 'a worktree room id starts with w-, so the two never meet');
+  assert.notEqual(p.securityRoomId, roomIdOf(p.buildingKey), 'the main worktree has the same path as the building, but its own room');
+  assert.notEqual(securityRoomIdOf(normPath(path.resolve('/work/Other'))), p.securityRoomId);
+  assert.equal(isSecurityRoom(p.securityRoomId), true);
+  assert.equal(isSecurityRoom(p.roomId), false);
+  assert.equal(isSecurityRoom('spare-room'), false);
+});
+
+test('the Other folders building has a Security room too', () => {
+  const p = placeOfSession(null, path.resolve('/work/Scratch'));
+  assert.equal(p.securityRoomId, securityRoomIdOf(''));
+});
+
+test('Security room id format is pinned', () => {
+  // The page matches the room by this id; a change makes every scene stale once, nothing is lost.
+  assert.equal(securityRoomIdOf('e:\\agent-office'), 's-e-agent-office-fe4d9e73');
 });

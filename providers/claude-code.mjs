@@ -240,11 +240,20 @@ export function createClaudeCode(deps) {
     },
 
     // The PermissionRequest hook's answer. No decision ({}) lets Claude Code decide: its terminal dialog, or it moves on.
+    // A refusal says why (d.message: the Security room rule), else that the user declined.
     answer(_s, request, d = {}) {
       if (typeof d.allow !== 'boolean') return {};
-      const decision = d.allow ? { behavior: 'allow' } : { behavior: 'deny', message: 'Declined from Agent Office.' };
+      const decision = d.allow ? { behavior: 'allow' } : { behavior: 'deny', message: typeof d.message === 'string' && d.message ? d.message : 'Declined from Agent Office.' };
       if (d.allow && d.always && request?.suggestions?.length) decision.updatedPermissions = request.suggestions;
       return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision } };
+    },
+
+    // The PreToolUse hook's answer (#70, security.mjs preToolDecision): 'deny' refuses the call before Claude Code's own
+    // permission check, 'ask' makes Claude Code ask (the office then holds the prompt). The office never answers 'allow'
+    // here: an Allow rule answers only the prompts Claude Code raises, so Claude Code's own deny and ask rules stay.
+    preToolAnswer(d) {
+      if (!d || (d.decision !== 'deny' && d.decision !== 'ask')) return null;
+      return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: d.decision, permissionDecisionReason: String(d.reason || '') } };
     },
 
     interrupt(s) { control(s, { subtype: 'interrupt' }); },

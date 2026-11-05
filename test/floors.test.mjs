@@ -68,6 +68,24 @@ test('staleFloors lists merged clean floors only', async () => {
   }
 });
 
+// #69 with #86: an agent room (createWorktree) sits on the floor of its base branch. Its branch is no floor, and the floor it
+// sits on is in use (deleteFloor refuses it until the agent room is removed), so neither is offered for clean-up.
+test('staleFloors offers no agent branch, and no floor an agent room sits on', async () => {
+  const dir = repo();
+  const tag = 'aotest' + crypto.randomBytes(3).toString('hex');
+  let agent = null;
+  try {
+    await git.createFloor(dir, 'done', '', tag + 'a');
+    const busy = await git.createFloor(dir, 'busy', '', tag + 'b');
+    agent = await git.createWorktree(busy.root, tag + 'bot');   // an agent opened from the busy floor
+    assert.deepEqual(await git.staleFloors(dir, { minAgeMs: 0 }), [{ branch: 'done', rooms: 1 }]);
+  } finally {
+    if (agent) await git.removeRoom(dir, agent.root, true).catch(() => {});
+    for (const b of ['done', 'busy']) await git.deleteFloor(dir, b, true).catch(() => {});
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('roomNameOf refuses Windows reserved names and never ends in a dot or dash after the cut', () => {
   for (const n of ['con', 'NUL', 'aux', 'COM1', 'lpt9', 'con.txt']) assert.throws(() => git.roomNameOf(n), /reserves/i, n);
   assert.equal(git.roomNameOf('console'), 'console');

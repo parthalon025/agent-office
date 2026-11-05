@@ -5,7 +5,7 @@
    timers. The page loads it as a script (window.OfficeWire). The server and the tests import it for its side effect
    and read globalThis.OfficeWire.
 
-     lean(state)        -> the snapshot the page gets. state: { sessions (each with place), plan, figures, notes, pins, repos, kinds }
+     lean(state)        -> the snapshot the page gets. state: { sessions (each with place), plan, figures, notes, pins, repos, kinds, security }
      leanCall(c)        -> one tool call as the page reads it
      diff(prev, next)   -> the patch from one lean snapshot to the next, or null when nothing changed
      apply(prev, patch) -> the next snapshot. prev does not change; the parts that did not change are shared
@@ -75,7 +75,8 @@
       notes: state.notes || {},
       pins: state.pins || {},
       repos: state.repos || [],
-      kinds: state.kinds || []   // the agent kinds (providers/index.mjs kinds): fixed while the server runs, so no patch repeats them
+      kinds: state.kinds || [],   // the agent kinds (providers/index.mjs kinds): fixed while the server runs, so no patch repeats them
+      security: state.security || null   // the Security room (#70): rules, what is enforced, the Spend screen
     };
   }
 

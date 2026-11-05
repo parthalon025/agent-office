@@ -55,6 +55,14 @@ export function roomIdOf(rootKey) {
   const hash = crypto.createHash('sha1').update(rootKey).digest('hex').slice(0, 8);
   return 'w-' + slug(rootKey).slice(-32).replace(/^-/, '') + '-' + hash;
 }
+// The Security room (#70): one per building, on its ground floor, where the user sets the permission rules. It is never a
+// worktree: its id starts with 's-' and a worktree's with 'w-', so no folder can ever be taken for it. It has no notes key.
+// Its name is a word of the shared vocabulary (public/vocab.js security.roomName).
+/** The Security room id of a building (buildingKey: '' for Other folders). */
+export function securityRoomIdOf(buildingKey) { return 's-' + roomIdOf(String(buildingKey || '')).slice(2); }
+/** True for a Security room id. */
+export function isSecurityRoom(roomId) { return /^s-/.test(String(roomId || '')); }
+
 /** The room id before the hash was added (it is lossy). Used only to carry old notes over. */
 export function legacyRoomId(rootKey) { return 'w-' + slug(rootKey).slice(-48); }
 
@@ -67,6 +75,7 @@ function make(buildingKey, building, repoPath, branch, root, base) {
     buildingKey, building, repoPath, floor: baseBranch || branch, branch, baseBranch,
     room: (baseBranch && branch) || baseName(root) || 'Folder', root: String(root || ''), rootKey, roomId,
     noteKey: (buildingKey || OTHER_NOTE_PREFIX) + '|' + roomId,
+    securityRoomId: securityRoomIdOf(buildingKey),
   };
 }
 

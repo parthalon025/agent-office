@@ -1,10 +1,14 @@
-// How risky a tool call is, for the Approve card and the "Approve all low-risk" action.
+// How risky a tool call is, for the Approve card and the "Approve all low-risk" action, and which row of the Security
+// room grid it falls under (its action kind, #70).
 // An allowlist: only reads and edits inside the session's root folder are low, and never for a secret-looking
 // file or a settings file that runs code (.git, .claude, .mcp.json, .vscode, .idea). Every agent provider uses
 // this one rule, so a local model or a Copilot session is rated like Claude Code.
+// One classifier (rate) gives both answers, so the grid and riskOf never disagree: the rows read-inside and
+// edit-inside are exactly the reads and edits that are low.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const READS = new Set(['Read', 'Grep', 'Glob', 'LS', 'NotebookRead']); // read-only tools that take a path
 const NO_FILES = new Set(['TodoWrite', 'WebSearch']);                  // read-only tools that touch no file
@@ -33,9 +37,12 @@ const DANGER = [
 // Path parts (folders or files) whose content a program runs without asking: git config, hooks and the
 // worktree link file; Claude Code settings, hooks, commands and skills; MCP server lists; editor tasks and
 // run settings; ssh config; the office's own hook and MCP files, with or without a port in the name (files.mjs). An
-// edit to one of them is high.
-const RUNS = new Set(['.git', '.claude', '.vscode', '.idea', '.ssh', '.mcp.json', '.claude.json', '.gitconfig']);
-const RUNS_FILE = /^office-(hooks|hooks-http|mcp)(-\d+)?\.json$/;
+// edit to one of them is high. The Start Menu folder holds the Startup folder (Programs\Startup): Windows runs what is
+// in it at sign-in.
+const RUNS = new Set(['.git', '.claude', '.vscode', '.idea', '.ssh', '.mcp.json', '.claude.json', '.gitconfig', 'start menu']);
+// File names that run code: the office's hook and MCP files (any port), PowerShell profiles (profile.ps1,
+// Microsoft.PowerShell_profile.ps1, Microsoft.VSCode_profile.ps1) and sh, bash, zsh, csh and ksh profiles.
+const RUNS_FILE = /^(office-(hooks|hooks-http|mcp)(-\d+)?\.json|(microsoft\.[\w.]+_)?profile\.ps1|\.(bashrc|bash_profile|bash_login|bash_logout|profile|zshrc|zprofile|zshenv|zlogin|cshrc|tcshrc|kshrc))$/;
 // Credential folders and secret-looking file names. A read outside the root is high, inside it is medium.
 // .office-token[-<port>] and office-hooks-http[-<port>].json hold an office's agent token (files.mjs);
 // office-page-<port>.json holds the office's page token for the user's own tools (auth.mjs pageFile).
@@ -107,6 +114,31 @@ function resolveIn(root, abs) {
   return { real, realRoot, in: !!root && inside(root, abs) && !!real && !!realRoot && inside(realRoot, real) };
 }
 
+// The office's own saved state (#70): state.json holds the Security room rules and the schedules (prompts the office runs),
+// history.json the past sessions; an office on another port has state-<port>.json and history-<port>.json (files.mjs).
+// A change to them changes what the office does at its next start, so they are settings that run code. Matched in the
+// office folder (this file's folder) only, not by name alone: another project's state.json is a plain file.
+const OFFICE_DIR = norm(path.dirname(fileURLToPath(import.meta.url)));
+const OWN_STATE = /^(state|history)(-\d+)?\.json$/i;
+const ownState = (p) => !!p && path.dirname(norm(p)) === OFFICE_DIR && OWN_STATE.test(path.basename(String(p)));
+let realHome;   // the real path of the home folder, looked up once
+/**
+ * True when a root holds the user's own settings, so nothing in it counts as inside: a drive root, the home folder or a
+ * folder above it, as text or after links (a terminal session started in the home folder, #70). Writes there reach the
+ * Startup folder, profiles and app settings, which no list of names covers.
+ */
+export function wideRoot(root) {
+  if (!root) return false;
+  const r = path.resolve(String(root));
+  if (path.parse(r).root === r) return true;
+  const home = os.homedir();
+  if (!home) return false;
+  if (inside(r, home)) return true;
+  if (realHome === undefined) realHome = realPath(home);
+  const real = realPath(r);
+  return !!(real && realHome && (inside(real, realHome) || path.parse(real).root === real));
+}
+
 /**
  * True when target is inside root both as text (inside()) and after every junction, symbolic link and short
  * name is resolved (fs.realpathSync.native on the target, or its nearest existing parent, and on the root).
@@ -129,11 +161,14 @@ function place(root, p) {
   if (/^~(?=[\\/]|$)/.test(s)) s = path.join(os.homedir(), s.slice(1));
   if (!path.isAbsolute(s) && !root) return { inside: false, ...kinds(parts(s)) };
   const abs = path.resolve(root || '', s);
-  const { real, realRoot, in: isIn } = resolveIn(root, abs);
+  const r = resolveIn(root, abs), real = r.real, realRoot = r.realRoot;
+  const isIn = r.in && !wideRoot(root); // a wide root (home, a drive) has no inside
   const whole = [...parts(abs), ...(real ? parts(real) : [])];
   const k = kinds(isIn ? [...parts(path.relative(norm(root), norm(abs))), ...parts(path.relative(norm(realRoot), norm(real)))] : whole);
-  // A .git folder anywhere on the path holds git's config and hooks, also when the root is below it.
-  if (!k.runs && whole.some((x) => forms(x).includes('.git'))) k.runs = true;
+  // A .git folder anywhere on the path holds git's config and hooks, and the Start Menu holds the Startup folder, also when
+  // the root is below them.
+  if (!k.runs && whole.some((x) => forms(x).some((n) => n === '.git' || n === 'start menu'))) k.runs = true;
+  if (ownState(abs) || ownState(real)) k.runs = true;
   return { inside: isIn, ...k };
 }
 
@@ -157,16 +192,21 @@ function globKinds(list) {
   return { secret: k.secret, runs: k.runs || dot };
 }
 
+// A rating: the risk and the action kind (a row of the Security room grid; 'other' has no row).
+const R = (risk, action) => ({ risk, action });
+// Where a read or an edit points, as a row: a secret wins over settings, settings over inside or outside.
+const fileAction = (secret, runs, isIn, inRow) => (secret ? 'secrets' : runs ? 'settings' : isIn ? inRow : 'files-outside');
+
 // Read, Grep, Glob, LS, NotebookRead: low only inside the root, and never for a secret or settings.
 function readRisk(name, a, root) {
   const file = name === 'Read' ? a.file_path : name === 'NotebookRead' ? a.notebook_path || a.file_path : a.path;
-  if (!file && (name === 'Read' || name === 'NotebookRead')) return 'medium';
+  if (!file && (name === 'Read' || name === 'NotebookRead')) return R('medium', 'files-outside');
   let base = file || root;
   let g = { secret: false, runs: false };
   const glob = name === 'Glob' ? a.pattern : name === 'Grep' ? a.glob : null;
   if (glob) {
     const s = String(glob);
-    if (parts(s).some((x) => forms(x).includes('..'))) return 'medium'; // a glob that climbs out of its folder
+    if (parts(s).some((x) => forms(x).includes('..'))) return R('medium', 'files-outside'); // a glob that climbs out of its folder
     if (path.isAbsolute(s)) {
       // An absolute glob searches below its folder part (up to the last slash before a wildcard), not below path.
       const w = s.search(/[*?[\]{}]/);
@@ -175,30 +215,51 @@ function readRisk(name, a, root) {
       g = globKinds(parts(s.slice(cut)));
     } else g = globKinds(parts(s));
   }
-  if (!base) return 'medium';
-  const w = place(root, base);
-  if (!w.inside) return w.secret || g.secret ? 'high' : 'medium';
-  return w.secret || w.runs || g.secret || g.runs ? 'medium' : 'low';
+  if (!base) return R('medium', 'files-outside');
+  const w = place(root, base), secret = w.secret || g.secret, runs = w.runs || g.runs;
+  const action = fileAction(secret, runs, w.inside, 'read-inside');
+  if (!w.inside) return R(secret ? 'high' : 'medium', action);
+  return R(secret || runs ? 'medium' : 'low', action);
 }
 
 // Edit, Write, MultiEdit, NotebookEdit: settings that run code are high anywhere; low only inside the root.
 function editRisk(file, root) {
-  if (!file) return 'medium';
-  const w = place(root, file);
-  if (w.runs) return 'high';
-  return w.inside && !w.secret ? 'low' : 'medium';
+  if (!file) return R('medium', 'files-outside');
+  const w = place(root, file), action = fileAction(w.secret, w.runs, w.inside, 'edit-inside');
+  if (w.runs) return R('high', action);
+  return R(w.inside && !w.secret ? 'low' : 'medium', action);
 }
 
 /**
  * 'low' | 'medium' | 'high' for a tool call. root is the session's root folder: the worktree or the folder it
  * started in. Relative paths are read against it.
  */
-export function riskOf(tool, input = {}, root = '') {
+export function riskOf(tool, input = {}, root = '') { return rate(tool, input, root).risk; }
+
+/**
+ * The action kind of a tool call: the row of the Security room grid it falls under (public/vocab.js has the names).
+ * 'read-inside', 'edit-inside', 'files-outside', 'shell', 'web', 'mcp', 'settings' (settings files that run code),
+ * 'secrets' (secret files), or 'other' (no row: the office's own tools, TodoWrite, Task and unknown tools).
+ * The same root rule as riskOf: read-inside and edit-inside are exactly the low reads and edits.
+ */
+export function actionOf(tool, input = {}, root = '') { return rate(tool, input, root).action; }
+
+// The office's own tools (office_inbox, office_ask, office_room, office_room_update) only talk to the office: no row.
+const OFFICE_TOOL = /^mcp__office__/;
+const WEB = new Set(['WebFetch', 'WebSearch']);
+/** Both at once, for a caller that needs the two (the Security room verdict): { risk, action }. */
+export function ratingOf(tool, input = {}, root = '') { return rate(tool, input, root); }
+
+/** The rating of one tool call: { risk, action }. riskOf and actionOf read it. */
+function rate(tool, input, root) {
   const name = String(tool || '');
   const a = input && typeof input === 'object' ? input : {};
-  if (SHELLS.has(name)) { const cmd = String(a.command || ''); return DANGER.some((re) => re.test(cmd)) ? 'high' : 'medium'; }
-  if (NO_FILES.has(name)) return 'low';
+  if (SHELLS.has(name)) { const cmd = String(a.command || ''); return R(DANGER.some((re) => re.test(cmd)) ? 'high' : 'medium', 'shell'); }
+  if (NO_FILES.has(name)) return R('low', WEB.has(name) ? 'web' : 'other');
   if (READS.has(name)) return readRisk(name, a, root);
   if (EDITS.has(name)) return editRisk(a.file_path || a.notebook_path, root);
-  return 'medium'; // unknown tools, connector (MCP) tools, WebFetch, Task and the rest need a look
+  // unknown tools, connector (MCP) tools, WebFetch, Task and the rest need a look
+  if (WEB.has(name)) return R('medium', 'web');
+  if (name.startsWith('mcp__') && !OFFICE_TOOL.test(name)) return R('medium', 'mcp');
+  return R('medium', 'other');
 }

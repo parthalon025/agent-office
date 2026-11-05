@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { riskOf, inside, realInside, isProtectedPart } from '../risk.mjs';
+import { fileURLToPath } from 'node:url';
+import { riskOf, actionOf, inside, realInside, isProtectedPart } from '../risk.mjs';
 import { officeFiles } from '../files.mjs';
 import '../public/vocab.js';
 
@@ -253,4 +254,97 @@ test('Approve all low-risk and Always allow never take the protected, secret or 
   // A low request next to them is still the one the bulk action takes.
   const low = { id: 'ok', tool: 'Edit', risk: riskOf('Edit', { file_path: at('src', 'a.js') }, cwd), always: '', t: 99 };
   assert.deepEqual(V.requests({ status: 'waiting', pending: [...pending, low], questions: [] }).filter((r) => r.risk === 'low').map((r) => r.id), ['ok']);
+});
+
+// ---------- the action kind of a tool call: the Security room row it falls under (#70) ----------
+// One rule with riskOf: the two rows whose default is Allow (read or edit inside the worktree) are exactly the reads and
+// edits riskOf rates low. Everything the grid has no row for is 'other' and keeps today's rating.
+test('actionOf: each tool call has the Security room row it falls under', () => {
+  const kinds = [
+    ['Read inside', 'Read', { file_path: inFolder }, 'read-inside'],
+    ['Grep inside', 'Grep', { pattern: 'x', path: at('src') }, 'read-inside'],
+    ['Glob inside, relative', 'Glob', { pattern: 'src/**/*.js' }, 'read-inside'],
+    ['LS of the root', 'LS', { path: cwd }, 'read-inside'],
+    ['Edit inside', 'Edit', { file_path: inFolder }, 'edit-inside'],
+    ['Write inside, relative', 'Write', { file_path: 'src/new.js' }, 'edit-inside'],
+    ['NotebookEdit inside', 'NotebookEdit', { notebook_path: at('n.ipynb') }, 'edit-inside'],
+    ['Read outside', 'Read', { file_path: outFolder }, 'files-outside'],
+    ['Edit outside', 'Edit', { file_path: outFolder }, 'files-outside'],
+    ['Read with no path', 'Read', {}, 'files-outside'],
+    ['Glob that climbs out', 'Glob', { pattern: '../**/*' }, 'files-outside'],
+    ['Bash', 'Bash', { command: 'git status' }, 'shell'],
+    ['PowerShell delete', 'PowerShell', { command: 'Remove-Item x' }, 'shell'],
+    ['WebFetch', 'WebFetch', { url: 'https://x.test' }, 'web'],
+    ['WebSearch', 'WebSearch', { query: 'x' }, 'web'],
+    ['a connector tool', 'mcp__github__create_issue', {}, 'mcp'],
+    ['a browser connector', 'mcp__plugin_playwright_playwright__browser_click', {}, 'mcp'],
+    ['edit of .claude settings', 'Edit', { file_path: at('.claude', 'settings.json') }, 'settings'],
+    ['read of .git config inside', 'Read', { file_path: at('.git', 'config') }, 'settings'],
+    ['edit of .mcp.json', 'Write', { file_path: at('.mcp.json') }, 'settings'],
+    ['glob over dot names', 'Glob', { pattern: '.*' }, 'settings'],
+    ['read of .env inside', 'Read', { file_path: at('.env') }, 'secrets'],
+    ['read of an ssh key outside', 'Read', { file_path: path.join(home, '.ssh', 'id_ed25519') }, 'secrets'],
+    ['edit of a .pem inside', 'Edit', { file_path: at('certs', 'a.pem') }, 'secrets'],
+    ['grep for .env files', 'Grep', { pattern: 'KEY', glob: '.env*' }, 'secrets'],
+    ['the office tools are the office\'s own', 'mcp__office__office_ask', {}, 'other'],
+    ['TodoWrite', 'TodoWrite', { todos: [] }, 'other'],
+    ['Task', 'Task', { prompt: 'x' }, 'other'],
+    ['an unknown tool', 'Frobnicate', {}, 'other'],
+  ];
+  for (const [what, tool, input, want] of kinds) assert.equal(actionOf(tool, input, cwd), want, what);
+  assert.equal(actionOf('Read', { file_path: inFolder }, wtRoot), 'files-outside', 'a file outside the worktree root is outside');
+  assert.equal(actionOf('Read', { file_path: path.join(wtRoot, 'a.js') }, wtRoot), 'read-inside', 'a worktree in .claude/worktrees is still inside');
+});
+
+test('actionOf and riskOf use one rule: read-inside and edit-inside are the low reads and edits', () => {
+  const files = cases.filter(([, tool]) => ['Read', 'Grep', 'Glob', 'LS', 'NotebookRead', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool));
+  assert.ok(files.length > 20, 'the shared cases cover many file calls');
+  for (const [what, tool, input, root] of files.map((c) => [c[0], c[1], c[2], c[4] === undefined ? cwd : c[4]])) {
+    const low = riskOf(tool, input, root) === 'low', a = actionOf(tool, input, root);
+    assert.equal(low, a === 'read-inside' || a === 'edit-inside', `${what}: ${a} vs ${riskOf(tool, input, root)}`);
+  }
+  for (const [what, tool, input] of cases.filter(([, tool]) => tool === 'Bash' || tool === 'PowerShell')) assert.equal(actionOf(tool, input, cwd), 'shell', what);
+});
+
+// #70 review: a root that holds the user's settings is no sandbox. A terminal session started in the home folder (or a
+// drive root) must not get its writes to the Startup folder or a shell profile rated low, and so allowed by the Security room.
+test('a wide root (the home folder, a folder above it, a drive root) has no inside: reads and edits there are not low', () => {
+  const startup = path.join(home, 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'x.cmd');
+  const doc = path.join(home, 'Documents', 'notes.txt');
+  for (const root of [home, path.dirname(home), path.parse(home).root]) {
+    assert.notEqual(riskOf('Write', { file_path: doc }, root), 'low', `write under ${root}`);
+    assert.equal(actionOf('Write', { file_path: doc }, root), 'files-outside', `write under ${root}`);
+    assert.equal(actionOf('Read', { file_path: doc }, root), 'files-outside', `read under ${root}`);
+    assert.equal(actionOf('Write', { file_path: startup }, root), 'settings', `the Startup folder under ${root}`);
+  }
+  const below = path.join(home, 'src', 'app');
+  assert.equal(riskOf('Edit', { file_path: path.join(below, 'a.js') }, below), 'low', 'a project folder below home still has an inside');
+});
+
+test('files that run code at sign-in or in every shell are settings: the Startup folder, PowerShell and shell profiles', () => {
+  const runs = [
+    path.join(home, 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'x.cmd'),
+    path.join(WIN ? 'C:\\ProgramData' : '/opt', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'StartUp', 'y.lnk'),
+    path.join(home, 'Documents', 'PowerShell', 'Microsoft.PowerShell_profile.ps1'),
+    path.join(home, 'Documents', 'WindowsPowerShell', 'profile.ps1'),
+    path.join(home, 'Documents', 'PowerShell', 'Microsoft.VSCode_profile.ps1'),
+    path.join(home, '.bashrc'), path.join(home, '.bash_profile'), path.join(home, '.profile'), path.join(home, '.zshrc'),
+  ];
+  for (const f of runs) {
+    assert.equal(actionOf('Write', { file_path: f }, home), 'settings', f);
+    assert.equal(riskOf('Write', { file_path: f }, path.dirname(f)), 'high', `${f}, even with its own folder as the root`);
+  }
+  assert.equal(actionOf('Edit', { file_path: at('src', 'startup', 'boot.js') }, cwd), 'edit-inside', 'a folder that is only named startup is not the Startup folder');
+  assert.equal(actionOf('Edit', { file_path: at('scripts', 'powershell', 'build.ps1') }, cwd), 'edit-inside', 'a script in a powershell folder is not a profile');
+});
+
+test('the office\'s own state.json and history.json are settings: the Security rules and schedules live there', () => {
+  const office = path.dirname(fileURLToPath(new URL('../risk.mjs', import.meta.url)));
+  // an office on another port keeps state-<port>.json and history-<port>.json (files.mjs, #100)
+  const other = officeFiles(office, 4392);
+  for (const f of ['state.json', 'history.json', path.basename(other.state), path.basename(other.history)]) {
+    assert.equal(actionOf('Write', { file_path: path.join(office, f) }, office), 'settings', f);
+    assert.equal(riskOf('Write', { file_path: path.join(office, f) }, office), 'high', f);
+  }
+  assert.equal(actionOf('Write', { file_path: at('state.json') }, cwd), 'edit-inside', 'a state.json of another project is a plain file');
 });

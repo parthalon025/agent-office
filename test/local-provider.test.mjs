@@ -8,6 +8,7 @@ import path from 'node:path';
 import { createTracker } from '../tracker.mjs';
 import { providerEvents, checkProvider } from '../providers/index.mjs';
 import { createLocal, KINDS, MAX_ROUNDS } from '../providers/local.mjs';
+import { cleanRules, setRule, decide } from '../security.mjs';
 import { startFakeOpenAI } from './fixtures/fake-openai.mjs';
 
 const SLEEP = 'node -e "setTimeout(()=>{},60000)"';
@@ -21,7 +22,10 @@ async function until(fn, what, ms = 4000) {
 }
 
 // The office side: a tracker, the events, and the holds without sockets (as server.mjs holds them).
-async function rig(script, { models, kind = 'lmstudio', stallMs, officeTools } = {}) {
+// rules: the Security room rules (security.mjs); the tracker checks them before a hold, as the server's tracker does,
+// and a decision is answered at once on a later tick (the server's holdRequest). worktree: the session works in its own
+// git worktree, as an office session in a repository does (the server's callOf reads s.worktree); false: a folder outside git.
+async function rig(script, { models, kind = 'lmstudio', stallMs, officeTools, rules = cleanRules(null), worktree = true } = {}) {
   const fake = await startFakeOpenAI({ script, models });
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-local-'));
   const cwd = path.join(base, 'work');
@@ -31,10 +35,11 @@ async function rig(script, { models, kind = 'lmstudio', stallMs, officeTools } =
   o.tracker = createTracker({
     now: Date.now, makeId: (k) => `${k[0]}${(o.ids[k] = (o.ids[k] || 0) + 1)}`, locate: async () => null,
     setTimer: () => 0, releaseHold: (id, d) => o.release(id, d),
+    screen: (s, p, opts) => decide(rules, { building: null, kind: s.provider, tool: p.tool_name, input: p.full_input || p.tool_input, root: o.tracker.rootOf(s), worktree: !!(s.worktree && s.worktree.root), provider: opts.provider }),
   });
   o.events = providerEvents({
     tracker: o.tracker,
-    hold: (r) => o.holds.set(r.id, { s: r.s, suggestions: r.suggestions }),
+    hold: (r) => (r.auto ? setImmediate(() => o.provider.answer(r.s, { id: r.id, suggestions: [] }, r.auto)) : o.holds.set(r.id, { s: r.s, suggestions: r.suggestions })),
   });
   o.release = (id, d) => {
     const h = o.holds.get(id);
@@ -43,7 +48,7 @@ async function rig(script, { models, kind = 'lmstudio', stallMs, officeTools } =
     return true;
   };
   o.provider = createLocal({ events: o.events, kind, baseUrl: fake.url, stallMs, officeTools });
-  o.session = () => o.tracker.newSession({ uid: 'o1', officeId: 'o1', name: 'bot', cwd, headless: true, status: 'starting', provider: kind });
+  o.session = () => o.tracker.newSession({ uid: 'o1', officeId: 'o1', name: 'bot', cwd, headless: true, status: 'starting', provider: kind, worktree: worktree ? { root: cwd, branch: 'agent/bot-1', repo: cwd } : null });
   // What the server does for a user message: the provider call, then the tracker marks the turn.
   o.say = (s, text) => { o.provider.message(s, { text }); o.tracker.startTurn(s, text); };
   o.done = async () => { await o.provider.close(o.tracker.sessions.get('o1') || { uid: 'o1' }); await fake.close(); fs.rmSync(base, { recursive: true, force: true }); };
@@ -141,6 +146,58 @@ test('a risky tool waits for you: allow runs it, decline tells the model', async
     assert.match(o.fake.requests[2].messages.at(-1).content, /42/);
     assert.equal(s.pending.length, 0);
     assert.deepEqual(s.calls.map((c) => c.ok), [false, true]);
+  } finally { await o.done(); }
+});
+
+// ---------- the Security room rules decide before a hold (#70) ----------
+const rule = (row, value, r = cleanRules(null)) => setRule(r, { scope: 'office', row, col: 'local', value, confirmed: true }).rules;
+
+test('a Deny rule refuses a call at once: no hold, the model hears why, one feed line', async () => {
+  const o = await rig([{ toolCalls: [{ name: 'Bash', args: { command: 'node -e "console.log(1)"' } }] }, { text: 'ok' }], { rules: rule('shell', 'deny') });
+  try {
+    const s = o.session();
+    o.provider.open(s, { model: 'm' });
+    o.say(s, 'go');
+    await until(() => s.status === 'idle', 'the turn to end');
+    assert.equal(o.holds.size, 0, 'nothing waited for the user');
+    assert.match(o.fake.requests[1].messages.at(-1).content, /Denied by the Security room: Shell commands/);
+    assert.deepEqual(s.calls.map((c) => c.ok), [false]);
+    assert.ok(o.tracker.feed.some((f) => f.text === 'denied by Security: Shell commands'));
+  } finally { await o.done(); }
+});
+
+// #70 review: Read inside the worktree (default Allow) is for a git worktree. "Use this folder" outside git has none.
+test('a local agent in a folder outside git asks before it reads: its folder is not a worktree', async () => {
+  const o = await rig([{ toolCalls: [{ name: 'Read', args: { file_path: 'a.txt' } }] }, { text: 'ok' }], { worktree: false });
+  try {
+    const s = o.session();
+    o.provider.open(s, { model: 'm' });
+    o.say(s, 'go');
+    await until(() => o.holds.size === 1, 'the read to wait');
+    assert.equal(s.pending[0].tool, 'Read');
+    o.release([...o.holds.keys()][0], { allow: true });
+    await until(() => s.status === 'idle', 'the turn to end');
+    assert.match(o.fake.requests[1].messages.at(-1).content, /hello file/);
+  } finally { await o.done(); }
+});
+
+test('a tightened read is held; an Allow on shell commands runs one without a hold, with a feed line', async () => {
+  const o = await rig([
+    { toolCalls: [{ name: 'Read', args: { file_path: 'a.txt' } }] },
+    { toolCalls: [{ name: 'Bash', args: { command: 'node -e "console.log(41+1)"' } }] },
+    { text: 'ok' },
+  ], { rules: rule('shell', 'allow', rule('read-inside', 'ask')) });
+  try {
+    const s = o.session();
+    o.provider.open(s, { model: 'm' });
+    o.say(s, 'go');
+    await until(() => o.holds.size === 1, 'the read to wait');
+    assert.equal(s.pending[0].tool, 'Read');
+    o.release([...o.holds.keys()][0], { allow: true });
+    await until(() => s.status === 'idle', 'the turn to end');
+    assert.match(o.fake.requests[2].messages.at(-1).content, /42/);
+    assert.ok(o.tracker.feed.some((f) => f.text === 'allowed by Security: Shell commands'));
+    assert.ok(!o.tracker.feed.some((f) => /Read inside/.test(f.text)), 'a held request writes no automatic line');
   } finally { await o.done(); }
 });
 

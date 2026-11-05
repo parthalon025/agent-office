@@ -18,9 +18,11 @@ import { createTracker, clip } from './tracker.mjs';
 import { createRegistry, providerEvents, isPaid, spendLimitFor, DEFAULT_SPEND_LIMIT, DEFAULT_PROVIDER } from './providers/index.mjs';
 import { createLocal } from './providers/local.mjs';
 import { createClaudeCode, claudeVersion, MODEL_RE, MODES } from './providers/claude-code.mjs';
-import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, cleanRecent, recentChoices } from './place.mjs';
+import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, cleanRecent, recentChoices, securityRoomIdOf } from './place.mjs';
 import * as startup from './startup.mjs';
 import { createNotes, cleanPin, PIN_MAX } from './notes.mjs';
+import { cleanRules, setRule, decide, preToolDecision, permissionModeFor, openRefusal, enforcement, addCost, costThisMonth } from './security.mjs';
+import { inside } from './risk.mjs';
 import { mcpAddArgs, mcpRemoveArgs, pluginArgs } from './extensions.mjs';
 import * as auth from './auth.mjs';
 import { officeFiles, portArgs, DEFAULT_PORT } from './files.mjs';
@@ -98,6 +100,10 @@ try { persisted = { ...persisted, ...JSON.parse(fs.readFileSync(STATE_FILE, 'utf
 // Drop folders that are gone, and worktree folders from older runs.
 persisted.recent = cleanRecent(persisted.recent).filter((d) => fs.existsSync(d) && !/[\\/]\.agent-office[\\/]worktrees/.test(d));
 const savePersisted = () => { try { fs.writeFileSync(STATE_FILE, JSON.stringify(persisted, null, 2)); } catch { /* ignore */ } };
+// The Security room rules (#70, security.mjs): office-wide, with per-building overrides. Saved in state.json, which is
+// written with writeSecret once at listen. costs: the Spend screen's ledger, dollars per agent kind per month.
+persisted.security = cleanRules(persisted.security);
+persisted.costs = persisted.costs && typeof persisted.costs === 'object' ? persisted.costs : {};
 const rememberDir = (dir) => {
   persisted.recent = addRecent(persisted.recent, dir);
   savePersisted();
@@ -195,19 +201,76 @@ const tracker = createTracker({
   locate: (cwd) => git.locate(cwd),
   onChange: () => broadcast(),
   releaseHold: (id, decision) => releaseHold(id, decision),
+  // The check before a hold: the Security room rules answer Allow and Deny at once (security.mjs decide).
+  screen: (s, p, opts) => decide(persisted.security, callOf(s, p, opts)),
   persist: {
     history: (s) => recordHistory(s),
     recentDir: (dir) => rememberDir(dir),
     commands: (list) => { persisted.commands = list; savePersisted(); },
     placed: (s, g) => { adoptNotes(roomPlace(s)); if (g) addRepo(g.repo); },
+    spent: (s, dollars) => { persisted.costs = addCost(persisted.costs, Date.now(), V.security.columnOf(s.provider), dollars); savePersisted(); },
   },
 });
 const { sessions, feed, addFeed, newSession, placeSession, findSession, onHook, endSession } = tracker;
 
+// ---------- the Security room: the user's permission rules (#70) ----------
+// The rules live in security.mjs and public/vocab.js; this file applies them. A call is rated against the session's root
+// (tracker.rootOf, like the Approve card) in its building. A session not placed yet (git not looked up) has no building
+// (null): the office-wide rule applies unless some building has a stricter override, and then the call is held.
+const buildingOfSession = (s) => (s.placed ? roomPlace(s).buildingKey : null);
+// The root is in a git worktree: the office made one for the session, or git placed the session in a repository whose
+// worktree holds the root. Only then do the rows Read inside and Edit inside apply (a terminal session in the home folder
+// or in a folder outside git has no worktree, so its edits are Ask by default).
+function inWorktree(s, root) {
+  if (s.worktree && s.worktree.root) return true;
+  return !!(s.placed && s.git && s.git.root && root && inside(s.git.root, root));
+}
+function callOf(s, p, opts = {}) {
+  const root = tracker.rootOf(s);
+  return { building: buildingOfSession(s), kind: s.provider, tool: p.tool_name, input: p.full_input || p.rate_input || p.tool_input, root, worktree: inWorktree(s, root), provider: opts.provider === true };
+}
+// Claude Code's PreToolUse: a Deny rule refuses the call before Claude Code's own permission check (its allow rules and
+// modes cannot run it), and a tightened read or edit inside makes Claude Code ask. Returns the hook's answer, or null.
+function preToolGate(p) {
+  if (p.hook_event_name !== 'PreToolUse') return null;
+  const s = findSession(p);
+  if (!s || s.status === 'ended' || providerOf(s) !== claude) return null;
+  const d = preToolDecision(persisted.security, callOf(s, p));
+  if (!d) return null;
+  if (d.decision === 'deny') tracker.refuseCall(s, p, d.reason, d.line);
+  return claude.preToolAnswer(d);
+}
+// Why the office does not open this agent kind now (an ungated kind that is off, a kind with no cost reports and Deny).
+function checkOpen(provider) {
+  const why = openRefusal(persisted.security, provider);
+  if (why) throw httpError(409, why);
+}
+// The building key of a folder for the rules at open: the repository of a worktree, or of the folder; '' outside git.
+async function buildingOfFolder(cwd, worktree) {
+  if (worktree && worktree.repo) return normPath(worktree.repo);
+  const g = await git.locate(cwd).catch(() => null);
+  return g ? normPath(g.repo) : '';
+}
+// One change from the wall (the page's Security room screens). Each change writes a feed line.
+function saveRule(body) {
+  const scope = body.scope; // setRule checks it: 'office' or 'building'
+  const r = setRule(persisted.security, { scope, building: body.building, row: String(body.row || ''), col: String(body.col || ''), value: body.value ?? null, confirmed: body.confirmed === true });
+  persisted.security = r.rules;
+  savePersisted();
+  const S = V.security, col = S.columns.find((c) => c.id === body.col);
+  const where = scope === 'building' ? (body.building ? `the building ${basename(body.building) || body.building}` : 'Other folders') : 'all buildings';
+  addFeed({ uid: 'security', name: 'Security' }, 'tool', `${S.rows[body.row].label}, ${col.label}: ${S.word(r.to)} (${where})`);
+  broadcast();
+  return { ok: true, from: r.from, to: r.to };
+}
+// What each agent kind enforces: from the providers of this office, which do not change while it runs.
+let ENFORCE = null;
+
 // ---------- providers: the agent tools behind the sessions (providers/) ----------
 // Every provider reports through the same events into the tracker: Claude Code, Ollama and LM Studio. Claude Code's hooks come in over
 // the hook routes below, and a permission decision goes back as the hook's answer (claude.answer gives the body).
-const events = providerEvents({ tracker, onChange: () => broadcast(), hold: (r) => { holdRequest(r); broadcast(); } });
+// A quiet answer (a low call a local agent asks about, allowed by default) changes nothing the page shows: no snapshot.
+const events = providerEvents({ tracker, onChange: () => broadcast(), hold: (r) => { holdRequest(r); if (!r.quiet) broadcast(); } });
 const claude = createClaudeCode({ events, files: () => ({ settings: activeHooksFile(), mcp: MCP_FILE, launcher: path.join(ROOT, 'launch.ps1') }) });
 // The four office tools for agents the office runs itself (no MCP process): the same handlers the /mcp/* routes call.
 // They answer text or throw httpError. Function declarations are hoisted, so they are ready when a local agent calls one.
@@ -219,6 +282,7 @@ const officeTools = {
 };
 const providers = createRegistry([claude, createLocal({ events, kind: 'ollama', baseUrl: process.env.OFFICE_OLLAMA_URL, officeTools }), createLocal({ events, kind: 'lmstudio', baseUrl: process.env.OFFICE_LMSTUDIO_URL, officeTools })]);
 const providerOf = (s) => providers.of(s);
+ENFORCE = enforcement(providers.list());
 // The agent kinds as the page offers and shows them (providers/index.mjs describe). Fixed while the server runs.
 const KINDS = providers.kinds();
 
@@ -276,6 +340,8 @@ async function repoTree(root) {
 }
 
 // Git refusals (branch exists, not merged, uncommitted changes) are the user's to fix: answer 409.
+// A room on a floor: a worktree of the branch, or an agent room whose base is that branch (it sits on that floor, #69).
+const onFloor = (w, branch) => w.branch === branch || (!!w.base && w.base === branch);
 async function floorAction(action, body) {
   try { return await floorActionRaw(action, body); } catch (e) { throw e.status ? e : httpError(409, e.message); }
 }
@@ -290,7 +356,8 @@ async function floorActionRaw(action, body) {
     if (s) throw httpError(409, `${s.name} works in this room. Close the session first.`);
     out = await git.removeRoom(r.path, String(body.root || ''), body.force === true);
   } else if (action === 'delete-floor') {
-    for (const w of (await git.layout(r.path)).filter((x) => x.branch === branch)) { // git's list, not the 30 s copy
+    // git's list, not the 30 s copy; the floor's rooms are its worktrees and the agent rooms that sit on it (#69 base)
+    for (const w of (await git.layout(r.path)).filter((x) => onFloor(x, branch))) {
       const s = roomInUse(w.root);
       if (s) throw httpError(409, `${s.name} works on this floor. Close the session first.`);
     }
@@ -301,7 +368,7 @@ async function floorActionRaw(action, body) {
     const wts = await git.layout(r.path);
     out = { deleted: [], skipped: [] };
     for (const b of (Array.isArray(body.branches) ? body.branches : []).map(String)) {
-      const busy = wts.filter((w) => w.branch === b).map((w) => roomInUse(w.root)).find(Boolean);
+      const busy = wts.filter((w) => onFloor(w, b)).map((w) => roomInUse(w.root)).find(Boolean);
       if (!safe.has(b) || busy) { out.skipped.push(b); continue; }
       try { await git.deleteFloor(r.path, b, false); out.deleted.push(b); } catch { out.skipped.push(b); }
     }
@@ -412,7 +479,14 @@ function replyOn(res, body) {
 
 // A permission request waits for the user. The session's provider turns the decision into its own answer; on a hook (res)
 // that answer is the hook's reply. A terminal session's request goes back to the terminal dialog after the short hold.
-function holdRequest({ s, id, suggestions }, res = null) {
+// auto: the Security room rules decided (tracker screen). Nothing is held: a hook gets the answer now, a provider on a
+// later tick (its permission() returns the request id first, the seam's timing rule).
+function holdRequest({ s, id, suggestions, auto }, res = null) {
+  if (auto) {
+    const answer = () => providerOf(s).answer(s, { id, suggestions: [] }, auto);
+    if (res) replyOn(res, answer()); else setImmediate(answer);
+    return;
+  }
   const hold = s.headless ? HEADLESS_ASK_MS : ASK_TIMEOUT_MS;
   const timer = setTimeout(() => { if (releaseHold(id, {})) addFeed(s, 'wait', s.headless ? `question timed out, ${providerOf(s).label} moved on` : 'question went back to the terminal'); }, hold);
   const reply = (d) => { const body = providerOf(s).answer(s, { id, suggestions }, d); if (res) replyOn(res, body); };
@@ -423,6 +497,7 @@ function onPermission(p, res) {
   const r = tracker.permissionRequest(p);
   if (!r) { res.writeHead(200, { 'content-type': 'application/json' }); return res.end('{}'); }
   holdRequest(r, res);
+  if (r.auto) return broadcast();
   // The terminal answered first and Claude cancelled the hook: drop the question.
   res.on('close', () => forget(r.id));
   broadcast();
@@ -585,7 +660,7 @@ function roomContents(pl) {
   return [
     'What is in the room',
     'The room is a lab room in a 3D building. Fixed parts (the office draws them the same in every lab room):',
-    '- A floor and a back wall. The first room of a floor has a solid left wall with a wide window, and a wall clock on the back wall. Other rooms have a glass wall on the left.',
+    '- A floor and a back wall. The first room of a floor has a solid left wall with a wide window, and a wall clock on the back wall. Other rooms have a glass wall on the left. On the ground floor the Security room comes first, so every lab room there has a glass wall on the left.',
     `- A room sign on the back wall with the room name (${pl.room}), the room type and the office version.`,
     '- Server racks along the back wall, with a metal shelf on top. A cable tray runs above the racks and carries data packets from the desks to the racks.',
     '- A work table with a small monitor and an amber block.',
@@ -595,6 +670,7 @@ function roomContents(pl) {
     '- On the floor: an elevator lobby on the left side with the elevator and a railing, and a meter near the front right corner.',
     'The page adds to every lab room: a blackboard on the back wall with what the agents do (plan, browser steps, last steps, the repository and a pinned note), a chalk ledge with two pieces of chalk, a whiteboard with the user notes and a marker tray, a stats display on the left wall (sessions, tool calls, tokens and cost), a door with an Agents sign on the left wall, a warm lamp that is lit at night, and two plants.',
     'The window of the first room is a picture: by day a blue sky with clouds over a low skyline, at night a dark sky with a moon over a skyline with lit windows, in Sublevel a lit corridor. It does not show the street.',
+    'The ground floor of every building also has the Security room, left of the lab rooms. No agent works in it. Its six wall screens (Files, Commands, Network, Secrets, Agents, Spend) are where the user sets the permission rules: Ask, Allow or Deny for each kind of tool call and agent kind. The office applies them before it asks the user.',
     'In the building view (outside the floors) the office draws a road with lane marks along the front and the right side of the building, sidewalks with trees, two street lights that glow at night, and a flock of birds that circles over the tower.',
     'You can change only the notes board and the blackboard pin (office_room_update). You cannot move furniture, desks, boards, the door or bots. The office places them.',
   ];
@@ -764,8 +840,12 @@ async function extAction(body) {
 
 
 // The provider runs the agent; the office makes the session, seats it and sends the first prompt.
-function openHeadless(provider, { cwd, name, prompt, worktree = null, budget = null, resume = null, scheduleId = null, model = null, permissionMode = null, prior = null }) {
+// building: the session's building key for the Security room rules (null: not known, the office-wide rules).
+function openHeadless(provider, { cwd, name, prompt, worktree = null, budget = null, resume = null, scheduleId = null, model = null, permissionMode = null, prior = null, building = null }) {
   provider.check?.({}); // before the session exists: a missing program (claude.exe) leaves no ghost session
+  // A Claude Code session opens in default mode while any of its Security cells is Ask, so Claude Code asks and the rules apply.
+  const asked = permissionMode;
+  if (provider === claude) permissionMode = permissionModeFor(persisted.security, building, permissionMode);
   const officeId = 'o' + crypto.randomBytes(4).toString('hex');
   // The last slash-command list came from a Claude Code init, so only a Claude Code session starts with it.
   const known = provider === claude ? persisted.commands : null;
@@ -777,6 +857,7 @@ function openHeadless(provider, { cwd, name, prompt, worktree = null, budget = n
   provider.open(s, { model, permissionMode, budget, resume });
   if (!worktree) rememberDir(cwd); // a worktree folder is an implementation detail, not a place to start from
   addFeed(s, 'start', resume ? 'reopened in the office' : worktree ? `started in the office on branch ${worktree.branch}` : 'started in the office');
+  if (asked && permissionMode !== asked) addFeed(s, 'start', `opened in ${permissionMode} permission mode, not ${asked}: the Security room has Ask rules`);
   if (prompt) { s.prompt = prompt; writeUser(s, prompt); addFeed(s, 'prompt', clip(prompt, 100)); }
   broadcast();
   return s.uid;
@@ -794,6 +875,7 @@ async function openSession(opts) {
 
   const provider = providers.get(opts.provider);
   provider.check?.(opts); // unknown model or mode: refused before a worktree is made
+  checkOpen(provider);    // the Agents screen of the Security room: also before a worktree is made
   const model = opts.model || null, permissionMode = opts.permissionMode || null;
   const prompt = String(opts.prompt || '').slice(0, 8000);
 
@@ -813,7 +895,8 @@ async function openSession(opts) {
     if (worktree) rememberDir(cwd);
     // A paid provider gets the default spend limit unless the caller sets one (0 clears it). A local provider has none (#33).
     const budget = spendLimitFor({ paid: isPaid(provider), requested: opts.maxBudget, fallback: defaultSpend() });
-    const uid = openHeadless(provider, { cwd: workdir, name, prompt, worktree, budget, scheduleId: opts.scheduleId || null, model, permissionMode });
+    const building = await buildingOfFolder(workdir, worktree);
+    const uid = openHeadless(provider, { cwd: workdir, name, prompt, worktree, budget, scheduleId: opts.scheduleId || null, model, permissionMode, building });
     if (noRoom) { const s = sessions.get(uid); if (s) { addFeed(s, 'start', 'This folder is not in git, so the agent has no room of its own.'); broadcast(); } }
     return uid;
   }
@@ -821,7 +904,9 @@ async function openSession(opts) {
   const officeId = 'o' + crypto.randomBytes(4).toString('hex');
   const s = newSession({ uid: officeId, officeId, provider: provider.kind, name, cwd, startDir: cwd, launched: true, status: 'starting', model });
   placeSession(s, true);
-  provider.openWindow(s, { model, permissionMode, prompt });
+  // The window's Claude Code asks too while a Security cell is Ask; its own dialog answers what the office lets go back.
+  const windowMode = provider === claude ? permissionModeFor(persisted.security, await buildingOfFolder(cwd, null), permissionMode) : permissionMode;
+  provider.openWindow(s, { model, permissionMode: windowMode, prompt });
   rememberDir(cwd);
   addFeed(s, 'start', 'opened a new window');
   broadcast();
@@ -830,14 +915,20 @@ async function openSession(opts) {
 
 // A past session opens again with its own provider (providers.reopenPlan). A provider that can resume continues the
 // conversation (Claude Code --resume); another one starts a fresh session in the same folder, and the record stays.
-// The permission mode starts as the default.
+// The permission mode starts as the default (or what the Security room rules need).
 async function reopenSession(uid) {
+  const first = history.find((h) => h.uid === uid);
+  if (!first) throw httpError(404, 'That past session is gone.');
+  // The building for the rules, looked up before the checks: from the in-use check to reopening.set nothing waits,
+  // so a second reopen that comes meanwhile is refused (#54).
+  const building = await buildingOfFolder(first.cwd, first.worktree);
   const rec = history.find((h) => h.uid === uid);
   if (!rec) throw httpError(404, 'That past session is gone.');
   if (pastInUse().has(uid)) throw httpError(409, 'That session is open again. Close it first, or wait until it has started.');
   if (!fs.existsSync(rec.cwd)) throw httpError(409, `Its folder is gone: ${rec.cwd}. It may have been a removed worktree.`);
   const plan = providers.reopenPlan(rec);
-  const id = openHeadless(plan.provider, plan.opts);
+  checkOpen(plan.provider);
+  const id = openHeadless(plan.provider, { ...plan.opts, building });
   if (plan.note) { const s = sessions.get(id); if (s) { addFeed(s, 'start', plan.note); broadcast(); } }
   if (!plan.fresh) reopening.set(id, uid); // the past record leaves history when the new session has started (recordHistory)
   return id;
@@ -883,9 +974,12 @@ persisted.schedules = persisted.schedules || [];
 // The default spend limit of new paid sessions, schedules and goals, in dollars (0 = none). The user changes it in the Attach
 // sessions dialog. Never saved means the built-in default.
 const defaultSpend = () => (Number.isFinite(persisted.spendLimit) && persisted.spendLimit >= 0 ? persisted.spendLimit : DEFAULT_SPEND_LIMIT);
+// No limit (0) is the loosest spend setting: a change to it needs confirmed: true (the wall's painted Confirm, or the
+// Save of the typed field in the Attach sessions dialog), so no single click on the wall removes the limit (#70).
 function saveSpendLimit(x) {
   const n = x.limit === null || x.limit === '' ? 0 : Number(x.limit);
   if (!Number.isFinite(n) || n < 0 || n > 1000) throw httpError(400, 'The spend limit is a number from 0 to 1000. 0 means no limit.');
+  if (n === 0 && defaultSpend() !== 0 && x.confirmed !== true) throw httpError(409, 'Confirm No limit first.');
   persisted.spendLimit = n;
   savePersisted();
   return { spendLimit: n };
@@ -938,7 +1032,7 @@ async function runSchedule(sch) {
     const uid = await openSession({ cwd: sch.cwd, name: sch.name, prompt: sch.prompt, model: sch.model, permissionMode: sch.permissionMode, isolation: sch.isolation, maxBudget: sch.maxBudget, scheduleId: sch.id, where: 'office' });
     return uid;
   } catch (e) {
-    feed.push({ t: Date.now(), uid: 'schedule', name: sch.name, kind: 'end', text: 'schedule could not start: ' + e.message });
+    addFeed({ uid: 'schedule', name: sch.name }, 'end', 'schedule could not start: ' + e.message);
     broadcast();
     return null;
   }
@@ -1037,7 +1131,10 @@ const snapshot = () => W.lean({
   figures: allFigures(),    // noteKey -> room figures (sessions, working, waiting, toolCalls, tokens, cost, todosDone, todosTotal, lastEvent)
   notes: persisted.notes,   // noteKey -> { text, at, v, by? }: each room's notes board (v: version counter; a cleared board stays with text '' and at 0; by: the agent session that last wrote it)
   pins: persisted.pins,     // noteKey -> { text, by, at }: a short message an agent pinned on the room's blackboard
-  repos: [...repos.entries()].map(([key, r]) => ({ key, ...r, worktrees: r.worktrees.map((w) => ({ ...w, place: placeOfWorktree(r.path, w) })) })),
+  repos: [...repos.entries()].map(([key, r]) => ({ key, ...r, securityRoomId: securityRoomIdOf(key), worktrees: r.worktrees.map((w) => ({ ...w, place: placeOfWorktree(r.path, w) })) })),
+  // The Security room (#70): the rules (office-wide and per building), why a cell is not enforced for an agent kind
+  // (security.mjs enforcement), and the Spend screen (the default spend limit, cost per agent kind this month).
+  security: { rules: persisted.security, enforce: ENFORCE, spend: { limit: defaultSpend(), ...costThisMonth(persisted.costs, Date.now()) } },
   kinds: KINDS,             // the agent kinds: the label of each session's kind, and the Open dialog's options before readiness comes
 });
 // A page gets the whole snapshot when it connects, then one patch per broadcast with only what changed (wire.js).
@@ -1072,7 +1169,7 @@ setInterval(() => { for (const c of clients) c.write(': ping\n\n'); }, 20000).un
 const MIME = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
 const FONT_FILES = fs.readdirSync(path.join(PUBLIC, 'vendor', 'fonts')).filter((f) => /^[a-z0-9-]+\.woff2$/.test(f));
 const STATIC_FILES = new Map([
-  ['/office.js', 'public/office.js'], ['/scene-host.js', 'public/scene-host.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/vocab.js', 'public/vocab.js'], ['/wire.js', 'public/wire.js'], ['/format.js', 'public/format.js'], ['/wheel-gate.js', 'public/wheel-gate.js'], ['/building.js', 'public/building.js'], ['/toasts.js', 'public/toasts.js'], ['/tokens.css', 'tokens.css'],
+  ['/office.js', 'public/office.js'], ['/scene-host.js', 'public/scene-host.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/security.js', 'public/security.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/vocab.js', 'public/vocab.js'], ['/wire.js', 'public/wire.js'], ['/format.js', 'public/format.js'], ['/wheel-gate.js', 'public/wheel-gate.js'], ['/building.js', 'public/building.js'], ['/toasts.js', 'public/toasts.js'], ['/tokens.css', 'tokens.css'],
   ['/components/bundle.css', 'components/bundle.css'], ['/components/bundle.js', 'components/bundle.js'],
   ['/components/lib/three.min.js', 'components/lib/three.min.js'],
   ['/components/lib/three-orbit-controls.js', 'components/lib/three-orbit-controls.js'],
@@ -1138,6 +1235,8 @@ const server = http.createServer(async (req, res) => {
     const body = await readBody(req);
     if (url.pathname === '/hook') {
       const out = onHook(body);
+      const pre = preToolGate(body); // a Security room Deny refuses the call before it runs (hook.mjs forwards the answer)
+      if (pre) return send(res, 200, pre);
       if (body.hook_ppid && !body.office_id) {
         const s = findSession(body);
         if (s && !s.pid) { const pid = await walkToClaude(body.hook_ppid); if (pid) { s.pid = pid; broadcast(); } }
@@ -1149,6 +1248,8 @@ const server = http.createServer(async (req, res) => {
       if (probeSeen && p.office_id === 'probe') probeSeen.add(p.hook_event_name);
       if (p.hook_event_name === 'PermissionRequest') return onPermission(p, res);
       const out = onHook(p);
+      const pre = preToolGate(p);
+      if (pre) return send(res, 200, JSON.stringify(pre));
       return send(res, 200, out ? JSON.stringify(out) : '');
     }
     if (url.pathname === '/api/startup') return send(res, 200, body.enabled === true ? startup.enable(STARTUP_DIR, ROOT, process.execPath) : startup.disable(STARTUP_DIR));
@@ -1170,7 +1271,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/floor/stale') {
       const r = knownRepo(body.repo);
       const wts = await git.layout(r.path);
-      return send(res, 200, { floors: (await git.staleFloors(r.path)).filter((f) => !wts.some((w) => w.branch === f.branch && roomInUse(w.root))) });
+      return send(res, 200, { floors: (await git.staleFloors(r.path)).filter((f) => !wts.some((w) => onFloor(w, f.branch) && roomInUse(w.root))) });
     }
     if (url.pathname === '/api/floor/cleanup') return send(res, 200, await floorAction('cleanup-floors', body));
     if (url.pathname === '/api/floor/delete') return send(res, 200, await floorAction('delete-floor', body));
@@ -1206,7 +1307,9 @@ const server = http.createServer(async (req, res) => {
       if (!r.worktree) throw httpError(409, 'Pull requests need a worktree session, so the changes stay off your main branch.');
       return send(res, 200, await git.createPr(r.cwd, r.worktree.branch, r.name));
     }
-    if (url.pathname === '/api/settings/spend') return send(res, 200, saveSpendLimit(body));
+    if (url.pathname === '/api/settings/spend') { const r = saveSpendLimit(body); broadcast(); return send(res, 200, r); }
+    // One Security room rule from the wall: { scope: 'office' | 'building', building, row, col, value, confirmed } (security.mjs setRule).
+    if (url.pathname === '/api/security/set') return send(res, 200, saveRule(body));
     if (url.pathname === '/api/template/save') return send(res, 200, saveTemplate(body));
     if (url.pathname === '/api/template/delete') { persisted.templates = persisted.templates.filter((t) => t.id !== String(body.id)); savePersisted(); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/schedule/save') return send(res, 200, saveSchedule(body));

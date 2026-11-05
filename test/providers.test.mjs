@@ -450,6 +450,18 @@ test('claude-code answer: the PermissionRequest hook body for allow, always allo
   assert.deepEqual(p.answer(null, { id: 'p1', suggestions: sug }, { allow: false, always: true }), out({ behavior: 'deny', message: 'Declined from Agent Office.' }));
   assert.deepEqual(p.answer(null, { id: 'p1' }, {}), {}, 'no decision: Claude Code decides');
   assert.deepEqual(p.answer(null, { id: 'p1' }), {});
+  // the Security room refused: Claude hears why
+  assert.deepEqual(p.answer(null, { id: 'p1', suggestions: [] }, { allow: false, message: 'Denied by the Security room: Shell commands.' }),
+    out({ behavior: 'deny', message: 'Denied by the Security room: Shell commands.' }));
+});
+
+test('claude-code preToolAnswer: the PreToolUse hook body that refuses a call or makes Claude Code ask (#70)', () => {
+  const p = claudeRig().p;
+  assert.deepEqual(p.preToolAnswer({ decision: 'deny', reason: 'Denied by the Security room: Shell commands.' }),
+    { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Denied by the Security room: Shell commands.' } });
+  assert.deepEqual(p.preToolAnswer({ decision: 'ask', reason: 'x' }).hookSpecificOutput.permissionDecision, 'ask');
+  assert.equal(p.preToolAnswer(null), null);
+  assert.equal(p.preToolAnswer({ decision: 'allow', reason: 'x' }), null, 'the office never allows a call before Claude Code\'s own check');
 });
 
 test('claude-code check: unknown model or mode is 400; a missing program is 409, before any worktree', () => {

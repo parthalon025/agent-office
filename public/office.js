@@ -232,7 +232,9 @@
         h(UseFolder, { key: 'i', checked: form.useFolder || terminal, disabled: terminal, onChange: set('useFolder'),
           hint: terminal ? 'A terminal window works in the folder.' : form.useFolder ? 'The agent works in this folder. Other agents in it share its room.' : 'The agent gets its own room: a new branch in its own folder next to the repository. Your branch stays untouched.' }),
         paid ? h(A.TextInput, { key: 'b', id: 'f-budget', label: 'Spend limit in USD', value: form.maxBudget, placeholder: 'No limit', disabled: terminal, onChange: set('maxBudget'), hint: terminal ? undefined : limitHint(k ? k.label : 'Claude Code') }) : null,
-        hasModes ? h(A.Select, { key: 'm', id: 'f-mode', label: 'Permissions', options: modes, value: form.permissionMode, onChange: set('permissionMode') }) : null]),
+        // The server opens Claude Code in Default mode while a Security room rule for it is Ask (security.mjs permissionModeFor).
+        hasModes ? h(A.Select, { key: 'm', id: 'f-mode', label: 'Permissions', options: modes, value: form.permissionMode, onChange: set('permissionMode'),
+          hint: form.permissionMode === 'acceptEdits' ? 'While a Security room rule for Claude Code is Ask, the session opens in Default mode. The office then answers its edits by the rules.' : undefined }) : null]),
       p.templates.length ? h(A.Select, { id: 'f-template', label: 'Template', options: tpl, value: form.template, onChange: pickTemplate }) : null,
       h(Area, { id: 'f-prompt', label: 'First instruction (optional)', value: form.prompt, placeholder: 'Review the open PRs and list what blocks merge.', rows: 4, onChange: set('prompt') }),
       saving === null
@@ -461,7 +463,8 @@
     var le = useState(''), limitErr = le[0], setLimitErr = le[1];
     function saveLimit() {
       setLimitBusy(true); setLimitErr('');
-      api('/api/settings/spend', { limit: limitSent(limit, true) }).then(function (r) {
+      // An empty field is No limit; Save on the typed field is the confirm the server asks for (it refuses 0 without one).
+      api('/api/settings/spend', { limit: limitSent(limit, true), confirmed: true }).then(function (r) {
         setLimitBusy(false);
         if (p.onSaved) p.onSaved();
         if (p.toast) p.toast({ tone: 'info', title: r.spendLimit > 0 ? 'Default spend limit saved' : 'Default spend limit cleared', text: r.spendLimit > 0 ? 'New Claude Code sessions stop at $' + r.spendLimit + '.' : 'New Claude Code sessions have no limit.' });
@@ -1171,9 +1174,10 @@
       return function () { window.removeEventListener('resize', place); };
     }, []);
     useEffect(function () { if (pos) p.onPlaced(); }, [pos]);
+    // A screen with no second step (a Security room screen: its cells take the clicks) has the Back button only.
     return h('div', { ref: ref, className: 'look-bar', role: 'group', 'aria-label': 'Screen in view', style: pos ? { left: pos.left, top: pos.top } : { visibility: 'hidden' } },
       h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onBack }, 'Back to the room'),
-      h(A.Button, { variant: 'quiet', icon: p.icon, onClick: p.onOpen }, p.verb));
+      p.verb ? h(A.Button, { variant: 'quiet', icon: p.icon, onClick: p.onOpen }, p.verb) : null);
   }
 
   // ---------- one session as a full terminal ----------
@@ -1344,7 +1348,8 @@
 
     // With no live session the welcome card shows. One card at a time: it waits while the DS Since you left card
     // shows (they share the middle of the screen, and do not both fit on a phone), and the dock holds the primary button then (#66).
-    var welcome = !!snap && !live.length && !p.syl;
+    // It also waits while the camera looks at a screen (p.look): the Security room screens work with no session (#70).
+    var welcome = !!snap && !live.length && !p.syl && !p.look;
     return h(React.Fragment, null,
       welcome ? h('div', { className: 'welcome' },
         h('div', { className: 'welcome-logo' }, h(A.Logo, { variant: 'lockup', height: 28 })),
@@ -1499,6 +1504,9 @@
     var terminalRef = React.useRef(null);
     // the scene host (scene-host.js): the one reader of the DS stage; board, terminal, streets and birds are its adapters
     var hostRef = React.useRef(null);
+    // the Security room's wall screens (security.js): the user picks the permission rules on them
+    var securityRef = React.useRef(null);
+    useEffect(function () { if (securityRef.current) securityRef.current.refresh(); }, [snap]);
     var tm = useState(null), term = tm[0], setTerm = tm[1];
     // the screen the camera looks at (step 1 of a screen: scene-host.js focus), or null
     var lk = useState(null), look = lk[0], setLook = lk[1];
@@ -1514,6 +1522,7 @@
     useEffect(function () { return function () {
       if (boardRef.current) { boardRef.current.dispose(); boardRef.current = null; }
       if (terminalRef.current) { terminalRef.current.dispose(); terminalRef.current = null; }
+      if (securityRef.current) { securityRef.current.dispose(); securityRef.current = null; }
       if (hostRef.current) { hostRef.current.dispose(); hostRef.current = null; }
       setBoard(null); setTerm(null); setLook(null);
     }; }, [sceneKey, cur2.view]);
@@ -1660,13 +1669,15 @@
         var st = o.inspect && o.inspect().stage;
         if (boardRef.current) boardRef.current.dispose();
         if (terminalRef.current) terminalRef.current.dispose();
+        if (securityRef.current) { securityRef.current.dispose(); securityRef.current = null; }
         if (hostRef.current) hostRef.current.dispose();
         var host = hostRef.current = window.OfficeSceneHost && st ? window.OfficeSceneHost.attach(o, { covers: sceneCovers }) : null;
         window.officeHost = host;   // the scene host (focus, flights), for the console and tests
         // A screen in focus: a look shows the look bar; a look, a look at another screen or a way back closes the panels.
         // The second step opens a panel through the board's or the terminal's onOpen.
+        // A Security room screen keeps the look bar in focus: every click on it is a click on a cell, never a panel.
         if (host) host.onFocus(function (f) {
-          setLook(f && !f.open ? f : null);
+          setLook(f && (!f.open || f.kind === 'security') ? f : null);
           if (!f || !f.open) { setBoard(null); setTerm(null); }
         });
         if (st && host && window.OfficeBoard) {
@@ -1680,6 +1691,18 @@
             onDoor: function (id) { setTerm(null); setDlg({ name: 'room', roomId: id }); },
             onOpen: function (id, kind) { setTerm(null); setBoard({ id: id, kind: kind }); }
           });
+        }
+        if (st && host && window.OfficeSecurity) {
+          var secMount = mount;
+          securityRef.current = window.OfficeSecurity.attach(o, {
+            host: host,
+            roomId: function () { return secMount.securityRoom(); },
+            // the rules, what each agent kind enforces and the Spend figures (snap.security), for this building
+            data: function () { var sn = latestSnap.current; return sn && sn.security ? { sec: sn.security, building: secMount.repo, buildingName: (def && def.name) || '' } : null; },
+            post: function (route, body) { return api(route, body); },
+            onError: function (text) { toast({ tone: 'error', title: 'Security', text: text }); }
+          });
+          window.officeSecurity = securityRef.current;   // the Security room screens (open a screen), for the console and tests
         }
         if (st && host && window.OfficeTerminal) {
           terminalRef.current = window.OfficeTerminal.attach(o, {
@@ -1773,7 +1796,12 @@
 
     // Room tools and sessions are built when the palette draws, so the rooms of the floor on screen are current.
     function liveActions() {
-      var out = [], b = boardRef.current, sn = latestSnap.current;
+      var out = [], b = boardRef.current, sn = latestSnap.current, sec = securityRef.current;
+      // Permissions: fly to the Security room of the building on screen (its floor first), at its Files screen
+      if (sec && mount && cur2.view === 'office' && mount.repo === shown && mount.securityRoom()) {
+        out.push({ id: 'page-permissions', label: 'Permissions', icon: 'security', group: 'Office', keywords: 'security room rules ask allow deny agents spend limit',
+          run: function () { if (!sec.open('files')) toast({ tone: 'info', title: 'Permissions', text: 'This building shows no Security room yet.' }); } });
+      }
       if (b && mount && cur2.view === 'office' && mount.repo === shown) {
         var tools = [['board', 'Board of ', 'plan', 'blackboard overview plan steps'], ['notes', 'Notes of ', 'memory', 'whiteboard notes reminder'],
           ['stats', 'Stats of ', 'cost', 'numbers tokens cost calls'], ['door', 'Agents in ', 'team', 'door add remove agents']];
@@ -1795,7 +1823,7 @@
 
     return h(React.Fragment, null,
       h('div', { className: 'view' + (fading ? ' is-fading' : '') }, scene),
-      ambient ? null : h(Controls, { sel: cur2.view === 'office' ? sel : null, syl: syl && cur2.view === 'office', buildings: list, shown: shown, shownName: (list.filter(function (b) { return b.key === shown; })[0] || def || {}).name, toast: toast, needs: needs.length, onNeeds: function () { setDlg({ name: 'needs' }); }, onBuilding: function (k) { pick(k); if (view === 'city') go('office'); }, onCity: function () { go('city'); }, onOffice: function () { introNext.current = true; go('office'); }, view: cur2.view, onSessions: function () { setDlg({ name: 'sessions' }); }, onCompact: function () { setAmbient(true); },
+      ambient ? null : h(Controls, { sel: cur2.view === 'office' ? sel : null, syl: syl && cur2.view === 'office', look: !!look, buildings: list, shown: shown, shownName: (list.filter(function (b) { return b.key === shown; })[0] || def || {}).name, toast: toast, needs: needs.length, onNeeds: function () { setDlg({ name: 'needs' }); }, onBuilding: function (k) { pick(k); if (view === 'city') go('office'); }, onCity: function () { go('city'); }, onOffice: function () { introNext.current = true; go('office'); }, view: cur2.view, onSessions: function () { setDlg({ name: 'sessions' }); }, onCompact: function () { setAmbient(true); },
         onFloors: function () { setDlg({ name: 'floors' }); }, onExtensions: extensions, onTerminal: openTerminal, onOpen: function () { show('open'); }, onPast: function () { show('past'); }, onSchedules: function () { show('schedules'); }, onHooks: function () { show('hooks'); }, onKinds: function () { setDlg({ name: 'kinds' }); }, onChanges: changes }),
       d === 'open' ? h(OpenDialog, { shownPath: shownPath, kind: dlg.kind, spendLimit: info.spendLimit, recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
       d === 'kinds' ? h(KindsDialog, { onOpen: function (kind) { refresh().then(function () { setDlg({ name: 'open', kind: kind }); }); }, onClose: close }) : null,
