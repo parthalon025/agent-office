@@ -112,3 +112,99 @@ test('staleFloors leaves out a floor whose room is younger than the minimum age'
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ---------- relayout: a failed `git worktree list` must not make the office forget a repository (#81) ----------
+const LAST = [{ root: path.normalize('C:\\r'), branch: 'main', main: true, prunable: false }];
+const NEW = [...LAST, { root: path.normalize('C:\\r2'), branch: 'x', main: false, prunable: false }];
+
+const later = (ms, fn) => new Promise((res, rej) => setTimeout(() => { try { res(fn()); } catch (e) { rej(e); } }, ms));
+const entry = () => ({ path: 'C:\r', name: 'r', worktrees: LAST });
+
+test('relayout gives the fresh list when git answers', async () => {
+  assert.deepEqual(await git.relayout('C:\r', { list: async () => NEW, exists: () => true }), NEW);
+});
+
+test('relayout says KEEP when git fails and the folder is still there', async () => {
+  for (const msg of ['Command failed: timed out', 'fatal: Unable to create index.lock: File exists', 'fatal: detected dubious ownership in repository']) {
+    const failing = async () => { throw new Error(msg); };
+    assert.equal(await git.relayout('C:\r', { list: failing, exists: () => true }), git.KEEP, msg);
+  }
+});
+
+test('relayout drops the repository when its folder is gone', async () => {
+  const failing = async () => { throw new Error('spawn git ENOENT'); };
+  assert.equal(await git.relayout('C:\r', { list: failing, exists: () => false }), null);
+});
+
+test('relayout drops the repository when git says it is no longer a repository', async () => {
+  const failing = async () => { throw new Error('fatal: not a git repository (or any of the parent directories): .git'); };
+  assert.equal(await git.relayout('C:\r', { list: failing, exists: () => true }), null);
+});
+
+test('refreshEntry: a failed read leaves the entry as it is', async () => {
+  const e = entry();
+  assert.equal(await git.refreshEntry(e, { list: async () => { throw new Error('Command failed: timed out'); }, exists: () => true }), 'same');
+  assert.equal(e.worktrees, LAST);
+});
+
+test('refreshEntry: changed, same, gone', async () => {
+  const e = entry();
+  assert.equal(await git.refreshEntry(e, { list: async () => NEW, exists: () => true }), 'changed');
+  assert.deepEqual(e.worktrees, NEW);
+  assert.equal(await git.refreshEntry(e, { list: async () => [...NEW], exists: () => true }), 'same');
+  assert.equal(await git.refreshEntry(e, { list: async () => { throw new Error('fatal: not a git repository'); }, exists: () => true }), 'gone');
+});
+
+test('refreshEntry: a slow failing refresh does not put an older list back over a newer one (#81)', async () => {
+  const e = entry();
+  const slowFail = git.refreshEntry(e, { list: () => later(40, () => { throw new Error('Command failed: timed out'); }), exists: () => true });
+  const fast = git.refreshEntry(e, { list: async () => NEW, exists: () => true });
+  assert.equal(await fast, 'changed');
+  assert.equal(await slowFail, 'same');
+  assert.deepEqual(e.worktrees, NEW);
+});
+
+test('refreshEntry: a slow older read that succeeds cannot undo a newer one', async () => {
+  const e = entry();
+  const slowOld = git.refreshEntry(e, { list: () => later(40, () => LAST), exists: () => true });
+  const fast = git.refreshEntry(e, { list: async () => NEW, exists: () => true });
+  assert.equal(await fast, 'changed');
+  assert.equal(await slowOld, 'stale');
+  assert.deepEqual(e.worktrees, NEW);
+});
+
+test('refreshEntry: a failed newer read does not block an older read that succeeds', async () => {
+  const e = entry();
+  const slowOk = git.refreshEntry(e, { list: () => later(40, () => NEW), exists: () => true });
+  const fastFail = git.refreshEntry(e, { list: async () => { throw new Error('Command failed: timed out'); }, exists: () => true });
+  assert.equal(await fastFail, 'same');
+  assert.equal(await slowOk, 'changed');
+  assert.deepEqual(e.worktrees, NEW);
+});
+
+test('relayout still drops a plain folder under a German locale (git is asked for English)', async () => {
+  const plainDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-plain-')));
+  const keep = { LANG: process.env.LANG, LC_ALL: process.env.LC_ALL, LANGUAGE: process.env.LANGUAGE };
+  try {
+    Object.assign(process.env, { LANG: 'de_DE.UTF-8', LC_ALL: 'de_DE.UTF-8', LANGUAGE: 'de' });
+    assert.equal(await git.relayout(plainDir), null);
+  } finally {
+    for (const [k, v] of Object.entries(keep)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    fs.rmSync(plainDir, { recursive: true, force: true });
+  }
+});
+
+test('relayout, with real git: a repo stays, a plain folder and a removed folder are dropped', async () => {
+  const dir = repo();
+  const plainDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-plain-')));
+  try {
+    const first = await git.relayout(dir);
+    assert.equal(first.length, 1);
+    assert.equal(await git.relayout(plainDir), null);         // a folder that is not a repository
+    fs.rmSync(dir, { recursive: true, force: true });
+    assert.equal(await git.relayout(dir), null);              // the folder is gone
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(plainDir, { recursive: true, force: true });
+  }
+});

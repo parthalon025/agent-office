@@ -230,9 +230,9 @@ function addRepo(repoPath) {
 async function refreshRepo(k) {
   const r = repos.get(k);
   if (!r) return;
-  let wts;
-  try { wts = await git.layout(r.path); } catch { repos.delete(k); broadcast(); return; } // not a repository any more
-  if (JSON.stringify(wts) !== JSON.stringify(r.worktrees)) { r.worktrees = wts; wts.forEach((w) => adoptNotes(placeOfWorktree(r.path, w))); broadcast(); }
+  const done = await git.refreshEntry(r); // a failed `git worktree list` changes nothing; overlapping refreshes keep the newest answer
+  if (done === 'gone') { if (repos.get(k) === r) repos.delete(k); broadcast(); return; } // the folder is gone, or it is not a repository any more
+  if (done === 'changed') { r.worktrees.forEach((w) => adoptNotes(placeOfWorktree(r.path, w))); broadcast(); }
 }
 function knownRepo(p) {
   const r = repos.get(repoKey(String(p || '')));
