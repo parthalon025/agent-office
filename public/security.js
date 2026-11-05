@@ -209,14 +209,16 @@
 
   // The rows of a rules or Agents screen as a grid: one column per agent kind.
   function grid(p, view, data, L) {
-    var sc = screenOf(view.screen), W = view.w, x0 = 48, labelW = 380, gx = x0 + labelW, cols = S().columns;
-    var colW = Math.floor((W - 48 - gx) / cols.length), y0 = L.y0, rowH = rowHOf(L, sc.rows.length);
+    // eight kinds (#22, #24): the label column is 300 px and the grid runs to 24 px from the edge, so a column is 113 px and
+    // "Framework" and "Not enforced" fit it; a row label that does not fit at 28 px takes a smaller size (fit).
+    var sc = screenOf(view.screen), W = view.w, x0 = 48, labelW = 300, gx = x0 + labelW, cols = S().columns;
+    var colW = Math.floor((W - 24 - gx) / cols.length), y0 = L.y0, rowH = rowHOf(L, sc.rows.length);
     heads(p, cols, gx, colW, 24, y0 + 30, y0 + 42);
     var y = y0 + 52;
     sc.rows.forEach(function (row) {
       var r = S().rows[row];
       fill(p, x0, y, W - 96, 2, 'line');
-      text(p, x0, y + rowH / 2 + 10, 28, 'ink', r.label, { maxW: labelW - 16 });
+      text(p, x0, y + rowH / 2 + 10, fit(r.label, 28, labelW - 16, 400), 'ink', r.label, { maxW: labelW - 16 });
       cols.forEach(function (c, i) {
         var cx = gx + i * colW, cw = colW - 16, ch = L.ch, cy = y + L.cy;
         if (!S().applies(row, c.id)) { text(p, cx + colW / 2, cy + ch / 2 + 9, fit(S().na(row, c.id), 22, colW - 8, 400), 'muted', S().na(row, c.id), { align: 'center', maxW: colW - 8 }); return; }

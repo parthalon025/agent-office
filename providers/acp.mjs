@@ -109,10 +109,12 @@ export const AGENTS = {
     gated: false, supervision: 'Partly supervised: edits and most commands ask, reads do not',
     // The Security room cells (security.mjs enforcement). A write asks (session/request_permission), also of a settings file.
     // Reads in its folder do not ask, a secret file there too: Not enforced, with Hermes's words, so the wall says it once for
-    // both. (It asks before a read outside its folder, but a Deny on Secret files cannot hold the ones inside.)
-    enforces: ['edit-inside', 'settings'],
+    // both. (It asks before a read outside its folder, but a Deny on Secret files cannot hold the ones inside.) The Settings row
+    // is only Partly enforced: risk.mjs actionOf puts a read of .git/config or .github/hooks in it, and that read asks nothing.
+    enforces: ['edit-inside'],
     unenforced: { 'read-inside': HERMES_READS, secrets: HERMES_READS },
     partly: {
+      settings: 'Writes ask. Reads in its folder do not.',
       'files-outside': 'It asks, except in folders its own settings trust (trustedFolders).',
       shell: 'It asks, except for a command it rates read-only. Hooks in its settings or the repository run commands without asking.',
       web: 'It asks, except for the URLs its own settings allow (allowedUrls).',

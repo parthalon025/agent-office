@@ -130,9 +130,10 @@ test('Security room: the column says which cells Copilot carries, which it carri
     assert.match(e.partly.web, /allowedUrls/);
     assert.match(e.partly['files-outside'], /trustedFolders/);
     assert.match(e.partly.mcp, /read-only/);
-    // Every call row is Not enforced, Partly enforced, or carried (a write asks, also of a settings file): none is left out.
+    assert.equal(e.partly.settings, 'Writes ask. Reads in its folder do not.', 'Settings is Partly enforced: a read of a settings file in its folder asks nothing');
+    // Every call row is Not enforced, Partly enforced, or carried (a write asks): none is left out.
     const carried = ['read-inside', 'edit-inside', 'files-outside', 'shell', 'web', 'mcp', 'settings', 'secrets'].filter((row) => !(row in e.rows) && !(row in e.partly));
-    assert.deepEqual(carried, ['edit-inside', 'settings']);
+    assert.deepEqual(carried, ['edit-inside']);
   } finally { r.done(); }
 });
 
