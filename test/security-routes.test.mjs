@@ -120,7 +120,8 @@ test('the snapshot carries the rules, what each agent kind enforces, and the Spe
   // (session/request_permission), so the Edit inside cell is enforced. Reads and its own skill and memory writes are not.
   const h = s.security.enforce.hermes;
   assert.equal(h.reason, '');
-  assert.match(h.rows.shell, /without asking the office/);
+  assert.equal(h.rows.shell, undefined, 'review M1: commands Hermes rates dangerous come to the office');
+  assert.match(h.partly.shell, /rates dangerous come to the office/);
   assert.equal(h.rows['edit-inside'], undefined, 'Edit inside the worktree is enforced for Hermes');
   assert.match(h.rows['read-inside'], /reads files without asking/);
   assert.match(h.partly['files-outside'], /its own skills and memory/);

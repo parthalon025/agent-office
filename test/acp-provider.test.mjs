@@ -132,7 +132,10 @@ test('gating is per agent (ADR 0001): Hermes runs commands itself, so it is part
   try {
     // Hermes Agent's ACP server never uses the client's fs or terminal, and asks for a command only when it matches its own
     // danger patterns (acp_adapter/server.py; upstream issue #139074). Its edits ask in its default mode.
-    assert.deepEqual([r.p.gated, isGated(r.p), supervisionOf(r.p)], [false, false, 'Partly supervised: file edits ask, commands do not']);
+    // Review M1 (acp_adapter/edit_approval.py, tools/approval.py DANGEROUS_PATTERNS, read 2026-11-05): every edit asks in its
+    // default mode, and a command asks only when it matches a danger pattern; the office holds every such request.
+    assert.deepEqual([r.p.gated, isGated(r.p), supervisionOf(r.p)], [false, false, 'Partly supervised: file edits and risky commands ask']);
+    assert.match(r.p.partly.shell, /rates dangerous come to the office/, 'the shell row is partly enforced, not "Not enforced"');
     assert.deepEqual([AGENTS.hermes.gated, AGENTS.dsh.gated], [false, true]);
     assert.deepEqual([d.p.gated, supervisionOf(d.p)], [true, null]);
     assert.doesNotThrow(() => checkProvider(r.p));

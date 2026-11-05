@@ -430,11 +430,23 @@ test('/api/open gives each agent a worktree on the base floor; isolation "same" 
 });
 
 // ---------- an ACP agent (#71): the stand-in hermes.exe runs the fake ACP agent ----------
+// Review M1: Hermes is ungated (ADR 0001), so it is off until the user turns it on; the tests below run with it on.
+test('Hermes is off until the Security room turns it on: the open is refused before the cost question and before a worktree', { skip: SKIP }, async () => {
+  const before = (await snapshot()).sessions.length;
+  const off = await call('/api/open', { cwd: acpRepo, name: 'hermes-off', provider: 'hermes', where: 'office', isolation: 'worktree', confirmCost: true });
+  assert.equal(off.status, 409);
+  assert.match(off.json.error, /^Hermes Agent runs tool calls without asking the office\. Turn on Hermes Agent on the Agents screen/);
+  assert.equal((await snapshot()).sessions.length, before);
+  const on = { scope: 'office', row: 'ungated', col: 'hermes', value: 'on' };
+  assert.equal((await call('/api/security/set', on)).status, 409, 'turning it on loosens: the wall asks for the Confirm');
+  assert.equal((await call('/api/security/set', { ...on, confirmed: true })).status, 200);
+});
+
 test('an ACP agent asks once before it runs: no cost report, so the open is refused until the user says yes', { skip: SKIP }, async () => {
   const before = (await snapshot()).sessions.length;
   const no = await call('/api/open', { cwd: acpRepo, name: 'hermes-ask', provider: 'hermes', where: 'office', isolation: 'worktree' });
   assert.equal(no.status, 409);
-  assert.deepEqual(no.json, { error: 'This agent does not report cost. Partly supervised: file edits ask, commands do not. Run it?', confirm: 'cost' });
+  assert.deepEqual(no.json, { error: 'This agent does not report cost. Partly supervised: file edits and risky commands ask. Run it?', confirm: 'cost' });
   assert.equal((await snapshot()).sessions.length, before, 'no session, no worktree before the yes');
   const model = await call('/api/open', { cwd: acpRepo, name: 'hermes-model', provider: 'hermes', isolation: 'worktree', model: 'opus', confirmCost: true });
   assert.equal(model.status, 400, 'the agent picks its own model');
@@ -473,7 +485,7 @@ test('an ungated agent (ADR 0001) opens and reopens only in a new worktree of it
   for (const body of [{ where: 'office', isolation: 'same' }, { where: 'terminal' }, { where: 'office', cwd: work }]) {
     const r = await call('/api/open', { cwd: acpRepo, name: 'hermes-here', provider: 'hermes', confirmCost: true, ...body });
     assert.equal(r.status, 409, JSON.stringify(body));
-    assert.equal(r.json.error, 'Hermes Agent runs some tool calls without asking the office (Partly supervised: file edits ask, commands do not), so it opens only in a room of its own: clear Use this folder, in a folder that is in a git repository.');
+    assert.equal(r.json.error, 'Hermes Agent runs some tool calls without asking the office (Partly supervised: file edits and risky commands ask), so it opens only in a room of its own: clear Use this folder, in a folder that is in a git repository.');
     assert.equal(r.json.confirm, undefined, 'refused before the cost question');
   }
   assert.equal((await snapshot()).sessions.length, before);
@@ -488,13 +500,13 @@ test('an ACP session: cost unknown and no spend limit, a held request answered f
   const uid = r.json.uid;
   const s = await until(async () => { const x = await sessionOf(uid); return x && x.sid === 'fake-sess-1' ? x : null; }, 'the ACP session to start');
   assert.deepEqual([s.provider, s.costUnknown, s.cost, s.budget, s.status], ['hermes', true, null, null, 'idle']);
-  assert.equal(s.supervision, 'Partly supervised: file edits ask, commands do not');
+  assert.equal(s.supervision, 'Partly supervised: file edits and risky commands ask');
   assert.ok(s.worktree && s.cwd.toLowerCase().includes('acp-repo.worktrees'), 'a new worktree next to the repository (#69)');
   const feed = (await fullOf(uid)).feed.map((f) => f.text);
   const onPage = (await snapshot()).sessions.find((x) => x.uid === uid);
   assert.equal(onPage.costUnknown, true, 'the page gets it, so it shows unknown, never $0.00');
   assert.ok(feed.includes('Hermes Agent does not report cost. The office shows it as unknown, and no spend limit can stop it.'), feed.join('\n'));
-  assert.ok(feed.includes('Hermes Agent: Partly supervised: file edits ask, commands do not. The feed says what it ran without asking.'), feed.join('\n'));
+  assert.ok(feed.includes('Hermes Agent: Partly supervised: file edits and risky commands ask. The feed says what it ran without asking.'), feed.join('\n'));
   // A request the agent raises goes to the Security room first (#70). Every cell is Ask by default, an edit inside its
   // worktree too: both requests wait in the office until the user answers there.
   const options = [{ optionId: 'always', name: 'Always', kind: 'allow_always' }, { optionId: 'once', name: 'Allow', kind: 'allow_once' }, { optionId: 'no', name: 'Reject', kind: 'reject_once' }];

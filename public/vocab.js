@@ -180,7 +180,8 @@
     settings: { label: 'Settings files that run code', options: ASK_DENY, def: 'ask' },
     secrets: { label: 'Secret files', options: ASK_DENY, def: 'ask' },
     // Agents screen. Ungated agents run tool calls without asking the office (ADR 0001): off until the user turns them on.
-    ungated: { label: 'Turn on ungated agents', options: TOGGLE, def: 'off', office: true, only: ['openclaw'], na: 'Gated' },
+    // only: the kinds whose provider is gated: false (providers/acp.mjs AGENTS); the others ask the office, so "Gated".
+    ungated: { label: 'Turn on ungated agents', options: TOGGLE, def: 'off', office: true, only: ['hermes', 'openclaw'], na: 'Gated' },
     // Paperclip's Claude Code runs go through the office hooks (#76).
     supervise: { label: 'Paperclip: Supervise in office', options: TOGGLE, def: 'off', office: true, only: ['claude-code'], na: 'Not used' },
     // An agent that reports no cost: Ask (the office asks once per session), Allow (it runs without asking), Deny (it never runs).

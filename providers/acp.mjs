@@ -41,19 +41,24 @@ export const PROTOCOL_VERSION = 1;
 // gated (ADR 0001): true only when the agent asks the office before every tool call that is not low risk; an agent where only
 // some calls ask is ungated, with its supervision label. None of the agents has been run against the office yet (pin: null).
 const HERMES_EDITS = 'Edit requests come to the office and the rule applies. Reads, and writes to its own skills and memory, run without asking.';
+const HERMES_SHELL = 'Commands that Hermes rates dangerous come to the office and the rule applies. The others run without asking.';
 export const AGENTS = {
   hermes: {
     label: 'Hermes Agent', program: 'hermes', args: ['acp'],
-    // From Hermes's source (acp_adapter/server.py: initialize ignores the client's fs and terminal; its terminal tool asks
-    // only for commands that match its danger patterns) and upstream issue #139074 (0.21.5, a client with terminal: true:
-    // a write asked, a touch ran without asking). Its default mode asks before edits.
-    gated: false, supervision: 'Partly supervised: file edits ask, commands do not',
+    // From Hermes's source (acp_adapter/server.py: initialize ignores the client's fs and terminal) and upstream issue
+    // #139074 (0.21.5, a client with terminal: true: a write asked, a touch ran without asking). Read again on main
+    // 6c2bf4b (2026-11-05, review M1): in its default mode every write_file and patch asks (acp_adapter/edit_approval.py
+    // maybe_require_edit_approval, kind "edit"); its terminal tool asks only for a command that matches DANGEROUS_PATTERNS
+    // (tools/approval.py check_all_command_guards, kind "execute"), and none when yolo or approvals.mode off is set. The
+    // office holds every session/request_permission, so the label names both.
+    gated: false, supervision: 'Partly supervised: file edits and risky commands ask',
     // The Security room cells (security.mjs enforcement): an edit request inside the worktree comes through
     // session/request_permission, so the office's rule decides it. Reads do not ask. An edit outside the worktree or of a
     // settings file asks too, but Hermes writes its own skills and memory (under .hermes) with no request: partly enforced.
+    // So is a command: only the ones Hermes rates dangerous come to the office.
     enforces: ['edit-inside'],
     unenforced: { 'read-inside': 'This agent reads files without asking the office.', secrets: 'This agent reads files without asking the office.' },
-    partly: { 'files-outside': HERMES_EDITS, settings: HERMES_EDITS },
+    partly: { 'files-outside': HERMES_EDITS, settings: HERMES_EDITS, shell: HERMES_SHELL },
     askTimeoutMs: 60_000, // Hermes issue #63302: a fixed 60 s timeout on edit approval (command approval has its own setting)
     features: ['skills', 'memory'], skillsHome: { env: 'HERMES_HOME', dir: '.hermes' }, pin: null,
     needs: ['Install Hermes Agent so that hermes.exe is on the PATH, then run hermes acp --check in a terminal.'],

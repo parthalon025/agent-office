@@ -100,7 +100,7 @@ test('below 700 px of free view a screen in focus shows one agent kind, with Pre
 test('Agents: turning on an ungated agent needs the Confirm; a gated kind has no cell, it says why', () => {
   const d = data(), v = view({ screen: 'agents', h: 738 }), p = P.plan(v, d);
   assert.deepEqual(p.hots.filter((h) => h.kind === 'cell').map((h) => h.id).sort(),
-    ['cell:no-cost|dsh', 'cell:no-cost|hermes', 'cell:no-cost|openclaw', 'cell:supervise|claude-code', 'cell:ungated|openclaw']);
+    ['cell:no-cost|dsh', 'cell:no-cost|hermes', 'cell:no-cost|openclaw', 'cell:supervise|claude-code', 'cell:ungated|hermes', 'cell:ungated|openclaw'], 'Hermes is ungated too (M1)');
   assert.ok(texts(p).includes('Gated') && texts(p).includes('Reports cost') && texts(p).includes('Free'));
   const r = P.step(v, cell(p, 'ungated', 'openclaw'), d);
   assert.deepEqual(r.view.pending, { row: 'ungated', col: 'openclaw', to: 'on', office: null });

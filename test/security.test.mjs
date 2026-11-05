@@ -353,3 +353,18 @@ test('cost per agent kind this month: a ledger by month, the last three months k
   assert.deepEqual(Object.keys(l).sort(), ['2026-10', '2026-11', '2026-12']);
   assert.deepEqual(addCost({}, at(2026, 11), 'claude-code', -1), {}, 'no negative or bad amounts');
 });
+
+// Review M1: Hermes is ungated (providers/acp.mjs gated: false), so ADR 0001 keeps it off until the user turns it on, like
+// OpenClaw. The Agents screen has a cell for it, not "Gated".
+test('M1: Hermes is ungated, so it is off until the user turns it on; the Agents screen has its cell', () => {
+  const S = globalThis.OfficeVocab.security;
+  assert.equal(S.applies('ungated', 'hermes'), true);
+  assert.equal(S.na('ungated', 'hermes'), '', 'a cell, not a "Gated" note');
+  assert.equal(S.na('ungated', 'dsh'), 'Gated', 'dsh asks the office before its tool calls');
+  const hermes = { kind: 'hermes', label: 'Hermes Agent', gated: false, cost: 'unknown' };
+  assert.match(openRefusal(none(), hermes), /Turn on Hermes Agent on the Agents screen of the Security room/);
+  assert.equal(status(() => setRule(none(), { scope: 'office', row: 'ungated', col: 'hermes', value: 'on' }))[0], 409, 'turning it on needs the painted Confirm');
+  const on = setRule(none(), { scope: 'office', row: 'ungated', col: 'hermes', value: 'on', confirmed: true }).rules;
+  assert.equal(openRefusal(on, hermes), null);
+  assert.equal(openRefusal(on, { kind: 'dsh', label: 'DeepSeek Harness', gated: true, cost: 'unknown' }), null, 'a gated kind needs no switch');
+});
