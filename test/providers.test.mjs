@@ -494,6 +494,37 @@ test('claude-code readiness: installed and signed in; not installed; signed out;
   assert.ok(models.some((m) => m.id === 'haiku') && models.every((m) => MODEL_RE.test(m.id) && m.label));
 });
 
+test('claude-code readiness: Bedrock, Vertex, Foundry, a token or a third-party sign-in is a usable key source (#103)', async () => {
+  const exec = (auth) => (_f, a, done) => (a[0] === '--version' ? done(null, '2.1.318 (Claude Code)\n', '') : auth(done));
+  const SIGNED_OUT = '{"loggedIn":false,"authMethod":"none"}';
+  const ready = { ready: true, version: '2.1.318 (Claude Code)', needs: [] };
+  for (const env of [
+    { CLAUDE_CODE_USE_BEDROCK: '1' }, { CLAUDE_CODE_USE_VERTEX: '1' }, { CLAUDE_CODE_USE_FOUNDRY: 'true' },
+    { ANTHROPIC_AUTH_TOKEN: 't' }, { ANTHROPIC_API_KEY: 'k' },
+  ]) {
+    const r = claudeRig({ env, exec: exec((d) => d(null, SIGNED_OUT, '')) });
+    assert.deepEqual(await r.p.readiness(), ready, JSON.stringify(Object.keys(env)));
+    assert.deepEqual(r.execs.map((x) => x.args), [['--version'], ['auth', 'status', '--json']], 'the status command runs once, and it is no paid call');
+  }
+  // A switch that is not on (Claude Code accepts only 1, true, yes, on), or an empty key, is no key source.
+  for (const env of [{ CLAUDE_CODE_USE_BEDROCK: '0' }, { CLAUDE_CODE_USE_VERTEX: 'false' }, { CLAUDE_CODE_USE_FOUNDRY: '' }, { CLAUDE_CODE_USE_BEDROCK: '2' }, { CLAUDE_CODE_USE_VERTEX: 'enabled' }, { ANTHROPIC_AUTH_TOKEN: '' }]) {
+    const out = await claudeRig({ env, exec: exec((d) => d(null, SIGNED_OUT, '')) }).p.readiness();
+    assert.equal(out.ready, false, JSON.stringify(env));
+  }
+  // The status itself says a third party signs in: Claude Code knows, so the office does not block.
+  const third = '{"loggedIn":true,"authMethod":"third_party","apiProvider":"bedrock"}';
+  const r = claudeRig({ exec: exec((d) => d(null, third, '')) });
+  assert.deepEqual(await r.p.readiness(), ready);
+  assert.equal(r.execs.filter((x) => x.args[0] === 'auth').length, 1);
+  // No key source and no sign-in: Not ready, with the sign-in message.
+  assert.deepEqual(await claudeRig({ exec: exec((d) => d(null, SIGNED_OUT, '')) }).p.readiness(),
+    { ready: false, version: '2.1.318 (Claude Code)', needs: ['Sign in to Claude Code: run claude auth login in a terminal.'] });
+  // A shape the office does not know does not block.
+  for (const raw of ['{}', '[]', 'null', 'not json', '{"loggedIn":"no"}']) {
+    assert.equal((await claudeRig({ exec: exec((d) => d(null, raw, '')) }).p.readiness()).ready, true, raw);
+  }
+});
+
 test('claude-code openWindow: cmd.exe and PowerShell by full path, the options in the environment, the window ends the session', () => {
   const r = claudeRig();
   const s = r.o.session({ name: 'my bot!', headless: false });
