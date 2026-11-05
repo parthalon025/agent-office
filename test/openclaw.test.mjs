@@ -77,6 +77,8 @@ test('checkConfig: reports each wanted setting as on or off, and the command tha
   const bad = await checkConfig(w, have({}));
   assert.equal(bad.ok, false);
   assert.deepEqual(bad.settings.map((s) => [s.path, s.ok]), [['tools.fs.workspaceOnly', false], ['tools.exec.ask', false], ['tools.deny', false]]);
+  // Each setting names the Security room rows it carries, so the wall can say which cells are not enforced (security.mjs).
+  assert.deepEqual(bad.settings.map((s) => s.rows), [['files-outside'], ['shell'], ['web']]);
   assert.deepEqual(bad.fix, [
     'openclaw config set tools.fs.workspaceOnly true',
     'openclaw config set tools.exec.ask always',

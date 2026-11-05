@@ -121,7 +121,10 @@ test('the snapshot carries the rules, what each agent kind enforces, and the Spe
   assert.match(s.security.enforce.hermes.rows.shell, /without asking the office/);
   assert.equal(s.security.enforce.dsh.reason, '', 'dsh is gated: it asks the office before its tool calls');
   assert.deepEqual(s.security.enforce.dsh.rows, {});
-  assert.match(s.security.enforce.openclaw.reason, /no provider for this agent kind yet/);
+  // OpenClaw (#73) is ungated: off, and its config not read, it takes only the shell rule into its own config.
+  assert.equal(s.security.enforce.openclaw.reason, '');
+  assert.equal(s.security.enforce.openclaw.rows.shell, undefined);
+  assert.match(s.security.enforce.openclaw.rows['edit-inside'], /without asking the office/);
   assert.equal(s.security.spend.limit, 2);
   assert.match(s.security.spend.month, /^\d{4}-\d{2}$/);
   assert.deepEqual(s.security.spend.byColumn, {});

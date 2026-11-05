@@ -76,7 +76,7 @@ function rig({ kind = 'hermes', fake = {}, rules = ASK_ALL, ...over } = {}) {
   r.p = createAcp({
     events: r.events, kind,
     exe: (name) => `C:/bin/${name}.exe`,
-    ...(kind === 'openclaw' ? { env: { ...process.env, OFFICE_ENABLE_OPENCLAW: '1' }, gatewayUp: async () => true, readConfig: configOf({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'always' }) } : {}),
+    ...(kind === 'openclaw' ? { gatewayUp: async () => true, readConfig: configOf({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'always' }) } : {}),
     spawn: (file, args, opts) => {
       r.spawned.push({ file, args, opts });
       return realSpawn(process.execPath, [FAKE, ...args], { ...opts, env: { ...opts.env, ...fake, FAKE_ACP_LOG: logFile } });
@@ -906,7 +906,7 @@ test('openclaw readiness: no Gateway is "Not ready: start the OpenClaw Gateway",
 
 test('openclaw readiness: a Gateway on another loopback port (OFFICE_OPENCLAW_PORT) is checked there and the bridge gets that URL', async () => {
   const asked = [];
-  const r = rig({ kind: 'openclaw', env: { ...process.env, OFFICE_ENABLE_OPENCLAW: '1', OFFICE_OPENCLAW_PORT: '19001' }, fake: { FAKE_ACP_VERSION: '2026.10.10' }, gatewayUp: async (port) => { asked.push(port); return true; } });
+  const r = rig({ kind: 'openclaw', env: { ...process.env, OFFICE_OPENCLAW_PORT: '19001' }, fake: { FAKE_ACP_VERSION: '2026.10.10' }, gatewayUp: async (port) => { asked.push(port); return true; } });
   const s = r.session();
   try {
     assert.equal((await r.p.readiness()).ready, true);
@@ -951,18 +951,25 @@ test('openclaw readiness: workspace-only off or unreadable is not ready; exec ap
   } finally { for (const x of [noWs, lost, noExec]) fs.rmSync(x.base, { recursive: true, force: true }); }
 });
 
-test('openclaw is off until the user turns it on: without the switch it is not ready and no session starts (#70 replaces the switch)', async () => {
-  const r = rig({ kind: 'openclaw', env: { ...process.env, OFFICE_ENABLE_OPENCLAW: '' } });
+// The office's Security room says whether an agent kind may run now (security.mjs openRefusal: the Agents screen switch of an
+// ungated kind, a no-cost Deny); the server gives the provider that answer as deps.blocked. There is no switch of its own.
+test('openclaw is off until the user turns it on in the Security room: then it is not ready, reads no config, and no session starts', async () => {
+  let off = 'OpenClaw runs tool calls without asking the office. Turn on OpenClaw on the Agents screen of the Security room first.';
+  const reads = [];
+  const r = rig({ kind: 'openclaw', env: { ...process.env, OFFICE_ENABLE_OPENCLAW: '1' }, blocked: () => off, readConfig: async (p) => { reads.push(p); return { state: 'unset' }; } });
   const s = r.session();
   try {
     const ready = await r.p.readiness();
     assert.equal(ready.ready, false);
-    assert.match(ready.needs[0], /^OpenClaw is off\. Until the Security room can turn it on \(#70\), set OFFICE_ENABLE_OPENCLAW=1 and restart the office\./);
-    assert.equal(r.spawned.length, 0, 'not even a probe');
+    assert.deepEqual(ready.needs, [off], 'the old environment switch turns nothing on');
+    assert.equal(await r.p.policy(), null, 'no config check while it is off');
+    assert.deepEqual([r.spawned.length, reads.length], [0, 0], 'not even a probe or a config read');
     r.p.open(s, {});
     await until(() => s.status === 'ended', 'the session to end');
-    assert.match(r.replies(s)[0], /^OpenClaw could not start a session: OpenClaw is off\./);
+    assert.match(r.replies(s)[0], /^OpenClaw could not start a session: OpenClaw runs tool calls without asking the office\. Turn on OpenClaw/);
     assert.equal(r.sent('initialize').length, 0);
+    off = null;
+    assert.notEqual(await r.p.policy(), null, 'on: the config is checked');
   } finally { await r.done(); }
 });
 

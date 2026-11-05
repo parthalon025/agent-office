@@ -23,7 +23,7 @@ import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, clea
 import * as startup from './startup.mjs';
 import { createNotes, cleanPin, PIN_MAX, NOTES_MAX, AGENT_WRITE_MAX } from './notes.mjs';
 import { createSkills } from './skills.mjs';
-import { cleanRules, setRule, decide, preToolDecision, permissionModeFor, openRefusal, costAsk, enforcement, addCost, costThisMonth } from './security.mjs';
+import { cleanRules, setRule, decide, preToolDecision, permissionModeFor, openRefusal, costAsk, cellsOf, enforcement, addCost, costThisMonth } from './security.mjs';
 import { inside } from './risk.mjs';
 import { mcpAddArgs, mcpRemoveArgs, pluginArgs } from './extensions.mjs';
 import * as auth from './auth.mjs';
@@ -287,10 +287,22 @@ function saveRule(body) {
   const where = scope === 'building' ? (body.building ? `the building ${basename(body.building) || body.building}` : 'Other folders') : 'all buildings';
   addFeed({ uid: 'security', name: 'Security' }, 'tool', `${S.rows[body.row].label}, ${col.label}: ${S.word(r.to)} (${where})`);
   broadcast();
+  void refreshEnforce(true); // an agent whose own config carries the cells checks it again for the new cells
   return { ok: true, from: r.from, to: r.to };
 }
-// What each agent kind enforces: from the providers of this office, which do not change while it runs.
+// What each agent kind enforces (security.mjs enforcement): from the providers of this office, and for an ungated agent whose
+// own config carries the rules (OpenClaw), from what that config was found to carry (provider.policy(), read-only). It is read
+// at start, after a rule change and when the page asks for the agent kinds; a policy is null while the kind is off.
 let ENFORCE = null;
+async function refreshEnforce(fresh = false) {
+  const policies = {};
+  for (const p of providers.list()) {
+    if (typeof p.policy !== 'function') continue;
+    try { const v = await p.policy(fresh); if (v) policies[p.kind] = v; } catch { /* unreadable: what the provider claims stays */ }
+  }
+  const next = enforcement(providers.list(), policies);
+  if (JSON.stringify(next) !== JSON.stringify(ENFORCE)) { ENFORCE = next; broadcast(); }
+}
 
 // ---------- providers: the agent tools behind the sessions (providers/) ----------
 // Every provider reports through the same events into the tracker: Claude Code, Ollama, LM Studio and the ACP agents. Claude
@@ -310,7 +322,11 @@ const officeTools = {
 };
 const providers = createRegistry([claude, createLocal({ events, kind: 'ollama', baseUrl: process.env.OFFICE_OLLAMA_URL, officeTools }), createLocal({ events, kind: 'lmstudio', baseUrl: process.env.OFFICE_LMSTUDIO_URL, officeTools }),
   // ACP agents (providers/acp.mjs): Hermes Agent, DeepSeek Harness and OpenClaw, one entry each in its AGENTS list.
-  ...Object.keys(ACP_AGENTS).map((kind) => createAcp({ events, kind }))]);
+  // blocked: the Security room's answer to whether this kind may run now (its Agents screen: an ungated kind is off until
+  // turned on, a no-cost Deny); cells: its call cells, for an agent whose own config carries them (OpenClaw). One rule source.
+  ...Object.keys(ACP_AGENTS).map((kind) => createAcp({ events, kind,
+    blocked: () => openRefusal(persisted.security, providers.get(kind)),
+    cells: (s) => cellsOf(persisted.security, s ? buildingOfSession(s) : null, V.security.columnOf(kind)) }))]);
 const providerOf = (s) => providers.of(s);
 ENFORCE = enforcement(providers.list());
 // The agent kinds as the page offers and shows them (providers/index.mjs describe). Fixed while the server runs.
@@ -1367,7 +1383,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/api/choices') return send(res, 200, { folders: recentChoices(persisted.recent, url.searchParams.get('first') || '') });
     // Each agent kind with its readiness, what it needs and its models (providers/index.mjs status), for the settings view (#20).
-    if (req.method === 'GET' && url.pathname === '/api/providers') return send(res, 200, { providers: await providers.status() });
+    if (req.method === 'GET' && url.pathname === '/api/providers') { const list = await providers.status(); void refreshEnforce(); return send(res, 200, { providers: list }); }
     if (req.method === 'GET' && url.pathname === '/api/info') {
       return send(res, 200, {
         port: PORT, hooksFile: activeHooksFile(), recent: persisted.recent, home: os.homedir(),
@@ -1524,6 +1540,8 @@ server.listen(PORT, HOST, () => {
   // After listen, so a second copy that exits on EADDRINUSE never rewrites them.
   writeSecret(STATE_FILE, JSON.stringify(persisted, null, 2));
   writeSecret(HISTORY_FILE, JSON.stringify(history));
+  // What an ungated agent's own config carries, for the Security room wall (read-only; nothing is read while it is off).
+  void refreshEnforce();
   try {
     fs.mkdirSync(path.dirname(PAGE_FILE), { recursive: true });
     writeSecret(PAGE_FILE, JSON.stringify({ token: PAGE_TOKEN, port: PORT }));

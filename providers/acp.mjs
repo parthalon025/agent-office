@@ -63,14 +63,14 @@ export const AGENTS = {
   // the office never starts or stops that Gateway. From v2026.10.10 the bridge relays shell approvals as
   // session/request_permission. File edits, writes, browser and web tools have no approval step, so the agent is ungated.
   // gateway: check the Gateway before the bridge starts. minVersion: older versions send no shell approvals.
-  // enforces: the one Security room row whose Ask, Allow and Deny the Gateway config carries (exec approval).
-  // optIn: the environment variable that turns this agent on. Spec #73 says it is off until the user turns it on in the
-  // Security room Agents screen (with the painted Confirm). That room is #70 and does not exist yet, so until it does this
-  // switch keeps the owner decision (ADR 0001) true: off unless OFFICE_ENABLE_OPENCLAW=1. #70 replaces it.
+  // enforces: the one Security room row whose Ask, Allow and Deny the Gateway config carries (exec approval); policy() says
+  // whether the config really carries it, and which cells it cannot (security.mjs enforcement).
+  // It is off until the user turns it on on the Security room Agents screen, with the painted Confirm (spec #73, ADR 0001):
+  // the server passes that answer as deps.blocked (security.mjs openRefusal), so there is no switch here.
   openclaw: {
     label: 'OpenClaw', program: 'openclaw', args: ['acp'],
     gated: false, supervision: 'Partly supervised: commands ask, file edits do not',
-    askTimeoutMs: null, gateway: true, minVersion: MIN_VERSION, enforces: ['shell'], optIn: 'OFFICE_ENABLE_OPENCLAW',
+    askTimeoutMs: null, gateway: true, minVersion: MIN_VERSION, enforces: ['shell'],
     features: [], pin: null, // not run against a real Gateway yet: native Windows is untested upstream
     needs: ['Install OpenClaw so that openclaw.exe is on the PATH, then start its Gateway.'], // a .cmd shim from npm is not accepted (resolveExe)
   },
@@ -223,7 +223,11 @@ export function createAcp(deps) {
   const port = gatewayPort(env);
   const gatewayUp = deps.gatewayUp || ((p) => probeGateway({ port: p }));
   const readConfig = deps.readConfig || configReader({ exe, execFile, env });
+  // cells(s): the Security room cells of this agent kind (row -> ask | allow | deny), for session s's building or office-wide.
   const cells = deps.cells || (() => DEFAULT_CELLS);
+  // blocked(): why the Security room does not let this agent kind run now (its Agents screen), or null. It is the server's
+  // security.mjs openRefusal, so the provider keeps no switch of its own.
+  const blocked = deps.blocked || (() => null);
   const args = spec.gateway && port !== DEFAULT_GATEWAY_PORT ? [...spec.args, '--url', `ws://${GATEWAY_HOST}:${port}`] : spec.args;
   /** @type {Map<string, object>} uid -> the agent state of an open session */
   const agents = new Map();
@@ -276,27 +280,29 @@ export function createAcp(deps) {
   });
 
   // ----- OpenClaw: the Gateway and its config (providers/openclaw.mjs) -----
-  // Why the agent cannot start now, or null: it is off (optIn), or no Gateway answers. The office only looks: it never starts,
-  // stops or restarts the Gateway.
+  // Why the agent cannot start now, or null: the Security room does not let it run (blocked), or no Gateway answers. The office
+  // only looks: it never starts, stops or restarts the Gateway.
   async function notReady() {
+    const off = blocked();
+    if (off) return off;
     if (!spec.gateway) return null;
-    if (spec.optIn && env[spec.optIn] !== '1') {
-      return `${label} is off. Until the Security room can turn it on (#70), set ${spec.optIn}=1 and restart the office. It runs some tool calls without asking.`;
-    }
     return (await gatewayUp(port)) ? null : `Not ready: start the ${label} Gateway. It should listen on ${GATEWAY_HOST}:${port}. The office never starts or stops it.`;
   }
-  // What the Gateway config says about the Security room rules, read-only. Kept for a minute; fresh: read it again now.
-  // A read that does not finish in POLICY_MS counts as unreadable, never as a pass.
+  // What the Gateway config says about the Security room rules, read-only: null for an agent with no config, one that is off
+  // (blocked: nothing is read then) or one that is not installed. Kept for a minute for the same cells; fresh: read it again
+  // now. s: the session whose building's cells count. A read that does not finish in POLICY_MS counts as unreadable, never as a pass.
   let policyNow = null;
-  async function policy(fresh = false) {
-    if (!spec.gateway) return null;
-    if (!fresh && policyNow && now() - policyNow.at < PROBE_TTL_MS) return policyNow.value;
-    const w = wantedConfig(cells());
+  async function policy(fresh = false, s = null) {
+    if (!spec.gateway || blocked()) return null;
+    try { program(); } catch { return null; }
+    const want = cells(s), key = JSON.stringify(want);
+    if (!fresh && policyNow && policyNow.key === key && now() - policyNow.at < PROBE_TTL_MS) return policyNow.value;
+    const w = wantedConfig(want);
     let config;
     try { config = await within(checkConfig(w, readConfig), POLICY_MS, 'reading its config took too long', setTimer, clearTimer); } catch (e) {
       config = await checkConfig(w, async () => ({ state: 'unreadable', why: textOf(e) }));
     }
-    policyNow = { at: now(), value: { config, gaps: w.gaps } };
+    policyNow = { at: now(), key, value: { config, gaps: w.gaps } };
     return policyNow.value;
   }
   const setting = (c, path) => c.settings.find((x) => x.path === path);
@@ -708,7 +714,9 @@ export function createAcp(deps) {
     if (spec.minVersion && !versionAtLeast(learned.version, spec.minVersion)) {
       throw new Error(`${label} ${learned.version || '(unknown version)'} is older than ${spec.minVersion}, or does not say its version. Before ${spec.minVersion} it does not send shell approvals to the office, so commands would run without asking. Update ${label}.`);
     }
-    const c = (await policy(true)).config;
+    const p = await policy(true, s);
+    if (!p) throw new Error(`the office could not check the ${label} config.`);
+    const c = p.config;
     const block = workspaceBlock(c);
     if (block) throw new Error(block);
     if (c.execAsks !== true && s.supervision) s.supervision = 'Unsupervised';
@@ -810,7 +818,7 @@ export function createAcp(deps) {
     // The Security room rows the agent's own config takes (providers/index.mjs; security.mjs enforcement()).
     ...(spec.enforces ? { enforces: [...spec.enforces] } : {}),
     // OpenClaw: the config check for the current Security room cells, and the cells its config cannot carry (null: no config).
-    policy: () => policy(),
+    policy: (fresh) => policy(fresh === true),
 
     async readiness() {
       try { program(); } catch (e) { return { ready: false, version: null, needs: [e.message, ...spec.needs] }; }

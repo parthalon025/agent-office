@@ -140,8 +140,9 @@ before(async () => {
   const noServer = `http://127.0.0.1:${await freePort()}/v1`;
   const env = { ...process.env, PATH: bin + path.delimiter + (process.env.PATH || process.env.Path || ''), OFFICE_PORT: String(port), OFFICE_HOOKS: 'command', OFFICE_OLLAMA_URL: fake.url, OFFICE_LMSTUDIO_URL: noServer, FAKE_ACP_FORK: '1', OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
     OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local'), USERPROFILE: path.join(base, 'home'), HERMES_HOME: path.join(base, 'hermes-home'), OFFICE_OPENCLAW_PORT: String(gatewayPort),
-    // OpenClaw is off unless OFFICE_ENABLE_OPENCLAW=1 (until the Security room can turn it on, #70), and it needs a version that
-    // relays shell approvals: the fake agent says so. The config stand-in is preloaded into every node the server starts.
+    // OpenClaw is off until the Security room's Agents screen turns it on (the OpenClaw test does that). The old switch is set
+    // here on purpose: it turns nothing on. OpenClaw needs a version that relays shell approvals: the fake agent says so. The
+    // config stand-in is preloaded into every node the server starts.
     OFFICE_ENABLE_OPENCLAW: '1', FAKE_ACP_VERSION: '2026.10.10', FAKE_OPENCLAW_CONFIG: clawConfig,
     NODE_OPTIONS: `--require=${path.join(SRC, 'test', 'fixtures', 'fake-openclaw-config.cjs').split(path.sep).join('/')}` };
   child = spawn(process.execPath, ['server.mjs'], { cwd: copy, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env });
@@ -629,11 +630,28 @@ test('notes: an agent write that reads as an instruction, or is too long, is ref
   assert.ok(!/Ignore all previous/.test(room.json.text));
 });
 
-test('OpenClaw (#73): ungated and partly supervised, opens only in a new worktree, and its label reaches the page and the feed', { skip: SKIP }, async () => {
-  const info = await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
-  const row = info.providers.find((p) => p.kind === 'openclaw');
+test('OpenClaw (#73): off until the Security room turns it on; then ungated and partly supervised, only in a new worktree, its label on the page', { skip: SKIP }, async () => {
+  let info = await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
+  let row = info.providers.find((p) => p.kind === 'openclaw');
   assert.ok(row, 'OpenClaw is registered');
   assert.deepEqual([row.gated, row.supervision, row.cost], [false, 'Partly supervised: commands ask, file edits do not', 'unknown']);
+  // Off until the user turns it on on the Agents screen of the Security room, with the painted Confirm (ADR 0001, #70).
+  assert.equal(row.ready, false);
+  assert.match(row.needs[0], /^OpenClaw runs tool calls without asking the office\. Turn on OpenClaw on the Agents screen of the Security room first\./);
+  const off = await call('/api/open', { cwd: acpRepo, name: 'claw-off', provider: 'openclaw', where: 'office', confirmCost: true });
+  assert.deepEqual([off.status, off.json.confirm], [409, undefined]);
+  assert.match(off.json.error, /Turn on OpenClaw on the Agents screen/);
+  assert.equal((await snapshot()).security.enforce.openclaw.rows['edit-inside'], 'This agent runs this kind of call without asking the office.', 'its config is not read while it is off');
+  const on = { scope: 'office', row: 'ungated', col: 'openclaw', value: 'on' };
+  assert.equal((await call('/api/security/set', on)).status, 409, 'turning it on loosens: the wall asks for the Confirm');
+  assert.equal((await call('/api/security/set', { ...on, confirmed: true })).status, 200);
+  // On: the office reads its config (read-only) and the wall shows what the config really carries.
+  const enforce = await until(async () => { const e = (await snapshot()).security.enforce.openclaw; return e.rows['edit-inside'] ? null : e; }, 'the wall to show what the config carries');
+  assert.equal(enforce.rows.shell, undefined, 'exec approval is on: the shell cell is enforced');
+  assert.equal(enforce.rows['edit-inside'], undefined, 'Allow: it edits, as the cell says');
+  assert.match(enforce.rows.web, /no approval step/, 'Ask on web: its config cannot ask');
+  info = await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
+  row = info.providers.find((p) => p.kind === 'openclaw');
   // The Gateway answered, so the check went on to the handshake. That one runs in the temp folder, where the stand-in agent
   // file (acp) is not: not ready for that reason, and not for a missing Gateway.
   assert.equal(row.ready, false);

@@ -57,9 +57,9 @@ export function versionAtLeast(v, min = MIN_VERSION) {
 // ---------- the config the Security room rules need ----------
 // What the Security room cells (row -> ask | allow | deny) were before the user changes them. #70 owns the real rules; the
 // caller passes the cells of the OpenClaw column.
-// Pre-wired for the Security room (#70). Nothing in the office reads these cells yet: the caller passes DEFAULT_CELLS until
-// that room exists, and the Deny and gap tables below are exercised by tests only. Only workspaceOnly and exec ask affect a
-// session today (providers/acp.mjs start()).
+// The server passes the OpenClaw column of the Security room (security.mjs cellsOf, for the session's building) as the cells.
+// DEFAULT_CELLS (the room's defaults) is what a caller without the room gets. workspaceOnly and exec ask decide whether a
+// session starts and how it is labelled (providers/acp.mjs start()); the rest says which cells the wall marks Not enforced.
 export const DEFAULT_CELLS = { 'read-inside': 'allow', 'edit-inside': 'allow', 'files-outside': 'ask', shell: 'ask', web: 'ask', mcp: 'ask', settings: 'ask', secrets: 'ask' };
 // A Deny cell is these tool ids in tools.deny (tool groups and ids as OpenClaw names them).
 const DENY = { shell: ['group:runtime'], web: ['group:web'], 'edit-inside': ['write', 'edit', 'apply_patch'], mcp: ['group:plugins'], 'read-inside': ['read'] };
@@ -110,7 +110,8 @@ const show = (r) => (r.state === 'unreadable' ? 'unknown' : r.state === 'unset' 
 
 /**
  * Compare the wanted settings with the real ones. read(path) -> { state: 'set', value } | { state: 'unset' } | { state: 'unreadable', why }.
- * Returns { ok, unreadable, execAsks, settings: [{ path, value, have, ok, fix }], fix: [command text] }.
+ * Returns { ok, unreadable, execAsks, settings: [{ path, value, have, ok, fix, rows }], fix: [command text] }. rows: the Security
+ * room rows the setting carries (security.mjs enforcement says a cell is not enforced while its setting is off).
  * execAsks: true when OpenClaw asks before a shell command (tools.exec.ask is always or on-miss, or tools.exec.mode is ask),
  * false when it does not, null when the office could not read it. An unreadable setting is never a pass.
  */
@@ -137,7 +138,7 @@ export async function checkConfig(w, read) {
       ok = r.state === 'set' && r.value === x.value;
       if (!ok) command = `openclaw config set ${x.path} ${x.value}`;
     }
-    settings.push({ path: x.path, value: x.value, have: show(r), ok, fix: command && r.state !== 'unreadable' ? command : null });
+    settings.push({ path: x.path, value: x.value, have: show(r), ok, fix: command && r.state !== 'unreadable' ? command : null, rows: [...x.rows] });
     if (command && r.state !== 'unreadable') fix.push(command);
   }
   const unreadable = paths.some((p) => got[p].state === 'unreadable');
