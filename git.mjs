@@ -116,7 +116,8 @@ export function branchPort(name) {
 /** The name a checkout's port comes from: its branch, or the worktree folder name when HEAD is detached. `loc` is what `locate` returns. */
 export function checkoutName(loc) {
   if (!loc) throw new Error('This folder is not in a git repository, so it has no branch to take a port from.');
-  return loc.branch === 'detached' ? path.win32.basename(loc.root) // Windows rules on every host, so Linux CI reads a Windows folder name the same way : loc.branch;
+  // Windows rules on every host, so Linux CI reads a Windows folder name the same way
+  return loc.branch === 'detached' ? path.win32.basename(loc.root) : loc.branch;
 }
 
 const WORKTREE_ROOT = path.join(os.homedir(), '.agent-office', 'worktrees');
