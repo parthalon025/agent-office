@@ -1387,7 +1387,7 @@
     var ws = useState(winSize), win = ws[0], setWin = ws[1];   // the window size: the scene height follows it (#55)
     // The DS Since you left card shows (OfficeScene onSinceYouLeft). The welcome card waits until it closes (#66).
     var sy = useState(false), syl = sy[0], setSyl = sy[1];
-    // Toasts (toasts.js): an error or a toast with an action stays until closed; the others close after 8 s, and wait while the pointer or focus is on them.
+    // Toasts (toasts.js): an error or a toast with an action stays until closed; the others close after 8 s, and wait while the pointer or focus is on them, or while the stack has no room (is-off).
     var tt = useState([]), toasts = tt[0], setToasts = tt[1], tid = React.useRef(0), toastBox = React.useRef(null);
     function toast(t) {
       var id = ++tid.current;
@@ -1414,63 +1414,80 @@
       var last = Date.now(), held = 0;
       var iv = setInterval(function () {
         var now = Date.now(), dt = now - last; last = now;
-        var el = toastBox.current, paused = !!el && (el.matches(':hover') || el.contains(document.activeElement));
+        var el = toastBox.current, paused = !!el && (el.matches(':hover') || el.contains(document.activeElement) || el.classList.contains('is-off'));
         if (paused) { held += dt; return; }
         var h0 = held; held = 0;
         setToasts(function (l) { if (h0) l = window.OfficeToasts.tick(l, now, now - h0, true); return window.OfficeToasts.tick(l, now, now, false); });
       }, 250);
       return function () { clearInterval(iv); };
     }, [timed]);
-    // On a narrow screen (office.css, 820 px) the stack stands above the dock and above every box on it, so it never covers the room card, the chat or a panel, and it stays below the top controls (#79).
-    // It measures the boxes again when one appears, goes, or changes size (ResizeObserver: a longer task line moves the room card), or when --strip-clear changes.
+    // Where the stack stands, at every width and window height (#79): toasts.js place decides from the boxes measured here.
+    // KEEP: never covered: the top controls, the floors card, the zoom column, the dock and its More list, every request
+    // bar (Approve, Decline), message box and Back button of a panel or the chat, the decisions inbox, the city controls.
+    // AVOID: covered only when no band is free of them: the DS HUD boxes (chat, roster, room card, Since you left), the
+    // terminal, board, stats and notes panels, the welcome card. A new box goes in one of the two lists.
+    // It measures again when a box appears, goes or changes size (ResizeObserver), when a toast comes or goes, when
+    // --strip-clear changes, on resize, and when a box scrolls. With no free band the stack waits out of sight (is-off) and its clocks wait.
+    var KEEP = '.ao-hud-top, .ao-hud-left, .ao-hud-zoom, .ao-hud-inbox, .ao-hud-cast, .strip, .strip-more, .asks, .term-head, .term-input, .board-b > .inline-actions, .look-bar, .city-hud, .city-zoom, .ao-hud-chat .ao-chat-h, .ao-hud-chat .ao-tablist, .ao-hud-chat .ao-act, .ao-hud-chat .ao-chips, .ao-hud-chat .ao-composer';
+    var AVOID = '.ao-hud > *, .board-panel, .terminal-panel, .notes-edit, .welcome';
+    var placeRef = React.useRef(null);
     useEffect(function () {
-      var BOXES = '.ao-hud-right, .ao-hud-syl, .ao-hud-scrub, .board-panel, .terminal-panel', TOPS = '.ao-hud-top, .ao-hud-left';
       var wait = 0, trail = 0, ro = null, watched = new Set();
-      function seen(b) {   // a box the user can see: not display none, not visibility hidden (a panel hides the DS column that way), not empty
+      function seen(b) {   // the part of a box the user can see: not display none, not visibility hidden (a panel hides the DS column that way), cut by every scrolling or clipping parent
         var cs = getComputedStyle(b);
         if (cs.display === 'none' || cs.visibility === 'hidden') return null;
-        var r = b.getBoundingClientRect();
-        return r.height > 0 ? r : null;
+        var r = b.getBoundingClientRect(), o = { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+        for (var p = b.parentElement; p && p !== document.body; p = p.parentElement) {
+          var ps = getComputedStyle(p);
+          if (ps.overflowX === 'visible' && ps.overflowY === 'visible') continue;
+          var q = p.getBoundingClientRect();
+          o = { left: Math.max(o.left, q.left), top: Math.max(o.top, q.top), right: Math.min(o.right, q.right), bottom: Math.min(o.bottom, q.bottom) };
+        }
+        return o.right > o.left && o.bottom > o.top ? o : null;
       }
-      function watch(els) {   // the observer follows the measured boxes and the dock
+      function rects(sel, els) {
+        var out = [];
+        document.querySelectorAll(sel).forEach(function (b) { var r = seen(b); if (r) { out.push(r); els.push(b); } });
+        return out;
+      }
+      function watch(els) {   // the observer follows the measured boxes and the stack
         if (!ro) return;
         var now = new Set(els);
         now.forEach(function (e) { if (!watched.has(e)) ro.observe(e); });
         watched.forEach(function (e) { if (!now.has(e)) ro.unobserve(e); });
         watched = now;
       }
+      function set(el, k, v) { if (el.style.getPropertyValue(k) !== v) el.style.setProperty(k, v); }   // the same value writes nothing: no loop with the observers
       function place() {
         wait = 0;
         var el = toastBox.current;
         if (!el) return;
-        var strip = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--strip-clear'));
-        if (window.innerWidth > 820 || !isFinite(strip)) { el.style.removeProperty('--toast-lift'); el.style.removeProperty('--toast-room'); el.style.removeProperty('--toast-top'); watch([]); return; }   // the CSS defaults apply
-        var boxes = [], topEdge = 0, els = [];
-        document.querySelectorAll(BOXES).forEach(function (b) { var r = seen(b); if (r) { boxes.push({ top: r.top, bottom: r.bottom }); els.push(b); } });
-        document.querySelectorAll(TOPS).forEach(function (b) { var r = seen(b); if (r) { topEdge = Math.max(topEdge, r.bottom); els.push(b); } });
-        var dock = document.querySelector('.strip');
-        if (dock) els.push(dock);
+        var cs = getComputedStyle(el), strip = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--strip-clear'));
+        var vw = document.documentElement.clientWidth, vh = window.innerHeight, els = [el];
+        var keep = rects(KEEP, els), avoid = rects(AVOID, els);
         watch(els);
-        var p = window.OfficeToasts.lift(window.innerHeight, strip, boxes, topEdge);
-        // a short band: the stack hangs under the top controls (--toast-top) and the bottom rule is off (auto)
-        var lift = p.bottom == null ? 'auto' : p.bottom + 'px', room = p.maxH + 'px', top = p.top == null ? 'auto' : p.top + 'px';
-        // the same value writes nothing: no loop with the observers
-        if (el.style.getPropertyValue('--toast-lift') !== lift) el.style.setProperty('--toast-lift', lift);
-        if (el.style.getPropertyValue('--toast-room') !== room) el.style.setProperty('--toast-room', room);
-        if (el.style.getPropertyValue('--toast-top') !== top) el.style.setProperty('--toast-top', top);
+        var home = { x: parseFloat(cs.getPropertyValue('--toast-home')) || 16, y: isFinite(strip) ? vh - strip : vh };
+        var p = window.OfficeToasts.place({ w: vw, h: vh }, { w: el.getBoundingClientRect().width }, home, keep, avoid);
+        el.classList.toggle('is-off', !!p.hidden);
+        if (p.hidden) return;
+        set(el, '--toast-x', p.x + 'px'); set(el, '--toast-bottom', p.bottom + 'px'); set(el, '--toast-room', p.maxH + 'px');
       }
-      function soon() {   // at most every 120 ms, and once more after the panel animation has ended
+      function soon() {   // at most every 120 ms, and once more after a panel animation has ended
         if (!wait) wait = setTimeout(place, 120);
         clearTimeout(trail); trail = setTimeout(place, 500);
       }
+      placeRef.current = place;
       if (window.ResizeObserver) ro = new ResizeObserver(soon);
       var mo = new MutationObserver(soon);
-      mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
+      mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden'] });
       mo.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });   // --strip-clear
       window.addEventListener('resize', soon);
-      soon();
-      return function () { mo.disconnect(); if (ro) ro.disconnect(); window.removeEventListener('resize', soon); clearTimeout(wait); clearTimeout(trail); };
+      document.addEventListener('scroll', soon, true);   // a scrolled chat log or panel moves its request bars
+      place();
+      return function () { placeRef.current = null; mo.disconnect(); if (ro) ro.disconnect(); window.removeEventListener('resize', soon); document.removeEventListener('scroll', soon, true); clearTimeout(wait); clearTimeout(trail); };
     }, []);
+    // a new or closed toast is placed before it paints, not up to 120 ms later
+    React.useLayoutEffect(function () { if (placeRef.current) placeRef.current(); }, [toasts]);
     function refresh() { return getInfo(shownPath).then(function (i) { setInfo(i); return i; }, function () { return info; }); }
     function show(name) { refresh().then(function () { setDlg({ name: name }); }); }
     function changes(uid, name) {
