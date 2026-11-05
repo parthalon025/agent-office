@@ -1145,8 +1145,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/startup') {
       // Only the office on 4317 in the main folder owns the entry (#108); the others get 403 with the reason.
-      const r = body.enabled === true ? startup.enable(STARTUP_DIR, ROOT, process.execPath, PORT) : startup.disable(STARTUP_DIR, ROOT, PORT);
-      return send(res, 200, { ...r, ...startup.access(ROOT, PORT) });
+      return send(res, 200, startup.change(STARTUP_DIR, ROOT, process.execPath, PORT, body.enabled));
     }
     if (url.pathname === '/api/launch-link') return send(res, 200, { url: auth.launchUrl(PORT, launchCodes.mint()) }); // a second npm start asks for one
     if (url.pathname === '/api/probe-http') return send(res, 200, await probeHttp());

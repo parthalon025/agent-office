@@ -38,9 +38,20 @@ export function state(dir) {
   return { available: true, enabled: fs.existsSync(p), path: p };
 }
 
-// A linked git worktree has a .git file (gitdir: ...), a main checkout a .git folder, and a download no .git at all.
+// A linked git worktree has a .git file that points to <repo>/.git/worktrees/<name>, and that folder holds a commondir file.
+// A main checkout has a .git folder. A download has no .git. A .git file is not enough: a clone made with
+// --separate-git-dir and a submodule also have one, and each is a main folder. A relative gitdir (newer git) is read
+// against the folder.
 function inWorktree(root) {
-  try { return !!root && fs.statSync(path.join(root, '.git')).isFile(); } catch { return false; }
+  if (!root) return false;
+  try {
+    const dot = path.join(root, '.git');
+    if (!fs.statSync(dot).isFile()) return false;
+    const m = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(dot, 'utf8'));
+    if (!m) return false;
+    const gitdir = path.resolve(root, m[1]);
+    return fs.existsSync(path.join(gitdir, 'commondir')) || path.basename(path.dirname(gitdir)) === 'worktrees';
+  } catch { return false; }
 }
 
 /**
@@ -73,4 +84,13 @@ export function disable(dir, root = '', port = DEFAULT_PORT) {
   guard(root, port);
   if (dir) fs.rmSync(entryPath(dir), { force: true });
   return state(dir);
+}
+
+/**
+ * One turn-on or turn-off from the page: enable (enabled === true) or disable, then the reply the page shows:
+ * the entry state with access. Throws (status 403) when this office does not own the entry.
+ */
+export function change(dir, root, node, port, enabled) {
+  const r = enabled === true ? enable(dir, root, node, port) : disable(dir, root, port);
+  return { ...r, ...access(root, port) };
 }

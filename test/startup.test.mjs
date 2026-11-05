@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { startupDir, entryPath, entryContent, state, status, access, enable, disable, ENTRY_NAME } from '../startup.mjs';
+import { startupDir, entryPath, entryContent, state, status, access, enable, disable, change, ENTRY_NAME } from '../startup.mjs';
 
 test('startup folder is under APPDATA; unknown without it', () => {
   assert.equal(startupDir('C:\\Users\\a\\AppData\\Roaming'), 'C:\\Users\\a\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup');
@@ -95,4 +95,47 @@ test('status: the entry state plus whether this office may change it', () => {
     assert.ok(other.reason);
     assert.deepEqual(status('', main, 4317), { available: false, enabled: false, path: '', canChange: true, reason: '' });
   } finally { rm(dir, main); }
+});
+
+// A .git file alone does not make a worktree: a --separate-git-dir clone and a submodule have one too, and each is a main folder.
+test('access: only a linked worktree is read-only, not any folder with a .git file', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-gitfile-'));
+  const mk = (name, gitdirLine, makeGitdir) => {
+    const d = path.join(base, name);
+    fs.mkdirSync(d);
+    fs.writeFileSync(path.join(d, '.git'), `${gitdirLine}\n`);
+    if (makeGitdir) fs.mkdirSync(path.join(base, makeGitdir), { recursive: true });
+    return d;
+  };
+  try {
+    const separate = mk('separate', 'gitdir: ' + path.join(base, 'sep.git').split(path.sep).join('/'), 'sep.git');
+    const sub = mk('sub', 'gitdir: ../parent/.git/modules/sub', 'parent/.git/modules/sub');
+    const garbage = mk('garbage', 'not a gitdir line', '');
+    const real = mk('real', 'gitdir: ../main/.git/worktrees/real', 'main/.git/worktrees/real');
+    fs.writeFileSync(path.join(base, 'main/.git/worktrees/real/commondir'), '../..\n'); // what git writes for a linked worktree
+    const gone = mk('gone', 'gitdir: ' + path.join(base, 'main2/.git/worktrees/gone').split(path.sep).join('/'), ''); // folder pruned: the path still says worktree
+    for (const d of [separate, sub, garbage]) assert.equal(access(d, 4317).canChange, true, path.basename(d) + ' is a main folder');
+    for (const d of [real, gone]) {
+      const a = access(d, 4317);
+      assert.equal(a.canChange, false, path.basename(d) + ' is a worktree');
+      assert.match(a.reason, /worktree/);
+    }
+  } finally { rm(base); }
+});
+
+// The reply of POST /api/startup (server.mjs calls change): the page keeps the toggle only when canChange stays in it (#108).
+test('change: the owner gets the entry state with canChange true, another office gets 403', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-startup-'));
+  const main = folder('main'), wt = folder('worktree');
+  try {
+    const on = change(dir, main, process.execPath, 4317, true);
+    assert.deepEqual(on, { available: true, enabled: true, path: entryPath(dir), canChange: true, reason: '' });
+    assert.ok(fs.existsSync(entryPath(dir)));
+    const off = change(dir, main, process.execPath, 4317, false);
+    assert.deepEqual(off, { available: true, enabled: false, path: entryPath(dir), canChange: true, reason: '' });
+    assert.equal(change(dir, main, process.execPath, 4317, undefined).enabled, false, 'anything but true turns it off');
+    assert.throws(() => change(dir, main, process.execPath, 4392, true), (e) => e.status === 403);
+    assert.throws(() => change(dir, wt, process.execPath, 4317, true), (e) => e.status === 403);
+    assert.deepEqual(fs.readdirSync(dir), []);
+  } finally { rm(dir, main, wt); }
 });
