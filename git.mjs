@@ -246,10 +246,13 @@ export async function branches(repo) {
 }
 
 const BRANCH_RE = /^(?!-)(?!.*\.\.)(?!.*\/\/)(?!.*@\{)[A-Za-z0-9._\/-]{1,100}(?<![./])$/;
-const slugOf = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'branch';
+/** Letters with accents become their plain letter (Ünïcode -> Unicode); a few that do not decompose get a spelled form. */
+const FOLD = { 'ß': 'ss', 'æ': 'ae', 'Æ': 'AE', 'œ': 'oe', 'Œ': 'OE', 'ø': 'o', 'Ø': 'O', 'đ': 'd', 'Đ': 'D', 'ð': 'd', 'Ð': 'D', 'ł': 'l', 'Ł': 'L', 'þ': 'th', 'Þ': 'Th', 'ı': 'i' };
+const fold = (t) => String(t).normalize('NFKD').replace(/\p{M}+/gu, '').replace(/[ßæÆœŒøØđĐðÐłŁþÞı]/g, (c) => FOLD[c]);
+const slugOf = (t) => fold(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'branch';
 /** A room name as a folder name: letters, digits, dots and dashes. The folder name is the room name in the office. */
 export function roomNameOf(name) {
-  const n = String(name || '').trim().replace(/[^A-Za-z0-9._]+/g, '-').replace(/^[-.]+|[-.]+$/g, '');
+  const n = fold(String(name || '').trim()).replace(/[^A-Za-z0-9._]+/g, '-').replace(/^[-.]+|[-.]+$/g, '');
   if (String(name || '').trim() && !n) throw new Error('Use letters or digits in the room name.');
   const cut = n.slice(0, 40).replace(/[-.]+$/, ''); // Windows drops a trailing dot from a folder name
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(cut)) throw new Error('Windows reserves that name. Pick another room name.');

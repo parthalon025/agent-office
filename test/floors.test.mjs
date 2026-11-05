@@ -29,6 +29,14 @@ test('roomNameOf keeps a safe folder name and refuses a name with no letters', (
   assert.throws(() => git.roomNameOf('???'), /letters or digits/);
 });
 
+test('roomNameOf turns accented letters into plain ones and does not drop them', () => {
+  assert.equal(git.roomNameOf('Ünïcode'), 'Unicode');
+  assert.equal(git.roomNameOf('café déjà vu'), 'cafe-deja-vu');
+  assert.equal(git.roomNameOf('Straße Ørsted'), 'Strasse-Orsted');
+  assert.equal(git.roomNameOf('Łódź'), 'Lodz');
+  assert.throws(() => git.roomNameOf('日本語'), /letters or digits/);
+});
+
 test('a named room gets that folder name, and a second one with the same name gets a number', async () => {
   const dir = repo();
   const tag = 'aotest' + crypto.randomBytes(3).toString('hex');

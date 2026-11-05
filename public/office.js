@@ -404,6 +404,7 @@
   }
 
   // ---------- floors (branches) and rooms (worktrees) ----------
+  var IGNORED_NOTE = 'Files that git ignores in a room, such as a local .env, are deleted too. Copy them first if you need them.';
   function FloorsDialog(p) {
     var snap = useSnapshot();
     var repo = snap && (snap.repos || []).filter(function (r) { return r.key === p.repo; })[0];
@@ -427,6 +428,14 @@
         if (t && p.toast) p.toast({ tone: t[0], title: t[1], text: t[2] });
       }, function (x) { setBusy(''); setErr(x.message); });
     }
+    // The Keep button leaves the page, so the focus would fall to the page. Move it to the next Keep button, else to the first dialog button.
+    function focusAfterKeep(i) {
+      setTimeout(function () {
+        var b = document.querySelectorAll('.ao-dialog .past-actions button');
+        var t = b[Math.min(i, b.length - 1)] || document.querySelector('.ao-dialog-a button');
+        if (t) t.focus();
+      }, 0);
+    }
     if (!repo) {
       return h(A.Dialog, { open: true, title: 'Floors and rooms', onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
         h(A.EmptyState, { icon: 'floor', title: 'No repository here', text: 'Folders outside git have no branches. Open a session in a git repository to get floors.' }));
@@ -442,12 +451,12 @@
         fl.length ? h(A.Button, { key: 'r', variant: 'danger', icon: 'remove', loading: busy === 'cleanup', onClick: function () { run('cleanup', '/api/floor/cleanup', { branches: fl.map(function (f) { return f.branch; }) }, function () { setClean(null); }); } }, 'Delete ' + fl.length + (fl.length === 1 ? ' floor' : ' floors')) : null] },
         h('div', { className: 'form' },
           fl.length
-            ? h('p', { className: 'note' }, 'These floors are merged into ' + (main ? main.branch : 'the main branch') + ', have no changes, no session and are over an hour old. Press Keep this floor to leave one out. Deleting removes the rest with their rooms and branches. No commit is lost.')
-            : h(A.EmptyState, { icon: 'floor', title: 'Nothing to clean up', text: 'Every floor has unmerged work, changes or a session.' }),
-          h('ul', { className: 'past' }, fl.map(function (f) {
+            ? h('p', { className: 'note' }, 'These floors are merged into ' + (main ? main.branch : 'the main branch') + ', have no changes, no session and are over an hour old. Press Keep this floor to leave one out. Deleting removes the rest with their rooms and branches. No commit is lost. ' + IGNORED_NOTE)
+            : h(A.EmptyState, { icon: 'floor', title: 'Nothing to clean up', text: 'No floor is ready. A floor must be merged, have no changes and no session, and be over an hour old.' }),
+          h('ul', { className: 'past' }, fl.map(function (f, i) {
             return h('li', { key: f.branch, className: 'past-row' },
               h('div', { className: 'past-title' }, h(A.Icon, { name: 'floor', size: 16 }), h('b', null, f.branch), h(Tag, null, f.rooms + (f.rooms === 1 ? ' room' : ' rooms'))),
-              h('div', { className: 'past-actions' }, h(A.Button, { variant: 'quiet', onClick: function () { setClean({ floors: fl.filter(function (x) { return x.branch !== f.branch; }) }); } }, 'Keep this floor')));
+              h('div', { className: 'past-actions' }, h(A.Button, { variant: 'quiet', onClick: function () { setClean({ floors: fl.filter(function (x) { return x.branch !== f.branch; }) }); focusAfterKeep(i); } }, 'Keep this floor')));
           })),
           err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
     }
@@ -463,8 +472,8 @@
         h(A.Button, { key: 'r', variant: 'danger', icon: 'remove', loading: busy === 'confirm', onClick: go }, forced ? (isFloor ? 'Delete and lose the commits' : 'Remove and discard changes') : (isFloor ? 'Delete floor' : 'Remove room'))] },
         h('div', { className: 'form' },
           h('p', { className: 'note' }, isFloor
-            ? 'Deletes the branch ' + confirm.branch + ' and removes its rooms (worktree folders). Git refuses when the branch has commits that are not merged.'
-            : 'Deletes the folder ' + confirm.root + '. The branch ' + confirm.branch + ' and its floor stay.'),
+            ? 'Deletes the branch ' + confirm.branch + ' and removes its rooms (worktree folders). Git refuses when the branch has commits that are not merged. ' + IGNORED_NOTE
+            : 'Deletes the folder ' + confirm.root + '. The branch ' + confirm.branch + ' and its floor stay. ' + IGNORED_NOTE),
           err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
     }
 

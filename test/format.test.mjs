@@ -82,6 +82,7 @@ test('cleanupNote says what the clean-up did, and is an error when a floor was s
   assert.deepEqual(F.cleanupNote({ deleted: ['a', 'b'], skipped: [] }), ['info', 'Floors cleaned up', '2 floors and their rooms are gone.']);
   assert.deepEqual(F.cleanupNote({ deleted: ['a'], skipped: [] }), ['info', 'Floors cleaned up', '1 floor and its rooms are gone.']);
   assert.deepEqual(F.cleanupNote({ deleted: ['a'], skipped: ['x', 'y'] }), ['error', 'Some floors stayed', '1 floor deleted. Kept: x, y. They changed or a session works there.']);
+  assert.deepEqual(F.cleanupNote({ deleted: ['a', 'b'], skipped: ['x'] }), ['error', 'Some floors stayed', '2 floors deleted. Kept: x. It changed or a session works there.']);
   assert.deepEqual(F.cleanupNote({ deleted: [], skipped: ['x'] }), ['error', 'No floor deleted', 'Kept: x. It changed or a session works there.']);
   assert.deepEqual(F.cleanupNote({}), ['info', 'Nothing to clean up', 'No floor was deleted.']);
 });

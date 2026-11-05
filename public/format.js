@@ -30,8 +30,9 @@
     var gone = d.length === 1 ? '1 floor and its rooms are gone.' : d.length + ' floors and their rooms are gone.';
     if (!d.length && !k.length) return ['info', 'Nothing to clean up', 'No floor was deleted.'];
     if (!k.length) return ['info', 'Floors cleaned up', gone];
-    if (!d.length) return ['error', 'No floor deleted', 'Kept: ' + k.join(', ') + '. ' + (k.length === 1 ? 'It changed' : 'They changed') + ' or a session works there.'];
-    return ['error', 'Some floors stayed', plural(d.length, 'floor') + ' deleted. Kept: ' + k.join(', ') + '. They changed or a session works there.'];
+    var why = (k.length === 1 ? 'It changed' : 'They changed') + ' or a session works there.';
+    if (!d.length) return ['error', 'No floor deleted', 'Kept: ' + k.join(', ') + '. ' + why];
+    return ['error', 'Some floors stayed', plural(d.length, 'floor') + ' deleted. Kept: ' + k.join(', ') + '. ' + why];
   }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
   function trimmed(p) { var s = String(p == null ? '' : p); return s.length > 1 ? s.replace(/[\\/]+$/, '') : s; }
