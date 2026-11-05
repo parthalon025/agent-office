@@ -161,6 +161,21 @@ test('a Paperclip run is labelled from the ids hook.mjs reads in its environment
   await until(async () => (await full(run.uid)).feed.some((f) => f.text === 'Paperclip marked this run succeeded, but the office denied a call of it that waited with no answer.'), 'the feed line');
 });
 
+// Review 76, finding 5: the hold follows from the run having no terminal (claude --print), not from the office knowing its
+// company. The company match is only for the labels.
+test('a run with Paperclip ids of a company the office does not watch has no label, but its held call still waits and ends in a deny', async () => {
+  const OTHER = { PAPERCLIP_AGENT_ID: ADA.id, PAPERCLIP_COMPANY_ID: 'c-not-watched', PAPERCLIP_RUN_ID: 'run-other-1' };
+  await runHook(ev('sid-pc-other', 'UserPromptSubmit', { prompt: 'a run of a company not watched' }), OTHER);
+  const s = await until(async () => (await snapshot()).sessions.find((x) => x.prompt === 'a run of a company not watched'), 'the session', { ms: 15000 });
+  assert.equal(s.hq, null, 'no label: not an agent of the watched company');
+  const t0 = Date.now();
+  const out = await runHook(ev('sid-pc-other', 'PermissionRequest', { tool_name: 'Write', tool_input: { file_path: path.join(work, 'c.txt'), content: 'c' }, permission_suggestions: [] }), OTHER);
+  assert.notEqual(out, '', 'not sent back to a terminal dialog: a --print run has none');
+  assert.deepEqual(JSON.parse(out).hookSpecificOutput.decision, { behavior: 'deny', message: 'Agent Office got no answer in time, so this call is denied.' });
+  assert.ok(Date.now() - t0 >= 3500, `it waited the Paperclip hold (4 s here), not the terminal one (1 s): ${Date.now() - t0} ms`);
+  assert.ok((await full(s.uid)).feed.some((f) => f.text === 'question timed out, the office denied the call. Paperclip may still mark this run succeeded.'));
+});
+
 test('watch only: the office only read Paperclip, apart from the one Supervise PATCH; Disconnect forgets the connection', async () => {
   const methods = pc.requests.map((q) => q.method);
   assert.deepEqual([...new Set(methods)].sort(), ['GET', 'PATCH', 'UPGRADE']);

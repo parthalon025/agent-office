@@ -1,5 +1,6 @@
 // A fake Paperclip server for the HQ tests (#76): the REST routes the office reads, the one PATCH it may send, and the live
-// events WebSocket (/api/companies/{id}/events/ws). Not a recording: the routes, the agent, issue and routine fields and the
+// events WebSocket (/api/companies/{id}/events/ws), and GET /api/agents/:id (Supervise reads the agent again before its PATCH).
+// Not a recording: the routes, the agent, issue and routine fields and the
 // event shapes follow the Paperclip source (0.3.1: server/src/routes/{agents,issues,routines,companies,health}.ts,
 // server/src/realtime/live-events-ws.ts, server/src/services/heartbeat.ts publishLiveEvent calls, packages/shared/src/types).
 // PATCH /api/agents/:id merges adapterConfig key by key, as Paperclip does without replaceAdapterConfig, and logs activity.
@@ -101,6 +102,8 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
       }
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/routines$/))) return send(res, 200, st.routines.filter((r) => r.companyId === x[1]));
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/live-runs$/))) return send(res, 200, st.liveRuns);
+      // the agent as saved, with what buildAgentDetail adds (routes/agents.ts; the board reads the whole config)
+      if (req.method === 'GET' && (x = m(/^\/api\/agents\/([^/]+)$/))) { const a = st.agents.find((y) => y.id === x[1]); return a ? send(res, 200, { ...a, chainOfCommand: [], access: {} }) : send(res, 404, { error: 'Agent not found' }); }
       if (req.method === 'PATCH' && (x = m(/^\/api\/agents\/([^/]+)$/))) {
         const a = st.agents.find((y) => y.id === x[1]);
         if (!a) return send(res, 404, { error: 'Agent not found' });

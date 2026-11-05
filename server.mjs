@@ -656,8 +656,9 @@ function holdRequest({ s, id, suggestions, auto }, res = null) {
   }
   // A Paperclip run (#76) is a terminal session with no terminal: `claude --print` has no dialog to fall back to, so an
   // unanswered call is denied. It gets the hold of an office session, and the feed says what Paperclip will not (spike #75: a
-  // run whose held call timed out was still marked succeeded).
-  const paperclip = !s.headless && !!s.paperclip && hq.knows(s.paperclip);
+  // run whose held call timed out was still marked succeeded). Every session with Paperclip run ids gets it, also one of a
+  // company the office does not watch or while Paperclip is not connected: the company match is for its labels only.
+  const paperclip = !s.headless && !!s.paperclip;
   const hold = s.headless ? HEADLESS_ASK_MS : paperclip ? PAPERCLIP_ASK_MS : ASK_TIMEOUT_MS;
   const timer = setTimeout(() => {
     // A Paperclip run gets a deny that says why (fail closed by the office's own answer, not by what print mode does with none).
