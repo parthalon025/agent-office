@@ -46,3 +46,19 @@ test('folder name is the last segment', () => {
   assert.equal(F.folderName('/a/b'), 'b');
   assert.equal(F.folderName(''), '');
 });
+
+test('hint pill grows with its label and keeps the key chip inside the round end', () => {
+  const a = F.hintPill(300, 150), b = F.hintPill(500, 150);
+  assert.equal(b.w - a.w, 200, 'the pill is as much wider as the label');
+  assert.ok(a.keyX > a.textX + 300, 'the chip starts after the label');
+  assert.ok(a.keyX + a.keyW < a.w - 6, 'the chip ends inside the pill edge');
+  assert.ok(a.w - 6 - (a.keyX + a.keyW) >= 24, 'the chip does not touch the round end');
+});
+
+test('hint pill without a key has the label only', () => {
+  const p = F.hintPill(300, 0);
+  assert.equal(p.keyX, null);
+  assert.equal(p.keyW, 0);
+  assert.ok(p.w < F.hintPill(300, 150).w);
+  assert.deepEqual(F.hintPill(NaN, undefined), F.hintPill(0, 0), 'a bad width counts as zero');
+});

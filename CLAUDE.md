@@ -56,7 +56,7 @@ Stop the server by the pid that owns port 4317 (`netstat -ano | grep :4317`, the
 | `public/terminal.js` | Desk terminals (`OfficeTerminal`): repaints each bot's desk monitor as its session terminal (prompt, tool calls, streamed reply, cursor) and stats, and adds the night light pool (amber when the bot needs you, red after an error). A monitor is a screen for the host's two steps: the first click looks at it, the second calls `onOpen(uid, name)`. The hover badge says the next step. A host adapter, like `board.js`. |
 | `public/toasts.js` | Toast list rules, no DOM (`globalThis.OfficeToasts`, tested in `test/toasts.test.mjs`): an error or a toast with an action stays, others close after 8 s, at most 4, the oldest timed toast goes first. `office.js` owns the timer. |
 | `public/office.js` | React: the dock (strip), dialogs, the request bar of the terminal and room panels. Mounts `OfficeScene` once. |
-| `public/format.js` | Display formats shared by the page and the server: money (`$0.00`, `<$0.01`), plurals, short folder paths. Plain script, tested in `test/format.test.mjs`. |
+| `public/format.js` | Display formats shared by the page and the server: money (`$0.00`, `<$0.01`), plurals, short folder paths, and the layout of the scene hint pill (`hintPill`). Plain script, tested in `test/format.test.mjs`. |
 | `public/chat-extras.js` | Chat resize grips, the `/` list, theme mirror. It depends on DS class names (`.ao-hud-chat`, `.ao-input`). |
 
 Add a new file only for a distinct job. Extend the file that owns the concern first.
