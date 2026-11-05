@@ -10,5 +10,5 @@
     "smoke": "node test/smoke.mjs",
     "test": "node --test \"test/*.test.mjs\""
   },
-  "engines": { "node": ">=20" }
+  "engines": { "node": ">=22" }
 }

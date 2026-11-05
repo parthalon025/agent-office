@@ -38,7 +38,7 @@ It is built on the Agent Office design system (x1.6), which lives in this folder
 ## Requirements
 
 - Windows 11. Opening and closing sessions is written for Windows.
-- Node.js 20 or newer.
+- Node.js 22 or newer. `npm test` passes a quoted glob to `node --test`, which Node reads only from version 21 on.
 - Claude Code 2.1.295 or newer, already signed in. The office uses your existing login. It was tested on 2.1.317.
 - Git for worktrees and the Changes view. The GitHub CLI (`gh`) for pull requests.
 
