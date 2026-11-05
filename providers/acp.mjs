@@ -30,6 +30,7 @@ import { riskOf, fileKey } from '../risk.mjs';
 import { clip } from '../tracker.mjs';
 import { providerError } from './index.mjs';
 import { createLocalTools, killTree } from './local-tools.mjs';
+import { GATEWAY_HOST, DEFAULT_GATEWAY_PORT, MIN_VERSION, DEFAULT_CELLS, gatewayPort, probeGateway, versionAtLeast, wantedConfig, checkConfig, configReader } from './openclaw.mjs';
 
 export const PROTOCOL_VERSION = 1;
 // One entry per agent. program: the name resolveExe finds on PATH. args: what starts its ACP mode on stdio.
@@ -56,6 +57,18 @@ export const AGENTS = {
     // dsh-acp lists forks, deletion and transcript replay as unsupported, so no fork here.
     features: ['reason', 'teams', 'schedules'], pin: null, // a developer preview: pin the version tested on the owner's PC
     needs: ['Install DeepSeek Harness so that dsh.exe is on the PATH, and set DEEPSEEK_API_KEY.'],
+  },
+  // OpenClaw (#73, ADR 0001). `openclaw acp` is a bridge to a Gateway that already runs on loopback (providers/openclaw.mjs);
+  // the office never starts or stops that Gateway. From v2026.10.10 the bridge relays shell approvals as
+  // session/request_permission. File edits, writes, browser and web tools have no approval step, so the agent is ungated.
+  // gateway: check the Gateway before the bridge starts. minVersion: older versions send no shell approvals.
+  // enforces: the one Security room row whose Ask, Allow and Deny the Gateway config carries (exec approval).
+  openclaw: {
+    label: 'OpenClaw', program: 'openclaw', args: ['acp'],
+    gated: false, supervision: 'Partly supervised: commands ask, file edits do not',
+    askTimeoutMs: null, gateway: true, minVersion: MIN_VERSION, enforces: ['shell'],
+    features: [], pin: null, // not run against a real Gateway yet: native Windows is untested upstream
+    needs: ['Install OpenClaw so that openclaw.exe is on the PATH, then start its Gateway.'],
   },
 };
 
@@ -181,6 +194,9 @@ function within(p, ms, why, setTimer, clearTimer) {
  * @param {Function} [deps.setTimer] setTimeout.  @param {Function} [deps.clearTimer] clearTimeout.
  * @param {() => number} [deps.now] the clock.  @param {() => string} [deps.makeId] ids for messages and terminals.
  * @param {string} [deps.probeDir] the folder readiness starts the agent in (the temp folder).
+ * OpenClaw only (spec.gateway): @param {(port: number) => Promise<boolean>} [deps.gatewayUp] is a Gateway listening (probeGateway);
+ * @param {(path: string) => Promise<object>} [deps.readConfig] reads one OpenClaw config key (configReader);
+ * @param {() => object} [deps.cells] the Security room cells of the OpenClaw column, row -> ask | allow | deny.
  */
 export function createAcp(deps) {
   const spec = AGENTS[deps.kind];
@@ -197,6 +213,12 @@ export function createAcp(deps) {
   const now = deps.now || Date.now;
   const makeId = deps.makeId || (() => crypto.randomBytes(5).toString('hex'));
   const probeDir = deps.probeDir || os.tmpdir();
+  // OpenClaw: a Gateway the office never starts, and a config it only reads.
+  const port = gatewayPort(env);
+  const gatewayUp = deps.gatewayUp || ((p) => probeGateway({ port: p }));
+  const readConfig = deps.readConfig || configReader({ exe, execFile, env });
+  const cells = deps.cells || (() => DEFAULT_CELLS);
+  const args = spec.gateway && port !== DEFAULT_GATEWAY_PORT ? [...spec.args, '--url', `ws://${GATEWAY_HOST}:${port}`] : spec.args;
   /** @type {Map<string, object>} uid -> the agent state of an open session */
   const agents = new Map();
   // What the agent said at its last handshake (a probe or a session): its capabilities and version.
@@ -219,7 +241,7 @@ export function createAcp(deps) {
     let file;
     try { file = program(); } catch (e) { learned = { caps: null, version: null, at: now(), ok: false, why: e.message }; return; }
     let child;
-    try { child = spawn(file, spec.args, { cwd: probeDir, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...env } }); } catch (e) {
+    try { child = spawn(file, args, { cwd: probeDir, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...env } }); } catch (e) {
       learned = { caps: null, version: null, at: now(), ok: false, why: textOf(e) };
       return;
     }
@@ -246,6 +268,37 @@ export function createAcp(deps) {
     clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: true },
     clientInfo: { name: 'agent-office', title: 'Agent Office', version: '0.1.0' },
   });
+
+  // ----- OpenClaw: the Gateway and its config (providers/openclaw.mjs) -----
+  // Why there is no Gateway, or null. The office only looks: it never starts, stops or restarts it.
+  async function gatewayDown() {
+    if (!spec.gateway) return null;
+    return (await gatewayUp(port)) ? null : `Not ready: start the ${label} Gateway. It should listen on ${GATEWAY_HOST}:${port}. The office never starts or stops it.`;
+  }
+  // What the Gateway config says about the Security room rules, read-only. Kept for a minute; fresh: read it again now.
+  let policyNow = null;
+  async function policy(fresh = false) {
+    if (!spec.gateway) return null;
+    if (!fresh && policyNow && now() - policyNow.at < PROBE_TTL_MS) return policyNow.value;
+    const w = wantedConfig(cells());
+    policyNow = { at: now(), value: { config: await checkConfig(w, readConfig), gaps: w.gaps } };
+    return policyNow.value;
+  }
+  // The settings that are off, in words and with the command that turns each on. A setting the office could not read is never
+  // a pass: one line says it cannot confirm.
+  function configNotes(c) {
+    if (c.unreadable) return ['the office could not read its config, so it cannot confirm that commands ask or that file tools stay in the worktree.'];
+    const notes = [];
+    for (const x of c.settings) {
+      if (x.ok) continue;
+      const run = x.fix ? ` Run: ${x.fix}` : '';
+      if (x.path === 'tools.fs.workspaceOnly') notes.push(`${x.path} is ${x.have}, so its file tools can reach outside the worktree.${run}`);
+      else if (x.path === 'tools.exec.ask') notes.push(`${x.path} is ${x.have}, so shell commands run without asking the office.${run}`);
+      else notes.push(`${x.path} does not list ${JSON.stringify(x.value)}, so the Security room Deny rule does not reach ${label}.${run}`);
+    }
+    if (c.execAsks === false && !notes.some((n) => /shell commands run without asking/.test(n))) notes.push('exec approval is off, so shell commands run without asking the office.');
+    return notes;
+  }
 
   // ----- reporting -----
   // Every report goes through emit(): after close, nothing more is reported (the seam's timing rule 2).
@@ -522,7 +575,11 @@ export function createAcp(deps) {
         hook(s, st, { hook_event_name: 'PostToolUse', tool_name: 'TodoWrite', tool_use_id: null, tool_input: { todos } });
         break;
       }
-      default: break; // thoughts, commands, modes, usage: not shown yet
+      case 'usage_update':
+        // Token totals (used, size) go to the stats. The cost the spec allows here is not read: the session stays "unknown".
+        emit(st, () => events.stream(s, { type: 'usage', used: u.used, size: u.size }));
+        break;
+      default: break; // thoughts, commands, modes: not shown yet
     }
   }
 
@@ -585,7 +642,20 @@ export function createAcp(deps) {
   }
 
   // ----- the session -----
+  // OpenClaw, once the session runs: read the Gateway config and say what is off. Exec approval off means commands do not ask,
+  // so the session no longer carries "commands ask" (ADR 0001: the label must stay true). The office never writes the config.
+  async function checkPolicy(s, st) {
+    const p = await policy(true);
+    if (st.closed) return;
+    const c = p.config, notes = configNotes(c);
+    if (c.execAsks === false && s.supervision) s.supervision = 'Unsupervised';
+    if (!notes.length) emit(st, () => events.feed(s, 'start', `${label} config: workspace-only is on${c.execAsks ? ' and commands ask' : ''}.`));
+    for (const n of notes) emit(st, () => events.feed(s, 'wait', `${label}: ${n}`));
+  }
+
   async function start(s, st, o) {
+    const down = await gatewayDown();
+    if (down) throw new Error(down);
     const init = await within(handshake(st.rpc), INIT_MS, 'it did not answer the handshake in time', setTimer, clearTimer);
     remember(init);
     if (init?.protocolVersion !== PROTOCOL_VERSION) throw new Error(`it speaks ACP version ${init?.protocolVersion}; the office speaks version ${PROTOCOL_VERSION}`);
@@ -608,6 +678,7 @@ export function createAcp(deps) {
     st.sid = sid;
     // The session id first (the tracker saves the session when its sid arrives), then the bot sits down at rest.
     emit(st, () => events.stream(s, { type: 'system', subtype: 'init', session_id: sid, model: r.models?.currentModelId || null, permissionMode: 'default' }));
+    if (spec.gateway) checkPolicy(s, st).catch(() => {});
     // With a first prompt waiting, the turn starts at once instead (no flicker from at rest to working).
     if (!st.queue.length) hook(s, st, { hook_event_name: 'SessionStart', source: o.resume ? 'resume' : 'startup' });
     const next = st.queue.shift();
@@ -650,12 +721,24 @@ export function createAcp(deps) {
       return [...f, ...spec.features];
     },
     spec,
+    // The Security room rows the agent's own config takes (providers/index.mjs; security.mjs enforcement()).
+    ...(spec.enforces ? { enforces: [...spec.enforces] } : {}),
+    // OpenClaw: the config check for the current Security room cells, and the cells its config cannot carry (null: no config).
+    policy: () => policy(),
 
     async readiness() {
       try { program(); } catch (e) { return { ready: false, version: null, needs: [e.message, ...spec.needs] }; }
+      const down = await gatewayDown(); // before the bridge starts: without a Gateway it has nothing to talk to
+      if (down) return { ready: false, version: null, needs: [down] };
       await this.learn();
       if (!learned.ok) return { ready: false, version: null, needs: [`${label} did not answer the ACP handshake: ${learned.why}`, ...spec.needs] };
       const needs = spec.pin && learned.version !== spec.pin ? [`The office was tested with ${label} ${spec.pin}. This is ${learned.version || 'an unknown version'}.`] : [];
+      if (spec.minVersion && !versionAtLeast(learned.version, spec.minVersion)) {
+        needs.push(`${label} ${learned.version || '(unknown version)'} is older than ${spec.minVersion}. Before ${spec.minVersion} it does not send shell approvals to the office, so commands run without asking. Update ${label}.`);
+      }
+      if (spec.gateway) {
+        try { needs.push(...configNotes((await policy()).config).map((n) => `${label}: ${n}`)); } catch (e) { needs.push(`${label}: the office could not check its config: ${textOf(e)}`); }
+      }
       return { ready: true, version: learned.version || 'unknown', needs };
     },
 
@@ -680,7 +763,7 @@ export function createAcp(deps) {
       // A missing program or a spawn that throws: the session says why and ends, on a later tick (seam timing rule 1).
       try {
         file = program();
-        child = spawn(file, spec.args, { cwd: s.cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...env, OFFICE_ID: s.officeId } });
+        child = spawn(file, args, { cwd: s.cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...env, OFFICE_ID: s.officeId } });
       } catch (e) {
         setImmediate(() => { events.reply(s, `Could not start ${label}: ${textOf(e)}`); events.end(s, 'could not start'); });
         return;

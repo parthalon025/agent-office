@@ -64,11 +64,23 @@
   }
   function todoStatus(t) { return TODO[t && t.status !== undefined ? t.status : t] || 'resting'; }
 
+  // Supervision (ADR 0001): an ungated agent carries a label. The server sets it on the session (providers/index.mjs
+  // supervisionOf); the words come from the provider. This is the one place the page reads it.
+  //   supervision(s)     the full label, '' for a gated agent. On the bot card, the desk terminal and the stats.
+  //   supervisionHead(l) the words before the colon, for the room sign, which has no room for the rest.
+  //   platform(s)        the line under the bot's name: the label when it has one.
+  function supervision(s) { return s && typeof s.supervision === 'string' ? s.supervision : ''; }
+  function supervisionHead(label) { return String(label || '').split(':')[0]; }
+  function platform(s) { return supervision(s) || 'Claude Code'; }
+
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
   // priced: sessions with a cost figure. unknown: sessions whose agent reports no cost (costUnknown), shown as "unknown".
+  // supervision: the label of the least supervised agent in the room ('Unsupervised' before any other), '' when all are gated.
   function figures(list) {
-    var o = { sessions: 0, working: 0, waiting: 0, toolCalls: 0, tokens: 0, cost: 0, priced: 0, unknown: 0, todosDone: 0, todosTotal: 0, lastEvent: 0 };
+    var o = { sessions: 0, working: 0, waiting: 0, toolCalls: 0, tokens: 0, cost: 0, priced: 0, unknown: 0, supervision: '', todosDone: 0, todosTotal: 0, lastEvent: 0 };
     (list || []).forEach(function (s) {
+      var sup = supervision(s);
+      if (sup && (!o.supervision || (sup.indexOf('Unsupervised') === 0 && o.supervision.indexOf('Unsupervised') !== 0))) o.supervision = sup;
       o.sessions++;
       var k = status(s).key;
       if (k === 'working') o.working++;
@@ -99,5 +111,5 @@
     return requests(s).filter(function (r) { return r.kind === 'permission' && r.always && r.risk !== 'high'; })[0] || null;
   }
 
-  root.OfficeVocab = { requests: requests, alwaysOffer: alwaysOffer, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures };
+  root.OfficeVocab = { requests: requests, alwaysOffer: alwaysOffer, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, supervision: supervision, supervisionHead: supervisionHead, platform: platform };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

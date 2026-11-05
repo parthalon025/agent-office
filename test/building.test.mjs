@@ -115,6 +115,17 @@ test('a scene mounted on an empty building gets a floor and a room when the firs
   assert.equal(m.stale(), false, 'the spare room took the first session, so nothing is mounted again');
 });
 
+test('the bot of an ungated agent carries its supervision label on its card; a gated one says Claude Code (ADR 0001, #73)', async () => {
+  const r = rig();
+  await r.hook(HOOKS.turnWithEdit[0]);
+  assert.equal(of(r.mount(KEY_A).ev, 'bot.add')[0].bot.platform, 'Claude Code');
+  const r2 = rig();
+  await r2.hook(HOOKS.turnWithEdit[0]);
+  [...r2.tracker.sessions.values()][0].supervision = 'Partly supervised: commands ask, file edits do not';
+  r2.push();
+  assert.equal(of(r2.mount(KEY_A).ev, 'bot.add')[0].bot.platform, 'Partly supervised: commands ask, file edits do not');
+});
+
 test('a turn with an edit: working, tool call without a bubble on replay, result, finished', async () => {
   const r = rig();
   const m0 = r.mount(KEY_A);

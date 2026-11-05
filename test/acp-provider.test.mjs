@@ -15,6 +15,8 @@ import { providerEvents, createRegistry, checkProvider, spendLimitFor, isPaid, i
 import { createAcp, AGENTS, commandLine } from '../providers/acp.mjs';
 import { createLocalTools } from '../providers/local-tools.mjs';
 
+// A fake OpenClaw config: path -> value. A path that is not there is unset.
+const configOf = (o) => async (p) => (p in o ? { state: 'set', value: o[p] } : { state: 'unset' });
 const FAKE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-acp.mjs');
 
 async function until(fn, what, ms = 10_000) {
@@ -58,6 +60,7 @@ function rig({ kind = 'hermes', fake = {}, ...over } = {}) {
   r.p = createAcp({
     events: r.events, kind,
     exe: (name) => `C:/bin/${name}.exe`,
+    ...(kind === 'openclaw' ? { gatewayUp: async () => true, readConfig: configOf({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'always' }) } : {}),
     spawn: (file, args, opts) => {
       r.spawned.push({ file, args, opts });
       return realSpawn(process.execPath, [FAKE, ...args], { ...opts, env: { ...opts.env, ...fake, FAKE_ACP_LOG: logFile } });
@@ -715,4 +718,162 @@ test('a queued message that a stopped turn could not deliver goes with the next 
     assert.equal(texts[0], 'go on');
     assert.match(texts[1], /use tabs/);
   } finally { await r.done(s); }
+});
+
+// ---------- OpenClaw (#73): an OpenClaw-shaped fake agent behind a Gateway the office never starts ----------
+// OpenClaw's `openclaw acp` is a bridge to a Gateway on loopback. It relays shell approvals as session/request_permission and
+// reports file edits only after the fact. The Gateway check and the config reader are injected; the agent is the same fake.
+
+const EXEC = (id = 'e1', command = 'git status') => ({ toolCallId: id, title: command, kind: 'execute', rawInput: { command } });
+const LABEL = 'Partly supervised: commands ask, file edits do not';
+
+test('openclaw: an ungated kind with its label, its own program, and the one Security row its config takes', () => {
+  const r = rig({ kind: 'openclaw' });
+  try {
+    assert.doesNotThrow(() => checkProvider(r.p));
+    assert.deepEqual([r.p.kind, r.p.label, r.p.gated, isGated(r.p), supervisionOf(r.p), isPaid(r.p), r.p.cost], ['openclaw', 'OpenClaw', false, false, LABEL, true, 'unknown']);
+    assert.deepEqual([AGENTS.openclaw.program, AGENTS.openclaw.args], ['openclaw', ['acp']]);
+    assert.deepEqual(r.p.enforces, ['shell'], 'exec approval is the one row whose Ask, Allow and Deny config carries');
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
+
+test('openclaw readiness: no Gateway is "Not ready: start the OpenClaw Gateway", and the office starts nothing', async () => {
+  const asked = [];
+  const r = rig({ kind: 'openclaw', gatewayUp: async (port) => { asked.push(port); return false; } });
+  try {
+    const ready = await r.p.readiness();
+    assert.equal(ready.ready, false);
+    assert.equal(ready.needs[0], 'Not ready: start the OpenClaw Gateway. It should listen on 127.0.0.1:18789. The office never starts or stops it.');
+    assert.deepEqual(asked, [18789]);
+    assert.equal(r.spawned.length, 0, 'not even the bridge starts without a Gateway');
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
+});
+
+test('openclaw readiness: a Gateway on another loopback port (OFFICE_OPENCLAW_PORT) is checked there and the bridge gets that URL', async () => {
+  const asked = [];
+  const r = rig({ kind: 'openclaw', env: { ...process.env, OFFICE_OPENCLAW_PORT: '19001' }, fake: { FAKE_ACP_VERSION: '2026.10.10' }, gatewayUp: async (port) => { asked.push(port); return true; } });
+  const s = r.session();
+  try {
+    assert.equal((await r.p.readiness()).ready, true);
+    assert.ok(asked.length >= 1 && asked.every((p) => p === 19001), String(asked));
+    assert.deepEqual(r.spawned[0].args, ['acp', '--url', 'ws://127.0.0.1:19001']);
+    await started(r, s);
+    assert.deepEqual(r.spawned.at(-1).args, ['acp', '--url', 'ws://127.0.0.1:19001']);
+  } finally { await r.done(s); }
+});
+
+test('openclaw readiness: ready on 2026.10.10, an older one is told to update; a config that is off is named with its command', async () => {
+  const good = rig({ kind: 'openclaw', fake: { FAKE_ACP_VERSION: '2026.10.10' } });
+  const old = rig({ kind: 'openclaw', fake: { FAKE_ACP_VERSION: '2026.9.30' } });
+  const off = rig({ kind: 'openclaw', fake: { FAKE_ACP_VERSION: '2026.10.12' }, readConfig: configOf({}) });
+  try {
+    assert.deepEqual(await good.p.readiness(), { ready: true, version: '2026.10.10', needs: [] });
+    const o = await old.p.readiness();
+    assert.deepEqual([o.ready, o.version], [true, '2026.9.30']);
+    assert.match(o.needs[0], /OpenClaw 2026\.9\.30 is older than 2026\.10\.10\. Before 2026\.10\.10 it does not send shell approvals to the office, so commands run without asking\./);
+    const f = await off.p.readiness();
+    assert.equal(f.ready, true, 'a setting that is off is a warning; the Gateway is the user\'s');
+    assert.ok(f.needs.some((n) => /tools\.fs\.workspaceOnly is unset/.test(n) && /openclaw config set tools\.fs\.workspaceOnly true/.test(n)), f.needs.join('\n'));
+    assert.ok(f.needs.some((n) => /tools\.exec\.ask is unset/.test(n) && /openclaw config set tools\.exec\.ask always/.test(n)));
+  } finally { for (const x of [good, old, off]) fs.rmSync(x.base, { recursive: true, force: true }); }
+});
+
+test('openclaw: the shell command it relays is held with its text; approve sends allow once, decline sends reject once', async () => {
+  const r = rig({ kind: 'openclaw' });
+  const s = await started(r, r.session({ supervision: LABEL }));
+  try {
+    r.steps(s, [{ ask: { toolCall: EXEC('e1', 'npm test'), options: OPTIONS } }, { ask: { toolCall: EXEC('e2', 'rm -rf build'), options: OPTIONS } }]);
+    await until(() => s.pending.length === 1, 'the first command');
+    assert.equal(s.status, 'waiting');
+    assert.deepEqual([s.pending[0].tool, s.pending[0].detail, s.pending[0].always], ['Bash', 'npm test', ''], 'no Always allow for an ACP agent');
+    r.release(s.pending[0].id, { allow: true, always: true });
+    await until(() => s.pending.length === 1 && r.replies(s).length === 1, 'the second command');
+    r.release(s.pending[0].id, { allow: false });
+    await r.idle(s);
+    assert.deepEqual(r.replies(s), ['asked: selected once', 'asked: selected no']);
+    assert.equal(s.supervision, LABEL);
+  } finally { await r.done(s); }
+});
+
+test('openclaw: a file edit and a write arrive after the fact; the office cannot hold them and the feed says so', async () => {
+  const r = rig({ kind: 'openclaw' });
+  const s = await started(r, r.session({ supervision: LABEL }));
+  try {
+    r.steps(s, [{ tool: EDIT_CALL(r.root, 'a.txt', 'w1') }, { update: { toolCallId: 'w1', status: 'completed' } },
+      { tool: { toolCallId: 'w2', title: 'Write notes.md', kind: 'edit', locations: [{ path: path.join(r.root, 'notes.md') }] } }, { update: { toolCallId: 'w2', status: 'completed' } }]);
+    await r.idle(s);
+    assert.equal(s.pending.length, 0, 'no request was ever made');
+    assert.deepEqual(s.calls.map((c) => [c.id, c.name, c.ok]), [['w1', 'Edit', true], ['w2', 'Edit', true]]);
+    const lines = r.tracker.feed.map((f) => f.text);
+    assert.ok(lines.includes('OpenClaw changed a.txt without asking the office.'), lines.join('\n'));
+    assert.ok(lines.includes('OpenClaw changed notes.md without asking the office.'));
+  } finally { await r.done(s); }
+});
+
+test('openclaw: usage_update token totals go to the session stats; the cost stays unknown', async () => {
+  const r = rig({ kind: 'openclaw' });
+  const s = await started(r, r.session({ costUnknown: true }));
+  try {
+    r.steps(s, [{ usage: { used: 4200, size: 128000 } }, { say: 'ok' }, { usage: { used: 6100, size: 128000, cost: { amount: 0.02, currency: 'USD' } } }]);
+    await r.idle(s);
+    assert.deepEqual([s.usage.tokens, s.ctxTokens, s.ctxWindow], [6100, 6100, 128000]);
+    assert.deepEqual([s.cost, s.costUnknown], [null, true], 'a cost the agent sends is not trusted into a figure: the office shows unknown');
+  } finally { await r.done(s); }
+});
+
+test('openclaw: with no Gateway a session says so and ends; nothing runs', async () => {
+  const r = rig({ kind: 'openclaw', gatewayUp: async () => false });
+  const s = r.session();
+  try {
+    r.p.open(s, {});
+    await until(() => s.status === 'ended', 'the session to end');
+    assert.match(r.replies(s)[0], /^OpenClaw could not start a session: Not ready: start the OpenClaw Gateway\./);
+    assert.equal(r.sent('initialize').length, 0, 'the bridge never got a handshake');
+  } finally { await r.done(); }
+});
+
+test('openclaw: a session start checks the config; a good one is one start line, an off setting is named with its command', async () => {
+  const good = rig({ kind: 'openclaw' });
+  const sg = await started(good, good.session({ supervision: LABEL }));
+  const bad = rig({ kind: 'openclaw', readConfig: configOf({ 'tools.exec.ask': 'on-miss' }) });
+  const sb = await started(bad, bad.session({ supervision: LABEL }));
+  try {
+    await until(() => good.tracker.feed.some((f) => /^OpenClaw config:/.test(f.text)), 'the config line');
+    assert.ok(good.tracker.feed.some((f) => f.text === 'OpenClaw config: workspace-only is on and commands ask.'));
+    assert.equal(sg.supervision, LABEL);
+    await until(() => bad.tracker.feed.some((f) => /workspaceOnly/.test(f.text)), 'the warning');
+    const line = bad.tracker.feed.find((f) => /workspaceOnly/.test(f.text));
+    assert.equal(line.text, 'OpenClaw: tools.fs.workspaceOnly is unset, so its file tools can reach outside the worktree. Run: openclaw config set tools.fs.workspaceOnly true');
+    assert.equal(sb.supervision, LABEL, 'commands still ask here');
+  } finally { await good.done(sg); await bad.done(sb); }
+});
+
+test('openclaw: when exec approval is off the label is no longer "commands ask": the session reads Unsupervised', async () => {
+  const r = rig({ kind: 'openclaw', readConfig: configOf({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'off' }) });
+  const s = await started(r, r.session({ supervision: LABEL }));
+  try {
+    await until(() => s.supervision === 'Unsupervised', 'the label to change');
+    const lines = r.tracker.feed.map((f) => f.text);
+    assert.ok(lines.includes('OpenClaw: tools.exec.ask is "off", so shell commands run without asking the office. Run: openclaw config set tools.exec.ask always'), lines.join('\n'));
+  } finally { await r.done(s); }
+});
+
+test('openclaw: a config the office cannot read keeps the label and says it cannot confirm', async () => {
+  const r = rig({ kind: 'openclaw', readConfig: async () => ({ state: 'unreadable', why: 'openclaw.exe stopped' }) });
+  const s = await started(r, r.session({ supervision: LABEL }));
+  try {
+    await until(() => r.tracker.feed.some((f) => /cannot confirm/.test(f.text)), 'the note');
+    assert.ok(r.tracker.feed.some((f) => f.text === 'OpenClaw: the office could not read its config, so it cannot confirm that commands ask or that file tools stay in the worktree.'));
+    assert.equal(s.supervision, LABEL);
+  } finally { await r.done(s); }
+});
+
+test('openclaw policy: the rules its config carries are checked; the cells it cannot carry are listed as gaps', async () => {
+  const r = rig({ kind: 'openclaw', cells: () => ({ shell: 'ask', web: 'deny', mcp: 'ask', secrets: 'ask' }) });
+  try {
+    const p = await r.p.policy();
+    assert.deepEqual(p.config.settings.map((x) => [x.path, x.ok]), [['tools.fs.workspaceOnly', true], ['tools.exec.ask', true], ['tools.deny', false]]);
+    assert.deepEqual(p.config.fix, ['openclaw config set tools.deny \'["group:web"]\' --strict-json']);
+    assert.deepEqual(p.gaps.map((g) => `${g.row}=${g.value}`), ['mcp=ask', 'secrets=ask']);
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
 });

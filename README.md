@@ -114,6 +114,15 @@ Two agent kinds speak the Agent Client Protocol (ACP): **Hermes Agent** (`hermes
 - **Time limit.** Hermes Agent waits 60 s for an answer to an edit. When it moves on first, the office drops the card, declines the edit and says so in the feed.
 - **Reopen (job 9).** It continues the past conversation when the agent can load one. Else it starts a new session, and the past session stays in the list.
 
+### OpenClaw
+
+**OpenClaw** (`openclaw`, the office starts `openclaw acp`) is an ACP agent with one difference: it talks to a **Gateway** that must already run on this PC. Use OpenClaw v2026.10.10 or later. OpenClaw on native Windows is untested upstream, and the office has not run against a real Gateway yet.
+
+- **The Gateway is yours.** The office never starts, stops or restarts it. It only checks that something listens on `127.0.0.1:18789`. Set `OFFICE_OPENCLAW_PORT` before `npm start` for another loopback port. Without a Gateway, Settings says "Not ready: start the OpenClaw Gateway", and a session that starts anyway ends with that sentence.
+- **Partly supervised: commands ask, file edits do not.** From v2026.10.10 OpenClaw sends its shell approvals to the office. The card shows the command. Approve sends "allow once". File edits, writes, browser and web tools have no approval step in OpenClaw, so the office cannot hold them. The label shows on the bot card, the desk terminal, the stats display and the door sign of the room. Like Hermes Agent, it opens only in a new git worktree (ADR 0001). The activity feed says "changed a.txt without asking the office" after the fact.
+- **Your OpenClaw config decides.** The Gateway runs the tools, so its config limits them. The office only reads it (`openclaw config get`) and never writes it. At each start the feed says what is off and gives the command to turn it on, for example `openclaw config set tools.fs.workspaceOnly true` (file tools stay in the worktree) and `openclaw config set tools.exec.ask always` (commands ask). If exec approval is off, commands do not ask, and the session label changes to "Unsupervised". If the office cannot read the config, it says so and keeps the label.
+- **Cost and tokens.** OpenClaw reports token totals. The office shows them in the stats. The cost stays "unknown".
+
 ## How it works
 
 ```

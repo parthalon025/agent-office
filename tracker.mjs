@@ -390,6 +390,13 @@ export function createTracker(deps = {}) {
         s.usage.cached += u.cache_read_input_tokens || 0;
       }
       for (const b of m.message?.content || []) if (b.type === 'text' && b.text && b.text.trim()) pushReply(s, b.text);
+    } else if (m.type === 'usage') {
+      // An agent that reports a token total, not per message (ACP usage_update: used, size). It replaces the last total. It
+      // carries no cost: an agent that reports none stays costUnknown.
+      const used = Number(m.used), size = Number(m.size);
+      if (Number.isFinite(used) && used >= 0) { s.usage.tokens = used; s.ctxTokens = used; }
+      if (Number.isFinite(size) && size > 0) s.ctxWindow = size;
+      changed();
     } else if (m.type === 'result') {
       s.live = '';
       if (typeof m.total_cost_usd === 'number') s.cost = (s.costBase || 0) + m.total_cost_usd;

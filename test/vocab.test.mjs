@@ -74,13 +74,32 @@ test('room figures count once, with the same waiting rule', () => {
     mk({ status: 'working', pending: [{ id: 'p' }], calls: [1], usage: { tokens: 500 }, lastEvent: 20 }),
     mk({ turns: 1, error: { id: 1, text: 'x' }, cost: 0.5 }),
   ];
-  assert.deepEqual(V.figures(list), { sessions: 3, working: 1, waiting: 1, toolCalls: 3, tokens: 2000, cost: 0.75, priced: 2, unknown: 0, todosDone: 1, todosTotal: 2, lastEvent: 20 });
+  assert.deepEqual(V.figures(list), { sessions: 3, working: 1, waiting: 1, toolCalls: 3, tokens: 2000, cost: 0.75, priced: 2, unknown: 0, supervision: '', todosDone: 1, todosTotal: 2, lastEvent: 20 });
   assert.equal(V.figures([]).sessions, 0);
 });
 
 test('room figures count the sessions whose agent reports no cost, apart from the priced ones', () => {
   const f = V.figures([mk({ cost: 0.25 }), mk({ cost: null, costUnknown: true }), mk({ cost: null, costUnknown: true })]);
   assert.deepEqual([f.cost, f.priced, f.unknown], [0.25, 1, 2]);
+});
+
+const PARTLY = 'Partly supervised: commands ask, file edits do not';
+
+test('supervision words (ADR 0001): the label of an ungated agent, its short form for a small sign, and the bot platform line', () => {
+  assert.equal(V.supervision(mk({ supervision: PARTLY })), PARTLY);
+  assert.equal(V.supervision(mk({})), '', 'a gated agent has none');
+  assert.equal(V.supervision(null), '');
+  assert.equal(V.supervisionHead(PARTLY), 'Partly supervised');
+  assert.equal(V.supervisionHead('Unsupervised'), 'Unsupervised');
+  assert.equal(V.supervisionHead(''), '');
+  assert.equal(V.platform(mk({})), 'Claude Code');
+  assert.equal(V.platform(mk({ supervision: PARTLY })), PARTLY, 'the label is on the bot card');
+});
+
+test('room figures carry the supervision label of the least supervised agent in the room, "" when every agent is gated', () => {
+  assert.equal(V.figures([mk({}), mk({})]).supervision, '');
+  assert.equal(V.figures([mk({}), mk({ supervision: PARTLY })]).supervision, PARTLY);
+  assert.equal(V.figures([mk({ supervision: PARTLY }), mk({ supervision: 'Unsupervised' })]).supervision, 'Unsupervised');
 });
 
 test('requests lists every permission prompt and question, oldest first', () => {

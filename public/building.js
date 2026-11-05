@@ -350,7 +350,7 @@
             firstSight = true;
             var name = uniqueName(s.name);
             k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: V.status(s).key, task: V.taskLine(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, model: s.model, ended: false, place: placeKey(pl), room: roomOf(pl, emit) };
-            var bot = withColor({ name: name, role: 'coder', shape: shapeOf(s.uid), status: k.status, task: k.task, platform: 'Claude Code', identity: s.cwd }, s.uid);
+            var bot = withColor({ name: name, role: 'coder', shape: shapeOf(s.uid), status: k.status, task: k.task, platform: V.platform(s), identity: s.cwd }, s.uid);
             if (s.skills && s.skills.length) bot.skills = s.skills.slice(0, 16);
             if (s.scheduleId) bot.triggers = [s.name];
             emit(stamp({ type: 'bot.add', roomId: k.room, bot: bot }, s.startedAt));

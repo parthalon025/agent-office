@@ -569,6 +569,23 @@ test('a session is a Claude Code session unless the office opened it with anothe
   assert.equal(r.tracker.newSession({ uid: 'l1', provider: 'local' }).provider, 'local');
 });
 
+test('a usage line sets the token total and the context of an agent that reports totals (ACP usage_update); it never sets a cost', () => {
+  const r = rig();
+  const s = r.tracker.newSession({ uid: 'o1', headless: true, costUnknown: true });
+  r.line(s, { type: 'usage', used: 1200, size: 200000 });
+  assert.equal(s.usage.tokens, 1200);
+  assert.equal(s.ctxTokens, 1200);
+  assert.equal(s.ctxWindow, 200000);
+  r.line(s, { type: 'usage', used: 3400, size: 200000 });
+  assert.equal(s.usage.tokens, 3400, 'a total replaces the last total; it does not add to it');
+  r.line(s, { type: 'usage', used: 'x', size: -5 });
+  r.line(s, { type: 'usage' });
+  assert.equal(s.usage.tokens, 3400, 'a line without numbers changes nothing');
+  assert.equal(s.ctxWindow, 200000);
+  assert.equal(s.cost, null);
+  assert.equal(s.costUnknown, true);
+});
+
 test('the feed keeps the last 200 lines', () => {
   const r = rig();
   const s = r.tracker.newSession({ uid: 'o1', name: 'n' });

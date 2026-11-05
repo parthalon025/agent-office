@@ -91,6 +91,16 @@ test('an agent that reports no cost reaches the page as costUnknown, so no surfa
   assert.equal(V.figures([l]).unknown, 1);
 });
 
+test('an ungated agent\'s label reaches the page (ADR 0001, #73), so the bot, the desk terminal and the room sign can show it', () => {
+  const o = office(1, 0);
+  const s = [...o.tr.sessions.values()][0];
+  assert.equal(W.lean(o.state()).sessions[0].supervision, null, 'a gated agent has none');
+  s.supervision = 'Partly supervised: commands ask, file edits do not';
+  const l = W.lean(o.state()).sessions[0];
+  assert.equal(l.supervision, 'Partly supervised: commands ask, file edits do not');
+  assert.equal(V.figures([l]).supervision, l.supervision, 'the room figures carry it for the room sign');
+});
+
 test('replies are capped per broadcast by characters, newest first, and the newest always goes', () => {
   const o = office(1, 0);
   const s = [...o.tr.sessions.values()][0];

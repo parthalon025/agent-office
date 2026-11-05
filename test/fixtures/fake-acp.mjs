@@ -5,6 +5,7 @@
 //   { say: 'text' }                     an agent_message_chunk
 //   { tool: { toolCallId, ... } }        a tool_call update        { update: { toolCallId, ... } }  a tool_call_update
 //   { plan: [entries] }                  a plan update
+//   { usage: { used, size } }            a usage_update (OpenClaw sends token totals this way)
 //   { ask: { toolCall, options } }       session/request_permission, then says "asked: <outcome> <optionId>"
 //   { ask: {...}, while: [steps] }       the same, and runs those steps while the request waits (before its answer)
 //   { giveUp: { toolCall, options, ms } } asks, then after ms stops waiting: a failed tool_call_update, "gave up"
@@ -45,6 +46,7 @@ async function runStep(sid, step) {
   else if (step.tool) update(sid, { sessionUpdate: 'tool_call', ...step.tool });
   else if (step.update) update(sid, { sessionUpdate: 'tool_call_update', ...step.update });
   else if (step.plan) update(sid, { sessionUpdate: 'plan', entries: step.plan });
+  else if (step.usage) update(sid, { sessionUpdate: 'usage_update', ...step.usage });
   else if (step.ask) {
     const answer = request('session/request_permission', { sessionId: sid, ...step.ask });
     for (const w of step.while || []) await runStep(sid, w); // while the request waits: an agent that changes the call

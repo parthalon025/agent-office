@@ -516,6 +516,7 @@ function figuresText(f) {
   if (f.unknown) out.push(`${globalThis.OfficeFormat.costLabel(f.cost, f.unknown)} (an agent here reports no cost)`);
   else if (f.priced) out.push(`${globalThis.OfficeFormat.money(f.cost)} spent`);
   if (f.todosTotal) out.push(`${f.todosDone} of ${f.todosTotal} plan steps done`);
+  if (f.supervision) out.push(`an agent here runs some tool calls without asking (${f.supervision})`);
   return out.join(', ') + '.';
 }
 // The figures of every room that has an open session, computed once per snapshot (noteKey -> figures).
@@ -597,7 +598,7 @@ function roomContents(pl) {
     '- A desk with monitors for each bot. A session gets a coder desk. A subagent gets a desk for its type (research, planner, analyst, writer or coder). The monitors show the terminal of that session.',
     '- A beacon light on the back wall. It blinks when a bot in the room waits for the user or has an error.',
     '- On the floor: an elevator lobby on the left side with the elevator and a railing, and a meter near the front right corner.',
-    'The page adds to every lab room: a blackboard on the back wall with what the agents do (plan, browser steps, last steps, the repository and a pinned note), a chalk ledge with two pieces of chalk, a whiteboard with the user notes and a marker tray, a stats display on the left wall (sessions, tool calls, tokens and cost), a door with an Agents sign on the left wall, a warm lamp that is lit at night, and two plants.',
+    'The page adds to every lab room: a blackboard on the back wall with what the agents do (plan, browser steps, last steps, the repository and a pinned note), a chalk ledge with two pieces of chalk, a whiteboard with the user notes and a marker tray, a stats display on the left wall (sessions, tool calls, tokens and cost), a door with an Agents sign on the left wall (it says Partly supervised or Unsupervised under the count when an agent in the room runs tool calls without asking), a warm lamp that is lit at night, and two plants.',
     'The window of the first room is a picture: by day a blue sky with clouds over a low skyline, at night a dark sky with a moon over a skyline with lit windows, in Sublevel a lit corridor. It does not show the street.',
     'In the building view (outside the floors) the office draws a road with lane marks along the front and the right side of the building, sidewalks with trees, two street lights that glow at night, and a flock of birds that circles over the tower.',
     'You can change only the notes board and the blackboard pin (office_room_update). You cannot move furniture, desks, boards, the door or bots. The office places them.',
