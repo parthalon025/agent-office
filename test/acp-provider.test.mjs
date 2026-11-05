@@ -1132,6 +1132,35 @@ test('openclaw: an exec approval for another command than the one the office app
   } finally { await r.done(s); }
 });
 
+// Review 77 (second round) problem C: OpenClaw's exec approval carries only the command and the host (src/acp/permission-relay.ts
+// buildAcpPermissionRequest), so env, workdir and elevated cannot be compared. The host can: a host the user approved by name
+// that the approval names differently is held again.
+test('openclaw: an exec approval on another host than the one the user approved is held again', async () => {
+  const r = rig({ kind: 'openclaw' });
+  const s = await started(r, r.session());
+  try {
+    const p = r.p.gate(s, { toolName: 'exec', params: { command: 'npm test', host: 'sandbox' }, toolCallId: 'e1' });
+    await until(() => s.pending.length === 1, 'the command to be held');
+    r.release(s.pending[0].id, { allow: true });
+    await p;
+    r.steps(s, [{ ask: { toolCall: { ...EXEC('e1', 'npm test'), rawInput: { command: 'npm test', host: 'gateway' } }, options: OPTIONS } }]);
+    await until(() => s.pending.length === 1, 'the approval on another host to be held');
+    assert.ok(r.tracker.feed.some((f) => f.text === 'OpenClaw asks to run on another host (gateway) than the one you approved (sandbox): npm test'));
+    r.release(s.pending[0].id, { allow: false });
+    await r.idle(s);
+    // The same host, or an approval that names none, answers from the office's yes.
+    const q = r.p.gate(s, { toolName: 'exec', params: { command: 'git status', host: 'sandbox' }, toolCallId: 'e2' });
+    await until(() => s.pending.length === 1, 'the second command to be held');
+    r.release(s.pending[0].id, { allow: true });
+    await q;
+    const cards = r.shown.length;
+    r.steps(s, [{ ask: { toolCall: { ...EXEC('e2', 'git status'), rawInput: { command: 'git status', host: 'sandbox' } }, options: OPTIONS } }]);
+    await until(() => s.turns === 2 && s.status === 'idle', 'the second turn to end');
+    assert.equal(r.shown.length, cards);
+    assert.equal(r.replies(s).at(-1), 'asked: selected once');
+  } finally { await r.done(s); }
+});
+
 // Review 77 problem 2: the start check reads only the config. A plugin that did not load, a Gateway not restarted, or another
 // call id: then nothing held the call. A completed call without the office's yes ends the session with an Error.
 test('openclaw: a call that ran without the office\'s yes (the plugin did not hold it) ends the session with an Error naming the plugin', async () => {
@@ -1192,6 +1221,80 @@ test('openclaw gate: a patch is held as an Edit of each file its text names; a h
     assert.deepEqual(await p, { allow: false, reason: 'Declined in Agent Office.' });
     assert.deepEqual(await r.p.gate(s, { toolName: 'apply_patch', params: { input: '*** Begin Patch\n*** Update File: a.txt\n*** End Patch' }, toolCallId: 'p2', derivedPaths: [] }), { allow: true, reason: '' }, 'one file inside: the Allow rule');
   } finally { await r.done(s); }
+});
+
+// Review 77 (second round) problem A, through the gate: OpenClaw drops one leading @ from a file path, so with Read inside and
+// Edit inside on Allow, "@.env" and "@.git/hooks/pre-commit" ran with no question.
+test('openclaw gate: a path with a leading @ is held as the file OpenClaw uses; a literal @ file in the worktree is held too', async () => {
+  const r = rig({ kind: 'openclaw', rules: ALLOW_INSIDE });
+  const s = await started(r, r.session({ worktree: { root: r.root } }));
+  try {
+    const read = r.p.gate(s, { toolName: 'read', params: { path: '@.env' }, toolCallId: 'r1' });
+    await until(() => s.pending.length === 1, 'the secret read to be held');
+    assert.deepEqual([s.pending[0].tool, s.pending[0].detail], ['Read', '.env']);
+    r.release(s.pending[0].id, { allow: false });
+    assert.equal((await read).allow, false);
+    const hook = r.p.gate(s, { toolName: 'edit', params: { path: '@.git/hooks/pre-commit' }, toolCallId: 'e1' });
+    await until(() => s.pending.length === 1, 'the hook edit to be held');
+    assert.deepEqual([s.pending[0].tool, s.pending[0].detail, s.pending[0].risk], ['Edit', 'pre-commit', 'high']);
+    r.release(s.pending[0].id, { allow: false });
+    assert.equal((await hook).allow, false);
+    const settings = r.p.gate(s, { toolName: 'write', params: { path: '@.claude/settings.json', content: '{}' }, toolCallId: 'w1' });
+    await until(() => s.pending.length === 1, 'the settings write to be held');
+    assert.deepEqual([s.pending[0].tool, s.pending[0].detail, s.pending[0].risk], ['Write', 'settings.json', 'high']);
+    r.release(s.pending[0].id, { allow: false });
+    assert.equal((await settings).allow, false);
+    // A file literally named "@notes.md" is the one OpenClaw uses; the office also holds notes.md, the one it would use if that
+    // file went away. Both are inside, so the Allow rule answers both.
+    fs.writeFileSync(path.join(r.root, '@notes.md'), 'x');
+    assert.deepEqual(await r.p.gate(s, { toolName: 'read', params: { path: '@notes.md' }, toolCallId: 'r2' }), { allow: true, reason: '' });
+    assert.equal(s.pending.length, 0);
+  } finally { await r.done(s); }
+});
+
+// Review 77 (second round) problem B: OpenClaw reports "failed" for every tool result that is an error, so a call the plugin never
+// held that ran and then failed (a push, then exit 1) left no trace. Only a result OpenClaw marks as blocked before it ran
+// (details.status "blocked", agent-tools.before-tool-call.wrapper.ts buildBlockedToolResult) is not a gate failure. Its text is
+// not trusted: a command can print the plugin's "Agent Office: " prefix.
+test('openclaw: a failed call the office never got ends the session; a call OpenClaw blocked before it ran does not', async () => {
+  const r = rig({ kind: 'openclaw' });
+  const s = await started(r, r.session());
+  const text = (t) => [{ type: 'content', content: { type: 'text', text: t } }];
+  const blocked = 'Agent Office: the office does not answer on 127.0.0.1:1. The call is denied.';
+  try {
+    r.steps(s, [{ tool: EXEC('b1', 'npm test') }, { update: { toolCallId: 'b1', status: 'failed', content: text(blocked), rawOutput: { content: [{ type: 'text', text: blocked }], details: { status: 'blocked', deniedReason: 'plugin-before-tool-call', reason: blocked } } } }, { say: 'blocked' }]);
+    await r.idle(s);
+    assert.equal(s.status, 'idle', 'a blocked call did not run');
+    assert.ok(!r.tracker.feed.some((f) => /without the office's yes|may have run/.test(f.text)));
+    r.steps(s, [{ tool: EXEC('x1', 'git push --force origin main; exit 1') }, { update: { toolCallId: 'x1', status: 'failed', content: text('Agent Office: the call is denied.\nexit 1'), rawOutput: { content: [{ type: 'text', text: 'Agent Office: the call is denied.' }], details: { status: 'failed', exitCode: 1 } } } }, { say: 'pushed' }]);
+    await until(() => s.status === 'ended', 'the session to end');
+    const feed = r.tracker.feed.map((f) => f.text).join('\n');
+    assert.match(feed, /OpenClaw reports a failed Bash git push --force origin main; exit 1 that the office never got\. It may have run without the office's yes\. The agent-office plugin did not hold this call/);
+    assert.match(s.error?.text || '', /^OpenClaw reports a failed Bash git push --force/);
+  } finally { await r.done(s.status === 'ended' ? null : s); }
+});
+
+// The office has a call from the moment the plugin sends it. OpenClaw can end that call (failed) while the office still decides,
+// for example on a Stop, before the plugin's request closes: that is not a call the office never got. One that completes then
+// ran before the office answered.
+test('openclaw: a call that fails while the office still decides is not a gate failure; one that completes then is', async () => {
+  const r = rig({ kind: 'openclaw' });
+  const s = await started(r, r.session());
+  try {
+    const p = r.p.gate(s, { toolName: 'exec', params: { command: 'npm test' }, toolCallId: 'w1' });
+    await until(() => s.pending.length === 1, 'the command to be held');
+    r.steps(s, [{ tool: EXEC('w1', 'npm test') }, { update: { toolCallId: 'w1', status: 'failed' } }, { say: 'stopped' }]);
+    await r.idle(s);
+    assert.equal(s.status, 'idle');
+    assert.ok(!r.tracker.feed.some((f) => /without the office's yes/.test(f.text)));
+    assert.equal((await p).allow, false, 'the end of the turn takes the hold away');
+    const q = r.p.gate(s, { toolName: 'exec', params: { command: 'git push' }, toolCallId: 'w2' });
+    await until(() => s.pending.length === 1, 'the second command to be held');
+    r.steps(s, [{ tool: EXEC('w2', 'git push') }, { update: { toolCallId: 'w2', status: 'completed' } }, { say: 'pushed' }]);
+    await until(() => s.status === 'ended', 'the session to end');
+    assert.ok(r.tracker.feed.some((f) => /^OpenClaw ran Bash git push without the office's yes \(before the office answered\)\./.test(f.text)));
+    await q;
+  } finally { await r.done(s.status === 'ended' ? null : s); }
 });
 
 test('openclaw gate: a Deny on the Web and MCP rows reaches the browser and MCP tools', async () => {

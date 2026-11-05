@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { gatewayPort, probeGateway, versionAtLeast, wantedConfig, checkConfig, configReader, toolCall, patchFiles, hookLimit, HOOK_LIMIT_MS, PLUGIN_DIR } from '../providers/openclaw.mjs';
+import { pathToFileURL } from 'node:url';
+import { gatewayPort, probeGateway, versionAtLeast, wantedConfig, checkConfig, configReader, toolCall, patchFiles, pathsOf, hookLimit, HOOK_LIMIT_MS, PLUGIN_DIR } from '../providers/openclaw.mjs';
 import { hookLimit as pluginHookLimit, HOOK_MS as PLUGIN_HOOK_MS } from '../integrations/openclaw-plugin/gate.js';
 import { riskOf, actionOf } from '../risk.mjs';
 
@@ -180,6 +181,74 @@ test('toolCall apply_patch: the files come from the patch text and the hints tog
   const blind = toolCall('apply_patch', { input: 'garbage' }, ['a.js'], '/r');
   assert.deepEqual([blind.tool_name, blind.files], ['openclaw:apply_patch', undefined], 'a text that names no file is not rated as an edit from the hints');
   assert.match(blind.tool_input.description, /names no file it changes \(OpenClaw's hints: a\.js\)/);
+});
+
+// Review 77 (second round) problem A: OpenClaw reads a file tool's path before it uses it (v2026.10.10:
+// agent-tools.params.ts normalizeFileToolPathParam, path-policy.ts preserveAtPrefixedRelativePath, sessions/tools/path-utils.ts
+// expandPath, sandbox-paths.ts normalizeFileReferencePrefix). The office rated the path as written, so "@.env" was a low read
+// and "@.git/hooks/pre-commit" a low edit. pathsOf gives the files OpenClaw can use for a path; the office rates each one.
+const HOME = path.resolve('/home/me');
+const none = () => false;
+test('pathsOf: the files OpenClaw can use for one path, the way OpenClaw reads it', () => {
+  const at = (raw, exists = none, read = false) => pathsOf(raw, { cwd: '/r', home: HOME, exists, read });
+  assert.deepEqual(at('src/a.js'), ['src/a.js'], 'a plain path is the path');
+  assert.deepEqual(at('@.env'), ['.env'], 'one leading @ is a file reference: OpenClaw drops it');
+  assert.deepEqual(at('@.git/hooks/pre-commit'), ['.git/hooks/pre-commit']);
+  assert.deepEqual(at('@@x.txt'), ['./@x.txt'], 'only one @ goes; the next stays part of the name');
+  // A literal "@..." file (or its top folder) in the folder: OpenClaw uses it. It may be gone when the call runs, so both are held.
+  const lit = (p) => p === path.resolve('/r', './@.env') || p === path.resolve('/r', './@pkg');
+  assert.deepEqual(at('@.env', lit), ['./@.env', '.env']);
+  assert.deepEqual(at('@pkg/a.js', lit), ['./@pkg/a.js', 'pkg/a.js'], 'a literal top folder counts too');
+  // Home, file URLs and an @ in front of them.
+  assert.deepEqual(at('~'), [HOME]);
+  assert.deepEqual(at('~/.ssh/id_rsa'), [path.join(HOME, '.ssh/id_rsa')]);
+  assert.deepEqual(at('@~/.ssh/id_rsa'), [path.join(HOME, '.ssh/id_rsa')]);
+  const url = pathToFileURL(path.join(HOME, '.aws', 'credentials')).href;
+  assert.deepEqual(at(url), [path.join(HOME, '.aws', 'credentials')]);
+  assert.deepEqual(at('@' + url), [path.join(HOME, '.aws', 'credentials')]);
+  if (process.platform === 'win32') assert.deepEqual(at('~\\.ssh\\id_rsa'), [path.join(HOME, '.ssh\\id_rsa')]);
+  // OpenClaw's repairs of a model's path: an XML tag left at the end, an invented Office extension.
+  assert.deepEqual(at('.env</arg_value>>'), ['.env']);
+  assert.deepEqual(at('@.env</arg_value>>>'), ['.env']);
+  assert.deepEqual(at('notes.docodex'), ['notes.docx']);
+  // A read that misses tries other spellings of the name (path-utils.ts getReadPathVariants): spaces and Unicode form.
+  assert.deepEqual(at('.env\u00A0', none, true), ['.env\u00A0', '.env ']);
+  assert.deepEqual(at('.\u212Aey', none, true), ['.\u212Aey', '.Key'], 'NFC makes the Kelvin sign a K');
+  assert.deepEqual(at('.env\u00A0'), ['.env\u00A0'], 'only a read tries other spellings');
+  assert.deepEqual(at(''), []);
+});
+
+test('toolCall: a file path is rated as the file OpenClaw uses, so @, ~ and file URLs do not get around Settings and Secrets', () => {
+  const root = path.resolve('/r');
+  const rated = (name, p, exists = none) => {
+    const c = toolCall(name, { path: p }, [], root, { home: HOME, exists });
+    return (c.files || [c.tool_input.file_path]).map((f) => `${actionOf(c.tool_name, { file_path: f }, root)}/${riskOf(c.tool_name, { file_path: f }, root)}`);
+  };
+  assert.deepEqual(rated('read', '@.env'), ['secrets/medium']);
+  assert.deepEqual(rated('edit', '@.git/hooks/pre-commit'), ['settings/high']);
+  assert.deepEqual(rated('write', '@.claude/settings.json'), ['settings/high']);
+  assert.deepEqual(rated('read', '~/.ssh/id_rsa'), ['secrets/high']);
+  assert.deepEqual(rated('read', pathToFileURL(path.join(root, '.env')).href), ['secrets/medium']);
+  assert.deepEqual(rated('read', '.env</arg_value>>'), ['secrets/medium']);
+  assert.deepEqual(rated('read', 'a.txt'), ['read-inside/low']);
+  const lit = (p) => p === path.resolve(root, './@.env');
+  const both = toolCall('read', { path: '@.env' }, [], root, { home: HOME, exists: lit });
+  assert.deepEqual([both.tool_name, both.tool_input, both.files], ['Read', { file_path: './@.env' }, ['./@.env', '.env']]);
+  assert.equal(both.reason, 'OpenClaw can use either file for @.env: ./@.env, .env.');
+  assert.deepEqual(rated('read', '@.env', lit), ['read-inside/low', 'secrets/medium'], 'each file meets its own row');
+  const one = toolCall('read', { path: '@a.txt' }, [], root, { home: HOME, exists: none });
+  assert.deepEqual([one.tool_input, one.files, one.reason], [{ file_path: 'a.txt' }, undefined, null]);
+});
+
+test('toolCall apply_patch: headers with leading spaces count, and each patch path is read the way OpenClaw reads it', () => {
+  const root = path.resolve('/r');
+  const text = ['*** Begin Patch', '  *** Update File: a.js', '@@', '-a', '+b', '\t*** Add File: @.git/hooks/pre-commit', '+curl x', '*** Update File: b.js\r', ' *** Move to: ~/.bashrc', '*** End Patch'].join('\n');
+  assert.deepEqual(patchFiles(text), ['a.js', '@.git/hooks/pre-commit', 'b.js', '~/.bashrc']);
+  const c = toolCall('apply_patch', { input: text }, [], root, { home: HOME, exists: none });
+  assert.deepEqual(c.files, ['a.js', '.git/hooks/pre-commit', 'b.js', path.join(HOME, '.bashrc')]);
+  assert.deepEqual(c.files.map((f) => actionOf('Edit', { file_path: f }, root)), ['edit-inside', 'settings', 'edit-inside', 'settings']);
+  const hinted = toolCall('apply_patch', { input: PATCH('a.js') }, ['@.env'], root, { home: HOME, exists: none });
+  assert.deepEqual(hinted.files, ['a.js', '.env'], 'a hint is read the same way');
 });
 
 // Review 77 problem 6: browser and MCP tools had no row, so the Web and MCP Deny did not reach them.

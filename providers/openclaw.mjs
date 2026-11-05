@@ -14,6 +14,8 @@
 // (tools.exec.ask: off | on-miss | always; the newer tools.exec.mode: deny | allowlist | ask | auto | full), /cli/config.
 // None of this ran against a real Gateway yet (see CLAUDE.md, Gotchas).
 import net from 'node:net';
+import fs from 'node:fs';
+import os from 'node:os';
 import { execFile as realExecFile } from 'node:child_process';
 import { clip } from '../tracker.mjs';
 import { helperCwd } from '../git.mjs';
@@ -102,12 +104,71 @@ const HANDOFF = (name) => `${name} starts work outside this session (another ses
 const NODE_HANDOFF = (name) => `${name} on a paired device (node) runs outside this PC and its worktree. The office cannot hold that work, so it denies the call.`;
 const short = (v) => clip(JSON.stringify(v ?? {}), 300);
 // apply_patch names its files in its own text (OpenClaw's patch format). OpenClaw's derivedPaths are hints only ("best-effort,
-// may be incomplete", src/plugins/hook-types.ts), so the office reads these lines itself.
-const PATCH_FILE = /^\*\*\* (?:(?:Add|Update|Delete) File|Move to):\s*(.+?)\s*$/gm;
-/** The files an apply_patch text names (Add, Update, Delete File and Move to), in order, or [] when it names none. */
+// may be incomplete", src/plugins/hook-types.ts), so the office reads these lines itself. OpenClaw splits the text on line
+// breaks and trims each line before it looks for a header (src/agents/apply-patch-parse.ts at v2026.10.10), so the office does
+// the same: a header with spaces or a tab in front is still a header. Any line that reads as a header counts, also one OpenClaw
+// would take as hunk text: more files ask, never fewer.
+const PATCH_FILE = /^\*\*\* (?:(?:Add|Update|Delete) File|Move to):\s*(.+?)\s*$/;
+/** The files an apply_patch text names (Add, Update, Delete File and Move to), in order, as written, or [] when it names none. */
 export function patchFiles(text) {
   if (typeof text !== 'string') return [];
-  return [...text.matchAll(PATCH_FILE)].map((m) => m[1]).filter(Boolean);
+  return text.split(/\r?\n/).map((l) => PATCH_FILE.exec(l.trim())?.[1]).filter(Boolean);
+}
+
+// The files an OpenClaw file tool can touch for one path. OpenClaw reads a path before it uses it (v2026.10.10), and the office
+// rates the file that is used, not the text the model wrote:
+//   - agent-tools.params.ts normalizeFileToolPathParam: a "</arg_value>>" left at the end goes, and an invented Office
+//     extension (".docodex") becomes the real one.
+//   - path-policy.ts preserveAtPrefixedRelativePath: "@x" names the literal file "./@x" only when it, or its top folder, exists.
+//   - sessions/tools/path-utils.ts expandPath with sandbox-paths.ts normalizeFileReferencePrefix: one leading "@" goes (a
+//     file reference; a second "@" stays part of the name), then a file:// URL becomes its path, and "~", "~/" (and "~\" on
+//     Windows) become the home folder.
+//   - path-utils.ts getReadPathVariants: a read that misses tries other spellings of the name (Unicode spaces as plain spaces,
+//     the NFC form). Quote spellings are left out: no Security room name has a quote.
+// A literal "@" file can go away between the hold and the run, so the office then holds both files. Every file is held on its
+// own row, so a call is allowed only when each one is.
+const XML_TAIL = /<\/arg_value>>+$/;
+const OFFICE_EXT = /\.(doc|ppt|xls)(?:odex|codex|xodex|xcodex)$/i;
+const UNICODE_SPACES = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
+const isHome = (p) => p === '~' || p.startsWith('~/') || (process.platform === 'win32' && p.startsWith('~\\'));
+const isAbs = (p) => path.posix.isAbsolute(p) || path.win32.isAbsolute(p);
+/**
+ * The files OpenClaw can use for path `raw`: the one it uses now first, then the one it uses if a literal "@" file goes. [] for
+ * no path. opts: { cwd, home, exists, read } (exists(absolutePath) -> boolean; read: the read tool, which tries other spellings).
+ */
+export function pathsOf(raw, { cwd = '', home = os.homedir(), exists = fs.existsSync, read = false } = {}) {
+  if (typeof raw !== 'string' || !raw) return [];
+  const repaired = (raw.includes('</arg_value>') ? raw.replace(XML_TAIL, '') : raw).replace(OFFICE_EXT, (m, f) => `.${f.toLowerCase()}x`);
+  const out = [];
+  const add = (p) => { if (p && !out.includes(p)) out.push(p); };
+  const literal = literalAt(repaired, cwd, exists);
+  if (literal) add(literal);
+  add(expand(repaired, home));
+  if (read) {
+    for (const p of [...out]) {
+      const name = path.basename(p), dir = p.slice(0, p.length - name.length);
+      add(dir + name.replace(UNICODE_SPACES, ' ').normalize('NFC'));
+    }
+  }
+  return out;
+}
+// preserveAtPrefixedRelativePath: "./@x" when x is a plain relative path and "./@x" or its top folder exists, else null.
+function literalAt(p, cwd, exists) {
+  if (!p.startsWith('@')) return null;
+  const rest = p.slice(1);
+  if (!rest || isHome(rest) || rest.startsWith('~\\') || /^file:\/\//i.test(rest) || isAbs(rest)) return null;
+  let top = p;
+  for (;;) { const up = path.dirname(top); if (up === '.' || up === top) break; top = up; }
+  const at = (q) => { try { return exists(path.resolve(String(cwd || '.'), `./${q}`)); } catch { return false; } };
+  return at(p) || (top !== p && at(top)) ? `./${p}` : null;
+}
+// expandPath: one leading "@" goes (a second one stays, behind "./"), a file:// URL becomes its path, "~" is the home folder.
+function expand(p, home) {
+  let q = p.startsWith('@') ? p.slice(1) : p;
+  if (q.startsWith('@')) q = `./${q}`;
+  if (q.startsWith('file://')) { try { return fileURLToPath(q); } catch { return q; } }
+  if (isHome(q)) return q === '~' ? home : path.join(home, q.slice(2));
+  return q;
 }
 // The MCP tools of OpenClaw's bundle-mcp are named "<server>__<tool>" (docs.openclaw.ai/gateway/config-tools/tool-policy, "MCP
 // servers"); no core tool id has "__". They become "mcp__<server>__<tool>", so the Security room MCP row rates them (risk.mjs).
@@ -119,16 +180,25 @@ const SECRET_NAME = /key|token|secret|passw|auth|cred/i;
  * One OpenClaw tool call as the office holds it: { tool_name, tool_input, handoff, reason, firm, files }.
  *   handoff: why the office denies the call at once, or null. reason: what the card adds to the tool and input (the fields of
  *   an exec that change what it does), or null. firm: the user answers it (an Allow rule does not), a Deny rule still does.
- *   files: apply_patch only, every file it changes (resolved against cwd for the compare); the office holds each as an Edit.
+ *   files: more than one file (an apply_patch, or a path OpenClaw can read as two files, pathsOf); the office holds each on
+ *   its own, with the same tool. tool_input.file_path is the first.
+ * Paths are the files OpenClaw uses (pathsOf), not the text the model wrote. paths: { home, exists } for pathsOf (tests).
  */
-export function toolCall(name, params = {}, derivedPaths = [], cwd = '') {
+export function toolCall(name, params = {}, derivedPaths = [], cwd = '', paths = {}) {
   const p = params && typeof params === 'object' ? params : {};
   const s = (v) => (typeof v === 'string' && v ? v : null);
   const out = (tool_name, tool_input, more = {}) => ({ tool_name, tool_input, handoff: null, reason: null, firm: false, ...more });
   const other = (input = { description: short(p) }) => out(`openclaw:${name}`, input);
+  const where = (f, read = false) => pathsOf(f, { cwd, ...paths, read });
   if (OUTSIDE.has(name)) return out(`openclaw:${name}`, { description: short(p) }, { handoff: HANDOFF(name) });
-  if (FILE_TOOLS[name]) { const f = s(p.path) || s(p.file_path) || s(p.filePath); return f ? out(FILE_TOOLS[name], { file_path: f }) : other(); }
-  if (name === 'apply_patch') return patchCall(p, derivedPaths, cwd, other);
+  if (FILE_TOOLS[name]) {
+    const f = s(p.path) || s(p.file_path) || s(p.filePath);
+    const files = f ? where(f, name === 'read') : [];
+    if (!files.length) return other();
+    if (files.length === 1) return out(FILE_TOOLS[name], { file_path: files[0] });
+    return out(FILE_TOOLS[name], { file_path: files[0] }, { files, reason: clip(`OpenClaw can use either file for ${f}: ${files.join(', ')}.`, 300) });
+  }
+  if (name === 'apply_patch') return patchCall(p, derivedPaths, cwd, other, where);
   if (SHELL_TOOLS.has(name)) return s(p.command) ? execCall(name, p) : other();
   if (RUN_TOOLS.has(name)) return out('Bash', { command: `${name} ${short(p)}` });
   if (name === 'web_fetch') return out('WebFetch', { url: s(p.url) || short(p) });
@@ -165,13 +235,14 @@ function execCall(name, p) {
 // apply_patch: the files its text names, together with OpenClaw's hints. One file: an Edit of that file. More: an Edit of
 // each, so each file meets its own Security room row (a hook or a settings file asks, a secret file asks or is denied).
 // A patch text that names no file is not rated as an edit: the office cannot see what it changes, so it asks.
-function patchCall(p, derivedPaths, cwd, other) {
+// Each path, from the text or a hint, is read the way OpenClaw reads it (pathsOf): "@.git/hooks/x" is .git/hooks/x.
+function patchCall(p, derivedPaths, cwd, other, where) {
   const named = patchFiles(p.input ?? p.patch);
   const hints = (Array.isArray(derivedPaths) ? derivedPaths : []).map(String).filter(Boolean);
   if (!named.length) return other({ description: clip(`a patch that names no file it changes${hints.length ? ` (OpenClaw's hints: ${hints.join(', ')})` : ''}`, 300) });
   const seen = new Map();
   const keyOf = (f) => { const a = path.resolve(String(cwd || '.'), f); return process.platform === 'win32' ? a.replace(/\//g, '\\').toLowerCase() : a; };
-  for (const f of [...named, ...hints]) if (!seen.has(keyOf(f))) seen.set(keyOf(f), f);
+  for (const f of [...named, ...hints].flatMap((x) => where(x))) if (!seen.has(keyOf(f))) seen.set(keyOf(f), f);
   const files = [...seen.values()];
   return { tool_name: 'Edit', tool_input: { file_path: files[0] }, handoff: null, reason: files.length > 1 ? clip(`A patch of ${files.length} files: ${files.join(', ')}.`, 300) : null, firm: false, files };
 }

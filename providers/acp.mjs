@@ -558,8 +558,15 @@ export function createAcp(deps) {
     // spec.plugin: every call of the session goes to the office through the plugin before it runs (gate). A call that ran
     // without the office's yes means the plugin did not hold it: not loaded, a Gateway not restarted after the plugin was
     // turned on, or another call id. Nothing else stops OpenClaw's calls, so the session ends with an Error that says so.
-    if (spec.plugin && u.status === 'completed' && !c.served && !(file && st.wrote.has(file)) && !(gated && gated.allow)) {
+    // A failed call the office never got may have run too: OpenClaw reports "failed" for every tool result that is an error
+    // (src/acp/translator.agent-events.ts), so a push that ran and then exited 1 is "failed". Only a result OpenClaw marks as
+    // blocked before the tool ran (rawOutput.details.status "blocked": agent-tools.before-tool-call.wrapper.ts
+    // buildBlockedToolResult, also the plugin's own denials) did not run. Its text is never trusted: a command can print anything.
+    const before = blockedBefore(u);
+    if (spec.plugin && u.status === 'completed' && !before && !c.served && !(file && st.wrote.has(file)) && !(gated && gated.allow)) {
       gateFailed(s, st, c, gated);
+    } else if (spec.plugin && u.status === 'failed' && !before && !c.served && !gated) {
+      gateFailed(s, st, c, null, true);
     } else if (spec.plugin) {
       // held by the office: nothing to say
     } else if (u.status === 'completed' && EDIT_KINDS.has(c.kind) && file && st.denied.has(file)) {
@@ -582,12 +589,21 @@ export function createAcp(deps) {
     else hook(s, st, { hook_event_name: 'PostToolUseFailure', ...base, error: clip(String(said || 'Failed'), 240), is_interrupt: st.interrupted });
   }
 
+  // OpenClaw marked the call's result as blocked before the tool ran (agent-tools.before-tool-call.wrapper.ts buildBlockedToolResult:
+  // details.status "blocked"). The text of the result is not read: a command can print anything.
+  function blockedBefore(u) {
+    const d = u && u.rawOutput && typeof u.rawOutput === 'object' ? u.rawOutput.details : null;
+    return !!(d && typeof d === 'object' && d.status === 'blocked');
+  }
   // The plugin did not hold a call that ran (spec.plugin). The turn ends with an Error naming the plugin, and the agent stops:
   // its next calls would not be held either.
-  function gateFailed(s, st, c, gated) {
+  function gateFailed(s, st, c, gated, failed = false) {
     if (st.closed || st.gateFail) return;
-    const why = gated ? 'the office had declined it' : 'the office never got it';
-    st.gateFail = `${label} ran ${c.tool_name} ${what(c)} without the office's yes (${why}). The ${PLUGIN_ID} plugin did not hold this call: it is not loaded, the Gateway was not restarted after openclaw plugins enable ${PLUGIN_ID}, or ${label} gave the call another id. The office stopped the session.`;
+    const why = !gated ? 'the office never got it' : gated.pending ? 'before the office answered' : 'the office had declined it';
+    const ran = failed
+      ? `${label} reports a failed ${c.tool_name} ${what(c)} that the office never got. It may have run without the office's yes.`
+      : `${label} ran ${c.tool_name} ${what(c)} without the office's yes (${why}).`;
+    st.gateFail = `${ran} The ${PLUGIN_ID} plugin did not hold this call: it is not loaded, the Gateway was not restarted after openclaw plugins enable ${PLUGIN_ID}, or ${label} gave the call another id. The office stopped the session.`;
     emit(st, () => events.feed(s, 'wait', st.gateFail));
     try { st.rpc.notify('session/cancel', { sessionId: st.sid }); } catch { /* the agent is gone */ }
     if (st.endCancel) st.endCancel({ stopReason: 'cancelled' });
@@ -648,13 +664,17 @@ export function createAcp(deps) {
     // spec.plugin: the office already answered this call when the plugin sent it (gate). OpenClaw's own exec approval for the
     // same call gets a no at once, and a yes only for the command the office approved: that request shows the command that
     // will run, which another plugin may have changed after the office's yes. Another command, or a paired device, is held again.
-    const g = st.gated.get(c.id);
+    const g0 = st.gated.get(c.id), g = g0 && !g0.pending ? g0 : null; // a call the office has not answered yet is held as usual
     if (g && !g.allow) return no ? pick(no) : CANCELLED;
     if (g && g.allow) {
-      const host = c.raw && typeof c.raw.host === 'string' ? c.raw.host : '';
+      // The approval carries only the command and the host (OpenClaw src/acp/permission-relay.ts), so env, workdir and elevated
+      // cannot be compared here; a host the user approved by name must be the same.
+      const host = c.raw && typeof c.raw.host === 'string' ? c.raw.host.trim() : '';
       const ran = String(c.tool_input.command || '').trim();
-      if (c.tool_name === 'Bash' && g.command !== null && ran === g.command && host !== 'node') return once ? pick(once) : CANCELLED;
-      emit(st, () => events.feed(s, 'wait', `${label} asks to run ${host === 'node' ? 'on a paired device' : 'another command than the one you approved'}: ${clip(ran || c.title, 100)}`));
+      const moved = !!(g.host && host && host !== g.host);
+      if (c.tool_name === 'Bash' && g.command !== null && ran === g.command && host !== 'node' && !moved) return once ? pick(once) : CANCELLED;
+      const why = host === 'node' ? 'on a paired device' : moved ? `on another host (${host}) than the one you approved (${g.host})` : 'another command than the one you approved';
+      emit(st, () => events.feed(s, 'wait', `${label} asks to run ${why}: ${clip(ran || c.title, 100)}`));
     }
     const shown = { kind: c.kind, tool_name: c.tool_name, tool_input: { ...c.tool_input }, sig: sigOf(c), told: false };
     shown.file = EDIT_KINDS.has(c.kind) && shown.tool_input.file_path ? norm(st, shown.tool_input.file_path) : null;
@@ -1038,7 +1058,10 @@ export function createAcp(deps) {
       if (!spec.plugin || !st || st.closed || st.dead || st.gateFail) return { allow: false, reason: `This ${label} session is not open in Agent Office.` };
       const id = call.toolCallId ? String(call.toolCallId) : null;
       const m = toolCall(call.toolName, call.params, call.derivedPaths, s.cwd);
-      const done = (allow, reason = '') => { if (id) st.gated.set(id, { allow, command: m.tool_name === 'Bash' && typeof m.tool_input.command === 'string' ? m.tool_input.command.trim() : null }); return { allow, reason }; };
+      // host: the host the call named (not "auto"), so OpenClaw's own exec approval on another host is held again (onPermission).
+      const named = call.params && typeof call.params.host === 'string' && call.params.host.trim() && call.params.host !== 'auto' ? call.params.host.trim() : null;
+      const record = (allow, pending = false) => st.gated.set(id, { allow, pending, command: m.tool_name === 'Bash' && typeof m.tool_input.command === 'string' ? m.tool_input.command.trim() : null, host: named });
+      const done = (allow, reason = '') => { if (id) record(allow); return { allow, reason }; };
       if (m.handoff) {
         emit(st, () => events.feed(s, 'tool', `refused ${call.toolName}: ${m.handoff}`));
         return done(false, m.handoff);
@@ -1047,6 +1070,9 @@ export function createAcp(deps) {
         emit(st, () => events.feed(s, 'tool', `refused ${call.toolName}: the ${PLUGIN_ID} plugin sent no tool call id`));
         return { allow: false, reason: `The ${PLUGIN_ID} plugin sent no tool call id, so the office cannot match the call to what ${label} reports. The call is denied.` };
       }
+      // The office has the call from now on (pending until it answers): a failed call it is still deciding about is not one
+      // the office never got (endCall), for example when OpenClaw stops the call on a Stop before the plugin's wait ends.
+      record(false, true);
       const parts = m.files && m.files.length > 1 ? m.files.map((f) => ({ ...m, tool_input: { file_path: f } })) : [m];
       for (const part of parts) {
         if (st.closed || st.dead || st.gateFail) return done(false, `This ${label} session is not open in Agent Office.`);
