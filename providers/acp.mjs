@@ -34,15 +34,22 @@ export const PROTOCOL_VERSION = 1;
 // askTimeoutMs: how long the agent waits for an approval before it moves on by itself (the office's hold is longer, so the
 // feed says when the agent gave up first). features: what the agent has beyond the seam, for the page (#72); 'resume' and
 // 'images' come from the handshake. pin: the version the office was tested against (null: not tested with a real one yet).
+// gated (ADR 0001): true only when the agent asks the office before every tool call that is not low risk; an agent where only
+// some calls ask is ungated, with its supervision label. Neither agent has been run against the office yet (pin: null).
 export const AGENTS = {
   hermes: {
     label: 'Hermes Agent', program: 'hermes', args: ['acp'],
-    askTimeoutMs: 60_000, // Hermes issue #63302: a fixed 60 s timeout on edit approval
+    // From Hermes's source (acp_adapter/server.py: initialize ignores the client's fs and terminal; its terminal tool asks
+    // only for commands that match its danger patterns) and upstream issue #139074 (0.21.5, a client with terminal: true:
+    // a write asked, a touch ran without asking). Its default mode asks before edits.
+    gated: false, supervision: 'Partly supervised: file edits ask, commands do not',
+    askTimeoutMs: 60_000, // Hermes issue #63302: a fixed 60 s timeout on edit approval (command approval has its own setting)
     features: ['skills', 'memory', 'fork'], pin: null,
     needs: ['Install Hermes Agent so that hermes.exe is on the PATH, then run hermes acp --check in a terminal.'],
   },
   dsh: {
     label: 'DeepSeek Harness', program: 'dsh', args: ['--profile', 'acp'],
+    gated: true, // research (2026-11-04): it sends its tool approvals over ACP and fails closed when no client answers
     askTimeoutMs: null,
     // dsh-acp lists forks, deletion and transcript replay as unsupported, so no fork here.
     features: ['reason', 'teams', 'schedules'], pin: null, // a developer preview: pin the version tested on the owner's PC
@@ -607,7 +614,8 @@ export function createAcp(deps) {
       st.loading = false;
       sid = String(o.resume);
     } else {
-      if (o.resume) emit(st, () => events.feed(s, 'start', `${label} cannot load a past session now. A new session started.`));
+      // Before the session id: the office keeps the past record of a conversation that did not continue.
+      if (o.resume) emit(st, () => events.fresh(s, `${label} cannot load a past session now. A new session started.`));
       r = await within(st.rpc.request('session/new', { cwd: s.cwd, mcpServers: [] }), INIT_MS, 'it did not start a session in time', setTimer, clearTimer);
       sid = r && r.sessionId;
     }
@@ -646,7 +654,9 @@ export function createAcp(deps) {
     label,
     paid: true,       // the agent runs on the user's own model account
     cost: 'unknown',  // ACP reports no cost: the office asks once per session and shows "unknown"
-    gated: true,      // every permission request, file write and command is held (see the file comment)
+    // gated (ADR 0001): an agent that runs some calls without asking is not, whatever the office holds of what it does ask.
+    gated: spec.gated === true,
+    ...(spec.gated === true ? {} : { supervision: spec.supervision || 'Unsupervised' }),
     get canResume() { return learned.caps?.loadSession === true; },
     get features() {
       const f = [];

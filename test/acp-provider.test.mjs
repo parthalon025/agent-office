@@ -11,7 +11,7 @@ import path from 'node:path';
 import { spawn as realSpawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createTracker } from '../tracker.mjs';
-import { providerEvents, createRegistry, checkProvider, spendLimitFor, isPaid } from '../providers/index.mjs';
+import { providerEvents, createRegistry, checkProvider, spendLimitFor, isPaid, isGated, supervisionOf } from '../providers/index.mjs';
 import { createAcp, AGENTS, commandLine } from '../providers/acp.mjs';
 import { createLocalTools } from '../providers/local-tools.mjs';
 
@@ -89,7 +89,7 @@ test('open: the agent by its absolute path, the handshake offers files and termi
   const s = r.session();
   try {
     assert.equal(checkProvider(r.p), r.p);
-    assert.deepEqual([r.p.kind, r.p.label, r.p.gated, isPaid(r.p), r.p.cost, r.p.canResume], ['hermes', 'Hermes Agent', true, true, 'unknown', false]);
+    assert.deepEqual([r.p.kind, r.p.label, isPaid(r.p), r.p.cost, r.p.canResume], ['hermes', 'Hermes Agent', true, 'unknown', false]);
     r.p.open(s, {});
     assert.equal(s.sid, null, 'nothing is reported inside open (seam timing rule 1)');
     await until(() => s.sid, 'the session id');
@@ -104,6 +104,19 @@ test('open: the agent by its absolute path, the handshake offers files and termi
     assert.equal(AGENTS.dsh.program, 'dsh');
     assert.deepEqual(AGENTS.dsh.args, ['--profile', 'acp']);
   } finally { await r.done(s); }
+});
+
+test('gating is per agent (ADR 0001): Hermes runs commands itself, so it is partly supervised; dsh asks for its calls', () => {
+  const r = rig(), d = rig({ kind: 'dsh' });
+  try {
+    // Hermes Agent's ACP server never uses the client's fs or terminal, and asks for a command only when it matches its own
+    // danger patterns (acp_adapter/server.py; upstream issue #139074). Its edits ask in its default mode.
+    assert.deepEqual([r.p.gated, isGated(r.p), supervisionOf(r.p)], [false, false, 'Partly supervised: file edits ask, commands do not']);
+    assert.deepEqual([AGENTS.hermes.gated, AGENTS.dsh.gated], [false, true]);
+    assert.deepEqual([d.p.gated, supervisionOf(d.p)], [true, null]);
+    assert.doesNotThrow(() => checkProvider(r.p));
+    assert.doesNotThrow(() => checkProvider(d.p));
+  } finally { fs.rmSync(r.base, { recursive: true, force: true }); fs.rmSync(d.base, { recursive: true, force: true }); }
 });
 
 test('a text turn: live text, the reply, at rest after; the cost stays unknown, never $0.00', async () => {
@@ -547,6 +560,21 @@ test('resume: an agent with loadSession can resume, Reopen loads the past sessio
     r.say(s, 'and now?');
     await r.idle(s);
     assert.deepEqual(r.replies(s), ['echo: and now?']);
+  } finally { await r.done(s); }
+});
+
+test('resume: an agent that said loadSession at the probe but not at the session starts fresh, and the office is told before the sid', async () => {
+  const fake = { FAKE_ACP_LOAD: '1' };
+  const r = rig({ fake });
+  const s = r.session();
+  try {
+    await r.p.learn();
+    assert.equal(r.p.canResume, true);
+    fake.FAKE_ACP_LOAD = '0'; // the agent changed between the probe and the session (an update, another config)
+    await started(r, s, { resume: 'old-sess' });
+    assert.deepEqual([r.sent('session/load').length, r.sent('session/new').length], [0, 1]);
+    assert.deepEqual([r.freshened, s.sid], [['o1'], 'fake-sess-1']);
+    assert.ok(r.tracker.feed.some((f) => f.text === 'Hermes Agent cannot load a past session now. A new session started.'));
   } finally { await r.done(s); }
 });
 

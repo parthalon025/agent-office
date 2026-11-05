@@ -30,8 +30,13 @@
 //                                      May be a getter: an ACP agent says it at its handshake (loadSession).
 //   learn() -> Promise     (optional)  refresh what the provider knows about its agent before the office reads canResume or
 //                                      features (ACP: one handshake). The office calls it before Reopen.
-//   gated                  (optional)  false when the agent runs tool calls without asking the office first (ADR 0001). Without
-//                                      it the provider is gated: every tool call that is not low risk is held. true or false only.
+//   gated                  (optional)  false when the agent runs tool calls without asking the office first (ADR 0001), also
+//                                      when only some of its calls are held. Without it the provider is gated: every tool call
+//                                      that is not low risk is held. true or false only. An ungated provider opens only in a new
+//                                      worktree (server.mjs), and its sessions carry its supervision label.
+//   supervision            (optional)  the label of an ungated provider (gated: false), for example "Partly supervised: file
+//                                      edits ask, commands do not". Without it an ungated provider is "Unsupervised"
+//                                      (supervisionOf). A gated provider has none.
 //   cost                   (optional)  'unknown' when the agent reports no cost (ACP). Such a provider is paid, the office asks
 //                                      once per session before it runs, no spend limit can stop it, and the page shows
 //                                      "unknown", never $0.00. Without it the agent reports cost ('reported').
@@ -59,6 +64,8 @@
 //   feed(s, kind, text) one activity line.
 //   drop(s, id, why)    the agent no longer waits for request id (it gave up, or its own time ran out): the office frees the
 //                       hold as if no one answered (provider.answer gets {}), and the feed says why.
+//   fresh(s, why)       open(s, { resume }) could not continue the past conversation and started a new one (an ACP agent that
+//                       no longer says loadSession). Report it before the session id: the office keeps the past record.
 //   end(s, why)         the agent stopped: the session ends.
 import { slimPayload } from '../payload.mjs';
 
@@ -72,6 +79,8 @@ export const MAX_SPEND_LIMIT = 1000;
 export const isPaid = (p) => !p || p.paid !== false;
 /** True unless the provider says gated: false (ADR 0001). A provider that does not say holds every call that is not low risk. */
 export const isGated = (p) => !p || p.gated !== false;
+/** The label of an ungated provider (ADR 0001): its own, else 'Unsupervised'. null for a gated one. */
+export const supervisionOf = (p) => (isGated(p) ? null : typeof p.supervision === 'string' && p.supervision ? p.supervision : 'Unsupervised');
 /** The provider's cost word: 'unknown' when its agent reports no cost, else 'reported'. */
 export const costOf = (p) => (p && p.cost === 'unknown' ? 'unknown' : 'reported');
 const FEATURE_RE = /^[a-z][a-z0-9-]{0,30}$/;
@@ -111,6 +120,7 @@ export function checkProvider(p) {
   if (p.canResume !== undefined && typeof p.canResume !== 'boolean') missing.push('canResume (optional, but then true or false)');
   if (p.learn !== undefined && typeof p.learn !== 'function') missing.push('learn() (optional, but then a function)');
   if (p.gated !== undefined && typeof p.gated !== 'boolean') missing.push('gated (optional, but then true or false)');
+  if (p.supervision !== undefined && p.supervision !== null && (typeof p.supervision !== 'string' || p.gated !== false)) missing.push('supervision (optional, but then text, and only with gated: false)');
   if (p.cost !== undefined && p.cost !== 'unknown') missing.push("cost (optional, but then 'unknown')");
   if (p.cost === 'unknown' && p.paid === false) missing.push("cost 'unknown' with paid: false (an agent that reports no cost is paid)");
   const f = p.features;
@@ -128,8 +138,9 @@ export function checkProvider(p) {
  * @param {(request: {s: object, id: string, suggestions: object[]}) => void} [deps.hold] holds a provider's request
  *   until the user answers (the server's holds; the answer goes to provider.answer).
  * @param {(id: string) => void} [deps.release] frees a held request with no decision (the server's releaseHold(id, {})).
+ * @param {(s: object) => void} [deps.fresh] a reopen that started a new conversation (the server keeps the past record).
  */
-export function providerEvents({ tracker, onChange = () => {}, hold = () => {}, release = () => {} }) {
+export function providerEvents({ tracker, onChange = () => {}, hold = () => {}, release = () => {}, fresh = () => {} }) {
   // A provider's hook-shaped event carries the session's ids, and it is trimmed like the HTTP hook route trims a hook.
   // So no file content is kept, and a tool result finds its permission request by the same call key (payload.mjs).
   const tag = (s, p) => slimPayload({ session_id: s.sid || s.uid, cwd: s.cwd, ...p }, s.officeId);
@@ -145,6 +156,7 @@ export function providerEvents({ tracker, onChange = () => {}, hold = () => {}, 
     reply: (s, text) => tracker.pushReply(s, text),
     feed: (s, kind, text) => { tracker.addFeed(s, kind, text); onChange(); },
     drop: (s, id, why) => { tracker.addFeed(s, 'wait', why); release(id); onChange(); },
+    fresh: (s, why) => { tracker.addFeed(s, 'start', why); fresh(s); onChange(); },
     end: (s, why) => { tracker.endSession(s, why); onChange(); },
   };
 }
@@ -189,7 +201,7 @@ export function createRegistry(list) {
     /**
      * Readiness and models of every provider, for the settings view (#20). A provider that fails or does not answer in
      * time is not ready, and the reason is its need. Models are asked only of a ready provider.
-     * Also what the page needs to know of each kind: gated, paid, cost, canResume and features (#72). They are read after
+     * Also what the page needs to know of each kind: gated, supervision, paid, cost, canResume and features (#72). They are read after
      * readiness, because an ACP agent says what it can do at its handshake.
      */
     status({ timeoutMs = STATUS_MS } = {}) {
@@ -199,7 +211,7 @@ export function createRegistry(list) {
         const models = r.ready ? await settled(() => p.models(), timeoutMs, () => []) : [];
         return {
           kind: p.kind, label: p.label, ready: r.ready === true, version: r.version || null, needs: Array.isArray(r.needs) ? r.needs : [], models,
-          gated: isGated(p), paid: isPaid(p), cost: costOf(p), canResume: p.canResume === true, features: Array.isArray(p.features) ? [...p.features] : [],
+          gated: isGated(p), supervision: supervisionOf(p), paid: isPaid(p), cost: costOf(p), canResume: p.canResume === true, features: Array.isArray(p.features) ? [...p.features] : [],
         };
       }));
     },

@@ -10,7 +10,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { createTracker } from '../tracker.mjs';
 import { slimPayload } from '../payload.mjs';
-import { createRegistry, providerEvents, checkProvider, providerError, DEFAULT_PROVIDER, PROVIDER_METHODS, DEFAULT_SPEND_LIMIT, isPaid, isGated, spendLimitFor } from '../providers/index.mjs';
+import { createRegistry, providerEvents, checkProvider, providerError, DEFAULT_PROVIDER, PROVIDER_METHODS, DEFAULT_SPEND_LIMIT, isPaid, isGated, supervisionOf, spendLimitFor } from '../providers/index.mjs';
 import { createLocal } from '../providers/local.mjs';
 import { createClaudeCode, claudeVersion, programPath, MODEL_RE } from '../providers/claude-code.mjs';
 import { resolveExe } from '../git.mjs';
@@ -127,7 +127,7 @@ test('status: readiness and models of each provider; a failing or silent one is 
   const silent = { ...createFake(o.events), kind: 'silent', label: 'Silent', readiness: () => new Promise(() => {}) };
   const off = { ...createFake(o.events), kind: 'off', label: 'Off', readiness: async () => ({ ready: false, version: null, needs: ['Start the server.'] }), models: async () => { asked++; return [{ id: 'x' }]; } };
   const out = await createRegistry([fake, broken, silent, off]).status({ timeoutMs: 30 });
-  const plain = { gated: true, paid: true, cost: 'reported', canResume: false, features: [] };
+  const plain = { gated: true, supervision: null, paid: true, cost: 'reported', canResume: false, features: [] };
   assert.deepEqual(out, [
     { kind: 'fake', label: 'Fake agent', ready: true, version: '1.0', needs: [], models: [{ id: 'fake-1', label: 'Fake 1' }], ...plain },
     { kind: 'broken', label: 'Broken', ready: false, version: null, needs: ['The office could not check Broken: boom'], models: [], ...plain },
@@ -631,6 +631,18 @@ test('gated: a provider holds every tool call unless it says gated: false; gated
   assert.equal(createLocal({ events: {}, kind: 'ollama' }).gated, true);
 });
 
+test('supervision: an ungated provider has a label (ADR 0001), "Unsupervised" when it gives none; a gated one has none', async () => {
+  const base = { kind: 'x', label: 'X', ...Object.fromEntries(PROVIDER_METHODS.map((m) => [m, () => {}])), readiness: async () => ({ ready: false, needs: [] }) };
+  const partly = { ...base, kind: 'partly', gated: false, supervision: 'Partly supervised: file edits ask, commands do not' };
+  assert.equal(supervisionOf(partly), 'Partly supervised: file edits ask, commands do not');
+  assert.equal(supervisionOf({ ...base, gated: false }), 'Unsupervised');
+  assert.equal(supervisionOf(base), null);
+  assert.throws(() => checkProvider({ ...base, supervision: 'Partly supervised' }), /supervision/, 'a gated provider has no label');
+  assert.throws(() => checkProvider({ ...base, gated: false, supervision: 3 }), /supervision/);
+  const rows = await createRegistry([base, partly]).status({ timeoutMs: 30 });
+  assert.deepEqual(rows.map((r) => [r.kind, r.gated, r.supervision]), [['x', true, null], ['partly', false, 'Partly supervised: file edits ask, commands do not']]);
+});
+
 test('cost unknown: such a provider is paid, has no spend limit the office could enforce, and cannot say it is free', () => {
   const base = { kind: 'x', label: 'X', ...Object.fromEntries(PROVIDER_METHODS.map((m) => [m, () => {}])) };
   assert.doesNotThrow(() => checkProvider({ ...base, cost: 'unknown' }));
@@ -660,6 +672,17 @@ test('status: each kind also says whether it is gated, paid, its cost, whether i
     'read after readiness: what the agent told it at the handshake counts');
   const [claude] = await createRegistry([createClaudeCode({ events: o.events, files: () => ({}), exe: () => { throw new Error('none'); } })]).status({ timeoutMs: 30 });
   assert.deepEqual([claude.gated, claude.paid, claude.cost, claude.canResume, claude.features], [true, true, 'reported', true, []]);
+});
+
+test('events.fresh: a provider that could not continue a past conversation says so, and the office learns it before the sid', () => {
+  const freshened = [];
+  const o = office();
+  const events = providerEvents({ tracker: o.tracker, fresh: (s) => freshened.push(s.uid) });
+  const s = o.session();
+  events.fresh(s, 'Hermes Agent cannot load a past session now. A new session started.');
+  assert.deepEqual(freshened, [s.uid]);
+  assert.equal(o.tracker.feed.at(-1).text, 'Hermes Agent cannot load a past session now. A new session started.');
+  assert.doesNotThrow(() => providerEvents({ tracker: o.tracker }).fresh(s, 'x'), 'without the callback it only writes the feed');
 });
 
 test('events.drop: the provider frees a request its agent no longer waits for, and the feed says why', () => {
