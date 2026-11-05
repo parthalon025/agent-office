@@ -10,7 +10,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { createTracker } from '../tracker.mjs';
 import { slimPayload } from '../payload.mjs';
-import { createRegistry, providerEvents, checkProvider, providerError, DEFAULT_PROVIDER, PROVIDER_METHODS, DEFAULT_SPEND_LIMIT, isPaid, spendLimitFor } from '../providers/index.mjs';
+import { createRegistry, providerEvents, checkProvider, providerError, DEFAULT_PROVIDER, PROVIDER_METHODS, DEFAULT_SPEND_LIMIT, isPaid, isGated, spendLimitFor } from '../providers/index.mjs';
 import { createLocal } from '../providers/local.mjs';
 import { createClaudeCode, claudeVersion, programPath, MODEL_RE } from '../providers/claude-code.mjs';
 import { resolveExe } from '../git.mjs';
@@ -127,11 +127,12 @@ test('status: readiness and models of each provider; a failing or silent one is 
   const silent = { ...createFake(o.events), kind: 'silent', label: 'Silent', readiness: () => new Promise(() => {}) };
   const off = { ...createFake(o.events), kind: 'off', label: 'Off', readiness: async () => ({ ready: false, version: null, needs: ['Start the server.'] }), models: async () => { asked++; return [{ id: 'x' }]; } };
   const out = await createRegistry([fake, broken, silent, off]).status({ timeoutMs: 30 });
+  const plain = { gated: true, paid: true, cost: 'reported', canResume: false, features: [] };
   assert.deepEqual(out, [
-    { kind: 'fake', label: 'Fake agent', ready: true, version: '1.0', needs: [], models: [{ id: 'fake-1', label: 'Fake 1' }] },
-    { kind: 'broken', label: 'Broken', ready: false, version: null, needs: ['The office could not check Broken: boom'], models: [] },
-    { kind: 'silent', label: 'Silent', ready: false, version: null, needs: ['The office could not check Silent: No answer in time.'], models: [] },
-    { kind: 'off', label: 'Off', ready: false, version: null, needs: ['Start the server.'], models: [] },
+    { kind: 'fake', label: 'Fake agent', ready: true, version: '1.0', needs: [], models: [{ id: 'fake-1', label: 'Fake 1' }], ...plain },
+    { kind: 'broken', label: 'Broken', ready: false, version: null, needs: ['The office could not check Broken: boom'], models: [], ...plain },
+    { kind: 'silent', label: 'Silent', ready: false, version: null, needs: ['The office could not check Silent: No answer in time.'], models: [], ...plain },
+    { kind: 'off', label: 'Off', ready: false, version: null, needs: ['Start the server.'], models: [], ...plain },
   ]);
   assert.equal(asked, 0, 'models are asked only of a ready provider');
 });
@@ -616,6 +617,60 @@ test('spend limit: the user can change it or clear it; a bad value falls back to
   assert.equal(paid(undefined, 7), 7, 'the default the user set in settings');
   assert.equal(paid(undefined, 0), null, 'a cleared default means no limit');
   assert.equal(paid(3, 0), 3, 'a limit asked for still counts when the default is cleared');
+});
+
+// ---------- gated, cost and features (#71) ----------
+
+test('gated: a provider holds every tool call unless it says gated: false; gated must be true or false', () => {
+  const base = { kind: 'x', label: 'X', ...Object.fromEntries(PROVIDER_METHODS.map((m) => [m, () => {}])) };
+  assert.equal(isGated(base), true, 'a provider that does not say is gated');
+  assert.equal(isGated({ ...base, gated: true }), true);
+  assert.equal(isGated({ ...base, gated: false }), false);
+  assert.throws(() => checkProvider({ ...base, gated: 'yes' }), /gated/);
+  assert.equal(createClaudeCode({ events: {}, files: () => ({}) }).gated, true);
+  assert.equal(createLocal({ events: {}, kind: 'ollama' }).gated, true);
+});
+
+test('cost unknown: such a provider is paid, has no spend limit the office could enforce, and cannot say it is free', () => {
+  const base = { kind: 'x', label: 'X', ...Object.fromEntries(PROVIDER_METHODS.map((m) => [m, () => {}])) };
+  assert.doesNotThrow(() => checkProvider({ ...base, cost: 'unknown' }));
+  assert.throws(() => checkProvider({ ...base, cost: 'free' }), /cost/);
+  assert.throws(() => checkProvider({ ...base, cost: 'unknown', paid: false }), /cost/);
+  assert.equal(isPaid({ ...base, cost: 'unknown' }), true);
+  assert.equal(spendLimitFor({ paid: true, cost: 'unknown', requested: undefined }), null, 'no limit: nothing reports what it spent');
+  assert.equal(spendLimitFor({ paid: true, cost: 'unknown', requested: 5 }), null);
+  assert.equal(spendLimitFor({ paid: true, requested: undefined }), 2, 'a provider that reports cost keeps the default');
+});
+
+test('features: a list of names, also from a getter', () => {
+  const base = { kind: 'x', label: 'X', ...Object.fromEntries(PROVIDER_METHODS.map((m) => [m, () => {}])) };
+  assert.doesNotThrow(() => checkProvider({ ...base, features: ['fork', 'skills'] }));
+  assert.doesNotThrow(() => checkProvider({ ...base, get features() { return ['resume']; } }));
+  assert.throws(() => checkProvider({ ...base, features: 'fork' }), /features/);
+  assert.throws(() => checkProvider({ ...base, features: ['Fork It'] }), /features/);
+});
+
+test('status: each kind also says whether it is gated, paid, its cost, whether it can resume, and its features', async () => {
+  const o = office();
+  const fake = { ...createFake(o.events), gated: true, cost: 'unknown', get canResume() { return this.learned; }, learned: false,
+    get features() { return this.learned ? ['resume', 'fork'] : ['fork']; },
+    async readiness() { this.learned = true; return { ready: true, version: '2', needs: [] }; } };
+  const [row] = await createRegistry([fake]).status({ timeoutMs: 30 });
+  assert.deepEqual([row.gated, row.paid, row.cost, row.canResume, row.features], [true, true, 'unknown', true, ['resume', 'fork']],
+    'read after readiness: what the agent told it at the handshake counts');
+  const [claude] = await createRegistry([createClaudeCode({ events: o.events, files: () => ({}), exe: () => { throw new Error('none'); } })]).status({ timeoutMs: 30 });
+  assert.deepEqual([claude.gated, claude.paid, claude.cost, claude.canResume, claude.features], [true, true, 'reported', true, []]);
+});
+
+test('events.drop: the provider frees a request its agent no longer waits for, and the feed says why', () => {
+  const released = [];
+  const o = office();
+  const events = providerEvents({ tracker: o.tracker, hold: () => {}, release: (id) => released.push(id) });
+  const s = o.session();
+  const id = events.permission(s, { tool_name: 'Bash', tool_input: { command: 'npm test' } });
+  events.drop(s, id, 'Hermes Agent moved on without your answer.');
+  assert.deepEqual(released, [id]);
+  assert.equal(o.tracker.feed.at(-1).text, 'Hermes Agent moved on without your answer.');
 });
 
 test('spend limit: a provider that does not say it is free is paid; paid must be true or false', () => {

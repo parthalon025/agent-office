@@ -235,6 +235,7 @@ export function createLocal(deps) {
     label: spec.label,
     paid: false, // a model on this machine costs nothing: no spend limit
     canResume: false, // a local conversation lives in memory: Reopen starts a fresh session in the same folder
+    gated: true, // the office runs every tool itself and asks first when riskOf is not low
 
     async readiness() {
       let ids;

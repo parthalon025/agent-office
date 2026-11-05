@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createLocalTools, TOOL_DEFINITIONS, killTree } from '../providers/local-tools.mjs';
+import { createLocalTools, TOOL_DEFINITIONS, killTree, LIMITS } from '../providers/local-tools.mjs';
 import { startFakeOpenAI } from './fixtures/fake-openai.mjs';
 
 function scratch() {
@@ -195,3 +195,84 @@ test('a root under a settings folder still searches its own files', async () => 
   const t = createLocalTools(inner);
   try { assert.match((await t.run('Grep', { pattern: 'findme' })).text, /f\.txt:1/); } finally { s.done(); }
 });
+
+// ---------- the same tools for an ACP agent (#71): raw file text, a refusal before any approval, and terminals ----------
+
+test('readText gives the raw text (no line numbers), a line range, and refuses binary, missing, large and outside files', () => {
+  const s = scratch(); const t = createLocalTools(s.root);
+  try {
+    assert.deepEqual(t.readText(path.join(s.root, 'a.txt')), { ok: true, text: 'one\ntwo\nthree\n' });
+    assert.deepEqual(t.readText('a.txt', { line: 2, limit: 1 }), { ok: true, text: 'two' });
+    assert.deepEqual(t.readText('a.txt', { line: 3 }), { ok: true, text: 'three\n' });
+    fs.writeFileSync(path.join(s.root, 'bin.dat'), Buffer.from([1, 0, 2]));
+    assert.match(t.readText('bin.dat').text, /Not a text file/);
+    assert.match(t.readText('nope.txt').text, /No such file/);
+    assert.match(t.readText(path.join(s.outside, 'key.txt')).text, /outside the working folder/);
+    fs.writeFileSync(path.join(s.root, 'big.txt'), 'x'.repeat(LIMITS.textBytes + 1));
+    const big = t.readText('big.txt');
+    assert.equal(big.ok, false, 'never a cut file: an agent that writes it back would lose the rest');
+    assert.match(big.text, /larger than/);
+  } finally { s.done(); }
+});
+
+test('guard refuses a path outside the folder without running anything; a path inside passes', () => {
+  const s = scratch(); const t = createLocalTools(s.root);
+  try {
+    assert.equal(t.guard('Write', { file_path: path.join(s.root, 'new.txt') }), null);
+    assert.match(t.guard('Write', { file_path: path.join(s.outside, 'x.txt') }), /outside the working folder/);
+    assert.match(t.guard('Read', { file_path: '../secret/key.txt' }), /outside the working folder/);
+    assert.match(t.guard('LS', { path: s.outside }), /outside the working folder/);
+    assert.equal(fs.existsSync(path.join(s.outside, 'x.txt')), false);
+  } finally { s.done(); }
+});
+
+test('start runs one command in the background: output while it runs, the exit, kill, and a folder inside the root only', async () => {
+  const s = scratch(); const t = createLocalTools(s.root);
+  try {
+    const h = t.start('node -e "console.log(\'hi\'); setTimeout(() => process.exit(4), 300)"', { cwd: path.join(s.root, 'src') });
+    assert.match(await waitFor(() => (/hi/.test(h.output()) ? h.output() : null)), /hi/);
+    assert.equal(h.exit(), null, 'still running');
+    assert.deepEqual(await h.done, { exitCode: 4, signal: null, timedOut: false });
+    assert.deepEqual(h.exit(), { exitCode: 4, signal: null });
+    const long = t.start(SLEEP);
+    long.kill();
+    const end = await long.done;
+    assert.ok(end.exitCode !== 0 || end.signal, 'killed');
+    assert.throws(() => t.start('echo x', { cwd: s.outside }), /outside the working folder/);
+    assert.throws(() => t.start('  '), /command is empty/);
+  } finally { s.done(); }
+});
+
+test('start keeps the end of the output under a byte limit, cut at a character, and says it was cut', async () => {
+  const s = scratch(); const t = createLocalTools(s.root);
+  try {
+    const h = t.start('node -e "process.stdout.write(String.fromCharCode(97).repeat(5000) + String.fromCharCode(233, 233) + \'END\')"', { keep: 'end', limitBytes: 100 });
+    await h.done;
+    const out = h.output();
+    assert.ok(out.endsWith('ééEND'), JSON.stringify(out.slice(-20)));
+    assert.ok(Buffer.byteLength(out) <= 100);
+    assert.ok(!out.includes('�'), 'no half character at the cut');
+    assert.equal(h.truncated(), true);
+  } finally { s.done(); }
+});
+
+test('stop() also kills commands that start() began', async () => {
+  const s = scratch(); const t = createLocalTools(s.root);
+  try {
+    const h = t.start(SLEEP);
+    await new Promise((r) => setTimeout(r, 200));
+    t.stop();
+    const end = await h.done;
+    assert.ok(end.exitCode !== 0 || end.signal);
+  } finally { s.done(); }
+});
+
+async function waitFor(fn, ms = 10_000) {
+  const t0 = Date.now();
+  for (;;) {
+    const v = fn();
+    if (v) return v;
+    if (Date.now() - t0 > ms) throw new Error('timed out');
+    await new Promise((r) => setTimeout(r, 30));
+  }
+}

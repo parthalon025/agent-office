@@ -15,6 +15,9 @@ export const LIMITS = {
   grepFileBytes: 1_000_000,
   lsEntries: 300,
   runTimeoutMs: 60_000,
+  maxRunMs: 10 * 60_000,  // the longest any command may run
+  textBytes: 4_000_000,   // the largest file readText gives whole (an ACP agent may write it back, so it is never cut)
+  endBytes: 1_000_000,    // what start() keeps of a command's output with keep 'end' when the caller sets no limit
 };
 const SKIP_DIRS = new Set(['.git', 'node_modules', '.hg', '.svn']);
 
@@ -37,6 +40,14 @@ export const TOOL_DEFINITIONS = [
 class ToolError extends Error {}
 const fail = (msg) => { throw new ToolError(msg); };
 const clip = (s, n) => (s.length > n ? s.slice(0, n) + `\n[cut: ${s.length - n} more characters]` : s);
+// The last n bytes of a text, cut at the start of a character (UTF-8 continuation bytes are 10xxxxxx).
+function lastBytes(s, n) {
+  const b = Buffer.from(s, 'utf8');
+  if (b.length <= n) return s;
+  let i = b.length - n;
+  while (i < b.length && (b[i] & 0xc0) === 0x80) i++;
+  return b.subarray(i).toString('utf8');
+}
 
 /** Kill a process and its children. Windows: taskkill /T by PID (a shell's children outlive a plain kill). */
 export function killTree(pid, run = execFile) {
@@ -136,35 +147,107 @@ export function createLocalTools(root, deps = {}) {
     },
   };
 
-  /** Run a shell command; resolves with its output. A timeout kills the whole process tree. */
-  function bash(a) {
-    const cmd = String(a.command || '').trim();
+  /**
+   * Start one shell command in the folder, or in a folder inside it, and return at once (Bash below, and an ACP terminal).
+   * The handle: output() the text so far; truncated() whether some was dropped; exit() null while it runs, then
+   * { exitCode, signal }; done, a promise of { exitCode, signal, timedOut } (and error when it could not start); kill() stops
+   * its process tree. keep 'start' keeps the first part of a long output (a model reads the start); keep 'end' keeps the last
+   * limitBytes, cut at a character (an ACP terminal, as the protocol asks). The time limit kills the whole tree.
+   * Throws a ToolError for an empty command or a folder outside the root.
+   */
+  function start(command, { cwd = root, timeoutMs, keep = 'start', limitBytes = LIMITS.endBytes } = {}) {
+    const cmd = String(command || '').trim();
     if (!cmd) fail('command is empty.');
-    const limit = Math.min(Math.max(Number(a.timeout_ms) || LIMITS.runTimeoutMs, 100), 10 * 60_000);
+    const dir = safe(cwd, { mustExist: true });
+    if (!fs.statSync(dir).isDirectory()) fail(`Not a folder: ${cwd}`);
+    const limitMs = Math.min(Math.max(Number(timeoutMs) || LIMITS.runTimeoutMs, 100), LIMITS.maxRunMs);
     const win = process.platform === 'win32';
-    const shell = resolveExe(win ? 'cmd.exe' : 'sh'); // throws to run(), which answers "The tool failed"
-    return new Promise((resolve) => {
-      const child = spawn(shell, win ? ['/d', '/s', '/c', cmd] : ['-c', cmd], {
-        cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], detached: !win, windowsVerbatimArguments: win,
-      });
-      running.add(child);
-      let out = '', timedOut = false, done = false;
-      const add = (d) => { if (out.length < LIMITS.outputChars * 2) out += d; };
-      child.stdout.on('data', add); child.stderr.on('data', add);
-      const timer = setTimeout(() => { timedOut = true; kill(child.pid); }, limit);
-      const end = (text, ok) => { if (done) return; done = true; clearTimeout(timer); running.delete(child); resolve({ ok, text }); };
-      child.on('error', (e) => end(`Could not run the command: ${e.message}`, false));
-      child.on('close', (code, sig) => {
-        const body = clip(out.trim(), LIMITS.outputChars);
-        if (timedOut) end(`${body}\n[stopped: the command ran longer than ${limit} ms]`.trim(), false);
-        else end(`${body}${body ? '\n' : ''}[exit ${code ?? sig}]`, code === 0);
-      });
+    const shell = resolveExe(win ? 'cmd.exe' : 'sh'); // throws to the caller: run() answers "The tool failed"
+    const child = spawn(shell, win ? ['/d', '/s', '/c', cmd] : ['-c', cmd], {
+      cwd: dir, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], detached: !win, windowsVerbatimArguments: win,
     });
+    running.add(child);
+    const cap = Math.max(1, Number(limitBytes) || LIMITS.endBytes);
+    let out = '', cut = false, timedOut = false, exit = null;
+    const add = (d) => {
+      if (keep === 'end') { out += d; if (Buffer.byteLength(out) > cap) { out = lastBytes(out, cap); cut = true; } }
+      else if (out.length < LIMITS.outputChars * 2) out += d;
+      else cut = true;
+    };
+    // Text, not bytes: a character split across two chunks stays one character.
+    child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
+    child.stdout.on('data', add); child.stderr.on('data', add);
+    const timer = setTimeout(() => { timedOut = true; kill(child.pid); }, limitMs);
+    const done = new Promise((resolve) => {
+      let ended = false;
+      const end = (exitCode, signal, error) => {
+        if (ended) return;
+        ended = true; clearTimeout(timer); running.delete(child);
+        exit = { exitCode, signal };
+        resolve(error ? { exitCode, signal, timedOut, error } : { exitCode, signal, timedOut });
+      };
+      child.on('error', (e) => end(null, null, e.message));
+      child.on('close', (code, sig) => end(code ?? null, sig ?? null));
+    });
+    return {
+      done, limitMs,
+      output: () => out,
+      truncated: () => cut,
+      exit: () => exit,
+      kill: () => { if (!exit) kill(child.pid); },
+    };
+  }
+
+  /** Run a shell command in the folder; resolves with its output when it ends. */
+  async function bash(a) {
+    const h = start(a.command, { timeoutMs: a.timeout_ms });
+    const r = await h.done;
+    if (r.error) return { ok: false, text: `Could not run the command: ${r.error}` };
+    const body = clip(h.output().trim(), LIMITS.outputChars);
+    if (r.timedOut) return { ok: false, text: `${body}\n[stopped: the command ran longer than ${h.limitMs} ms]`.trim() };
+    return { ok: r.exitCode === 0, text: `${body}${body ? '\n' : ''}[exit ${r.exitCode ?? r.signal}]` };
+  }
+
+  // { ok, text } for a call that throws a ToolError for the caller to read, never an exception.
+  function attempt(fn) {
+    try { return { ok: true, text: fn() }; } catch (e) {
+      if (e instanceof ToolError) return { ok: false, text: e.message };
+      return { ok: false, text: `The tool failed: ${e.code || e.message}` };
+    }
+  }
+
+  /**
+   * The whole text of a file, without line numbers (an ACP agent's fs/read_text_file). line (1-based) and limit pick lines.
+   * A file over LIMITS.textBytes is refused, never cut: an agent that writes the text back would lose the rest.
+   */
+  function readText(p, { line, limit } = {}) {
+    return attempt(() => {
+      const f = safe(p, { mustExist: true });
+      const st = fs.statSync(f);
+      if (!st.isFile()) fail(`Not a file: ${p}`);
+      if (st.size > LIMITS.textBytes) fail(`The file is larger than ${LIMITS.textBytes} bytes: ${p}. The office does not send part of it as the whole file.`);
+      const buf = fs.readFileSync(f);
+      if (buf.includes(0)) fail(`Not a text file: ${p}`);
+      const text = buf.toString('utf8');
+      const from = Number(line) > 0 ? Math.floor(Number(line)) : 1, n = Number(limit) > 0 ? Math.floor(Number(limit)) : 0;
+      if (from === 1 && !n) return text;
+      const lines = text.split('\n');
+      return lines.slice(from - 1, n ? from - 1 + n : undefined).join('\n');
+    });
+  }
+
+  /** The refusal text when the path of a call is outside the folder (or leads out), else null. Runs nothing. */
+  function guard(name, a = {}) {
+    const p = name === 'LS' || name === 'Grep' ? a.path || '.' : a.file_path;
+    try { safe(p); return null; } catch (e) { if (e instanceof ToolError) return e.message; throw e; }
   }
 
   return {
     definitions: TOOL_DEFINITIONS,
     root,
+    start,
+    readText,
+    guard,
     async run(name, args) {
       let a = args;
       if (typeof a === 'string') { try { a = JSON.parse(a || '{}'); } catch { return { ok: false, text: 'The arguments are not valid JSON.' }; } }

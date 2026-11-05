@@ -139,6 +139,7 @@ export function createClaudeCode(deps) {
     label: 'Claude Code',
     paid: true, // runs on the user's account: new sessions get the default spend limit
     canResume: true, // claude --resume continues a past conversation
+    gated: true, // its PermissionRequest hook holds every call Claude Code asks about
 
     async readiness() {
       let version;
