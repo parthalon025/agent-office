@@ -115,3 +115,21 @@ test('office.css: short windows shrink the welcome card, and landscape drops it 
   // none of the short rules touches the centring, z-index or animation (#47)
   for (const m of [tier[1], tight[1], land[1]]) { assert.doesNotMatch(m, /z-index|animation|transform|translate/); }
 });
+
+// Review minor: the security office type (#70) had no picture, so OfficeTypeCard showed its badge only. Every office type has a
+// flat picture in each theme, and the bundle's copy is the asset file byte for byte; the DS preview shows the security card.
+test('OfficeTypeCard: every office type has a picture in Day, Night and Sublevel, the same as its file in assets/Offices', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const bundle = readFileSync(join(root, 'components', 'bundle.js'), 'utf8');
+  const at = bundle.indexOf('AO.THUMBS = {'), end = bundle.indexOf('\n  };', bundle.indexOf('sublevel: {', at));
+  const block = bundle.slice(at, end);
+  for (const [theme, sfx] of [['light', ''], ['dark', '-night'], ['sublevel', '-sublevel']]) {
+    const part = theme === 'light' ? block.slice(0, block.indexOf('AO.THUMBS_BY_THEME')) : block.slice(block.indexOf(theme + ': {'));
+    for (const type of ['team', 'lab', 'studio', 'hq', 'security']) {
+      const m = new RegExp('"' + type + '": ("(?:[^"\\\\]|\\\\.)*")').exec(part);
+      assert.ok(m, `${type} in ${theme}`);
+      assert.equal(JSON.parse(m[1]), readFileSync(join(root, 'assets', 'Offices', `${type}${sfx}.svg`), 'utf8').trim(), `${type}${sfx}.svg`);
+    }
+  }
+  assert.match(readFileSync(join(root, 'components', 'OfficeTypeCard', 'preview.html'), 'utf8'), /\["security",/);
+});

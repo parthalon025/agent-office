@@ -8,6 +8,7 @@ Flat isometric (30 degree) room thumbnails. viewBox `0 0 320 200`. Each room has
 | Lab / server room | `lab.svg` | `lab-night.svg` | `lab-sublevel.svg` | `#0f8b8d` / `#2fb3b5` / `#0f7f7c` | Server racks with LED dots, a cable tray, a work bench with test gear. |
 | Studio | `studio.svg` | `studio-night.svg` | `studio-sublevel.svg` | `#c2477a` / `#e0709a` / `#b03f6e` | A stage in front of a curved cyc wall, a light on a stand, a camera on a tripod. |
 | War room / HQ | `hq.svg` | `hq-night.svg` | `hq-sublevel.svg` | `#a36a12` / `#d0922e` / `#946010` | A long table with seats on all sides, a wall of screens, a map screen. |
+| Security | `security.svg` | `security-night.svg` | `security-sublevel.svg` | `#6650b8` / `#9a86e8` / `#5a48a6` | Six wall screens, three on each wall, each a small rule grid (Allow, Deny and Ask cells) in a frame of the type colour. No bots: the room has none. The room shell is the HQ one. |
 
 ## Themes
 - **Day** (`<type>.svg`): the x0.2 thumbnails, unchanged.
