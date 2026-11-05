@@ -111,26 +111,39 @@ export function createTracker(deps = {}) {
     if (!force && s.gitCwd === s.cwd && now() - s.gitAt < 15000) return Promise.resolve();
     s.gitCwd = s.cwd; s.gitAt = now();
     return locate(s.cwd).then((g) => {
-      const diff = !s.placed || JSON.stringify(g) !== JSON.stringify(s.git);
+      const first = !s.placed;
+      const diff = first || JSON.stringify(g) !== JSON.stringify(s.git);
       s.git = g; s.placed = true;
+      // Only calls opened before the first place have no file yet. Later calls keep theirs when the folder changes.
+      if (first) for (const c of s.calls) { const abs = callPaths.get(c); if (abs) c.file = fileOf(s, abs); }
       persist.placed?.(s, g);
       if (diff) changed();
     });
   }
 
   // ---------- tool calls ----------
+  // The absolute path of each call, kept off the call so the snapshot does not carry it.
+  const callPaths = new WeakMap();
+  // The path inside the repo root (or the folder, outside git), or null. Unknown until the place is looked up:
+  // before that a path would be read against the session folder, not the repo (placeSession fixes it later).
+  function fileOf(s, abs) {
+    const top = s.placed ? s.git?.root || s.cwd : null;
+    const rel = abs && top ? path.win32.relative(top, abs).replace(/\\/g, '/') : null;
+    return rel && !rel.startsWith('..') ? rel : null;
+  }
   // One tool call: opened by PreToolUse, closed by PostToolUse or PostToolUseFailure.
   function openCall(s, p) {
     if (!p.tool_use_id || s.calls.some((c) => c.id === p.tool_use_id)) return;
     const input = p.tool_input || {};
     // file: the path inside the worktree, for the room board's repo view
     const fp = input.file_path || input.path;
-    const top = s.git?.root || s.cwd;
     // A relative path (a local agent sends these) is read against the session folder, never the server's cwd.
     // Session paths follow Windows rules on every host, like place.mjs (CI runs the tests on Linux).
     const abs = fp && s.cwd ? path.win32.resolve(s.cwd, String(fp)) : fp ? String(fp) : null;
-    const rel = abs && top ? path.win32.relative(top, abs).replace(/\\/g, '/') : null;
-    s.calls.push({ id: p.tool_use_id, name: p.tool_name, detail: describeTool(p.tool_name, input), file: rel && !rel.startsWith('..') ? rel : null, agent: p.agent_id, t: now(), ms: null, ok: null, err: null });
+    const c = { id: p.tool_use_id, name: p.tool_name, detail: describeTool(p.tool_name, input), file: null, agent: p.agent_id, t: now(), ms: null, ok: null, err: null };
+    if (abs) callPaths.set(c, abs);
+    c.file = fileOf(s, abs);
+    s.calls.push(c);
     if (isAgentTool(p.tool_name)) s.agents.push({ call: p.tool_use_id, id: null, type: input.subagent_type || 'general-purpose', task: describeTool(p.tool_name, input), done: false, ok: null });
     // Keep every open call; drop the oldest closed ones.
     while (s.calls.length > MAX_CALLS) { const i = s.calls.findIndex((c) => c.ok !== null); if (i < 0) break; s.calls.splice(i, 1); }

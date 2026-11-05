@@ -18,7 +18,8 @@ function rig(over = {}) {
   r.tracker = createTracker({
     now: () => r.t,
     makeId: (kind) => `${kind[0]}${(r.ids[kind] = (r.ids[kind] || 0) + 1)}`,
-    locate: async (cwd) => { r.located.push(cwd); return over.git === undefined ? GIT : over.git; },
+    // over.locate lets a test hold the git place back.
+    locate: async (cwd) => { r.located.push(cwd); return over.locate ? over.locate(cwd) : over.git === undefined ? GIT : over.git; },
     onChange: () => { r.changes++; },
     releaseHold: (id, decision) => r.released.push({ id, decision }),
     setTimer: (fn, ms) => { r.timers.push({ fn, ms }); return r.timers.length; },
@@ -648,4 +649,51 @@ test('a session records itself as soon as it has a sid, from the init line or th
   assert.equal(b.sid, 'sid-b');
   assert.equal(r.history.length, n + 1, 'the first hook gives the sid, and the session records itself');
   assert.equal(r.history.at(-1).uid, 'o2');
+});
+
+// Issue #57: the first call can arrive before the git place is known. Its file must not stay relative to the session folder.
+test('a call opened before locate resolves gets its file against the repo root once the place is known', async () => {
+  let release;
+  const gate = new Promise((res) => { release = res; });
+  const r = rig({ locate: () => gate.then(() => GIT) });
+  const sub = path.join(REPO, 'sub');
+  r.hook({ hook_event_name: 'SessionStart', session_id: 'sid-57', cwd: sub, source: 'startup' });
+  r.hook({ hook_event_name: 'PreToolUse', session_id: 'sid-57', cwd: sub, tool_name: 'Write', tool_use_id: 't1', tool_input: { file_path: 'hello.txt' } });
+  const s = r.only();
+  assert.equal(s.placed, false, 'the place is not known yet');
+  assert.equal(s.calls[0].file, null, 'no path against the session folder while the place is unknown');
+  release();
+  await wait();
+  assert.equal(s.placed, true);
+  assert.equal(s.calls[0].file, 'sub/hello.txt');
+  assert.ok(!('abs' in JSON.parse(JSON.stringify(s)).calls[0]), 'the snapshot carries no private field');
+});
+
+// Review of #57: only calls opened before the first place get their file recomputed. A later folder change keeps the others.
+test('a call opened after the place is known keeps its file when the session folder changes later', async () => {
+  const OUT = 'C:/a/b';
+  const r = rig({ git: null }); // outside git: the root is the session folder
+  r.hook({ hook_event_name: 'SessionStart', session_id: 'sid-57b', cwd: OUT, source: 'startup' });
+  await wait();
+  r.hook({ hook_event_name: 'PreToolUse', session_id: 'sid-57b', cwd: OUT, tool_name: 'Write', tool_use_id: 't1', tool_input: { file_path: 'x.txt' } });
+  const s = r.only();
+  assert.equal(s.calls[0].file, 'x.txt');
+  r.hook({ hook_event_name: 'UserPromptSubmit', session_id: 'sid-57b', cwd: 'C:/c', prompt: 'go' });
+  await wait();
+  assert.equal(s.calls[0].file, 'x.txt', 'the folder change does not re-base an earlier call');
+});
+
+test('outside git, a call opened before locate resolves gets its file against the session folder', async () => {
+  let release;
+  const gate = new Promise((res) => { release = res; });
+  const r = rig({ locate: () => gate.then(() => null) });
+  const OUT = 'C:/a/b';
+  r.hook({ hook_event_name: 'SessionStart', session_id: 'sid-57c', cwd: OUT, source: 'startup' });
+  r.hook({ hook_event_name: 'PreToolUse', session_id: 'sid-57c', cwd: OUT, tool_name: 'Write', tool_use_id: 't1', tool_input: { file_path: 'sub/hello.txt' } });
+  r.hook({ hook_event_name: 'PreToolUse', session_id: 'sid-57c', cwd: OUT, tool_name: 'Bash', tool_use_id: 't2', tool_input: { command: 'ls' } });
+  const s = r.only();
+  assert.deepEqual(s.calls.map((c) => c.file), [null, null]);
+  release();
+  await wait();
+  assert.deepEqual(s.calls.map((c) => c.file), ['sub/hello.txt', null], 'a call with no path stays null');
 });
