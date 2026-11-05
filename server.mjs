@@ -44,12 +44,16 @@ const PAGE_TOKEN = auth.newPageToken();
 const PAGE_FILE = auth.pageFile(process.env, PORT);
 const launchCodes = auth.createLaunchCodes();
 // Files with a token, and settings files whose commands sessions run: only the user, SYSTEM and Administrators can
-// read them (auth.writeOwnerOnly; the icacls runner must return its output).
+// read them (auth.writeOwnerOnly). icacls sets the ACL; Windows PowerShell reads it back by SID (auth.ACL_SCRIPT,
+// about 0.2 s per file, only when a file is written).
 function writeSecret(file, text) {
   const warning = auth.writeOwnerOnly(file, text, {
-    fs, icacls: (args) => execFileSync(git.resolveExe('icacls'), args, { windowsHide: true, stdio: 'pipe', timeout: 15000 }),
+    fs,
+    icacls: (args) => execFileSync(git.resolveExe('icacls'), args, { windowsHide: true, stdio: 'pipe', timeout: 15000 }),
+    readAcl: (f) => auth.parseAcl(execFileSync(git.resolveExe('powershell'), ['-NoProfile', '-NonInteractive', '-Command', auth.ACL_SCRIPT],
+      { windowsHide: true, encoding: 'utf8', stdio: 'pipe', timeout: 30000, env: { ...process.env, AO_ACL_FILE: f } })),
   });
-  if (warning) console.warn(warning);
+  if (warning) console.warn(`WARNING: ${warning}`);
 }
 const HOOKS_CMD_FILE = path.join(ROOT, 'office-hooks.json');
 const HOOKS_HTTP_FILE = path.join(ROOT, 'office-hooks-http.json');
