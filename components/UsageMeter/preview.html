@@ -1,9 +1,18 @@
-<!-- @dsCard group="Feeds" height=190 -->
+<!-- @dsCard group="Feeds" height=330 width=1200 -->
 <!doctype html>
 <html><head><meta charset="utf-8"><title>UsageMeter</title></head><body style="margin:0">
 <div id="root"></div>
 <script>
-var A=window.AgentOffice,h=React.createElement;
-ReactDOM.createRoot(document.getElementById("root")).render(h("div",{className:"ao-stage"},h("div",{style:{width:270}},h(A.UsageMeter,{percent:31,reset:"Resets in 3d 14h",rows:[{name:"QT Scout",color:"#f2c230",percent:5.7},{name:"Projects Manager",color:"#6a7684",percent:5.5},{name:"Paper Digest",color:"#9b4fd1",percent:5.5},{name:"Sales Call Coach",color:"#e2574c",percent:5.1}]}))));
+var A=window.AgentOffice,h=React.createElement,C=A.BODY_COLORS;
+function card(label,props){return h("div",{key:label,style:{width:270}},h("div",{className:"ao-state-l",style:{marginBottom:6}},label),h(A.UsageMeter,props));}
+var rows=[{name:"QT Scout",color:C[6],percent:5.7},{name:"Projects Manager",color:C[8],percent:5.5},{name:"Paper Digest",color:C[3],percent:5.5},{name:"Sales Call Coach",color:C[9],percent:5.1}];
+var spendRows=[{name:"QT Scout",color:C[6],percent:5.7,cost:0.18},{name:"Paper Digest",color:C[3],percent:5.5,cost:0.004},{name:"Sales Call Coach",color:C[9],percent:5.1,cost:0.31}];
+ReactDOM.createRoot(document.getElementById("root")).render(h("div",{className:"ao-stage",style:{display:"flex",flexWrap:"wrap",gap:16,alignItems:"flex-start"}},
+ card("Percent",{percent:31,reset:"Resets in 3d 14h",rows:rows}),
+ card("Percent and spend",{percent:31,cost:0.42,reset:"Resets in 3d 14h",rows:spendRows}),
+ card("Spend and spend limit",{percent:31,cost:0.42,costLimit:2,reset:"Resets in 3d 14h",rows:spendRows}),
+ card("Spend only",{cost:0.42,costLimit:2,rows:[{name:"QT Scout",color:C[6],cost:0.18},{name:"Sales Call Coach",color:C[9],cost:0.24}]}),
+ card("Spend only, under one cent",{cost:0.004}),
+ card("Own title",{cost:1.25,title:"This run"})));
 </script>
 </body></html>

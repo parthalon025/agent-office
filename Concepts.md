@@ -128,7 +128,7 @@ Do not use "Oops", "Sorry", exclamation marks, "please wait" or vague verbs like
 
 ## Accessibility
 
-- **Contrast.** Text 4.5:1; icons, dots, type colors, borders and focus rings 3:1, in every theme. ContrastCheck measures it live.
+- **Contrast.** Text 4.5:1; icons, dots, type colors, borders and focus rings 3:1, in every theme. ContrastCheck measures it live. A status color (`status-*`) is a fill or a dot. For a status word, use `status-*-text` on `bg`, `panel` and `chip`, or `status-*-on-bubble` on `bubble`. Reference.md lists the pairs the DS checks.
 - **Never color alone.** Every status dot has a word; every type color has an icon and a label; every sound has a visible change.
 - **Keyboard.** Every control is a real button, input or select. Tabs move with arrow keys. Dialogs trap focus and close on Escape. The HUD is the keyboard path to every bot.
 - **Screen readers.** The roster is a listbox, the chat a polite live log, toasts `status` or `alert`, the usage bar a `meter`, the sound button a toggle with `aria-pressed`.
