@@ -271,18 +271,28 @@ async function floorActionRaw(action, body) {
   const r = knownRepo(body.repo);
   const branch = String(body.branch || '').trim();
   let out;
-  if (action === 'create-floor') out = await git.createFloor(r.path, branch, String(body.from || '').trim());
-  else if (action === 'create-room') out = await git.createRoom(r.path, branch);
+  if (action === 'create-floor') out = await git.createFloor(r.path, branch, String(body.from || '').trim(), String(body.name || ''));
+  else if (action === 'create-room') out = await git.createRoom(r.path, branch, String(body.name || ''));
   else if (action === 'remove-room') {
     const s = roomInUse(String(body.root || ''));
     if (s) throw httpError(409, `${s.name} works in this room. Close the session first.`);
     out = await git.removeRoom(r.path, String(body.root || ''), body.force === true);
   } else if (action === 'delete-floor') {
-    for (const w of r.worktrees.filter((x) => x.branch === branch)) {
+    for (const w of (await git.layout(r.path)).filter((x) => x.branch === branch)) { // git's list, not the 30 s copy
       const s = roomInUse(w.root);
       if (s) throw httpError(409, `${s.name} works on this floor. Close the session first.`);
     }
     out = await git.deleteFloor(r.path, branch, body.force === true);
+  } else if (action === 'cleanup-floors') {
+    // Only floors that are still unused and safe now, whatever the page sent. Never forced.
+    const safe = new Set((await git.staleFloors(r.path)).map((f) => f.branch));
+    const wts = await git.layout(r.path);
+    out = { deleted: [], skipped: [] };
+    for (const b of (Array.isArray(body.branches) ? body.branches : []).map(String)) {
+      const busy = wts.filter((w) => w.branch === b).map((w) => roomInUse(w.root)).find(Boolean);
+      if (!safe.has(b) || busy) { out.skipped.push(b); continue; }
+      try { await git.deleteFloor(r.path, b, false); out.deleted.push(b); } catch { out.skipped.push(b); }
+    }
   } else throw httpError(400, 'Unknown action.');
   await refreshRepo(repoKey(r.path));
   return out;
@@ -1116,6 +1126,12 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/tree') return send(res, 200, await repoTree(String(body.root || '')));
     if (url.pathname === '/api/branches') return send(res, 200, { branches: await git.branches(knownRepo(body.repo).path) });
     if (url.pathname === '/api/floor/create') return send(res, 200, await floorAction('create-floor', body));
+    if (url.pathname === '/api/floor/stale') {
+      const r = knownRepo(body.repo);
+      const wts = await git.layout(r.path);
+      return send(res, 200, { floors: (await git.staleFloors(r.path)).filter((f) => !wts.some((w) => w.branch === f.branch && roomInUse(w.root))) });
+    }
+    if (url.pathname === '/api/floor/cleanup') return send(res, 200, await floorAction('cleanup-floors', body));
     if (url.pathname === '/api/floor/delete') return send(res, 200, await floorAction('delete-floor', body));
     if (url.pathname === '/api/room/create') return send(res, 200, await floorAction('create-room', body));
     if (url.pathname === '/api/room/delete') return send(res, 200, await floorAction('remove-room', body));
