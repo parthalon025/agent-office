@@ -300,6 +300,13 @@
    }
   }
  },
+ "common": {
+  "desc": "Fields every event can carry. seeded: true marks state the office already had (a scene mount sends the whole mirror again): the scene applies it, but records no history, plays no sound and sends no notification or toast. at: the time of the event in ms; a seeded event with at after the last time the building was seen counts as news in Since you left.",
+  "fields": {
+   "seeded": "boolean?",
+   "at": "number?"
+  }
+ },
  "tokens": [
   "accent",
   "bg",
@@ -620,5 +627,5 @@
   "Icon",
   "Logo"
  ],
- "note": "The one source for events and commands. The build puts it in the bundle (AgentOffice.schema, AgentOffice.validate), in index.d.ts, in Reference.md and in kit/schema.json. Field types: string, number, boolean, object, Status, string[], object[]; a trailing ? means optional."
+ "note": "The one source for events and commands. The build puts it in the bundle (AgentOffice.schema, AgentOffice.validate), in index.d.ts, in Reference.md and in kit/schema.json. common lists the fields every event can carry. Field types: string, number, boolean, object, Status, string[], object[]; a trailing ? means optional."
 }

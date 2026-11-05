@@ -1,6 +1,9 @@
 // Scene host: shown floor, view, room groups and rebuild detection on plain scene graphs (no THREE, no DOM).
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import '../public/scene-host.js';
 
 const P = globalThis.OfficeSceneHost.pure;
@@ -524,6 +527,63 @@ test('host: the engine does not reframe while a screen is in focus', () => {
   host.dispose();
   s.stage.goal = { t: 4 };
   assert.deepEqual(Object.getOwnPropertyDescriptor(s.stage, 'goal'), { value: { t: 4 }, writable: true, enumerable: true, configurable: true }, 'dispose gives the stage its plain property back');
+});
+
+// The engine's own frame and goal step (components/bundle.js), on the focus stage: under reduced motion every move is
+// still a goal, so the host holds it back while a screen is in focus (#36).
+const bundleSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'components', 'bundle.js'), 'utf8').replace(/\r\n/g, '\n');
+function engineFn(start) {
+  const at = bundleSrc.indexOf(start);
+  assert.ok(at >= 0 && bundleSrc.indexOf(start, at + 1) === -1, `bundle has ${start} once`);
+  return bundleSrc.slice(at, bundleSrc.indexOf('};\n', at) + 3);
+}
+class V3 {
+  constructor(x = 0, y = 0, z = 0) { this.x = x; this.y = y; this.z = z; }
+  set(x, y, z) { this.x = x; this.y = y; this.z = z; return this; }
+  copy(v) { return this.set(v.x, v.y, v.z); }
+  clone() { return new V3(this.x, this.y, this.z); }
+  add(v) { this.x += v.x; this.y += v.y; this.z += v.z; return this; }
+  sub(v) { this.x -= v.x; this.y -= v.y; this.z -= v.z; return this; }
+  lerp(v, a) { this.x += (v.x - this.x) * a; this.y += (v.y - this.y) * a; this.z += (v.z - this.z) * a; return this; }
+  distanceTo(v) { return Math.hypot(this.x - v.x, this.y - v.y, this.z - v.z); }
+}
+function engineStage(s) {
+  const proto = {};
+  new Function('T', 'Stage', 'DUR', engineFn('Stage.prototype.frame=function') + engineFn('Stage.prototype.goalStep=function'))({ Vector3: V3 }, { prototype: proto }, { camera: 600 });
+  const st = s.stage;
+  Object.assign(st, { rm: true, D: 11, sunOff: null, ext: null, frame: proto.frame, goalStep: proto.goalStep,
+    sun: { position: new V3(), target: { position: new V3() } }, shadowFit() {}, resize() {}, fitD() { return 7; } });
+  st.ctl.target = new V3(0, 0, 0);
+  st.cam.position = new V3(30, 40, 60);
+  // one frame of the stage loop: the goal step, then the page's frames (st.anim)
+  return (dt = 0.016) => { if (st.goal) st.goalStep(dt); s.anim.forEach((f) => f(dt, 0)); };
+}
+const at3 = (v) => [v.x, v.y, v.z].map((n) => Math.round(n * 1e6) / 1e6);
+
+test('host + engine, reduced motion: a move cuts in one frame, and is held while a screen is in focus (#36)', () => {
+  const s = focusStage({ a: 5 }), log = [];
+  const frameOnce = engineStage(s), st = s.stage;
+  const host = globalThis.OfficeSceneHost.attach(s.office);
+  host.register(screens(s, log).t);
+  st.frame([1, 2, 3], 9, 1);   // setFloor or setView: no focus, the camera cuts
+  frameOnce();
+  assert.equal(st.goal, null);
+  assert.deepEqual(at3(st.ctl.target), [1, 2, 3]);
+  click(s); land(s);
+  assert.ok(host.focused(), 'a screen is in focus');
+  const t0 = at3(st.ctl.target), p0 = at3(st.cam.position), z0 = st.cam.zoom, d0 = st.D;
+  st.frame([9, 0, 9], 5, 1);   // a bot joins (frameFloor) or the HUD inset changes (setFrameInset)
+  frameOnce(); frameOnce();
+  assert.equal(st.goal, null, 'the goal is held');
+  assert.deepEqual(at3(st.ctl.target), t0, 'the camera stays on the screen');
+  assert.deepEqual(at3(st.cam.position), p0);
+  assert.equal(st.cam.zoom, z0);
+  assert.equal(st.D, d0);
+  host.blur(); land(s);
+  st.frame([2, 0, 2], 9, 1);
+  frameOnce();
+  assert.deepEqual(at3(st.ctl.target), [2, 0, 2], 'no focus: the next move cuts again');
+  host.dispose();
 });
 
 test('host: after a rebuild the focus follows the new mesh; a screen that is gone flies back', () => {

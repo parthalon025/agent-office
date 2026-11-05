@@ -133,5 +133,5 @@ Do not use "Oops", "Sorry", exclamation marks, "please wait" or vague verbs like
 - **Keyboard.** Every control is a real button, input or select. Tabs move with arrow keys. Dialogs trap focus and close on Escape. The HUD is the keyboard path to every bot.
 - **Screen readers.** The roster is a listbox, the chat a polite live log, toasts `status` or `alert`, the usage bar a `meter`, the sound button a toggle with `aria-pressed`.
 - **Focus.** 2 px `accent` outline with 2 px offset.
-- **Motion.** `prefers-reduced-motion` stops bob, squash, auto-rotate, spinners, shimmer, blink, sway, glance, hop, flicker, the intro, the elevator ride, packets, envelopes, walks to talk, the portrait fly and the panel stagger.
+- **Motion.** `prefers-reduced-motion` stops bob, squash, auto-rotate, spinners, shimmer, blink, sway, glance, hop, flicker, the intro, the elevator ride, camera glides (the camera cuts), packets, envelopes, walks to talk, the portrait fly and the panel stagger.
 - **Targets.** Icon buttons 30 × 30 px or more.

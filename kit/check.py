@@ -17,13 +17,15 @@ def check_event(ev, kind="events"):
     sp = S[kind].get(ev.get("type"))
     if not sp: return ["unknown type: %s" % ev.get("type")]
     out = []
-    for k, t in sp["fields"].items():
+    # common: fields every event can carry (seeded, at)
+    fields = dict(S.get("common", {}).get("fields", {}), **sp["fields"]) if kind == "events" else sp["fields"]
+    for k, t in fields.items():
         opt = t.endswith("?"); t = t.rstrip("?"); v = ev.get(k)
         if v is None:
             if not opt: out.append("missing " + k)
             continue
         ok = {"string": isinstance(v, str), "number": isinstance(v, (int, float)) and not isinstance(v, bool),
-              "boolean": isinstance(v, bool), "Status": v in STATES}.get(t, isinstance(v, list) if t.endswith("[]") else isinstance(v, dict))
+              "boolean": isinstance(v, bool), "Status": isinstance(v, str) and v in STATES}.get(t, isinstance(v, list) if t.endswith("[]") else isinstance(v, dict))
         if not ok: out.append("%s must be %s" % (k, t))
     return out
 

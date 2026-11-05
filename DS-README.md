@@ -13,7 +13,7 @@ Read four files. Do not guess a value, a prop or an event name.
 | File | Type | Use it to |
 | --- | --- | --- |
 | **README** (this page) | Quickstart | Load, mount, connect, the rules, the definition of done |
-| **Recipes** | How-to | Do one task: daily use (since you left, replay, decisions, palette, alerts), show agents, connect Hermes or Copilot, sessions, agent talk, add a role, a part or a theme, test |
+| **Recipes** | How-to | Do one task: daily use (since you left, replay, decisions, palette, alerts), show agents, connect Hermes or Copilot, mount a scene again, sessions, agent talk, add a role, a part or a theme, test |
 | **Reference** | Reference (generated) | Look up a token, an event, a command, the office API or a component |
 | **Concepts** | Explanation | Learn why: the model, orchestration map, scene behavior, visual rules, words, accessibility |
 
