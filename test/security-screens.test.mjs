@@ -89,12 +89,12 @@ test('below 700 px of free view a screen in focus shows one agent kind, with Pre
   assert.equal(P.PAGED_BELOW, 700);
   const d = data(), v = view({ paged: true }), p = P.plan(v, d);
   assert.equal(p.hots.filter((h) => h.kind === 'cell').length, 3, 'one column');
-  assert.ok(texts(p).includes('Claude Code (1 of 6)'));
+  assert.ok(texts(p).includes('Claude Code (1 of 7)'));
   const next = P.step(v, hotOf(p, 'next'), d);
   assert.equal(next.view.page, 1);
-  assert.ok(texts(P.plan(next.view, d)).includes('Hermes (2 of 6)'));
+  assert.ok(texts(P.plan(next.view, d)).includes('Hermes (2 of 7)'));
   assert.ok(texts(P.plan(next.view, d)).includes('Not enforced for this agent'));
-  assert.equal(P.step(v, hotOf(p, 'prev'), d).view.page, 5, 'Previous from the first goes to the last');
+  assert.equal(P.step(v, hotOf(p, 'prev'), d).view.page, 6, 'Previous from the first goes to the last');
   // a looser change in the paged view: the row turns to the Confirm
   const r = P.step(v, cell(p, 'files-outside', 'claude-code'), d);
   const pp = P.plan(r.view, d);
@@ -243,13 +243,15 @@ test('Spend: every cost word fits its column, in the full and the paged view', (
   const words = /^(Not reported|Not set up|Free|\$[\d,.]+)$/;
   for (const v of [view({ screen: 'spend', h: 686 }), view({ screen: 'spend', h: 738 })]) {
     const items = P.plan(v, d).items.filter((i) => i.t === 'text' && words.test(i.text));
-    assert.deepEqual(items.map((i) => i.text).sort(), ['$2.00', '$1234.50', 'Free', 'Free', 'Not reported', 'Not reported', 'Not set up'].sort(), 'the limit and the six cost words: an Agent Framework team is free (#23)');
+    assert.deepEqual(items.map((i) => i.text).sort(), ['$2.00', '$1234.50', 'Free', 'Free', 'Not reported', 'Not reported', 'Not reported', 'Not set up'].sort(), 'the limit and the seven cost words: an Agent Framework team is free (#23)');
     for (const i of items) assert.ok(i.text.length * i.s * 0.62 <= i.maxW, `${i.text} at ${i.s} px needs about ${Math.round(i.text.length * i.s * 0.62)} px, has ${i.maxW}`);
-    const labels = P.plan(v, d).items.filter((i) => i.t === 'text' && /^(Claude Code|Hermes|dsh|OpenClaw|Local model|Agent Framework)$/.test(i.text));
-    assert.equal(labels.length, 6, 'every agent kind has its cost column');
+    // a head that does not fit one line takes two (Agent / Framework): every word of every kind is painted
+    const labels = P.plan(v, d).items.filter((i) => i.t === 'text' && /^(Claude|Code|Hermes|dsh|OpenClaw|Local|model|Agent|Framework|Cloud|Claude Code|Local model|Agent Framework|Cloud agent)$/.test(i.text));
+    const said = labels.map((i) => i.text).join(' ');
+    for (const c of globalThis.OfficeVocab.security.columns) for (const w of c.label.split(' ')) assert.ok(said.includes(w), `${w} of ${c.label} has its cost column head`);
     for (const i of labels) assert.ok(i.text.length * i.s * 0.62 <= i.maxW, `${i.text} fits`);
   }
-  for (let page = 0; page < 6; page++) {
+  for (let page = 0; page < 7; page++) {
     const t = P.plan(view({ screen: 'spend', h: 1100, paged: true, page }), d).items.find((i) => i.t === 'text' && /: /.test(i.text) && i.s === 44);
     assert.ok(t.text.length * t.s * 0.62 <= t.maxW, `${t.text} fits the paged view`);
   }

@@ -388,7 +388,7 @@ test('Agent Framework: its own column decides its calls; a default Ask holds a l
   assert.equal(openRefusal(none(), af), null);
   assert.equal(costAsk(none(), af), false);
   const e = enforcement([{ kind: 'claude-code', label: 'Claude Code' }, af]);
-  assert.deepEqual(e['agent-framework'], { reason: '', rows: {}, asks: {}, unset: {}, partly: {} });
+  assert.deepEqual(e['agent-framework'], { reason: '', rows: {}, asks: {}, unset: {}, partly: {}, reports: false });
   assert.match(enforcement([{ kind: 'claude-code', label: 'Claude Code' }])['agent-framework'].reason, /no provider for this agent kind/);
 });
 

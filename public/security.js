@@ -111,7 +111,7 @@
   function charW(size, wt) { return size * (wt >= 600 ? 0.6 : 0.56); }
   // The size a one-line word in a column takes: s, or smaller so that it fits maxW by the same estimate (six agent kinds make
   // the columns narrower, #24), with 5 % more room than charW, so the paint's ellipsis never cuts it. Never under 14 px.
-  function fit(str, s, maxW, wt) { var n = String(str).length; return n ? Math.max(14, Math.min(s, Math.floor(maxW / (n * charW(1, wt) * 1.05)))) : s; }
+  function fit(str, s, maxW, wt) { var n = String(str).length; return n ? Math.max(14, Math.min(s, Math.floor(maxW / (n * charW(1, wt) * 1.08)))) : s; }
   function wrap(str, size, maxW, wt) {
     var cap = Math.max(1, Math.floor(maxW / charW(size, wt))), lines = [], cur = '';
     String(str).split(/\s+/).filter(Boolean).forEach(function (w) {
