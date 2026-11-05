@@ -136,16 +136,36 @@ function saveHistory() {
   clearTimeout(historyTimer);
   historyTimer = setTimeout(() => { try { fs.writeFileSync(HISTORY_FILE, JSON.stringify(history)); } catch { /* ignore */ } }, 800);
 }
+// A reopened session replaces its past record when it has a sid, which is when it records itself (the tracker saves a
+// session at once when its sid first arrives). Until then the past record stays: a reopen that fails before init must
+// not lose the session (#54). While the reopened session is live, its past record is hidden and cannot be reopened again.
+const reopening = new Map(); // uid of the reopened session -> uid of the past record
+function pastInUse() {
+  const used = new Set();
+  for (const [id, past] of reopening) { const s = sessions.get(id); if (s && s.status !== 'ended') used.add(past); }
+  return used;
+}
+const pastShown = () => { const used = pastInUse(); return history.filter((h) => !used.has(h.uid)); };
 function recordHistory(s) {
-  if (!s.headless || !s.sid) return;
+  if (!s.headless) return;
+  if (!s.sid) { if (s.status === 'ended') failedReopen(s); return; }
   const rec = {
     uid: s.uid, sid: s.sid, provider: s.provider, name: s.name, cwd: s.cwd, model: s.model, mode: s.mode, cost: s.cost, turns: s.turns,
     startedAt: s.startedAt, endedAt: s.endedAt, worktree: s.worktree, replies: s.replies.slice(-40), prompt: s.prompt, budget: s.budget,
   };
+  const past = reopening.get(s.uid);
+  if (past) { reopening.delete(s.uid); history = history.filter((h) => h.uid !== past); }
   const i = history.findIndex((h) => h.uid === s.uid);
   if (i >= 0) history[i] = rec; else history.unshift(rec);
   history = history.slice(0, 60);
   saveHistory();
+}
+
+// The reopened session ended before init: the past record stays in Past sessions, and the session shows why.
+function failedReopen(s) {
+  if (!reopening.delete(s.uid)) return;
+  const last = String(s.replies.at(-1)?.text || '').replace(/\s+/g, ' ').trim();
+  tracker.fail(s, `Could not reopen. ${last ? last + ' ' : ''}The past session stays in Past sessions.`);
 }
 
 // ---------- state ----------
@@ -773,18 +793,20 @@ async function openSession(opts) {
 async function reopenSession(uid) {
   const rec = history.find((h) => h.uid === uid);
   if (!rec) throw httpError(404, 'That past session is gone.');
+  if (pastInUse().has(uid)) throw httpError(409, 'That session is open again. Close it first, or wait until it has started.');
   if (!fs.existsSync(rec.cwd)) throw httpError(409, `Its folder is gone: ${rec.cwd}. It may have been a removed worktree.`);
   const plan = providers.reopenPlan(rec);
   const id = openHeadless(plan.provider, plan.opts);
   if (plan.note) { const s = sessions.get(id); if (s) { addFeed(s, 'start', plan.note); broadcast(); } }
-  if (!plan.fresh) { history = history.filter((h) => h.uid !== uid); saveHistory(); }
+  if (!plan.fresh) reopening.set(id, uid); // the past record leaves history when the new session has started (recordHistory)
   return id;
 }
 
 function closeSession(uid) {
   const s = sessions.get(uid);
   if (!s) throw httpError(404, 'No such session.');
-  if (s.status === 'ended') { sessions.delete(uid); broadcast(); return; }
+  if (s.status === 'ended') { sessions.delete(uid); reopening.delete(uid); broadcast(); return; }
+  reopening.delete(uid); // the user closed it: that is not a failed reopen, and the past record stays
   return providerOf(s).close(s).then(() => {
     endSession(s, 'closed from the office');
     broadcast();
@@ -901,7 +923,7 @@ function search(q) {
       return;
     }
   };
-  for (const h of history) scan(h, 'past');
+  for (const h of pastShown()) scan(h, 'past');
   for (const s of sessions.values()) if (s.headless) scan(s, 'live');
   return out.slice(0, 30);
 }
@@ -913,7 +935,7 @@ setInterval(() => {
   let changed = false;
   for (const [uid, s] of sessions) {
     if (s.status === 'ended') {
-      if (Date.now() - s.endedAt > 120_000) { sessions.delete(uid); changed = true; }
+      if (Date.now() - s.endedAt > 120_000) { sessions.delete(uid); reopening.delete(uid); changed = true; }
       continue;
     }
     if (s.pid) {
@@ -1100,7 +1122,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/ext/list') return send(res, 200, await extList(extSession(body.uid)));
     if (url.pathname === '/api/ext') return send(res, 200, await extAction(body));
     if (url.pathname === '/api/control') { doControl(String(body.uid), String(body.action), body.value); return send(res, 200, { ok: true }); }
-    if (url.pathname === '/api/history') return send(res, 200, { sessions: history.map(pastSummary) });
+    if (url.pathname === '/api/history') return send(res, 200, { sessions: pastShown().map(pastSummary) });
     if (url.pathname === '/api/history/forget') { history = history.filter((h) => h.uid !== String(body.uid)); saveHistory(); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/search') return send(res, 200, { results: search(body.q) });
     if (url.pathname === '/api/changes') { const r = folderOf(String(body.uid)); return send(res, 200, { ...(await git.changes(r.cwd)), worktree: r.worktree || null, name: r.name }); }
