@@ -309,7 +309,7 @@ const officeTools = {
   roomUpdate: async (s, args) => updateRoom(await roomOf(s), args),
 };
 const providers = createRegistry([claude, createLocal({ events, kind: 'ollama', baseUrl: process.env.OFFICE_OLLAMA_URL, officeTools }), createLocal({ events, kind: 'lmstudio', baseUrl: process.env.OFFICE_LMSTUDIO_URL, officeTools }),
-  // ACP agents (providers/acp.mjs): Hermes Agent and DeepSeek Harness, one entry each in its AGENTS list.
+  // ACP agents (providers/acp.mjs): Hermes Agent, DeepSeek Harness and OpenClaw, one entry each in its AGENTS list.
   ...Object.keys(ACP_AGENTS).map((kind) => createAcp({ events, kind }))]);
 const providerOf = (s) => providers.of(s);
 ENFORCE = enforcement(providers.list());
@@ -618,6 +618,7 @@ function figuresText(f) {
   if (f.unknown) out.push(`${globalThis.OfficeFormat.costLabel(f.cost, f.unknown)} (an agent here reports no cost)`);
   else if (f.priced) out.push(`${globalThis.OfficeFormat.money(f.cost)} spent`);
   if (f.todosTotal) out.push(`${f.todosDone} of ${f.todosTotal} plan steps done`);
+  if (f.supervision) out.push(f.supervision.indexOf('Unsupervised') === 0 ? `an agent here runs without asking (${f.supervision})` : `an agent here runs some tool calls without asking (${f.supervision})`);
   return out.join(', ') + '.';
 }
 // The figures of every room that has an open session, computed once per snapshot (noteKey -> figures).
@@ -699,7 +700,7 @@ function roomContents(pl) {
     '- A desk with monitors for each bot. A session gets a coder desk. A subagent gets a desk for its type (research, planner, analyst, writer or coder). The monitors show the terminal of that session.',
     '- A beacon light on the back wall. It blinks when a bot in the room waits for the user or has an error.',
     '- On the floor: an elevator lobby on the left side with the elevator and a railing, and a meter near the front right corner.',
-    'The page adds to every lab room: a blackboard on the back wall with what the agents do (plan, browser steps, last steps, the repository and a pinned note), a chalk ledge with two pieces of chalk, a whiteboard with the user notes and a marker tray, a stats display on the left wall (sessions, tool calls, tokens and cost), a door with an Agents sign on the left wall, a warm lamp that is lit at night, and two plants.',
+    'The page adds to every lab room: a blackboard on the back wall with what the agents do (plan, browser steps, last steps, the repository and a pinned note), a chalk ledge with two pieces of chalk, a whiteboard with the user notes and a marker tray, a stats display on the left wall (sessions, tool calls, tokens and cost), a door with an Agents sign on the left wall (under the word Agents it shows the supervision label, for example Partly supervised: commands ask, file edits do not, when an agent in the room runs tool calls without asking), a warm lamp that is lit at night, and two plants.',
     'The window of the first room is a picture: by day a blue sky with clouds over a low skyline, at night a dark sky with a moon over a skyline with lit windows, in Sublevel a lit corridor. It does not show the street.',
     'The ground floor of every building also has the Security room, left of the lab rooms. No agent works in it. Its six wall screens (Files, Commands, Network, Secrets, Agents, Spend) are where the user sets the permission rules: Ask, Allow or Deny for each kind of tool call and agent kind. The office applies them before it asks the user.',
     'In the building view (outside the floors) the office draws a road with lane marks along the front and the right side of the building, sidewalks with trees, two street lights that glow at night, and a flock of birds that circles over the tower.',

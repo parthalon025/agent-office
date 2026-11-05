@@ -211,9 +211,19 @@
     var flat = function (bs) { var o = []; bs.forEach(function (b) { o = o.concat(b.lines); }); return o; };
     if (full) {
       var all = flat(before).concat(head, flat(after), tail);
-      return all.length > 400 ? all.slice(-400) : all;
+      all = all.length > 400 ? all.slice(-400) : all;
+      // An ungated agent (ADR 0001): the label stays at the top of the terminal panel.
+      var sup = window.OfficeVocab.supervision(s);
+      return sup ? [{ text: sup, tone: 'muted' }].concat(all) : all;
     }
-    // a screen: the prompt on top, the questions at the bottom, the newest steps between them
+    // a screen: the label of an ungated agent (ADR 0001, whole, up to two lines) and the prompt on top, the questions at the
+    // bottom, the newest steps between them
+    var supLines = [];
+    window.OfficeVocab.supervisionLines(window.OfficeVocab.supervision(s)).forEach(function (t) {
+      wrapCols(t, cols, '', '  ').forEach(function (u) { supLines.push({ text: u, tone: 'muted' }); });
+    });
+    supLines = supLines.slice(0, rows > 6 ? 3 : 2);
+    rows = Math.max(1, rows - supLines.length);
     tail = tail.slice(-Math.max(1, rows - 1));
     head = head.slice(0, Math.max(0, Math.min(head.length, rows - tail.length)));
     var avail = rows - head.length - tail.length, body = [];
@@ -222,7 +232,7 @@
       if (ls.length <= avail) { body = ls.concat(body); avail -= ls.length; }
       else { body = (after[j].text ? ls.slice(ls.length - avail) : ls.slice(0, avail)).concat(body); avail = 0; }
     }
-    return head.concat(body, tail);
+    return supLines.concat(head, body, tail);
   }
 
   // ---------- stats ----------
@@ -261,6 +271,7 @@
     var pre = kind ? kind + DOT : '';
     if (todos.length) S.rows.push(['Agent', pre + model]);
     else S.rows.push(['Agent', pre + (s.headless ? 'in the office' : 'in a terminal')], ['Model', model]);
+    if (window.OfficeVocab.supervision(s)) S.rows.push(['Oversight', window.OfficeVocab.supervision(s)]);
     S.rows.push(['Context', pct == null ? '--' : pct + '%', 'bar', pct]);
     if (!todos.length) S.rows.push(['Tokens', u.tokens ? fmtTok(u.tokens) + (u.input ? DOT + Math.round(100 * (u.cached || 0) / u.input) + '% cached' : '') : '--']);
     S.rows.push(['Spend', money(s.cost, s.costUnknown) + DOT + plural(+s.turns || 0, 'turn', 'turns')]);
@@ -547,7 +558,7 @@
     function viewOf(e, s, info) {
       var v = { k: e.kind, name: e.name, word: info.word, key: info.key, live: info.live, hover: e.hover && e.uid ? e.hover : '', look: K.look, th: themeN };
       if (e.kind === 'term') {
-        v.sub = s && s.helper ? 'subagent' : shortModel(s && s.model);
+        v.sub = s && s.helper ? 'subagent' : [shortModel(s && s.model), window.OfficeVocab.supervisionHead(window.OfficeVocab.supervision(s))].filter(Boolean).join(DOT);
         v.lines = lines(s, e.P.cols, e.P.rows);
         if (e.footer) v.foot = footOf(s);
       } else { v.sub = 'Stats'; v.stats = statsOf(s, kindOf(s)); }
