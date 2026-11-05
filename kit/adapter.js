@@ -1,4 +1,4 @@
-/* Agent Office kit x1.6.1: adapter template.
+/* Agent Office kit x1.6.7: adapter template.
    1. Fill the two tables. 2. Change connect() and call() for your platform. 3. Keep AgentOffice.strict on while you test.
    Event and command names: Reference.md or kit/schema.json. */
 (function () {

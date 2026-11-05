@@ -210,6 +210,65 @@ test('no source starts a program by a bare name, through a shell, or with shell:
   assert.deepEqual(bad, [], 'start programs with resolveExe(name) from git.mjs:\n' + bad.join('\n'));
 });
 
+// ---------- the folder a program starts in (#78) ----------
+// On Windows a running process keeps its current folder busy: nobody can remove or rename that folder until the process
+// ends. A helper that inherits the office's folder (the walkToClaude PowerShell, icacls, the ACL reader) kept a temp
+// office busy for about a second after a test killed the server (EBUSY in fs.rmSync). So every program the office
+// starts names its folder: the session folder for work in it, git.helperCwd() for a helper that works on no folder.
+
+/** Top-level arguments of the call whose opening parenthesis ends at `from`. */
+function argsOf(src, from) {
+  const out = [];
+  for (let j = from; ;) {
+    const end = endOf(src, j, true);
+    out.push(src.slice(j, end).trim());
+    if (end >= src.length || src[end] !== ',') return out;
+    j = end + 1;
+  }
+}
+/** Spawn calls that let the program inherit the office's folder: no options, or options with no cwd. Options passed on
+ *  as one name (`opts`) belong to the caller, and the caller's call is checked. */
+function inheritedCwd(src) {
+  const bad = [];
+  for (const m of src.matchAll(SPAWN_RE)) {
+    const args = argsOf(src, m.index + m[0].length);
+    const last = args[args.length - 1] || '';
+    const opts = /^(?:\([^)]*\)|\w+)\s*=>/.test(last) || /^function\b/.test(last) ? args[args.length - 2] : last;   // execFile(file, args, opts, done)
+    const passed = args.length >= 3 && /^[\w$.]+$/.test(opts || '');
+    if (args.length < 3 || !(passed || /\bcwd\b/.test(opts))) bad.push({ line: src.slice(0, m.index).split('\n').length, call: m[0] + args.join(', ').slice(0, 120) });
+  }
+  return bad;
+}
+
+test('the folder check finds a program with no cwd and allows named or passed-on options', () => {
+  const flagged = (s) => inheritedCwd(s).length > 0;
+  assert.ok(flagged("spawn(exe, ['-c', x], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] })"));
+  assert.ok(flagged("execFileSync(exe, args)"));
+  assert.ok(flagged("execFile(exe, args, { windowsHide: true }, (err, out) => done(err))"));
+  assert.ok(!flagged("spawn(exe, args, { cwd: s.cwd, windowsHide: true })"));
+  assert.ok(!flagged("execFile(exe, args, { cwd, timeout }, (err) => {})"));
+  assert.ok(!flagged("execFileSync(exe, args, { cwd: helperCwd(), stdio: 'pipe' })"));
+  assert.ok(!flagged('execFile(file, args, opts, done)'));
+});
+
+test('every program the office starts names the folder it starts in', () => {
+  const files = sources().filter((f) => !f.startsWith(path.join(ROOT, 'test') + path.sep));   // a test picks its own folders
+  assert.ok(files.some((f) => path.basename(f) === 'server.mjs') && files.some((f) => path.basename(f) === 'local-tools.mjs'));
+  const bad = [];
+  for (const f of files) for (const b of inheritedCwd(fs.readFileSync(f, 'utf8'))) bad.push(`${path.relative(ROOT, f)}:${b.line} ${b.call}`);
+  assert.deepEqual(bad, [], 'give every spawn a cwd (git.helperCwd() for a helper):\n' + bad.join('\n'));
+});
+
+test('helperCwd is a folder that exists, outside the office folder and the temp folder', () => {
+  const dir = git.helperCwd();
+  assert.ok(path.isAbsolute(dir) && fs.statSync(dir).isDirectory(), dir);
+  const inside = (a, b) => { const r = path.relative(b, a); return r === '' || (!r.startsWith('..') && !path.isAbsolute(r)); };
+  assert.ok(!inside(dir, ROOT), 'not in the office folder');
+  assert.ok(!inside(dir, os.tmpdir()), 'not in the temp folder, where tests make offices and session folders');
+  if (win) assert.ok(same(dir, process.env.SystemRoot || process.env.windir), 'Windows: %SystemRoot%');
+  if (win) assert.ok(same(git.helperCwd({ SystemRoot: 'relative\\dir' }), git.helperCwd({})), 'a relative SystemRoot is not used');
+});
+
 test('server, hook, MCP and probe set the guard as their first statement', () => {
   for (const name of ['server.mjs', 'hook.mjs', 'mcp.mjs', 'probe.mjs']) {
     const first = fs.readFileSync(path.join(ROOT, name), 'utf8').split(/\r?\n/)

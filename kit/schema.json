@@ -1,5 +1,5 @@
 {
- "version": "x1.6.1",
+ "version": "x1.6.7",
  "events": {
   "status": {
    "desc": "A bot changes state. The bot walks to rest or back to its seat when needed.",
@@ -71,7 +71,7 @@
    }
   },
   "session.end": {
-   "desc": "A session ends. Its blob, if any, walks back to the elevator.",
+   "desc": "A session ends. Its blob, if any, first walks to its desk and sits for a short time (1.4 s), then walks back to the elevator.",
    "fields": {
     "bot": "string",
     "session": "string",
@@ -107,7 +107,7 @@
    }
   },
   "subagent.done": {
-   "desc": "A subagent returns its result. A temporary subagent leaves by the elevator.",
+   "desc": "A subagent returns its result. A temporary subagent first walks to its desk and sits for a short time (1.4 s), then leaves by the elevator.",
    "fields": {
     "bot": "string",
     "result": "string?",
@@ -468,6 +468,7 @@
   "scene-wall-h",
   "scene-wall-side",
   "scene-wood",
+  "scrim",
   "shadow-panel",
   "space-1",
   "space-2",

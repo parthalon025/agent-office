@@ -50,23 +50,9 @@ async function open(name) {
   assert.equal(r.status, 200, JSON.stringify(r.json));
   return r.json.uid;
 }
-// The sessions the server shows: the first snapshot of the event stream.
-async function snapshot() {
-  const ctl = new AbortController();
-  try {
-    const r = await fetch(`http://127.0.0.1:${port}/events`, { headers: { 'x-office-token': pageToken }, signal: ctl.signal });
-    const reader = r.body.getReader();
-    let buf = '';
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) return null;
-      buf += Buffer.from(value).toString('utf8');
-      const m = /data: (.*)\n\n/.exec(buf);
-      if (m) return JSON.parse(m[1]);
-    }
-  } finally { ctl.abort(); }
-}
-const sessionOf = async (uid) => (await snapshot()).sessions.find((s) => s.uid === uid);
+// One session with all its data (provider, budget, ...) and its feed lines: the snapshot carries only what the page reads.
+const fullOf = async (uid) => { const r = await fetch(`http://127.0.0.1:${port}/api/session?uid=${encodeURIComponent(uid)}`, { headers: { 'x-office-token': pageToken } }); return r.ok ? r.json() : null; };
+const sessionOf = async (uid) => (await fullOf(uid))?.session;
 
 before(async () => {
   if (SKIP) return;
@@ -209,8 +195,8 @@ test('a past local session reopens as a fresh local session in the same folder',
   assert.equal(s.provider, 'ollama');
   assert.equal(s.model, 'fake-model', 'the same model as the past session');
   assert.equal(s.cwd.toLowerCase(), work.toLowerCase());
-  const snap = await snapshot();
-  assert.ok(snap.feed.some((f) => /cannot resume a past session/.test(f.text || '')), 'the feed says why it is a new session');
+  const { feed } = await fullOf(re.json.uid);
+  assert.ok(feed.some((f) => /cannot resume a past session/.test(f.text || '')), 'the feed says why it is a new session');
 });
 
 // ---------- default spend limit (#33). No paid session opens here: a paid one would start claude. ----------
@@ -223,6 +209,13 @@ test('a local session has no spend limit, also when the default is set or one is
   const b = await call('/api/open', { cwd: work, name: 'free-b', provider: 'ollama', model: 'fake-model', where: 'office', maxBudget: 9 });
   assert.equal(b.status, 200, JSON.stringify(b.json));
   assert.equal((await sessionOf(b.json.uid)).budget, null, 'a model on this machine costs nothing');
+});
+
+// The Attach sessions dialog hides the agent token until the user clicks Show (#60), so info must carry it.
+test('info gives the agent token to the page token only', { skip: SKIP }, async () => {
+  assert.equal((await info()).agentToken, agentToken, 'the page can show and copy the token the hooks need');
+  const r = await fetch(`http://127.0.0.1:${port}/api/info`, { headers: { 'x-office-token': agentToken } });
+  assert.equal(r.status, 401, 'the agent token opens no /api route');
 });
 
 test('the default spend limit shows in info, can be changed or cleared, and a bad value is refused', { skip: SKIP }, async () => {

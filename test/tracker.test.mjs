@@ -112,6 +112,36 @@ test('a session outside git is placed with git null and still counts as placed',
   assert.equal(r.changes, before, 'same place again is not a change');
 });
 
+test('a failed git lookup keeps the last known place when the folder is the same', async () => {
+  let fail = false;
+  const r = rig({ locate: () => (fail ? null : GIT) });
+  r.hook(HOOKS.turnWithEdit[0]); await wait();
+  const s = r.only();
+  assert.deepEqual(s.git, GIT);
+  const before = r.changes, placedBefore = r.placed.length;
+  fail = true;
+  r.t += 20000; r.tracker.placeSession(s); await wait();
+  assert.deepEqual(s.git, GIT, 'null from locate does not drop the place');
+  assert.equal(s.placed, true);
+  assert.equal(r.changes, before, 'no change is announced');
+  assert.equal(r.placed.length, placedBefore, 'the kept place is not saved again');
+  fail = false;
+  r.t += 20000; r.tracker.placeSession(s); await wait();
+  assert.deepEqual(s.git, GIT, 'the next good lookup is fine');
+});
+
+test('a null git lookup is believed when the folder changed', async () => {
+  let there = GIT;
+  const r = rig({ locate: () => there });
+  r.hook(HOOKS.turnWithEdit[0]); await wait();
+  const s = r.only();
+  assert.deepEqual(s.git, GIT);
+  there = null;
+  s.cwd = 'C:\\elsewhere';
+  r.tracker.placeSession(s); await wait();
+  assert.equal(s.git, null, 'a new folder outside git is Other folders');
+});
+
 test('a permission request waits, then the tool result clears it', () => {
   const r = rig();
   r.hook(HOOKS.turnWithEdit[1]);

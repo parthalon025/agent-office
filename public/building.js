@@ -4,7 +4,9 @@
 
    Snapshot store (createStore): owns the latest snapshot, the people who listen to it, and the building
    adapters that are on screen.
-     set(snap)             the SSE feed calls this for each snapshot
+     set(snap)             a whole snapshot
+     receive(msg)          the SSE feed calls this for each message: a whole snapshot or a patch (wire.js);
+                           false when a patch does not fit the latest snapshot (then connect again)
      latest()              the newest snapshot, or null
      onSnapshot(fn)        fn(snap) now (when there is one) and on each snapshot; returns an unsubscribe function
      buildings(snap?)      the buildings, busiest first
@@ -28,6 +30,9 @@
      detach()              the scene stops: later snapshots and timers do nothing
      stale(snap?)          true when the scene shows a worktree room that is gone.
                            The DS has no event that removes a floor or a room, so the page mounts a new adapter.
+     floorBranch(floorId)  the branch of a DS floor id in this scene, or null
+     floorId(branch)       the DS floor id of a branch in this scene's definition, or null
+                           OfficeBuilding.keepFloor(fromMount, floorId, toMount) joins them for a rebuild.
      roomInfo(roomId)      { sessions, place } of one room of this building
      figures(roomId)       the server's figures for that room
      noteKey(roomId)       the server's notes key for that room
@@ -198,6 +203,14 @@
       latest = snap;
       attached.slice().forEach(function (m) { m._follow(snap); });
       listeners.slice().forEach(function (fn) { try { fn(snap); } catch (x) { /* a bad listener must not stop the office */ } });
+    };
+    // One /events message (wire.js): a whole snapshot, or a patch on top of the latest one. False when a patch does
+    // not start from the latest snapshot (nothing changes then): the caller connects again for a whole snapshot.
+    store.receive = function (msg) {
+      if (!msg || !msg.patch) { store.set(msg); return true; }
+      if (!root.OfficeWire.fits(latest, msg)) return false;
+      store.set(root.OfficeWire.apply(latest, msg));
+      return true;
     };
     store.onSnapshot = function (fn) {
       listeners.push(fn);
@@ -387,11 +400,14 @@
             pick(prev && prev.asked[q.id])(stamp({ type: 'request', bot: bot0, id: q.id, text: q.text, tool: 'office_ask' }, q.t));
           });
           // what the session said (headless sessions only; a terminal session answers in its terminal).
-          // Restored replies fill the chat without speech bubbles, like restored tool calls.
+          // Restored replies fill the chat without speech bubbles, like restored tool calls. The replies of a bot this
+          // scene sees for the first time in a live pass are restored too (seeded, without at, like its error below): it
+          // may have said them live here before (a round trip through another building, a reopened session that
+          // carries its old replies), and a seeded event with at after the last visit would be recorded a second time (#58).
           (s.replies || []).forEach(function (r) {
             if (r.id <= k.replySeen) return;
             k.replySeen = r.id;
-            var e = pick(prev && r.id <= prev.replySeen), msg = stamp({ type: 'message', bot: bot0, text: r.text }, r.t);
+            var e = prev ? pick(r.id <= prev.replySeen) : (firstSight && !seedAll ? restore : emit), msg = stamp({ type: 'message', bot: bot0, text: r.text }, r.t);
             if (e !== out) msg.say = false;
             e(msg);
           });
@@ -466,6 +482,13 @@
         Object.keys(layout.floors).forEach(function (br) { Object.keys(layout.floors[br].rooms).forEach(function (root) { out.push(br + '|' + root); }); });
         return out;
       };
+      // The branch a DS floor id stands for in this scene (the layout follows the floors added later), or null.
+      m.floorBranch = function (id) {
+        for (var br in layout.floors) { if (layout.floors[br].id === id) return br; }
+        return null;
+      };
+      // The id of the floor of a branch in the definition this scene starts with, or null.
+      m.floorId = function (branch) { var f = d.floors[branch]; return f ? f.id : null; };
       m.stale = function (snap) {
         var nowRooms = roomsNow(snap || latest, repo);
         seeWorktrees(snap || latest);
@@ -510,5 +533,14 @@
     return store;
   }
 
-  root.OfficeBuilding = { createStore: createStore, shapeOf: shapeOf, colorOf: colorOf, buildings: buildings, requests: requests, describe: describe, roomsNow: roomsNow };
+  // The floor a new scene of a building starts on, so a rebuild keeps the floor the user picked: the floor id in
+  // the old scene (fromMount) as a floor id in the new scene (toMount). Floor ids are new for each mount, so the
+  // match is by branch. Null when the floor is gone or unknown: the scene then uses its own default.
+  function keepFloor(fromMount, floorId, toMount) {
+    if (!fromMount || !toMount || floorId == null) return null;
+    var br = fromMount.floorBranch(floorId);
+    return br == null ? null : toMount.floorId(br);
+  }
+
+  root.OfficeBuilding = { createStore: createStore, keepFloor: keepFloor, shapeOf: shapeOf, colorOf: colorOf, buildings: buildings, requests: requests, describe: describe, roomsNow: roomsNow };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

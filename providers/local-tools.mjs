@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
 import { inside, realInside, isProtectedPart } from '../risk.mjs';
-import { resolveExe } from '../git.mjs'; // absolute program paths: a cmd.exe planted in the worktree never runs
+import { resolveExe, helperCwd } from '../git.mjs'; // absolute program paths: a cmd.exe planted in the worktree never runs
 
 export const LIMITS = {
   readBytes: 200_000,     // most of one file the model gets back
@@ -41,7 +41,7 @@ const clip = (s, n) => (s.length > n ? s.slice(0, n) + `\n[cut: ${s.length - n} 
 /** Kill a process and its children. Windows: taskkill /T by PID (a shell's children outlive a plain kill). */
 export function killTree(pid, run = execFile) {
   if (!pid) return;
-  if (process.platform === 'win32') run(resolveExe('taskkill'), ['/PID', String(pid), '/T', '/F'], { windowsHide: true }, () => {});
+  if (process.platform === 'win32') run(resolveExe('taskkill'), ['/PID', String(pid), '/T', '/F'], { cwd: helperCwd(), windowsHide: true }, () => {});
   else { try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } } }
 }
 

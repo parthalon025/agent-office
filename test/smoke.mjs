@@ -20,7 +20,8 @@ const api = async (route, body) => { const r = await fetch(`http://127.0.0.1:${c
 const snap = () => new Promise((res) => { fetch(`http://127.0.0.1:${cfg.port}/events`, { headers: { 'x-office-token': page.token } }).then(async (r) => { const rd = r.body.getReader(); const { value } = await rd.read(); rd.cancel(); res(JSON.parse(new TextDecoder().decode(value).split('\n')[0].slice(6))); }); });
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 60000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = await fn(); if (v) return v; await wait(700); } return null; };
-const me = async (uid) => (await snap()).sessions.find((x) => x.uid === uid);
+// One session with all its data (sid, budget, worktree, every reply): /events sends only what the page reads.
+const me = async (uid) => { const r = await fetch(`http://127.0.0.1:${cfg.port}/api/session?uid=${encodeURIComponent(uid)}`, { headers: { 'x-office-token': page.token } }); return r.ok ? (await r.json()).session : undefined; };
 const ok = (name, cond, extra = '') => console.log((cond ? 'PASS ' : 'FAIL ') + name + (extra ? ' | ' + extra : ''));
 
 // a scratch git repo

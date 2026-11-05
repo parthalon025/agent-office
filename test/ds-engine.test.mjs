@@ -245,6 +245,82 @@ test('seen time is after every recorded event, also one in the same ms (#35)', (
   assert.ok(seenNow([{ t: 10 }]) >= now);
 });
 
+// ---------- the saved history has a size cap (agent-office #30) ----------
+// A localStorage stand-in with a quota in characters (keys and values), like the browser's.
+function storage(quota, init = {}) {
+  const m = new Map(Object.entries(init));
+  const used = () => [...m].reduce((n, [k, v]) => n + k.length + v.length, 0);
+  return {
+    m, sets: 0,
+    get length() { return m.size; },
+    key: (i) => [...m.keys()][i] ?? null,
+    getItem: (k) => (m.has(k) ? m.get(k) : null),
+    setItem(k, v) {
+      this.sets++;
+      const old = m.get(k);
+      m.set(k, String(v));
+      if (used() > quota) { if (old === undefined) m.delete(k); else m.set(k, old); const e = new Error('The quota has been exceeded.'); e.name = 'QuotaExceededError'; throw e; }
+    },
+    removeItem: (k) => { m.delete(k); },
+  };
+}
+function saver(store, { HBYTES = 4000, HTEXT = 40, history = [] } = {}) {
+  const st = { history, lastSeen: 500 };
+  return Object.assign(new Function('st', 'HKEY', 'HBYTES', 'HTEXT', 'window', 'hsz',
+    'var saveT=null,lastSave=0;' + source(' function hslim(') + source(' function hfit(') + source(' function hevict(') + source(' function hsave(') +
+    'return { hsave: hsave, hfit: hfit, hslim: hslim };'
+  )(st, 'ao-history:Here', HBYTES, HTEXT, { localStorage: store }, new WeakMap()), { st });
+}
+const entries = (n, text = 'ok') => Array.from({ length: n }, (_, i) => ({ t: 1000 + i, ev: { type: 'message', bot: 'Ada', text: text + ' ' + i } }));
+
+test('saved history: the newest entries that fit the size cap, in time order; long text is cut in the saved copy only', () => {
+  const store = storage(1e9);
+  const long = 'x'.repeat(500) + ' end';
+  const h = entries(400);
+  h[399].ev.text = long;
+  h[399].ev.attachments = [{ name: 'a.png', url: 'data:image/png;base64,' + 'A'.repeat(900) }];
+  const s = saver(store, { history: h });
+  s.hsave();
+  const raw = store.m.get('ao-history:Here');
+  assert.ok(raw.length <= 4000 + 60, `${raw.length} characters saved`);
+  const d = JSON.parse(raw);
+  assert.equal(d.v, 1); assert.equal(d.lastSeen, 500);
+  assert.ok(d.history.length > 10 && d.history.length < 400, `${d.history.length} entries kept`);
+  assert.deepEqual(d.history.map((x) => x.t), h.slice(-d.history.length).map((x) => x.t), 'the newest ones, in order');
+  const last = d.history.at(-1).ev;
+  assert.equal(last.text.length, 40, 'a long text is cut');
+  assert.ok(last.text.endsWith('…'));
+  assert.equal(last.attachments[0].url, '', 'a long data URL is dropped, not cut');
+  assert.equal(last.attachments[0].name, 'a.png');
+  assert.equal(h[399].ev.text, long, 'the history in memory keeps the whole text (replay shows it until reload)');
+  assert.equal(s.st.history.length, 400);
+});
+
+test('saved history: when the browser is full, the building seen longest ago goes first, then the oldest half', () => {
+  const old = JSON.stringify({ v: 1, lastSeen: 10, history: entries(30) }), newer = JSON.stringify({ v: 1, lastSeen: 900, history: entries(30) });
+  const store = storage(old.length + newer.length + 1500, { 'ao-history:Old': old, 'ao-history:Newer': newer, 'ao-view': 'office' });
+  const s = saver(store, { HBYTES: 2500, history: entries(200) });
+  s.hsave();
+  assert.ok(store.m.has('ao-history:Here'), 'this building is saved');
+  assert.ok(!store.m.has('ao-history:Old'), 'the building seen longest ago is gone');
+  assert.ok(store.m.has('ao-history:Newer'), 'a building seen later stays');
+  assert.equal(store.m.get('ao-view'), 'office', 'other keys stay');
+  const kept = JSON.parse(store.m.get('ao-history:Here')).history.length;
+  // no other building to remove: the oldest half of this one goes, until it fits
+  const tight = storage(2200);
+  const t = saver(tight, { HBYTES: 100000, history: entries(200) });
+  t.hsave();
+  const d = JSON.parse(tight.m.get('ao-history:Here'));
+  assert.ok(d.history.length > 0 && d.history.length < 200, `${d.history.length} entries`);
+  assert.equal(d.history.at(-1).t, 1199, 'the newest entry stays');
+  assert.ok(kept > 0);
+  // nothing fits at all: no throw, nothing saved, and it stops trying
+  const none = storage(10);
+  const n = saver(none, { history: entries(50) });
+  assert.doesNotThrow(() => n.hsave());
+  assert.ok(none.sets <= 8, `${none.sets} tries`);
+});
+
 test('a plan keeps its own copy of the steps, so plan.step does not change the recorded event (#50)', () => {
   assert.match(bundle, /st\.plans\[b\.name\]=\{goal:ev\.goal,steps:\(ev\.steps\|\|\[\]\)\.map\(function\(x\)\{return Object\.assign\(\{\},x\);\}\)\}/);
 });
@@ -424,4 +500,133 @@ test('floor.update and room.update rename in place: the floor and room stay, bot
   assert.equal(e.updateRoom('missing', { name: 'x' }), undefined);
   assert.equal(e.updateFloor(9, { name: 'x' }), undefined);
   assert.ok(!calls.includes('FRAME'), 'a rename never moves the camera');
+});
+
+// #64: the narrow floor strip (HUD left at 820 px and below) is one row that scrolls sideways. A row keeps the width
+// of its name; it does not shrink (the name has min-width 0), so names do not draw on top of each other.
+const dsCss = readFileSync(join(root, 'components', 'bundle.css'), 'utf8').replace(/\r\n/g, '\n');
+test('narrow floor strip: a floor row does not shrink, so the names do not overlap (#64)', () => {
+  const r = dsCss.match(/@container \(max-width:820px\)\{[^\n]*?\.ao-hud-left \.ao-floors \.ao-row\{([^}]*)\}/);
+  assert.ok(r, 'the floor row rule of the 820 px container query');
+  assert.match(r[1], /(^|;)flex:none(;|$)/);
+  assert.match(r[1], /white-space:nowrap/);
+});
+
+test('floorScroll: the current floor is centered in a strip that scrolls; no scroll when all floors fit (#64)', () => {
+  const floorScroll = new Function(source('function floorScroll(') + 'return floorScroll;')();
+  assert.equal(floorScroll(300, 300, 100, 80), null, 'no overflow');
+  assert.equal(floorScroll(1200, 300, 600, 100), 500, 'centered: 600 + 50 - 150');
+  assert.equal(floorScroll(1200, 300, 20, 100), 0, 'never before the start');
+  assert.equal(floorScroll(1200, 300, 1150, 50), 900, 'never past the end');
+});
+
+test('FloorList scrolls the current floor into view when the floor or the list changes (#64)', () => {
+  const fl = source('function FloorList(p){var fl=p.floors', '));}\n');
+  assert.match(fl, /h\("div",\{className:"ao-floors",ref:box\}/);
+  assert.match(fl, /R\.useEffect\(function\(\)\{[^}]*querySelector\('\[aria-current="true"\]'\)[\s\S]*?floorScroll\(/);
+  assert.match(fl, /\},\[p\.current,fl\.length\]\);/);
+});
+
+// #66: the page lays its own cards out around Since you left, so the scene says when the card shows and when it goes.
+test('OfficeScene reports Since you left: true when the card shows, false when it closes or the scene goes (#66)', () => {
+  assert.ok(bundle.includes('R.useEffect(function(){if(!D.syl)return;var cb=sylCb.current;if(cb)cb(true);return function(){var c=sylCb.current;if(c)c(false);};},[!!D.syl]);'));
+  assert.ok(bundle.includes('sylCb=R.useRef(null);sylCb.current=p.onSinceYouLeft;'));
+});
+
+// ---- retire: a temporary subagent sits at its desk before it leaves by the elevator ----
+function retireRig({ rm = false, view = 'floor', shown = true, exitMs = 0 } = {}) {
+  let now = 0, id = 0;
+  const timers = new Map(), left = [], removed = [];
+  const s = { rm, dead: false }, st = { view, floor: 1 };
+  const b = { name: 'sub', floor: shown ? 1 : 2, path: [new V(1, 0, 1)], pos: { x: 0, z: 0 } };
+  const env = {
+    s, st, DUR: { dwell: 1400 }, Date: { now: () => now },
+    byName: (n) => (removed.includes(n) ? null : b),
+    removeBot: (n) => removed.push(n),
+    leaveByElevator: (bot, done) => { left.push(now); if (exitMs === 0) done(); else if (exitMs !== Infinity) env.setTimeout(done, exitMs); },
+    setTimeout: (f, ms) => { timers.set(++id, { f, at: now + ms }); return id; },
+  };
+  const retire = new Function(...Object.keys(env), source('function retire(b)') + 'return retire;')(...Object.values(env));
+  const advance = (ms) => { // run due timers in time order, 10 ms at a time
+    for (const end = now + ms; now < end;) { now += 10; for (const [k, t] of [...timers]) if (t.at <= now) { timers.delete(k); t.f(); } }
+  };
+  const walk = (ms) => { for (let i = 0; i < ms / 1000; i++) { b.pos = { x: b.pos.x + 1, z: b.pos.z }; advance(1000); } }; // a bot that moves 1 unit a second
+  return { b, st, retire, advance, walk, left, removed };
+}
+
+test('retire: a bot that still walks in is not sent out; it leaves after the dwell once it sits', () => {
+  const r = retireRig();
+  r.retire(r.b);
+  r.advance(3000); // the old fixed timer (1400 ms) would have sent it out by now
+  assert.equal(r.left.length, 0, 'still walking: no exit');
+  r.b.path = []; // arrived at the seat
+  r.advance(1300);
+  assert.equal(r.left.length, 0, 'sits first');
+  r.advance(300);
+  assert.equal(r.left.length, 1, 'then leaves');
+  assert.ok(r.left[0] - 3000 >= 1400, 'a full dwell after it arrived');
+  assert.deepEqual(r.removed, ['sub']);
+});
+
+test('retire: a long walk in and a long walk out are never cut by a timer while the bot moves', () => {
+  const r = retireRig({ exitMs: Infinity }); // far room: 40 s in, 40 s out
+  r.retire(r.b);
+  r.walk(40000);
+  assert.equal(r.left.length, 0, 'still walking in after 40 s');
+  r.b.path = [];
+  r.advance(1500);
+  assert.equal(r.left.length, 1, 'it starts the exit walk after the dwell');
+  r.walk(40000);
+  assert.equal(r.removed.length, 0, 'still walking to the elevator after 40 s');
+});
+
+test('retire: a bot that stops moving for 15 s is removed, on the way in or out', () => {
+  const inn = retireRig({ exitMs: Infinity });
+  inn.retire(inn.b);
+  inn.walk(5000);
+  inn.advance(13800); // the last move was seen about 1 s before the walk call ended
+  assert.equal(inn.removed.length, 0);
+  inn.advance(1500);
+  assert.deepEqual(inn.removed, ['sub'], 'stuck on the way in');
+  const out = retireRig({ exitMs: Infinity });
+  out.retire(out.b);
+  out.b.path = [];
+  out.advance(1600);
+  assert.equal(out.left.length, 1);
+  out.advance(15200);
+  assert.deepEqual(out.removed, ['sub'], 'stuck on the way out');
+});
+
+test('retire: a hard cap of 120 s removes a bot that keeps moving but never finishes', () => {
+  const r = retireRig({ exitMs: Infinity });
+  r.retire(r.b);
+  r.walk(119000);
+  assert.equal(r.removed.length, 0);
+  r.walk(2000);
+  assert.deepEqual(r.removed, ['sub']);
+});
+
+test('retire: a bot that is walking out is removed at once when its floor goes off screen', () => {
+  for (const off of [(st) => { st.view = 'building'; }, (st) => { st.floor = 2; }]) {
+    const r = retireRig({ exitMs: Infinity });
+    r.retire(r.b);
+    r.b.path = [];
+    r.advance(1600);
+    assert.equal(r.left.length, 1, 'on the exit walk');
+    r.walk(2000);
+    assert.equal(r.removed.length, 0, 'still shown: it keeps walking');
+    off(r.st);
+    r.advance(200); // not the 15 s stall
+    assert.deepEqual(r.removed, ['sub']);
+  }
+});
+
+test('retire: reduced motion and a floor that is not on screen do not wait for the walk', () => {
+  for (const opt of [{ rm: true }, { shown: false }, { view: 'building' }]) {
+    const r = retireRig(opt);
+    r.retire(r.b); // path is still set: nothing walks it here
+    r.advance(1500);
+    assert.equal(r.left.length, 1, JSON.stringify(opt));
+    assert.deepEqual(r.removed, ['sub']);
+  }
 });

@@ -352,11 +352,17 @@
       { id: 'schedule', name: 'Schedules', route: 'Open an office session on time', today: live.filter(function (s) { return s.scheduleId; }).length },
       { id: 'terminal', name: 'Terminal sessions', route: (i.hooksMode || 'command') + ' hooks', today: live.filter(function (s) { return !s.headless; }).length }];
     // Copy needs a secure page. The office runs on localhost, which counts as one; if the browser still refuses, say so.
-    function copy(text, what) {
+    function copy(text, what, byHand) {
       var ok = function () { if (p.toast) p.toast({ tone: 'success', title: 'Copied', text: what + ' is on your clipboard.' }); };
-      var no = function () { if (p.toast) p.toast({ tone: 'error', title: 'Not copied', text: 'The browser blocked the copy. Select the text and copy it by hand.' }); };
+      var no = function () { if (p.toast) p.toast({ tone: 'error', title: 'Not copied', text: 'The browser blocked the copy. ' + (byHand || 'Select the text and copy it by hand.') }); };
       try { navigator.clipboard.writeText(text).then(ok, no); } catch (x) { no(); }
     }
+    // The agent token stays hidden until the user clicks Show, so a screen share or a screenshot does not leak it (#60).
+    // It shows in the HTTP hooks (the snippet), so the token field and the mask apply only when the snippet holds it.
+    var tk = useState(false), tokenShown = tk[0], setTokenShown = tk[1];
+    var token = i.agentToken || '';
+    var tokenUsed = !!token && String(i.settingsSnippet || '').indexOf(token) >= 0;
+    var snippetText = tokenUsed && !tokenShown ? F.maskSecret(i.settingsSnippet, token) : (i.settingsSnippet || '');
     var su = useState(i.startup || null), startup = su[0], setStartup = su[1];
     var sb = useState(false), startBusy = sb[0], setStartBusy = sb[1];
     function toggleStartup() {
@@ -396,8 +402,15 @@
           h(A.Button, { variant: 'quiet', icon: 'copy', disabled: !i.launchCommand, onClick: function () { copy(i.launchCommand, 'The launch command'); } }, 'Copy command')),
         h('p', { className: 'note' }, 'Hooks: ' + (i.hooksMode || '') + ' on Claude Code ' + (i.claudeVersion || '') + '. Or merge these hooks into ~/.claude/settings.json to seat every session on this machine.'),
         h('div', { className: 'copy-row' },
-          h('pre', { className: 'code', tabIndex: 0, style: { maxHeight: 200 } }, i.settingsSnippet || ''),
-          h(A.Button, { variant: 'quiet', icon: 'copy', disabled: !i.settingsSnippet, onClick: function () { copy(i.settingsSnippet, 'The hooks'); } }, 'Copy hooks'))));
+          h('pre', { className: 'code', tabIndex: 0, style: { maxHeight: 200 } }, snippetText),
+          h(A.Button, { variant: 'quiet', icon: 'copy', disabled: !i.settingsSnippet, onClick: function () { copy(i.settingsSnippet, 'The hooks', tokenUsed ? 'Click Show, then select the text and copy it by hand.' : undefined); } }, 'Copy hooks')),
+        tokenUsed ? h('h3', { className: 'ext-h' }, 'Agent token') : null,
+        tokenUsed ? h('p', { className: 'note' }, 'The HTTP hooks use this token to reach the office. Keep it private. It stays hidden until you click Show token.') : null,
+        tokenUsed ? h('div', { className: 'copy-row' },
+          h(A.TextInput, { id: 'h-token', label: 'Agent token', type: tokenShown ? 'text' : 'password', value: token, onChange: function () { /* read only */ } }),
+          h('div', { className: 'btn-row' },
+            h(A.Button, { variant: 'quiet', onClick: function () { setTokenShown(!tokenShown); } }, tokenShown ? 'Hide token' : 'Show token'),
+            h(A.Button, { variant: 'quiet', icon: 'copy', onClick: function () { copy(token, 'The agent token', 'Click Show token, then select the token and copy it by hand.'); } }, 'Copy token'))) : null));
   }
 
   // ---------- floors (branches) and rooms (worktrees) ----------
@@ -408,15 +421,20 @@
     var cf = useState(null), confirm = cf[0], setConfirm = cf[1];    // { kind: 'floor' | 'room', branch, root }
     var bz = useState(''), busy = bz[0], setBusy = bz[1];
     var er = useState(''), err = er[0], setErr = er[1];
-    var DONE = { '/api/floor/create': ['success', 'Floor added', function (b) { return 'Branch ' + b.branch + ' with its first room.'; }],
+    var nr = useState(null), newRoom = nr[0], setNewRoom = nr[1];    // naming a room: { branch, name }
+    var cl = useState(null), clean = cl[0], setClean = cl[1];         // clean up: null, or { floors: [{ branch, rooms }] }
+    var DONE = {
+      '/api/floor/cleanup': function (b, j) { return F.cleanupNote(j); },
+      '/api/floor/create': ['success', 'Floor added', function (b) { return 'Branch ' + b.branch + ' with its first room.'; }],
       '/api/floor/delete': ['info', 'Floor deleted', function (b) { return 'Branch ' + b.branch + ' and its rooms are gone.'; }],
       '/api/room/create': ['success', 'Room added', function (b) { return 'A new worktree on ' + b.branch + '.'; }],
       '/api/room/delete': ['info', 'Room removed', function (b) { return 'The folder ' + String(b.root).split(/[\\/]/).pop() + ' is gone. Its branch stays.'; }] };
     function run(key, path, body, after) {
       setBusy(key); setErr('');
-      api(path, Object.assign({ repo: p.repo }, body)).then(function () {
+      api(path, Object.assign({ repo: p.repo }, body)).then(function (j) {
         setBusy(''); if (after) after();
-        var t = DONE[path]; if (t && p.toast) p.toast({ tone: t[0], title: t[1], text: t[2](body) });
+        var t = DONE[path]; if (typeof t === 'function') t = t(body, j) ; else if (t) t = [t[0], t[1], t[2](body)];
+        if (t && p.toast) p.toast({ tone: t[0], title: t[1], text: t[2] });
       }, function (x) { setBusy(''); setErr(x.message); });
     }
     if (!repo) {
@@ -428,6 +446,22 @@
     repo.worktrees.forEach(function (w) { var fl = w.place.floor; if (!floors[fl]) { floors[fl] = []; order.push(fl); } floors[fl].push(w); });
     var main = repo.worktrees.filter(function (w) { return w.main; })[0];
 
+    if (clean) {
+      var fl = clean.floors;
+      return h(A.Dialog, { open: true, title: 'Clean up unused floors', onClose: function () { setClean(null); setErr(''); }, actions: [
+        h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setClean(null); setErr(''); } }, fl.length ? 'Keep them' : 'Close'),
+        fl.length ? h(A.Button, { key: 'r', variant: 'danger', icon: 'remove', loading: busy === 'cleanup', onClick: function () { run('cleanup', '/api/floor/cleanup', { branches: fl.map(function (f) { return f.branch; }) }, function () { setClean(null); }); } }, 'Delete ' + fl.length + (fl.length === 1 ? ' floor' : ' floors')) : null] },
+        h('div', { className: 'form' },
+          fl.length
+            ? h('p', { className: 'note' }, 'These floors are merged into ' + (main ? main.branch : 'the main branch') + ', have no changes, no session and are over an hour old. Press Keep this floor to leave one out. Deleting removes the rest with their rooms and branches. No commit is lost.')
+            : h(A.EmptyState, { icon: 'floor', title: 'Nothing to clean up', text: 'Every floor has unmerged work, changes or a session.' }),
+          h('ul', { className: 'past' }, fl.map(function (f) {
+            return h('li', { key: f.branch, className: 'past-row' },
+              h('div', { className: 'past-title' }, h(A.Icon, { name: 'floor', size: 16 }), h('b', null, f.branch), h(Tag, null, f.rooms + (f.rooms === 1 ? ' room' : ' rooms'))),
+              h('div', { className: 'past-actions' }, h(A.Button, { variant: 'quiet', onClick: function () { setClean({ floors: fl.filter(function (x) { return x.branch !== f.branch; }) }); } }, 'Keep this floor')));
+          })),
+          err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
+    }
     if (confirm) {
       var isFloor = confirm.kind === 'floor';
       var forced = /anyway/i.test(err);
@@ -454,10 +488,11 @@
         form ? h('div', { className: 'past-row' },
           h('div', { className: 'form' },
             Pair(
-              h(A.TextInput, { id: 'f-branch', label: 'Branch name', value: form.branch, placeholder: 'feature/login', onChange: function (v) { setForm(Object.assign({}, form, { branch: v })); } }),
+              h(A.TextInput, { id: 'f-branch', label: 'Floor name (branch)', value: form.branch, placeholder: 'feature/login', onChange: function (v) { setForm(Object.assign({}, form, { branch: v })); } }),
               h(A.Select, { id: 'f-from', label: 'Start from', options: branches, value: form.from, onChange: function (v) { setForm(Object.assign({}, form, { from: v })); } })),
+            h(A.TextInput, { id: 'f-room', label: 'Name of the first room (optional)', value: form.name || '', placeholder: 'login-work', onChange: function (v) { setForm(Object.assign({}, form, { name: v })); } }),
             h('div', { className: 'inline-actions' },
-              h(A.Button, { variant: 'primary', icon: 'add', loading: busy === 'new', disabled: !form.branch.trim(), onClick: function () { run('new', '/api/floor/create', { branch: form.branch.trim(), from: form.from }, function () { setForm(null); }); } }, 'Create floor and room'),
+              h(A.Button, { variant: 'primary', icon: 'add', loading: busy === 'new', disabled: !form.branch.trim(), onClick: function () { run('new', '/api/floor/create', { branch: form.branch.trim(), from: form.from, name: (form.name || '').trim() }, function () { setForm(null); }); } }, 'Create floor and room'),
               h(A.Button, { variant: 'quiet', onClick: function () { setForm(null); setErr(''); } }, 'Cancel')))) : null,
         h('ul', { className: 'past' }, order.map(function (b) {
           var rooms = floors[b], hasMain = rooms.some(function (w) { return w.main; });
@@ -470,12 +505,18 @@
                   h(A.OfficeTypeBadge, { type: 'lab', label: w.place.room }), h('span', { className: 'past-sub mono', title: w.root }, F.shortPath(w.root)),
                   here.map(function (s) { return h('span', { key: s.uid, className: 'room-bot', title: s.name }, h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: colorOf(s.uid), status: statusOf(s), size: 20 }), s.name); }),
                   w.main ? null : h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setConfirm({ kind: 'room', branch: w.branch, floor: b, root: w.root }); } }, 'Remove room'));
-              })),
+              }),
+              newRoom && newRoom.branch === b ? h('div', { className: 'inline-actions' },
+                h(A.TextInput, { id: 'r-name', label: 'Room name (optional)', value: newRoom.name, placeholder: 'review', onChange: function (v) { setNewRoom({ branch: b, name: v }); } }),
+                h(A.Button, { variant: 'primary', icon: 'add', loading: busy === 'room:' + b, onClick: function () { run('room:' + b, '/api/room/create', { branch: b, name: newRoom.name.trim() }, function () { setNewRoom(null); }); } }, 'Add room'),
+                h(A.Button, { variant: 'quiet', onClick: function () { setNewRoom(null); } }, 'Cancel')) : null),
             h('div', { className: 'past-actions' },
-              h(A.Button, { variant: 'quiet', icon: 'add', loading: busy === 'room:' + b, onClick: function () { run('room:' + b, '/api/room/create', { branch: b }); } }, 'Add room'),
+              newRoom && newRoom.branch === b ? null : h(A.Button, { variant: 'quiet', icon: 'add', onClick: function () { setErr(''); setNewRoom({ branch: b, name: '' }); } }, 'Add room'),
               hasMain ? null : h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setConfirm({ kind: 'floor', branch: b }); } }, 'Delete floor')));
         })),
-        form ? null : h(A.AddButton, { label: 'Add a floor', onClick: function () { setErr(''); setForm({ branch: '', from: main ? main.branch : '' }); } }),
+        form ? null : h('div', { className: 'inline-actions' },
+          h(A.AddButton, { label: 'Add a floor', onClick: function () { setErr(''); setForm({ branch: '', from: main ? main.branch : '', name: '' }); } }),
+          h(A.Button, { variant: 'quiet', icon: 'remove', loading: busy === 'stale', onClick: function () { setBusy('stale'); setErr(''); api('/api/floor/stale', { repo: p.repo }).then(function (j) { setBusy(''); setClean({ floors: j.floors }); }, function (x) { setBusy(''); setErr(x.message); }); } }, 'Clean up unused floors')),
         h(FloorsWithoutRooms, { repo: p.repo, busy: busy, run: run, shown: repo.worktrees.map(function (w) { return w.branch; }) })));
   }
   // Branches with no worktree: a room brings the floor into the building.
@@ -1178,13 +1219,16 @@
     var usage = sess && sess.usage && sess.usage.tokens ? sess.usage : null;
     var many = p.buildings.length > 1 || (p.buildings.length && p.buildings[0].key !== p.shown);
 
+    // With no live session the welcome card shows. One card at a time: it waits while the DS Since you left card
+    // shows (they share the middle of the screen, and do not both fit on a phone), and the dock holds the primary button then (#66).
+    var welcome = !!snap && !live.length && !p.syl;
     return h(React.Fragment, null,
-      snap && !live.length ? h('div', { className: 'welcome' },
+      welcome ? h('div', { className: 'welcome' },
         h('div', { className: 'welcome-logo' }, h(A.Logo, { variant: 'lockup', height: 28 })),
         h(A.EmptyState, { icon: 'building', title: 'No sessions yet', text: 'Open a session to seat the first bot. You can also reopen a past one.', action: { label: 'Open session', icon: 'add', onClick: p.onOpen } })) : null,
       h('div', { className: 'strip', role: 'toolbar', 'aria-label': 'Office controls' },
         h('div', { className: 'strip-group' },
-          h(A.Button, { variant: snap && !live.length ? 'quiet' : 'primary', icon: 'add', onClick: p.onOpen }, 'Open session'),   // the welcome card holds the primary one while there is no session
+          h(A.Button, { variant: welcome ? 'quiet' : 'primary', icon: 'add', onClick: p.onOpen }, 'Open session'),   // the welcome card holds the primary one while it shows
           many ? h(A.Select, { id: 'c-building', ariaLabel: 'Building (repository)', value: p.shown, onChange: p.onBuilding,
                 options: p.buildings.map(function (b) { return { value: b.key, label: b.name + ' · ' + plural(b.sessions, 'session', 'sessions') + (b.waiting ? ' · ' + b.waiting + ' need you' : '') }; })
                   .concat(p.buildings.some(function (b) { return b.key === p.shown; }) ? [] : [{ value: p.shown, label: (p.shownName || 'This building') + ' · no sessions' }]) }) : null,
@@ -1218,6 +1262,7 @@
   }
 
   // ---------- app ----------
+  function winSize() { return { w: window.innerWidth, h: window.innerHeight }; }
   function App() {
     var sel = useChatBot();
     // The Decisions inbox: open or closed. The page owns the state (OfficeScene inbox, onInbox), so it can close it.
@@ -1227,6 +1272,9 @@
     var setInbox = React.useCallback(function (v) { ib[1]({ key: ibKey.current, open: !!v }); }, []);
     var s2 = useState(null), dlg = s2[0], setDlg = s2[1];
     var s3 = useState({ recent: [], templates: [], schedules: [] }), info = s3[0], setInfo = s3[1];
+    var ws = useState(winSize), win = ws[0], setWin = ws[1];   // the window size: the scene height follows it (#55)
+    // The DS Since you left card shows (OfficeScene onSinceYouLeft). The welcome card waits until it closes (#66).
+    var sy = useState(false), syl = sy[0], setSyl = sy[1];
     // Toasts (toasts.js): an error or a toast with an action stays until closed; the others close after 8 s, and wait while the pointer or focus is on them.
     var tt = useState([]), toasts = tt[0], setToasts = tt[1], tid = React.useRef(0), toastBox = React.useRef(null);
     function toast(t) {
@@ -1285,7 +1333,7 @@
     // cur2.mount is the building adapter of the scene on screen (null in the city, or before the first snapshot).
     // A scene gets a new one when the building changes, and when the adapter says it is stale: the DS has no
     // event that removes a floor or a room, so a removal mounts the building again.
-    var fd = useState({ key: wantKey, repo: shown, view: view, mount: null }), cur2 = fd[0], setCur2 = fd[1];
+    var fd = useState({ key: wantKey, repo: shown, view: view, mount: null, floor: null }), cur2 = fd[0], setCur2 = fd[1];
     var stale = !!snap && !!cur2.mount && cur2.mount.stale();
     var needsMount = !!snap && view === 'office' && !cur2.mount && cur2.view === 'office';
     var mount = cur2.mount, def = mount ? mount.def : null;
@@ -1296,7 +1344,14 @@
     useEffect(function () {
       if (!fading) return undefined;
       var t = setTimeout(function () {
-        setCur2({ key: wantKey, repo: shown, view: view, mount: view === 'office' && window.officeAdapter.latest() ? window.officeAdapter.mount(shown) : null });
+        var next = view === 'office' && window.officeAdapter.latest() ? window.officeAdapter.mount(shown) : null;
+        // A rebuild of the same building keeps the floor the user looks at, if it still exists (#85). Floor ids are new
+        // for each mount, so the match is by branch. Another building or the city starts on the scene's default floor.
+        var floor = null;
+        if (next && cur2.mount && cur2.view === 'office' && cur2.repo === shown && hostRef.current) {
+          try { floor = window.OfficeBuilding.keepFloor(cur2.mount, hostRef.current.floorId(), next); } catch (x) { floor = null; }
+        }
+        setCur2({ key: wantKey, repo: shown, view: view, mount: next, floor: floor });
       }, reduced() ? 0 : cssMs('duration-base', 240));
       return function () { clearTimeout(t); };
     }, [wantKey, view, stale, needsMount, sceneKey]);
@@ -1407,11 +1462,15 @@
     useEffect(function () { var el = document.getElementById('office'); if (el) el.classList.toggle('has-panel', panelOpen); }, [panelOpen]);
     // A side panel changes the free part of the view: the screen in focus is framed again beside it. The window too.
     useEffect(function () { if (hostRef.current) hostRef.current.refit(); }, [panelOpen]);
+    // The scene is as tall as the window. The DS sets its height inline from the height prop, so a resize renders
+    // the page again with the new size (once per frame), and then frames the screen in focus again (#55).
     useEffect(function () {
-      function refit() { if (hostRef.current) hostRef.current.refit(); }
-      window.addEventListener('resize', refit);
-      return function () { window.removeEventListener('resize', refit); };
+      var raf = 0;
+      function onResize() { if (!raf) raf = requestAnimationFrame(function () { raf = 0; setWin(winSize()); }); }
+      window.addEventListener('resize', onResize);
+      return function () { window.removeEventListener('resize', onResize); cancelAnimationFrame(raf); };
     }, []);
+    useEffect(function () { if (hostRef.current) hostRef.current.refit(); }, [win]);
     // Esc flies back from a screen (a look or an open panel). Esc closes the top layer only: a dialog or the palette
     // on top takes it (board.js escTaken), and so does an open panel's own handler that ran first.
     useEffect(function () {
@@ -1464,8 +1523,8 @@
     }, [cur2.view]);
     // notifier: false: the page runs the one Notifier (alerts and the tab title for every building, below).
     // Since you left shows on every scene: the adapter seeds the state it sends again, so the card counts only news.
-    var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: mount.adapter, height: window.innerHeight, quality: 'auto', intro: intro, editable: false, simulate: false, toasts: false,
-      inbox: inbox, onInbox: setInbox, notifier: false,
+    var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: mount.adapter, floor: cur2.floor == null ? undefined : cur2.floor, height: win.h, quality: 'auto', intro: intro, editable: false, simulate: false, toasts: false,
+      inbox: inbox, onInbox: setInbox, notifier: false, onSinceYouLeft: setSyl,
       // The scene's live request and error toasts go to the page stack, where they stay until closed. Seeded events
       // (a scene mounted again) send none: an open request stays in Needs you, the inbox and the tab title.
       onNotify: function (n) {
@@ -1633,7 +1692,7 @@
 
     return h(React.Fragment, null,
       h('div', { className: 'view' + (fading ? ' is-fading' : '') }, scene),
-      ambient ? null : h(Controls, { sel: cur2.view === 'office' ? sel : null, buildings: list, shown: shown, shownName: (list.filter(function (b) { return b.key === shown; })[0] || def || {}).name, toast: toast, needs: needs.length, onNeeds: function () { setDlg({ name: 'needs' }); }, onBuilding: function (k) { pick(k); if (view === 'city') go('office'); }, onCity: function () { go('city'); }, onOffice: function () { introNext.current = true; go('office'); }, view: cur2.view, onSessions: function () { setDlg({ name: 'sessions' }); }, onCompact: function () { setAmbient(true); },
+      ambient ? null : h(Controls, { sel: cur2.view === 'office' ? sel : null, syl: syl && cur2.view === 'office', buildings: list, shown: shown, shownName: (list.filter(function (b) { return b.key === shown; })[0] || def || {}).name, toast: toast, needs: needs.length, onNeeds: function () { setDlg({ name: 'needs' }); }, onBuilding: function (k) { pick(k); if (view === 'city') go('office'); }, onCity: function () { go('city'); }, onOffice: function () { introNext.current = true; go('office'); }, view: cur2.view, onSessions: function () { setDlg({ name: 'sessions' }); }, onCompact: function () { setAmbient(true); },
         onFloors: function () { setDlg({ name: 'floors' }); }, onExtensions: extensions, onTerminal: openTerminal, onOpen: function () { show('open'); }, onPast: function () { show('past'); }, onSchedules: function () { show('schedules'); }, onHooks: function () { show('hooks'); }, onChanges: changes }),
       d === 'open' ? h(OpenDialog, { shownPath: shownPath, spendLimit: info.spendLimit, recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
       d === 'past' ? h(PastDialog, { onClose: close, onChanges: changes, toast: toast }) : null,
