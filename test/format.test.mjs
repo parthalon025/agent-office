@@ -62,3 +62,18 @@ test('hint pill without a key has the label only', () => {
   assert.ok(p.w < F.hintPill(300, 150).w);
   assert.deepEqual(F.hintPill(NaN, undefined), F.hintPill(0, 0), 'a bad width counts as zero');
 });
+
+test('mask secret hides every copy of a secret and keeps the rest of the text', () => {
+  const t = '{"x-office-token":"abc123","again":"abc123"}';
+  const m = F.maskSecret(t, 'abc123');
+  assert.ok(!m.includes('abc123'), 'no copy of the secret stays');
+  assert.equal(m, '{"x-office-token":"' + F.SECRET_MASK + '","again":"' + F.SECRET_MASK + '"}');
+  assert.equal(F.maskSecret('abc123', 'abc123'), F.SECRET_MASK, 'the mask has a fixed length, so it does not show the length');
+});
+
+test('mask secret leaves the text alone when there is no secret to hide', () => {
+  assert.equal(F.maskSecret('plain text', ''), 'plain text');
+  assert.equal(F.maskSecret('plain text', null), 'plain text');
+  assert.equal(F.maskSecret(null, 'abc'), '');
+  assert.equal(F.maskSecret('a.c', '.'), 'a' + F.SECRET_MASK + 'c', 'a secret is text, not a pattern');
+});

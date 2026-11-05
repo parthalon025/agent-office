@@ -1066,6 +1066,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, {
         port: PORT, hooksFile: activeHooksFile(), recent: persisted.recent, home: os.homedir(),
         settingsSnippet: JSON.stringify(hooksMode === 'http' ? httpSettings : commandSettings, null, 2),
+        agentToken: AGENT_TOKEN, // the Attach sessions dialog hides it until the user clicks Show (#60)
         launchCommand: `claude --settings "${activeHooksFile()}" --mcp-config "${MCP_FILE}"`,
         startup: startup.state(STARTUP_DIR),
         hooksMode, claudeVersion: CLAUDE_VERSION, templates: persisted.templates, schedules: persisted.schedules, spendLimit: defaultSpend(),

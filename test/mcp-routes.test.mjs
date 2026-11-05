@@ -225,6 +225,13 @@ test('a local session has no spend limit, also when the default is set or one is
   assert.equal((await sessionOf(b.json.uid)).budget, null, 'a model on this machine costs nothing');
 });
 
+// The Attach sessions dialog hides the agent token until the user clicks Show (#60), so info must carry it.
+test('info gives the agent token to the page token only', { skip: SKIP }, async () => {
+  assert.equal((await info()).agentToken, agentToken, 'the page can show and copy the token the hooks need');
+  const r = await fetch(`http://127.0.0.1:${port}/api/info`, { headers: { 'x-office-token': agentToken } });
+  assert.equal(r.status, 401, 'the agent token opens no /api route');
+});
+
 test('the default spend limit shows in info, can be changed or cleared, and a bad value is refused', { skip: SKIP }, async () => {
   assert.equal((await call('/api/settings/spend', { limit: 5 })).json.spendLimit, 5);
   assert.equal((await info()).spendLimit, 5);
