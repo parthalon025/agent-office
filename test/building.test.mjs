@@ -1108,6 +1108,50 @@ test('a bot that leaves and comes back keeps the older replies: restored once, n
   assert.equal(asked.length, 1);
 });
 
+// A held bot is not told in part: its error, its end and its seat wait for its replies, so the chat reads in the order it happened.
+test('a failed turn shows after the replies it followed, not before them', async () => {
+  const asked = [], r = rig({ wire: true, fetchReplies: (uid) => serverReplies(r, asked)(uid) });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  const s = [...r.tracker.sessions.values()][0];
+  bigReplies(r, s, 12);
+  s.error = { id: 1, text: 'Out of budget.', at: r.t + 1 }; r.push();
+  const m = r.mount(KEY_A);
+  assert.deepEqual(of(m.ev, 'error'), [], 'the error waits for the replies');
+  await settle();
+  const line = m.ev.filter((e) => e.type === 'message' || e.type === 'error').map((e) => (e.type === 'error' ? 'ERROR' : e.text.split(' ')[0]));
+  assert.deepEqual(line, [...upTo(12), 'ERROR']);
+  assert.equal(of(m.ev, 'status').filter((e) => e.status === 'error').length, 0, 'the error is told once, as the error');
+});
+
+test('a session that ends while the older replies load still shows its replies, then its end', async () => {
+  const asked = [], r = rig({ wire: true, fetchReplies: (uid) => serverReplies(r, asked)(uid) });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  const s = [...r.tracker.sessions.values()][0];
+  bigReplies(r, s, 12); r.push();
+  const m = r.mount(KEY_A);
+  r.tracker.onHook(slimPayload({ hook_event_name: 'SessionEnd', session_id: 'a', cwd: REPO_A }, null)); r.push();
+  assert.equal(s.status, 'ended');
+  assert.deepEqual(of(m.ev, 'session.end'), [], 'the end waits for the replies');
+  await settle();
+  const line = m.ev.filter((e) => e.type === 'message' || e.type === 'session.end').map((e) => (e.type === 'message' ? e.text.split(' ')[0] : 'END'));
+  assert.deepEqual(line, [...upTo(12), 'END']);
+});
+
+test('a bot seated again while the older replies load tells them as it would have: restored, no bubble', async () => {
+  const asked = [], r = rig({ wire: true, fetchReplies: (uid) => serverReplies(r, asked)(uid) });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  const s = [...r.tracker.sessions.values()][0];
+  bigReplies(r, s, 12); r.push();
+  const m = r.mount(KEY_A);
+  s.git = { ...GITS['C:\\work\\repo-feat'] }; s.cwd = 'C:\\work\\repo-feat'; r.t += 5; r.push();   // another floor, request still out
+  await settle();
+  const msgs = of(m.ev, 'message');
+  assert.deepEqual(msgs.map((e) => e.text.split(' ')[0]), upTo(12));
+  assert.ok(msgs.every((e) => e.seeded === true && e.say === false), 'none of them is news');
+  r.t += 5; r.tracker.pushReply(s, 'New.'); r.push();
+  assert.deepEqual([of(m.ev, 'message').at(-1).text, of(m.ev, 'message').at(-1).say], ['New.', undefined]);
+});
+
 test('replies that all fit the snapshot need no request', async () => {
   const asked = [], r = rig({ wire: true, fetchReplies: (uid) => serverReplies(r, asked)(uid) });
   await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });

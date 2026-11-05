@@ -207,10 +207,11 @@
     store.latest = function () { return latest; };
     // The older replies of a session that the lean snapshot left out (#80). The page asks the server once (opts.fetchReplies(uid)
     // gives the session's whole reply list) and keeps the answer; a failure is told once (opts.onProblem(text)) and the chat
-    // shows the newest replies. A new scene tries again (attach clears the failures). Entries of sessions that are gone are dropped.
+    // shows the newest replies. A new scene tries again (attach clears the failures), so a failure that stays tells the page once per scene,
+    // one more error toast for each building change. Entries of sessions that are gone are dropped.
     var oldReplies = {}, oldAsked = {}, oldFailed = {};
     // firstId: the id of the newest-window's first reply. Answers { list } (replies older than that, in order), { wait } or { none }.
-    store._older = function (uid, firstId) {
+    function loadOlder(uid, firstId) {
       var have = oldReplies[uid];
       if (have && have.length && have[have.length - 1].id < firstId - 1) have = oldReplies[uid] = null;   // replies came since: a gap, ask again
       if (have) return { list: have.filter(function (r) { return r.id < firstId; }) };
@@ -223,7 +224,7 @@
         }).then(function () { delete oldAsked[uid]; attached.slice().forEach(function (m) { m._follow(latest); }); });
       }
       return { wait: true };
-    };
+    }
     store.set = function (snap) {
       latest = snap;
       var live = {};
@@ -405,9 +406,12 @@
             if (s.status === 'ended') return;
             firstSight = true;
             var name = uniqueName(s.name);
-            k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: V.status(s).key, task: V.taskLine(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, olderDone: false, firstKind: seedAll ? 'seed' : 'restore', prevSeen: prev ? prev.replySeen : null, model: s.model, ended: false, place: placeKey(pl), sup: V.supervision(s), room: roomOf(pl, emit) };
+            k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: V.status(s).key, task: V.taskLine(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, olderDone: false, held: false, firstKind: seedAll ? 'seed' : 'restore', prevSeen: prev ? prev.replySeen : null, model: s.model, ended: false, place: placeKey(pl), sup: V.supervision(s), room: roomOf(pl, emit) };
             // platform: the line on the bot's card: the supervision label of an ungated agent, else its agent kind (Claude Code,
             // Ollama, ...), the same word every list shows (vocab.js)
+            // The old seat held its replies (the older ones were still loading), so it told none of them: this seat tells them
+            // the way the old seat would have (a first sight, or what it had seen before), and keeps the wait for newer ones.
+            if (prev && prev.held) { k.firstKind = prev.firstKind; k.prevSeen = prev.prevSeen; k.holdTop = prev.holdTop; }
             var bot = withColor({ name: name, role: 'coder', shape: shapeOf(s.uid), status: k.status, task: k.task, platform: V.platform(s, snapshot.kinds), identity: s.cwd }, s.uid);
             if (s.skills && s.skills.length) bot.skills = s.skills.slice(0, 16);
             if (s.scheduleId) bot.triggers = [s.name];
@@ -460,22 +464,24 @@
           if (!k.olderDone) {
             if (!s.olderReplies) k.olderDone = true;
             else {
-              var old = store._older(s.uid, list.length ? list[0].id : Infinity);
+              var old = loadOlder(s.uid, list.length ? list[0].id : Infinity);
               if (old.wait) { hold = true; if (k.holdTop === undefined) k.holdTop = list.length ? list[list.length - 1].id : 0; }
               else { if (old.list) list = old.list.concat(list); k.olderDone = true; }
             }
           }
-          if (!hold) {
-            list.forEach(function (r) {
-              if (r.id <= k.replySeen) return;
-              k.replySeen = r.id;
-              var kind = k.holdTop !== undefined && r.id > k.holdTop ? 'live' : k.prevSeen !== null ? (r.id <= k.prevSeen ? 'restore' : 'live') : k.firstKind;
-              var e = kind === 'seed' ? seeded : kind === 'restore' ? restore : out, msg = stamp({ type: 'message', bot: bot0, text: r.text }, r.t);
-              if (e !== out) msg.say = false;
-              e(msg);
-            });
-            k.firstKind = 'live'; k.prevSeen = null; k.holdTop = undefined;
-          }
+          k.held = hold;
+          // The rest of the pass waits too: the error, the end and the status of a bot come after its replies in the chat. Every
+          // path of the store's request ends with a pass over this snapshot, so nothing is lost (#80).
+          if (hold) return;
+          list.forEach(function (r) {
+            if (r.id <= k.replySeen) return;
+            k.replySeen = r.id;
+            var kind = k.holdTop !== undefined && r.id > k.holdTop ? 'live' : k.prevSeen !== null ? (r.id <= k.prevSeen ? 'restore' : 'live') : k.firstKind;
+            var e = kind === 'seed' ? seeded : kind === 'restore' ? restore : out, msg = stamp({ type: 'message', bot: bot0, text: r.text }, r.t);
+            if (e !== out) msg.say = false;
+            e(msg);
+          });
+          k.firstKind = 'live'; k.prevSeen = null; k.holdTop = undefined;
           // a queued message was read by the session
           var queued = (s.inbox || []).length;
           if (queued < k.inbox) emit({ type: 'message', bot: bot0, text: 'I read your message.', format: 'plain' });
