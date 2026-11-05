@@ -102,3 +102,65 @@ test('cleanupNote says what the clean-up did, and is an error when a floor was s
   assert.deepEqual(F.cleanupNote({ deleted: [], skipped: ['x'] }), ['error', 'No floor deleted', 'Kept: x. It changed or a session works there.']);
   assert.deepEqual(F.cleanupNote({}), ['info', 'Nothing to clean up', 'No floor was deleted.']);
 });
+
+// ----- token counts, timeline and export (#72) -----
+test('tokens: 999, 1.2k, 15k, 3.4M, 12M', () => {
+  assert.deepEqual([0, 999, 1234, 15000, 3400000, 12000000, null, 'x'].map(F.tokens), ['0', '999', '1.2k', '15k', '3.4M', '12M', '0', '0']);
+});
+
+test('duration: under a second in ms, then seconds, then minutes; a dash when unknown', () => {
+  assert.deepEqual([420, 1500, 59000, 61000, 125000, null, undefined].map(F.duration), ['420 ms', '1.5 s', '59 s', '1 min 1 s', '2 min 5 s', '–', '–']);
+});
+
+test('clock: hours, minutes and seconds, in the given zone', () => {
+  assert.equal(F.clock(Date.UTC(2026, 10, 4, 14, 3, 9), 'utc'), '14:03:09');
+  assert.equal(F.clock(null), '–');
+});
+
+const CALLS = [
+  { id: 'b', name: 'Bash', detail: 'npm test', t: Date.UTC(2026, 10, 4, 14, 0, 10), ms: 4200, ok: false, err: 'exit 1' },
+  { id: 'a', name: 'Read', detail: 'a.txt', t: Date.UTC(2026, 10, 4, 14, 0, 5), ms: 40, ok: true },
+  { id: 'c', name: 'Edit', detail: 'a.txt', t: Date.UTC(2026, 10, 4, 14, 0, 20), ms: null, ok: null },
+];
+
+test('timeline: one row per call, oldest first, with the time, the duration and the result', () => {
+  const rows = F.timeline(CALLS, { zone: 'utc', start: Date.UTC(2026, 10, 4, 14, 0, 0) });
+  assert.deepEqual(rows.map((r) => [r.id, r.time, r.after, r.duration, r.state]), [
+    ['a', '14:00:05', '+5 s', '40 ms', 'done'],
+    ['b', '14:00:10', '+10 s', '4.2 s', 'failed'],
+    ['c', '14:00:20', '+20 s', '–', 'open'],
+  ]);
+  assert.equal(rows[1].text, 'Bash npm test');
+  assert.equal(rows[1].err, 'exit 1');
+  assert.deepEqual(F.timeline([], {}), []);
+  assert.deepEqual(F.timeline(null, {}), []);
+});
+
+test('exportText: the session as Markdown with its facts, its first instruction, the timeline and its replies; cost unknown stays unknown', () => {
+  const s = {
+    name: 'fixer', agent: 'Hermes Agent', model: 'm1', cwd: 'C:\\w\\repo', worktree: { branch: 'agent/fixer-1' }, startedAt: Date.UTC(2026, 10, 4, 14, 0, 0), turns: 2,
+    cost: null, costUnknown: true, usage: { tokens: 15000 }, prompt: 'fix the test', calls: CALLS,
+    replies: [{ id: 1, t: Date.UTC(2026, 10, 4, 14, 1, 0), text: 'Done.\nTwo files changed.' }],
+  };
+  const md = F.exportText(s, { zone: 'utc' });
+  assert.match(md, /^# fixer\n/);
+  for (const line of ['- Agent: Hermes Agent', '- Model: m1', '- Folder: C:\\w\\repo', '- Branch: agent/fixer-1', '- Started: 2026-11-04 14:00', '- Turns: 2', '- Tokens: 15k', '- Cost: unknown']) assert.ok(md.includes(line + '\n'), line);
+  assert.match(md, /## First instruction\n\nfix the test\n/);
+  assert.match(md, /## Timeline\n\n\| Time \| Call \| Result \| Duration \|\n\| --- \| --- \| --- \| --- \|\n\| 14:00:05 \| Read a\.txt \| done \| 40 ms \|\n\| 14:00:10 \| Bash npm test \| failed: exit 1 \| 4\.2 s \|\n\| 14:00:20 \| Edit a\.txt \| open \| – \|\n/);
+  assert.match(md, /## Replies\n\n### 14:01:00\n\nDone\.\nTwo files changed\.\n/);
+  assert.ok(!md.includes('$0.00'));
+});
+
+test('exportText: a pipe in a call, a past session with no calls, and a known cost', () => {
+  const md = F.exportText({ name: 'p', cwd: 'C:\\w', startedAt: 0, turns: 1, cost: 0.256, usage: { tokens: 0 }, calls: [{ id: 'x', name: 'Bash', detail: 'a | b', t: 1000, ms: 5, ok: true }], replies: [] }, { zone: 'utc' });
+  assert.match(md, /\| Bash a \\\| b \|/);
+  assert.match(md, /- Cost: \$0\.26\n/);
+  assert.ok(!/## Replies/.test(md));
+  const bare = F.exportText({ name: 'q', cwd: '', startedAt: 0, turns: 0, cost: null, calls: [], replies: [] }, { zone: 'utc' });
+  assert.match(bare, /## Timeline\n\nNo tool calls were recorded\.\n/);
+});
+
+test('exportFileName: a safe file name from the session name and the start time', () => {
+  assert.equal(F.exportFileName({ name: 'My: bot/1?', startedAt: Date.UTC(2026, 10, 4, 14, 0, 0) }, 'utc'), 'my-bot-1-2026-11-04-1400.md');
+  assert.equal(F.exportFileName({ name: '', startedAt: Date.UTC(2026, 10, 4, 9, 5, 0) }, 'utc'), 'session-2026-11-04-0905.md');
+});

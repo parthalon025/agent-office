@@ -35,7 +35,8 @@ export const PROTOCOL_VERSION = 1;
 // One entry per agent. program: the name resolveExe finds on PATH. args: what starts its ACP mode on stdio.
 // askTimeoutMs: how long the agent waits for an approval before it moves on by itself (the office's hold is longer, so the
 // feed says when the agent gave up first). features: what the agent has beyond the seam, for the page (#72); 'resume' and
-// 'images' come from the handshake. pin: the version the office was tested against (null: not tested with a real one yet).
+// 'images' come from the handshake, and so does 'fork' (sessionCapabilities.fork). skillsHome: where the agent keeps its skills, the
+// variable that moves it and the folder under the user's home (the office lists them, #72; only with the 'skills' feature). pin: the version the office was tested against (null: not tested with a real one yet).
 // gated (ADR 0001): true only when the agent asks the office before every tool call that is not low risk; an agent where only
 // some calls ask is ungated, with its supervision label. Neither agent has been run against the office yet (pin: null).
 export const AGENTS = {
@@ -46,7 +47,7 @@ export const AGENTS = {
     // a write asked, a touch ran without asking). Its default mode asks before edits.
     gated: false, supervision: 'Partly supervised: file edits ask, commands do not',
     askTimeoutMs: 60_000, // Hermes issue #63302: a fixed 60 s timeout on edit approval (command approval has its own setting)
-    features: ['skills', 'memory', 'fork'], pin: null,
+    features: ['skills', 'memory', 'fork'], skillsHome: { env: 'HERMES_HOME', dir: '.hermes' }, pin: null,
     needs: ['Install Hermes Agent so that hermes.exe is on the PATH, then run hermes acp --check in a terminal.'],
   },
   dsh: {
@@ -197,6 +198,7 @@ export function createAcp(deps) {
   const now = deps.now || Date.now;
   const makeId = deps.makeId || (() => crypto.randomBytes(5).toString('hex'));
   const probeDir = deps.probeDir || os.tmpdir();
+  const homedir = deps.homedir || os.homedir;
   /** @type {Map<string, object>} uid -> the agent state of an open session */
   const agents = new Map();
   // What the agent said at its last handshake (a probe or a session): its capabilities and version.
@@ -367,14 +369,25 @@ export function createAcp(deps) {
     emit(st, () => events.drop(s, id, why));
   }
   // Hold a request until the user answers. done(verdict) gets 'allow', 'deny', 'cancel' or 'withdraw'.
-  function hold(s, st, toolName, input, done) {
-    const id = emit(st, () => events.permission(s, { tool_name: toolName, tool_input: input, permission_suggestions: [] }));
+  function hold(s, st, toolName, input, done, reason = null) {
+    const id = emit(st, () => events.permission(s, { tool_name: toolName, tool_input: input, permission_suggestions: [], ask_reason: reason }));
     if (!id) { done('deny'); return null; }
     const ask = { gaveUp: false, timer: null, done: (v) => { if (st.asks.get(id) !== ask) return; st.asks.delete(id); if (ask.timer) clearTimer(ask.timer); done(v); } };
     st.asks.set(id, ask);
     return id;
   }
   function cancelAsks(st) { for (const ask of [...st.asks.values()]) { ask.gaveUp = true; ask.done('cancel'); } }
+
+  // The reason the agent gives for a request (dsh asks again with one), only for an agent kind that declares 'reason'. ACP names no
+  // field for it: it is read from `reason` or `_meta.reason` of the request or its tool call. Not checked against a real dsh yet.
+  function reasonOf(params) {
+    if (!spec.features.includes('reason')) return null;
+    for (const o of [params, params.toolCall]) {
+      const v = o && (typeof o.reason === 'string' ? o.reason : o._meta && typeof o._meta.reason === 'string' ? o._meta.reason : null);
+      if (v && v.trim()) return v;
+    }
+    return null;
+  }
 
   // session/request_permission: held like any request. The answer is allow once or reject once, never an always option.
   // It is the answer to what the card showed: a frozen copy of the call (shown) gives the grant and the declined file.
@@ -410,7 +423,7 @@ export function createAcp(deps) {
           else if (EDIT_KINDS.has(shown.kind)) st.deniedVague = true;
           resolve(pick(no));
         }
-      });
+      }, reasonOf(params));
       if (!id) return;
       c.held.set(id, shown);
       // Hermes issue #63302: its edit approval stops after a fixed time (a command approval follows its own setting). When
@@ -527,6 +540,18 @@ export function createAcp(deps) {
   }
 
   // ----- a turn -----
+  // The token counts an agent puts in the answer of a prompt (inputTokens, outputTokens, cachedReadTokens, or only totalTokens). They go
+  // to the tracker as the usage of one assistant message with its own id, so each turn counts once. No usage, nothing reported.
+  function reportUsage(s, st, r) {
+    const u = r && typeof r.usage === 'object' && r.usage ? r.usage : null;
+    const n = (v) => (Number.isFinite(v) && v > 0 ? Math.floor(v) : 0);
+    if (!u) return;
+    const out = n(u.outputTokens), cached = n(u.cachedReadTokens);
+    const input = n(u.inputTokens) || Math.max(0, n(u.totalTokens) - out);
+    if (!input && !out) return;
+    emit(st, () => events.stream(s, { type: 'assistant', message: { id: `acp-${makeId()}`, usage: { input_tokens: Math.max(0, input - cached), output_tokens: out, cache_read_input_tokens: cached }, content: [] } }));
+  }
+
   async function runTurn(s, st, item) {
     st.busy = true;
     st.interrupted = false;
@@ -542,6 +567,7 @@ export function createAcp(deps) {
         const r = await Promise.race([st.rpc.request('session/prompt', { sessionId: st.sid, prompt }), st.cancelled]);
         flushText(s, st);
         if (st.closed || st.interrupted) break;
+        reportUsage(s, st, r);
         const why = STOP_WORDS[r?.stopReason];
         if (why) { failure = why; break; }
         if (st.notes.length) { prompt = [{ type: 'text', text: st.notes.splice(0).join('\n\n') }]; continue; }
@@ -598,6 +624,13 @@ export function createAcp(deps) {
       r = await within(st.rpc.request('session/load', { sessionId: String(o.resume), cwd: s.cwd, mcpServers: [] }), INIT_MS, 'it did not load the past session in time', setTimer, clearTimer);
       st.loading = false;
       sid = String(o.resume);
+    } else if (o.fork) {
+      // A copy of a past session (#72). The agent replays the past as updates of the new session, before it answers; the office
+      // has those replies already (the past record), so the replay is not shown again.
+      st.loading = true;
+      r = await within(st.rpc.request('session/fork', { sessionId: String(o.fork), cwd: s.cwd, mcpServers: [] }), INIT_MS, 'it did not fork the past session in time', setTimer, clearTimer);
+      st.loading = false;
+      sid = r && r.sessionId;
     } else {
       // Before the session id: the office keeps the past record of a conversation that did not continue.
       if (o.resume) emit(st, () => events.fresh(s, `${label} cannot load a past session now. A new session started.`));
@@ -647,7 +680,14 @@ export function createAcp(deps) {
       const f = [];
       if (learned.caps?.loadSession === true) f.push('resume');
       if (learned.caps?.promptCapabilities?.image === true) f.push('images');
+      if (learned.caps?.sessionCapabilities?.fork && !spec.features.includes('fork')) f.push('fork');
       return [...f, ...spec.features];
+    },
+    // Where this agent keeps the skills it writes (#72), or null for an agent kind without the 'skills' feature.
+    skillsDir() {
+      const h = spec.features.includes('skills') && spec.skillsHome;
+      if (!h) return null;
+      return path.join(env[h.env] || path.join(homedir(), h.dir), 'skills');
     },
     spec,
 

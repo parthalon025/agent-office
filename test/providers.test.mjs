@@ -10,7 +10,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { createTracker } from '../tracker.mjs';
 import { slimPayload } from '../payload.mjs';
-import { createRegistry, providerEvents, checkProvider, providerError, DEFAULT_PROVIDER, PROVIDER_METHODS, DEFAULT_SPEND_LIMIT, isPaid, isGated, supervisionOf, spendLimitFor } from '../providers/index.mjs';
+import { createRegistry, providerEvents, checkProvider, providerError, DEFAULT_PROVIDER, PROVIDER_METHODS, DEFAULT_SPEND_LIMIT, isPaid, isGated, supervisionOf, spendLimitFor, featuresOf } from '../providers/index.mjs';
 import { createLocal } from '../providers/local.mjs';
 import { createClaudeCode, claudeVersion, programPath, MODEL_RE } from '../providers/claude-code.mjs';
 import { resolveExe } from '../git.mjs';
@@ -702,4 +702,17 @@ test('spend limit: a provider that does not say it is free is paid; paid must be
   assert.equal(isPaid({ ...base, paid: false }), false);
   assert.doesNotThrow(() => checkProvider({ ...base, paid: true }));
   assert.throws(() => checkProvider({ ...base, paid: 'no' }), /paid/);
+});
+
+test('featuresOf: a copy of what the provider declares, read when asked (a getter), [] when it declares none (#72)', () => {
+  let learned = false;
+  const p = { get features() { return learned ? ['resume', 'skills'] : ['skills']; } };
+  assert.deepEqual(featuresOf(p), ['skills']);
+  learned = true;
+  const f = featuresOf(p);
+  assert.deepEqual(f, ['resume', 'skills']);
+  f.push('x');
+  assert.deepEqual(featuresOf(p), ['resume', 'skills']);
+  assert.deepEqual(featuresOf({}), []);
+  assert.deepEqual(featuresOf(null), []);
 });

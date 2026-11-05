@@ -15,13 +15,14 @@ import { fileURLToPath } from 'node:url';
 import * as git from './git.mjs';
 import { slimPayload } from './payload.mjs';
 import { createTracker, clip } from './tracker.mjs';
-import { createRegistry, providerEvents, isPaid, isGated, supervisionOf, costOf, spendLimitFor, DEFAULT_SPEND_LIMIT } from './providers/index.mjs';
+import { createRegistry, providerEvents, isPaid, isGated, supervisionOf, costOf, spendLimitFor, featuresOf, DEFAULT_PROVIDER, DEFAULT_SPEND_LIMIT } from './providers/index.mjs';
 import { createLocal } from './providers/local.mjs';
 import { createAcp, AGENTS as ACP_AGENTS } from './providers/acp.mjs';
 import { createClaudeCode, claudeVersion, MODEL_RE, MODES } from './providers/claude-code.mjs';
 import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, cleanRecent, recentChoices } from './place.mjs';
 import * as startup from './startup.mjs';
-import { createNotes, cleanPin, PIN_MAX } from './notes.mjs';
+import { createNotes, cleanPin, PIN_MAX, AGENT_WRITE_MAX } from './notes.mjs';
+import { createSkills } from './skills.mjs';
 import { mcpAddArgs, mcpRemoveArgs, pluginArgs } from './extensions.mjs';
 import * as auth from './auth.mjs';
 import './public/format.js'; // money, plurals and short paths, shared with the page (globalThis.OfficeFormat)
@@ -145,6 +146,7 @@ let history = [];
 try { history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8')); } catch { /* first run */ }
 for (const h of history) h.endedAt = h.endedAt || Date.now(); // whatever was running died with the last server
 let historyTimer = null;
+const HISTORY_CALLS = 40; // tool calls a past record keeps, for the timeline and Export
 function saveHistory() {
   clearTimeout(historyTimer);
   historyTimer = setTimeout(() => { try { fs.writeFileSync(HISTORY_FILE, JSON.stringify(history)); } catch { /* ignore */ } }, 800);
@@ -166,6 +168,8 @@ function recordHistory(s) {
     uid: s.uid, sid: s.sid, provider: s.provider, name: s.name, cwd: s.cwd, model: s.model, mode: s.mode, cost: s.cost, turns: s.turns,
     startedAt: s.startedAt, endedAt: s.endedAt, worktree: s.worktree, replies: s.replies.slice(-40), prompt: s.prompt, budget: s.budget,
     ...(s.costUnknown ? { costUnknown: true } : {}),
+    // For Export of a past session (#72): the tokens and the last calls, trimmed like the page's own list.
+    usage: s.usage, calls: s.calls.slice(-HISTORY_CALLS).map(W.leanCall),
   };
   const past = reopening.get(s.uid);
   if (past) { reopening.delete(s.uid); history = history.filter((h) => h.uid !== past); }
@@ -573,7 +577,7 @@ function describeRoom(s) {
     '- Desks. Each session has a desk. Its monitors show the terminal of that session: prompts, tool calls and results.',
     '',
     'What you can change with office_room_update',
-    '- notes_append: add text at the end of the notes board. The office puts your name in front of each line.',
+    `- notes_append: add text at the end of the notes board. The office puts your name in front of each line. Write short facts (${AGENT_WRITE_MAX} characters at a time). The office refuses text that reads as an instruction to the next agent, or that holds a secret.`,
     '- notes_replace: replace all of the notes. Do this only when the user asks. An empty text clears the board.',
     `- pin: pin a short message (${PIN_MAX} characters or less) on the blackboard. It replaces the last pin. An empty pin clears it.`,
     'To add or remove agents, the user uses the door. To ask the user something, use office_ask.',
@@ -768,7 +772,8 @@ async function extAction(body) {
 
 
 // The provider runs the agent; the office makes the session, seats it and sends the first prompt.
-function openHeadless(provider, { cwd, name, prompt, worktree = null, budget = null, resume = null, scheduleId = null, model = null, permissionMode = null, prior = null }) {
+// resume: the session id of a past conversation to continue. fork: the session id of one to copy into a new conversation (#72).
+function openHeadless(provider, { cwd, name, prompt, worktree = null, budget = null, resume = null, fork = null, scheduleId = null, model = null, permissionMode = null, prior = null }) {
   provider.check?.({}); // before the session exists: a missing program (claude.exe) leaves no ghost session
   const officeId = 'o' + crypto.randomBytes(4).toString('hex');
   // The last slash-command list came from a Claude Code init, so only a Claude Code session starts with it.
@@ -781,9 +786,9 @@ function openHeadless(provider, { cwd, name, prompt, worktree = null, budget = n
     commands: known?.commands || [], skills: known?.skills || [], costUnknown, supervision });
   placeSession(s, true);
   if (prior) { s.replies = prior.replies || []; s.replySeq = s.replies.reduce((n, r) => Math.max(n, r.id || 0), 0); s.costBase = prior.cost || 0; s.cost = prior.cost || null; s.turns = prior.turns || 0; s.prompt = prior.prompt || ''; }
-  provider.open(s, { model, permissionMode, budget, resume });
+  provider.open(s, { model, permissionMode, budget, resume, fork });
   if (!worktree) rememberDir(cwd); // a worktree folder is an implementation detail, not a place to start from
-  addFeed(s, 'start', resume ? 'reopened in the office' : worktree ? `started in the office on branch ${worktree.branch}` : 'started in the office');
+  addFeed(s, 'start', fork ? `forked from ${prior?.name || 'a past session'}, in a new worktree on branch ${worktree?.branch}` : resume ? 'reopened in the office' : worktree ? `started in the office on branch ${worktree.branch}` : 'started in the office');
   if (costUnknown) addFeed(s, 'start', `${provider.label} does not report cost. The office shows it as unknown, and no spend limit can stop it.`);
   if (supervision) addFeed(s, 'start', `${provider.label}: ${supervision}. The feed says what it ran without asking.`);
   if (prompt) { s.prompt = prompt; writeUser(s, prompt); addFeed(s, 'prompt', clip(prompt, 100)); }
@@ -867,6 +872,32 @@ async function reopenSession(uid, { confirmed = false } = {}) {
   if (plan.note) { const s = sessions.get(id); if (s) { addFeed(s, 'start', plan.note); broadcast(); } }
   if (!plan.fresh) reopening.set(id, uid); // the past record leaves history when the new session has started (recordHistory)
   return id;
+}
+
+// Fork (#72): a copy of a past session in a new worktree, for an agent kind that declares 'fork'. It writes (a worktree and a session),
+// so the office holds it until the user says yes: the first call is 409 with confirm: 'fork' and the question, and the page sends the
+// same call again with confirmed: true. That yes also covers the cost question of an agent that reports no cost (confirmCost). The
+// past record stays. The worktree branches from the repository the session was made in (its main folder), not from the old worktree.
+async function forkSession(uid, { confirmed = false } = {}) {
+  const rec = history.find((h) => h.uid === uid);
+  if (!rec) throw httpError(404, 'That past session is gone.');
+  const provider = providers.get(rec.provider);
+  if (provider.learn) await provider.learn();
+  if (!featuresOf(provider).includes('fork')) throw httpError(409, `${provider.label} cannot fork a session.`);
+  if (!rec.sid) throw httpError(409, 'That session never started, so there is nothing to fork.');
+  const from = rec.worktree?.repo && fs.existsSync(rec.worktree.repo) ? rec.worktree.repo : rec.cwd;
+  if (!from || !fs.existsSync(from)) throw httpError(409, `Its folder is gone: ${rec.cwd}.`);
+  if (confirmed !== true) {
+    const e = httpError(409, `Fork ${rec.name} into a new worktree? The copy gets the conversation so far and its own branch. ${costOf(provider) === 'unknown' ? `${provider.label} does not report cost, so the office shows it as unknown and no spend limit can stop it.` : ''}`.trim());
+    e.confirm = 'fork';
+    throw e;
+  }
+  provider.check?.({});
+  const name = `${rec.name} fork`.slice(0, 40);
+  const wt = await git.createWorktree(from, name);
+  rememberDir(from);
+  const budget = spendLimitFor({ paid: isPaid(provider), cost: costOf(provider), requested: undefined, fallback: defaultSpend() });
+  return openHeadless(provider, { cwd: wt.path, name, prompt: '', worktree: { root: wt.root, branch: wt.branch, repo: wt.repo }, budget, fork: rec.sid, prior: rec, model: rec.model || null });
 }
 
 function closeSession(uid) {
@@ -974,9 +1005,43 @@ setInterval(() => { const now = Date.now(); for (const sch of persisted.schedule
 // ---------- past sessions: list and search ----------
 function pastSummary(h) {
   const last = h.replies?.length ? h.replies[h.replies.length - 1].text : '';
-  return { uid: h.uid, name: h.name, cwd: h.cwd, model: h.model, cost: h.cost, costUnknown: h.costUnknown === true, turns: h.turns, startedAt: h.startedAt, endedAt: h.endedAt,
+  return { uid: h.uid, name: h.name, ...kindInfo(h), provider: h.provider || DEFAULT_PROVIDER, cwd: h.cwd, model: h.model, cost: h.cost, costUnknown: h.costUnknown === true, turns: h.turns, startedAt: h.startedAt, endedAt: h.endedAt,
     branch: h.worktree?.branch || null, worktreeRoot: h.worktree?.root || null, last: clip(String(last).replace(/\s+/g, ' '), 140), firstAsk: clip(h.prompt || '', 140) };
 }
+// Export (#72): a session, live or past, as Markdown with its call timeline. Every agent kind has it (Q29): the office wrote the record.
+function exportSession(uid) {
+  const live = sessions.get(uid);
+  const src = live ? fullSession(live) : history.find((h) => h.uid === uid);
+  if (!src) throw httpError(404, 'No such session.');
+  const full = live ? src : { ...src, ...kindInfo(src) };
+  const F = globalThis.OfficeFormat;
+  return { filename: F.exportFileName(full), text: F.exportText(full) };
+}
+
+// Skills an agent kind writes (#72), for the kinds that declare 'skills'. list and read answer at once; save and delete write
+// outside the worktree, so they are held until the user says yes (409 with confirm: 'skill', then the same call with confirmed: true).
+function skillsOf(kind) {
+  const provider = providers.get(kind ? String(kind) : undefined);
+  const dir = featuresOf(provider).includes('skills') && typeof provider.skillsDir === 'function' ? provider.skillsDir() : null;
+  if (!dir) throw httpError(404, `${provider.label} has no skills the office can show.`);
+  return { provider, skills: createSkills({ dir }) };
+}
+function skillAction(action, body) {
+  const { provider, skills } = skillsOf(body.provider);
+  if (action === 'list') return { agent: provider.label, dir: skills.dir, skills: skills.list() };
+  const name = String(body.name ?? '');
+  if (action === 'read') return skills.read(name);
+  skills.read(name); // 400 or 404 before the question
+  if (body.confirmed !== true) {
+    const e = httpError(409, action === 'delete'
+      ? `Delete the skill ${name}? ${provider.label} loses it for good. Its folder is removed.`
+      : `Save your changes to the skill ${name}? ${provider.label} follows this skill in later sessions.`);
+    e.confirm = 'skill';
+    throw e;
+  }
+  return action === 'delete' ? skills.remove(name) : skills.save(name, String(body.text ?? ''));
+}
+
 function search(q) {
   const needle = String(q || '').trim().toLowerCase();
   if (needle.length < 2) return [];
@@ -1054,7 +1119,10 @@ function readPlan() {
 setInterval(readPlan, 15000).unref();
 
 // One session with all its data and its place: GET /api/session (full data on request; the snapshot is lean).
-const fullSession = (s) => ({ ...s, place: s.placed ? roomPlace(s) : null });
+// agent and features: the agent kind's name and what it has beyond the seam (#72), read now because an ACP agent says some of it at its
+// handshake. The page shows a feature only when the kind declares it (vocab.js featuresOf).
+const kindInfo = (s) => { try { const p = providers.of(s); return { agent: p.label, features: featuresOf(p) }; } catch { return { agent: '', features: [] }; } };
+const fullSession = (s) => ({ ...s, ...kindInfo(s), place: s.placed ? roomPlace(s) : null });
 // What /events sends: only what the page reads, with caps per session (public/wire.js lean).
 const snapshot = () => W.lean({
   sessions: [...sessions.values()].map(fullSession),
@@ -1217,6 +1285,12 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/history') return send(res, 200, { sessions: pastShown().map(pastSummary) });
     if (url.pathname === '/api/history/forget') { history = history.filter((h) => h.uid !== String(body.uid)); saveHistory(); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/search') return send(res, 200, { results: search(body.q) });
+    if (url.pathname === '/api/fork') return send(res, 200, { uid: await forkSession(String(body.uid), { confirmed: body.confirmed === true }) });
+    if (url.pathname === '/api/export') return send(res, 200, exportSession(String(body.uid)));
+    if (url.pathname === '/api/skills/list') return send(res, 200, skillAction('list', body));
+    if (url.pathname === '/api/skills/read') return send(res, 200, skillAction('read', body));
+    if (url.pathname === '/api/skills/save') return send(res, 200, skillAction('save', body));
+    if (url.pathname === '/api/skills/delete') return send(res, 200, skillAction('delete', body));
     if (url.pathname === '/api/changes') { const r = folderOf(String(body.uid)); return send(res, 200, { ...(await git.changes(r.cwd)), worktree: r.worktree || null, name: r.name }); }
     if (url.pathname === '/api/worktree/remove') {
       const r = folderOf(String(body.uid));

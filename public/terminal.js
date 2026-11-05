@@ -215,7 +215,7 @@
     return m + (big ? ' 1M' : '');
   }
   function ctxPct(s) { return s && s.ctxTokens && s.ctxWindow ? Math.min(100, Math.round(100 * s.ctxTokens / s.ctxWindow)) : null; }
-  function fmtTok(n) { n = +n || 0; return n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k' : String(Math.round(n)); }
+  function fmtTok(n) { return window.OfficeFormat.tokens(n); }
   // A session's spend: "unknown" when its agent reports no cost (an ACP agent), never $0.00 (format.js cost).
   function money(c, unknown) { return window.OfficeFormat.cost(c, unknown); }
   function age(ms) { var m = Math.floor(Math.max(0, ms) / 60000); return m < 1 ? 'under 1 min' : m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60) + ' min'; }

@@ -31,9 +31,9 @@ const DANGER = [
 ];
 
 // Path parts (folders or files) whose content a program runs without asking: git config, hooks and the
-// worktree link file; Claude Code settings, hooks, commands and skills; MCP server lists; editor tasks and
+// worktree link file; Claude Code settings, hooks, commands and skills; Hermes skills, memory and config (.hermes, #72); MCP server lists; editor tasks and
 // run settings; ssh config; the office's own hook and MCP files. An edit to one of them is high.
-const RUNS = new Set(['.git', '.claude', '.vscode', '.idea', '.ssh', '.mcp.json', '.claude.json', '.gitconfig',
+const RUNS = new Set(['.git', '.claude', '.hermes', '.vscode', '.idea', '.ssh', '.mcp.json', '.claude.json', '.gitconfig',
   'office-hooks.json', 'office-hooks-http.json', 'office-mcp.json']);
 // Credential folders and secret-looking file names. A read outside the root is high, inside it is medium.
 // office-page-<port>.json holds the office's page token for the user's own tools (auth.mjs pageFile).

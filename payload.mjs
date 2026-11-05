@@ -30,7 +30,8 @@ export function slimPayload(b, officeId = null) {
     prompt: clip(b.prompt, 400), message: clip(b.message, 300), reason: b.reason,
     office_id: officeId,
     // A permission prompt needs the full input (to show the change) and Claude's "always allow" suggestions.
-    ...(ev === 'PermissionRequest' ? { full_input: b.tool_input, permission_suggestions: b.permission_suggestions } : {}),
+    // ask_reason: why the agent asks (an ACP agent such as dsh gives one, #72). One short text, shown beside the request.
+    ...(ev === 'PermissionRequest' ? { full_input: b.tool_input, permission_suggestions: b.permission_suggestions, ask_reason: typeof b.ask_reason === 'string' && b.ask_reason.trim() ? clip(b.ask_reason.trim(), 300) : null } : {}),
   };
 }
 

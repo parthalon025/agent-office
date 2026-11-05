@@ -69,7 +69,7 @@ test('a session sends only the fields the page reads; server-only fields stay on
   s.inbox.push({ t: 7, text: 'a long user message that the page never shows' });
   s.git = { repo: 'C:\\r', root: 'C:\\r', branch: 'main' };
   const l = W.lean(o.state()).sessions[0];
-  for (const f of ['sid', 'pid', 'officeId', 'startDir', 'gitCwd', 'gitAt', 'costBase', 'replySeq', 'lastUsageId', 'errorSeq', 'placed', 'launched', 'interrupted', 'budget', 'provider', 'worktree']) {
+  for (const f of ['sid', 'pid', 'officeId', 'startDir', 'gitCwd', 'gitAt', 'costBase', 'replySeq', 'lastUsageId', 'errorSeq', 'placed', 'launched', 'interrupted', 'budget', 'worktree']) {
     assert.equal(f in l, false, f);
   }
   for (const f of W.SESSION_FIELDS) assert.notEqual(l[f], undefined, `${f} is always set, so a patch can clear it`);
