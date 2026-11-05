@@ -4,5 +4,11 @@ state.json
 office-hooks-http.json
 office-mcp.json
 history.json
+# An office on another port (files.mjs): the same files with the port in the name.
+.office-token-*
+office-hooks-*.json
+office-mcp-*.json
+state-*.json
+history-*.json
 .playwright-mcp/
 .scratch/

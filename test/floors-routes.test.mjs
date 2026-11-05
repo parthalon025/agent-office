@@ -13,6 +13,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startFakeOpenAI } from './fixtures/fake-openai.mjs';
 import { pageFile } from '../auth.mjs';
+import { officeFiles } from '../files.mjs';
 import * as git from '../git.mjs';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -61,12 +62,13 @@ before(async () => {
   const copy = path.join(base, 'office');
   fs.mkdirSync(copy);
   for (const f of fs.readdirSync(SRC)) {
-    if (/\.(mjs|json|ps1)$/.test(f) && !['state.json', 'history.json'].includes(f) && !f.startsWith('office-')) fs.copyFileSync(path.join(SRC, f), path.join(copy, f));
+    if (/\.(mjs|json|ps1)$/.test(f) && !/^(state|history)(-\d+)?\.json$/.test(f) && !f.startsWith('office-')) fs.copyFileSync(path.join(SRC, f), path.join(copy, f));
   }
   for (const d of ['providers', 'public']) fs.cpSync(path.join(SRC, d), path.join(copy, d), { recursive: true });
-  fs.writeFileSync(path.join(copy, 'state.json'), JSON.stringify({ recent: [repo] })); // the repo is a building before any session
   fake = await startFakeOpenAI({ script: [{ text: 'ok' }], models: ['fake-model'] });
   port = await freePort();
+  // The repo is a building before any session. The state file of an office on a free port has the port in its name.
+  fs.writeFileSync(officeFiles(copy, port).state, JSON.stringify({ recent: [repo] }));
   const env = { ...process.env, OFFICE_PORT: String(port), OFFICE_HOOKS: 'command', OFFICE_OLLAMA_URL: fake.url, OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
     OFFICE_FLOOR_MIN_AGE_MS: '0', OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local') };
   child = spawn(process.execPath, ['server.mjs'], { cwd: copy, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env });

@@ -8,6 +8,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { slimPayload } from './payload.mjs';
+import { officeFiles, portArg } from './files.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -17,8 +18,11 @@ for await (const chunk of process.stdin) raw += chunk;
 let payload;
 try { payload = JSON.parse(raw); } catch { process.exit(0); }
 
+// The office's port is the first argument when it is not the default (files.mjs). Its token file names the port.
+const port = portArg(process.argv[2]);
+if (!port) process.exit(0);
 let cfg;
-try { cfg = JSON.parse(fs.readFileSync(path.join(here, '.office-token'), 'utf8')); } catch { process.exit(0); }
+try { cfg = JSON.parse(fs.readFileSync(officeFiles(here, port).token, 'utf8')); } catch { process.exit(0); }
 
 // Same trimmed fields as HTTP hooks (payload.mjs). The server's PowerShell helper walks up from
 // hook_ppid to find the claude process.

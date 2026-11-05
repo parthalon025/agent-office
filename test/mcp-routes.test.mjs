@@ -1,8 +1,9 @@
 // The /mcp/* routes (office_inbox, office_room, office_ask), and the same office tools called by a local agent in-process,
-// against a real server.mjs. The server runs from a throwaway copy of the code, so its state, hook files and .office-token
+// against a real server.mjs. The server runs from a throwaway copy of the code, so its state, hook files and token file
 // stay out of this folder and a running office is never touched. A random port, a fake OpenAI server on 127.0.0.1 for the
 // local provider, no model, no Claude. Sessions are opened through /api/open, which is Windows-only, so other systems skip.
-// Two tokens (auth.mjs): the /mcp routes take the agent token from the copy's .office-token, the /api routes and the event
+// The office's files in the copy have the port in their names (files.mjs officeFiles), as the port is not the default one.
+// Two tokens (auth.mjs): the /mcp routes take the agent token from the copy's token file, the /api routes and the event
 // stream take the page token from the copy's page file, which goes to the test's own LOCALAPPDATA (auth.pageFile).
 // OFFICE_OPEN=0: the server opens no browser.
 // Run: npm test
@@ -16,6 +17,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startFakeOpenAI } from './fixtures/fake-openai.mjs';
 import { pageFile, routeOf } from '../auth.mjs';
+import { officeFiles } from '../files.mjs';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SKIP = process.platform !== 'win32' ? 'opening sessions is only implemented for Windows' : false;
@@ -62,18 +64,19 @@ before(async () => {
   fs.mkdirSync(work);
   fs.mkdirSync(copy);
   for (const f of fs.readdirSync(SRC)) {
-    if (/\.(mjs|json|ps1)$/.test(f) && !['state.json', 'history.json'].includes(f) && !f.startsWith('office-')) fs.copyFileSync(path.join(SRC, f), path.join(copy, f));
+    if (/\.(mjs|json|ps1)$/.test(f) && !/^(state|history)(-\d+)?\.json$/.test(f) && !f.startsWith('office-')) fs.copyFileSync(path.join(SRC, f), path.join(copy, f));
   }
   for (const d of ['providers', 'public']) fs.cpSync(path.join(SRC, d), path.join(copy, d), { recursive: true });
   fake = await startFakeOpenAI({ script: [{ text: 'ok' }], models: ['fake-model'] });
   port = await freePort();
+  const own = officeFiles(copy, port);
   // A claude.exe that fails before init: node.exe under that name. It answers the headless flags with "bad option" and exits
   // at once, so Reopen of a Claude Code record starts a process that never reaches init. No Claude Code, no paid call.
   const bin = path.join(base, 'bin');
   fs.mkdirSync(bin);
   try { fs.linkSync(process.execPath, path.join(bin, 'claude.exe')); } catch { fs.copyFileSync(process.execPath, path.join(bin, 'claude.exe')); }
-  // A past Claude Code session the server loads at start (history.json is read once, at start).
-  fs.writeFileSync(path.join(copy, 'history.json'), JSON.stringify([{ uid: PAST_UID, sid: 'past-sid-1', provider: 'claude-code', name: 'past-claude', cwd: work, model: 'sonnet',
+  // A past Claude Code session the server loads at start (the past sessions file is read once, at start).
+  fs.writeFileSync(own.history, JSON.stringify([{ uid: PAST_UID, sid: 'past-sid-1', provider: 'claude-code', name: 'past-claude', cwd: work, model: 'sonnet',
     cost: 0.5, turns: 2, startedAt: 1000, endedAt: 2000, worktree: null, replies: [{ id: 1, text: 'earlier answer' }], prompt: 'earlier ask', budget: null }]));
   const env = { ...process.env, PATH: bin + path.delimiter + (process.env.PATH || process.env.Path || ''), OFFICE_PORT: String(port), OFFICE_HOOKS: 'command', OFFICE_OLLAMA_URL: fake.url, OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
     OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local') };
@@ -81,8 +84,8 @@ before(async () => {
   child.stdout.on('data', (d) => { log += d; });
   child.stderr.on('data', (d) => { log += d; });
   const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')).token; } catch { return null; } };
-  // The server writes .office-token, then the page file, once it listens.
-  agentToken = await until(() => read(path.join(copy, '.office-token')), 'the server to listen');
+  // The server writes its token file, then the page file, once it listens.
+  agentToken = await until(() => read(own.token), 'the server to listen');
   pageToken = await until(() => read(pageFile(env, port)), 'the page token file');
   assert.notEqual(agentToken, pageToken);
 });

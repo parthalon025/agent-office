@@ -23,6 +23,7 @@ import * as startup from './startup.mjs';
 import { createNotes, cleanPin, PIN_MAX } from './notes.mjs';
 import { mcpAddArgs, mcpRemoveArgs, pluginArgs } from './extensions.mjs';
 import * as auth from './auth.mjs';
+import { officeFiles, portArgs, DEFAULT_PORT } from './files.mjs';
 import './public/format.js'; // money, plurals and short paths, shared with the page (globalThis.OfficeFormat)
 import './public/vocab.js'; // session vocabulary, shared with the page (globalThis.OfficeVocab)
 import './public/wire.js'; // the /events wire format: lean snapshot and patches, shared with the page (globalThis.OfficeWire)
@@ -41,17 +42,27 @@ const BRANCH_PORT = process.env.OFFICE_PORT === 'branch'
     }
   })()
   : null;
-const PORT = BRANCH_PORT ? BRANCH_PORT.port : Number(process.env.OFFICE_PORT) || 4317;
+const PORT = BRANCH_PORT ? BRANCH_PORT.port : Number(process.env.OFFICE_PORT) || DEFAULT_PORT;
 const HOST = '127.0.0.1';
-// Two tokens (auth.mjs has the rules). The agent token opens /hook* and /mcp/* only. It is kept in .office-token,
+// The files of this office in its folder (files.mjs): the plain names on the default port, names with the port in
+// them on any other port, so a second office in this folder never rewrites the first one's files (#100). All of them
+// are written only once this office owns its port (the listen callback).
+const FILES = officeFiles(ROOT, PORT);
+// Two tokens (auth.mjs has the rules). The agent token opens /hook* and /mcp/* only. It is kept in the token file,
 // which hook.mjs and mcp.mjs read, and reused across restarts, so hooks of sessions that are already running keep
 // working. The page token opens /events and /api/* only. It is new at each start and never written in this folder:
 // the browser gets it as an HttpOnly cookie for a one-time launch code, the user's own tools read PAGE_FILE.
-const TOKEN_FILE = path.join(ROOT, '.office-token');
-const AGENT_TOKEN = (() => {
-  try { const t = JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8')).token; if (auth.AGENT_TOKEN_RE.test(t)) return t; } catch { /* first run */ }
-  return auth.newAgentToken();
-})();
+const TOKEN_FILE = FILES.token;
+const readToken = (file, port) => {
+  try { const c = JSON.parse(fs.readFileSync(file, 'utf8')); if (auth.AGENT_TOKEN_RE.test(c.token) && (port === undefined || c.port === port)) return c.token; } catch { /* none */ }
+  return null;
+};
+// Before #100 an office on another port kept its token in .office-token too. When that file still names this port, its
+// token is this office's, and the settings files that office made carry it: keep it, so those settings keep working.
+// Only the token: state.json and history.json may belong to the office on the default port (its schedules, its notes).
+const AGENT_TOKEN = readToken(TOKEN_FILE)
+  || (PORT !== DEFAULT_PORT && readToken(officeFiles(ROOT).token, PORT))
+  || auth.newAgentToken();
 const PAGE_TOKEN = auth.newPageToken();
 const PAGE_FILE = auth.pageFile(process.env, PORT);
 const launchCodes = auth.createLaunchCodes();
@@ -67,11 +78,11 @@ function writeSecret(file, text) {
   });
   if (warning) console.warn(`WARNING: ${warning}`);
 }
-const HOOKS_CMD_FILE = path.join(ROOT, 'office-hooks.json');
-const HOOKS_HTTP_FILE = path.join(ROOT, 'office-hooks-http.json');
-const STATE_FILE = path.join(ROOT, 'state.json');
-const MCP_FILE = path.join(ROOT, 'office-mcp.json');
-const HISTORY_FILE = path.join(ROOT, 'history.json');
+const HOOKS_CMD_FILE = FILES.hooksCmd;
+const HOOKS_HTTP_FILE = FILES.hooksHttp;
+const STATE_FILE = FILES.state;
+const MCP_FILE = FILES.mcp;
+const HISTORY_FILE = FILES.history;
 
 const HOOK_EVENTS = [
   'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest',
@@ -97,7 +108,8 @@ const rememberDir = (dir) => {
 const NODE = process.execPath.replace(/\\/g, '/');
 // The hook may wait as long as the longest hold below; the server decides when to give up.
 const askSeconds = 1000;
-const hookCommand = `"${NODE}" "${path.join(ROOT, 'hook.mjs').replace(/\\/g, '/')}"`;
+// On a port other than the default, the port follows as an argument, so hook.mjs reads this office's token file.
+const hookCommand = [`"${NODE}" "${path.join(ROOT, 'hook.mjs').replace(/\\/g, '/')}"`, ...portArgs(PORT)].join(' ');
 // The office tools are safe to pre-allow: they only talk to this server, and office_room_update
 // changes only the caller's own room boards (notes and blackboard pin in state.json).
 const PERMISSIONS = { allow: ['mcp__office__office_inbox', 'mcp__office__office_ask', 'mcp__office__office_room', 'mcp__office__office_room_update'] };
@@ -126,16 +138,13 @@ const httpSettings = {
   })),
   permissions: PERMISSIONS,
 };
-writeSecret(HOOKS_CMD_FILE, JSON.stringify(commandSettings, null, 2));
-writeSecret(HOOKS_HTTP_FILE, JSON.stringify(httpSettings, null, 2));
 
 // Use HTTP hooks only after a probe proved them on this Claude Code version (npm run probe).
 const CLAUDE_VERSION = claudeVersion();
 const httpProven = () => persisted.httpHooks?.ok === true && persisted.httpHooks.version === CLAUDE_VERSION;
 let hooksMode = process.env.OFFICE_HOOKS === 'command' ? 'command' : (process.env.OFFICE_HOOKS === 'http' || httpProven() ? 'http' : 'command');
 const activeHooksFile = () => (hooksMode === 'http' ? HOOKS_HTTP_FILE : HOOKS_CMD_FILE);
-const mcpConfig = { mcpServers: { office: { command: process.execPath.replace(/\\/g, '/'), args: [path.join(ROOT, 'mcp.mjs').replace(/\\/g, '/')] } } };
-writeSecret(MCP_FILE, JSON.stringify(mcpConfig, null, 2));
+const mcpConfig = { mcpServers: { office: { command: process.execPath.replace(/\\/g, '/'), args: [path.join(ROOT, 'mcp.mjs').replace(/\\/g, '/'), ...portArgs(PORT)] } } };
 
 // ---------- past sessions ----------
 // Sessions that run inside the office are saved, so a restart or a closed session can be reopened
@@ -1234,8 +1243,12 @@ server.on('error', async (e) => {
 });
 
 server.listen(PORT, HOST, () => {
-  // Written only once we own the port, so a second copy can never invalidate a running office's tokens.
+  // Written only once we own the port, so a second copy can never invalidate a running office's tokens or settings:
+  // a copy on a busy port writes nothing, and an office on another port has its own files (files.mjs).
   writeSecret(TOKEN_FILE, JSON.stringify({ token: AGENT_TOKEN, port: PORT }));
+  writeSecret(HOOKS_CMD_FILE, JSON.stringify(commandSettings, null, 2));
+  writeSecret(HOOKS_HTTP_FILE, JSON.stringify(httpSettings, null, 2));
+  writeSecret(MCP_FILE, JSON.stringify(mcpConfig, null, 2));
   // Saved state (schedule prompts, notes) and past sessions (replies) are limited too (#27 L10): once here, with
   // what this office loaded. savePersisted and saveHistory then write plainly, and a plain write keeps the ACL.
   // After listen, so a second copy that exits on EADDRINUSE never rewrites them.
