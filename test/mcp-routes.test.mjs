@@ -75,7 +75,9 @@ before(async () => {
   // A past Claude Code session the server loads at start (history.json is read once, at start).
   fs.writeFileSync(path.join(copy, 'history.json'), JSON.stringify([{ uid: PAST_UID, sid: 'past-sid-1', provider: 'claude-code', name: 'past-claude', cwd: work, model: 'sonnet',
     cost: 0.5, turns: 2, startedAt: 1000, endedAt: 2000, worktree: null, replies: [{ id: 1, text: 'earlier answer' }], prompt: 'earlier ask', budget: null }]));
-  const env = { ...process.env, PATH: bin + path.delimiter + (process.env.PATH || process.env.Path || ''), OFFICE_PORT: String(port), OFFICE_HOOKS: 'command', OFFICE_OLLAMA_URL: fake.url, OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
+  // LM Studio points at a free port with nothing on it, so a real LM Studio on this machine is never asked.
+  const noServer = `http://127.0.0.1:${await freePort()}/v1`;
+  const env = { ...process.env, PATH: bin + path.delimiter + (process.env.PATH || process.env.Path || ''), OFFICE_PORT: String(port), OFFICE_HOOKS: 'command', OFFICE_OLLAMA_URL: fake.url, OFFICE_LMSTUDIO_URL: noServer, OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
     OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local') };
   child = spawn(process.execPath, ['server.mjs'], { cwd: copy, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env });
   child.stdout.on('data', (d) => { log += d; });
@@ -125,6 +127,18 @@ test('the local providers are registered, and an unknown agent kind is refused',
   const ollama = info.providers.find((p) => p.kind === 'ollama');
   assert.equal(ollama.ready, true);
   assert.deepEqual(ollama.models.map((m) => m.id), ['fake-model']);
+  // The Open dialog's options per kind (#20): a local model is free, opens in the office only and needs a model.
+  assert.deepEqual([ollama.paid, ollama.terminal, ollama.modes, ollama.needsModel, ollama.control], [false, false, [], true, false]);
+  const claude = info.providers.find((p) => p.kind === 'claude-code');
+  assert.deepEqual([claude.paid, claude.terminal, claude.needsModel, claude.control], [true, true, false, true]);
+  // LM Studio has no server in this test: not ready, and it says what to do.
+  const lm = info.providers.find((p) => p.kind === 'lmstudio');
+  assert.equal(lm.ready, false);
+  assert.match(lm.needs[0], /LM Studio local server/);
+  // A local agent does not open in a terminal window.
+  const win = await call('/api/open', { cwd: work, provider: 'ollama', model: 'fake-model', where: 'terminal' });
+  assert.equal(win.status, 400);
+  assert.match(win.json.error, /does not open in a terminal window/);
 });
 
 test('office_inbox returns what the user sent during a turn, once', { skip: SKIP }, async () => {
@@ -188,6 +202,9 @@ test('a past local session reopens as a fresh local session in the same folder',
     return (h.json.sessions || []).find((x) => x.uid === uid);
   }, 'the past session in the history');
   assert.ok(rec, 'the closed local session is in the history');
+  assert.equal(rec.provider, 'ollama', 'Past sessions shows the agent kind');
+  const old = (await call('/api/history', {})).json.sessions.find((x) => x.uid === PAST_UID);
+  assert.equal(old.provider, 'claude-code', 'a record that says no kind is Claude Code\'s');
   const re = await call('/api/reopen', { uid });
   assert.equal(re.status, 200, JSON.stringify(re.json));
   const s = await sessionOf(re.json.uid);

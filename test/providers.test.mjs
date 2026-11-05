@@ -127,13 +127,44 @@ test('status: readiness and models of each provider; a failing or silent one is 
   const silent = { ...createFake(o.events), kind: 'silent', label: 'Silent', readiness: () => new Promise(() => {}) };
   const off = { ...createFake(o.events), kind: 'off', label: 'Off', readiness: async () => ({ ready: false, version: null, needs: ['Start the server.'] }), models: async () => { asked++; return [{ id: 'x' }]; } };
   const out = await createRegistry([fake, broken, silent, off]).status({ timeoutMs: 30 });
+  // Each entry starts with what kinds() says of the provider (the Open dialog's options), then its readiness.
+  const plain = { paid: true, terminal: false, modes: [], needsModel: false, control: false };
   assert.deepEqual(out, [
-    { kind: 'fake', label: 'Fake agent', ready: true, version: '1.0', needs: [], models: [{ id: 'fake-1', label: 'Fake 1' }] },
-    { kind: 'broken', label: 'Broken', ready: false, version: null, needs: ['The office could not check Broken: boom'], models: [] },
-    { kind: 'silent', label: 'Silent', ready: false, version: null, needs: ['The office could not check Silent: No answer in time.'], models: [] },
-    { kind: 'off', label: 'Off', ready: false, version: null, needs: ['Start the server.'], models: [] },
+    { kind: 'fake', label: 'Fake agent', ...plain, ready: true, version: '1.0', needs: [], models: [{ id: 'fake-1', label: 'Fake 1' }] },
+    { kind: 'broken', label: 'Broken', ...plain, ready: false, version: null, needs: ['The office could not check Broken: boom'], models: [] },
+    { kind: 'silent', label: 'Silent', ...plain, ready: false, version: null, needs: ['The office could not check Silent: No answer in time.'], models: [] },
+    { kind: 'off', label: 'Off', ...plain, ready: false, version: null, needs: ['Start the server.'], models: [] },
   ]);
   assert.equal(asked, 0, 'models are asked only of a ready provider');
+});
+
+// The page shows the options of each agent kind from these facts, so it keeps no copy of a provider's rules (#20).
+test('kinds: each provider\'s options for the Open dialog, from the provider itself, with no readiness call', () => {
+  const o = office();
+  let calls = 0;
+  const count = (p) => ({ ...p, readiness: async () => { calls++; return { ready: true }; }, models: async () => { calls++; return []; } });
+  const claude = count(createClaudeCode({ events: o.events, files: () => ({}) }));
+  const ollama = count(createLocal({ events: o.events, kind: 'ollama' }));
+  const lmstudio = count(createLocal({ events: o.events, kind: 'lmstudio' }));
+  const reg = createRegistry([claude, ollama, lmstudio, createFake(o.events)]);
+  assert.deepEqual(reg.kinds(), [
+    // Claude Code: paid (a spend limit), a terminal window, permission modes, a default model, and live changes (control)
+    { kind: 'claude-code', label: 'Claude Code', paid: true, terminal: true, modes: ['default', 'acceptEdits', 'plan'], needsModel: false, control: true },
+    // a local model: free, in the office only, no permission modes, a model to pick, no live changes
+    { kind: 'ollama', label: 'Ollama', paid: false, terminal: false, modes: [], needsModel: true, control: false },
+    { kind: 'lmstudio', label: 'LM Studio', paid: false, terminal: false, modes: [], needsModel: true, control: false },
+    // a provider that says nothing is paid, has no window, no modes, needs no model and takes no control request
+    { kind: 'fake', label: 'Fake agent', paid: true, terminal: false, modes: [], needsModel: false, control: false },
+  ]);
+  assert.equal(calls, 0, 'kinds() asks no provider anything: the snapshot sends it');
+  const k = reg.kinds();
+  k[0].modes.push('x');
+  assert.deepEqual(reg.kinds()[0].modes, ['default', 'acceptEdits', 'plan'], 'a copy: a caller cannot change a provider');
+  assert.throws(() => checkProvider({ ...createFake(o.events), modes: 'plan' }), /modes \(optional, but then a list of mode names\)/);
+  assert.throws(() => checkProvider({ ...createFake(o.events), modes: [1] }), /modes/);
+  assert.throws(() => checkProvider({ ...createFake(o.events), needsModel: 'yes' }), /needsModel \(optional, but then true or false\)/);
+  assert.throws(() => checkProvider({ ...createFake(o.events), control: true }), /control\(\) \(optional, but then a function\)/);
+  assert.throws(() => checkProvider({ ...createFake(o.events), openWindow: 'yes' }), /openWindow\(\)/);
 });
 
 // ---------- a provider other than Claude Code drives every tracker input ----------

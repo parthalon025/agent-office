@@ -5,7 +5,7 @@
    timers. The page loads it as a script (window.OfficeWire). The server and the tests import it for its side effect
    and read globalThis.OfficeWire.
 
-     lean(state)        -> the snapshot the page gets. state: { sessions (each with place), plan, figures, notes, pins, repos }
+     lean(state)        -> the snapshot the page gets. state: { sessions (each with place), plan, figures, notes, pins, repos, kinds }
      leanCall(c)        -> one tool call as the page reads it
      diff(prev, next)   -> the patch from one lean snapshot to the next, or null when nothing changed
      apply(prev, patch) -> the next snapshot. prev does not change; the parts that did not change are shared
@@ -24,7 +24,7 @@
 
   // Every session field the page reads (building.js, office.js, terminal.js, board.js, chat-extras.js, vocab.js).
   // A field the page does not read stays on the server. Add a field here when the page starts to read it.
-  var SESSION_FIELDS = ['uid', 'name', 'status', 'cwd', 'headless', 'note', 'model', 'mode', 'tool', 'prompt', 'promptAt', 'live',
+  var SESSION_FIELDS = ['uid', 'provider', 'name', 'status', 'cwd', 'headless', 'note', 'model', 'mode', 'tool', 'prompt', 'promptAt', 'live',
     'error', 'turns', 'cost', 'usage', 'ctxTokens', 'ctxWindow', 'todos', 'agents', 'calls', 'replies', 'pending', 'questions',
     'inbox', 'commands', 'skills', 'scheduleId', 'startedAt', 'endedAt', 'lastEvent', 'git', 'place'];
   // Per session and broadcast. calls: the tracker's own limit (MAX_CALLS); the boards and the terminal count all of them.
@@ -74,7 +74,8 @@
       figures: state.figures || {},
       notes: state.notes || {},
       pins: state.pins || {},
-      repos: state.repos || []
+      repos: state.repos || [],
+      kinds: state.kinds || []   // the agent kinds (providers/index.mjs kinds): fixed while the server runs, so no patch repeats them
     };
   }
 

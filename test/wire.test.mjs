@@ -69,7 +69,7 @@ test('a session sends only the fields the page reads; server-only fields stay on
   s.inbox.push({ t: 7, text: 'a long user message that the page never shows' });
   s.git = { repo: 'C:\\r', root: 'C:\\r', branch: 'main' };
   const l = W.lean(o.state()).sessions[0];
-  for (const f of ['sid', 'pid', 'officeId', 'startDir', 'gitCwd', 'gitAt', 'costBase', 'replySeq', 'lastUsageId', 'errorSeq', 'placed', 'launched', 'interrupted', 'budget', 'provider', 'worktree']) {
+  for (const f of ['sid', 'pid', 'officeId', 'startDir', 'gitCwd', 'gitAt', 'costBase', 'replySeq', 'lastUsageId', 'errorSeq', 'placed', 'launched', 'interrupted', 'budget', 'worktree']) {
     assert.equal(f in l, false, f);
   }
   for (const f of W.SESSION_FIELDS) assert.notEqual(l[f], undefined, `${f} is always set, so a patch can clear it`);
@@ -78,6 +78,21 @@ test('a session sends only the fields the page reads; server-only fields stay on
   assert.deepEqual(l.git, { branch: 'main' });
   const open = { id: 'x', name: 'Read', detail: 'a.js', file: null, agent: null, t: 1, ms: null, ok: null, err: null };
   assert.deepEqual(W.leanCall(open), { id: 'x', name: 'Read', detail: 'a.js', t: 1, ok: null }, 'an open call keeps ok: null');
+  // The agent kind: every list and the bot card show it (#20). A session the tracker saw first in a hook is Claude Code.
+  assert.equal(l.provider, 'claude-code');
+});
+
+test('the snapshot carries the agent kinds once, and a patch never repeats them', () => {
+  const o = office(1, 1);
+  const kinds = [{ kind: 'claude-code', label: 'Claude Code', paid: true, terminal: true, modes: ['default'], needsModel: false },
+    { kind: 'ollama', label: 'Ollama', paid: false, terminal: false, modes: [], needsModel: true }];
+  const a = W.lean({ ...o.state(), kinds });
+  assert.deepEqual(a.kinds, kinds);
+  assert.deepEqual(W.lean(o.state()).kinds, [], 'no kinds: an empty list, never undefined');
+  o.hook({ hook_event_name: 'UserPromptSubmit', session_id: '5f0c3a1e-0000-4000-8000-000000000000', cwd: 'C:\\work\\project-0', prompt: 'Again.' });
+  const p = W.diff(a, W.lean({ ...o.state(), kinds }));
+  assert.ok(p, 'the session changed');
+  assert.equal('kinds' in (p.set || {}), false, 'the kinds did not change: the patch leaves them out');
 });
 
 test('replies are capped per broadcast by characters, newest first, and the newest always goes', () => {
@@ -264,6 +279,8 @@ test('the server: a whole snapshot on connect, then patches that add up to it; p
     assert.equal(fresh.snap.sessions.length, N);
     assert.ok(fresh.snap.sessions.every((s) => s.calls.length === CALLS && s.calls.every((c) => c.ok === true)));
     assert.equal('sid' in fresh.snap.sessions[0], false, 'the snapshot is lean');
+    assert.ok(fresh.snap.sessions.every((s) => s.provider === 'claude-code'), 'each session says its agent kind');
+    assert.deepEqual(fresh.snap.kinds.map((k) => [k.kind, k.label]), [['claude-code', 'Claude Code'], ['ollama', 'Ollama'], ['lmstudio', 'LM Studio']], 'the server sends its agent kinds');
     // one message per broadcast window at most (100 ms), however many hooks come in
     const during = early.msgs.filter((x) => x.t >= t0 && x.t <= t1 + 150).length;
     assert.ok(during <= Math.ceil((t1 - t0) / 100) + 2, `${during} messages in ${t1 - t0} ms for ${N * CALLS * 2} hooks`);
