@@ -525,7 +525,11 @@ test('Hermes is off until the Security room turns it on: the open is refused bef
   assert.equal((await snapshot()).sessions.length, before);
   const on = { scope: 'office', row: 'ungated', col: 'hermes', value: 'on' };
   assert.equal((await call('/api/security/set', on)).status, 409, 'turning it on loosens: the wall asks for the Confirm');
+  // #104: a plain ask keeps its answer for 30 s, so the rule change must drop it, or the old "Turn on Hermes" would stay.
+  const plain = async () => (await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json())).providers.find((p) => p.kind === 'hermes');
+  assert.match((await plain()).needs.join(' '), /Turn on Hermes on the Agents screen/, 'off: the answer says so, and is kept');
   assert.equal((await call('/api/security/set', { ...on, confirmed: true })).status, 200);
+  assert.doesNotMatch((await plain()).needs.join(' '), /Turn on Hermes on the Agents screen/, 'a plain ask right after the change gets the new answer');
 });
 
 test('an ACP agent asks once before it runs: no cost report, so the open is refused until the user says yes', { skip: SKIP }, async () => {
@@ -735,7 +739,8 @@ test('notes: an agent write that reads as an instruction, or is too long, is ref
 test('OpenClaw (#77): gated through the office plugin; a file edit the plugin sends is held in the office until the user answers', { skip: SKIP }, async () => {
   // A good install: workspace-only, and the plugin enabled with this office's token file.
   fs.writeFileSync(clawConfig, JSON.stringify(clawOk()));
-  const info = await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
+  // fresh=1: the config just changed, and the server keeps a provider answer for 30 s (#104).
+  const info = await fetch(`http://127.0.0.1:${port}/api/providers?fresh=1`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
   const row = info.providers.find((p) => p.kind === 'openclaw');
   assert.ok(row, 'OpenClaw is registered');
   assert.deepEqual([row.gated, row.supervision, row.cost], [true, null, 'unknown']);
@@ -801,7 +806,7 @@ test('OpenClaw (#77): a config that is off is refused before the cost question a
 test('OpenClaw (#73): no Gateway on the port is "Not ready: start the OpenClaw Gateway", and the office starts nothing', { skip: SKIP }, async () => {
   await new Promise((r) => gateway.close(r));
   gateway = null;
-  const info = await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
+  const info = await fetch(`http://127.0.0.1:${port}/api/providers?fresh=1`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
   const row = info.providers.find((p) => p.kind === 'openclaw');
   assert.equal(row.ready, false);
   assert.match(row.needs[0], /^Not ready: start the OpenClaw Gateway\. It should listen on 127\.0\.0\.1:\d+\. The office never starts or stops it\.$/);

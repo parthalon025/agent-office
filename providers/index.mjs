@@ -133,6 +133,9 @@ export function spendLimitFor({ paid, cost, requested, fallback = DEFAULT_SPEND_
 
 const KIND_RE = /^[a-z][a-z0-9-]{0,39}$/;
 const STATUS_MS = 15000;
+// How long GET /api/providers keeps its answer (#104). A round can take a second (Claude Code runs claude --version) or
+// the whole time limit (a silent local server), and the page asks each time a dialog opens.
+const STATUS_KEEP_MS = 30000;
 
 /** An error the HTTP layer answers with `status`, like the rule errors of notes.mjs. */
 export function providerError(status, message) {
@@ -226,8 +229,11 @@ export function describe(p) {
     ...(p.cloud === true ? { cloud: true } : {}), ...(p.modelLabel ? { modelLabel: p.modelLabel } : {}) };
 }
 
-/** The providers of one office, by kind. */
-export function createRegistry(list) {
+/**
+ * The providers of one office, by kind.
+ * opts: now (the clock) and statusTtlMs (how long statusCached keeps an answer). Both are injected so tests need no waiting.
+ */
+export function createRegistry(list, { now = Date.now, statusTtlMs = STATUS_KEEP_MS } = {}) {
   const by = new Map();
   for (const p of list) {
     checkProvider(p);
@@ -239,8 +245,11 @@ export function createRegistry(list) {
     if (!p) throw providerError(400, 'Unknown agent kind.');
     return p;
   }
-  return {
+  // The kept answer of statusCached: { at, answer } once a round has ended, and the round that runs now ({ promise, fresh }).
+  let kept = null, running = null;
+  const api = {
     get,
+    statusTtlMs,
     /** The provider of a session. A session the tracker first saw in a hook is a Claude Code session. */
     of: (s) => get(s.provider),
     list: () => [...by.values()],
@@ -273,5 +282,34 @@ export function createRegistry(list) {
           canResume: p.canResume === true, features: featuresOf(p) };
       }));
     },
+    /**
+     * status() with a short memory, for GET /api/providers (#104). The answer is the same.
+     * - A plain ask inside statusTtlMs gets the kept answer and calls no provider.
+     * - A round that runs is shared: asks that arrive meanwhile get its answer, so one set of provider calls serves all.
+     * - fresh: true (the page's Check again) runs a new round and replaces the kept answer. It shares a running round only
+     *   when a fresh ask started that round. A plain round began before this ask and may hold a reading from before the
+     *   user fixed the problem, so it does not count.
+     * - A round that rejects keeps nothing: the next ask runs a new round. A round that ends after a newer one began
+     *   leaves the newer answer alone.
+     * - Two fresh asks that overlap share one round on purpose: a double click on Check again asks the providers once.
+     * - forgetStatus() drops the kept answer and cuts the round that runs loose: its answer goes to the asks that wait for
+     *   it, but is not kept and is not shared with later asks.
+     */
+    forgetStatus() { kept = null; running = null; },
+    statusCached({ fresh = false, timeoutMs } = {}) {
+      if (running && (!fresh || running.fresh)) return running.promise;
+      if (!fresh && kept && now() - kept.at < statusTtlMs) return Promise.resolve(kept.answer);
+      const round = { fresh, promise: null };
+      round.promise = api.status(timeoutMs === undefined ? undefined : { timeoutMs }).then((answer) => {
+        if (running === round) { running = null; kept = { at: now(), answer }; }
+        return answer;
+      }, (e) => {
+        if (running === round) running = null;
+        throw e;
+      });
+      running = round;
+      return round.promise;
+    },
   };
+  return api;
 }

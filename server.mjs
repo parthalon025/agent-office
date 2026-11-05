@@ -331,6 +331,7 @@ function saveRule(body) {
   const where = scope === 'building' ? (body.building ? `the building ${basename(body.building) || body.building}` : 'Other folders') : 'all buildings';
   addFeed({ uid: 'security', name: 'Security' }, 'tool', `${S.rows[body.row].label}, ${col.label}: ${S.word(r.to)} (${where})`);
   broadcast();
+  providers.forgetStatus(); // readiness reads this rule (blocked), so the kept GET /api/providers answer is stale (#104)
   void refreshEnforce(true); // an agent whose own config carries the cells checks it again for the new cells
   return { ok: true, from: r.from, to: r.to };
 }
@@ -1506,7 +1507,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/api/choices') return send(res, 200, { folders: recentChoices(persisted.recent, url.searchParams.get('first') || '') });
     // Each agent kind with its readiness, what it needs and its models (providers/index.mjs status), for the settings view (#20).
-    if (req.method === 'GET' && url.pathname === '/api/providers') { const list = await providers.status(); void refreshEnforce(); return send(res, 200, { providers: list }); }
+    if (req.method === 'GET' && url.pathname === '/api/providers') { const list = await providers.statusCached({ fresh: url.searchParams.get('fresh') === '1' }); void refreshEnforce(); return send(res, 200, { providers: list }); }
     if (req.method === 'GET' && url.pathname === '/api/info') {
       return send(res, 200, {
         port: PORT, hooksFile: activeHooksFile(), recent: persisted.recent, home: os.homedir(),

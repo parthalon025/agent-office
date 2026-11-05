@@ -52,6 +52,17 @@ test('office.js: the scene height follows the window, and no CSS overrides the D
   assert.match(office, /useEffect\(function \(\) \{ if \(hostRef\.current\) hostRef\.current\.refit\(\); \}, \[win\]\);/);
 });
 
+test('office.js: only Check again asks the server for a fresh provider round; opening a dialog reads the kept answer (#104)', () => {
+  const fx = office.match(/function useKinds\(on\) \{[\s\S]*?\n  \}\n/);
+  assert.ok(fx, 'useKinds');
+  const asks = [...fx[0].matchAll(/'\/api\/providers[^']*'/g)].map((m) => m[0]);
+  assert.deepEqual(asks, ["'/api/providers?fresh=1'", "'/api/providers'"], 'one plain ask, one fresh ask');
+  assert.match(fx[0], /var fresh = wantFresh\.current; wantFresh\.current = false;/, 'the flag is read once');
+  assert.match(fx[0], /recheck: function \(\) \{ wantFresh\.current = true; setRound\(round \+ 1\); \}/, 'only recheck sets it');
+  assert.equal((fx[0].match(/wantFresh\.current = true/g) || []).length, 1);
+  assert.equal([...office.matchAll(/'\/api\/providers/g)].length, 2, 'no other page code asks for the provider status');
+});
+
 test('office.js: the welcome card waits while the Since you left card shows, and the dock holds the primary button then (#66)', () => {
   assert.match(office, /h\(A\.OfficeScene, \{[^\n]*\n(?:[^\n]*\n){0,12}?[^\n]*onSinceYouLeft: setSyl/, 'the scene reports the card');
   // It also waits while the camera looks at a screen: the Security room screens work with no session (#70).
