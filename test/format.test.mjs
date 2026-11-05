@@ -86,3 +86,10 @@ test('cleanupNote says what the clean-up did, and is an error when a floor was s
   assert.deepEqual(F.cleanupNote({ deleted: [], skipped: ['x'] }), ['error', 'No floor deleted', 'Kept: x. It changed or a session works there.']);
   assert.deepEqual(F.cleanupNote({}), ['info', 'Nothing to clean up', 'No floor was deleted.']);
 });
+
+test('cleanupEmpty gives the true reason the clean-up list is empty', () => {
+  assert.equal(F.cleanupEmpty(0), 'No floor is ready. A floor must be merged, have no changes and no session, and be over an hour old.');
+  assert.equal(F.cleanupEmpty(undefined), F.cleanupEmpty(0));
+  assert.equal(F.cleanupEmpty(1), 'You kept the floor. No floor is deleted.');
+  assert.equal(F.cleanupEmpty(3), 'You kept all 3 floors. No floor is deleted.');
+});

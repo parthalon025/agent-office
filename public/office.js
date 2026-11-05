@@ -403,6 +403,16 @@
             h(A.Button, { variant: 'quiet', icon: 'copy', onClick: function () { copy(token, 'The agent token', 'Click Show token, then select the token and copy it by hand.'); } }, 'Copy token'))) : null));
   }
 
+  // A row of a dialog list goes (answered, kept). If the focus was on it, it falls to the page. Move it inside the dialog:
+  // to the button of the row that took its place, else to the first dialog button. inner = any element inside the dialog.
+  function refocusRow(inner, idx) {
+    var root = inner && inner.closest('.ao-dialog');
+    if (!root || root.contains(document.activeElement)) return;
+    var rows = root.querySelectorAll('.past-row'), next = rows[Math.min(idx, rows.length - 1)];
+    var f = next ? next.querySelector('button') : root.querySelector('.ao-dialog-a button');
+    if (f) f.focus();
+  }
+
   // ---------- floors (branches) and rooms (worktrees) ----------
   var IGNORED_NOTE = 'Files that git ignores in a room, such as a local .env, are deleted too. Copy them first if you need them.';
   function FloorsDialog(p) {
@@ -413,7 +423,8 @@
     var bz = useState(''), busy = bz[0], setBusy = bz[1];
     var er = useState(''), err = er[0], setErr = er[1];
     var nr = useState(null), newRoom = nr[0], setNewRoom = nr[1];    // naming a room: { branch, name }
-    var cl = useState(null), clean = cl[0], setClean = cl[1];         // clean up: null, or { floors: [{ branch, rooms }] }
+    var cl = useState(null), clean = cl[0], setClean = cl[1];         // clean up: null, or { floors: [{ branch, rooms }], kept: floors the user left out }
+    var box = React.useRef(null), lastIdx = React.useRef(null);       // lastIdx: the row that Keep removed; null when no row went
     var DONE = {
       '/api/floor/cleanup': function (b, j) { return F.cleanupNote(j); },
       '/api/floor/create': ['success', 'Floor added', function (b) { return 'Branch ' + b.branch + ' with its first room.'; }],
@@ -428,14 +439,11 @@
         if (t && p.toast) p.toast({ tone: t[0], title: t[1], text: t[2] });
       }, function (x) { setBusy(''); setErr(x.message); });
     }
-    // The Keep button leaves the page, so the focus would fall to the page. Move it to the next Keep button, else to the first dialog button.
-    function focusAfterKeep(i) {
-      setTimeout(function () {
-        var b = document.querySelectorAll('.ao-dialog .past-actions button');
-        var t = b[Math.min(i, b.length - 1)] || document.querySelector('.ao-dialog-a button');
-        if (t) t.focus();
-      }, 0);
-    }
+    // A Keep press removes its row, so the focus would fall to the page. Keep it in the dialog (see refocusRow).
+    useEffect(function () {
+      if (lastIdx.current == null) return;
+      refocusRow(box.current, lastIdx.current); lastIdx.current = null;
+    }, [clean ? clean.floors.map(function (f) { return f.branch; }).join('|') : null]);
     if (!repo) {
       return h(A.Dialog, { open: true, title: 'Floors and rooms', onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
         h(A.EmptyState, { icon: 'floor', title: 'No repository here', text: 'Folders outside git have no branches. Open a session in a git repository to get floors.' }));
@@ -449,14 +457,14 @@
       return h(A.Dialog, { open: true, title: 'Clean up unused floors', onClose: function () { setClean(null); setErr(''); }, actions: [
         h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setClean(null); setErr(''); } }, fl.length ? 'Keep them' : 'Close'),
         fl.length ? h(A.Button, { key: 'r', variant: 'danger', icon: 'remove', loading: busy === 'cleanup', onClick: function () { run('cleanup', '/api/floor/cleanup', { branches: fl.map(function (f) { return f.branch; }) }, function () { setClean(null); }); } }, 'Delete ' + fl.length + (fl.length === 1 ? ' floor' : ' floors')) : null] },
-        h('div', { className: 'form' },
+        h('div', { className: 'form', ref: box },
           fl.length
             ? h('p', { className: 'note' }, 'These floors are merged into ' + (main ? main.branch : 'the main branch') + ', have no changes, no session and are over an hour old. Press Keep this floor to leave one out. Deleting removes the rest with their rooms and branches. No commit is lost. ' + IGNORED_NOTE)
-            : h(A.EmptyState, { icon: 'floor', title: 'Nothing to clean up', text: 'No floor is ready. A floor must be merged, have no changes and no session, and be over an hour old.' }),
+            : h(A.EmptyState, { icon: 'floor', title: 'Nothing to clean up', text: F.cleanupEmpty(clean.kept) }),
           h('ul', { className: 'past' }, fl.map(function (f, i) {
             return h('li', { key: f.branch, className: 'past-row' },
               h('div', { className: 'past-title' }, h(A.Icon, { name: 'floor', size: 16 }), h('b', null, f.branch), h(Tag, null, f.rooms + (f.rooms === 1 ? ' room' : ' rooms'))),
-              h('div', { className: 'past-actions' }, h(A.Button, { variant: 'quiet', onClick: function () { setClean({ floors: fl.filter(function (x) { return x.branch !== f.branch; }) }); focusAfterKeep(i); } }, 'Keep this floor')));
+              h('div', { className: 'past-actions' }, h(A.Button, { variant: 'quiet', onClick: function () { lastIdx.current = i; setClean({ floors: fl.filter(function (x) { return x.branch !== f.branch; }), kept: (clean.kept || 0) + 1 }); } }, 'Keep this floor')));
           })),
           err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
     }
@@ -1148,13 +1156,7 @@
     var list = snap ? window.officeAdapter.requests(snap) : [];
     var bz = useState(''), busy = bz[0], setBusy = bz[1], box = React.useRef(null), lastIdx = React.useRef(0);
     // After an answer the row goes. Keep the focus inside the dialog, on the row that took its place.
-    useEffect(function () {
-      var root = box.current && box.current.closest('.ao-dialog');
-      if (!root || root.contains(document.activeElement)) return;
-      var rows = root.querySelectorAll('.past-row'), next = rows[Math.min(lastIdx.current, rows.length - 1)];
-      var f = next ? next.querySelector('button') : root.querySelector('.ao-dialog-a button');
-      if (f) f.focus();
-    }, [list.map(function (r) { return r.id; }).join('|')]);
+    useEffect(function () { refocusRow(box.current, lastIdx.current); }, [list.map(function (r) { return r.id; }).join('|')]);
     function answer(r, allow) {
       lastIdx.current = list.indexOf(r);
       setBusy(r.id);

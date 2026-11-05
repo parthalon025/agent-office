@@ -29,7 +29,8 @@ const freePort = () => new Promise((resolve, reject) => {
   s.listen(0, '127.0.0.1', () => { const { port: p } = s.address(); s.close(() => resolve(p)); });
   s.on('error', reject);
 });
-const until = async (fn, what, ms = 15000) => {
+// A server that starts while other suites run can need more than 15 s; a fast start still returns at once.
+const until = async (fn, what, ms = 45000) => {
   const t0 = Date.now();
   for (;;) {
     const v = await fn();
