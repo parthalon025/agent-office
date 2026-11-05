@@ -1,10 +1,11 @@
 // A fake OpenAI-compatible chat server for provider tests. No model, no cost, 127.0.0.1 on a free port.
 // script: one entry per chat request, in order. { text } streams a reply; { toolCalls: [{ name, args }] } asks for tools;
-// { status: 500 } fails; { delayMs } waits before it answers; { usage } sets the token numbers. The last entry repeats. models: ids for GET /v1/models.
+// { status: 500 } fails; { delayMs } waits before it answers; { usage } sets the token numbers. The last entry repeats. models: ids for GET /v1/models. `requests` holds the chat bodies, `calls` every method and path.
 import http from 'node:http';
 
 export async function startFakeOpenAI({ script = [{ text: 'ok' }], models = ['fake-model'] } = {}) {
   const requests = [];
+  const calls = []; // every request of any kind: { method, path }, so a test can see a different endpoint
   let n = 0;
   let steps = script;
   const server = http.createServer((req, res) => {
@@ -12,6 +13,7 @@ export async function startFakeOpenAI({ script = [{ text: 'ok' }], models = ['fa
     req.on('data', (d) => { body += d; });
     req.on('end', async () => {
       const url = new URL(req.url, 'http://x');
+      calls.push({ method: req.method, path: url.pathname });
       if (req.method === 'GET' && url.pathname === '/v1/models') {
         res.writeHead(200, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ object: 'list', data: models.map((id) => ({ id, object: 'model' })) }));
@@ -59,8 +61,9 @@ export async function startFakeOpenAI({ script = [{ text: 'ok' }], models = ['fa
   return {
     url: `http://127.0.0.1:${port}/v1`,
     requests,
+    calls,
     /** Start the script again with new steps (a shared server, one test after another). */
-    reset(next) { steps = next; n = 0; requests.length = 0; },
+    reset(next) { steps = next; n = 0; requests.length = 0; calls.length = 0; },
     close: () => new Promise((r) => { server.closeAllConnections?.(); server.close(r); }),
   };
 }

@@ -325,6 +325,39 @@ test('the office tools run in-process, need no approval, and are offered only wh
   } finally { await bare.done(); }
 });
 
+// LM Studio can run its own MCP servers (for example run-command). Any extra request field or endpoint could hand a tool call to them,
+// past riskOf and the approval check. So the chat request has exactly these keys and goes to one endpoint.
+const CHAT_KEYS = ['messages', 'model', 'stream', 'stream_options', 'tools'];
+
+test('the chat request carries only model, messages, tools, stream and stream_options, to /chat/completions only', async () => {
+  for (const withOffice of [false, true]) {
+    const officeTools = withOffice ? { inbox: async () => 'none', ask: async () => 'y', room: async () => 'r', roomUpdate: async () => 'u' } : undefined;
+    const o = await rig([
+      { toolCalls: [{ name: 'Read', args: { file_path: 'a.txt' } }, ...(withOffice ? [{ name: 'office_room', args: {} }] : [])] },
+      { toolCalls: [{ name: 'Bash', args: { command: 'echo hi' } }] },
+      { text: 'done' },
+    ], { officeTools, kind: withOffice ? 'lmstudio' : 'ollama' });
+    try {
+      const s = o.session();
+      o.provider.open(s, { model: 'm' });
+      o.say(s, 'go');
+      await until(() => o.holds.size === 1, 'the Bash approval');
+      o.release([...o.holds.keys()][0], { allow: true });
+      await until(() => s.status === 'idle' && last(s) === 'done', 'the answer');
+      const label = withOffice ? 'with office tools' : 'without office tools';
+      assert.equal(o.fake.requests.length, 3, 'one request per round, ' + label);
+      for (const [i, body] of o.fake.requests.entries()) {
+        assert.deepEqual(Object.keys(body).sort(), CHAT_KEYS, `request ${i} keys, ${label}`);
+        assert.equal(body.stream, true);
+        assert.deepEqual(body.stream_options, { include_usage: true });
+        assert.ok(Array.isArray(body.tools) && body.tools.every((t) => t.type === 'function' && Object.keys(t).sort().join() === 'function,type'), 'tools are plain function definitions');
+      }
+      assert.ok(o.fake.calls.length >= 3);
+      for (const c of o.fake.calls) assert.deepEqual(c, { method: 'POST', path: '/v1/chat/completions' }, 'the only call a session makes');
+    } finally { await o.done(); }
+  }
+});
+
 test('office_ask waits for the user and an interrupt frees it', async () => {
   let release;
   const officeTools = { inbox() {}, room() {}, roomUpdate() {}, ask: () => new Promise((r) => { release = r; }) };
