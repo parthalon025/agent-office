@@ -204,13 +204,15 @@ function freshReopen(s) {
 }
 
 // A fork (#72) made its worktree before the agent proved it can fork. When the session ends before init, the empty worktree and its
-// branch go with it (it holds no work: the agent never ran in it).
-const forkTrees = new Map(); // uid of a forked session -> its worktree, until it has started
+// branch go with it (it holds no work: the agent never ran in it). This and the catch in forkSession are the one exception to
+// "the office never removes a worktree by itself" (CLAUDE.md): git.discardNew takes only the object createWorktree returned
+// for this fork, never a past record's or another session's worktree.
+const forkTrees = new Map(); // uid of a forked session -> the worktree createWorktree made for it, until it has started
 function failedFork(s) {
   const wt = forkTrees.get(s.uid);
   if (!wt) return;
   forkTrees.delete(s.uid);
-  git.removeWorktree(wt, false).then(() => addFeed(s, 'start', 'The fork did not start. The new worktree and its branch are removed.'), () => addFeed(s, 'start', `The fork did not start. The new worktree stays at ${wt.root}.`));
+  git.discardNew(wt).then(() => addFeed(s, 'start', 'The fork did not start. The new worktree and its branch are removed.'), () => addFeed(s, 'start', `The fork did not start. The new worktree stays at ${wt.root}.`));
 }
 
 // The reopened session ended before init: the past record stays in Past sessions, and the session shows why.
@@ -1062,10 +1064,10 @@ async function forkSession(uid, { confirmed = false } = {}) {
     addRepo(wt.repo); await refreshRepo(repoKey(wt.repo));
     const building = await buildingOfFolder(wt.path, worktree);
     const uid = openHeadless(provider, { cwd: wt.path, name, prompt: '', worktree, budget, fork: rec.sid, prior: rec, model: rec.model || null, building });
-    forkTrees.set(uid, worktree);
+    forkTrees.set(uid, wt);
     return uid;
   } catch (e) {
-    await git.removeWorktree(worktree, false).catch(() => {}); // no session opened: the worktree would be left over
+    await git.discardNew(wt).catch(() => {}); // no session opened: the worktree this call made would be left over
     throw e;
   }
 }

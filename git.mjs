@@ -211,7 +211,20 @@ export const perRepo = keyedQueue(repoKeyOf);
 export async function createWorktree(cwd, name) {
   // The main repository is common to all its worktrees, so it is the key of the queue.
   const main = (await locate(cwd))?.repo || (await repoTop(cwd));
-  return perRepo(main, () => makeWorktree(cwd, name));
+  const wt = await perRepo(main, () => makeWorktree(cwd, name));
+  minted.add(wt);
+  return wt;
+}
+// The one exception to "the office never removes a worktree by itself" (CLAUDE.md Safety rules): a caller that made a
+// worktree and could not start its session in it (a fork that ended before init, or whose open threw: server.mjs failedFork and forkSession) removes it again. It
+// never held work. discardNew takes only the object createWorktree returned in this process, once: a copy (a past record,
+// a session's worktree field, JSON) is refused, so no other worktree can be removed this way. Not forced: a change in it,
+// or a commit on its branch, keeps it.
+const minted = new WeakSet();
+export async function discardNew(wt) {
+  if (!wt || typeof wt !== 'object' || !minted.has(wt)) throw new Error('The office removes only a worktree it made in this call.');
+  minted.delete(wt);
+  return removeWorktree(wt, false);
 }
 async function makeWorktree(cwd, name) {
   const top = await repoTop(cwd);

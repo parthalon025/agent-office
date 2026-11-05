@@ -265,3 +265,27 @@ test('M5: perRepo runs the tasks of one repository one after the other, also aft
   assert.ok(log.indexOf('b+') > log.indexOf('a-'), 'b starts after a ends: ' + log.join(' '));
   assert.ok(log.indexOf('c+') < log.indexOf('a-'), 'c does not wait for a: ' + log.join(' '));
 });
+
+// The one exception to "the office never removes a worktree by itself" (CLAUDE.md): a fork that did not start removes the
+// worktree the same call made for it, which never held work. discardNew takes only an object createWorktree returned in this
+// process: a copy (a past record, a session's worktree field) is refused, so no other worktree can be removed this way.
+test('discardNew removes only a worktree createWorktree made in this call; a copy of one is refused and the worktree stays', async () => {
+  const dir = repo();
+  let keep = null;
+  try {
+    const wt = await git.createWorktree(dir, 'fork');
+    await git.discardNew(wt);
+    assert.equal(fs.existsSync(wt.root), false, 'the new worktree is gone');
+    assert.equal(plain(dir, 'branch', '--list', wt.branch).trim(), '', 'and its branch');
+    keep = await git.createWorktree(dir, 'keep');
+    for (const copy of [{ ...keep }, JSON.parse(JSON.stringify(keep)), { root: keep.root, repo: keep.repo, branch: keep.branch }]) {
+      await assert.rejects(git.discardNew(copy), /made in this call/);
+    }
+    assert.equal(fs.existsSync(keep.root), true, 'a worktree it did not just make stays');
+    await assert.rejects(git.discardNew(wt), /made in this call/, 'once only');
+  } finally {
+    if (keep) await git.removeRoom(dir, keep.root, true).catch(() => {});
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir + '.worktrees', { recursive: true, force: true });
+  }
+});
