@@ -698,7 +698,7 @@ test('a bot that moves in from another building brings the replies it already ha
   assert.deepEqual(said(m.ev), ['Said in the other building.']);
 });
 
-test('replies of a bot first seen in a live pass are restored, not spoken: seeded with their time, no bubble; later replies speak', async () => {
+test('replies of a bot first seen in a live pass are restored, not spoken: seeded without at, no bubble; later replies speak', async () => {
   const r = rig();
   await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_B });
   const s = [...r.tracker.sessions.values()][0];
@@ -709,9 +709,45 @@ test('replies of a bot first seen in a live pass are restored, not spoken: seede
   r.t += 10;
   r.push();
   const old = of(m.ev, 'message');
-  assert.deepEqual(old.map((e) => [e.text, e.seeded, e.say, e.at]), [['One.', true, false, s.replies[0].t], ['Two.', true, false, s.replies[1].t]]);
+  assert.deepEqual(old.map((e) => [e.text, e.seeded, e.say, e.at]), [['One.', true, false, undefined], ['Two.', true, false, undefined]]);
   r.t += 10;
   r.tracker.pushReply(s, 'Three.'); r.push();
   const nw = of(m.ev, 'message').at(-1);
   assert.deepEqual([nw.text, nw.seeded, nw.say], ['Three.', undefined, undefined]);
+});
+
+test('a bot that leaves this building and comes back restores its replies once: nothing is recorded twice', async () => {
+  const r = rig();
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  const s = [...r.tracker.sessions.values()][0];
+  const m = r.mount(KEY_A);
+  r.t += 5; r.tracker.pushReply(s, 'Said here.'); r.push();
+  const live = of(m.ev, 'message');
+  assert.deepEqual(live.map((e) => [e.text, e.seeded, e.say]), [['Said here.', undefined, undefined]], 'first said live');
+  s.git = { ...GITS[REPO_B] }; s.cwd = REPO_B; r.t += 5; r.push();   // it leaves
+  s.git = { ...GITS[REPO_A] }; s.cwd = REPO_A; r.t += 5; r.push();   // and comes back
+  const all = of(m.ev, 'message');
+  assert.equal(all.length, 2);
+  assert.deepEqual([all[1].text, all[1].seeded, all[1].say, all[1].at], ['Said here.', true, false, undefined], 'restored, with no time, so the DS does not count it as news again');
+});
+
+test('a reopened session carries its old replies: restored in a live pass, no bubbles, no time; its new reply speaks', async () => {
+  const r = rig();
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  const old = [...r.tracker.sessions.values()][0];
+  const m = r.mount(KEY_A);
+  r.t += 5; r.tracker.pushReply(old, 'First.'); r.t += 5; r.tracker.pushReply(old, 'Second.'); r.push();
+  // the server opens a new session (new uid) with the replies of the old one (openHeadless, prior)
+  r.tracker.onHook(slimPayload({ ...HOOKS.turnWithEdit[0], session_id: 'b', cwd: REPO_A }, null));
+  await new Promise((res) => setImmediate(res));   // no push yet: the page's first sight of the session has its replies
+  const fresh = [...r.tracker.sessions.values()].find((x) => x.uid !== old.uid);
+  fresh.replies = old.replies.map((x) => ({ ...x })); fresh.replySeq = 2;
+  r.t += 5; r.push();
+  const botB = m.botName(fresh.uid);
+  const restored = of(m.ev, 'message').filter((e) => e.bot === botB);
+  assert.ok(botB && botB !== old.name, 'a second bot');
+  assert.deepEqual(restored.map((e) => [e.text, e.seeded, e.say, e.at]), [['First.', true, false, undefined], ['Second.', true, false, undefined]]);
+  r.t += 5; r.tracker.pushReply(fresh, 'Third.'); r.push();
+  const nw = of(m.ev, 'message').filter((e) => e.bot === botB).at(-1);
+  assert.deepEqual([nw.text, nw.seeded, nw.say], ['Third.', undefined, undefined]);
 });
