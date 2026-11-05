@@ -617,6 +617,20 @@ test('a usage line sets the token total of an agent that reports totals (ACP usa
   assert.equal(s.costUnknown, true);
 });
 
+// An ACP agent can send both: per-turn usage in its prompt answer (#72) and session totals in usage_update (#73).
+test('an agent that reports a token total: its per-turn usage after that does not add to the total a second time', () => {
+  const r = rig();
+  const s = r.tracker.newSession({ uid: 'o1', headless: true, costUnknown: true });
+  const turn = (id) => r.line(s, { type: 'assistant', message: { id, usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 0 }, content: [] } });
+  turn('acp-1');
+  assert.equal(s.usage.tokens, 150, 'no total yet: the turns add up');
+  r.line(s, { type: 'usage', used: 4200, size: 128000 });
+  turn('acp-2');
+  assert.equal(s.usage.tokens, 4200, 'the total already holds that turn');
+  r.line(s, { type: 'usage', used: 4400, size: 128000 });
+  assert.equal(s.usage.tokens, 4400);
+});
+
 test('the feed keeps the last 200 lines', () => {
   const r = rig();
   const s = r.tracker.newSession({ uid: 'o1', name: 'n' });

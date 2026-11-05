@@ -91,7 +91,7 @@ export function createTracker(deps = {}) {
       tool: null, prompt: '', note: '', pending: [], questions: [], inbox: [], replies: [], replySeq: 0, headless: false, commands: [], skills: [], cost: null, costUnknown: false, supervision: null, costBase: 0, live: '', mode: null,
       ctxTokens: null, ctxWindow: null, worktree: null, budget: null, scheduleId: null, interrupted: false, turns: 0,
       // calls: tool calls, newest last. agents: subagents (Task or Agent tool). todos: the TodoWrite plan.
-      calls: [], agents: [], todos: [], usage: { tokens: 0, cached: 0, input: 0 }, error: null, errorSeq: 0,
+      calls: [], agents: [], todos: [], usage: { tokens: 0, cached: 0, input: 0 }, usageTotal: false, error: null, errorSeq: 0,
       // git: { repo, root, branch } of cwd, or null outside git. placed: git was looked up at least once.
       git: null, placed: false, gitCwd: '', gitAt: 0,
       // startDir: the folder the session started in (the office's launch folder, or the first cwd a hook
@@ -418,7 +418,8 @@ export function createTracker(deps = {}) {
       const mid = m.message?.id;
       if (u && mid && mid !== s.lastUsageId) {
         s.lastUsageId = mid;
-        s.usage.tokens += s.ctxTokens + (u.output_tokens || 0);
+        // An agent that reports totals (a usage line) already counts this turn in its total: no second count.
+        if (!s.usageTotal) s.usage.tokens += s.ctxTokens + (u.output_tokens || 0);
         s.usage.input += s.ctxTokens;
         s.usage.cached += u.cache_read_input_tokens || 0;
       }
@@ -427,8 +428,9 @@ export function createTracker(deps = {}) {
       // An agent that reports a token total, not per message (ACP usage_update: used, size). It replaces the last total. It
       // sets the Tokens figure only: the OpenClaw bridge sends Gateway session totals, not the tokens in context, so the
       // Context bar (ctxTokens, ctxWindow) stays unknown rather than read 100% by mistake. It carries no cost either.
+      // From the first total on, the total is the Tokens figure (usageTotal): per-turn usage no longer adds to it.
       const used = Number(m.used);
-      if (Number.isFinite(used) && used >= 0) s.usage.tokens = used;
+      if (Number.isFinite(used) && used >= 0) { s.usage.tokens = used; s.usageTotal = true; }
       changed();
     } else if (m.type === 'result') {
       s.live = '';
