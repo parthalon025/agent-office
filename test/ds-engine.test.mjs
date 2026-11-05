@@ -794,7 +794,7 @@ test('Kit.refresh frees the textures it drops from K.tex, once; screens get the 
   assert.equal(spent.get(K.tex['scr-coder']), undefined, 'the shown one is kept');
 });
 
-// ----- Themes (x1.7.1): one list, AO.MODES, drives the engine, the mode controls and the palette; Fluent and Fluent Dark are full themes -----
+// ----- Themes (x1.7): one list, AO.MODES, drives the engine, the mode controls and the palette; Fluent and Fluent Dark are full themes -----
 const tokensJson = JSON.parse(readFileSync(join(root, 'tokens.json'), 'utf8'));
 const tokensCss = readFileSync(join(root, 'tokens.css'), 'utf8').replace(/\r\n/g, '\n');
 const rootVals = (() => {
@@ -956,7 +956,7 @@ test('the fluent and fluentdark icons are in the bundle, the schema and assets/I
 test('a dark theme is a flag of AO.MODES: the engine sets K.dark, and the window, the screen glow, the desk light and the note card read it', () => {
   assert.match(source('Stage.prototype.applyMode=function', '\n'), /K=this\.K,prev=K\.look;K\.dark=!!DARK\[lk\];K\.look=lk;/);
   assert.match(bundle, /function Kit\(el\)\{[^\n]*this\.dark=false;/);
-  // no night flag: one keyed on the look name "night" would be false in Fluent Dark (x1.7.1 review)
+  // no night flag: one keyed on the look name "night" would be false in Fluent Dark (x1.7 review)
   assert.ok(!/K\.night\b|this\.night\b|prototype\.night\b/.test(bundle), 'no K.night, Kit night or Stage.night');
   const win = source('Parts.window=function', '};\n');
   assert.match(win, /else if\(lk==="fluent-dark"\)\{/, 'Fluent Dark paints its own dusk window, not the Day sky');
