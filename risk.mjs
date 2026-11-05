@@ -370,7 +370,8 @@ export function ratingOf(tool, input = {}, root = '', opts) { return rate(tool, 
 function rate(tool, input, root, opts) {
   const name = String(tool || '');
   const a = input && typeof input === 'object' ? input : {};
-  if (SHELLS.has(name)) { const cmd = String(a.command || ''); return R(DANGER.some((re) => re.test(cmd)) ? 'high' : 'medium', 'shell'); }
+  // elevated: a command that asks for host elevation (OpenClaw exec, providers/openclaw.mjs toolCall) is high whatever it says.
+  if (SHELLS.has(name)) { const cmd = String(a.command || ''); return R(a.elevated === true || DANGER.some((re) => re.test(cmd)) ? 'high' : 'medium', 'shell'); }
   if (NO_FILES.has(name)) return R('low', WEB.has(name) ? 'web' : 'other');
   if (READS.has(name)) return readRisk(name, a, root, opts);
   if (EDITS.has(name)) return editRisk(a.file_path || a.notebook_path, root, opts);

@@ -11,9 +11,8 @@
 //                                    user set is Ask; a default Ask keeps the asked mode)
 //   openRefusal(rules, provider)     why the office does not open an agent kind now (ungated and off, no cost reports and Deny)
 //   costAsk(rules, provider)         an agent without cost reports asks once per session unless its cell is Allow
-//   cellsOf(rules, building, col)    the call cells of one agent kind, for an agent whose own config carries them (OpenClaw)
 //   enforcement(providers, policies) per agent kind: why a cell is not enforced ('' = it is), for "Not enforced for this agent",
-//                                    from what an ungated agent's own config was found to carry (policies) when the office read it,
+//                                    from what an agent's own config (OpenClaw: workspace-only and the office plugin) was found to carry (policies) when the office read it,
 //                                    and why an Ask cell is only partly enforced (asks), for "Partly enforced"
 //   addCost(ledger, at, col, $), costThisMonth(ledger, at)   the Spend screen's cost per agent kind this month
 // rules: { office: { 'row|col': value }, buildings: { buildingKey: { 'row|col': value } } }. A default is not stored.
@@ -222,7 +221,7 @@ const REPORTS = 'This agent reports cost from the prices you set, so this rule i
  * while its cell is Ask ("Partly enforced"): Claude Code decides itself whether to ask on some rows (CLAUDE_ASKS). Allow and
  * Deny on those rows are enforced. The no-cost cell is enforced: Ask asks once per session (costAsk), Deny refuses (openRefusal).
  * providers: the office's providers ({ kind, label, gated?, enforces? }). Paperclip is not built: its row says so.
- * policies: provider kind -> what an ungated agent's own config was found to carry (provider.policy(): { config: { settings:
+ * policies: provider kind -> what an agent's own config was found to carry (provider.policy(): { config: { settings:
  * [{ path, have, ok, fix, rows }] }, gaps: [{ row, reason }] }, providers/openclaw.mjs). With one, a row is enforced when no
  * setting it needs is off and config can carry it; else the row says why. Without one (not read yet), the provider's own
  * claim (enforces) counts.
@@ -267,14 +266,6 @@ function policyRows(policy) {
   }
   for (const g of policy.gaps || []) if (S.rows[g.row] && !own(rows, g.row) && typeof g.reason === 'string') rows[g.row] = g.reason;
   return rows;
-}
-
-/** The call cells of one agent kind (row -> ask | allow | deny) in a building (null: office-wide), for an agent whose own
- *  config carries the rules (providers/openclaw.mjs wantedConfig). The Agents rows are not calls and are left out. */
-export function cellsOf(rules, building, col) {
-  const out = {};
-  for (const row of CALL_ROWS) if (S.applies(row, col)) out[row] = S.valueOf(rules, building ?? null, row, col);
-  return out;
 }
 
 // ---------- the Spend screen: cost per agent kind this month ----------

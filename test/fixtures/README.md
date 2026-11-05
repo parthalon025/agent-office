@@ -42,3 +42,5 @@ types `text` and `usage`), in the order those sources make:
 - Members in one superstep run in parallel, so their events interleave.
 The framework is not installed on the build machine, so no live run has checked it yet (#23).
 `fake-af/` is a stand-in `agent_framework` package with the same names, for the test that runs the real runner with Python.
+
+`fake-openclaw.mjs` is not a recording. It stands in for the OpenClaw Gateway's plugin host for `test/openclaw-plugin.test.mjs` and `test/mcp-routes.test.mjs` (#77): it loads `integrations/openclaw-plugin` by its `package.json` entry, checks the manifest id and the config, and runs `before_tool_call` handlers by priority with the host's failure rule (a throw or the handler's `timeoutMs`, default 15 s, blocks the call). The rules come from the OpenClaw v2026.10.10 sources and docs (`src/plugin-sdk/plugin-entry.ts`, `docs/plugins/hooks/reference.md`, `docs/plugins/hooks/tool-policy.md`): OpenClaw on the build PC (2026.1.29) is too old to start, so no real Gateway ran the plugin yet.

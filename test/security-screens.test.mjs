@@ -107,10 +107,10 @@ test('below 700 px of free view a screen in focus shows one agent kind, with Pre
 test('Agents: turning on an ungated agent needs the Confirm; a gated kind has no cell, it says why', () => {
   const d = data(), v = view({ screen: 'agents', h: 738 }), p = P.plan(v, d);
   assert.deepEqual(p.hots.filter((h) => h.kind === 'cell').map((h) => h.id).sort(),
-    ['cell:no-cost|cloud', 'cell:no-cost|copilot', 'cell:no-cost|dsh', 'cell:no-cost|hermes', 'cell:no-cost|openclaw', 'cell:supervise|claude-code', 'cell:ungated|cloud', 'cell:ungated|copilot', 'cell:ungated|hermes', 'cell:ungated|openclaw'], 'Hermes and Copilot are ungated too (M1, #22), and the cloud kinds (#24)');
+    ['cell:no-cost|cloud', 'cell:no-cost|copilot', 'cell:no-cost|dsh', 'cell:no-cost|hermes', 'cell:no-cost|openclaw', 'cell:supervise|claude-code', 'cell:ungated|cloud', 'cell:ungated|copilot', 'cell:ungated|hermes'], 'Hermes and Copilot are ungated (M1, #22), and the cloud kinds (#24); OpenClaw is gated through its office plugin (#77)');
   assert.ok(texts(p).includes('Gated') && texts(p).includes('Reports cost') && texts(p).includes('Free'));
-  const r = P.step(v, cell(p, 'ungated', 'openclaw'), d);
-  assert.deepEqual(r.view.pending, { row: 'ungated', col: 'openclaw', to: 'on', office: null });
+  const r = P.step(v, cell(p, 'ungated', 'copilot'), d);
+  assert.deepEqual(r.view.pending, { row: 'ungated', col: 'copilot', to: 'on', office: null });
   assert.equal(P.step(v, cell(p, 'no-cost', 'hermes'), d).send, undefined, 'Ask to Allow on no cost reports is looser too');
   assert.equal(p.hots.some((h) => h.kind === 'scope'), false, 'the Agents rules are office-wide');
   assert.ok(texts(p).includes('Office-wide'));

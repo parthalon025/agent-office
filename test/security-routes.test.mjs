@@ -135,10 +135,9 @@ test('the snapshot carries the rules, what each agent kind enforces, and the Spe
   assert.match(h.partly.settings, /its own skills and memory/);
   assert.equal(s.security.enforce.dsh.reason, '', 'dsh is gated: it asks the office before its tool calls');
   assert.deepEqual(s.security.enforce.dsh.rows, {});
-  // OpenClaw (#73) is ungated: off, and its config not read, it takes only the shell rule into its own config.
+  // OpenClaw (#77) is gated through its office plugin. Not installed here, so its config is not read: every cell enforced.
   assert.equal(s.security.enforce.openclaw.reason, '');
-  assert.equal(s.security.enforce.openclaw.rows.shell, undefined);
-  assert.match(s.security.enforce.openclaw.rows['edit-inside'], /without asking the office/);
+  assert.deepEqual(s.security.enforce.openclaw.rows, {});
   assert.equal(s.security.spend.limit, 2);
   assert.match(s.security.spend.month, /^\d{4}-\d{2}$/);
   assert.deepEqual(s.security.spend.byColumn, {});

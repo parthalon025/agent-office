@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { startFakeOpenAI } from './fixtures/fake-openai.mjs';
 import { pageFile, routeOf } from '../auth.mjs';
 import { officeFiles } from '../files.mjs';
+import { load as loadPlugin } from './fixtures/fake-openclaw.mjs';
 import { resolveExe } from '../git.mjs';
 import { startOnFreePort, freePort, until as untilTrue } from './fixtures/office-server.mjs';
 
@@ -25,7 +26,9 @@ const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SKIP = process.platform !== 'win32' ? 'opening sessions is only implemented for Windows' : false;
 const PAST_UID = 'past-claude-1';
 const FORK_UID = 'past-hermes-fork', CLAUDE2_UID = 'past-claude-2';
-let base, work, acpRepo, clawConfig, child, port, agentToken, pageToken, fake, gateway, gatewayPort;
+let base, work, acpRepo, clawConfig, clawToken, child, port, agentToken, pageToken, fake, gateway, gatewayPort;
+// What a good OpenClaw install has (#77): workspace-only, and the office plugin enabled with this office's token file.
+const clawOk = () => ({ 'tools.fs.workspaceOnly': true, 'plugins.entries.agent-office.enabled': true, 'plugins.entries.agent-office.config.tokenFile': clawToken });
 
 const until = (fn, what) => untilTrue(fn, what, { log: () => child?.out() });
 // auth: true sends the token of the route's group, false sends none, a string sends that token.
@@ -88,10 +91,10 @@ before(async () => {
   gatewayPort = await freePort();
   gateway = net.createServer((c) => c.destroy());
   await new Promise((resolve) => gateway.listen(gatewayPort, '127.0.0.1', resolve));
-  // Its config reads (`node config get ...`) are answered by a preloaded stand-in from a JSON file the test can change. Exec
-  // approval is on and workspace-only is on, as a good install has them.
+  // Its config reads (`node config get ...`) are answered by a preloaded stand-in from a JSON file the test can change. The
+  // OpenClaw test writes a good install (clawOk) once the office has its token file.
   clawConfig = path.join(base, 'openclaw-config.json');
-  fs.writeFileSync(clawConfig, JSON.stringify({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'always' }));
+  fs.writeFileSync(clawConfig, JSON.stringify({ 'tools.fs.workspaceOnly': true }));
   const fakeAcp = path.join(SRC, 'test', 'fixtures', 'fake-acp.mjs');
   fs.writeFileSync(path.join(work, 'acp'), `import(require('node:url').pathToFileURL(${JSON.stringify(fakeAcp)}).href);\n`);
   // Hermes Agent is ungated (ADR 0001), so it opens only in a new worktree: a repository whose commit has the acp file, so the
@@ -128,9 +131,8 @@ before(async () => {
     OFFICE_FOUNDRY_ENDPOINT: '', OFFICE_FOUNDRY_TOKEN: '', OFFICE_FOUNDRY_TOKEN_FILE: '', OFFICE_COPILOTSTUDIO_ENDPOINT: '', OFFICE_COPILOTSTUDIO_TOKEN: '', OFFICE_COPILOTSTUDIO_TOKEN_FILE: '',
     OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
     OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local'), USERPROFILE: path.join(base, 'home'), HERMES_HOME: path.join(base, 'hermes-home'), OFFICE_OPENCLAW_PORT: String(gatewayPort),
-    // OpenClaw is off until the Security room's Agents screen turns it on (the OpenClaw test does that). The old switch is set
-    // here on purpose: it turns nothing on. OpenClaw needs a version that relays shell approvals: the fake agent says so. The
-    // config stand-in is preloaded into every node the server starts.
+    // OpenClaw is gated through its office plugin (#77). The old switch is set here on purpose: it turns nothing on. The plugin
+    // needs 2026.10.10 or later: the fake agent says so. The config stand-in is preloaded into every node the server starts.
     OFFICE_ENABLE_OPENCLAW: '1', FAKE_ACP_VERSION: '2026.10.10', FAKE_OPENCLAW_CONFIG: clawConfig,
     NODE_OPTIONS: `--require=${path.join(SRC, 'test', 'fixtures', 'fake-openclaw-config.cjs').split(path.sep).join('/')}` };
   // Ready is the server's own "is open" line, printed after it wrote its files. The files have the port in their names, so the past
@@ -140,6 +142,7 @@ before(async () => {
   port = started.port;
   const read = (f) => JSON.parse(fs.readFileSync(f, 'utf8')).token;
   agentToken = read(officeFiles(copy, port).token);
+  clawToken = officeFiles(copy, port).token;
   pageToken = read(pageFile(started.env, port));
   assert.notEqual(agentToken, pageToken);
 });
@@ -700,71 +703,70 @@ test('notes: an agent write that reads as an instruction, or is too long, is ref
   assert.ok(!/Ignore all previous/.test(room.json.text));
 });
 
-test('OpenClaw (#73): off until the Security room turns it on; then ungated and partly supervised, only in a new worktree, its label on the page', { skip: SKIP }, async () => {
-  let info = await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
-  let row = info.providers.find((p) => p.kind === 'openclaw');
+test('OpenClaw (#77): gated through the office plugin; a file edit the plugin sends is held in the office until the user answers', { skip: SKIP }, async () => {
+  // A good install: workspace-only, and the plugin enabled with this office's token file.
+  fs.writeFileSync(clawConfig, JSON.stringify(clawOk()));
+  const info = await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
+  const row = info.providers.find((p) => p.kind === 'openclaw');
   assert.ok(row, 'OpenClaw is registered');
-  assert.deepEqual([row.gated, row.supervision, row.cost], [false, 'Partly supervised: commands ask, file edits do not', 'unknown']);
-  // Off until the user turns it on on the Agents screen of the Security room, with the painted Confirm (ADR 0001, #70).
-  assert.equal(row.ready, false);
-  assert.match(row.needs[0], /^OpenClaw runs tool calls without asking the office\. Turn on OpenClaw on the Agents screen of the Security room first\./);
-  const off = await call('/api/open', { cwd: acpRepo, name: 'claw-off', provider: 'openclaw', where: 'office', confirmCost: true });
-  assert.deepEqual([off.status, off.json.confirm], [409, undefined]);
-  assert.match(off.json.error, /Turn on OpenClaw on the Agents screen/);
-  assert.equal((await snapshot()).security.enforce.openclaw.rows['edit-inside'], 'This agent runs this kind of call without asking the office.', 'its config is not read while it is off');
-  const on = { scope: 'office', row: 'ungated', col: 'openclaw', value: 'on' };
-  assert.equal((await call('/api/security/set', on)).status, 409, 'turning it on loosens: the wall asks for the Confirm');
-  assert.equal((await call('/api/security/set', { ...on, confirmed: true })).status, 200);
-  // On: the office reads its config (read-only) and the wall shows what the config really carries.
-  const enforce = await until(async () => { const e = (await snapshot()).security.enforce.openclaw; return /no approval step/.test(e.rows.web || '') ? e : null; }, 'the wall to show what the config carries');
-  assert.equal(enforce.rows.shell, undefined, 'exec approval is on: the shell cell is enforced');
-  assert.match(enforce.rows['edit-inside'], /no approval step/, 'Ask on edit inside (the default): OpenClaw cannot ask about edits, so the wall says so');
-  assert.match(enforce.rows.web, /no approval step/, 'Ask on web: its config cannot ask');
-  // A cell the user sets to Allow is what OpenClaw does with edits, so the wall then shows it as enforced.
-  assert.equal((await call('/api/security/set', { scope: 'office', row: 'edit-inside', col: 'openclaw', value: 'allow', confirmed: true })).status, 200);
-  await until(async () => (await snapshot()).security.enforce.openclaw.rows['edit-inside'] === undefined, 'Allow on edit inside to show as enforced');
-  info = await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
-  row = info.providers.find((p) => p.kind === 'openclaw');
-  // The Gateway answered, so the check went on to the handshake. That one runs in the temp folder, where the stand-in agent
-  // file (acp) is not: not ready for that reason, and not for a missing Gateway.
+  assert.deepEqual([row.gated, row.supervision, row.cost], [true, null, 'unknown']);
+  // No Agents switch keeps a gated kind off. The Gateway answered, so the check went on to the handshake. That one runs in the
+  // temp folder, where the stand-in agent file (acp) is not: not ready for that reason, and not for a missing Gateway.
   assert.equal(row.ready, false);
   assert.match(row.needs[0], /^OpenClaw did not answer the ACP handshake/);
-  const here = await call('/api/open', { cwd: acpRepo, name: 'claw-here', provider: 'openclaw', where: 'office', isolation: 'same', confirmCost: true });
-  assert.equal(here.status, 409);
-  assert.match(here.json.error, /^OpenClaw runs some tool calls without asking the office \(Partly supervised: commands ask, file edits do not\), so it opens only in a room of its own/);
   const r = await call('/api/open', { cwd: acpRepo, name: 'claw-1', provider: 'openclaw', where: 'office', isolation: 'worktree', confirmCost: true });
   assert.equal(r.status, 200, JSON.stringify(r.json));
   const s = await until(async () => { const x = await sessionOf(r.json.uid); return x && x.sid === 'fake-sess-1' ? x : null; }, 'the OpenClaw session to start');
-  assert.deepEqual([s.provider, s.costUnknown, s.cost, s.budget], ['openclaw', true, null, null]);
-  assert.ok(s.worktree && s.cwd.toLowerCase().includes('acp-repo.worktrees'), 'a new worktree next to the repository (#69)');
-  assert.equal((await snapshot()).sessions.find((x) => x.uid === r.json.uid).supervision, 'Partly supervised: commands ask, file edits do not', 'the page gets the label');
+  assert.deepEqual([s.provider, s.costUnknown, s.cost, s.budget, s.gatewayKey], ['openclaw', true, null, null, `agent-office:${r.json.uid}`]);
+  assert.equal((await snapshot()).sessions.find((x) => x.uid === r.json.uid).supervision ?? null, null, 'no supervision label: it is gated');
+  // The open read the config afresh (preflight), and the wall shows what it carries the next time the page asks for the kinds.
+  await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': pageToken } });
+  await until(async () => JSON.stringify((await snapshot()).security.enforce.openclaw.rows) === '{}', 'the wall to show every cell enforced: the config carries the plugin');
   const feed = (await fullOf(r.json.uid)).feed.map((x) => x.text);
-  assert.ok(feed.includes('OpenClaw: Partly supervised: commands ask, file edits do not. The feed says what it ran without asking.'), feed.join(' | '));
-  assert.ok(feed.includes('OpenClaw config: workspace-only is on and commands ask.'), 'the config was read and confirmed: ' + feed.join(' | '));
+  assert.ok(feed.includes('OpenClaw config: workspace-only is on, and the agent-office plugin sends every tool call to the office.'), feed.join(' | '));
+
+  // The plugin, loaded by the stand-in plugin host, as the Gateway would run it for a file edit of this session.
+  const host = await loadPlugin(path.join(SRC, 'integrations', 'openclaw-plugin'), { config: { tokenFile: clawToken } });
+  const ctx = { sessionKey: `agent:main:agent-office:${r.json.uid}`, sessionId: 'gw-1', agentId: 'main', toolName: 'edit' };
+  const edit = host.beforeToolCall({ toolName: 'edit', params: { path: 'README.md', old_string: 'a', new_string: 'b' }, toolCallId: 'tc-1' }, ctx);
+  const held = await until(async () => { const x = await sessionOf(r.json.uid); return x && x.pending.length === 1 ? x : null; }, 'the edit to be held in the office');
+  assert.deepEqual([held.pending[0].tool, held.pending[0].detail, held.status], ['Edit', 'README.md', 'waiting']);
+  assert.equal((await call('/api/answer', { id: held.pending[0].id, allow: true })).status, 200);
+  assert.equal(await edit, undefined, 'approved: OpenClaw runs the edit');
+  const shell = host.beforeToolCall({ toolName: 'exec', params: { command: 'npm publish' }, toolCallId: 'tc-2' }, ctx);
+  const held2 = await until(async () => { const x = await sessionOf(r.json.uid); return x && x.pending.length === 1 ? x : null; }, 'the command to be held');
+  assert.equal(held2.pending[0].detail, 'npm publish');
+  await call('/api/answer', { id: held2.pending[0].id, allow: false });
+  assert.deepEqual(await shell, { block: true, blockReason: 'Agent Office: Declined in Agent Office.' });
+  // A session key the office did not give, and a call that would start work in another session: denied, nothing waits.
+  assert.deepEqual(await host.beforeToolCall({ toolName: 'read', params: { path: 'a' } }, { ...ctx, sessionKey: 'agent:main:agent-office:o00000000' }),
+    { block: true, blockReason: 'Agent Office: Agent Office has no open session for this OpenClaw session.' });
+  assert.match((await host.beforeToolCall({ toolName: 'sessions_spawn', params: { task: 'x' } }, ctx)).blockReason, /^Agent Office: sessions_spawn starts work outside this session/);
+  // The route is in the agent group: the page token does not open it.
+  assert.equal((await call('/hook/openclaw', { session_key: ctx.sessionKey, tool_name: 'read', params: {} }, { auth: pageToken })).status, 401);
+  assert.equal((await call('/hook/openclaw', { tool_name: 'read' })).status, 400, 'a body the route cannot read');
   await call('/api/close', { uid: r.json.uid });
 });
 
-// Owner decision 3, default B (review): workspace-only or exec approval off is checked before the cost question (it names the
-// label "commands ask") and before a worktree: the open is refused with the command that turns it on; nothing starts.
-test('OpenClaw (#73): a config that is off is refused before the cost question and before a worktree, with the command that fixes it', { skip: SKIP }, async () => {
+// Workspace-only or the plugin off is checked before the cost question and before a worktree: the open is refused with the
+// command that turns it on; nothing starts.
+test('OpenClaw (#77): a config that is off is refused before the cost question and before a worktree, with the command that fixes it', { skip: SKIP }, async () => {
   const before = (await snapshot()).sessions.length;
   const worktrees = () => (fs.existsSync(acpRepo + '.worktrees') ? fs.readdirSync(acpRepo + '.worktrees').length : 0);
   const trees = worktrees();
   for (const [config, want] of [
-    [{ 'tools.exec.ask': 'always' }, /^OpenClaw cannot start: tools\.fs\.workspaceOnly is unset, so its file tools can reach outside the worktree\. Run: openclaw config set tools\.fs\.workspaceOnly true /],
-    [{ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'off' }, /^OpenClaw cannot start: tools\.exec\.ask is "off", so shell commands run without asking the office\. Run: openclaw config set tools\.exec\.ask always The office does not change the OpenClaw config\./]]) {
+    [{ ...clawOk(), 'tools.fs.workspaceOnly': false }, /^OpenClaw cannot start: tools\.fs\.workspaceOnly is false, so its file tools can reach outside the worktree\. Run: openclaw config set tools\.fs\.workspaceOnly true /],
+    [{ 'tools.fs.workspaceOnly': true }, /^OpenClaw cannot start: plugins\.entries\.agent-office\.enabled is unset \(wanted: true\), so the agent-office plugin does not send its tool calls to this office\. Run: openclaw plugins install --link ".*integrations\/openclaw-plugin" --force /]]) {
     fs.writeFileSync(clawConfig, JSON.stringify(config));
     const no = await call('/api/open', { cwd: acpRepo, name: 'claw-off-config', provider: 'openclaw', where: 'office', isolation: 'worktree' });
     assert.deepEqual([no.status, no.json.confirm], [409, undefined], 'no cost question: ' + JSON.stringify(no.json));
     assert.match(no.json.error, want);
-    assert.ok(!/commands ask/.test(no.json.error), 'the label is not claimed');
   }
   assert.equal((await snapshot()).sessions.length, before, 'no session');
   assert.equal(worktrees(), trees, 'no worktree');
-  fs.writeFileSync(clawConfig, JSON.stringify({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'always' }));
+  fs.writeFileSync(clawConfig, JSON.stringify(clawOk()));
   const ok = await call('/api/open', { cwd: acpRepo, name: 'claw-asks', provider: 'openclaw', where: 'office', isolation: 'worktree' });
-  assert.deepEqual([ok.status, ok.json.confirm], [200, 'cost'], 'a config that carries both: now the cost question, with the label');
-  assert.match(ok.json.question, /Partly supervised: commands ask, file edits do not/);
+  assert.deepEqual([ok.status, ok.json.confirm], [200, 'cost'], 'a config that carries both: now the cost question');
 });
 
 test('OpenClaw (#73): no Gateway on the port is "Not ready: start the OpenClaw Gateway", and the office starts nothing', { skip: SKIP }, async () => {

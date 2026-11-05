@@ -1,0 +1,11 @@
+{
+  "name": "agent-office-openclaw",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Agent Office plugin for OpenClaw: every tool call of an office session waits for the office.",
+  "openclaw": {
+    "extensions": ["./index.js"],
+    "compat": { "pluginApi": ">=2026.10.10", "minGatewayVersion": "2026.10.10" }
+  }
+}
