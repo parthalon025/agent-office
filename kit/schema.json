@@ -1,5 +1,5 @@
 {
- "version": "x1.6",
+ "version": "x1.6.1",
  "events": {
   "status": {
    "desc": "A bot changes state. The bot walks to rest or back to its seat when needed.",
@@ -304,7 +304,7 @@
   }
  },
  "common": {
-  "desc": "Fields every event can carry. seeded: true marks state the office already had (a scene mount sends the whole mirror again): the scene applies it, but records no history, plays no sound and sends no notification or toast. at: the time of the event in ms; a seeded event with at after the last time the building was seen counts as news in Since you left.",
+  "desc": "Fields every event can carry. seeded: true marks state the office already had (a scene mount sends the whole mirror again): the scene applies it, but records no history, plays no sound, sends no notification or toast, and adds no unread count or Activity line. at: the time of the event in ms; a seeded event with at after the last time the building was seen is news: it adds unread counts and Activity lines, and Since you left counts it.",
   "fields": {
    "seeded": "boolean?",
    "at": "number?"

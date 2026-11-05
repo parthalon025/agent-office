@@ -35,8 +35,8 @@ Every event can also carry these fields (`common` in `kit/schema.json`):
 
 | Field | Type | Result |
 | --- | --- | --- |
-| `seeded` | `boolean?` | The event restores state that the office already had. The scene applies it, but records no history, plays no sound and sends no notification or toast. Since you left does not count it. |
-| `at` | `number?` | The time of the event in ms (`Date.now()` form). A seeded event with `at` after the last time the person saw this building is news: the office records it at that time, and Since you left counts it. |
+| `seeded` | `boolean?` | The event restores state that the office already had. The scene applies it, but records no history, plays no sound and sends no notification or toast. It adds no unread count and no Activity line. Since you left does not count it. |
+| `at` | `number?` | The time of the event in ms (`Date.now()` form). A seeded event with `at` after the last time the person saw this building is news: the office records it at that time, it adds unread counts and Activity lines like a live event, and Since you left counts it. It still plays no sound and sends no notification or toast. |
 
 ### Scene mount
 
