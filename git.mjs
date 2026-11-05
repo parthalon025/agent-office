@@ -81,9 +81,9 @@ function findExe(name, env, win) {
   throw new Error(`${name} was not found on PATH.`);
 }
 
-function run(cmd, args, cwd, timeout = 30000) {
+function run(cmd, args, cwd, timeout = 30000, env) {
   return new Promise((resolve, reject) => {
-    execFile(resolveExe(cmd), args, { cwd, windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout }, (err, out, stderr) => {
+    execFile(resolveExe(cmd), args, { cwd, windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout, ...(env ? { env: { ...process.env, ...env } } : {}) }, (err, out, stderr) => {
       if (err) return reject(new Error((String(stderr || '').trim() || err.message).split('\n').slice(-3).join(' ')));
       resolve(String(out));
     });
@@ -98,7 +98,9 @@ export const GIT_HARDENING = ['-c', 'core.fsmonitor=false', '-c', `core.hooksPat
 const READ_ONLY = new Set(['status', 'diff', 'log', 'ls-files']);
 /** The full argument list for a git call: hardening, then --no-optional-locks for read-only commands, then the command. */
 export const gitArgs = (args) => [...GIT_HARDENING, ...(READ_ONLY.has(args[0]) ? ['--no-optional-locks'] : []), ...args];
-const git = (args, cwd, timeout) => run('git', gitArgs(args), cwd, timeout);
+const git = (args, cwd, timeout, env) => run('git', gitArgs(args), cwd, timeout, env);
+// Git words its errors in the user's language where it ships translations. Code that reads an error message asks for English.
+const ENGLISH = { LC_ALL: 'C', LANGUAGE: 'C' };
 
 export async function repoTop(cwd) {
   try { return (await git(['rev-parse', '--show-toplevel'], cwd)).trim(); } catch { throw new Error('That folder is not in a git repository, so it cannot get a worktree.'); }
@@ -223,7 +225,7 @@ export async function createPr(cwd, branch, title) {
 
 /** The worktrees of a repository: each one's folder, branch, and whether it is the main folder. */
 export async function layout(repo) {
-  const out = await git(['worktree', 'list', '--porcelain'], repo, 15000);
+  const out = await git(['worktree', 'list', '--porcelain'], repo, 15000, ENGLISH); // relayout reads the error text
   const list = [];
   let cur = null;
   for (const line of out.split(/\r?\n/)) {
@@ -235,16 +237,43 @@ export async function layout(repo) {
   return list.filter((w) => !w.bare && !w.prunable);
 }
 
+/** What `relayout` answers when git failed for a passing reason: change nothing. */
+export const KEEP = Symbol('keep');
+
 /**
  * The worktrees of a known repository, read again. When git fails for a passing reason (a timeout, a lock,
- * a busy disk) the last good list stays. Returns `null` only when the repository is really gone: its folder
- * is missing, or git says the folder is not a repository. `deps` (`list`, `exists`) are for tests.
+ * a busy disk) the answer is `KEEP`: the caller leaves what it has. Returns `null` only when the repository is
+ * really gone: its folder is missing, or git says the folder is not a repository. `deps` (`list`, `exists`) are for tests.
  */
-export async function relayout(repo, last, { list = layout, exists = fs.existsSync } = {}) {
+export async function relayout(repo, { list = layout, exists = fs.existsSync } = {}) {
   try { return await list(repo); } catch (e) {
     if (!exists(repo) || /not a git repository/i.test(String(e && e.message))) return null;
-    return last;
+    return KEEP;
   }
+}
+
+// Refreshes of one repository overlap: the 30 s timer, `addRepo` and every room or floor action each start one.
+// The order they START in is the order of their facts, so a slower older read must not undo a newer one.
+const refreshSeq = new WeakMap(); // entry -> { started, applied }
+
+/**
+ * Reads the worktrees of a repository entry (`{ path, worktrees }`) again and sets `entry.worktrees`.
+ * Answers `'changed'`, `'same'`, `'gone'` (the repository is gone: the caller drops the entry), or `'stale'`
+ * (a refresh that started later already settled: nothing is written). A failed read changes nothing: it carries
+ * no fact, so it neither writes nor blocks an older read that is still running. `deps` are `relayout`'s.
+ */
+export async function refreshEntry(entry, deps) {
+  const seq = refreshSeq.get(entry) || { started: 0, applied: 0 };
+  refreshSeq.set(entry, seq);
+  const mine = ++seq.started;
+  const res = await relayout(entry.path, deps);
+  if (res === KEEP) return 'same';
+  if (mine < seq.applied) return 'stale';
+  seq.applied = mine;
+  if (res === null) return 'gone';
+  if (JSON.stringify(res) === JSON.stringify(entry.worktrees)) return 'same';
+  entry.worktrees = res;
+  return 'changed';
 }
 
 /** The files git tracks in a folder (relative, forward slashes), at most 20000. */
