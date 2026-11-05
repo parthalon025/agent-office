@@ -37,8 +37,11 @@
 //                                      ungated provider opens only in a room of its own (server.mjs), and its sessions carry its
 //                                      supervision label.
 //   supervision            (optional)  the label of an ungated provider (gated: false), for example "Partly supervised: file
-//                                      edits ask, commands do not". Without it an ungated provider is "Unsupervised"
+//                                      edits and risky commands ask". Without it an ungated provider is "Unsupervised"
 //                                      (supervisionOf). A gated provider has none.
+//   preflight() -> Promise (optional)  why the agent would not start now (text), or null, from a check that needs no
+//                                      session (OpenClaw: its Gateway config). The office asks it before the cost question
+//                                      and before a worktree, and answers 409 with that text.
 //   cost                   (optional)  'unknown' when the agent reports no cost (ACP). Such a provider is paid, the office asks
 //                                      once per session before it runs, no spend limit can stop it, and the page shows
 //                                      "unknown", never $0.00. Without it the agent reports cost ('reported').

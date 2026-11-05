@@ -950,7 +950,10 @@ test('openclaw readiness: ready on 2026.10.10 with the config on; an older or un
   } finally { for (const x of [good, old, unnamed]) fs.rmSync(x.base, { recursive: true, force: true }); }
 });
 
-test('openclaw readiness: workspace-only off or unreadable is not ready; exec approval off is ready but the session will be Unsupervised', async () => {
+// Owner decision 3, default B (review): exec approval that is off or unreadable is not ready either. A session never runs
+// with commands that skip the office, so the label "commands ask" is always true.
+const EXEC_OFF = 'tools.exec.ask is "off", so shell commands run without asking the office. Run: openclaw config set tools.exec.ask always The office does not change the OpenClaw config. Fix it, then open the session again.';
+test('openclaw readiness: workspace-only or exec approval off or unreadable is not ready, with the command that turns it on', async () => {
   const noWs = rig({ kind: 'openclaw', readConfig: configOf({}) });
   const lost = rig({ kind: 'openclaw', readConfig: async () => ({ state: 'unreadable', why: 'it stopped' }) });
   const noExec = rig({ kind: 'openclaw', readConfig: configOf({ 'tools.fs.workspaceOnly': true }) });
@@ -963,10 +966,25 @@ test('openclaw readiness: workspace-only off or unreadable is not ready; exec ap
     assert.equal(l.ready, false, 'a setting the office cannot read is never a pass');
     assert.ok(l.needs.some((n) => /could not read tools\.fs\.workspaceOnly, so it cannot confirm it/.test(n)), l.needs.join('\n'));
     const e = await noExec.p.readiness();
-    assert.equal(e.ready, true);
-    assert.ok(e.needs.some((n) => /tools\.exec\.ask is unset/.test(n)));
-    assert.ok(e.needs.includes('OpenClaw: a session opens as Unsupervised until commands ask.'));
+    assert.equal(e.ready, false, 'commands that run without asking: the office does not open it');
+    assert.ok(e.needs.some((n) => /tools\.exec\.ask is unset/.test(n) && /openclaw config set tools\.exec\.ask always/.test(n)), e.needs.join('\n'));
+    assert.ok(!e.needs.some((n) => /Unsupervised/.test(n)), 'no session opens as Unsupervised');
   } finally { for (const x of [noWs, lost, noExec]) fs.rmSync(x.base, { recursive: true, force: true }); }
+});
+
+// The server asks preflight() before the cost question (it names the label "commands ask"), so the question never comes
+// for a session that would not start: null when it may start, else why not.
+test('openclaw preflight: the gate check before the cost question; null when the config carries workspace-only and exec approval', async () => {
+  const ok = rig({ kind: 'openclaw' });
+  const off = rig({ kind: 'openclaw', readConfig: configOf({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'off' }) });
+  const ws = rig({ kind: 'openclaw', readConfig: configOf({ 'tools.exec.ask': 'always' }) });
+  const h = rig();
+  try {
+    assert.equal(await ok.p.preflight(), null);
+    assert.equal(await off.p.preflight(), EXEC_OFF);
+    assert.match(await ws.p.preflight(), /^tools\.fs\.workspaceOnly is unset/);
+    assert.equal(await h.p.preflight(), null, 'Hermes has no Gateway config to check');
+  } finally { for (const x of [ok, off, ws, h]) fs.rmSync(x.base, { recursive: true, force: true }); }
 });
 
 // The office's Security room says whether an agent kind may run now (security.mjs openRefusal: the Agents screen switch of an
@@ -1107,30 +1125,29 @@ test('openclaw: an old or unnamed version ends the session before it starts: its
   } finally { await r.done(); }
 });
 
-test('openclaw: exec approval off labels the session Unsupervised from the start, before the session id and any prompt', async () => {
+test('openclaw: exec approval off ends the session with the command that turns it on; no session, no prompt (decision 3 B)', async () => {
   const r = rig({ kind: 'openclaw', readConfig: configOf({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'off' }) });
   const s = r.session({ supervision: LABEL });
   try {
     r.p.open(s, {});
-    await until(() => s.sid, 'the session to start');
-    assert.equal(s.supervision, 'Unsupervised', 'already true when the session id arrives');
-    assert.equal(r.sent('session/prompt').length, 0);
-    const lines = r.tracker.feed.map((f) => f.text);
-    assert.ok(lines.includes('OpenClaw: tools.exec.ask is "off", so shell commands run without asking the office. Run: openclaw config set tools.exec.ask always'), lines.join('\n'));
-    assert.ok(lines.includes('OpenClaw: this session is Unsupervised. Commands do not wait for the office.'));
-  } finally { await r.done(s); }
+    r.say(s, 'run everything');
+    await until(() => s.status === 'ended', 'the session to end');
+    assert.equal(r.replies(s)[0], 'OpenClaw could not start a session: ' + EXEC_OFF);
+    assert.deepEqual([r.sent('session/new').length, r.sent('session/prompt').length], [0, 0]);
+    assert.equal(s.supervision, LABEL, 'the label is never changed: no session ran');
+  } finally { await r.done(); }
 });
 
-test('openclaw: exec approval the office cannot read is not "commands ask": the session reads Unsupervised and says why', async () => {
+test('openclaw: exec approval the office cannot read is not "commands ask": the session does not start, and says why', async () => {
   const read = async (p) => (p === 'tools.fs.workspaceOnly' ? { state: 'set', value: true } : { state: 'unreadable', why: 'it stopped' });
   const r = rig({ kind: 'openclaw', readConfig: read });
   const s = r.session({ supervision: LABEL });
   try {
     r.p.open(s, {});
-    await until(() => s.sid, 'the session to start');
-    assert.equal(s.supervision, 'Unsupervised');
-    assert.ok(r.tracker.feed.some((f) => f.text === 'OpenClaw: the office could not read whether commands ask (tools.exec.ask and tools.exec.mode), so it cannot confirm that they do.'));
-  } finally { await r.done(s); }
+    await until(() => s.status === 'ended', 'the session to end');
+    assert.match(r.replies(s)[0], /^OpenClaw could not start a session: the office could not read whether commands ask \(tools\.exec\.ask and tools\.exec\.mode\), so it cannot confirm that they do\. To turn it on, run: openclaw config set tools\.exec\.ask always/);
+    assert.equal(r.sent('session/new').length, 0);
+  } finally { await r.done(); }
 });
 
 test('openclaw policy: the rules its config carries are checked; the cells it cannot carry are listed as gaps', async () => {

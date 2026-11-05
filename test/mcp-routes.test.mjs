@@ -689,22 +689,27 @@ test('OpenClaw (#73): off until the Security room turns it on; then ungated and 
   await call('/api/close', { uid: r.json.uid });
 });
 
-test('OpenClaw (#73): a config that is off is read before the session starts, and the session says so on every surface', { skip: SKIP }, async () => {
-  // Workspace-only unset: the session does not start. The reply names the command; the office changes nothing.
-  fs.writeFileSync(clawConfig, JSON.stringify({ 'tools.exec.ask': 'always' }));
-  const no = await call('/api/open', { cwd: acpRepo, name: 'claw-nows', provider: 'openclaw', where: 'office', isolation: 'worktree', confirmCost: true });
-  assert.equal(no.status, 200, JSON.stringify(no.json));
-  const ended = await until(async () => { const x = await sessionOf(no.json.uid); return x && x.status === 'ended' ? x : null; }, 'the session to end');
-  assert.equal(ended.sid, null, 'no session was made');
-  assert.match(ended.replies.at(-1).text, /^OpenClaw could not start a session: tools\.fs\.workspaceOnly is unset.*Run: openclaw config set tools\.fs\.workspaceOnly true/);
-  // Exec approval off: the session starts, and the label the page gets is Unsupervised from the first snapshot with a session id.
-  fs.writeFileSync(clawConfig, JSON.stringify({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'off' }));
-  const off = await call('/api/open', { cwd: acpRepo, name: 'claw-noexec', provider: 'openclaw', where: 'office', isolation: 'worktree', confirmCost: true });
-  assert.equal(off.status, 200, JSON.stringify(off.json));
-  await until(async () => { const x = await sessionOf(off.json.uid); return x && x.sid ? x : null; }, 'the session to start');
-  assert.equal((await snapshot()).sessions.find((x) => x.uid === off.json.uid).supervision, 'Unsupervised');
-  await call('/api/close', { uid: off.json.uid });
+// Owner decision 3, default B (review): workspace-only or exec approval off is checked before the cost question (it names the
+// label "commands ask") and before a worktree: the open is refused with the command that turns it on; nothing starts.
+test('OpenClaw (#73): a config that is off is refused before the cost question and before a worktree, with the command that fixes it', { skip: SKIP }, async () => {
+  const before = (await snapshot()).sessions.length;
+  const worktrees = () => (fs.existsSync(acpRepo + '.worktrees') ? fs.readdirSync(acpRepo + '.worktrees').length : 0);
+  const trees = worktrees();
+  for (const [config, want] of [
+    [{ 'tools.exec.ask': 'always' }, /^OpenClaw cannot start: tools\.fs\.workspaceOnly is unset, so its file tools can reach outside the worktree\. Run: openclaw config set tools\.fs\.workspaceOnly true /],
+    [{ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'off' }, /^OpenClaw cannot start: tools\.exec\.ask is "off", so shell commands run without asking the office\. Run: openclaw config set tools\.exec\.ask always The office does not change the OpenClaw config\./]]) {
+    fs.writeFileSync(clawConfig, JSON.stringify(config));
+    const no = await call('/api/open', { cwd: acpRepo, name: 'claw-off-config', provider: 'openclaw', where: 'office', isolation: 'worktree' });
+    assert.deepEqual([no.status, no.json.confirm], [409, undefined], 'no cost question: ' + JSON.stringify(no.json));
+    assert.match(no.json.error, want);
+    assert.ok(!/commands ask/.test(no.json.error), 'the label is not claimed');
+  }
+  assert.equal((await snapshot()).sessions.length, before, 'no session');
+  assert.equal(worktrees(), trees, 'no worktree');
   fs.writeFileSync(clawConfig, JSON.stringify({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'always' }));
+  const ok = await call('/api/open', { cwd: acpRepo, name: 'claw-asks', provider: 'openclaw', where: 'office', isolation: 'worktree' });
+  assert.deepEqual([ok.status, ok.json.confirm], [409, 'cost'], 'a config that carries both: now the cost question, with the label');
+  assert.match(ok.json.error, /Partly supervised: commands ask, file edits do not/);
 });
 
 test('OpenClaw (#73): no Gateway on the port is "Not ready: start the OpenClaw Gateway", and the office starts nothing', { skip: SKIP }, async () => {

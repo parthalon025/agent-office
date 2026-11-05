@@ -934,6 +934,7 @@ async function openSession(opts) {
   const wantsRoom = opts.where !== 'terminal' && opts.isolation !== 'same';
   const loc = wantsRoom ? await git.locate(cwd) : null;
   ownRoomOnly(provider, !!loc, 'opens only in a room of its own: clear Use this folder, in a folder that is in a git repository.');
+  await preflight(provider);
   confirmCost(provider, opts.confirmCost);
   const model = opts.model || null, permissionMode = opts.permissionMode || null;
   const prompt = String(opts.prompt || '').slice(0, 8000);
@@ -978,6 +979,13 @@ async function openSession(opts) {
 // question, Deny never gets here (checkOpen). The answer is 409 with confirm: 'cost'; the caller asks the user and sends
 // the same request again with confirmCost: true. An ungated agent's label goes in the question too, so the yes is for what
 // it does (ADR 0001).
+// The provider's own gate check that needs no session (an OpenClaw config without workspace-only or exec approval, owner
+// decision 3 B), before the cost question: that question names the label ("commands ask"), so it never comes for an agent
+// that would not start. 409 without confirm, before a worktree or a session.
+async function preflight(provider) {
+  const why = typeof provider.preflight === 'function' ? await provider.preflight() : null;
+  if (why) throw httpError(409, `${provider.label} cannot start: ${why}`);
+}
 function confirmCost(provider, confirmed) {
   if (confirmed === true || !costAsk(persisted.security, provider)) return;
   const label = supervisionOf(provider);
@@ -1009,6 +1017,7 @@ async function reopenSession(uid, { confirmed = false } = {}) {
   const provider = providers.get(first.provider);
   checkOpen(provider);
   ownRoomOnly(provider, !!first.worktree, 'reopens only in its own worktree. This past session ran in your folder: open a new session instead.');
+  await preflight(provider);
   confirmCost(provider, confirmed);
   // The building for the rules, and what a provider learns at a handshake (an ACP agent: whether it can resume), are looked
   // up before the last check: from that check to reopening.set nothing waits, so a second reopen that comes meanwhile is
@@ -1031,6 +1040,7 @@ async function forkSession(uid, { confirmed = false } = {}) {
   if (!rec) throw httpError(404, 'That past session is gone.');
   const provider = providers.get(rec.provider);
   checkOpen(provider); // the Agents screen of the Security room, before the question and the worktree
+  await preflight(provider);
   if (provider.learn) await provider.learn();
   if (!featuresOf(provider).includes('fork')) throw httpError(409, `${provider.label} cannot fork a session.`);
   if (!rec.sid) throw httpError(409, 'That session never started, so there is nothing to fork.');

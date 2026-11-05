@@ -339,10 +339,22 @@ export function createAcp(deps) {
   // The workspace-only rule is a precondition (spec #73: "start it with tools.fs.workspaceOnly on"). The office cannot write the
   // config (the Gateway is shared, Q40; the office only reads), so it does not start the agent while the rule is off or unknown.
   // Returns the text that says why, or null when it is on.
+  const NO_WRITE = ' The office does not change the OpenClaw config. Fix it, then open the session again.';
   function workspaceBlock(c) {
     const x = setting(c, 'tools.fs.workspaceOnly');
     if (!x || x.ok) return null;
-    return configNotes({ ...c, settings: [x] })[0] + ' The office does not change the OpenClaw config. Fix it, then open the session again.';
+    return configNotes({ ...c, settings: [x] })[0] + NO_WRITE;
+  }
+  // Exec approval is a precondition too (owner decision 3, default B): with it off or unreadable, commands would run without
+  // asking the office, and the label "commands ask" would be false. So the office does not start the agent, and says the
+  // command that turns it on. The setting is in the check only while the shell cell is Ask; else the words are built here.
+  const EXEC_ON = 'openclaw config set tools.exec.ask always';
+  function execBlock(c) {
+    if (c.execAsks === true) return null;
+    const x = setting(c, 'tools.exec.ask');
+    if (c.execAsks === null) return `the office could not read whether commands ask (tools.exec.ask and tools.exec.mode), so it cannot confirm that they do. To turn it on, run: ${EXEC_ON}${NO_WRITE}`;
+    if (x && !x.ok) return configNotes({ ...c, settings: [x] })[0] + NO_WRITE;
+    return `tools.exec.ask and tools.exec.mode do not ask, so shell commands run without asking the office. Run: ${EXEC_ON}${NO_WRITE}`;
   }
 
   // ----- reporting -----
@@ -719,9 +731,9 @@ export function createAcp(deps) {
 
   // ----- the session -----
   // OpenClaw, before the session exists (so before any prompt goes out): the version must relay shell approvals, the file tools
-  // must stay in the worktree, and the label must be true. Exec approval is not confirmed on (off, or the office could not
-  // read it): the session is labelled Unsupervised from its first message, never "commands ask". The Gateway config is only
-  // read; the office never writes it. Returns the config check, for the feed lines after the session starts.
+  // must stay in the worktree, and exec approval must be on (owner decision 3, default B), so the label "commands ask" is
+  // true for every session that runs. The Gateway config is only read; the office never writes it. Returns the config
+  // check, for the feed lines after the session starts.
   async function gateCheck(s) {
     if (spec.minVersion && !versionAtLeast(learned.version, spec.minVersion)) {
       throw new Error(`${label} ${learned.version || '(unknown version)'} is older than ${spec.minVersion}, or does not say its version. Before ${spec.minVersion} it does not send shell approvals to the office, so commands would run without asking. Update ${label}.`);
@@ -729,16 +741,14 @@ export function createAcp(deps) {
     const p = await policy(true, s);
     if (!p) throw new Error(`the office could not check the ${label} config.`);
     const c = p.config;
-    const block = workspaceBlock(c);
+    const block = workspaceBlock(c) || execBlock(c);
     if (block) throw new Error(block);
-    if (c.execAsks !== true && s.supervision) s.supervision = 'Unsupervised';
     return c;
   }
   function announce(s, st, c) {
     const notes = configNotes(c);
     if (!notes.length) emit(st, () => events.feed(s, 'start', `${label} config: workspace-only is on and commands ask.`));
     for (const n of notes) emit(st, () => events.feed(s, 'wait', `${label}: ${n}`));
-    if (c.execAsks !== true) emit(st, () => events.feed(s, 'wait', `${label}: this session is Unsupervised. Commands do not wait for the office.`));
   }
 
   async function start(s, st, o) {
@@ -833,6 +843,14 @@ export function createAcp(deps) {
     ...(spec.partly ? { partly: { ...spec.partly } } : {}),
     // OpenClaw: the config check for the current Security room cells, and the cells its config cannot carry (null: no config).
     policy: (fresh) => policy(fresh === true),
+    // The gate check of start() that needs no session, for the server to ask before the cost question (that question names
+    // the label "commands ask", so it must not come for a session that would not start): why the agent would not start, or
+    // null. Only an agent with a Gateway config has one; a missing program or an off kind is said elsewhere (null here).
+    async preflight() {
+      if (!spec.gateway) return null;
+      const p = await policy(true);
+      return p ? workspaceBlock(p.config) || execBlock(p.config) : null;
+    },
 
     async readiness() {
       try { program(); } catch (e) { return { ready: false, version: null, needs: [e.message, ...spec.needs] }; }
@@ -849,9 +867,9 @@ export function createAcp(deps) {
       if (spec.gateway) {
         try {
           const c = (await policy()).config;
-          if (workspaceBlock(c)) ready = false;
+          if (workspaceBlock(c) || execBlock(c)) ready = false;   // start() refuses the same way (gateCheck)
           needs.push(...configNotes(c).map((n) => `${label}: ${n}`));
-          if (c.execAsks !== true) needs.push(`${label}: a session opens as Unsupervised until commands ask.`);
+          if (c.execAsks === false && !setting(c, 'tools.exec.ask')) needs.push(`${label}: ${execBlock(c)}`);
         } catch (e) { ready = false; needs.push(`${label}: the office could not check its config: ${textOf(e)}`); }
       }
       return { ready, version: learned.version || 'unknown', needs };

@@ -16,7 +16,7 @@ Reasons to read only:
 
 - The office reads the OpenClaw config before each session (`providers/acp.mjs`, `gateCheck`). It never writes it.
 - `tools.fs.workspaceOnly` is a precondition. If it is off or unreadable, OpenClaw is not ready and no session starts. The message gives the `openclaw config set` command for the user to run.
-- Exec approval (`tools.exec.ask` or `tools.exec.mode`) that is off or unreadable does not stop the session. It makes the session "Unsupervised" from its first message, so the label stays true (ADR 0001).
+- Exec approval (`tools.exec.ask` or `tools.exec.mode`) is a precondition too (owner decision 3, default B, 2026-11-05; it replaces "the session runs as Unsupervised"). If it is off or unreadable, OpenClaw is not ready, the office refuses the open before the cost question and before a worktree (`preflight`), and no session starts. The message gives `openclaw config set tools.exec.ask always`. So the label "commands ask" is true for every session that runs (ADR 0001).
 - Pushing Security room rules into the config is out until #70 has a painted Confirm for it. Until then the Security room shows those cells as "Not enforced for this agent".
 
 ## Consequences
