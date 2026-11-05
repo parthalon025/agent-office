@@ -82,3 +82,4 @@ Use visual inspection: take screenshots and look at them.
 - [ ] Approve, decline, chat and broadcast send commands; the scene changes only after the adapter replies.
 - [ ] ContrastCheck passes in each theme. Focus is visible on every control.
 - [ ] Every new state (loading, empty, error, long text) has a preview. The changelog row is updated.
+- Exception: in-scene controls have no keyboard or screen reader path (owner decision, 2026-11-04, ADR 0003 in `docs/adr/`).

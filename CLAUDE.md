@@ -153,6 +153,7 @@ Add a new file only for a distinct job. Extend the file that owns the concern fi
 - Bind to 127.0.0.1, check the Host header and the Origin, and require the token of the route's group on every route except the page, its static files and `POST /launch` (which takes a one-time launch code). The agent token never opens `/api/*` or `/events`; the page token never opens `/hook*` or `/mcp/*`. A new route goes into one group in `auth.routeOf`.
 - Never edit `~/.claude/settings.json` or `.credentials.json`. The office only writes files in this folder, its page file in `%LOCALAPPDATA%\AgentOffice`, and the per-project rule a user approves.
 - Extensions change only the local or project scope of a session's folder. User scope stays out of reach, also through `claude mcp` or `claude plugin` (owner decision, 2026-11-03).
+- A gated provider holds every tool call that is not low risk until the user answers. Only a provider with `gated: false` skips the hold (owner decision, 2026-11-04, `docs/adr/0001-ungated-agents.md`). An ungated agent shows "Unsupervised" or "Partly supervised", is off until the user turns it on in the Security room, and runs only in a fresh worktree. A setting the office cannot enforce for an agent shows "Not enforced for this agent". The Secrets cells never offer Allow, and ACP agents never get Always allow.
 - Pull requests, pushes and worktree removal happen only after an explicit click and a confirm dialog.
 - Do not add dependencies without asking. The server runs on Node built-ins. The page loads nothing from another site: React and the fonts are vendored in `public/vendor` (owner decision on #27 M2), and the CSP allows scripts, style sheets and fonts from the office only.
 - A remote image in agent text loads only after the user clicks it (DS RichText). `data:` and `blob:` are the only images that show at once.
@@ -173,4 +174,4 @@ The five default roles as GitHub labels: `needs-triage`, `needs-info`, `ready-fo
 
 ### Domain docs
 
-Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root, created when terms or decisions are settled. See `docs/agents/domain.md`.
+Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root, created when terms or decisions are settled. See `docs/agents/domain.md`. Read the ADRs in `docs/adr/` before you change approvals, providers or the Security room.
