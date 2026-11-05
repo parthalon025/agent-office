@@ -5,6 +5,8 @@ import assert from 'node:assert/strict';
 import '../public/vocab.js';
 import '../public/format.js';
 import '../public/security.js';
+import { enforcement } from '../security.mjs';
+import { AGENTS } from '../providers/acp.mjs';
 
 const P = globalThis.OfficeSecurity.pure;
 const SET = '/api/security/set';
@@ -17,6 +19,8 @@ const cell = (p, row, col) => p.hots.find((h) => h.kind === 'cell' && h.row === 
 const hotOf = (p, kind) => p.hots.find((h) => h.kind === kind);
 const uvOf = (h, v) => ({ x: (h.x + h.w / 2) / v.w, y: 1 - (h.y + h.h / 2) / v.h });
 const texts = (p) => p.items.filter((i) => i.t === 'text').map((i) => i.text);
+// What a screen says, with the wrapped lines of a reason put back together.
+const said = (p) => texts(p).join(' ').replace(/\s+/g, ' ');
 
 test('full screen: one cell per row and agent kind, found again from the point the host gives', () => {
   const v = view(), p = P.plan(v, data());
@@ -29,7 +33,7 @@ test('full screen: one cell per row and agent kind, found again from the point t
   assert.ok(t.includes('Files') && t.includes('Read inside the worktree') && t.includes('Read or edit outside it'));
   assert.ok(t.includes('Allow') && t.includes('Ask'), 'every cell says its value in words');
   assert.ok(t.includes('Not enforced'), 'a cell the office cannot enforce says so');
-  assert.ok(t.includes('Not enforced for Hermes, dsh, OpenClaw. The office has no provider for this agent kind yet. The rule applies when it has one.'), 'and why, once for the kinds it is true for');
+  assert.ok(said(p).includes('Not enforced for Hermes, dsh, OpenClaw. The office has no provider for this agent kind yet. The rule applies when it has one.'), 'and why, once for the kinds it is true for');
 });
 
 test('a click on Ask paints the Confirm; a second click moves on to Deny; Confirm sends the looser rule', () => {
@@ -70,7 +74,7 @@ test('This building: a click changes the building rule; Use office rule clears i
   const r = P.step(v, clear, d);
   assert.equal(r.send, undefined, 'back to the office Allow is looser');
   assert.deepEqual(r.view.pending, { row: 'shell', col: 'claude-code', to: null, office: 'allow' });
-  assert.ok(texts(P.plan(r.view, d)).includes('Confirm: the office rule (Allow)'));
+  assert.match(said(P.plan(r.view, d)), /Confirm: Allow every command for Claude Code, high risk too \(rm -rf, git push --force\)\?/, 'back to an office Allow on Shell commands says what Allow means');
   const ok = P.step(r.view, hotOf(P.plan(r.view, d), 'confirm'), d);
   assert.deepEqual(ok.send.body, { scope: 'building', building: B, row: 'shell', col: 'claude-code', value: null, confirmed: true });
   // the scope switch
@@ -175,7 +179,7 @@ test('an Ask that Claude Code decides by itself says Partly enforced, and why; D
   const v = view({ screen: 'commands' });
   const t = texts(P.plan(v, d({ office: {}, buildings: {} })));
   assert.ok(t.includes('Partly enforced'), t.join(' / '));
-  assert.ok(t.includes('Partly enforced for Claude Code. ' + why));
+  assert.ok(said(P.plan(v, d({ office: {}, buildings: {} }))).includes('Partly enforced for Claude Code. ' + why));
   const deny = texts(P.plan(v, d({ office: { 'shell|claude-code': 'deny' }, buildings: {} })));
   assert.ok(!deny.includes('Partly enforced'), 'a Deny is enforced');
   const pagedT = texts(P.plan(view({ screen: 'commands', paged: true }), d({ office: {}, buildings: {} })));
@@ -190,7 +194,7 @@ test('a row where only some calls reach the office says Partly enforced with its
   for (const rules of [{ office: {}, buildings: {} }, { office: { 'files-outside|hermes': 'deny' }, buildings: {} }]) {
     const t = texts(P.plan(v, d(rules)));
     assert.ok(t.includes('Partly enforced'), t.join(' / '));
-    assert.ok(t.includes('Partly enforced for Hermes. ' + why));
+    assert.ok(said(P.plan(v, d(rules))).includes('Partly enforced for Hermes. ' + why));
   }
   assert.ok(!texts(P.plan(v, d({ office: {}, buildings: {} }))).some((x) => /^Not enforced for [^.]*Hermes/.test(x)), 'it is not "Not enforced"');
 });
@@ -210,7 +214,7 @@ test('B1: a default Ask that Claude Code decides says Partly enforced; a click s
   const enf = { ...enforce, 'claude-code': { ...enforce['claude-code'], asks: {}, unset: { 'read-inside': why, 'edit-inside': why } } };
   const d = (office) => ({ sec: { rules: { office, buildings: {} }, enforce: enf, spend: {} }, building: B, buildingName: 'repo' });
   const v = view(), p = P.plan(v, d({}));
-  assert.ok(texts(p).includes('Partly enforced for Claude Code. ' + why), texts(p).join(' / '));
+  assert.ok(said(p).includes('Partly enforced for Claude Code. ' + why), texts(p).join(' / '));
   const r = P.step(v, cell(p, 'read-inside', 'claude-code'), d({}));
   assert.deepEqual(r.send, { route: SET, body: { scope: 'office', row: 'read-inside', col: 'claude-code', value: 'ask' } }, 'the same word, now set by the user');
   const setD = d({ 'read-inside|claude-code': 'ask' }), sp = P.plan(v, setD);
@@ -274,4 +278,109 @@ test('M6: paged mode starts on a narrow or a short free view, from the width the
   assert.equal(P.pagedFor(at(1300, 300), aspect), true, 'wide but short: the screen is only 549 px wide');
   assert.equal(P.pagedFor(at(1300, 400), aspect), false, '731 px wide');
   assert.equal(P.pagedFor(null, aspect), false, 'not in focus');
+});
+
+// Review (re-review 4): a reason must show in full for every cell that is not fully enforced (CLAUDE.md). The plan wraps a reason
+// by a safe estimate of the width of a character (P.charW; the screenshots check it against the browser), so a line never
+// reaches the paint's ellipsis. The data is what the server sends with the real agent entries: Claude Code (default Ask cells
+// it decides), Hermes (Partly and Not enforced), OpenClaw (every call unsupervised, or its config does not carry a rule).
+{
+  const real = (policies) => enforcement([
+    { kind: 'claude-code' }, { kind: 'ollama', gated: true },
+    { kind: 'hermes', gated: false, enforces: AGENTS.hermes.enforces, unenforced: AGENTS.hermes.unenforced, partly: AGENTS.hermes.partly },
+    { kind: 'dsh', gated: true }, { kind: 'openclaw', gated: false, enforces: ['shell'] }], policies);
+  const gaps = { openclaw: { config: { settings: [
+    { path: 'tools.fs.workspaceOnly', have: 'false', ok: false, fix: 'openclaw config set tools.fs.workspaceOnly true', rows: ['files-outside', 'read-inside', 'edit-inside'] },
+    { path: 'tools.exec.ask', have: 'off', ok: false, fix: 'openclaw config set tools.exec.ask always', rows: ['shell', 'web'] }] } } };
+  const norm = (t) => t.replace(/\s+/g, ' ');
+  const SEC = () => globalThis.OfficeVocab.security;
+  // [viewport width, paged]: a free width under 700 px pages the screen (PAGED_BELOW)
+  const WIDTHS = [[1360, false], [820, false], [400, true]];
+  // the screen planes: Files and Commands on the back wall (1280 x 686), the others on the side walls (1280 x 738)
+  const SCREENS = [['files', 686], ['commands', 686], ['network', 738], ['secrets', 738]];
+  const D = (enf, rules) => ({ sec: { rules: rules || { office: {}, buildings: {} }, enforce: enf, spend: {} }, building: B, buildingName: 'repo' });
+  // the reasons a cell shows, from the plan's own rule (noteOf)
+  const wanted = (d, screen, scope, col) => {
+    const out = [];
+    for (const row of SEC().screens.find((x) => x.id === screen).rows) {
+      if (!SEC().applies(row, col)) continue;
+      const n = P.noteOf(d, scope, row, col);
+      if (n) out.push(n);
+    }
+    return out;
+  };
+
+  for (const [name, enf] of [['defaults', real()], ['with the OpenClaw config gaps', real(gaps)]]) {
+    test(`every reason of a cell that is not fully enforced is painted in full, at 1360, 820 and 400 px (${name})`, () => {
+      const cols = SEC().columns.map((c) => c.id);
+      let checked = 0;
+      for (const [width, paged] of WIDTHS) {
+        for (const [screen, h] of SCREENS) {
+          for (const scope of ['office', 'building']) {
+            const d = D(enf);
+            for (const page of paged ? cols : [null]) {
+              const v = view({ screen, h, paged, page: paged ? cols.indexOf(page) : 0, scope }), p = P.plan(v, d), said_ = norm(texts(p).join(' '));
+              for (const col of paged ? [page] : cols) for (const n of wanted(d, screen, scope, col)) {
+                assert.ok(said_.includes(norm(n.why)), `${width} px, ${screen}, ${scope}, ${col}: "${n.why}" is not painted in full`);
+                checked++;
+              }
+              // every line fits its width by the plan's own estimate, and stays on the screen
+              for (const i of p.items.filter((x) => x.t === 'text' && x.maxW >= 600)) {
+                if (i.align === 'center' || i.mono) continue;
+                const need = i.text.length * P.charW(i.s, i.wt);
+                assert.ok(need <= i.maxW + 0.5, `${width} px, ${screen}: "${i.text}" at ${i.s} px needs ${Math.round(need)} px, has ${i.maxW}`);
+                assert.ok(i.y <= h && i.y > 0, `${screen}: "${i.text}" is on the screen`);
+              }
+            }
+          }
+        }
+      }
+      assert.ok(checked > 40, 'the check looked at the reasons: ' + checked);
+    });
+  }
+
+  test('the reasons sit below the grid and above the hint; Files takes the compact layout for them', () => {
+    const d = D(real(gaps));
+    for (const scope of ['office', 'building']) {
+      const v = view({ screen: 'files', h: 686, scope }), p = P.plan(v, d), lay = P.levelFor(v, d);
+      assert.equal(lay.L.fs, 18, 'five agent kinds and their reasons need the smaller type: ' + lay.lines.length + ' lines');
+      const firstTop = lay.first - lay.L.fs * 0.8;
+      assert.ok(firstTop >= lay.end, `the reasons start (${Math.round(firstTop)}) under the grid (${lay.end})`);
+      const last = lay.first + (lay.lines.length - 1) * lay.L.lh;
+      assert.ok(last < lay.hintTop - lay.L.hint * 0.8, 'and end above the hint');
+      const rowBottom = Math.max(...p.hots.filter((h) => h.kind === 'cell').map((h) => h.y + h.h));
+      assert.ok(rowBottom <= lay.end, 'no cell reaches into them');
+    }
+    // a screen with few reasons keeps the roomy layout
+    assert.equal(P.levelFor(view({ screen: 'commands', h: 686 }), D(real())).L.fs, 21);
+    assert.equal(P.levelFor(view({ screen: 'secrets', h: 738 }), D(real())).L.fs, 21);
+  });
+
+  test('the paged Spend screen wraps the Extensions line and the hint, none of it cut', () => {
+    for (const edit of [null, { text: '7' }]) for (const note of [null, 'The spend limit is a number from 0 to 1000. 0 means no limit.']) {
+      const v = view({ screen: 'spend', h: 738, paged: true, edit, note }), p = P.plan(v, D(real()));
+      assert.match(norm(texts(p).join(' ')), /Extensions: local or project scope only\. User scope stays out of reach\./);
+      for (const i of p.items.filter((x) => x.t === 'text' && x.maxW >= 1000)) assert.ok(i.text.length * P.charW(i.s, i.wt) <= i.maxW, `"${i.text}" fits`);
+    }
+  });
+}
+
+// Review (re-review 5): the check before a hold ignores the risk rating (security.mjs decide), so an Allow on Shell commands
+// approves rm -rf and git push --force too. The painted Confirm says it, in the full and in the paged view.
+test('Allow on Shell commands paints a Confirm that names high risk commands, in the full and the paged view', () => {
+  const asked = data({ office: { 'shell|claude-code': 'ask' }, buildings: {} });   // a cell the user set to Ask: the next value is Allow
+  const full = view({ screen: 'commands' });
+  const r = P.step(full, cell(P.plan(full, asked), 'shell', 'claude-code'), asked);
+  assert.equal(r.send, undefined, 'a looser change waits');
+  assert.deepEqual(r.view.pending, { row: 'shell', col: 'claude-code', to: 'allow', office: null });
+  const want = /Confirm: Allow every command for Claude Code, high risk too \(rm -rf, git push --force\)\?/;
+  assert.match(said(P.plan(r.view, asked)), want, 'full view');
+  const pv = { ...r.view, paged: true, h: 686, page: 0 }, pp = P.plan(pv, asked);
+  assert.match(said(pp), want, 'paged view');
+  assert.ok(hotOf(pp, 'confirm') && hotOf(pp, 'cancel'), 'with its Confirm and Cancel');
+  for (const plan of [P.plan(r.view, asked), pp]) for (const i of plan.items.filter((x) => x.t === 'text' && x.maxW && x.align !== 'center')) assert.ok(i.text.length * P.charW(i.s, i.wt) <= i.maxW + 0.5, `"${i.text}" fits`);
+  assert.equal(P.step(pv, hotOf(pp, 'confirm'), asked).send.body.value, 'allow');
+  // other rows keep the short Confirm
+  const files = view({ screen: 'files' }), d = data(), fr = P.step(files, cell(P.plan(files, d), 'files-outside', 'claude-code'), d);
+  assert.ok(texts(P.plan(fr.view, d)).includes('Confirm: Allow'));
 });

@@ -84,7 +84,13 @@
   function tone(v) { return v === 'allow' || v === 'on' ? 'allow' : v === 'deny' ? 'deny' : 'ask'; }
   // The painted Confirm: the change, then what it is for.
   function isSpend(p) { return !!p && p.spend !== undefined; }
-  function confirmText(p) { return 'Confirm: ' + (isSpend(p) ? 'No limit' : p.to === null ? (p.def ? 'the default (' : 'the office rule (') + S().word(p.office) + ')' : S().word(p.to)); }
+  // Allow on the Shell commands row approves every command, high risk ones too: the check before a hold ignores the risk rating
+  // (security.mjs decide), so the painted Confirm says it (review).
+  function allowsAnyCommand(p) { return !!p && !isSpend(p) && p.row === 'shell' && (p.to === 'allow' || (p.to === null && p.office === 'allow')); }
+  function confirmText(p) {
+    if (allowsAnyCommand(p)) return 'Confirm: Allow every command for ' + colLabel(p.col) + ', high risk too (rm -rf, git push --force)?';
+    return 'Confirm: ' + (isSpend(p) ? 'No limit' : p.to === null ? (p.def ? 'the default (' : 'the office rule (') + S().word(p.office) + ')' : S().word(p.to));
+  }
   function confirmWhat(p) { return isSpend(p) ? 'Spend limit, new sessions' : S().rows[p.row].label + ', ' + colLabel(p.col); }
   function money(n) { var F = root.OfficeFormat; return F && F.money ? F.money(n) : '$' + (+n || 0).toFixed(2); }
   function monthName(m) {
@@ -98,6 +104,25 @@
   function stroke(p, x, y, w, h, c, lw, r) { p.items.push({ t: 'stroke', x: x, y: y, w: w, h: h, c: c, lw: lw || 3, r: r || 0 }); }
   function text(p, x, y, s, c, str, o) { o = o || {}; p.items.push({ t: 'text', x: x, y: y, s: s, c: c, text: String(str), wt: o.wt || 400, align: o.align || 'left', maxW: o.maxW || 0, mono: !!o.mono }); }
   function hot(p, h) { p.hots.push(h); return h; }
+  // Wrapping. Node has no canvas to measure text, so the plan wraps by a safe estimate of the width of a character: a share of
+  // the font size (IBM Plex Sans, checked against the browser's measureText in the screenshots: the average English text is
+  // about 0.48 em at 400 and 0.52 at 600). The share is higher than that on purpose, so a line the plan makes fits in the
+  // browser and the paint's ellipsis (clipW) never cuts a reason. One rule for the plan and for the test.
+  function charW(size, wt) { return size * (wt >= 600 ? 0.6 : 0.56); }
+  function wrap(str, size, maxW, wt) {
+    var cap = Math.max(1, Math.floor(maxW / charW(size, wt))), lines = [], cur = '';
+    String(str).split(/\s+/).filter(Boolean).forEach(function (w) {
+      while (w.length > cap) { if (cur) { lines.push(cur); cur = ''; } lines.push(w.slice(0, cap)); w = w.slice(cap); }
+      if (!cur) cur = w; else if (cur.length + 1 + w.length <= cap) cur += ' ' + w; else { lines.push(cur); cur = w; }
+    });
+    if (cur) lines.push(cur);
+    return lines;
+  }
+  // Paint wrapped lines, the first baseline at y, lh apart. Returns the baseline after the last line.
+  function para(p, x, y, s, lh, c, list, o) {
+    list.forEach(function (l, i) { text(p, x, y + i * lh, s, c, l, Object.assign({}, o)); });
+    return y + list.length * lh;
+  }
   // A value chip: words always, a status tone for Allow and Deny (DS: pair every status color with a word).
   function chip(p, x, y, w, h, v, s, hovered, pending) {
     if (pending) { fill(p, x, y, w, h, 'pending', h / 2); text(p, x + w / 2, y + h / 2 + s * 0.36, s, 'onPending', 'Confirm?', { wt: 600, align: 'center', maxW: w - 16 }); return; }
@@ -138,20 +163,32 @@
     } else text(p, W - 48, big ? 80 : 74, big ? 40 : 28, 'muted', 'Office-wide', { align: 'right' });
   }
 
+  // Two layouts of a rules screen (levels). The first is the roomy one. A screen with many reasons (Files, with five agent
+  // kinds) takes the second: smaller type (18 px is the smallest on the wall), a tighter grid and the subtitle under the
+  // title, so that every reason fits in full, wrapped, between the grid and the hint. fs/lh: reason type and line height;
+  // y0: the top of the grid; sub/subS: the subtitle baseline and size; rowH: a row of a screen with 3 rows (2 rows or fewer
+  // take 120); cy/ch: chip top in the row and chip height; ng: the note under the chip; bk: the Use default line under it;
+  // hint/hintY: the hint size and its baseline from the bottom; gap: hint baseline to the last reason baseline.
+  var LEVELS = [
+    { fs: 21, lh: 29, y0: 168, sub: 132, subS: 24, rowH: 104, cy: 16, ch: 52, ng: 26, bk: 22, hint: 24, hintY: 34, gap: 36 },
+    { fs: 18, lh: 23, y0: 128, sub: 110, subS: 22, rowH: 96, cy: 8, ch: 44, ng: 20, bk: 19, hint: 22, hintY: 30, gap: 30 }
+  ];
+  function rowHOf(L, rows) { return rows > 2 ? L.rowH : 120; }
+
   // The subtitle under the header of a full screen.
-  function subtitle(p, view, data) {
+  function subtitle(p, view, data, L) {
     var t;
     if (view.screen === 'spend') t = 'The spend limit of new sessions, and what each agent kind cost this month.';
     else if (view.screen === 'agents') t = 'Which agents may run. The office asks before a looser change.';
     else if (view.scope === 'building') t = 'Rules for ' + (data.buildingName || 'this building') + ' only. A corner mark: this building has its own rule.';
     else t = 'Rules for every building. A corner mark: this building has its own rule there.';
-    text(p, 48, 132, 24, 'muted', t, { maxW: view.w - 96 });
+    para(p, 48, L.sub, L.subS, L.subS + 6, 'muted', wrap(t, L.subS, view.w - 96, 400), { maxW: view.w - 96 });
   }
 
   // The rows of a rules or Agents screen as a grid: one column per agent kind.
-  function grid(p, view, data) {
+  function grid(p, view, data, L) {
     var sc = screenOf(view.screen), W = view.w, x0 = 48, labelW = 380, gx = x0 + labelW, cols = S().columns;
-    var colW = Math.floor((W - 48 - gx) / cols.length), y0 = 168, rowH = sc.rows.length > 2 ? 104 : 120;
+    var colW = Math.floor((W - 48 - gx) / cols.length), y0 = L.y0, rowH = rowHOf(L, sc.rows.length);
     cols.forEach(function (c, i) { text(p, gx + i * colW + colW / 2, y0 + 30, 24, 'muted', c.label, { wt: 600, align: 'center', maxW: colW - 8 }); });
     var y = y0 + 52;
     sc.rows.forEach(function (row) {
@@ -159,19 +196,19 @@
       fill(p, x0, y, W - 96, 2, 'line');
       text(p, x0, y + rowH / 2 + 10, 28, 'ink', r.label, { maxW: labelW - 16 });
       cols.forEach(function (c, i) {
-        var cx = gx + i * colW, cw = colW - 16, ch = 52, cy = y + 16;
+        var cx = gx + i * colW, cw = colW - 16, ch = L.ch, cy = y + L.cy;
         if (!S().applies(row, c.id)) { text(p, cx + colW / 2, cy + ch / 2 + 9, 22, 'muted', S().na(row, c.id), { align: 'center', maxW: colW - 8 }); return; }
         var id = 'cell:' + row + '|' + c.id, pend = view.pending && view.pending.row === row && view.pending.col === c.id;
         chip(p, cx + 8, cy, cw, ch, shown(data, view.scope, row, c.id), 24, isHover(view, id), pend);
         if (overridden(data, row, c.id) && !pend) p.items.push({ t: 'mark', x: cx + 8 + cw - 4, y: cy + 4, s: 18, c: 'accent' });
         hot(p, { kind: 'cell', id: id, row: row, col: c.id, x: cx + 4, y: cy - 4, w: cw + 8, h: ch + 8 });
         var nt = noteOf(data, view.scope, row, c.id);
-        if (nt) text(p, cx + colW / 2, cy + ch + 26, 18, 'muted', nt.word, { align: 'center', maxW: colW - 8 });
+        if (nt) text(p, cx + colW / 2, cy + ch + L.ng, 18, 'muted', nt.word, { align: 'center', maxW: colW - 8 });
         // Back to the office rule (a building override), or to the default (an office-wide rule the user set).
         var back = view.scope === 'building' ? overridden(data, row, c.id) && 'Use office rule' : officeSet(data, row, c.id) && 'Use default';
         if (back && !pend && view.focused) {
           var cid = 'clear:' + row + '|' + c.id;
-          text(p, cx + colW / 2, cy + ch + 26 + (nt ? 22 : 0), 18, isHover(view, cid) ? 'ink' : 'muted', back, { align: 'center', maxW: colW - 8 });
+          text(p, cx + colW / 2, cy + ch + L.ng + (nt ? L.bk : 0), 18, isHover(view, cid) ? 'ink' : 'muted', back, { align: 'center', maxW: colW - 8 });
           hot(p, { kind: 'clear', id: cid, row: row, col: c.id, x: cx + 4, y: cy + ch + 8, w: cw + 8, h: 26 });
         }
       });
@@ -180,10 +217,12 @@
     return y;
   }
 
-  // The reasons of the cells that are not or partly enforced, one line per reason: "Not enforced for Hermes, dsh. ...".
-  function reasons(view, data) {
+  // The reasons of the cells that are not or partly enforced, one per reason: "Not enforced for Hermes, dsh. ...". onlyCol: only
+  // that agent kind (the paged view), then "Not enforced. ..." without the kind.
+  function reasons(view, data, onlyCol) {
     var sc = screenOf(view.screen), by = {}, order = [];
     S().columns.forEach(function (c) {
+      if (onlyCol && c.id !== onlyCol) return;
       sc.rows.forEach(function (row) {
         if (!S().applies(row, c.id)) return;
         var nt = noteOf(data, view.scope, row, c.id);
@@ -193,59 +232,88 @@
         if (by[k].cols.indexOf(c.label) < 0) by[k].cols.push(c.label);
       });
     });
-    return order.map(function (k) { var x = by[k]; return x.word + ' for ' + x.cols.join(', ') + '. ' + x.why; });
+    return order.map(function (k) { var x = by[k]; return x.word + (onlyCol ? '' : ' for ' + x.cols.join(', ')) + '. ' + x.why; });
   }
+  function wrapAll(list, size, maxW, wt) { var out = []; list.forEach(function (t) { out = out.concat(wrap(t, size, maxW, wt)); }); return out; }
 
-  // The painted Confirm at the bottom of a screen: the change, what it is for, Confirm and Cancel. big: the paged view.
+  // The painted Confirm at the bottom of a screen: the change, what it is for, Confirm and Cancel. big: the paged view. The
+  // texts wrap in the room the buttons leave, and the band grows with them (a long Confirm, like Allow on Shell commands).
   function confirmBand(p, view, big) {
-    var W = view.w, H = view.h, bh = big ? 132 : 96, by = H - bh - 28, bw = big ? 260 : 220, bt = big ? 92 : 64;
+    var W = view.w, H = view.h, bw = big ? 260 : 220, bt = big ? 92 : 64, tw = W - 96 - 2 * bw - 80;
+    var hs = big ? 42 : 30, ws = big ? 30 : 22, hl = hs + 6, wl = ws + 6, gap = big ? 46 : 34;
+    var head = wrap(confirmText(view.pending), hs, tw, 600), what = wrap(confirmWhat(view.pending), ws, tw, 400);
+    var hb = Math.round(hs * 1.4), bh = Math.max(big ? 132 : 96, hb + (head.length - 1) * hl + gap + (what.length - 1) * wl + 20), by = H - bh - 28;
     fill(p, 48, by, W - 96, bh, 'pendingBand', 16);
-    text(p, 76, by + (big ? 58 : 42), big ? 42 : 30, 'onPending', confirmText(view.pending), { wt: 600, maxW: W - 96 - 2 * bw - 80 });
-    text(p, 76, by + (big ? 104 : 76), big ? 30 : 22, 'onPending', confirmWhat(view.pending), { maxW: W - 96 - 2 * bw - 80 });
+    para(p, 76, by + hb, hs, hl, 'onPending', head, { wt: 600, maxW: tw });
+    para(p, 76, by + hb + (head.length - 1) * hl + gap, ws, wl, 'onPending', what, { maxW: tw });
     hot(p, button(p, W - 48 - 2 * bw - 30, by + (bh - bt) / 2, bw, bt, 'Confirm', big ? 42 : 30, { kind: 'confirm', id: 'confirm' }, isHover(view, 'confirm'), 'primary'));
     hot(p, button(p, W - 48 - bw - 16, by + (bh - bt) / 2, bw, bt, 'Cancel', big ? 42 : 30, { kind: 'cancel', id: 'cancel' }, isHover(view, 'cancel')));
   }
 
-  // The bottom of a full screen: the painted Confirm, else the reasons and a hint (or the last error).
-  function footer(p, view, data, yTop) {
-    var W = view.w, H = view.h;
-    if (view.pending) { confirmBand(p, view, false); return; }
-    var lines = reasons(view, data), y = Math.max(yTop + 34, H - 40 - 30 * (Math.min(lines.length, 3) + 1));
-    lines.slice(0, 3).forEach(function (l) { text(p, 48, y, 21, 'muted', l, { maxW: W - 96 }); y += 30; });
-    var hint = view.note || (!view.focused ? 'Click to look closer.' : view.screen === 'secrets' ? 'Click a cell to change it: Ask or Deny.' : view.screen === 'agents' ? 'Click a cell to change it.' : 'Click a cell to change it: Ask, Allow, Deny.');
-    text(p, 48, H - 34, 24, view.note ? 'error' : 'ink', hint, { maxW: W - 96 });
+  function hintOf(view) {
+    return view.note || (!view.focused ? 'Click to look closer.' : view.screen === 'secrets' ? 'Click a cell to change it: Ask or Deny.' : view.screen === 'agents' ? 'Click a cell to change it.' : 'Click a cell to change it: Ask, Allow, Deny.');
+  }
+  // The layout of a rules screen: the first level in which the grid, every reason (wrapped) and the hint fit. The last level
+  // is the answer when none does. The reasons sit between the grid and the hint, the last reason a gap above the hint.
+  function levelFor(view, data) {
+    var rows = screenOf(view.screen).rows.length, W = view.w, H = view.h, rs = reasons(view, data), out;
+    for (var i = 0; i < LEVELS.length; i++) {
+      var L = LEVELS[i], ls = wrapAll(rs, L.fs, W - 96, 400), hl = wrap(hintOf(view), L.hint, W - 96, 400);
+      var hintTop = H - L.hintY - (hl.length - 1) * (L.hint + 4), last = hintTop - L.gap, first = last - Math.max(0, ls.length - 1) * L.lh;
+      var end = L.y0 + 52 + rows * rowHOf(L, rows);
+      out = { L: L, lines: ls, hint: hl, first: first, hintTop: hintTop, end: end };
+      if (!ls.length || first - L.fs * 0.8 >= end + 16) break;
+    }
+    return out;
   }
 
-  // One agent kind at a time (below 700 px of free view): Previous and Next, big text.
+  // The bottom of a full screen: the painted Confirm, else the reasons and a hint (or the last error).
+  function footer(p, view, lay) {
+    var W = view.w, L = lay.L;
+    if (view.pending) { confirmBand(p, view, false); return; }
+    para(p, 48, lay.first, L.fs, L.lh, 'muted', lay.lines, { maxW: W - 96 });
+    para(p, 48, lay.hintTop, L.hint, L.hint + 4, view.note ? 'error' : 'ink', lay.hint, { maxW: W - 96 });
+  }
+
+  // One agent kind at a time (below 700 px of free view): Previous and Next, big text. The reasons of the agent kind sit under
+  // the rows, wrapped in full; the rows share what is left (84 to 140 px each), and a Confirm that needs more lines takes them.
   function pagedRows(p, view, data) {
     var sc = screenOf(view.screen), W = view.w, H = view.h, cols = S().columns, n = cols.length;
     var page = ((view.page || 0) % n + n) % n, col = cols[page];
     hot(p, button(p, 48, 108, 230, 80, 'Previous', 44, { kind: 'prev', id: 'prev' }, isHover(view, 'prev')));
     hot(p, button(p, W - 48 - 230, 108, 230, 80, 'Next', 44, { kind: 'next', id: 'next' }, isHover(view, 'next')));
     text(p, W / 2, 162, 48, 'ink', col.label + ' (' + (page + 1) + ' of ' + n + ')', { wt: 600, align: 'center', maxW: W - 600 });
-    var rows = sc.rows, rowH = Math.min(140, Math.floor((H - 210 - 70) / Math.max(1, rows.length))), y = 210, cw = 300, chH = Math.min(96, rowH - 28);
+    var rows = sc.rows, cw = 300, top = 210, tw = W - 96 - 500;
+    // the bottom text: the last error, else the reasons of this agent kind, else the hint
+    var rl = reasons(view, data, col.id), bs = view.note || !rl.length ? 32 : 30, blh = bs + 6;
+    var bl = wrapAll(view.note ? [view.note] : rl.length ? rl : ['Click a value to change it.'], bs, W - 96, 400);
+    var pend = view.pending && !isSpend(view.pending) && view.pending.col === col.id ? view.pending : null;
+    var pl = pend ? wrap(confirmText(pend), 36, tw, 600) : [], pendNeed = pend ? pl.length * 42 + 28 : 0;
+    var bottom = view.pending ? H - 20 : H - 30 - (bl.length - 1) * blh - bs * 0.8 - 12;
+    var rowH = Math.max(84, Math.min(140, Math.floor((bottom - top) / Math.max(1, rows.length)))), small = rowH < 104, y = top;
     rows.forEach(function (row) {
-      var r = S().rows[row], pend = view.pending && view.pending.row === row && view.pending.col === col.id;
+      var r = S().rows[row], isP = pend && pend.row === row, rh = isP ? Math.max(rowH, pendNeed) : rowH, chH = Math.min(96, rowH - 28);
       fill(p, 48, y, W - 96, 2, 'line');
-      if (pend) {
-        fill(p, 48, y + 6, W - 96, rowH - 12, 'pendingBand', 16);
-        text(p, 72, y + rowH / 2 + 15, 40, 'onPending', confirmText(view.pending), { wt: 600, maxW: W - 96 - 500 });
-        hot(p, button(p, W - 48 - 460, y + (rowH - chH) / 2, 220, chH, 'Confirm', 42, { kind: 'confirm', id: 'confirm' }, isHover(view, 'confirm'), 'primary'));
-        hot(p, button(p, W - 48 - 228, y + (rowH - chH) / 2, 220, chH, 'Cancel', 42, { kind: 'cancel', id: 'cancel' }, isHover(view, 'cancel')));
-        y += rowH; return;
+      if (isP) {
+        var ph = rh - 12, bh2 = Math.min(chH, 92);
+        fill(p, 48, y + 6, W - 96, ph, 'pendingBand', 16);
+        para(p, 72, y + 6 + (ph - pl.length * 42) / 2 + 32, 36, 42, 'onPending', pl, { wt: 600, maxW: tw });
+        hot(p, button(p, W - 48 - 460, y + (rh - bh2) / 2, 220, bh2, 'Confirm', 42, { kind: 'confirm', id: 'confirm' }, isHover(view, 'confirm'), 'primary'));
+        hot(p, button(p, W - 48 - 228, y + (rh - bh2) / 2, 220, bh2, 'Cancel', 42, { kind: 'cancel', id: 'cancel' }, isHover(view, 'cancel')));
+        y += rh; return;
       }
       var nt = S().applies(row, col.id) ? noteOf(data, view.scope, row, col.id) : null;
-      text(p, 48, y + rowH / 2 + (nt ? 0 : 18), 52, 'ink', r.label, { maxW: W - 96 - cw - 24 });
-      if (nt) text(p, 48, y + rowH / 2 + 46, 34, 'muted', nt.word + ' for this agent', { maxW: W - 96 - cw - 24 });   // 34: about 9 px on a 400 px screen
-      if (!S().applies(row, col.id)) { text(p, W - 48 - cw / 2, y + rowH / 2 + 18, 44, 'muted', S().na(row, col.id), { align: 'center', maxW: cw }); y += rowH; return; }
+      var lb = y + rowH / 2 + (nt ? (small ? -2 : 0) : (small ? 16 : 18));
+      text(p, 48, lb, small ? 44 : 52, 'ink', r.label, { maxW: W - 96 - cw - 24 });
+      if (nt) text(p, 48, lb + (small ? 34 : 46), small ? 30 : 34, 'muted', nt.word + ' for this agent', { maxW: W - 96 - cw - 24 });   // 34: about 9 px on a 400 px screen
+      if (!S().applies(row, col.id)) { text(p, W - 48 - cw / 2, y + rowH / 2 + 18, 44, 'muted', S().na(row, col.id), { align: 'center', maxW: cw }); y += rh; return; }
       var id = 'cell:' + row + '|' + col.id, cy = y + (rowH - chH) / 2;
       chip(p, W - 48 - cw, cy, cw, chH, shown(data, view.scope, row, col.id), 52, isHover(view, id), false);
       if (overridden(data, row, col.id)) p.items.push({ t: 'mark', x: W - 48 - 6, y: cy + 6, s: 26, c: 'accent' });
       hot(p, { kind: 'cell', id: id, row: row, col: col.id, x: W - 48 - cw - 6, y: cy - 6, w: cw + 12, h: chH + 12 });
-      y += rowH;
+      y += rh;
     });
-    var why2 = sc.rows.map(function (row) { var n = S().applies(row, col.id) ? noteOf(data, view.scope, row, col.id) : null; return n ? n.why : ''; }).filter(Boolean)[0];
-    if (!view.pending) text(p, 48, H - 30, 32, view.note ? 'error' : 'muted', view.note || (why2 ? why2 : 'Click a value to change it.'), { maxW: W - 96 });
+    if (!view.pending) para(p, 48, H - 30 - (bl.length - 1) * blh, bs, blh, view.note ? 'error' : 'muted', bl, { maxW: W - 96 });
   }
 
   // The Spend screen: the default spend limit (minus, plus, click the value to type), cost this month, the extensions scope.
@@ -291,9 +359,11 @@
     }
     fill(p, 48, y, W - 96, 2, 'line');
     if (asking) { confirmBand(p, view, big); return; }   // the band takes the bottom of the screen until Confirm or Cancel
-    text(p, 48, y + (big ? 56 : 44), big ? 40 : 26, 'ink', 'Extensions: local or project scope only. User scope stays out of reach.', { maxW: W - 96 });
+    var es = big ? 40 : 26;
+    para(p, 48, y + (big ? 56 : 44), es, es + 8, 'ink', wrap('Extensions: local or project scope only. User scope stays out of reach.', es, W - 96, 400), { maxW: W - 96 });
     var hint = view.note || (editing ? 'Type a number of dollars. Enter saves, Esc cancels. 0 means no limit.' : !view.focused ? 'Click to look closer.' : 'Minus and plus change the limit by $1. Click the value to type it.');
-    text(p, 48, H - 34, big ? 32 : 24, view.note ? 'error' : big ? 'muted' : 'ink', hint, { maxW: W - 96 });
+    var hs = big ? 32 : 24, hw = wrap(hint, hs, W - 96, 400);
+    para(p, 48, H - 34 - (hw.length - 1) * (hs + 6), hs, hs + 6, view.note ? 'error' : big ? 'muted' : 'ink', hw, { maxW: W - 96 });
   }
 
   function plan(view, data) {
@@ -310,9 +380,10 @@
     header(p, v, data, big);
     if (view.screen === 'spend') { spend(p, v, data); return p; }
     if (big) { pagedRows(p, v, data); return p; }
-    subtitle(p, v, data);
-    var y = grid(p, v, data);
-    footer(p, v, data, y);
+    var lay = levelFor(v, data);
+    subtitle(p, v, data, lay.L);
+    grid(p, v, data, lay.L);
+    footer(p, v, lay);
     return p;
   }
 
@@ -429,7 +500,7 @@
     return Math.min(free.right - free.left, (free.bottom - free.top) * (aspect || 1)) < PAGED_BELOW;
   }
 
-  var pure = { plan: plan, hotAt: hotAt, step: step, key: key, pagedFor: pagedFor, PAGED_BELOW: PAGED_BELOW, CANVAS_W: CANVAS_W, TONES: TONES, toneColors: toneColors };
+  var pure = { plan: plan, hotAt: hotAt, step: step, key: key, pagedFor: pagedFor, wrap: wrap, charW: charW, noteOf: noteOf, levelFor: levelFor, PAGED_BELOW: PAGED_BELOW, CANVAS_W: CANVAS_W, TONES: TONES, toneColors: toneColors };
 
   // ---------- browser ----------
   // opts: { host, data() -> data, post(route, body) -> Promise, onError(text) }
