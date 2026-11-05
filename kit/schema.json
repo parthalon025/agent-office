@@ -197,6 +197,20 @@
     "room": "object"
    }
   },
+  "floor.update": {
+   "desc": "Rename a floor (name, key). Nothing else on it changes.",
+   "fields": {
+    "floorId": "number",
+    "floor": "object"
+   }
+  },
+  "room.update": {
+   "desc": "Rename a room, give it a new id, or change its type. Its bots stay and follow the new id.",
+   "fields": {
+    "roomId": "string",
+    "room": "object"
+   }
+  },
   "bot.add": {
    "desc": "Add a bot to a room.",
    "fields": {

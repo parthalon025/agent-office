@@ -63,6 +63,8 @@ export type AgentEvent = EventCommon & (
   | { type: "model"; bot: string; model: string; fallback?: string }
   | { type: "floor.add"; floor: Record<string, unknown> }
   | { type: "room.add"; floorId: number; room: Record<string, unknown> }
+  | { type: "floor.update"; floorId: number; floor: Record<string, unknown> }
+  | { type: "room.update"; roomId: string; room: Record<string, unknown> }
   | { type: "bot.add"; roomId: string; bot: BotDef }
   | { type: "bot.remove"; bot: string });
 /** Commands the office sends to the adapter when the user acts. `bots` is filled in by the office. */

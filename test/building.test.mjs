@@ -93,13 +93,14 @@ test('a scene mounted on an empty building gets a floor and a room when the firs
   const m = r.mount(KEY_A);
   assert.deepEqual(types(m.ev), [], 'nothing to say yet');
   await r.hook(HOOKS.turnWithEdit[0]);
-  assert.deepEqual(types(m.ev).slice(0, 4), ['floor.add', 'bot.add', 'session.start', 'model']);
-  const fl = of(m.ev, 'floor.add')[0].floor;
-  assert.equal(fl.name, 'main');
-  assert.equal(fl.rooms[0].name, 'repo');
-  assert.equal(of(m.ev, 'bot.add')[0].roomId, fl.rooms[0].id);
+  assert.deepEqual(types(m.ev).slice(0, 5), ['floor.update', 'room.update', 'bot.add', 'session.start', 'model']);
+  assert.equal(of(m.ev, 'floor.add').length, 0, 'the spare floor is renamed, not a second floor added');
+  const fu = of(m.ev, 'floor.update')[0], ru = of(m.ev, 'room.update')[0];
+  assert.deepEqual([fu.floorId, fu.floor.name], [1, 'main']);
+  assert.deepEqual([ru.roomId, ru.room.name], ['spare-room', 'repo']);
+  assert.equal(of(m.ev, 'bot.add')[0].roomId, ru.room.id);
   assert.equal(of(m.ev, 'bot.add')[0].bot.status, 'resting');
-  assert.equal(m.stale(), true, 'it was empty and now has a room, so the page mounts it again');
+  assert.equal(m.stale(), false, 'the spare room took the first session, so nothing is mounted again');
 });
 
 test('a turn with an edit: working, tool call without a bubble on replay, result, finished', async () => {
@@ -255,16 +256,13 @@ test('removing rooms: a worktree that goes makes the adapter stale; its replacem
   assert.equal(next.stale(), false);
 });
 
-test('a building that empties out is stale once, then the empty mount is steady', async () => {
+test('a session that ends leaves its room on screen: the scene is not stale', async () => {
   const r = rig();
   await r.hook(HOOKS.turnWithEdit[0]);
   const m = r.mount(KEY_A);
   assert.equal(m.stale(), false);
   r.tracker.onHook(slimPayload({ hook_event_name: 'SessionEnd', session_id: 'sid-1', cwd: REPO_A }, null)); r.push();
-  assert.equal(m.stale(), true);
-  const empty = r.mount(KEY_A);
-  assert.equal(empty.def.floors[0].name, 'No sessions');
-  assert.equal(empty.stale(), false);
+  assert.equal(m.stale(), false, 'the room stays, empty; a restart would flash the scene');
 });
 
 test('a branch change moves the bot: removed, then seated on the new floor', async () => {
@@ -276,7 +274,8 @@ test('a branch change moves the bot: removed, then seated on the new floor', asy
   assert.equal(s.cwd, 'C:\\work\\repo-feat');
   const kinds = types(m.ev);
   assert.ok(kinds.includes('bot.remove'));
-  assert.deepEqual(of(m.ev, 'floor.add').map((e) => e.floor.name), ['main', 'feat/x']);
+  assert.deepEqual(of(m.ev, 'floor.update').map((e) => e.floor.name), ['main']);
+  assert.deepEqual(of(m.ev, 'floor.add').map((e) => e.floor.name), ['feat/x']);
   assert.equal(of(m.ev, 'bot.add').length, 2);
 });
 

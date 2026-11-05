@@ -402,3 +402,26 @@ test('freeInset: no inset is null; negative sides count as 0; the free area keep
   const fi = s.freeInset();
   assert.ok(Math.abs(fi.left - 195) < 1e-9 && Math.abs(fi.right - 455) < 1e-9, 'both sides shrink in proportion');
 });
+
+test('floor.update and room.update rename in place: the floor and room stay, bots follow a new room id, no camera move', () => {
+  const calls = [];
+  const mk = new Function('TYPES', 'bld', 'st', 'calls',
+    'function floorOf(id){return bld.floors.filter(function(f){return f.id===id;})[0];}' +
+    'function norm(){bld.floors.forEach(function(f){f.rooms.forEach(function(r){r.bots.forEach(function(b){b.roomId=r.id;});});});}' +
+    'function rebuildFloor(){calls.push("floor");}function rebuildBuilding(){calls.push("building");}function show(){calls.push("show");}function emit(){calls.push("emit");}' +
+    'function frameFloor(){calls.push("FRAME");}function frameBuilding(){calls.push("FRAME");}' +
+    source(' function updateFloor(') + source(' function updateRoom(') + 'return { updateFloor: updateFloor, updateRoom: updateRoom };');
+  const bot = { name: 'a', roomId: 'spare-room' };
+  const bld = { floors: [{ id: 1, key: 'ops', name: 'No sessions', rooms: [{ id: 'spare-room', type: 'lab', name: 'Empty room', bots: [bot] }, { id: 'other', type: 'lab', name: 'Other', bots: [] }] }] };
+  const st = { room: 'spare-room' };
+  const e = mk({ lab: {}, team: {} }, bld, st, calls);
+  assert.equal(e.updateFloor(1, { name: 'main' }), 1);
+  assert.equal(bld.floors[0].name, 'main');
+  assert.equal(bld.floors[0].key, 'ops', 'the key stays unless it is given');
+  assert.equal(e.updateRoom('spare-room', { id: 'repo-abc', name: 'repo' }), 'repo-abc');
+  assert.deepEqual([bld.floors[0].rooms[0].id, bld.floors[0].rooms[0].name, bot.roomId, st.room], ['repo-abc', 'repo', 'repo-abc', 'repo-abc']);
+  assert.equal(e.updateRoom('repo-abc', { id: 'other' }), 'repo-abc', 'an id another room has is refused; the room keeps its own');
+  assert.equal(e.updateRoom('missing', { name: 'x' }), undefined);
+  assert.equal(e.updateFloor(9, { name: 'x' }), undefined);
+  assert.ok(!calls.includes('FRAME'), 'a rename never moves the camera');
+});

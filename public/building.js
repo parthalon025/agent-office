@@ -26,7 +26,7 @@
                            the snapshot has it), so the scene restores it with no toast, sound or onNotify.
                            A bot seated again on another floor is seeded too. Later news is not seeded.
      detach()              the scene stops: later snapshots and timers do nothing
-     stale(snap?)          true when the scene shows a room that is gone, or was empty and now has rooms.
+     stale(snap?)          true when the scene shows a worktree room that is gone.
                            The DS has no event that removes a floor or a room, so the page mounts a new adapter.
      roomInfo(roomId)      { sessions, place } of one room of this building
      figures(roomId)       the server's figures for that room
@@ -39,6 +39,7 @@
   var SHAPES = ['cone', 'blob', 'octa', 'capsule'];
   var FLOOR_KEYS = ['ops', 'sales', 'research', 'content', 'hq'];
   var OTHER = 'Other folders';
+  var SPARE_ROOM = 'spare-room';   // the room of an empty building, renamed when the first session comes
   var REMOVE_AFTER_MS = 6000;
   var HISTORY_CALLS = 12;   // calls shown in the trace when the page opens mid-session
   var USAGE_REPEAT_MS = 15000;
@@ -170,7 +171,8 @@
     });
     // An empty building still needs a floor to stand on.
     var empty = !floors.length;
-    if (empty) { floors = [floorDef(1, 'No sessions', [])]; nextId = 2; }
+    // It holds one spare room: the first session renames the floor and the room in place (floor.update, room.update), so the scene is not mounted again.
+    if (empty) { floors = [floorDef(1, 'No sessions', [{ id: SPARE_ROOM, type: 'lab', name: 'Empty room', bots: [] }])]; nextId = 2; }
     return { def: { name: name || (repo ? base(repo) : OTHER), sessions: 'agent', floors: floors }, floors: map, nextId: nextId, keys: keys, empty: empty };
   }
 
@@ -209,9 +211,13 @@
 
     store.mount = function (repo) {
       var d = describe(repo, latest, false);
-      function freshLayout() { return { floors: JSON.parse(JSON.stringify(d.floors)), nextId: d.nextId, keys: Object.assign({}, d.keys) }; }
+      function freshLayout() { return { floors: JSON.parse(JSON.stringify(d.floors)), nextId: d.nextId, keys: Object.assign({}, d.keys), spare: d.empty }; }
       var layout = freshLayout();
-      var startedEmpty = d.empty;
+      // Rooms that were a worktree of this building. Only a worktree that goes makes the scene stale: a room a
+      // session made stays on screen, empty, when the session ends, and the next session in that folder uses it.
+      var wtSeen = {};
+      function seeWorktrees(snap) { var rp = repoOf(snap, repo); if (rp) rp.worktrees.forEach(function (w) { wtSeen[w.place.floor + '|' + w.place.rootKey] = true; }); }
+      seeWorktrees(latest);
       var known = {};   // uid -> mirror of what the scene was told
       var taken = {};   // bot name -> true
       var emitRef = null, lastUsage = { percent: null, t: 0 };
@@ -227,6 +233,14 @@
         if (!f) {
           var r = roomDef(pl);
           layout.keys[r.id] = pl.noteKey;
+          if (layout.spare) {   // the empty building's spare floor and room become this floor and room
+            layout.spare = false;
+            f = layout.floors[pl.branch] = { id: 1, rooms: {} };
+            f.rooms[pl.root] = r.id;
+            emit({ type: 'floor.update', floorId: 1, floor: { name: floorDef(1, pl.branch, []).name } });
+            emit({ type: 'room.update', roomId: SPARE_ROOM, room: { id: r.id, name: r.name } });
+            return r.id;
+          }
           f = layout.floors[pl.branch] = { id: layout.nextId++, rooms: {} };
           f.rooms[pl.root] = r.id;
           emit({ type: 'floor.add', floor: floorDef(f.id, pl.branch, [r]) });
@@ -424,7 +438,7 @@
         var s0 = seedSnap; seedSnap = null;
         if (s0) { apply(s0, emit, true); syncUsage(s0, function (e) { e.seeded = true; emit(e); }); }
       }
-      m._follow = function (snap) { if (emitRef) { prime(emitRef); apply(snap, emitRef); syncUsage(snap, emitRef); } };
+      m._follow = function (snap) { seeWorktrees(snap); if (emitRef) { prime(emitRef); apply(snap, emitRef); syncUsage(snap, emitRef); } };
       m.attach = function (emit) {
         known = {}; taken = {}; layout = freshLayout(); lastUsage = { percent: null, t: 0 };
         emitRef = emit; primed = false; seedSnap = latest;
@@ -443,8 +457,9 @@
       };
       m.stale = function (snap) {
         var nowRooms = roomsNow(snap || latest, repo);
-        if (m.roomsShown().some(function (k) { return !nowRooms[k]; })) return true;
-        return startedEmpty && Object.keys(nowRooms).length > 0;
+        seeWorktrees(snap || latest);
+        if (m.roomsShown().some(function (k) { return !nowRooms[k] && wtSeen[k]; })) return true;
+        return false;
       };
       // The open sessions in one room of this building, and that room's place.
       m.roomInfo = function (roomId, snap) {

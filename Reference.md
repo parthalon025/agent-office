@@ -28,6 +28,8 @@ This repo copy is the DS source. Reference.md is kept by hand in step with `kit/
 | `model` | `bot`, `model`, `fallback?` | A bot changes model, or falls back to another model. |
 | `floor.add` | `floor` | Add a floor. |
 | `room.add` | `floorId`, `room` | Add a room to a floor. |
+| `floor.update` | `floorId`, `floor` | Rename a floor (name, key). Nothing else on it changes. |
+| `room.update` | `roomId`, `room` | Rename a room, give it a new id, or change its type. Its bots stay and follow the new id. |
 | `bot.add` | `roomId`, `bot` (BotDef) | Add a bot to a room. BotDef fields are listed below. |
 | `bot.remove` | `bot` | Remove a bot. |
 
