@@ -1,7 +1,8 @@
 // How risky a tool call is, for the Approve card and the "Approve all low-risk" action, and which row of the Security
 // room grid it falls under (its action kind, #70).
 // An allowlist: only reads and edits inside the session's root folder are low, and never for a secret-looking
-// file or a settings file that runs code (.git, .claude, .mcp.json, .vscode, .idea). Every agent provider uses
+// file or a settings file that runs code (.git, .claude, .mcp.json, .vscode, .idea, Copilot CLI's .copilot, .agents and the
+// RUNS_IN_GITHUB parts below .github). Every agent provider uses
 // this one rule, so a local model or a Copilot session is rated like Claude Code.
 // One classifier (rate) gives both answers, so the grid and riskOf never disagree: the rows read-inside and
 // edit-inside are exactly the reads and edits that are low.
@@ -37,9 +38,15 @@ const DANGER = [
 // Path parts (folders or files) whose content a program runs without asking: git config, hooks and the
 // worktree link file; Claude Code settings, hooks, commands and skills; Hermes skills, memory and config (.hermes, #72); MCP
 // server lists; editor tasks and run settings; ssh config; the office's own hook and MCP files, with or without a port in the
-// name (files.mjs). An edit to one of them is high. The Start Menu folder holds the Startup folder (Programs\Startup):
-// Windows runs what is in it at sign-in.
-const RUNS = new Set(['.git', '.claude', '.hermes', '.vscode', '.idea', '.ssh', '.mcp.json', '.claude.json', '.gitconfig', 'start menu']);
+// name (files.mjs); Copilot CLI's home folder (.copilot: settings, hooks, MCP list, skills) and the .agents skills folder (#22).
+// An edit to one of them is high. The Start Menu folder holds the Startup folder (Programs\Startup): Windows runs what is in
+// it at sign-in.
+const RUNS = new Set(['.git', '.claude', '.hermes', '.vscode', '.idea', '.ssh', '.mcp.json', '.claude.json', '.gitconfig', 'start menu', '.copilot', '.agents']);
+// Parts that run code only directly below .github: Copilot CLI's repo hooks (shell commands that run without asking), repo
+// settings (.github/copilot/settings*.json: hooks and allowedUrls), custom agents (they can start MCP servers), skills and the
+// workspace MCP list (copilot help config, copilot mcp --help, copilot skill --help; 1.0.105). .github/workflows and
+// .github/copilot-instructions.md are not on the list: they do not run on this PC.
+const RUNS_IN_GITHUB = new Set(['hooks', 'copilot', 'agents', 'skills', 'mcp.json']);
 // File names that run code: the office's hook and MCP files (any port), PowerShell profiles (profile.ps1,
 // Microsoft.PowerShell_profile.ps1, Microsoft.VSCode_profile.ps1) and sh, bash, zsh, csh and ksh profiles.
 const RUNS_FILE = /^(office-(hooks|hooks-http|mcp)(-\d+)?\.json|(microsoft\.[\w.]+_)?profile\.ps1|\.(bashrc|bash_profile|bash_login|bash_logout|profile|zshrc|zprofile|zshenv|zlogin|cshrc|tcshrc|kshrc))$/;
@@ -68,11 +75,15 @@ const forms = (part) => {
 };
 // What a list of path parts names: a secret, settings that run code, or saved state that runs schedules later (edits only).
 function kinds(list) {
-  let secret = false, runs = false, later = false;
-  for (const part of list) for (const n of forms(part)) {
-    if (SECRET_DIRS.has(n) || SECRET_FILE.test(n)) secret = true;
-    if (RUNS.has(n) || RUNS_FILE.test(n)) runs = true;
-    if (LATER_FILE.test(n)) later = true;
+  let secret = false, runs = false, later = false, github = false;
+  for (const part of list) {
+    const f = forms(part);
+    for (const n of f) {
+      if (SECRET_DIRS.has(n) || SECRET_FILE.test(n)) secret = true;
+      if (RUNS.has(n) || RUNS_FILE.test(n) || (github && RUNS_IN_GITHUB.has(n))) runs = true;
+      if (LATER_FILE.test(n)) later = true;
+    }
+    github = f.includes('.github'); // the part before the next one
   }
   return { secret, runs, later };
 }
@@ -158,8 +169,8 @@ function resolveIn(root, abs) {
 const OFFICE_DIR = norm(path.dirname(fileURLToPath(import.meta.url)));
 const OWN_STATE = /^(state|history)(-\d+)?\.json$/i;
 const ownState = (p) => !!p && path.dirname(norm(p)) === OFFICE_DIR && OWN_STATE.test(path.basename(String(p)));
-// The agents' own config homes (review M3): Claude Code's (~/.claude, or CLAUDE_CONFIG_DIR) and Hermes's (~/.hermes, or
-// HERMES_HOME) hold settings, hooks, commands, skills and memory that the agent runs. A path in one of them is settings that
+// The agents' own config homes (review M3): Claude Code's (~/.claude, or CLAUDE_CONFIG_DIR), Hermes's (~/.hermes, or
+// HERMES_HOME) and Copilot CLI's (~/.copilot, or COPILOT_HOME, #22) hold settings, hooks, commands, skills and memory that the agent runs. A path in one of them is settings that
 // run code whatever the root: a session rooted in ~/.claude would else rate its settings.json, hooks and CLAUDE.md as plain
 // files inside its root (only the parts below a root count there). opts: { home, env } for tests; the real home and
 // process.env by default. Both as text and after links.
@@ -167,7 +178,8 @@ export function configHomes(opts = {}) {
   const home = opts.home !== undefined ? opts.home : os.homedir();
   const env = opts.env || process.env;
   const out = [];
-  for (const d of [home && path.join(home, '.claude'), env.CLAUDE_CONFIG_DIR, home && path.join(home, '.hermes'), env.HERMES_HOME]) {
+  for (const d of [home && path.join(home, '.claude'), env.CLAUDE_CONFIG_DIR, home && path.join(home, '.hermes'), env.HERMES_HOME,
+    home && path.join(home, '.copilot'), env.COPILOT_HOME]) {
     if (d && path.isAbsolute(String(d))) out.push(path.resolve(String(d)));
   }
   return out;

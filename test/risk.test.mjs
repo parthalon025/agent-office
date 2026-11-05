@@ -147,6 +147,47 @@ for (const f of RUNS) {
   });
 }
 
+// Copilot CLI's settings that run code or approve calls without asking (copilot help config, copilot mcp --help,
+// copilot skill --help, 1.0.105): repo hooks, repo settings (hooks, allowedUrls), custom agents, skills, the workspace
+// MCP list, the .agents skills folder and the home folder .copilot. A read is medium, an edit is high, like .claude.
+const COPILOT_RUNS = ['.github/hooks/pre-tool.json', '.github/copilot/settings.json', '.github/copilot/settings.local.json',
+  '.github/agents/fix.agent.md', '.github/skills/s/SKILL.md', '.github/mcp.json', '.agents/skills/s/SKILL.md', '.copilot/mcp-config.json',
+  '.GitHub/Hooks/a.json', '.github./hooks/a.json', '.github/copilot::$DATA/settings.json'];
+for (const f of COPILOT_RUNS) {
+  test(`Copilot CLI settings that run code are never low: ${f}`, () => {
+    for (const tool of ['Read', 'NotebookRead', 'LS']) assert.equal(riskOf(tool, { file_path: f, notebook_path: f, path: f }, cwd), 'medium', tool);
+    for (const tool of ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']) assert.equal(riskOf(tool, { file_path: f, notebook_path: f }, cwd), 'high', tool);
+    assert.equal(riskOf('Edit', { file_path: at(f) }, cwd), 'high', 'absolute path');
+    assert.equal(actionOf('Edit', { file_path: f }, cwd), 'settings', 'the Security room row');
+  });
+}
+
+test('Copilot CLI: the home settings are high, and .github files that do not run here stay ordinary', () => {
+  for (const f of [path.join(home, '.copilot', 'settings.json'), '~/.copilot/hooks/a.json', path.join(home, '.copilot', 'mcp-config.json')]) {
+    assert.equal(riskOf('Edit', { file_path: f }, cwd), 'high', f);
+  }
+  assert.equal(riskOf('Grep', { pattern: 'x', glob: '.github/hooks/*.json' }, cwd), 'medium', 'a search of the hooks');
+  for (const f of ['.github/workflows/ci.yml', '.github/copilot-instructions.md', '.github/ISSUE_TEMPLATE/bug.md', 'docs/hooks/a.json', 'src/copilot/a.js', 'agents/a.md']) {
+    assert.equal(riskOf('Edit', { file_path: f }, cwd), 'low', f);
+  }
+  assert.equal(isProtectedPart('.copilot'), true);
+  assert.equal(isProtectedPart('.agents'), true);
+  assert.equal(isProtectedPart('hooks'), false, 'hooks alone is an ordinary folder name');
+  assert.equal(isProtectedPart('.github'), false);
+});
+
+test('Copilot CLI: its config home (~/.copilot, or COPILOT_HOME) is settings that run code, also for a session rooted there', () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-risk-copilot-'));
+  try {
+    const fake = path.join(base, 'home'), cp = path.join(fake, '.copilot'), moved = path.join(base, 'cfg');
+    for (const d of [path.join(cp, 'hooks'), moved]) fs.mkdirSync(d, { recursive: true });
+    assert.equal(actionOf('Edit', { file_path: path.join(cp, 'config.json') }, cp, { home: fake, env: {} }), 'settings');
+    assert.equal(riskOf('Edit', { file_path: path.join(cp, 'hooks', 'a.json') }, path.join(cp, 'hooks'), { home: fake, env: {} }), 'high');
+    assert.equal(actionOf('Edit', { file_path: path.join(moved, 'config.json') }, moved, { home: fake, env: { COPILOT_HOME: moved } }), 'settings', 'COPILOT_HOME');
+    assert.equal(riskOf('Edit', { file_path: path.join(moved, 'a.txt') }, moved, { home: fake, env: {} }), 'low', 'without the env it is a plain folder');
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
 // The office's own files on every port (files.mjs, #100): an office on another port has the same files with the port in
 // the name, and they get the same rating as the plain ones.
 test('the office files of every port: token files are secrets, hook and MCP settings run code', () => {

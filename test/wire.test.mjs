@@ -295,7 +295,7 @@ test('the server: a whole snapshot on connect, then patches that add up to it; p
     assert.ok(fresh.snap.sessions.every((s) => s.calls.length === CALLS && s.calls.every((c) => c.ok === true)));
     assert.equal('sid' in fresh.snap.sessions[0], false, 'the snapshot is lean');
     assert.ok(fresh.snap.sessions.every((s) => s.provider === 'claude-code'), 'each session says its agent kind');
-    assert.deepEqual(fresh.snap.kinds.map((k) => [k.kind, k.label]), [['claude-code', 'Claude Code'], ['ollama', 'Ollama'], ['lmstudio', 'LM Studio'], ['agent-framework', 'Agent Framework'], ['hermes', 'Hermes Agent'], ['dsh', 'DeepSeek Harness'], ['openclaw', 'OpenClaw'], ['foundry', 'Azure AI Foundry'], ['copilot-studio', 'Copilot Studio']], 'the server sends its agent kinds');
+    assert.deepEqual(fresh.snap.kinds.map((k) => [k.kind, k.label]), [['claude-code', 'Claude Code'], ['ollama', 'Ollama'], ['lmstudio', 'LM Studio'], ['agent-framework', 'Agent Framework'], ['hermes', 'Hermes Agent'], ['dsh', 'DeepSeek Harness'], ['openclaw', 'OpenClaw'], ['copilot', 'Copilot CLI'], ['foundry', 'Azure AI Foundry'], ['copilot-studio', 'Copilot Studio']], 'the server sends its agent kinds');
     // one message per broadcast window at most (100 ms), however many hooks come in
     const during = early.msgs.filter((x) => x.t >= t0 && x.t <= t1 + 150).length;
     assert.ok(during <= Math.ceil((t1 - t0) / 100) + 2, `${during} messages in ${t1 - t0} ms for ${N * CALLS * 2} hooks`);
