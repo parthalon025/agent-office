@@ -46,6 +46,10 @@
                          applies(row, col), na(row, col), word(value), key(row, col), own(map, key) (an own key, never
                          an inherited one: rule maps come from requests and state.json).
                          rules: { office: { 'row|col': value }, buildings: { buildingKey: { 'row|col': value } } }.
+     hq               -> Paperclip HQ words (#76): status(agent) { key, word } (never waiting: a Paperclip approval is not an
+                         office request), budget(b) ("$8.30 of $50.00 this month"), every(seconds) (a heartbeat), supervision(agent)
+                         ("Supervised in office" or the label), state(snap.hq) (the connection as a line).
+     platform(s, kinds) -> the bot card line: the supervision label or the kind word, after "Paperclip <role>, " for a Paperclip run.
 */
 (function (root) {
   'use strict';
@@ -80,17 +84,19 @@
   }
 
   // The HUD adds the state word ("Working · ..."), so the task text carries only the task.
+  // A Paperclip run (#76, s.hq: the server's label of the run) shows its Paperclip task in place of the prompt: Paperclip's
+  // prompt is its long wake-up text, the task is what the run is for.
   function taskLine(s) {
-    var k = status(s).key;
+    var k = status(s).key, job = s.hq && s.hq.task ? clip(s.hq.task, 70) : '';
     if (s.status === 'ended') return 'Left the office';
     if (k === 'waiting') return clip(s.note, 90) || 'Needs your attention';
     if (s.status === 'starting') return 'Waiting for the first hook';
     if (k === 'working') {
       if (s.live) return clip(String(s.live).replace(/\s+/g, ' ').slice(-90), 90);
-      return s.tool ? s.tool.name + (s.tool.detail ? ' ' + clip(s.tool.detail, 60) : '') : (clip(s.prompt, 70) || 'Thinking');
+      return s.tool ? s.tool.name + (s.tool.detail ? ' ' + clip(s.tool.detail, 60) : '') : (job || clip(s.prompt, 70) || 'Thinking');
     }
     if (k === 'error') return clip(s.error.text, 200) || 'The turn failed.';
-    return s.turns > 0 ? (clip(s.prompt, 60) || 'Last turn') : 'Waiting for a prompt';
+    return job || (s.turns > 0 ? (clip(s.prompt, 60) || 'Last turn') : 'Waiting for a prompt');
   }
 
   function toolKind(name) { if (/__browser_|playwright/i.test(String(name))) return 'browser'; return KIND[name] || (String(name).indexOf('mcp__') === 0 ? 'mcp' : 'api'); }
@@ -116,7 +122,42 @@
     var t = String(label || ''), i = t.indexOf(': ');
     return !t ? [] : i < 0 ? [t] : [t.slice(0, i + 1), t.slice(i + 2)];
   }
-  function platform(s, kinds) { return supervision(s) || kindWord(s, kinds) || 'Claude Code'; }
+  // A Paperclip run says so first, with its role: "Paperclip Engineer, Claude Code" (#76).
+  function platform(s, kinds) {
+    var base = supervision(s) || kindWord(s, kinds) || 'Claude Code';
+    return s && s.hq && s.hq.role ? 'Paperclip ' + s.hq.role + ', ' + base : base;
+  }
+
+  // ---------- Paperclip HQ (#76): the words of its agents, budgets and schedules (paperclip.mjs view) ----------
+  // An agent as a DS status: a run that is queued or runs is working, a failed run or an agent in error is error, else at rest.
+  // A Paperclip approval (hire, strategy) is Paperclip's, not a request of the office, so it is never waiting.
+  var HQ_FAILED = { failed: 1, error: 1, timed_out: 1 };
+  function hqStatus(a) {
+    var r = a && a.run, st = a && a.status;
+    if (r && (r.status === 'running' || r.status === 'queued')) return { key: 'working', word: r.status === 'queued' ? 'Queued in Paperclip' : 'Runs in Paperclip' };
+    if (st === 'error' || (r && HQ_FAILED[r.status])) return { key: 'error', word: 'Last run failed' };
+    if (st === 'paused') return { key: 'resting', word: 'Paused in Paperclip' };
+    if (st === 'pending_approval') return { key: 'resting', word: 'Waits for approval in Paperclip' };
+    return { key: 'resting', word: 'Idle' };
+  }
+  function money(n) { var F = root.OfficeFormat; return F && F.money ? F.money(n) : '$' + (+n || 0).toFixed(2); }
+  // A Paperclip budget: "$8.30 of $50.00 this month", or "$8.30 this month, no budget" (0 is no budget in Paperclip).
+  function hqBudget(b) { if (!b) return ''; return b.limit > 0 ? money(b.spent) + ' of ' + money(b.limit) + ' this month' : money(b.spent) + ' this month, no budget'; }
+  function hqEvery(sec) {
+    var s = Math.max(0, Math.round(+sec || 0)), m = Math.round(s / 60);
+    return s < 60 ? 'every ' + s + ' s' : m < 60 ? 'every ' + m + ' min' : m % 60 ? 'every ' + Math.floor(m / 60) + ' h ' + (m % 60) + ' min' : 'every ' + (m / 60) + ' h';
+  }
+  // The supervision words of an agent: "Supervised in office", else the label (ADR 0001).
+  function hqSupervision(a) { var x = a && a.supervision; return !x ? '' : x.state === 'supervised' ? 'Supervised in office' : x.label; }
+  // The HQ connection as a line: what the office does now.
+  function hqState(hq) {
+    if (!hq) return 'Not connected';
+    if (hq.state === 'on') return 'Watching ' + (hq.company ? hq.company.name : 'Paperclip') + ' at ' + hq.url;
+    if (hq.state === 'choose') return 'Pick a company';
+    if (hq.state === 'connecting') return 'Connecting to ' + hq.url;
+    return 'Lost ' + hq.url + ': ' + (hq.error || 'no answer') + ' The office tries again.';
+  }
+  var hq = { status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState };
 
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
   // priced: sessions with a cost figure. unknown: sessions whose agent reports no cost (costUnknown), shown as "unknown".
@@ -193,8 +234,8 @@
     // Agents screen. Ungated agents run tool calls without asking the office (ADR 0001): off until the user turns them on.
     // only: the kinds whose provider is gated: false (providers/acp.mjs AGENTS, the cloud kinds); the others ask the office, so "Gated".
     ungated: { label: 'Turn on ungated agents', options: TOGGLE, def: 'off', office: true, only: ['hermes', 'copilot', 'cloud'], na: 'Gated' },
-    // Paperclip's Claude Code runs go through the office hooks (#76).
-    supervise: { label: 'Paperclip: Supervise in office', options: TOGGLE, def: 'off', office: true, only: ['claude-code'], na: 'Not used' },
+    // Paperclip agents are not an agent kind: the Agents screen lists them by name in its Paperclip part, each with its own
+    // Supervise in office (#76, public/security.js), so no cell stands for all of them.
     // An agent that reports no cost: Ask (the office asks once per session), Allow (it runs without asking), Deny (it never runs).
     // A cloud kind reports cost only from the prices the owner set (providers/cloud.mjs); without them it is such an agent.
     'no-cost': { label: 'Run without cost reports', options: RULE, def: 'ask', office: true, only: ['hermes', 'dsh', 'openclaw', 'copilot', 'cloud'], na: { 'claude-code': 'Reports cost', local: 'Free', 'agent-framework': 'Free' } }
@@ -204,7 +245,7 @@
     { id: 'commands', title: 'Commands', rows: ['shell'] },
     { id: 'network', title: 'Network', rows: ['web', 'mcp'] },
     { id: 'secrets', title: 'Secrets', rows: ['settings', 'secrets'] },
-    { id: 'agents', title: 'Agents', rows: ['ungated', 'supervise', 'no-cost'] },
+    { id: 'agents', title: 'Agents', rows: ['ungated', 'no-cost'] },
     { id: 'spend', title: 'Spend', rows: [] }
   ];
   var SEC_WORD = bare({ ask: 'Ask', allow: 'Allow', deny: 'Deny', off: 'Off', on: 'On' });
@@ -302,5 +343,5 @@
     return label + ' does not report cost, so the office shows it as unknown and no spend limit can stop it. Check the spend in its own account.';
   }
 
-  root.OfficeVocab = { limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform };
+  root.OfficeVocab = { limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform, hq: hq };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

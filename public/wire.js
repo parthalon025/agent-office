@@ -26,7 +26,7 @@
   // A field the page does not read stays on the server. Add a field here when the page starts to read it.
   var SESSION_FIELDS = ['uid', 'provider', 'name', 'status', 'cwd', 'headless', 'note', 'model', 'mode', 'tool', 'prompt', 'promptAt', 'live',
     'error', 'turns', 'cost', 'costUnknown', 'supervision', 'usage', 'ctxTokens', 'ctxWindow', 'todos', 'agents', 'calls', 'replies', 'pending', 'questions',
-    'inbox', 'commands', 'skills', 'features', 'scheduleId', 'startedAt', 'endedAt', 'lastEvent', 'git', 'place', 'olderReplies'];
+    'inbox', 'commands', 'skills', 'features', 'scheduleId', 'startedAt', 'endedAt', 'lastEvent', 'git', 'place', 'olderReplies', 'hq'];
   // Per session and broadcast. calls: the tracker's own limit (MAX_CALLS); the boards and the terminal count all of them.
   // replyChars: the newest replies whose text fits, and always the newest one. The rest is on request, and the session says
   // how many it left out (olderReplies), so the page asks for them before it fills the chat (#80).
@@ -78,7 +78,8 @@
       pins: state.pins || {},
       repos: state.repos || [],
       kinds: state.kinds || [],   // the agent kinds (providers/index.mjs kinds): fixed while the server runs, so no patch repeats them
-      security: state.security || null   // the Security room (#70): rules, what is enforced, the Spend screen
+      security: state.security || null,  // the Security room (#70): rules, what is enforced, the Spend screen
+      hq: state.hq || null               // Paperclip HQ (#76, paperclip.mjs view): null until the user connects it
     };
   }
 

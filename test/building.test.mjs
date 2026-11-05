@@ -180,6 +180,27 @@ test('a supervision label that changes after the bot is seated seats it again, s
   assert.equal(of(m.ev, 'bot.add').length, adds + 1);
 });
 
+test('a Paperclip run (#76) is labelled with its role, company and task; the label that comes once the office watches it seats the bot again', async () => {
+  const r = rig({ kinds: [{ kind: 'claude-code', label: 'Claude Code' }] });
+  const m = r.mount(KEY_A);
+  await r.hook(HOOKS.turnWithEdit[0]);
+  assert.equal(of(m.ev, 'bot.add').at(-1).bot.owner, undefined, 'not a Paperclip run (yet): no owner');
+  const adds = of(m.ev, 'bot.add').length;
+  const s = [...r.tracker.sessions.values()][0];
+  s.hq = { agent: 'Ada', role: 'Backend engineer', company: 'Acme Robotics', task: 'ACM-12 Add a health route to the API', budget: { spent: 8.3, limit: 50 }, run: 'run-1' };
+  r.push();
+  assert.equal(of(m.ev, 'bot.add').length, adds + 1, 'the card lines come only with bot.add');
+  const bot = of(m.ev, 'bot.add').at(-1).bot;
+  assert.equal(bot.platform, 'Paperclip Backend engineer, Claude Code');
+  assert.equal(bot.owner, 'Acme Robotics (Ada)');
+  assert.equal(bot.task, 'ACM-12 Add a health route to the API', 'its Paperclip task, not the wake-up prompt');
+  r.push();
+  assert.equal(of(m.ev, 'bot.add').length, adds + 1, 'nothing changed: not seated again');
+  s.hq = { ...s.hq, task: 'ACM-13 Next task', budget: { spent: 9, limit: 50 } };
+  r.push();
+  assert.equal(of(m.ev, 'bot.add').length, adds + 1, 'a new task or budget is a status line, not a new seat');
+});
+
 test('a turn with an edit: working, tool call without a bubble on replay, result, finished', async () => {
   const r = rig();
   const m0 = r.mount(KEY_A);

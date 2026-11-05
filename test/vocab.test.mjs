@@ -173,7 +173,6 @@ test('security: every call row is Ask by default for every agent kind, also read
   // It is gated and free: no Turn on cell, no cost cell, and each says why.
   assert.deepEqual([S.applies('ungated', 'agent-framework'), S.na('ungated', 'agent-framework')], [false, 'Gated']);
   assert.deepEqual([S.applies('no-cost', 'agent-framework'), S.na('no-cost', 'agent-framework')], [false, 'Free']);
-  assert.deepEqual([S.applies('supervise', 'agent-framework'), S.na('supervise', 'agent-framework')], [false, 'Not used']);
   // Copilot CLI (#22) reads in its folder and runs the commands it rates read-only without asking: ungated, so off too.
   assert.equal(S.valueOf(none, '', 'ungated', 'copilot'), 'off');
   assert.equal(S.valueOf(none, '', 'no-cost', 'copilot'), 'ask', 'it reports no cost: the office asks once per session');
@@ -204,7 +203,6 @@ test('security: a loosening change is a change to Allow or On; Ask and Deny appl
   assert.equal(S.loosens('shell', 'allow', 'deny'), false);
   assert.equal(S.loosens('shell', 'deny', 'ask'), false);
   assert.equal(S.loosens('ungated', 'off', 'on'), true);
-  assert.equal(S.loosens('supervise', 'off', 'on'), true);
   assert.equal(S.loosens('shell', 'allow', 'allow'), false, 'no change is no loosening');
 });
 
@@ -231,8 +229,8 @@ test('security: a row that is only for some agent kinds has no cell in the other
   assert.equal(S.applies('ungated', 'copilot'), true);
   assert.equal(S.applies('ungated', 'openclaw'), false, 'OpenClaw is gated through its office plugin (#77)');
   assert.equal(S.applies('ungated', 'claude-code'), false);
-  assert.equal(S.applies('supervise', 'claude-code'), true);
-  assert.equal(S.applies('supervise', 'local'), false);
+  assert.equal(S.rows.supervise, undefined, 'Supervise in office is per Paperclip agent, on the Agents screen (#76), not a cell');
+  assert.equal(S.applies('supervise', 'claude-code'), false);
   assert.equal(S.applies('no-cost', 'hermes'), true);
   assert.equal(S.applies('no-cost', 'claude-code'), false);
   assert.equal(S.applies('shell', 'local'), true);
@@ -397,6 +395,33 @@ test('the pick of Foundry speaks of agents, not models, in every word around it'
   assert.equal(V.pickFact(FD), 'You pick the Foundry agent');
   assert.equal(V.pickFact(OL), 'You pick the model');
   assert.equal(V.pickFact({ ...OL, needsModel: false }), null);
+});
+
+test('Paperclip HQ words (#76): an agent\'s state is never "Needs you", budgets, heartbeats, supervision, the connection', () => {
+  const H = V.hq;
+  assert.deepEqual(H.status({ status: 'running', run: { status: 'running' } }), { key: 'working', word: 'Runs in Paperclip' });
+  assert.deepEqual(H.status({ status: 'idle', run: { status: 'queued' } }), { key: 'working', word: 'Queued in Paperclip' });
+  assert.deepEqual(H.status({ status: 'idle', run: { status: 'failed' } }), { key: 'error', word: 'Last run failed' });
+  assert.deepEqual(H.status({ status: 'error' }), { key: 'error', word: 'Last run failed' });
+  assert.deepEqual(H.status({ status: 'paused' }), { key: 'resting', word: 'Paused in Paperclip' });
+  assert.equal(H.status({ status: 'pending_approval' }).key, 'resting', 'a Paperclip approval is Paperclip\'s, not an office request');
+  assert.deepEqual(H.status({ status: 'idle', run: { status: 'succeeded' } }), { key: 'resting', word: 'Idle' });
+  assert.equal(H.budget({ spent: 8.3, limit: 50 }), '$8.30 of $50.00 this month');
+  assert.equal(H.budget({ spent: 0, limit: 0 }), '$0.00 this month, no budget');
+  assert.equal(H.budget(null), '');
+  assert.deepEqual([H.every(30), H.every(1800), H.every(7200), H.every(5400)], ['every 30 s', 'every 30 min', 'every 2 h', 'every 1 h 30 min']);
+  assert.equal(H.supervision({ supervision: { state: 'supervised', label: '' } }), 'Supervised in office');
+  assert.equal(H.supervision({ supervision: { state: 'unsupervised', label: 'Unsupervised' } }), 'Unsupervised');
+  assert.equal(H.state(null), 'Not connected');
+  assert.equal(H.state({ state: 'on', url: 'http://127.0.0.1:3100', company: { name: 'Acme' } }), 'Watching Acme at http://127.0.0.1:3100');
+  assert.match(H.state({ state: 'lost', url: 'http://127.0.0.1:3100', error: 'No Paperclip answers.' }), /^Lost http:\/\/127\.0\.0\.1:3100: No Paperclip answers\. The office tries again\.$/);
+  // a Paperclip run: its role first on the card; its task in place of Paperclip's long wake-up prompt
+  const run = mk({ turns: 1, prompt: 'You are Ada. Read your inbox...', hq: { role: 'Engineer', task: 'ACM-12 Add a route' } });
+  assert.equal(V.platform(run, [{ kind: 'claude-code', label: 'Claude Code' }]), 'Paperclip Engineer, Claude Code');
+  assert.equal(V.platform(mk({ provider: 'claude-code' }), [{ kind: 'claude-code', label: 'Claude Code' }]), 'Claude Code');
+  assert.equal(V.taskLine(run), 'ACM-12 Add a route');
+  assert.equal(V.taskLine({ ...run, status: 'working' }), 'ACM-12 Add a route');
+  assert.equal(V.taskLine({ ...run, status: 'working', tool: { name: 'Bash', detail: 'npm test' } }), 'Bash npm test', 'a running tool still shows');
 });
 
 test('tool calls of the cloud agents get a DS tool kind', () => {

@@ -236,6 +236,8 @@ export function createTracker(deps = {}) {
     if (p.cwd) { s.cwd = p.cwd; if (!s.startDir) s.startDir = p.cwd; }
     if (!s.name) s.name = basename(s.cwd) || 'session';
     if (p.model) s.model = p.model;
+    // A Paperclip run (#76): the ids from its environment (hook.mjs; the server checked them). A resumed run keeps the session and gets the new run id.
+    if (p.paperclip && typeof p.paperclip === 'object') s.paperclip = p.paperclip;
     if (firstSid) persist.history?.(s); // it can be found again from now on, also before its first turn ends
     s.lastEvent = now();
     if (s.status === 'ended' && ev !== 'SessionEnd') { s.endedAt = null; s.status = 'idle'; }

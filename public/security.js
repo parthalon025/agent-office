@@ -26,8 +26,11 @@
      key(view, e, data)  -> { view, send?, taken } for a key while the Spend value is being typed
      PAGED_BELOW         -> 700: below this width (px) that the screen in focus can take, it shows one agent kind
      pagedFor(free, aspect) -> that check: the free width, or the free height times the screen aspect (review M6)
-   view: { screen, w, h, focused, paged, page, scope, pending, edit, hover, busy, note, face }
-   data: { sec (snap.security), building (key), buildingName } */
+   view: { screen, w, h, focused, paged, page, scope, pending, edit, hover, busy, note, face, section, hqPage }
+   data: { sec (snap.security), building (key), buildingName, hq (snap.hq) }
+   The Agents screen has two parts (section): the agent kinds (the grid) and Paperclip (#76): each agent of the watched
+   company with its supervision and Supervise in office, which waits for the same painted Confirm and then sends
+   POST /api/paperclip/supervise { agent, confirmed: true } (one PATCH of that agent in Paperclip). */
 (function (root) {
   'use strict';
   var V = root.OfficeVocab;
@@ -87,11 +90,17 @@
   // Allow on the Shell commands row approves every command, high risk ones too: the check before a hold ignores the risk rating
   // (security.mjs decide), so the painted Confirm says it (review).
   function allowsAnyCommand(p) { return !!p && !isSpend(p) && p.row === 'shell' && (p.to === 'allow' || (p.to === null && p.office === 'allow')); }
+  // Supervise in office (#76): the one change on the wall that writes to another system, so the Confirm says what it writes.
+  function isHq(p) { return !!p && p.hq !== undefined; }
   function confirmText(p) {
+    if (isHq(p)) return 'Confirm: Supervise ' + p.name + ' in office?';
     if (allowsAnyCommand(p)) return 'Confirm: Allow every command for ' + colLabel(p.col) + ', high risk too (rm -rf, git push --force)?';
     return 'Confirm: ' + (isSpend(p) ? 'No limit' : p.to === null ? (p.def ? 'the default (' : 'the office rule (') + S().word(p.office) + ')' : S().word(p.to));
   }
-  function confirmWhat(p) { return isSpend(p) ? 'Spend limit, new sessions' : S().rows[p.row].label + ', ' + colLabel(p.col); }
+  function confirmWhat(p) {
+    if (isHq(p)) return 'The office writes to its config in Paperclip: engine cli, skip permissions off, permission mode default and the office hooks file. Its next run asks here.';
+    return isSpend(p) ? 'Spend limit, new sessions' : S().rows[p.row].label + ', ' + colLabel(p.col);
+  }
   function money(n) { var F = root.OfficeFormat; return F && F.money ? F.money(n) : '$' + (+n || 0).toFixed(2); }
   function monthName(m) {
     var a = String(m || '').split('-'), names = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -152,19 +161,113 @@
     var sc = screenOf(view.screen), W = view.w, ts = big ? 64 : 56;
     text(p, 48, big ? 80 : 76, ts, 'ink', sc.title, { wt: 600 });
     if (permScreen(view.screen)) {
-      var scope = view.scope === 'building' ? 'building' : 'office';
       // Both choices, the chosen one marked. The paged view draws them bigger; one button that named only the current scope
       // hid "This building" there (review minor).
-      var bw = big ? 344 : 250, bh = big ? 80 : 58, by = big ? 22 : 30, fs = big ? 40 : 28;
-      ['office', 'building'].forEach(function (s, i) {
-        var id = 'scope-' + s, x = W - 48 - (2 - i) * (bw + 12) + 12, on = scope === s;
-        // the chosen scope is the primary pair (accent and on-accent): ink on the room's accent was 2.76:1 at Night
-        if (on) fill(p, x, by, bw, bh, 'primary', bh / 2); else stroke(p, x + 1.5, by + 1.5, bw - 3, bh - 3, 'line', 3, bh / 2);
-        if (isHover(view, id)) stroke(p, x - 5, by - 5, bw + 10, bh + 10, 'focus', 4, bh / 2 + 5);
-        text(p, x + bw / 2, by + bh / 2 + fs * 0.36, fs, on ? 'onPrimary' : 'ink', s === 'office' ? 'All buildings' : 'This building', { wt: 600, align: 'center', maxW: bw - 16 });
-        hot(p, { kind: 'scope', id: id, scope: s, x: x, y: by, w: bw, h: bh });
-      });
+      pair(p, view, big, [['office', 'All buildings'], ['building', 'This building']], view.scope === 'building' ? 'building' : 'office', 'scope');
+    } else if (view.screen === 'agents') {
+      // the Agents screen has two parts: the agent kinds (the grid) and the Paperclip agents, one by one (#76)
+      pair(p, view, big, [['kinds', 'Agent kinds'], ['hq', 'Paperclip']], sectionOf(view), 'section');
     } else text(p, W - 48, big ? 80 : 74, big ? 40 : 28, 'muted', 'Office-wide', { align: 'right' });
+  }
+  // Two choices at the right of the header, the chosen one marked: the scope of a rules screen, or the part of the Agents screen.
+  function pair(p, view, big, opts, cur, kind) {
+    var W = view.w, bw = big ? 344 : 250, bh = big ? 80 : 58, by = big ? 22 : 30, fs = big ? 40 : 28;
+    opts.forEach(function (o, i) {
+      var id = kind + '-' + o[0], x = W - 48 - (2 - i) * (bw + 12) + 12, on = cur === o[0];
+      // the chosen one is the primary pair (accent and on-accent): ink on the room's accent was 2.76:1 at Night
+      if (on) fill(p, x, by, bw, bh, 'primary', bh / 2); else stroke(p, x + 1.5, by + 1.5, bw - 3, bh - 3, 'line', 3, bh / 2);
+      if (isHover(view, id)) stroke(p, x - 5, by - 5, bw + 10, bh + 10, 'focus', 4, bh / 2 + 5);
+      text(p, x + bw / 2, by + bh / 2 + fs * 0.36, fs, on ? 'onPrimary' : 'ink', o[1], { wt: 600, align: 'center', maxW: bw - 16 });
+      var h0 = { kind: kind, id: id, x: x, y: by, w: bw, h: bh };
+      h0[kind] = o[0];
+      hot(p, h0);
+    });
+  }
+  function sectionOf(view) { return view.screen === 'agents' && view.section === 'hq' ? 'hq' : 'kinds'; }
+
+  // ---------- the Paperclip part of the Agents screen (#76) ----------
+  // Each Paperclip agent of the watched company: its role, whether its runs hold their calls in the office (paperclip.mjs
+  // supervisionOf), why not, and Supervise in office when the office can set it up. A click paints the Confirm; Confirm sends
+  // POST /api/paperclip/supervise, one PATCH of that agent in Paperclip. data.hq: the snapshot's hq (null: not connected).
+  function hqAgents(data) { var q = data && data.hq; return q && q.company && q.agents ? q.agents : null; }
+  function hqHead(data) {
+    var q = data && data.hq;
+    if (!q) return 'Paperclip is not connected. Connect it in Attach sessions, then supervise its agents here.';
+    if (!q.company) return V.hq.state(q) + '.';
+    return V.hq.state(q) + '. Supervise in office sends the Claude Code runs of an agent through the office hooks.';
+  }
+  function hqTone(a) { var s = a.supervision && a.supervision.state; return s === 'supervised' ? 'allow' : s === 'partly' ? 'ask' : 'deny'; }
+  function hqWord(a) { var s = a.supervision && a.supervision.state; return s === 'supervised' ? 'Supervised' : s === 'partly' ? 'Partly' : 'Unsupervised'; }
+  function stateChip(p, x, y, w, h, a, s) {
+    var tn = hqTone(a), word = hqWord(a), ws = fit(word, s, w - 16, 600);
+    if (tn === 'ask') stroke(p, x + 1.5, y + 1.5, w - 3, h - 3, 'line', 3, h / 2); else fill(p, x, y, w, h, tn + 'Fill', h / 2);
+    text(p, x + w / 2, y + h / 2 + ws * 0.36, ws, 'ink', word, { wt: 600, align: 'center', maxW: w - 16 });
+  }
+  // Lines of a reason that fit in n lines: the last one ends with an ellipsis when the reason is longer (the HQ dialog has it whole).
+  function upTo(lines, n) { if (lines.length <= n) return lines; var out = lines.slice(0, n); out[n - 1] = out[n - 1].replace(/\s*\S*$/, '') + '…'; return out; }
+  function hqScreen(p, view, data, big) {
+    var W = view.w, H = view.h, list = hqAgents(data), hs = big ? 32 : 24;
+    // the narrow view keeps the head to the connection: what Supervise in office does is on its Confirm
+    var head = big && list ? V.hq.state(data.hq) + '.' : hqHead(data);
+    var y = para(p, 48, big ? 150 : 134, hs, hs + 6, 'muted', wrap(head, hs, W - 96, 400), { maxW: W - 96 }) + (big ? 6 : 2);
+    var hint = view.note || (!view.focused ? 'Click to look closer.' : list && list.some(function (a) { return a.supervision && a.supervision.can; }) ? (big ? 'The office asks before it writes to Paperclip.' : 'Click Supervise in office for an agent. The office asks before it writes to Paperclip.') : 'No agent here needs Supervise in office.');
+    var ns = big ? 32 : 24, hl = wrap(hint, ns, W - 96, 400);
+    function foot() { if (view.pending) { confirmBand(p, view, big); return; } para(p, 48, H - 30 - (hl.length - 1) * (ns + 6), ns, ns + 6, view.note ? 'error' : 'ink', hl, { maxW: W - 96 }); }
+    if (!list || !list.length) {
+      if (list) text(p, 48, y + (big ? 60 : 44), big ? 40 : 28, 'ink', 'This company has no agents yet.', { maxW: W - 96 });
+      foot(); return;
+    }
+    var n = list.length, bottom = (view.pending ? H - 170 : H - 40 - hl.length * (ns + 6)) - (big ? 0 : 4);
+    if (big) {
+      // one agent at a time, with Previous and Next (the narrow view)
+      var pg = ((view.hqPage || 0) % n + n) % n, a = list[pg];
+      if (n > 1) {
+        hot(p, button(p, 48, y, 230, 80, 'Previous', 44, { kind: 'hq-prev', id: 'hq-prev' }, isHover(view, 'hq-prev')));
+        hot(p, button(p, W - 48 - 230, y, 230, 80, 'Next', 44, { kind: 'hq-next', id: 'hq-next' }, isHover(view, 'hq-next')));
+        text(p, W / 2, y + 54, 36, 'muted', (pg + 1) + ' of ' + n, { align: 'center', maxW: W - 600 });
+        y += 100;
+      }
+      text(p, 48, y + 46, 48, 'ink', a.name, { wt: 600, maxW: W - 96 - 330 });
+      text(p, 48, y + 86, 30, 'muted', a.title || a.role, { maxW: W - 96 - 330 });
+      stateChip(p, W - 48 - 300, y + 4, 300, 80, a, 40);
+      var can = a.supervision.can && !view.pending, room = (can ? bottom - 100 : bottom) - (y + 130);
+      var wl = upTo(wrap(a.supervision.why || 'Its runs hold every call Claude Code asks about in the office.', 30, W - 96, 400), Math.max(1, Math.floor(room / 36) + 1));
+      para(p, 48, y + 130, 30, 36, 'muted', wl, { maxW: W - 96 });
+      var byy = Math.min(bottom - 92, y + 130 + wl.length * 36 - 10);
+      if (can) {
+        if (a.busy) text(p, 48, byy + 60, 40, 'muted', 'Setting up in Paperclip', { maxW: W - 96 });
+        else hot(p, button(p, 48, byy, 520, 92, 'Supervise in office', 44, { kind: 'supervise', id: 'hq:' + a.id, agent: a.id, name: a.name }, isHover(view, 'hq:' + a.id), 'primary'));
+      }
+      foot(); return;
+    }
+    // the full view: a row per agent, as many as fit, with Previous and Next when there are more
+    // a row: name and role, the state in a chip, the reason in up to three lines, Supervise in office when it is offered
+    var rowH = 92, fitN = Math.max(1, Math.floor((bottom - y - 8) / rowH)), more = n > fitN;
+    if (more) fitN = Math.max(1, Math.floor((bottom - y - 76) / rowH));
+    var pages = Math.ceil(n / fitN), page = ((view.hqPage || 0) % pages + pages) % pages, from = page * fitN;
+    var nameW = 250, chipX = 48 + nameW + 12, chipW = 190, bw = 290, whyX = chipX + chipW + 20;
+    list.slice(from, from + fitN).forEach(function (a) {
+      fill(p, 48, y, W - 96, 2, 'line');
+      text(p, 48, y + 38, fit(a.name, 28, nameW, 600), 'ink', a.name, { wt: 600, maxW: nameW });
+      text(p, 48, y + 70, 21, 'muted', a.title || a.role, { maxW: nameW });
+      stateChip(p, chipX, y + 20, chipW, 52, a, 24);
+      var can = a.supervision && a.supervision.can, whyW = W - 48 - whyX - (can ? bw + 16 : 0);
+      para(p, whyX, y + 28, 20, 24, 'muted', upTo(wrap(a.supervision.why || 'Its runs hold every call Claude Code asks about in the office.', 20, whyW, 400), 3), { maxW: whyW });
+      if (can) {
+        var pend = isHq(view.pending) && view.pending.hq === a.id, id = 'hq:' + a.id, bx = W - 48 - bw;
+        if (pend) { fill(p, bx, y + 18, bw, 56, 'pending', 28); text(p, bx + bw / 2, y + 46 + 9, 24, 'onPending', 'Confirm?', { wt: 600, align: 'center', maxW: bw - 16 }); }
+        else if (a.busy) text(p, bx + bw / 2, y + 54, 22, 'muted', 'Setting up', { align: 'center', maxW: bw });
+        else hot(p, button(p, bx, y + 18, bw, 56, 'Supervise in office', 24, { kind: 'supervise', id: id, agent: a.id, name: a.name }, isHover(view, id), 'primary'));
+      }
+      y += rowH;
+    });
+    if (more) {
+      fill(p, 48, y, W - 96, 2, 'line');
+      hot(p, button(p, 48, y + 14, 200, 52, 'Previous', 24, { kind: 'hq-prev', id: 'hq-prev' }, isHover(view, 'hq-prev')));
+      hot(p, button(p, 260, y + 14, 200, 52, 'Next', 24, { kind: 'hq-next', id: 'hq-next' }, isHover(view, 'hq-next')));
+      text(p, 480, y + 48, 22, 'muted', 'Agents ' + (from + 1) + ' to ' + Math.min(n, from + fitN) + ' of ' + n, { maxW: W - 528 });
+    }
+    foot();
   }
 
   // Three layouts of a rules screen (levels). The first is the roomy one. A screen with many reasons (Files, with six agent
@@ -185,7 +288,7 @@
   function subtitle(p, view, data, L) {
     var t;
     if (view.screen === 'spend') t = 'The spend limit of new sessions, and what each agent kind cost this month.';
-    else if (view.screen === 'agents') t = 'Which agents may run. The office asks before a looser change.';
+    else if (view.screen === 'agents') t = 'Office-wide: which agents may run. The office asks before a looser change.';
     else if (view.scope === 'building') t = 'Rules for ' + (data.buildingName || 'this building') + ' only. A corner mark: this building has its own rule.';
     else t = 'Rules for every building. A corner mark: this building has its own rule there.';
     para(p, 48, L.sub, L.subS, L.subS + 6, 'muted', wrap(t, L.subS, view.w - 96, 400), { maxW: view.w - 96 });
@@ -409,6 +512,7 @@
     var v = big === view.paged ? view : Object.assign({}, view, { paged: big });
     header(p, v, data, big);
     if (view.screen === 'spend') { spend(p, v, data); return p; }
+    if (sectionOf(v) === 'hq') { hqScreen(p, v, data, big); return p; }
     if (big) { pagedRows(p, v, data); return p; }
     var lay = levelFor(v, data);
     subtitle(p, v, data, lay.L);
@@ -438,6 +542,11 @@
     var sc = view.scope === 'building' ? 'building' : 'office', n = S().columns.length;
     switch (h.kind) {
       case 'scope': return { view: with_(view, { scope: h.scope, pending: null }) };
+      case 'section': return { view: with_(view, { section: h.section, pending: null }) };
+      // the Paperclip part (#76): Supervise in office waits for the painted Confirm, then sends one change for one agent
+      case 'supervise': return { view: with_(view, { pending: { hq: h.agent, name: h.name } }) };
+      case 'hq-prev': return { view: with_(view, { hqPage: (view.hqPage || 0) - 1, pending: null }) };
+      case 'hq-next': return { view: with_(view, { hqPage: (view.hqPage || 0) + 1, pending: null }) };
       case 'prev': return { view: with_(view, { page: ((view.page || 0) - 1 + n) % n, pending: null }) };
       case 'next': return { view: with_(view, { page: ((view.page || 0) + 1) % n, pending: null }) };
       case 'cancel': return { view: with_(view, { pending: null }) };
@@ -445,6 +554,7 @@
         var pd = view.pending;
         if (!pd) return { view: view };
         if (isSpend(pd)) return { view: with_(view, { pending: null }), send: { route: '/api/settings/spend', body: { limit: pd.spend, confirmed: true } } };
+        if (isHq(pd)) return { view: with_(view, { pending: null }), send: { route: '/api/paperclip/supervise', body: { agent: pd.hq, confirmed: true } } };
         return { view: with_(view, { pending: null }), send: setBody(view, data, pd.row, pd.col, pd.to, true) };
       }
       case 'cell': {
@@ -549,7 +659,7 @@
       var f = host.focused(), focused = !!f && f.key === keyOf(it);
       var paged = pagedFor(focused ? host.free() : null, it.w / it.h);
       return { screen: it.screen, w: it.w, h: it.h, focused: focused, paged: paged, page: v.page, scope: scope, pending: v.pending, edit: it.screen === 'spend' ? edit : null,
-        hover: focused ? v.hover : null, busy: busy, note: v.note };
+        hover: focused ? v.hover : null, busy: busy, note: v.note, section: v.section || 'kinds', hqPage: v.hqPage || 0 };
     }
     function keyOf(it) { return 'security:' + it.screen; }
     function newTex(w, h) {
@@ -658,7 +768,7 @@
     }
     function apply(it, r) {
       var v = views[it.screen] || (views[it.screen] = { page: 0, pending: null, hover: null, note: null });
-      v.page = r.view.page; v.pending = r.view.pending; v.note = r.view.note || null;
+      v.page = r.view.page; v.pending = r.view.pending; v.note = r.view.note || null; v.section = r.view.section || 'kinds'; v.hqPage = r.view.hqPage || 0;
       if (r.view.scope !== scope) { scope = r.view.scope; Object.keys(views).forEach(function (k) { views[k].pending = null; }); }
       if (it.screen === 'spend') {
         // typing starts: no text field keeps the focus, so the digits go to the wall and nowhere else

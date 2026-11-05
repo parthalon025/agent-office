@@ -67,6 +67,10 @@
     return v.length ? v[Math.floor(hash(String(uid)) / SHAPES.length) % v.length] : undefined;
   }
   function withColor(bot, uid) { var c = colorOf(uid); if (c) bot.color = c; return bot; }
+  // A Paperclip run (#76, s.hq from the server): the card's owner line is its company and its Paperclip agent. cardOf is what
+  // the card shows that only bot.add sets (the owner and the role in the platform line), to seat the bot again on a change.
+  function ownerOf(s) { return s && s.hq ? s.hq.company + ' (' + s.hq.agent + ')' : ''; }
+  function cardOf(s) { return s && s.hq ? ownerOf(s) + '|' + s.hq.role : ''; }
   function clip(t, n) { t = String(t || ''); return t.length > n ? t.slice(0, n - 1) + '…' : t; }
   function base(p) { return String(p || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() || ''; }
   // A subagent's type picks its role: the workstation and the icon.
@@ -408,9 +412,10 @@
         snapshot.sessions.forEach(function (s) {
           if (!s.place) return;   // wait until the server knows the repo and branch
           var pl = placeOf(s), k = known[s.uid], emit = base, prev = null;
-          // the session checked out another branch, or moved to another folder: seat it again. So does a changed supervision
-          // label (an agent whose config turned out not to ask): the DS sets the card's platform line only when the bot is added.
-          if (k && !k.ended && (k.place !== placeKey(pl) || k.sup !== V.supervision(s))) {
+          // the session checked out another branch, or moved to another folder: seat it again. So does a changed card line
+          // (a supervision label: an agent whose config turned out not to ask; a Paperclip role and company, #76, once the office
+          // watches that company): the DS sets the card's platform and owner lines only when the bot is added.
+          if (k && !k.ended && (k.place !== placeKey(pl) || k.sup !== V.supervision(s) || k.card !== cardOf(s))) {
             dismissHelpers(k, emit, 'Moved with its session');
             emit({ type: 'bot.remove', bot: k.name }); delete taken[k.name]; delete known[s.uid];
             prev = k; k = null;
@@ -423,7 +428,7 @@
           if (!k) {
             if (s.status === 'ended') return;
             var name = uniqueName(s.name);
-            k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: V.status(s).key, task: V.taskLine(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, olderDone: false, held: false, firstKind: seedAll ? 'seed' : 'restore', prevSeen: prev ? prev.replySeen : null, errKind: seedAll ? 'seed' : 'restore', errPrev: prev ? prev.errorSeen : null, model: s.model, ended: false, place: placeKey(pl), sup: V.supervision(s), room: roomOf(pl, emit) };
+            k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: V.status(s).key, task: V.taskLine(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, olderDone: false, held: false, firstKind: seedAll ? 'seed' : 'restore', prevSeen: prev ? prev.replySeen : null, errKind: seedAll ? 'seed' : 'restore', errPrev: prev ? prev.errorSeen : null, model: s.model, ended: false, place: placeKey(pl), sup: V.supervision(s), card: cardOf(s), room: roomOf(pl, emit) };
             // platform: the line on the bot's card: the supervision label of an ungated agent, else its agent kind (Claude Code,
             // Ollama, ...), the same word every list shows (vocab.js)
             // The old seat held its replies (the older ones were still loading), so it told none of them: this seat tells them
@@ -431,6 +436,8 @@
             // The same for its error: errKind and errPrev say how the error is told, because the pass that tells it may come later.
             if (prev && prev.held) { k.firstKind = prev.firstKind; k.prevSeen = prev.prevSeen; k.holdTop = prev.holdTop; k.errKind = prev.errKind; k.errPrev = prev.errPrev; k.errTop = prev.errTop; }
             var bot = withColor({ name: name, role: 'coder', shape: shapeOf(s.uid), status: k.status, task: k.task, platform: V.platform(s, snapshot.kinds), identity: s.cwd }, s.uid);
+            // a Paperclip run (#76): the company and the Paperclip agent own it (its budget is on the stats display, terminal.js)
+            if (s.hq) bot.owner = ownerOf(s);
             if (s.skills && s.skills.length) bot.skills = s.skills.slice(0, 16);
             if (s.scheduleId) bot.triggers = [s.name];
             emit(stamp({ type: 'bot.add', roomId: k.room, bot: bot }, s.startedAt));
