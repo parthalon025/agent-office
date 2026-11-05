@@ -77,10 +77,10 @@ test('lift: the height is the free band between the top controls and the stack',
 
 test('lift: the stack never covers the top controls (400 x 800: header to 143, floors card to 200)', () => {
   const edge = 200;
-  // a tall chat reaches up to y 210: the free band above it is under MIN_H, so the stack stays on the dock edge
+  // a tall chat reaches up to y 210: the free band above it is under MIN_H, so the stack hangs under the controls
   const tall = T.lift(800, 170, [{ top: 210, bottom: 630 }], edge);
-  assert.equal(tall.bottom, 170, 'the stack does not rise into the controls');
-  assert.ok(800 - tall.bottom - tall.maxH >= edge + T.GAP, 'its top stays below the controls');
+  assert.equal(tall.bottom, null);
+  assert.ok(tall.top >= edge + T.GAP, 'its top stays below the controls');
   // a box whose top leaves a band of exactly MIN_H keeps the stack above it, and the stack fits the band
   const boxTop = 800 - (800 - edge - T.GAP - T.MIN_H) + T.GAP;
   const fit = T.lift(800, 170, [{ top: boxTop, bottom: 630 }], edge);
@@ -93,23 +93,47 @@ test('lift: the stack never covers the top controls (400 x 800: header to 143, f
   assert.ok(800 - fit.bottom - fit.maxH >= edge + T.GAP, 'its top stays below the controls');
 });
 
-test('lift: a band shorter than MIN_H takes the band above the dock, and never less than MIN_H', () => {
-  // 800 x 450 landscape: the top controls end at 160, the dock is 150 high, the room card reaches up to 142
+test('lift: a band shorter than MIN_H puts the stack under the top controls, over the top of the box, never over its bottom', () => {
+  // 400 x 800 terminal panel (228 to 630): the controls end at 201, the dock is 170 high
+  const tall = T.lift(800, 170, [{ top: 228, bottom: 630 }], 201);
+  assert.equal(tall.top, 201 + T.GAP, 'the top edge is just under the controls');
+  assert.equal(tall.bottom, null, 'a bottom rule is off, so the stack does not stand on the dock edge');
+  assert.ok(tall.top + tall.maxH <= 800 - 170, 'it ends above the dock');
+  // 800 x 450 landscape: the top controls end at 160, the dock is 150 high, the box reaches up to 142
   const land = T.lift(450, 150, [{ top: 142, bottom: 300 }], 160);
-  assert.equal(land.bottom, 150);
+  assert.equal(land.top, 160 + T.GAP);
   assert.equal(land.maxH, 450 - 150 - 160 - T.GAP);
+  assert.ok(land.top + land.maxH <= 450 - 150);
+  // with no top controls the stack starts at the gap
+  assert.equal(T.lift(300, 170, [{ top: 20, bottom: 130 }], 0).top, T.GAP);
   // no band at all: the stack still gets MIN_H, so a toast can be read and scrolled
   assert.equal(T.lift(300, 170, [], 200).maxH, T.MIN_H);
+  // enough room above the box: the stack stands above it and sets no top
+  assert.equal(T.lift(800, 170, [{ top: 410, bottom: 630 }], 150).top, null);
 });
 
-test('the narrow stack stands at --toast-lift and takes at most --toast-room, which office.js sets; no rule puts it at the top', () => {
+test('the narrow stack stands at --toast-lift and takes at most --toast-room, which office.js sets; a top is set only by office.js, and the CSS has no fixed top rule', () => {
   const css = fs.readFileSync(new URL('../public/office.css', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
   const narrow = css.slice(css.indexOf('@media (max-width: 820px) {\n  .page-toasts'));
   const block = narrow.slice(0, narrow.indexOf('\n}\n'));
   assert.match(block, /\.page-toasts \{[^}]*bottom: var\(--toast-lift\)/);
   assert.match(block, /\.page-toasts \{[^}]*max-height: min\([^;]*var\(--toast-room\)/);
-  assert.doesNotMatch(css, /\.page-toasts[^{]*\{[^}]*top:/, 'a top rule would cover the DS header');
+  assert.match(block, /\.page-toasts \{[^}]*top: var\(--toast-top\)/);
+  assert.doesNotMatch(css, /\.page-toasts[^{]*\{[^}]*(?<![-\w])top: (?!var\(--toast-top\))/, 'a fixed top rule would cover the DS header');
+  assert.match(css, /\.page-toasts \{[^}]*--toast-top: auto/, 'the default top is auto');
   assert.match(css, /\.page-toasts \{[^}]*--toast-lift: var\(--strip-clear/, 'the default is the dock edge');
   assert.match(css, /\.page-toasts \{[^}]*--toast-room: 100vh/, 'above 820 px the stack has no height rule');
   assert.match(fs.readFileSync(new URL('../public/office.js', import.meta.url), 'utf8'), /OfficeToasts\.lift\(/);
+});
+
+test('from 821 to 1100 px the stack stands between the floors card and the chat column, so it covers neither', () => {
+  const css = fs.readFileSync(new URL('../public/office.css', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
+  const m = css.match(/@media \(min-width: 821px\) and \(max-width: 1100px\) \{ \.page-toasts \{([^}]*)\} \}/);
+  assert.ok(m, 'a rule for 821 to 1100 px');
+  const left = Number(/left: (\d+)px/.exec(m[1])?.[1]);
+  assert.ok(left >= 16 + 220 + 16, 'it starts right of the floors card (16 px edge, 220 px card, 16 px gap)');
+  assert.match(m[1], /width: min\(360px, calc\(100vw - (\d+)px\)\)/);
+  const cut = Number(/calc\(100vw - (\d+)px\)/.exec(m[1])[1]);
+  assert.ok(cut >= left + 16 + 272 + 16, 'it ends left of the chat column (272 px wide, 16 px edge and gap)');
+  assert.doesNotMatch(css, /@media \(max-width: 1100px\) \{ \.page-toasts \{ left: var\(--space-4\)/, 'the old rule put it over the floors card');
 });

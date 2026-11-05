@@ -1444,7 +1444,7 @@
         var el = toastBox.current;
         if (!el) return;
         var strip = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--strip-clear'));
-        if (window.innerWidth > 820 || !isFinite(strip)) { el.style.removeProperty('--toast-lift'); el.style.removeProperty('--toast-room'); watch([]); return; }   // the CSS defaults apply
+        if (window.innerWidth > 820 || !isFinite(strip)) { el.style.removeProperty('--toast-lift'); el.style.removeProperty('--toast-room'); el.style.removeProperty('--toast-top'); watch([]); return; }   // the CSS defaults apply
         var boxes = [], topEdge = 0, els = [];
         document.querySelectorAll(BOXES).forEach(function (b) { var r = seen(b); if (r) { boxes.push({ top: r.top, bottom: r.bottom }); els.push(b); } });
         document.querySelectorAll(TOPS).forEach(function (b) { var r = seen(b); if (r) { topEdge = Math.max(topEdge, r.bottom); els.push(b); } });
@@ -1452,10 +1452,12 @@
         if (dock) els.push(dock);
         watch(els);
         var p = window.OfficeToasts.lift(window.innerHeight, strip, boxes, topEdge);
-        var lift = p.bottom + 'px', room = p.maxH + 'px';
+        // a short band: the stack hangs under the top controls (--toast-top) and the bottom rule is off (auto)
+        var lift = p.bottom == null ? 'auto' : p.bottom + 'px', room = p.maxH + 'px', top = p.top == null ? 'auto' : p.top + 'px';
         // the same value writes nothing: no loop with the observers
         if (el.style.getPropertyValue('--toast-lift') !== lift) el.style.setProperty('--toast-lift', lift);
         if (el.style.getPropertyValue('--toast-room') !== room) el.style.setProperty('--toast-room', room);
+        if (el.style.getPropertyValue('--toast-top') !== top) el.style.setProperty('--toast-top', top);
       }
       function soon() {   // at most every 120 ms, and once more after the panel animation has ended
         if (!wait) wait = setTimeout(place, 120);

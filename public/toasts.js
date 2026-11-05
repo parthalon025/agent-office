@@ -35,13 +35,15 @@
   function hasTimed(list) { return list.some(function (t) { return !!t.until; }); }
   function remove(list, id) { return list.filter(function (t) { return t.id !== id; }); }
 
-  // Where the stack stands on a narrow screen: { bottom, maxH } in px. viewH is the window height, strip is --strip-clear
-  // (the dock and its gap), boxes are { top, bottom } rects of the visible boxes, topEdge is the bottom of the top
-  // controls (the DS header and the floors card; 0 when none shows). A box on the dock ends at the dock (within 1 px);
-  // the stack goes above the highest one, and its height is the free band between the top controls and its bottom edge
-  // (it scrolls when a toast is taller). When that band is shorter than MIN_H, the stack does not rise: it stands on the
-  // dock edge over the boxes and takes the band above the dock, because a request must stay in sight and the top
-  // controls stay free. Never less than MIN_H high.
+  // Where the stack stands on a narrow screen: { bottom, top, maxH } in px. viewH is the window height, strip is
+  // --strip-clear (the dock and its gap), boxes are { top, bottom } rects of the visible boxes, topEdge is the bottom of
+  // the top controls (the DS header and the floors card; 0 when none shows). A box on the dock ends at the dock (within
+  // 1 px); the stack goes above the highest one, bottom is its distance from the bottom of the view, top is null, and
+  // maxH is the free band between the top controls and its bottom edge (it scrolls when a toast is taller).
+  // When that band is shorter than MIN_H, the stack cannot stand above the box. It then stands just under the top
+  // controls (top set, bottom null) and takes the band above the dock, so it covers the top of the box (the terminal
+  // screen, the chat log, the room list) and never its bottom, where the request bar and the message box sit. Never
+  // less than MIN_H high.
   function lift(viewH, strip, boxes, topEdge) {
     var top = viewH, edge = topEdge > 0 ? topEdge : 0;
     (boxes || []).forEach(function (b) {
@@ -49,8 +51,8 @@
     });
     var bottom = top >= viewH ? strip : Math.max(strip, viewH - top + GAP);
     var room = viewH - bottom - edge - GAP;
-    if (room < MIN_H) { bottom = strip; room = viewH - strip - edge - GAP; }
-    return { bottom: bottom, maxH: Math.max(MIN_H, room) };
+    if (room < MIN_H) return { bottom: null, top: edge + GAP, maxH: Math.max(MIN_H, viewH - strip - edge - GAP) };
+    return { bottom: bottom, top: null, maxH: room };
   }
 
   root.OfficeToasts = { MAX: MAX, AFTER_MS: AFTER_MS, GAP: GAP, MIN_H: MIN_H, lift: lift, sticky: sticky, add: add, tick: tick, hasTimed: hasTimed, remove: remove };
