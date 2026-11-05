@@ -1,6 +1,6 @@
 # Tabs
 
-Switch between views in one panel, for example Floor, Waiting and Activity in the phone sheet. Arrow keys move between tabs; Home and End jump. A tab can carry a count.
+Switch between views in one panel, for example Floor, Waiting and Activity in the phone sheet. Arrow keys move between tabs; Home and End jump. A tab can carry a count. If the tab list is wider than the panel, it scrolls sideways, and the tab that `value` names scrolls into view when `value` changes.
 
 **The consumer provides:** the tabs, the current value and `onChange`.
 

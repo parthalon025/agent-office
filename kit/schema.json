@@ -1,5 +1,5 @@
 {
- "version": "x1.5",
+ "version": "x1.6",
  "events": {
   "status": {
    "desc": "A bot changes state. The bot walks to rest or back to its seat when needed.",
@@ -52,10 +52,13 @@
    }
   },
   "usage": {
-   "desc": "Usage of the plan or limit, in percent.",
+   "desc": "Usage of the plan or limit, in percent. Spend is optional, in dollars: cost is the total for the goal or plan, costLimit is its limit, costs is the spend of each bot by name.",
    "fields": {
     "percent": "number?",
-    "bots": "object?"
+    "bots": "object?",
+    "cost": "number?",
+    "costLimit": "number?",
+    "costs": "object?"
    }
   },
   "session.start": {
@@ -198,7 +201,7 @@
    "desc": "Add a bot to a room.",
    "fields": {
     "roomId": "string",
-    "bot": "object"
+    "bot": "BotDef"
    }
   },
   "bot.remove": {
@@ -297,6 +300,57 @@
    "desc": "Resume a scheduled job.",
    "fields": {
     "job": "string"
+   }
+  }
+ },
+ "common": {
+  "desc": "Fields every event can carry. seeded: true marks state the office already had (a scene mount sends the whole mirror again): the scene applies it, but records no history, plays no sound and sends no notification or toast. at: the time of the event in ms; a seeded event with at after the last time the building was seen counts as news in Since you left.",
+  "fields": {
+   "seeded": "boolean?",
+   "at": "number?"
+  }
+ },
+ "enums": {
+  "Shape": [
+   "blob",
+   "cone",
+   "octa",
+   "capsule"
+  ],
+  "Sessions": [
+   "agent",
+   "session"
+  ]
+ },
+ "types": {
+  "BotDef": {
+   "desc": "A bot in bot.add. A field that is not listed here is reported as unknown. Fields that start with _ belong to the engine. usage, parent and session are set by the engine (usage: share of the weekly limit the bot used, in percent; parent: name of the bot that made this helper; session: id of the session it shows). A page may send them to restore a bot.",
+   "fields": {
+    "name": "string?",
+    "role": "string?",
+    "shape": "Shape?",
+    "color": "string?",
+    "status": "Status?",
+    "task": "string?",
+    "tasks": "string[]?",
+    "sessions": "Sessions?",
+    "orchestrator": "boolean?",
+    "ephemeral": "boolean?",
+    "platform": "string?",
+    "identity": "string?",
+    "owner": "string?",
+    "model": "string?",
+    "fallback": "string?",
+    "tools": "string[]?",
+    "knowledge": "string[]?",
+    "skills": "string[]?",
+    "channels": "string[]?",
+    "triggers": "string[]?",
+    "cost": "string?",
+    "word": "string?",
+    "usage": "number?",
+    "parent": "string?",
+    "session": "string?"
    }
   }
  },
@@ -408,10 +462,20 @@
   "space-5",
   "space-6",
   "status-error",
+  "status-error-on-bubble",
+  "status-error-text",
   "status-finished",
+  "status-finished-on-bubble",
+  "status-finished-text",
   "status-resting",
+  "status-resting-on-bubble",
+  "status-resting-text",
   "status-waiting",
+  "status-waiting-on-bubble",
+  "status-waiting-text",
   "status-working",
+  "status-working-on-bubble",
+  "status-working-text",
   "type-body-line",
   "type-body-size",
   "type-body-weight",
@@ -620,5 +684,5 @@
   "Icon",
   "Logo"
  ],
- "note": "The one source for events and commands. The build puts it in the bundle (AgentOffice.schema, AgentOffice.validate), in index.d.ts, in Reference.md and in kit/schema.json. Field types: string, number, boolean, object, Status, string[], object[]; a trailing ? means optional."
+ "note": "The one source for events and commands. It is in the bundle (AgentOffice.schema, AgentOffice.validate), in index.d.ts, in Reference.md and in kit/schema.json, kept in step by hand. common lists the fields every event can carry. Field types: string, number, boolean, object, Status, string[], object[], a name from enums (the value must be one of the list) or a name from types (an object with the listed fields; other fields are reported); a trailing ? means optional."
 }

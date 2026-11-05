@@ -1,9 +1,28 @@
-<!-- @dsCard group="Orchestration" height=520 -->
+<!-- @dsCard group="Orchestration" height=700 width=1200 -->
 <!doctype html>
-<html><head><meta charset="utf-8"><title>AgentPanel</title></head><body style="margin:0;background:var(--bg)">
+<html><head><meta charset="utf-8"><title>AgentPanel</title></head><body style="margin:0;background:var(--bg);font-family:var(--font-sans)">
 <div id="root"></div>
 <script>
 var A=window.AgentOffice,h=React.createElement,R=React;
-ReactDOM.createRoot(document.getElementById("root")).render(h("div",{style:{width:360,height:500,padding:10}},h(A.AgentPanel,{tab:"trace",connected:true,onSend:function(){},onClose:function(){},bot:{name:"Hermes",shape:"octa",color:"#e0a030",role:"planner",status:"working",task:"Orchestrating: Prepare the customer briefing",orchestrator:true,model:"Hermes 4"},plan:{goal:"Prepare the customer briefing",steps:[{id:"s1",text:"Gather context",status:"finished",owner:"Researcher"},{id:"s2",text:"Do the work",status:"working",owner:"Coder Bot 23"},{id:"s3",text:"Check and reply",status:"resting",owner:"Hermes"}]},cost:{tokens:18420,cost:0.21,cached:0.64},steps:[{type:"skill.load",title:"Loaded skill plan",time:"19:40"},{type:"plan",title:"Planned 3 steps",text:"Prepare the customer briefing",time:"19:40"},{type:"delegate",title:"Delegated to Researcher",text:"Gather context",time:"19:40"},{type:"tool.call",title:"Called web_search",time:"19:41",state:"done",call:{id:"t1",tool:"web_search",kind:"browser",args:{query:"Contoso Q3 results"},ok:true,ms:840,summary:"OK · 12 results"}},{type:"checkpoint",title:"Checkpoint · Before changes",time:"19:42",checkpoint:{id:"cp1",label:"Before changes"}},{type:"tool.call",title:"Called mcp:github.create_pr",time:"19:42",state:"error",call:{id:"t2",tool:"mcp:github.create_pr",kind:"mcp",args:{repo:"contoso/web"},ok:false,ms:5000,summary:"Failed · timeout"}},{type:"subagent.done",title:"Researcher returned",text:"Context ready (6 sources)",time:"19:43"}],messages:[]})));
+var bot={name:"Hermes",shape:"octa",color:"#e0a030",role:"planner",status:"working",task:"Orchestrating: Prepare the customer briefing",orchestrator:true,model:"Hermes 4"};
+var plan={goal:"Prepare the customer briefing",steps:[{id:"s1",text:"Gather context",status:"finished",owner:"Researcher"},{id:"s2",text:"Do the work",status:"working",owner:"Coder Bot 23"},{id:"s3",text:"Check and reply",status:"resting",owner:"Hermes"}]};
+var steps=[{type:"skill.load",title:"Loaded skill plan",time:"19:40"},{type:"plan",title:"Planned 3 steps",text:"Prepare the customer briefing",time:"19:40"},{type:"delegate",title:"Delegated to Researcher",text:"Gather context",time:"19:40"},{type:"tool.call",title:"Called web_search",time:"19:41",state:"done",call:{id:"t1",tool:"web_search",kind:"browser",args:{query:"Contoso Q3 results"},ok:true,ms:840,summary:"OK · 12 results"}},{type:"checkpoint",title:"Checkpoint · Before changes",time:"19:42",checkpoint:{id:"cp1",label:"Before changes"}},{type:"tool.call",title:"Called mcp:github.create_pr",time:"19:42",state:"error",call:{id:"t2",tool:"mcp:github.create_pr",kind:"mcp",args:{repo:"contoso/web"},ok:false,ms:5000,summary:"Failed · timeout"}},{type:"subagent.done",title:"Researcher returned",text:"Context ready (6 sources)",time:"19:43"}];
+var cost={tokens:18420,cost:0.21,cached:0.64};
+function term(b){return h("div",{className:"ao-mono",style:{fontSize:12,padding:12,color:"var(--ink)"}},"$ tail -f "+b.name.toLowerCase()+".log",h("div",{className:"ao-muted"},"ready"));}
+var common={bot:bot,connected:true,onSend:function(){},onClose:function(){},plan:plan,cost:cost,steps:steps,messages:[]};
+function Box(p){return h("div",{style:{width:360,height:560,display:"flex",flexDirection:"column",gap:6}},h("div",{className:"ao-muted",style:{fontSize:12,minHeight:46}},p.note),h("div",{style:{flex:1,minHeight:0}},p.children));}
+function Controlled(){var s=R.useState("terminal"),tab=s[0],setTab=s[1],hs=R.useState(false),hideTrace=hs[0],setHide=hs[1],lg=R.useState("none"),log=lg[0],setLog=lg[1];
+ function onTab(id){setTab(id);setLog(id);}
+ return h("div",{style:{width:360,height:560,display:"flex",flexDirection:"column",gap:6}},
+  h("div",{style:{display:"flex",gap:6,flexWrap:"wrap"}},
+   h(A.Button,{onClick:function(){setTab("trace");}},"Show Trace"),
+   h(A.Button,{onClick:function(){setTab("terminal");}},"Show Terminal"),
+   h(A.Button,{onClick:function(){setHide(!hideTrace);}},hideTrace?"Show Trace tab":"Hide Trace tab")),
+  h("div",{className:"ao-muted",style:{fontSize:12}},"activeTab: ",h("span",{className:"ao-mono",style:{color:"var(--ink)"}},tab)," · last onTabChange: ",h("span",{className:"ao-mono",style:{color:"var(--ink)"}},log)),
+  h("div",{style:{flex:1,minHeight:0}},h(A.AgentPanel,Object.assign({},common,{activeTab:tab,onTabChange:onTab,hideTabs:hideTrace?["trace"]:[],extraTabs:[{id:"terminal",label:"Terminal",icon:"terminal",after:"chat",render:term}]}))));}
+ReactDOM.createRoot(document.getElementById("root")).render(h("div",{style:{display:"flex",gap:16,flexWrap:"wrap",padding:10,alignItems:"flex-start"}},
+ h(Box,{note:"tab: trace. The panel keeps the open tab itself."},h(A.AgentPanel,Object.assign({},common,{tab:"trace"}))),
+ h(Box,{note:"extraTabs (Terminal after Chat, with a count) and hideTabs: Sessions."},h(A.AgentPanel,Object.assign({},common,{hideTabs:["sessions"],extraTabs:[{id:"terminal",label:"Terminal",icon:"terminal",count:2,after:"chat",render:term}]}))),
+ h(Controlled)));
 </script>
 </body></html>

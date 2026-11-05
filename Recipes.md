@@ -6,19 +6,33 @@ Each recipe does one task. Do the steps in order. Look up names in Reference.
 
 The office HUD has these by default (set `hud: false` to hide all HUD parts):
 
-- **Since you left.** On open, a card counts what happened since the page was last hidden: finished, needs you, errors, spend, and up to 3 lines. History is kept in the browser (`localStorage`, key `ao-history:<building name>`). Set `sinceYouLeft: false` to hide the card. API: `office.summary(sinceMs)`, `office.history(sinceMs)`.
+- **Since you left.** On open, a card counts what happened since the person last saw this building (the page was hidden, or the scene of this building was disposed while the page showed): finished, needs you, errors, spend, and up to 3 lines. History is kept in the browser (`localStorage`, key `ao-history:<building name>`). Events with `seeded: true` do not count (see Mount a scene again). Set `sinceYouLeft: false` to hide the card. API: `office.summary(sinceMs)`, `office.history(sinceMs)`.
 - **Replay.** "Replay" on the card, the trace button in the zoom panel, or the palette opens the time scrubber. The office replays the recorded events at 1x, 10x or 60x. Live events wait and apply after the replay. "Live" stops it. API: `office.replay({ from, to, speed })`, `office.stopReplay()`.
 - **Decisions.** The decisions button (with the count) opens the inbox: every request, high risk first, with cost and a preview. Keys: J / K move, A approve, D decline, X select, Shift+A approve the selection. Send `risk`, `cost`, `preview` and `tool` on `request` events to fill it. API: `office.approveMany(names)`, `office.declineMany(names)`.
 - **Command palette.** Ctrl+K or Cmd+K: jump to a bot or a floor, approve all low-risk requests, open decisions, replay, change the view, the theme or the sound, or type a request for the Manager.
-- **Alerts.** The bell button turns on browser alerts for "needs you" and errors while the page is hidden. The page title shows the count, for example "(3) Agent Office". Alerts start only from that click.
+- **Alerts.** The bell button turns on browser alerts for "needs you" and errors while the page is hidden. The page title shows the count, for example "(3) Agent Office". Alerts start only from that click. The scene counts the building on screen. To count more, pass `waitingCount` to `OfficeScene`. To run your own `Notifier`, pass `notifier: false` and give your `Notifier` `title` and `count` as you need.
+- **Control the inbox.** Pass `inbox` and `onInbox` to `OfficeScene` to open or close the decisions inbox from the page and to read its state.
 - **Ambient bar.** `ambient: true` shows only a strip with floor pips, the "needs you" count and the last activity, for a second screen or a narrow window. "Open" shows the full office (`onAmbientOpen`).
-- **Framing.** With the HUD on, the scene centers between the left and right panels, so the elevator lobby stays visible. Set `frameInset: { left, right }` (px) to override it, or `null` for none.
+- **Framing.** With the HUD on, the scene centers between the left and right panels, so the elevator lobby stays visible. Set `frameInset: { left, right }` (px) to override it, or `null` for none. With `prefers-reduced-motion`, the camera cuts to each new view.
+- **Zoom.** The + and - buttons call `office.zoom(1.2)` and `office.zoom(1/1.2)`. The zoom stays between `minZoom` and `maxZoom` of the stage controls (`office.inspect().stage.ctl`). If your page frames a view past `maxZoom`, raise `maxZoom` while that view shows, so + can zoom in more. + never zooms out.
+
+## Add a tab to the agent panel
+
+1. Pass `extraTabs` to `OfficeScene` (or `AgentPanel`): `[{ id: "terminal", label: "Terminal", icon: "terminal", after: "chat", render: function (bot) { return h(MyTerminal, { bot: bot.name }); } }]`.
+2. Give each tab a unique `id` of letters, digits and dashes only. Do not use `chat`, `trace`, `sessions` or `agent`. The panel ignores an extra tab with any other id.
+3. To remove a built-in tab, pass `hideTabs: ["trace"]`.
+4. To learn which tab is open, use `onTabChange(id)`.
+5. To open a tab from the page, for example from a click on a desk monitor, pass `agentTab: "terminal"` to `OfficeScene` (`activeTab` on `AgentPanel`), select the bot, and keep `agentTab` in step with `onTabChange`.
+
+The DS draws the tab, the focus and the keys. Your `render` draws only the content.
 
 ## Show your agents
 
 1. Write a `building`: `floors[] → rooms[] → bots[]`. Give each bot a unique `name`, a `role` and a `shape` (blob, cone, octa, capsule).
 2. Put each room in the office type that fits the work: `team`, `lab`, `studio` or `hq` (war room).
 3. Pass it: `h(A.OfficeScene, { building })`. Or start from a solution: `solution: "hermes" | "copilot" | "microsoft" | "hq"`.
+
+Leave `color` out and the scene picks a body color for each bot. To set it yourself, take it from `AgentOffice.BODY_COLORS` (10 colors), for example `BODY_COLORS[n % BODY_COLORS.length]`, so a list and the scene show the same color. Do not copy the hex values. `BOT_COLORS` has only 4 colors (one for each shape) and is for portraits. Do not use it for a bot color. The color is a CSS color, not an index.
 
 Do not draw your own 3D bots. Do not set bot positions.
 
@@ -37,6 +51,17 @@ Do not draw your own 3D bots. Do not set bot positions.
 | Claude Code, Agent SDK | Each session → `session.start` with `isolated: true`; subagent (Task) → `delegate` with `spawn`; tool use → `tool.call` / `tool.result`; permission prompt → `request` |
 
 Recipes are mappings, not drop-in code. Check the platform API before you ship.
+
+## Mount a scene again
+
+A page that shows one building at a time mounts a new scene for each building. A new scene starts empty, so the adapter sends the state again.
+
+1. In `init(ctx)`, send the building state: `floor.add`, `room.add`, `bot.add`, then the state of each bot (`status`, `session.start`, `request`, `tool.call`, ...). Set `seeded: true` on each of these events.
+2. Set `at` (the event time in ms) on a seeded event when you know it. A seeded event with `at` after the last time the person saw the building counts in Since you left. Without `at`, a seeded event never counts.
+3. Restore a plan in progress: send `plan` after `bot.add`, with the current status of each step. Keep the step ids the same as before, so later `plan.step` events find them.
+4. Send live events after that first pass, without `seeded`.
+
+Seeded events play no sound, send no toast and no `onNotify`, and go into the replay history only when they are news (step 2). Show open requests from your own list (or the DS inbox), not from toasts.
 
 ## Send rich messages
 
@@ -108,11 +133,11 @@ Use tokens only. Write a README with a props table and a "consumer provides" lin
 1. Screenshots: Day, Night, Sublevel; 1360, 1100 and 400 px; `quality: "low"`; reduced motion. Look at each one.
 2. Walk test: `office.applyEvent({ type: "status", bot, status: "resting" })` for each bot in a room, then `"working"`. Look while they walk. For a number, use `office.inspect().nav[floor].path(from, to)`.
 3. Adapter test: click Approve and check that the scene changes only after the adapter replies.
-4. Run `python3 kit/check.py`.
+4. Run `python3 kit/check.py <your files>`. A custom property that your own files define counts as a known token. That is `--name:` in a CSS file, in an HTML `<style>` block or in an HTML `style=""` attribute, and `setProperty('--name', ...)` in a script or an HTML file. A `var(--name)` that nothing defines is an error.
 
 ## Prompt templates
 
-**Build a page:** "Build <page> x0.1 with Agent Office DS x1.5 Read README, Recipes and Reference. Start from kit/page.html. Use tokens and the icon set only. Write copy in Simplified Technical English. Run kit/check.py and take the screenshots in the definition of done. Report what you checked."
+**Build a page:** "Build <page> x0.1 with Agent Office DS x1.6 Read README, Recipes and Reference. Start from kit/page.html. Use tokens and the icon set only. Write copy in Simplified Technical English. Run kit/check.py and take the screenshots in the definition of done. Report what you checked."
 
 **Connect a platform:** "Write an Agent Office adapter x0.1 for <platform>. Read Recipes (Connect a platform) and the events and commands in Reference. Copy kit/adapter.js. Fill the mapping tables first, then the code. Set AgentOffice.strict = true and play a recorded log. Report each event type you saw."
 

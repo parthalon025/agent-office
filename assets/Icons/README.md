@@ -1,4 +1,4 @@
-# Icons (Agent Office DS x1.5)
+# Icons (Agent Office DS x1.6)
 
 Line icons on a 24 x 24 grid with 2 px of padding (live area 2-22). Stroke is 1.75 px, round caps and round joins, no fill (small dots for eyes and LEDs are filled). The files use the ink colour `#18212b` and are for `<img>` use on light grounds. On dark grounds, do not use the files: use the inline icon component (`AgentOffice.ICONS[name]` in `src/assets.js`), which takes `currentColor`. Use the icons at 16, 20, 24 or 48 px. Do not change the stroke width. In the Sublevel theme, use the inline icons with `color: #102a33` (Sublevel ink).
 

@@ -128,10 +128,10 @@ Do not use "Oops", "Sorry", exclamation marks, "please wait" or vague verbs like
 
 ## Accessibility
 
-- **Contrast.** Text 4.5:1; icons, dots, type colors, borders and focus rings 3:1, in every theme. ContrastCheck measures it live.
+- **Contrast.** Text 4.5:1; icons, dots, type colors, borders and focus rings 3:1, in every theme. ContrastCheck measures it live. A status color (`status-*`) is a fill or a dot. For a status word, use `status-*-text` on `bg`, `panel` and `chip`, or `status-*-on-bubble` on `bubble`. Reference.md lists the pairs the DS checks.
 - **Never color alone.** Every status dot has a word; every type color has an icon and a label; every sound has a visible change.
 - **Keyboard.** Every control is a real button, input or select. Tabs move with arrow keys. Dialogs trap focus and close on Escape. The HUD is the keyboard path to every bot.
 - **Screen readers.** The roster is a listbox, the chat a polite live log, toasts `status` or `alert`, the usage bar a `meter`, the sound button a toggle with `aria-pressed`.
 - **Focus.** 2 px `accent` outline with 2 px offset.
-- **Motion.** `prefers-reduced-motion` stops bob, squash, auto-rotate, spinners, shimmer, blink, sway, glance, hop, flicker, the intro, the elevator ride, packets, envelopes, walks to talk, the portrait fly and the panel stagger.
+- **Motion.** `prefers-reduced-motion` stops bob, squash, auto-rotate, spinners, shimmer, blink, sway, glance, hop, flicker, the intro, the elevator ride, camera glides (the camera cuts), packets, envelopes, walks to talk, the portrait fly and the panel stagger.
 - **Targets.** Icon buttons 30 × 30 px or more.
