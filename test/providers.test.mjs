@@ -506,8 +506,8 @@ test('claude-code readiness: Bedrock, Vertex, Foundry, a token or a third-party 
     assert.deepEqual(await r.p.readiness(), ready, JSON.stringify(Object.keys(env)));
     assert.deepEqual(r.execs.map((x) => x.args), [['--version'], ['auth', 'status', '--json']], 'the status command runs once, and it is no paid call');
   }
-  // A switch that is off, or an empty key, is no key source.
-  for (const env of [{ CLAUDE_CODE_USE_BEDROCK: '0' }, { CLAUDE_CODE_USE_VERTEX: 'false' }, { CLAUDE_CODE_USE_FOUNDRY: '' }, { ANTHROPIC_AUTH_TOKEN: '' }]) {
+  // A switch that is not on (Claude Code accepts only 1, true, yes, on), or an empty key, is no key source.
+  for (const env of [{ CLAUDE_CODE_USE_BEDROCK: '0' }, { CLAUDE_CODE_USE_VERTEX: 'false' }, { CLAUDE_CODE_USE_FOUNDRY: '' }, { CLAUDE_CODE_USE_BEDROCK: '2' }, { CLAUDE_CODE_USE_VERTEX: 'enabled' }, { ANTHROPIC_AUTH_TOKEN: '' }]) {
     const out = await claudeRig({ env, exec: exec((d) => d(null, SIGNED_OUT, '')) }).p.readiness();
     assert.equal(out.ready, false, JSON.stringify(env));
   }

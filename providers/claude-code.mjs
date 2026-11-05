@@ -30,10 +30,10 @@ const KEY_VARS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'];
 
 /**
  * True when the environment gives Claude Code a key source that needs no claude.ai sign-in: a Bedrock, Vertex or Foundry
- * switch that is on (Claude Code reads 0, false and an empty value as off), or an API key or an auth token.
+ * switch that is on (Claude Code reads only 1, true, yes and on, in any case and trimmed, as on; any other value is off), or an API key or an auth token.
  */
 export function hasKeySource(env) {
-  const on = (v) => typeof v === 'string' && v.trim() !== '' && !/^(0|false|no|off)$/i.test(v.trim());
+  const on = (v) => typeof v === 'string' && ['1', 'true', 'yes', 'on'].includes(v.trim().toLowerCase());
   return CLOUD_SWITCHES.some((k) => on(env[k])) || KEY_VARS.some((k) => typeof env[k] === 'string' && env[k] !== '');
 }
 
