@@ -918,12 +918,16 @@ test('receive: a patch that does not start from the latest snapshot changes noth
   assert.equal(B.createStore().receive({ patch: 1, base: 1, seq: 2 }), false, 'a patch before any snapshot does not fit');
 });
 
-// Which floor a scene opens on (#85, #111). startFloor(mount, snap, prefer) answers { id, branch } or null.
+// Which floor a scene opens on (#85, #111). floorMemory().start(mount, snap, was) answers { id, branch }: the floor on
+// screen before a rebuild, else the busiest floor, else the user's last pick, else the first floor. Never the DS default.
 const wt = (branch, root) => ({ branch, root });
-const THREE = () => ({ repos: [{ path: REPO_A, worktrees: [wt('main', REPO_A), wt('feat/x', 'C:\\work\\repo-feat'), wt('feat/y', 'C:\\work\\repo-y')] }] });
+const FEAT = 'C:\\work\\repo-feat', FEAT_Y = 'C:\\work\\repo-y';
+const THREE = () => ({ repos: [{ path: REPO_A, worktrees: [wt('main', REPO_A), wt('feat/x', FEAT), wt('feat/y', FEAT_Y)] }] });
 const idOf = (m, name) => m.def.floors.filter((f) => f.name === name)[0].id;
+const at = (m, branch) => ({ id: idOf(m, branch), branch });
+const busy = (r, id, cwd) => r.hook({ ...HOOKS.turnWithEdit[0], session_id: id, cwd });
 
-test('a rebuild keeps the floor the user picked, by branch, when that floor still exists (#85)', () => {
+test('a rebuild keeps the floor on screen, by branch, when that floor still exists (#85)', () => {
   const r = rig(THREE());
   r.push();
   const m = r.mount(KEY_A);
@@ -935,83 +939,126 @@ test('a rebuild keeps the floor the user picked, by branch, when that floor stil
   assert.equal(m.stale(), true);
   const next = r.mount(KEY_A);
   assert.notEqual(idOf(next, 'feat/y'), picked, 'the id changed, so the page must not carry the id');
-  assert.deepEqual(B.startFloor(next, r.store.latest(), [m.floorBranch(picked)]), { id: idOf(next, 'feat/y'), branch: 'feat/y' }, 'the picked floor stays');
+  assert.deepEqual(B.floorMemory().start(next, r.store.latest(), m.floorBranch(picked)), at(next, 'feat/y'), 'the floor on screen stays');
 });
 
-test('a rebuild does not keep a floor that is gone, a spare floor, or an unknown floor (#85)', () => {
-  const r = rig({ repos: [{ path: REPO_A, worktrees: [wt('main', REPO_A), wt('feat/x', 'C:\\work\\repo-feat')] }] });
+test('a rebuild does not keep a floor that is gone or unknown; the page still opens a floor (#85, #111)', () => {
+  const r = rig({ repos: [{ path: REPO_A, worktrees: [wt('main', REPO_A), wt('feat/x', FEAT)] }] });
   r.push();
   const m = r.mount(KEY_A);
   const x = idOf(m, 'feat/x');
   r.repos[0].worktrees.pop();
   r.push();
-  const next = r.mount(KEY_A);
-  assert.equal(B.startFloor(next, r.store.latest(), [m.floorBranch(x)]), null, 'the floor is gone, nothing is busy: the scene uses its default');
-  assert.equal(B.startFloor(next, r.store.latest(), [m.floorBranch(999)]), null);
-  assert.equal(B.startFloor(next, r.store.latest(), [null]), null);
-  assert.equal(B.startFloor(null, r.store.latest(), ['feat/x']), null);
+  const next = r.mount(KEY_A), mem = B.floorMemory();
+  assert.deepEqual(mem.start(next, r.store.latest(), m.floorBranch(x)), at(next, 'main'), 'the floor is gone, nothing is busy: the first floor');
+  assert.deepEqual(mem.start(next, r.store.latest(), m.floorBranch(999)), at(next, 'main'));
+  assert.deepEqual(mem.start(next, r.store.latest(), null), at(next, 'main'));
+  assert.equal(mem.start(null, r.store.latest(), 'feat/x'), null, 'no scene, no floor');
   const empty = rig().mount(KEY_A);
-  assert.equal(B.startFloor(empty, null, ['feat/x']), null, 'the spare floor is not a branch');
+  assert.deepEqual(mem.start(empty, null, 'feat/x'), { id: 1, branch: null }, 'an empty building opens its spare floor, which is no branch');
 });
 
 test('a floor added after mount is kept by its branch too (#85)', async () => {
   const r = rig();
   const m = r.mount(KEY_A);
   await r.hook(HOOKS.turnWithEdit[0]);   // the spare floor takes the first branch
-  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'sid-2', cwd: 'C:\\work\\repo-feat' });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'sid-2', cwd: FEAT });
   const add = of(m.ev, 'floor.add')[0];
   assert.ok(add, 'a second floor is added');
   assert.equal(m.floorBranch(add.floor.id), 'feat/x');
   const next = r.mount(KEY_A);
-  assert.deepEqual(B.startFloor(next, r.store.latest(), [m.floorBranch(add.floor.id)]), { id: idOf(next, 'feat/x'), branch: 'feat/x' });
+  assert.deepEqual(B.floorMemory().start(next, r.store.latest(), m.floorBranch(add.floor.id)), at(next, 'feat/x'));
 });
 
 test('a building with many floors opens on the floor with the most live sessions (#111)', async () => {
   const r = rig(THREE());
-  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: 'C:\\work\\repo-feat' });
-  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'b', cwd: 'C:\\work\\repo-y' });
-  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'c', cwd: 'C:\\work\\repo-y' });
+  await busy(r, 'a', FEAT);
+  await busy(r, 'b', FEAT_Y);
+  await busy(r, 'c', FEAT_Y);
   const m = r.mount(KEY_A);
-  assert.deepEqual(B.startFloor(m, r.store.latest(), []), { id: idOf(m, 'feat/y'), branch: 'feat/y' });
-  assert.deepEqual(B.startFloor(m, r.store.latest(), [null, 'gone']), { id: idOf(m, 'feat/y'), branch: 'feat/y' }, 'a pick that is gone does not count');
+  assert.deepEqual(B.floorMemory().start(m, r.store.latest(), null), at(m, 'feat/y'));
+  assert.deepEqual(B.floorMemory().start(m, r.store.latest(), 'gone'), at(m, 'feat/y'), 'a floor that is gone does not count');
 });
 
 test('a tie between busy floors takes the lowest floor, and an ended session does not count (#111)', async () => {
   const r = rig(THREE());
-  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: 'C:\\work\\repo-feat' });
-  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'b', cwd: 'C:\\work\\repo-y' });
+  await busy(r, 'a', FEAT);
+  await busy(r, 'b', FEAT_Y);
   const m = r.mount(KEY_A);
-  assert.equal(B.startFloor(m, r.store.latest(), []).branch, 'feat/x', 'one each: the lower floor');
+  assert.equal(B.floorMemory().start(m, r.store.latest(), null).branch, 'feat/x', 'one each: the lower floor');
   const snap = JSON.parse(JSON.stringify(r.store.latest()));
   snap.sessions.filter((s) => s.place.floor === 'feat/x').forEach((s) => { s.status = 'ended'; });
-  assert.equal(B.startFloor(m, snap, []).branch, 'feat/y', 'the ended session left its floor');
+  assert.equal(B.floorMemory().start(m, snap, null).branch, 'feat/y', 'the ended session left its floor');
 });
 
-test('the floor the user picked comes before the busy floor; sessions of another building do not count (#111)', async () => {
+test('a floor with live sessions beats an earlier pick; the pick counts when nothing is busy; other buildings do not count (#111)', async () => {
   const r = rig(THREE());
   r.repos.push({ path: REPO_B, worktrees: [wt('main', REPO_B)] });
-  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: 'C:\\work\\repo-y' });
-  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'b', cwd: REPO_B });
-  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'c', cwd: REPO_B });
-  const m = r.mount(KEY_A);
-  assert.equal(B.startFloor(m, r.store.latest(), ['feat/x']).branch, 'feat/x', 'a floor with no bots, picked by the user');
-  assert.equal(B.startFloor(m, r.store.latest(), []).branch, 'feat/y');
-  const none = rig(THREE()); none.push();
-  assert.equal(B.startFloor(none.mount(KEY_A), none.store.latest(), []), null, 'no live session and no pick: the scene uses its default');
+  await busy(r, 'a', FEAT_Y);
+  await busy(r, 'b', REPO_B);
+  await busy(r, 'c', REPO_B);
+  const m = r.mount(KEY_A), mem = B.floorMemory();
+  mem.start(m, r.store.latest(), null);
+  mem.see(KEY_A, 'feat/x');   // the user moved to feat/x
+  assert.equal(mem.picked(KEY_A), 'feat/x');
+  assert.equal(mem.start(m, r.store.latest(), null).branch, 'feat/y', 'bots are working on feat/y: not an empty floor');
+  const none = rig(THREE());
+  none.push();
+  const m2 = none.mount(KEY_A);
+  assert.equal(mem.start(m2, none.store.latest(), null).branch, 'feat/x', 'nothing is busy: the floor the user picked');
+  assert.equal(B.floorMemory().start(m2, none.store.latest(), null).branch, 'main', 'no live session and no pick: the first floor, not the DS default');
 });
 
-test('floor memory: a floor the page chose is not a pick; a floor the user moved to is (#111)', () => {
+test('the page always knows the floor it opened: the DS default is never used (#111)', () => {
+  const r = rig({ repos: [{ path: REPO_A, worktrees: ['main', 'feat/a', 'feat/b', 'feat/c'].map((b) => wt(b, b === 'main' ? REPO_A : 'C:\\work\\' + b)) }] });
+  r.push();
+  const m = r.mount(KEY_A), f = B.floorMemory().start(m, r.store.latest(), null);
+  assert.deepEqual(f, at(m, 'main'));
+  assert.notEqual(f.id, m.def.floors[2].id, 'the DS opens floors[2] when it is given no floor');
+});
+
+test('flow: opened with nothing live, left, sessions start on another floor, opened again: the busy floor (#111)', async () => {
+  const r = rig(THREE());
+  r.push();
   const mem = B.floorMemory();
-  assert.equal(mem.picked(KEY_A), null);
-  mem.open(KEY_A, 'feat/y');                 // the page opened the busy floor
-  mem.leave(KEY_A, 'feat/y');                // the user left without a move
-  assert.equal(mem.picked(KEY_A), null, 'not a pick');
-  mem.leave(KEY_A, null);                    // the building view
-  assert.equal(mem.picked(KEY_A), null);
-  mem.leave(KEY_A, 'feat/x');                // the user went to another floor
+  const m1 = r.mount(KEY_A);
+  const first = mem.start(m1, r.store.latest(), null);
+  assert.equal(first.branch, 'main');
+  mem.see(KEY_A, m1.floorBranch(first.id));   // the user leaves for the city without moving
+  assert.equal(mem.picked(KEY_A), null, 'an automatic floor is not a pick');
+  await busy(r, 'a', FEAT_Y);
+  await busy(r, 'b', FEAT_Y);
+  const m2 = r.mount(KEY_A);
+  assert.deepEqual(mem.start(m2, r.store.latest(), null), at(m2, 'feat/y'));
+});
+
+test('flow: a rebuild after a move keeps the floor on screen over a busy floor and a pick (#85, #111)', async () => {
+  const r = rig(THREE());
+  await busy(r, 'a', FEAT_Y);
+  const mem = B.floorMemory(), m1 = r.mount(KEY_A);
+  assert.equal(mem.start(m1, r.store.latest(), null).branch, 'feat/y');
+  mem.see(KEY_A, 'feat/x');   // the user looks at feat/x, where nobody works
+  r.repos[0].worktrees.splice(0, 1);   // the main worktree goes: the page mounts again
+  r.push();
+  const m2 = r.mount(KEY_A);
+  assert.deepEqual(mem.start(m2, r.store.latest(), 'feat/x'), at(m2, 'feat/x'), 'the rebuild stays where the user looks');
   assert.equal(mem.picked(KEY_A), 'feat/x');
-  mem.open(KEY_A, 'feat/x');                 // the next scene opened on it
-  mem.leave(KEY_A, 'feat/x');
-  assert.equal(mem.picked(KEY_A), 'feat/x', 'the pick stays until the user moves again');
+});
+
+test('floor memory: a floor the page chose is not a pick; a floor the user moved to is, also a move back (#111)', () => {
+  const r = rig(THREE());
+  r.push();
+  const m = r.mount(KEY_A), mem = B.floorMemory();
+  assert.equal(mem.picked(KEY_A), null);
+  mem.start(m, r.store.latest(), null);      // the page opened main
+  mem.see(KEY_A, 'main');                    // seen again: no move
+  mem.see(KEY_A, null);                      // the building view
+  assert.equal(mem.picked(KEY_A), null, 'not a pick');
+  mem.see(KEY_A, 'feat/x');                  // the user went to another floor
+  assert.equal(mem.picked(KEY_A), 'feat/x');
+  mem.see(KEY_A, 'main');                    // and back to the floor the page opened: on purpose, so a pick
+  assert.equal(mem.picked(KEY_A), 'main');
   assert.equal(mem.picked(KEY_B), null, 'each building has its own');
+  mem.see(KEY_B, 'feat/z');                  // a building the page never opened records no move
+  assert.equal(mem.picked(KEY_B), null);
 });

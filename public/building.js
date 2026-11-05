@@ -34,8 +34,8 @@
                            The DS has no event that removes a floor or a room, so the page mounts a new adapter.
      floorBranch(floorId)  the branch of a DS floor id in this scene, or null
      floorId(branch)       the DS floor id of a branch in this scene's definition, or null
-                           OfficeBuilding.startFloor(mount, snap, prefer) picks the floor a new scene opens on;
-                           OfficeBuilding.floorMemory() keeps the user's last pick per building.
+                           OfficeBuilding.floorMemory() decides the floor a new scene opens on and keeps the user's
+                           last pick per building (start, see, picked); OfficeBuilding.startFloor is its rule.
      roomInfo(roomId)      { sessions, place } of one room of this building
      figures(roomId)       the server's figures for that room
      noteKey(roomId)       the server's notes key for that room
@@ -549,36 +549,51 @@
     return store;
   }
 
-  // The floor a new scene of a building starts on (#85, #111), as { id, branch }, or null for the scene's own default.
-  // prefer: branches in order, the first the new scene has wins (the floor on screen before a rebuild, the floor the
-  // user picked last). With no match the floor with the most live sessions wins; a tie goes to the lower floor.
+  // The floor a new scene of a building starts on (#85, #111), as { id, branch }. The page always gets a floor, so it
+  // never relies on the DS default (the third floor, often empty). Null only for no mount. In this order:
+  //   was     the branch on screen before a rebuild of the same building (#85); null for another building or the city
+  //   busy    the floor with the most live sessions; a tie goes to the lower floor
+  //   picked  the branch the user chose last in this building
+  //   first   the first floor of the building (the default branch), or its spare floor when it is empty (branch null)
   // Floor ids are new for each mount, so every match is by branch.
-  function startFloor(toMount, snap, prefer) {
+  function startFloor(toMount, snap, was, picked) {
     if (!toMount) return null;
-    var list = prefer || [];
-    for (var i = 0; i < list.length; i++) {
-      var id = list[i] == null ? null : toMount.floorId(list[i]);
-      if (id != null) return { id: id, branch: list[i] };
-    }
-    var count = {};
+    function by(branch) { var id = branch == null ? null : toMount.floorId(branch); return id == null ? null : { id: id, branch: branch }; }
+    var hit = by(was);
+    if (hit) return hit;
+    var count = {}, best = null;
     live(snap).forEach(function (s) { var pl = placeOf(s); if (pl.repo === toMount.repo) count[pl.branch] = (count[pl.branch] || 0) + 1; });
-    var best = null;
     Object.keys(count).forEach(function (br) {
       var bid = toMount.floorId(br);
       if (bid == null) return;
       if (!best || count[br] > best.n || (count[br] === best.n && bid < best.id)) best = { id: bid, branch: br, n: count[br] };
     });
-    return best ? { id: best.id, branch: best.branch } : null;
+    if (best) return { id: best.id, branch: best.branch };
+    hit = by(picked);
+    if (hit) return hit;
+    var f0 = toMount.def && toMount.def.floors && toMount.def.floors[0];
+    return f0 ? { id: f0.id, branch: toMount.floorBranch(f0.id) } : null;
   }
 
-  // What the page remembers of floors, per building, for the life of the page. A floor the page chose (open) is not
-  // a pick: leave(repo, branch) records the floor on screen only when it is another one, so the user's last move
-  // stays and an automatic choice does not become one.
+  // What the page remembers of floors, per building, for the life of the page (#111). One rule owns the whole choice:
+  //   start(mount, snap, was)  the floor a new scene opens on (startFloor); the page opens exactly that floor
+  //   see(repo, branch)        the floor on screen now (a poll while the scene shows, and when it is left). A floor
+  //                            other than the last one seen is a move of the user: the page itself moves nobody. The
+  //                            floor the page opened is not a pick. null (the building view) changes nothing.
+  //   picked(repo)             the branch the user moved to last, or null
   function floorMemory() {
-    var picked = {}, opened = {};
+    var picked = {}, last = {};
     return {
-      open: function (repo, branch) { opened[repo] = branch == null ? null : branch; },
-      leave: function (repo, branch) { if (branch != null && branch !== opened[repo]) picked[repo] = branch; },
+      start: function (mount, snap, was) {
+        var f = startFloor(mount, snap, was, mount ? picked[mount.repo] : null);
+        if (mount) last[mount.repo] = f ? f.branch : null;
+        return f;
+      },
+      see: function (repo, branch) {
+        if (branch == null) return;
+        if (last[repo] != null && branch !== last[repo]) picked[repo] = branch;
+        last[repo] = branch;
+      },
       picked: function (repo) { return picked[repo] == null ? null : picked[repo]; }
     };
   }
