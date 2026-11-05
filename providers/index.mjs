@@ -40,6 +40,12 @@
 //                       Returns the tracker's answer: queued office messages for the agent, or null.
 //                       A provider must deliver hook()'s return value (queued office messages: additionalContext, or
 //                       decision:block on Stop) to its agent.
+//                       Subagents (the contract for every provider that has them). An agent is a top-level session (uid); a subagent
+//                       is a guest of its parent. A provider reports a subagent with SubagentStart (agent_id, agent_type) after the
+//                       parent's Agent or Task tool call, tags every hook of the subagent with the same agent_id, and ends it with
+//                       SubagentStop (agent_id). The office then shows it as a helper bot in the parent's room: it never gets a
+//                       room, a desk or a count of its own (the room sign counts top-level sessions only), and its calls and
+//                       requests stay on the helper. A provider with no subagents reports no agent_id.
 //   permission(s, p)    a request the provider holds itself (no hook): tool_name, tool_input, agent_id, permission_suggestions.
 //                       Returns the request id. The office holds it until the user answers, then calls provider.answer.
 //   stream(s, m)        a stream message, as an object or a JSON line: system init (model, permissionMode, session_id,

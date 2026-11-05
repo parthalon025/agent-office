@@ -21,13 +21,13 @@ It is built on the Agent Office design system (x1.6.1), which lives in this fold
 - **Repos as buildings.** A git repository is a building, a branch is a floor and a worktree is a room. Pick the building in the control strip; one **Needs you** button shows how many requests wait in every building. Folders outside git share the "Other folders" building.
 - **Floors and rooms.** The Floors dialog creates a floor (a new branch with its first worktree), adds a room (one more worktree on a branch, also on a branch that has one), removes a room and deletes a floor (its worktrees and the branch). Git refusals (uncommitted changes, commits that are not merged) show with a button to go ahead anyway. The main folder and a room with an open session cannot be removed.
 - **Extensions.** The Extensions button (More > Actions for the selected bot, or Ctrl+K) lists the session's connectors (MCP servers) and plugins. Turn a connector off or on for this session, reconnect it, add one (a URL or a command) or remove one. Turn a plugin off or on for this folder, install or remove one. Saved changes go to the local or project scope of the folder, never to your user settings.
-- **Sessions as bots.** Each session sits at a desk in the room of its worktree. Typing means working, an amber badge means it needs you, and a red badge means the turn failed (Retry or Dismiss).
+- **Sessions as bots.** Each agent gets its own room: Open session makes a new worktree (branch `agent/<name>-<id>`, folder `<repo>.worktrees/<name>` next to the repository) unless you tick **Use this folder**. The room sits on the floor of the branch it was made from, and its sign shows the worktree branch. When two or more agents share a room (terminal sessions in one folder, or **Use this folder**), the sign says "N agents". Subagents are helpers in their parent's room and do not count. Typing means working, an amber badge means it needs you, and a red badge means the turn failed (Retry or Dismiss).
 - **Subagents as helpers.** A Task or Agent call brings a grey helper by the elevator. The helper does its own tool calls and leaves when it returns its result.
 - **Trace every step.** Select a bot and open Trace: the plan from TodoWrite with each step's state, every tool call with its argument, time and failure, skills loaded, pages read, and the schedule that started the run.
 - **No terminal needed.** A session can run inside the office. You chat with it, and its replies appear as they are written.
 - **Approve from the office.** Permission prompts become Approve and Decline cards that show the edit or command. One click can also allow it from now on.
 - **Control a live session.** Stop the current turn, switch model or permissions, attach images and text files, and run slash commands and skills (type `/` in the chat).
-- **See the work.** A Changes view shows the branch, the files and a colored diff. A session can run in its own git worktree, so your main branch stays clean, and you can open a pull request from the office.
+- **See the work.** A Changes view shows the branch, the files and a colored diff. A session runs in its own git worktree by default, so your main branch stays clean, and you can open a pull request from the office.
 - **Come back later.** Closed sessions are saved. Reopen one and Claude continues with its context. Search every past session.
 - **Run things on a schedule.** Save prompts as templates. Schedule a prompt daily or every N minutes.
 - **Weekly limit.** The meter shows the real 7-day plan usage and its reset time when your status line command saves Claude Code's `rate_limits` to `~/.claude/rate_limits_state.json` (or the file in `OFFICE_RATE_FILE`). Without that file the meter stays hidden.
@@ -55,7 +55,7 @@ The office opens in your browser with a launch link (`http://127.0.0.1:4317/#n=.
 
 1. Pick a folder.
 2. Leave **Runs** on "In the office (no terminal)".
-3. Optional: choose "New git worktree", a model, a spend limit, and a first instruction.
+3. Optional: tick **Use this folder** (the default is a new worktree, a room of its own), choose a model, a spend limit, and a first instruction.
 4. Click a bot, then use its chat. Type `/` for commands and skills.
 
 The dock at the bottom holds Open session, the building picker, City (or Go inside), Floors, Sessions, Past, a **More** control (Schedules, Attach sessions, Compact) and **Search actions** (Ctrl+K). When a bot is selected, the dock adds a row with its name, its context use and Stop turn (office sessions). More then lists Actions for that bot: Open terminal, Changes, Extensions, a quiet Always allow (never for a high-risk request), its cost, and for office sessions the model and the permissions. At laptop and phone widths the chat, the roster and the Since you left card stop above the dock, so the message box and Send stay clear.

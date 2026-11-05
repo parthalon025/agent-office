@@ -94,8 +94,16 @@
   function Busy(p) { return p.on ? h(A.Skeleton, { lines: p.lines || 3, label: 'Loading' }) : null; }
 
   // ---------- open a session ----------
+  // "Use this folder": the opt-out of a room of its own. The DS has no Checkbox, so this is a native checkbox on DS tokens (.check in office.css).
+  function UseFolder(p) {
+    return h('div', { className: 'ao-field' },
+      h('label', { className: 'check', htmlFor: 'f-usefolder' },
+        h('input', { id: 'f-usefolder', type: 'checkbox', checked: !!p.checked, disabled: !!p.disabled, 'aria-describedby': 'f-usefolder-hint', onChange: function (e) { p.onChange(e.target.checked); } }),
+        h('span', null, 'Use this folder')),
+      h('span', { id: 'f-usefolder-hint', className: 'ao-hint' }, p.hint));
+  }
   function OpenDialog(p) {
-    var f = useState({ cwd: p.shownPath || p.recent[0] || '', name: '', where: 'office', isolation: 'same', model: '', permissionMode: '', maxBudget: limitText(p.spendLimit), prompt: '', template: '' }), form = f[0], setForm = f[1];
+    var f = useState({ cwd: p.shownPath || p.recent[0] || '', name: '', where: 'office', useFolder: false, model: '', permissionMode: '', maxBudget: limitText(p.spendLimit), prompt: '', template: '' }), form = f[0], setForm = f[1];
     var b = useState(false), busy = b[0], setBusy = b[1];
     var e = useState(''), err = e[0], setErr = e[1];
     var sv = useState(null), saving = sv[0], setSaving = sv[1];
@@ -106,7 +114,8 @@
     }
     function submit() {
       setBusy(true); setErr('');
-      api('/api/open', Object.assign({}, form, { maxBudget: limitSent(form.maxBudget, p.spendLimit !== undefined) })).then(function () { setBusy(false); p.onClose(); }, function (x) { setBusy(false); setErr(x.message); });
+      // Each agent gets its own room (a new worktree) unless the user keeps the folder. A terminal window always uses the folder.
+      api('/api/open', Object.assign({}, form, { isolation: form.useFolder || form.where === 'terminal' ? 'same' : 'worktree', maxBudget: limitSent(form.maxBudget, p.spendLimit !== undefined) })).then(function () { setBusy(false); p.onClose(); }, function (x) { setBusy(false); setErr(x.message); });
     }
     function saveTemplate() {
       api('/api/template/save', { name: saving, text: form.prompt }).then(function (t) { setSaving(null); p.onTemplates(); setForm(Object.assign({}, form, { template: t.id })); }, function (x) { setErr(x.message); });
@@ -135,7 +144,8 @@
         h(A.TextInput, { id: 'f-name', label: 'Bot name (optional)', value: form.name, placeholder: 'Defaults to the folder name', onChange: set('name') }),
         h(A.Select, { id: 'f-where', label: 'Runs', options: WHERE, value: form.where, onChange: set('where') })),
       Pair(
-        h(A.Select, { id: 'f-isolation', label: 'Work in', options: ISOLATION, value: terminal ? 'same' : form.isolation, disabled: terminal, onChange: set('isolation'), hint: form.isolation === 'worktree' && !terminal ? 'A new branch in its own folder. Your main branch stays untouched.' : undefined }),
+        h(UseFolder, { checked: form.useFolder || terminal, disabled: terminal, onChange: set('useFolder'),
+          hint: terminal ? 'A terminal window works in the folder.' : form.useFolder ? 'The agent works in this folder. Other agents in it share its room.' : 'The agent gets its own room: a new branch in its own folder next to the repository. Your branch stays untouched.' }),
         h(A.TextInput, { id: 'f-budget', label: 'Spend limit in USD', value: form.maxBudget, placeholder: 'No limit', disabled: terminal, onChange: set('maxBudget'), hint: terminal ? undefined : LIMIT_HINT })),
       Pair(
         h(A.Select, { id: 'f-model', label: 'Model', options: MODELS, value: form.model, onChange: set('model') }),
@@ -414,7 +424,8 @@
         h(A.EmptyState, { icon: 'floor', title: 'No repository here', text: 'Folders outside git have no branches. Open a session in a git repository to get floors.' }));
     }
     var floors = {}, order = [];
-    repo.worktrees.forEach(function (w) { if (!floors[w.branch]) { floors[w.branch] = []; order.push(w.branch); } floors[w.branch].push(w); });
+    // The floor of a room is the server's place rule: an agent room sits on the floor of its base branch.
+    repo.worktrees.forEach(function (w) { var fl = w.place.floor; if (!floors[fl]) { floors[fl] = []; order.push(fl); } floors[fl].push(w); });
     var main = repo.worktrees.filter(function (w) { return w.main; })[0];
 
     if (confirm) {
@@ -456,7 +467,7 @@
               rooms.map(function (w) {
                 var here = (snap ? snap.sessions : []).filter(function (s) { return s.status !== 'ended' && s.place && s.place.rootKey === w.place.rootKey; });
                 return h('div', { key: w.root, className: 'room-row' },
-                  h(A.OfficeTypeBadge, { type: 'lab', label: w.root.split(/[\\/]/).pop() }), h('span', { className: 'past-sub mono', title: w.root }, F.shortPath(w.root)),
+                  h(A.OfficeTypeBadge, { type: 'lab', label: w.place.room }), h('span', { className: 'past-sub mono', title: w.root }, F.shortPath(w.root)),
                   here.map(function (s) { return h('span', { key: s.uid, className: 'room-bot', title: s.name }, h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: colorOf(s.uid), status: statusOf(s), size: 20 }), s.name); }),
                   w.main ? null : h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setConfirm({ kind: 'room', branch: b, root: w.root }); } }, 'Remove room'));
               })),
@@ -465,7 +476,7 @@
               hasMain ? null : h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setConfirm({ kind: 'floor', branch: b }); } }, 'Delete floor')));
         })),
         form ? null : h(A.AddButton, { label: 'Add a floor', onClick: function () { setErr(''); setForm({ branch: '', from: main ? main.branch : '' }); } }),
-        h(FloorsWithoutRooms, { repo: p.repo, busy: busy, run: run, shown: order })));
+        h(FloorsWithoutRooms, { repo: p.repo, busy: busy, run: run, shown: repo.worktrees.map(function (w) { return w.branch; }) })));
   }
   // Branches with no worktree: a room brings the floor into the building.
   function FloorsWithoutRooms(p) {

@@ -36,8 +36,8 @@ const o = await api('/api/open', { cwd: repo, name: 'wt test', model: 'haiku', w
 ok('open with worktree', !!o.uid, JSON.stringify(o));
 const uid = o.uid;
 let s = await me(uid);
-ok('worktree recorded', s?.worktree?.branch?.startsWith('office/wt-test-'), s?.worktree?.branch);
-ok('cwd is the worktree', s?.cwd?.replace(/\\/g, '/').includes('.agent-office/worktrees'), s?.cwd);
+ok('worktree recorded', s?.worktree?.branch?.startsWith('agent/wt-test-'), s?.worktree?.branch);
+ok('cwd is the worktree', s?.cwd?.replace(/\\/g, '/').includes('/repo.worktrees/wt-test'), s?.cwd);
 ok('budget recorded', s?.budget === 1);
 
 // 2) permission request with preview (edit needs permission in default mode)
@@ -134,8 +134,8 @@ fs.mkdirSync(repo2, { recursive: true });
 const g2 = (...a) => execFileSync(resolveExe('git'), a, { cwd: repo2, encoding: 'utf8' });
 g2('init', '-q'); g2('config', 'user.email', 't@t'); g2('config', 'user.name', 't'); g2('config', 'core.autocrlf', 'false');
 fs.writeFileSync(repo2 + '/a.txt', 'a\n'); g2('add', '-A'); g2('commit', '-qm', 'init');
-const watcher = await api('/api/open', { cwd: repo2, name: 'watcher', model: 'haiku', where: 'office', permissionMode: 'default' });
-const failer = await api('/api/open', { cwd: repo2, name: 'failer', model: 'haiku', where: 'office', maxBudget: 0.0001, prompt: 'Say hello.' });
+const watcher = await api('/api/open', { cwd: repo2, name: 'watcher', model: 'haiku', where: 'office', isolation: 'same', permissionMode: 'default' });
+const failer = await api('/api/open', { cwd: repo2, name: 'failer', model: 'haiku', where: 'office', isolation: 'same', maxBudget: 0.0001, prompt: 'Say hello.' });
 ok('open the watcher and the failing session', !!watcher.uid && !!failer.uid, JSON.stringify({ watcher, failer }));
 const failed = await until(async () => { const x = await me(failer.uid); return x?.error ? x : null; }, 90000);
 ok('failed turn sets session.error', !!failed, JSON.stringify(failed?.error));

@@ -162,3 +162,73 @@ test('createPr refuses when a filter is set, and commits and stages nothing', as
     assert.ok(!fs.existsSync(marker), 'the filter did not run');
   } finally { s.done(); }
 });
+
+// ---------- agent worktrees (#69): branch agent/<name>-<id> from the current branch, folder <repo>.worktrees/<name> ----------
+const same = (a, b) => path.normalize(a).toLowerCase() === path.normalize(b).toLowerCase();
+
+test('createWorktree makes agent/<name>-<id> from the current branch, in <repo>.worktrees/<name> next to the repository', async () => {
+  const s = scratch();
+  try {
+    const repo = makeRepo(s.dir);
+    plain(repo, ...IDENT, 'commit', '-q', '-a', '-m', 'two');
+    plain(repo, 'checkout', '-q', '-b', 'dev');
+    const made = await git.createWorktree(repo, 'Fix login!');
+    assert.match(made.branch, /^agent\/fix-login-[0-9a-f]{4}$/);
+    assert.equal(made.base, 'dev');
+    assert.ok(same(made.root, path.join(s.dir, 'repo.worktrees', 'fix-login')), made.root);
+    assert.ok(fs.existsSync(path.join(made.root, 'f.txt')));
+    assert.equal(plain(made.root, 'rev-parse', '--abbrev-ref', 'HEAD').trim(), made.branch);
+    // locate and layout both report the base branch, and only for the agent worktree
+    const g = await git.locate(made.root);
+    assert.equal(g.branch, made.branch);
+    assert.equal(g.base, 'dev');
+    assert.ok(same(g.repo, repo), 'the building is the main repository');
+    const lay = await git.layout(repo);
+    assert.equal(lay.find((w) => w.main).base, undefined);
+    assert.equal(lay.find((w) => !w.main).base, 'dev');
+    assert.equal((await git.locate(repo)).base, undefined);
+  } finally { s.done(); }
+});
+
+test('two agents with one name get two folders; a worktree made inside an agent worktree keeps the first base', async () => {
+  const s = scratch();
+  try {
+    const repo = makeRepo(s.dir);
+    plain(repo, ...IDENT, 'commit', '-q', '-a', '-m', 'two');
+    const a = await git.createWorktree(repo, 'helper');
+    const b = await git.createWorktree(repo, 'helper');
+    assert.ok(!same(a.root, b.root));
+    assert.ok(same(path.dirname(b.root), path.join(s.dir, 'repo.worktrees')));
+    assert.notEqual(a.branch, b.branch);
+    const c = await git.createWorktree(a.path, 'nested');
+    assert.equal(c.base, a.base, 'the floor stays the base of the first agent');
+    assert.ok(same(path.dirname(c.root), path.join(s.dir, 'repo.worktrees')), 'next to the main repository, not the agent folder');
+  } finally { s.done(); }
+});
+
+test('createWorktree from a detached HEAD has no base branch, and refuses outside git', async () => {
+  const s = scratch();
+  try {
+    const repo = makeRepo(s.dir);
+    plain(repo, ...IDENT, 'commit', '-q', '-a', '-m', 'two');
+    plain(repo, 'checkout', '-q', '--detach');
+    const made = await git.createWorktree(repo, 'loose');
+    assert.equal(made.base, '');
+    assert.equal((await git.locate(made.root)).base, undefined);
+    await assert.rejects(git.createWorktree(s.dir, 'x'), /not in a git repository/);
+  } finally { s.done(); }
+});
+
+test('deleteFloor refuses while an agent room sits on the floor, and deletes it after the room is removed', async () => {
+  const s = scratch();
+  try {
+    const repo = makeRepo(s.dir);
+    plain(repo, ...IDENT, 'commit', '-q', '-a', '-m', 'two');
+    plain(repo, 'branch', 'side');
+    const made = await git.createWorktree(repo, 'agent one'); // from the main folder's branch
+    plain(repo, 'config', `branch.${made.branch}.officebase`, 'side'); // as if it was made on `side`
+    await assert.rejects(git.deleteFloor(repo, 'side'), /agent room/i);
+    await git.removeRoom(repo, made.root, true);
+    assert.deepEqual(await git.deleteFloor(repo, 'side', true), { deleted: true });
+  } finally { s.done(); }
+});
