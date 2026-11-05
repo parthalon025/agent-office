@@ -1,3 +1,8 @@
+fake-openai.mjs is a fake OpenAI-compatible chat server for the local providers. fake-acp.mjs is a fake ACP agent (newline-
+delimited JSON-RPC on stdio) for test/acp-provider.test.mjs and test/mcp-routes.test.mjs; its prompt steps are listed at the
+top of the file. It follows the ACP v1 schema (agentclientprotocol.com), not a recording of Hermes Agent or dsh: neither was
+run for these tests.
+
 Hook payloads and stream lines for test/tracker.test.mjs.
 
 The shapes were checked against a real recording on 2026-11-04 (Claude Code 2.1.318, one smoke run with

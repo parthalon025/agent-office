@@ -101,6 +101,19 @@ Two more agent kinds are built: **Ollama** and **LM Studio**. They run a model o
 
 The office only lists models and sends chat requests to the server. It never loads, unloads or downloads a model. See **Settings** for the server addresses.
 
+### ACP agents: Hermes Agent and DeepSeek Harness
+
+Two agent kinds speak the Agent Client Protocol (ACP): **Hermes Agent** (`hermes`, the office starts `hermes acp`) and **DeepSeek Harness** (`dsh`, the office starts `dsh --profile acp`). The agent uses its own model and its own settings. These parts differ:
+
+- **Install.** The program must be on the PATH as an `.exe`. The office starts programs without a shell, so a `.cmd` install (npm) is refused with a message that names the file. DeepSeek Harness from npm is such an install, so the office cannot start it yet.
+- **Start one with the API.** As for a local agent, send `POST /api/open` with `cwd`, `provider` (`hermes` or `dsh`) and an optional first `prompt`. Leave `model` and `permissionMode` out. The first answer is 409 with `"confirm": "cost"` and the question "This agent does not report cost. Run it?". To say yes, send the same body again with `"confirmCost": true`. **Reopen** in Past sessions asks the same question in a dialog.
+- **Cost.** The agent reports no cost. The office shows "unknown", never $0.00, and no spend limit can stop it. Check the spend in the agent's own account.
+- **Approve a request (job 3).** The agent's own requests show as cards. Approve sends "allow once" and Decline sends "reject once". The office never sends an "always" answer: Hermes would write it as a lasting rule in its own settings.
+- **Files and commands.** The office reads and writes the agent's files and runs its commands for it, inside the session folder only. A path outside is refused, and every command waits for you. When you decline an edit, the agent cannot write that file another way in the same turn.
+- **Not asked.** Hermes Agent runs most commands itself and asks only for the ones it rates dangerous. The activity feed says "ran a command without asking the office" each time.
+- **Time limit.** Hermes Agent waits 60 s for an answer. When it moves on first, the office drops the card and the feed says so.
+- **Reopen (job 9).** It continues the past conversation when the agent can load one. Else it starts a new session.
+
 ## How it works
 
 ```
