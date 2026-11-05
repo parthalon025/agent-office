@@ -321,7 +321,7 @@ test('cellsOf: the call cells of one agent kind in a building, for an agent whos
 });
 
 test('enforcement: an ungated agent whose config the office read shows what that config really carries', () => {
-  const claw = { kind: 'openclaw', label: 'OpenClaw', gated: false, enforces: ['shell'] };
+  const claw = { kind: 'openclaw', label: 'OpenClaw', gated: false, cost: 'unknown', enforces: ['shell'] }; // as providers/acp.mjs gives it
   const NO_ASK = 'OpenClaw has no approval step for this kind of call, so it cannot ask.';
   const policy = {
     config: { ok: false, unreadable: false, execAsks: false, settings: [
@@ -390,4 +390,57 @@ test('Agent Framework: its own column decides its calls; a default Ask holds a l
   const e = enforcement([{ kind: 'claude-code', label: 'Claude Code' }, af]);
   assert.deepEqual(e['agent-framework'], { reason: '', rows: {}, asks: {}, unset: {}, partly: {} });
   assert.match(enforcement([{ kind: 'claude-code', label: 'Claude Code' }])['agent-framework'].reason, /no provider for this agent kind/);
+});
+
+// #24 on spec #67: the two Microsoft cloud kinds share one column, like the two local servers. They cannot reach the files on
+// this machine, so the file rows have no cell for them. Their tools run in the cloud without the office (ungated, ADR 0001):
+// off until turned on, every call cell Not enforced except MCP, where a Foundry tool set to ask comes to the office (Partly).
+test('#24: the cloud kinds share the Cloud agent column: no file cells, off until turned on, cost asked without prices', async () => {
+  const { createFoundry } = await import('../providers/foundry.mjs');
+  const { createCopilotStudio } = await import('../providers/copilot-studio.mjs');
+  const { cloudConfig } = await import('../providers/cloud.mjs');
+  const S = globalThis.OfficeVocab.security;
+  const fd = (env = {}) => createFoundry({ events: {}, config: cloudConfig(env, 'OFFICE_FOUNDRY') });
+  const cs = (env = {}) => createCopilotStudio({ events: {}, config: cloudConfig(env, 'OFFICE_COPILOTSTUDIO') });
+  assert.equal(S.columnOf('foundry'), 'cloud');
+  assert.equal(S.columnOf('copilot-studio'), 'cloud');
+  assert.equal(S.columns.find((c) => c.id === 'cloud').label, 'Cloud agent');
+  for (const row of ['read-inside', 'edit-inside', 'files-outside', 'settings', 'secrets']) {
+    assert.equal(S.applies(row, 'cloud'), false, row);
+    assert.equal(S.na(row, 'cloud'), 'No files', row);
+    assert.equal(S.applies(row, 'hermes'), true, 'the other kinds keep the row: ' + row);
+  }
+  for (const row of ['shell', 'web', 'mcp', 'ungated', 'no-cost']) assert.equal(S.applies(row, 'cloud'), true, row);
+  assert.throws(() => setRule(none(), { scope: 'office', row: 'secrets', col: 'cloud', value: 'deny' }), (e) => e.status === 400);
+  // Off until the Agents screen turns it on; then it opens.
+  const f = fd();
+  assert.match(openRefusal(none(), f), /Turn on Azure AI Foundry on the Agents screen of the Security room/);
+  const on = setRule(none(), { scope: 'office', row: 'ungated', col: 'cloud', value: 'on', confirmed: true }).rules;
+  assert.equal(openRefusal(on, f), null);
+  assert.equal(openRefusal(on, cs()), null, 'one switch for both cloud kinds');
+  // Cost: asked once without prices; with them it reports cost and asks nothing.
+  assert.equal(costAsk(on, f), true);
+  assert.equal(costAsk(on, fd({ OFFICE_FOUNDRY_PRICE_IN: '1', OFFICE_FOUNDRY_PRICE_OUT: '2' })), false);
+  assert.match(openRefusal(setRule(on, { scope: 'office', row: 'no-cost', col: 'cloud', value: 'deny' }).rules, cs()), /does not report cost/);
+  // A Foundry MCP approval is decided by the MCP row of the Cloud agent column.
+  const mcp = { building: B, kind: 'foundry', tool: 'mcp__github__create_issue', input: {}, root, worktree: true, provider: true };
+  assert.equal(decide(none(), mcp), null, 'Ask: held for the user');
+  assert.equal(decide(setRule(none(), { scope: 'office', row: 'mcp', col: 'cloud', value: 'deny' }).rules, mcp).allow, false);
+  // The wall: MCP partly enforced, shell and web not, and the no-cost cell is not used while both kinds report cost.
+  const e = enforcement([fd(), cs()]).cloud;
+  assert.equal(e.reason, '');
+  assert.match(e.partly.mcp, /Only an MCP tool that a Foundry agent sets to ask/);
+  assert.equal(e.rows.mcp, undefined);
+  assert.equal(e.rows.shell, 'This agent runs this kind of call without asking the office.');
+  assert.equal(e.rows.web, 'This agent runs this kind of call without asking the office.');
+  assert.equal(e.rows['read-inside'], undefined, 'no cell, so no reason');
+  assert.equal(e.rows['no-cost'], undefined, 'without prices the cell decides');
+  assert.equal(e.reports, false);
+  const priced = enforcement([fd({ OFFICE_FOUNDRY_PRICE_IN: '1', OFFICE_FOUNDRY_PRICE_OUT: '2' }), cs({ OFFICE_COPILOTSTUDIO_PRICE_MESSAGE: '0.01' })]).cloud;
+  assert.equal(priced.reports, true);
+  assert.equal(priced.rows['no-cost'], 'This agent reports cost from the prices you set, so this rule is not used.');
+  assert.equal(enforcement([fd({ OFFICE_FOUNDRY_PRICE_IN: '1', OFFICE_FOUNDRY_PRICE_OUT: '2' }), cs()]).cloud.rows['no-cost'], undefined, 'one kind without prices: the cell decides for it');
+  assert.equal(enforcement([{ kind: 'claude-code', label: 'Claude Code' }])['claude-code'].reports, true);
+  assert.equal(enforcement([{ kind: 'hermes', label: 'Hermes', cost: 'unknown', gated: false }]).hermes.reports, false);
+  assert.deepEqual(costThisMonth(addCost({}, Date.UTC(2026, 10, 5), 'cloud', 0.5), Date.UTC(2026, 10, 5)).byColumn, { cloud: 0.5 });
 });

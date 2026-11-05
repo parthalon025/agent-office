@@ -210,9 +210,12 @@ const UNGATED = 'This agent runs this kind of call without asking the office.';
 const CLAUDE_DECIDES = 'The agent asks only when its own allow rules and permission mode say so.';
 // A default Ask on a row Claude Code does not ask about by itself: nothing is forced until the user sets the cell (B1).
 const CLAUDE_UNSET = 'The agent decides until you click the cell: then the office makes it ask.';
+// A no-cost cell of a kind whose providers all report cost (a cloud kind with its prices set, #24): no session asks it.
+const REPORTS = 'This agent reports cost from the prices you set, so this rule is not used.';
 /**
- * Per agent kind (column): { reason, rows, asks, unset, partly }. unset: a reason for one row while its cell is a default
- * Ask ("Partly enforced"): Claude Code decides until the user sets the cell (B1). partly: a reason for one row of an ungated agent where only some
+ * Per agent kind (column): { reason, rows, asks, unset, partly, reports }. reports: every provider of the column is paid and
+ * reports cost (the Spend screen shows its dollars, also $0.00; its "Run without cost reports" cell is not used).
+ * unset: a reason for one row while its cell is a default Ask ("Partly enforced"): Claude Code decides until the user sets the cell (B1). partly: a reason for one row of an ungated agent where only some
  * calls come to the office (Hermes: its edit requests do, its reads and its own skill and memory writes do not), "Partly
  * enforced" whatever the value. reason '' means the office enforces the cells of that kind; else every
  * cell shows "Not enforced for this agent" with the reason. rows: a reason for one row only. asks: a reason for one row
@@ -242,9 +245,11 @@ export function enforcement(providers, policies = {}) {
       for (const row of CALL_ROWS) if (S.applies(row, c.id) && !takes.has(row) && !own(partly, row)) rows[row] = own(why, row) ? why[row] : UNGATED;
     }
     if (S.applies('supervise', c.id)) rows.supervise = 'Paperclip is not connected to this office.';
+    const reports = list.length > 0 && list.every((p) => p.paid !== false && p.cost !== 'unknown');
+    if (reports && S.applies('no-cost', c.id)) rows['no-cost'] = REPORTS;
     const asks = {}, unset = {};
     if (c.id === 'claude-code') for (const row of CALL_ROWS) if (CLAUDE_ASKS.has(row)) asks[row] = CLAUDE_DECIDES; else unset[row] = CLAUDE_UNSET;
-    out[c.id] = { reason, rows, asks, unset, partly };
+    out[c.id] = { reason, rows, asks, unset, partly, reports };
   }
   return out;
 }

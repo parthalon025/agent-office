@@ -142,7 +142,7 @@ test('security: six screens on three walls, each with its rows; six agent kinds 
   assert.deepEqual(S.screens.map((x) => x.title), ['Files', 'Commands', 'Network', 'Secrets', 'Agents', 'Spend']);
   assert.deepEqual(S.screens.find((x) => x.id === 'files').rows, ['read-inside', 'edit-inside', 'files-outside']);
   assert.deepEqual(S.screens.find((x) => x.id === 'secrets').rows, ['settings', 'secrets']);
-  assert.deepEqual(S.columns.map((c) => c.label), ['Claude Code', 'Hermes', 'dsh', 'OpenClaw', 'Local model', 'Agent Framework']);
+  assert.deepEqual(S.columns.map((c) => c.label), ['Claude Code', 'Hermes', 'dsh', 'OpenClaw', 'Local model', 'Agent Framework', 'Cloud agent']);
   // A kind that runs on a model of this machine costs nothing: the Spend screen says Free, never Not reported (#23).
   assert.deepEqual(S.columns.filter((c) => c.free).map((c) => c.id), ['local', 'agent-framework']);
   assert.equal(S.rows.shell.label, 'Shell commands');
@@ -339,4 +339,67 @@ test('M2: the spend limit field is for a paid kind that reports cost; a cost-unk
   assert.equal(V.costNote(HERMES), 'Hermes Agent does not report cost, so the office shows it as unknown and no spend limit can stop it. Check the spend in its own account.');
   assert.equal(V.costNote(CC), '');
   assert.equal(V.costNote(LOCAL), '');
+});
+
+// The cloud kinds (#24): off until the owner sets them up, so they read "Not configured", not "Not ready".
+const FD = { kind: 'foundry', label: 'Azure AI Foundry', paid: true, cloud: true, terminal: false, modes: [], needsModel: true, modelLabel: 'Foundry agent', models: [] };
+const CS = { kind: 'copilot-studio', label: 'Copilot Studio', paid: true, cloud: true, terminal: false, modes: [], needsModel: false, models: [] };
+
+test('a cloud kind that is not set up reads Not configured, blocks Open session, and says so in its title', () => {
+  assert.deepEqual(V.kindState({ ...FD, ready: false, configured: false }), { key: 'resting', word: 'Not configured' });
+  assert.deepEqual(V.kindState({ ...FD, ready: false, configured: true }), { key: 'waiting', word: 'Not ready' }, 'set up, but the service said no');
+  assert.deepEqual(V.kindState({ ...FD, ready: true, configured: true }), { key: 'finished', word: 'Ready' });
+  assert.deepEqual(V.kindState({ ...FD, checking: true, configured: false }), { key: 'resting', word: 'Checking' });
+  assert.deepEqual(V.kindState({ ...OL, ready: false }), { key: 'waiting', word: 'Not ready' }, 'a kind that does not say configured is as before');
+  assert.equal(V.notConfigured({ ...CS, ready: false, configured: false }), true);
+  assert.equal(V.notConfigured({ ...CS, ready: false }), false);
+  assert.equal(V.notConfigured({ ...CS, ready: false, configured: false, checking: true }), false, 'still asking');
+  assert.equal(V.notConfigured(null), false);
+  assert.equal(V.needsTitle({ ...CS, configured: false }), 'Copilot Studio is not configured');
+  assert.equal(V.needsTitle({ ...CS, configured: true }), 'Copilot Studio is not ready');
+  assert.equal(V.needsTitle({ ...OL }), 'Ollama is not ready');
+});
+
+test('the pick is called Foundry agent for Foundry and Model for the rest', () => {
+  assert.equal(V.modelLabel(FD), 'Foundry agent');
+  assert.equal(V.modelLabel(OL), 'Model');
+  assert.equal(V.modelLabel(null), 'Model');
+});
+
+test('the note of a cloud kind says it runs in your cloud account, costs money, cannot read the folder and never signs in', () => {
+  const n = V.kindNote(CS, false);
+  assert.match(n, /^Runs Copilot Studio in your Microsoft cloud account\./);
+  assert.match(n, /cost money/);
+  assert.match(n, /cannot read the folder/);
+  assert.match(n, /never signs in/);
+});
+
+test('the note of a cloud kind does not promise approvals the office cannot hold: its tools run in the cloud', () => {
+  for (const k of [CS, FD]) {
+    const n = V.kindNote(k, false);
+    assert.doesNotMatch(n, /approve its steps/, k.kind);
+    assert.match(n, /tools run in the cloud with no approval here/, k.kind);
+    assert.match(n, /Only a request the service sends for approval comes to you/, k.kind);
+  }
+});
+
+test('the pick of Foundry speaks of agents, not models, in every word around it', () => {
+  assert.equal(V.modelNoun(FD), 'agent');
+  assert.equal(V.modelNoun(OL), 'model');
+  assert.equal(V.modelNoun(null), 'model');
+  assert.deepEqual(V.modelChoices(FD), [{ value: '', label: 'No agents' }]);
+  assert.deepEqual(V.modelChoices({ ...FD, checking: true }), [{ value: '', label: 'Looking for agents' }]);
+  assert.equal(V.pickFact(FD), 'You pick the Foundry agent');
+  assert.equal(V.pickFact(OL), 'You pick the model');
+  assert.equal(V.pickFact({ ...OL, needsModel: false }), null);
+});
+
+test('tool calls of the cloud agents get a DS tool kind', () => {
+  assert.equal(V.toolKind('code_interpreter'), 'terminal');
+  assert.equal(V.toolKind('file_search'), 'search');
+  assert.equal(V.toolKind('bing_grounding'), 'search');
+  assert.equal(V.toolKind('Knowledge'), 'search');
+  assert.equal(V.toolKind('Connector'), 'mcp');
+  assert.equal(V.toolKind('Topic'), 'flow');
+  assert.equal(V.toolKind('Whatever'), 'api');
 });

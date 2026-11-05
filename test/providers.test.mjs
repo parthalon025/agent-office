@@ -130,7 +130,8 @@ test('status: readiness and models of each provider; a failing or silent one is 
   // Each entry starts with what kinds() says of the provider (the Open dialog's options), then its readiness, then what
   // a provider says after readiness (canResume, features: an ACP agent learns them at its handshake).
   const plain = { paid: true, terminal: false, modes: [], needsModel: false, control: false, gated: true, supervision: null, cost: 'reported', team: false };
-  const after = { canResume: false, features: [] };
+  // configured comes with readiness: false only for a kind the user has not set up yet (a cloud kind, #24).
+  const after = { configured: true, canResume: false, features: [] };
   assert.deepEqual(out, [
     { kind: 'fake', label: 'Fake agent', ...plain, ready: true, version: '1.0', needs: [], models: [{ id: 'fake-1', label: 'Fake 1' }], ...after },
     { kind: 'broken', label: 'Broken', ...plain, ready: false, version: null, needs: ['The office could not check Broken: boom'], models: [], ...after },

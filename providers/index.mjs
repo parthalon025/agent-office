@@ -9,8 +9,10 @@
 // Provider (checkProvider tests the shape)
 //   kind                               id of the agent kind: 'claude-code'. A session keeps it as `s.provider`.
 //   label                              name for the user: 'Claude Code'.
-//   readiness() -> Promise<{ ready, version, needs }>
+//   readiness() -> Promise<{ ready, version, needs, configured? }>
 //                                      installed, signed in, model server up. needs: steps for the user, in plain words.
+//                                      configured: false when the user has not set the kind up yet (a cloud kind with no endpoint or
+//                                      token): the page says "Not configured" in place of "Not ready". Without it: true.
 //   models() -> Promise<[{ id, label }]>   the models the user can pick.
 //   open(s, opts)                      start the agent for tracker session s, in s.cwd. opts: { model, permissionMode, budget,
 //                                      resume, fork }. fork: the session id of a past session to copy (only with the fork feature). May set s.pid when the
@@ -51,6 +53,9 @@
 //   needsModel             (optional)  true when open() needs opts.model (a local model). Without it the agent has a default.
 //   team                   (optional)  true when the session is a team of agents (Agent Framework): its members show as helper
 //                                      bots when the work passes to them. Without it: one agent.
+//   modelLabel             (optional)  what the dialog calls the pick when it is not a model: 'Foundry agent'. Without it: 'Model'.
+//   cloud                  (optional)  true when the agent runs in the owner's cloud account, not on this machine (Foundry, Copilot Studio).
+//                                      The agent cannot read the folder; the folder only sets its desk. Such a kind is off until configured.
 //   openWindow(s, opts)    (optional)  open the agent in its own terminal window (Claude Code). Without it: in the office only.
 //   control(s, request, onDone) (optional) a control request to a running session: change mode or model, connectors
 //                                      (Claude Code). Without it the office refuses those requests (409).
@@ -148,6 +153,8 @@ export function checkProvider(p) {
   if (p.modes !== undefined && !(Array.isArray(p.modes) && p.modes.every((m) => typeof m === 'string' && m))) missing.push('modes (optional, but then a list of mode names)');
   if (p.needsModel !== undefined && typeof p.needsModel !== 'boolean') missing.push('needsModel (optional, but then true or false)');
   if (p.team !== undefined && typeof p.team !== 'boolean') missing.push('team (optional, but then true or false)');
+  if (p.cloud !== undefined && typeof p.cloud !== 'boolean') missing.push('cloud (optional, but then true or false)');
+  if (p.modelLabel !== undefined && !(typeof p.modelLabel === 'string' && p.modelLabel)) missing.push('modelLabel (optional, but then a word)');
   if (p.openWindow !== undefined && typeof p.openWindow !== 'function') missing.push('openWindow() (optional, but then a function)');
   if (p.control !== undefined && typeof p.control !== 'function') missing.push('control() (optional, but then a function)');
   if (p.learn !== undefined && typeof p.learn !== 'function') missing.push('learn() (optional, but then a function)');
@@ -209,12 +216,14 @@ function settled(p, ms, fallback) {
  * takes), needsModel (the user must pick a model), control (a running session takes control requests: a model or mode
  * change, connectors; the dock offers them only then), gated and supervision (ADR 0001: an ungated kind opens only in a
  * room of its own, with its label), cost ('unknown': the office asks before it runs and shows no dollars),
- * team (a team of agents: members show as helper bots) }.
+ * team (a team of agents: members show as helper bots) }, and only when the provider says so: cloud (it runs in the
+ * owner's cloud account), modelLabel (the pick is not called Model).
  */
 export function describe(p) {
   return { kind: p.kind, label: p.label, paid: isPaid(p), terminal: typeof p.openWindow === 'function', modes: Array.isArray(p.modes) ? [...p.modes] : [],
     needsModel: p.needsModel === true, control: typeof p.control === 'function', gated: isGated(p), supervision: supervisionOf(p), cost: costOf(p),
-    team: p.team === true };
+    team: p.team === true,
+    ...(p.cloud === true ? { cloud: true } : {}), ...(p.modelLabel ? { modelLabel: p.modelLabel } : {}) };
 }
 
 /** The providers of one office, by kind. */
@@ -260,7 +269,7 @@ export function createRegistry(list) {
         const r = await settled(() => p.readiness(), timeoutMs,
           (e) => ({ ready: false, version: null, needs: [`The office could not check ${p.label}: ${e.message}`] }));
         const models = r.ready ? await settled(() => p.models(), timeoutMs, () => []) : [];
-        return { ...describe(p), ready: r.ready === true, version: r.version || null, needs: Array.isArray(r.needs) ? r.needs : [], models,
+        return { ...describe(p), ready: r.ready === true, configured: r.configured !== false, version: r.version || null, needs: Array.isArray(r.needs) ? r.needs : [], models,
           canResume: p.canResume === true, features: featuresOf(p) };
       }));
     },

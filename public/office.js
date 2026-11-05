@@ -24,7 +24,10 @@
     var n = Number(t);
     return isFinite(n) ? n : t;
   }
-  function limitHint(label) { return label + ' stops at this limit. Clear the field for no limit.'; }
+  function limitHint(label, cloud) {
+    // A cloud service reports no dollars. The office counts the prices the owner sets in the environment (README).
+    return label + (cloud ? ' stops at this limit, counted from the prices you set (see the README). With no prices set, nothing is counted. Clear the field for no limit.' : ' stops at this limit. Clear the field for no limit.');
+  }
   var LIMIT_HINT = limitHint('Claude Code');   // schedules start Claude Code only
   var KIND = [{ value: 'every', label: 'Every N minutes' }, { value: 'daily', label: 'Every day at' }];
 
@@ -169,7 +172,7 @@
     var list = ((snap && snap.kinds) || []).map(function (k) {
       if (!status) return Object.assign({}, k, { checking: true, ready: false, version: null, needs: [], models: [] });
       var r = status[k.kind] || { ready: false, version: null, models: [], needs: ['The office could not check ' + k.label + '. Check again.'] };
-      return Object.assign({}, k, { checking: false, ready: r.ready === true, version: r.version || null, needs: r.needs || [], models: r.models || [] });
+      return Object.assign({}, k, { checking: false, ready: r.ready === true, configured: r.configured !== false, version: r.version || null, needs: r.needs || [], models: r.models || [] });
     });
     return { list: list, checking: busy || !status, recheck: function () { setRound(round + 1); } };
   }
@@ -177,16 +180,16 @@
   function KindNeeds(p) {
     var k = p.kind, needs = k.needs && k.needs.length ? k.needs : ['It did not say what it needs.'];
     return h('div', { className: 'kind-need', role: 'status' },
-      h('span', { className: 'sess-state' }, h(A.StatusDot, { status: 'waiting' }), h('b', null, k.label + ' is not ready')),
+      h('span', { className: 'sess-state' }, h(A.StatusDot, { status: 'waiting' }), h('b', null, KV.needsTitle(k))),
       h('ul', { className: 'kind-steps' }, needs.map(function (n, i) { return h('li', { key: i }, n); })),
       p.onRecheck ? h('div', { className: 'btn-row' }, h(A.Button, { variant: 'quiet', icon: 'retry', loading: !!p.checking, onClick: p.onRecheck }, 'Check again')) : null);
   }
   // The agent kind and its model, for Open session and a room's Add agent. p: { id, kinds (useKinds), kind, model, onKind(id), onModel(v) }
   function KindFields(p) {
     var K = p.kinds, k = kindOf(K.list, p.kind);
-    var opts = K.list.map(function (x) { return { value: x.kind, label: x.label + (x.checking || x.ready ? '' : ' · Not ready') }; });
-    var model = h(A.Select, { id: p.id + '-model', label: 'Model', options: modelChoices(k), value: p.model, disabled: KV.noModelFor(k), onChange: p.onModel,
-      hint: k && k.needsModel && k.checking ? 'Asking ' + k.label + ' for its models.' : undefined });
+    var opts = K.list.map(function (x) { return { value: x.kind, label: x.label + (x.checking || x.ready ? '' : ' · ' + KV.kindState(x).word) }; });
+    var model = h(A.Select, { id: p.id + '-model', label: KV.modelLabel(k), options: modelChoices(k), value: p.model, disabled: KV.noModelFor(k), onChange: p.onModel,
+      hint: k && k.needsModel && k.checking ? 'Asking ' + k.label + ' for its ' + KV.modelNoun(k) + 's.' : undefined });
     return h(React.Fragment, null,
       K.list.length > 1 ? Pair(h(A.Select, { id: p.id + '-kind', label: 'Agent', options: opts, value: k ? k.kind : '', onChange: p.onKind }), model) : model,
       k && !k.checking && !k.ready ? h(KindNeeds, { kind: k, onRecheck: K.recheck, checking: K.checking }) : null);
@@ -257,7 +260,7 @@
     }
     function delTemplate() { api('/api/template/delete', { id: form.template }).then(function () { setForm(Object.assign({}, form, { template: '' })); p.onTemplates(); }, function (x) { setErr(x.message); }); }
     var terminal = canWindow && form.where === 'terminal';
-    var blocked = KV.noModelFor(k);
+    var blocked = KV.noModelFor(k) || KV.notConfigured(k);
     // The server owns the folder rules (place.mjs recentChoices); until its answer comes, show the stored list.
     var fc = useState(null), fetched = fc[0], setFetched = fc[1];
     useEffect(function () {
@@ -283,7 +286,7 @@
         canWindow ? h(A.Select, { key: 'w', id: 'f-where', label: 'Runs', options: WHERE, value: form.where, onChange: set('where') }) : null,
         h(UseFolder, { key: 'i', checked: form.useFolder || terminal, disabled: terminal, onChange: set('useFolder'),
           hint: terminal ? 'A terminal window works in the folder.' : form.useFolder ? 'The agent works in this folder. Other agents in it share its room.' : 'The agent gets its own room: a new branch in its own folder next to the repository. Your branch stays untouched.' }),
-        limited ? h(A.TextInput, { key: 'b', id: 'f-budget', label: 'Spend limit in USD', value: form.maxBudget, placeholder: 'No limit', disabled: terminal, onChange: set('maxBudget'), hint: terminal ? undefined : limitHint(k ? k.label : 'Claude Code') })
+        limited ? h(A.TextInput, { key: 'b', id: 'f-budget', label: 'Spend limit in USD', value: form.maxBudget, placeholder: 'No limit', disabled: terminal, onChange: set('maxBudget'), hint: terminal ? undefined : limitHint(k ? k.label : 'Claude Code', k && k.cloud) })
           : costNote ? h('p', { key: 'b', className: 'note' }, costNote) : null,
         // The server opens Claude Code in Default mode while a rule the user set to Ask applies (security.mjs permissionModeFor); the hint shows only then.
         hasModes ? h(A.Select, { key: 'm', id: 'f-mode', label: 'Permissions', options: modes, value: form.permissionMode, onChange: set('permissionMode'),
@@ -658,22 +661,24 @@
       h(A.Button, { key: 'r', variant: 'quiet', icon: 'retry', loading: K.checking, onClick: K.recheck }, 'Check again'),
       h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
       h('div', { className: 'form wide' },
-        h('p', { className: 'note' }, 'The agents the office can run. A kind that is not ready says what it needs. Local models run on this machine and cost nothing.'),
+        h('p', { className: 'note' }, 'The agents the office can run. A kind that is not ready says what it needs. Local models run on this machine and cost nothing. Cloud kinds stay off until you set them up. The README has the steps.'),
         h(Busy, { on: !K.list.length }),
         h('ul', { className: 'past' }, K.list.map(function (k) {
           var r = KV.kindState(k);
-          var facts = [k.terminal ? 'Runs in the office or a terminal window' : 'Runs in the office', KV.limitShown(k) ? 'Spend limit applies' : KV.costNote(k) ? 'Cost unknown, no spend limit' : 'No cost',
-            k.modes.length ? 'Permission modes' : null, k.needsModel ? 'You pick the model' : null, k.team ? 'A team: members show as helper bots' : null].filter(Boolean).join(' · ');
+          var facts = [k.terminal ? 'Runs in the office or a terminal window' : k.cloud ? 'Runs in your cloud account, steered from the office' : 'Runs in the office',
+            KV.limitShown(k) ? (k.cloud ? 'Spend limit counts the prices you set' : 'Spend limit applies') : KV.costNote(k) ? 'Cost unknown, no spend limit' : 'No cost',
+            k.modes.length ? 'Permission modes' : null, KV.pickFact(k), k.team ? 'A team: members show as helper bots' : null].filter(Boolean).join(' · ');
           var names = k.models.map(function (m) { return m.label || m.id; }).join(', ');
+          var noun = KV.modelNoun(k);
           return h('li', { key: k.kind, className: 'past-row' },
             h('div', { className: 'past-main' },
               h('div', { className: 'past-title' }, h('b', null, k.label), h('span', { className: 'sess-state' }, h(A.StatusDot, { status: r.key }), r.word), k.version ? h(Tag, null, k.version) : null),
               h('div', { className: 'past-meta' }, facts),
               k.checking ? null : k.ready
-                ? (names ? h('div', { className: 'past-sub mono', title: names }, 'Models: ' + names) : null)
+                ? (names ? h('div', { className: 'past-sub mono', title: names }, noun.charAt(0).toUpperCase() + noun.slice(1) + 's: ' + names) : null)
                 : h('ul', { className: 'kind-steps' }, (k.needs.length ? k.needs : ['It did not say what it needs.']).map(function (n, i) { return h('li', { key: i }, n); }))),
             h('div', { className: 'past-actions' },
-              h(A.Button, { variant: 'quiet', icon: 'add', disabled: k.checking || KV.noModelFor(k), onClick: function () { p.onOpen(k.kind); } }, 'Open session')));
+              h(A.Button, { variant: 'quiet', icon: 'add', disabled: k.checking || KV.noModelFor(k) || KV.notConfigured(k), onClick: function () { p.onOpen(k.kind); } }, 'Open session')));
         }))));
   }
 
@@ -1265,7 +1270,7 @@
           err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
     }
     return h(A.Dialog, { key: add ? 'add' : 'list', open: true, title: title, onClose: p.onClose, actions: add
-      ? [h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setAdd(null); setErr(''); } }, 'Cancel'), h(A.Button, { key: 'a', variant: 'primary', icon: 'add', loading: busy, disabled: KV.noModelFor(addKind), onClick: addAgent }, 'Add agent')]
+      ? [h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setAdd(null); setErr(''); } }, 'Cancel'), h(A.Button, { key: 'a', variant: 'primary', icon: 'add', loading: busy, disabled: KV.noModelFor(addKind) || KV.notConfigured(addKind), onClick: addAgent }, 'Add agent')]
       : [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
       h('div', { className: 'form' },
         add ? h(React.Fragment, null,
