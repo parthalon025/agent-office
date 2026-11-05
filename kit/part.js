@@ -1,4 +1,4 @@
-/* Agent Office kit x1.6.9: a custom role with its own workstation. Load after bundle.js and before you mount.
+/* Agent Office kit x1.7: a custom role with its own workstation. Load after bundle.js and before you mount.
    Build meshes inside the builder: the nav grid reads them, and bots walk around them. */
 (function () {
   var O = AgentOffice.office, P = O.Parts, H = O.helpers;

@@ -1,4 +1,4 @@
-# Icons (Agent Office DS x1.6.9)
+# Icons (Agent Office DS x1.7)
 
 Line icons on a 24 x 24 grid with 2 px of padding (live area 2-22). Stroke is 1.75 px, round caps and round joins, no fill (small dots for eyes and LEDs are filled). The files use the ink colour `#18212b` and are for `<img>` use on light grounds. On dark grounds, do not use the files: use the inline icon component (`AgentOffice.ICONS[name]` in `src/assets.js`), which takes `currentColor`. Use the icons at 16, 20, 24 or 48 px. Do not change the stroke width. In the Sublevel theme, use the inline icons with `color: #102a33` (Sublevel ink).
 
@@ -26,6 +26,8 @@ Orchestration icons (x0.8): `tool` is two meshed gears; `settings` is one gear w
 | `day` | ![](day.svg) | Day lighting mode. |
 | `night` | ![](night.svg) | Night lighting mode. |
 | `tour` | ![](tour.svg) | Start the guided camera tour. |
+| `fluent` | ![](fluent.svg) | Fluent theme: a round window with a wave. An original mark, not a product logo. |
+| `fluentdark` | ![](fluentdark.svg) | Fluent Dark theme: the same window with a filled night sky and a crescent moon. The fill is the one large fill in the set: it keeps the icon apart from `fluent` at 14 px, where the mode toggle shows icons only. An original mark, not a product logo. |
 | `sound` | ![](sound.svg) | Sound is on. Select to turn it off. |
 | `sound-off` | ![](sound-off.svg) | Sound is off. Select to turn it on. |
 | `session` | ![](session.svg) | A session: one run or conversation of an agent. |

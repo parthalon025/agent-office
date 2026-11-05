@@ -9,7 +9,7 @@ A search box for the whole office. The person types a few letters and jumps to a
 - When the person types text and a Manager exists, the first item is "Ask the Manager: <text>". It calls `onAsk(text)`. If other items match, the first match is active, so Enter jumps. Up selects the Manager item.
 - The match is a substring match on each word. "led cl" finds Ledger, Month-end close.
 - Up and Down move. Enter runs the item and closes the palette.
-- `AgentOffice.CommandPalette.actions(handlers)` makes the standard actions: Approve all low-risk, Open decisions, Replay since you left, Building view, Floor view, Day, Night, Sublevel, Turn sound on or off. Leave out a handler to hide its action. The handlers are `approveLowRisk`, `openDecisions`, `replay`, `setView(view)`, `setMode(mode)`, `sound`, `setSound(on)`.
+- `AgentOffice.CommandPalette.actions(handlers)` makes the standard actions: Approve all low-risk, Open decisions, Replay since you left, Building view, Floor view, one action for each theme of `AgentOffice.MODES` (Day, Night, Sublevel, Fluent, Fluent Dark), Turn sound on or off. Leave out a handler to hide its action. The handlers are `approveLowRisk`, `openDecisions`, `replay`, `setView(view)`, `setMode(mode)`, `sound`, `setSound(on)`.
 - Set `inline` to show it inside a box (for a preview card).
 
 ## Props

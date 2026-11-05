@@ -24,8 +24,11 @@ const py = (args) => {
 };
 
 test('tokens.css has every color token of tokens.json, with the same value, in each theme', () => {
-  const block = (open) => { const at = css.indexOf(open); return css.slice(at, css.indexOf('\n}', at)); };
-  const themes = { light: block(':root, [data-theme="light"] {'), dark: block('[data-theme="dark"] {'), sublevel: block('[data-theme="sublevel"] {') };
+  const block = (open) => { const at = css.indexOf(open); assert.ok(at >= 0, `tokens.css has ${open}`); return css.slice(at, css.indexOf('\n}', at)); };
+  // every theme of tokens.json, in its order: Day is the root block, each other theme has its own block
+  const ids = JSON.parse(read('tokens.json')).color.themes.map((t) => t.id);
+  assert.deepEqual(ids, ['light', 'dark', 'sublevel', 'fluent', 'fluent-dark']);
+  const themes = Object.fromEntries(ids.map((id) => [id, block(id === 'light' ? ':root, [data-theme="light"] {' : `\n[data-theme="${id}"] {`)]));
   for (const [th, text] of Object.entries(themes)) {
     for (const t of tokens) {
       const want = t.value[th].replace(/^\{(.+)\}$/, 'var(--$1)');
@@ -71,13 +74,13 @@ test('tokens.css has every non-color token of tokens.json, with the same value',
 
 test('tokens.css has every per-theme shadow token, with the same value, in each theme and in the system dark block', () => {
   const { perTheme } = nonColorProps();
-  const blocks = {
-    light: cssBlock(css, ':root, [data-theme="light"] {'),
-    dark: cssBlock(css, '[data-theme="dark"] {'),
-    sublevel: cssBlock(css, '[data-theme="sublevel"] {'),
-    system: cssBlock(css, ':root:not([data-theme]) {'),
-  };
+  // every theme of tokens.json (Fluent and Fluent Dark too), plus the system dark block, which takes the Night value
+  const ids = JSON.parse(read('tokens.json')).color.themes.map((t) => t.id);
+  for (const id of ['fluent', 'fluent-dark']) assert.ok(ids.includes(id), `tokens.json lists the ${id} theme`);
+  const blocks = Object.fromEntries(ids.map((id) => [id, cssBlock(css, id === 'light' ? ':root, [data-theme="light"] {' : `\n[data-theme="${id}"] {`)]));
+  blocks.system = cssBlock(css, ':root:not([data-theme]) {');
   for (const [name, value] of perTheme) {
+    assert.deepEqual(Object.keys(value), ids, `${name} has a value for every theme, in order`);
     for (const [th, text] of Object.entries(blocks)) {
       const got = cssProp(text, name);
       assert.ok(got !== undefined, `--${name} missing in ${th}`);
@@ -281,17 +284,23 @@ test('the DS files say they are edited by hand: no header or doc claims a genera
   assert.ok(!/`tokens\.css` \(generated/.test(read('DS-README.md')), 'DS-README does not call tokens.css generated');
 });
 
-test('bundle.js defines ModeToggle once, with icons and Sublevel; the types and docs list the same modes (#87)', () => {
+test('bundle.js defines ModeToggle once, with an icon on every mode; the types and docs list the same modes (#87)', () => {
   const b = read('components/bundle.js');
   assert.equal(b.match(/function ModeToggle\(/g).length, 1, 'one ModeToggle definition');
   assert.ok(!/NS=\{[^}]*ModeToggle/.test(b), 'the first IIFE does not export a ModeToggle');
   const at = b.indexOf('function ModeToggle(');
   const def = b.slice(at, b.indexOf('\n', at));
-  for (const id of ['day', 'night', 'sublevel', 'tour']) assert.match(def, new RegExp(`id:"${id}",label:"[A-Za-z]+",icon:"[a-z]+"`), `default option ${id} has an icon`);
+  // the default options are the themes of AO.MODES (one per theme of tokens.json, Fluent too), then Tour
+  assert.match(def, /var opts=p\.options\|\|AO\.MODES\.concat\(\[\{id:"tour",label:"Tour",icon:"tour"\}\]\)/, 'default options: AO.MODES, then Tour');
+  const ma = b.indexOf('AO.MODES=[');
+  const modes = b.slice(ma, b.indexOf('];', ma));
+  const themes = JSON.parse(read('tokens.json')).color.themes;
+  for (const t of themes) assert.match(modes, new RegExp(`theme:"${t.id}",label:"${t.name}",icon:"[a-z]+"`), `AO.MODES has ${t.name} with an icon`);
   assert.match(read('components/index.d.ts'), /interface ModeToggleProps \{[^}]*options\?: \{ id: string; label: string; icon\?: string \}\[\]/, 'index.d.ts: options take an icon');
   assert.match(read('components/ModeToggle/README.md'), /\| `options` \| no \| `\{ id: string; label: string; icon\?: string \}\[\]` \|/, 'component README: options take an icon');
+  const list = new RegExp(`${themes.map((t) => t.name).join(', ')}\\)? and Tour`);
   for (const f of ['Reference.md', 'components/ModeToggle/README.md']) {
-    assert.match(read(f), /scene mode: Day, Night, Sublevel, Tour/, `${f} lists Day, Night, Sublevel and Tour`);
+    assert.match(read(f), list, `${f} lists ${themes.map((t) => t.name).join(', ')} and Tour`);
   }
 });
 

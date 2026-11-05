@@ -12,3 +12,5 @@ history.json
 /history-*.json
 .playwright-mcp/
 .scratch/
+# Screenshots of a visual check: never commit them.
+/.screens/

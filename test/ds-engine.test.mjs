@@ -794,6 +794,251 @@ test('Kit.refresh frees the textures it drops from K.tex, once; screens get the 
   assert.equal(spent.get(K.tex['scr-coder']), undefined, 'the shown one is kept');
 });
 
+// ----- Themes (x1.7): one list, AO.MODES, drives the engine, the mode controls and the palette; Fluent and Fluent Dark are full themes -----
+const tokensJson = JSON.parse(readFileSync(join(root, 'tokens.json'), 'utf8'));
+const tokensCss = readFileSync(join(root, 'tokens.css'), 'utf8').replace(/\r\n/g, '\n');
+const rootVals = (() => {
+  const at = tokensCss.indexOf(':root, [data-theme="light"] {'), text = tokensCss.slice(at, tokensCss.indexOf('\n}', at)), o = {};
+  for (const m of text.matchAll(/\n\s*--([a-z0-9-]+): ([^;]+);/g)) o[m[1]] = m[2];
+  return o;
+})();
+function modes() { const AO = {}; new Function('AO', source('AO.MODES=[', '];\n'))(AO); return AO.MODES; }
+
+test('AO.MODES lists every theme of tokens.json, in order, each with a look id, a label and an icon of the set', () => {
+  const M = modes();
+  assert.deepEqual(M.map((m) => m.theme), tokensJson.color.themes.map((t) => t.id));
+  assert.deepEqual(M.map((m) => m.label), tokensJson.color.themes.map((t) => t.name));
+  assert.deepEqual(M.map((m) => m.id), ['day', 'night', 'sublevel', 'fluent', 'fluent-dark']);
+  const icons = JSON.parse(readFileSync(join(root, 'kit', 'schema.json'), 'utf8')).icons;
+  for (const m of M) assert.ok(icons.includes(m.icon), `icon ${m.icon} of ${m.id} is in the set`);
+  assert.equal(new Set(M.map((m) => m.id)).size, M.length);
+  // each theme has its own icon: below 520 px the toggle shows icons only, so two themes with one icon would look the same
+  assert.equal(new Set(M.map((m) => m.icon)).size, M.length, 'one icon per theme');
+  // the dark flag: Night and Fluent Dark are dark scenes, the others are not
+  assert.deepEqual(M.filter((m) => m.dark === true).map((m) => m.id), ['night', 'fluent-dark']);
+  for (const m of M) assert.ok(m.dark === true || m.dark === undefined, `${m.id}: dark is true or not set`);
+});
+
+test('every look has its light (LOOKS), its effects (FX) and its light-* and fx-* tokens, and readScene reads them', () => {
+  const run = new Function('AO', 'getComputedStyle', 'document',
+    'var DEPTH,PITCH,GAP,FLOOR_H,DUR={},HANDOFF={},WALK={},NAV={},LOOKS;' + source('var FX={', '};\n') + source('function num(cs,n,f){', '}\n') +
+    source('LOOKS={day:', '};\n') + source('function readScene(el){', '}\n') + 'readScene();return {FX:FX,LOOKS:LOOKS};');
+  const { FX, LOOKS } = run({ MODES: modes() }, () => ({ getPropertyValue: (n) => rootVals[n.slice(2)] ?? '' }), { documentElement: {} });
+  for (const { id } of modes()) {
+    const L = LOOKS[id];
+    assert.ok(L, `LOOKS.${id}`);
+    for (const k of ['hi', 'hc', 'hg', 'si', 'sc', 'lamp']) assert.equal(typeof L[k], 'number', `LOOKS.${id}.${k}`);
+    assert.equal(L.sp.length, 3, `LOOKS.${id}.sp`);
+    for (const [k, tok] of [['hi', 'sky'], ['si', 'sun'], ['lamp', 'lamp']]) {
+      assert.ok(`light-${id}-${tok}` in rootVals, `tokens.css has --light-${id}-${tok}`);
+      assert.equal(L[k], parseFloat(rootVals[`light-${id}-${tok}`]), `LOOKS.${id}.${k} comes from the token`);
+    }
+    for (const [k, tok] of [['bloom', 'bloom'], ['thr', 'threshold'], ['exp', 'exposure'], ['fog', 'fog'], ['vig', 'vignette']]) {
+      assert.ok(`fx-${tok}-${id}` in rootVals, `tokens.css has --fx-${tok}-${id}`);
+      assert.equal(FX[k][id], parseFloat(rootVals[`fx-${tok}-${id}`]), `FX.${k}.${id} comes from the token`);
+    }
+  }
+  // Fluent: soft daylight. Low bloom above white, a light haze, no vignette, room lamps off.
+  assert.ok(FX.bloom.fluent < FX.bloom.day && FX.thr.fluent > 1 && FX.vig.fluent === 0 && FX.fog.fluent > 0 && FX.fog.fluent < FX.fog.sublevel);
+  assert.equal(LOOKS.fluent.lamp, 0);
+  // Fluent Dark: a dim interior between Night and Fluent. Lamps on but softer than Night, screens bloom (threshold
+  // below white) less than at night, a haze and a light vignette. It keeps the Fluent sun angle.
+  const fd = 'fluent-dark';
+  assert.ok(LOOKS[fd].hi > LOOKS.night.hi && LOOKS[fd].hi < LOOKS.fluent.hi, 'sky between Night and Fluent');
+  assert.ok(LOOKS[fd].lamp > 0 && LOOKS[fd].lamp < LOOKS.night.lamp, 'lamps on, softer than Night');
+  assert.ok(FX.bloom[fd] > FX.bloom.fluent && FX.bloom[fd] < FX.bloom.night && FX.thr[fd] < 1, 'screens bloom, less than Night');
+  assert.ok(FX.vig[fd] > 0 && FX.vig[fd] < FX.vig.night && FX.fog[fd] > 0 && FX.fog[fd] < FX.fog.night);
+  assert.deepEqual(LOOKS[fd].sp, LOOKS.fluent.sp);
+});
+
+test('theme to look and back: Stage.look and setMode follow AO.MODES; an unknown theme shows the Day look', () => {
+  function Stage() {}
+  let theme = null;
+  const { map, dark } = new Function('AO', 'Stage', 'themeOf', source('var THEME_OF={},LOOK_OF={},DARK={};', '\n') + source('Stage.prototype.look=function', '};\n') +
+    source('Stage.prototype.setMode=function', '};\n') + 'return {map:THEME_OF,dark:DARK};')({ MODES: modes() }, Stage, () => theme);
+  assert.deepEqual(map, { day: 'light', night: 'dark', sublevel: 'sublevel', fluent: 'fluent', 'fluent-dark': 'fluent-dark' });
+  assert.deepEqual(dark, { day: false, night: true, sublevel: false, fluent: false, 'fluent-dark': true });
+  const s = Object.assign(Object.create(Stage.prototype), { mode: 'auto', K: { refresh() {} }, applyMode() {} });
+  for (const [t, look] of [['light', 'day'], ['dark', 'night'], ['sublevel', 'sublevel'], ['fluent', 'fluent'], ['fluent-dark', 'fluent-dark'], ['nope', 'day'], [null, 'day']]) {
+    theme = t; assert.equal(s.look(), look, `theme ${t}`);
+  }
+  const attrs = {};
+  s.root = { setAttribute(k, v) { attrs[k] = v; } };
+  s.setMode('fluent');
+  assert.equal(attrs['data-theme'], 'fluent');
+  assert.equal(s.mode, 'auto', 'with a root the theme attribute decides the look');
+  s.root = null; s.setMode('fluent');
+  assert.equal(s.look(), 'fluent', 'without a root the mode is the look');
+  s.root = { setAttribute(k, v) { attrs[k] = v; } };
+  s.setMode('fluent-dark');
+  assert.equal(attrs['data-theme'], 'fluent-dark');
+  assert.match(bundle, /var THEME_BY_LOOK=THEME_OF;/);
+});
+
+test('the mode controls and the palette list every theme from AO.MODES, then Tour', () => {
+  const AO = { MODES: modes() };
+  const opts = new Function('AO', source('var MODE_OPTS=', '\n') + 'return MODE_OPTS;')(AO);
+  assert.deepEqual(opts.map((o) => o.id), ['day', 'night', 'sublevel', 'fluent', 'fluent-dark', 'tour']);
+  assert.match(bundle, /function ModeToggle\(p\)\{var opts=p\.options\|\|AO\.MODES\.concat\(\[\{id:"tour",label:"Tour",icon:"tour"\}\]\);/);
+  const CP = {}, set = [];
+  new Function('AO', 'CommandPalette', source('CommandPalette.actions=function(x){', '};\n'))(AO, CP);
+  const acts = CP.actions({ setMode: (m) => set.push(m), setView() {}, setSound() {} }).filter((a) => a.group === 'Theme');
+  assert.deepEqual(acts.map((a) => [a.id, a.label, a.icon]), [['mode-day', 'Day', 'day'], ['mode-night', 'Night', 'night'], ['mode-sublevel', 'Sublevel', 'terminal'], ['mode-fluent', 'Fluent', 'fluent'], ['mode-fluent-dark', 'Fluent Dark', 'fluentdark']]);
+  acts.forEach((a) => a.run());
+  assert.deepEqual(set, ['day', 'night', 'sublevel', 'fluent', 'fluent-dark']);
+  assert.equal(CP.actions({}).length, 0, 'no handlers, no actions');
+});
+
+test('the page reads the theme list from the DS and keeps no copy (office.js City toggle, city.js)', () => {
+  const office = readFileSync(join(root, 'public', 'office.js'), 'utf8'), city = readFileSync(join(root, 'public', 'city.js'), 'utf8');
+  assert.match(office, /var CITY_MODES = A\.MODES;/);
+  assert.match(office, /if \(CITY_MODES\[i\]\.theme === t\) return CITY_MODES\[i\]\.id;/);
+  for (const src of [office, city]) assert.doesNotMatch(src, /sublevel: 'sublevel'|id: 'sublevel'|t === 'sublevel'/, 'no hand-made theme map');
+  assert.match(city, /\(A\.MODES \|\| \[\]\)\.filter\(function \(x\) \{ return x\.id === m; \}\)\[0\]/);
+});
+
+test('Fluent and Fluent Dark set the system faces and small corners through tokens, and load no font file', () => {
+  const css = readFileSync(join(root, 'components', 'bundle.css'), 'utf8');
+  // one selector for the family: [data-theme|="fluent"] matches "fluent" and "fluent-dark", so no Fluent rule is copied per theme
+  assert.match(css, /\[data-theme\|="fluent"\]\{--font-sans:var\(--font-fluent-sans\);--font-mono:var\(--font-fluent-mono\);--radius-sm:var\(--radius-fluent-sm\);--radius-md:var\(--radius-fluent-md\);--radius-lg:var\(--radius-fluent-lg\)\}/);
+  assert.ok(!css.includes('[data-theme="fluent"]'), 'no rule for Fluent alone: the look rules are for the family');
+  const dk = css.split(/\r?\n/).filter((l) => l.includes('[data-theme="fluent-dark"]'));
+  assert.equal(dk.length, 1, 'Fluent Dark has one rule of its own');
+  assert.match(dk[0], /^\[data-theme="dark"\],\[data-theme="fluent-dark"\]\{color-scheme:dark\}$/, 'and it is the dark color scheme, shared with Night');
+  // the structure swatch needs no theme list: floor-ops by default, the green carpet in Sublevel
+  assert.match(css, /\.ao-ratio-30\{flex:30;background:var\(--floor-ops\);color:var\(--on-floor\)\}/);
+  assert.ok(!/\[data-theme="(light|dark)"\] \.ao-ratio-30/.test(css));
+  for (const n of ['radius-fluent-sm', 'radius-fluent-md', 'radius-fluent-lg', 'font-fluent-sans', 'font-fluent-mono']) assert.ok(n in rootVals, `tokens.css has --${n}`);
+  assert.deepEqual(['sm', 'md', 'lg'].map((k) => rootVals['radius-fluent-' + k]), ['4px', '4px', '8px']);
+  const fonts = readFileSync(join(root, 'public', 'vendor', 'fonts', 'fonts.css'), 'utf8');
+  for (const f of ['Segoe', 'Cascadia', 'Consolas']) assert.ok(!fonts.includes(f), `fonts.css has no ${f} face: Fluent uses the system faces`);
+  // the Fluent shadow is the panel shadow of the theme, two layers (ambient and key)
+  for (const th of ['fluent', 'fluent-dark']) {
+    const sh = tokensJson.shadow.tokens.find((t) => t.name === 'shadow-panel').value[th];
+    assert.equal(sh.split('),').length, 2, `${th}: two shadow layers`);
+  }
+});
+
+test('the browser draws scrollbars and check boxes dark in every dark theme of AO.MODES, and light in the others', () => {
+  const css = readFileSync(join(root, 'components', 'bundle.css'), 'utf8');
+  // the theme root sets the scheme, and color-scheme is inherited, so no control needs a rule of its own
+  const lines = css.split(/\r?\n/);
+  assert.ok(lines.includes('[data-theme]{color-scheme:light}'), 'a light theme inside a dark one sets the light scheme back');
+  const rule = lines.filter((l) => /\{color-scheme:dark\}$/.test(l) && l.startsWith('[data-theme='));
+  assert.equal(rule.length, 1, 'one rule lists the dark themes');
+  assert.ok(lines.indexOf(rule[0]) > lines.indexOf('[data-theme]{color-scheme:light}'), 'after the light default, so it wins at the same specificity');
+  const listed = [...rule[0].matchAll(/\[data-theme="([a-z-]+)"\]/g)].map((m) => m[1]);
+  assert.deepEqual(listed, modes().filter((m) => m.dark).map((m) => m.theme), 'the list is the themes with dark: true');
+  assert.match(css, /@media \(prefers-color-scheme:dark\)\{:root:not\(\[data-theme\]\)\{color-scheme:dark\}\}/, 'no theme and OS dark mode: the Night tokens and the dark scheme');
+  assert.ok(!/\.ao-[a-z-]+[^{}]*\{color-scheme:dark\}/.test(css), 'no control rule of its own');
+  // the notes editor is a light face in every theme, so its scrollbar stays light
+  assert.match(readFileSync(join(root, 'public', 'office.css'), 'utf8'), /\.notes-text \{[^}]*background: var\(--bubble\);[^}]*color-scheme: light; \}/);
+});
+
+test('the fluent and fluentdark icons are in the bundle, the schema and assets/Icons, with the same drawing; neither is a four-pane mark', () => {
+  const icons = JSON.parse(readFileSync(join(root, 'kit', 'schema.json'), 'utf8')).icons;
+  const inners = {};
+  for (const name of ['fluent', 'fluentdark']) {
+    const m = bundle.match(new RegExp(`\\n {4}"${name}": "(<g [^\\n]*<\\/g>)"`));
+    assert.ok(m, `AO.ICONS.${name}`);
+    assert.ok(icons.includes(name), `kit/schema.json lists ${name}`);
+    // the files use the ink color where the inline icon uses currentColor
+    const inner = inners[name] = m[1].replace(/\\"/g, '"').replace(/^<g[^>]*>|<\/g>$/g, '').replace(/currentColor/g, '#18212b');
+    const svg = readFileSync(join(root, 'assets', 'Icons', name + '.svg'), 'utf8');
+    assert.ok(svg.includes(inner), `assets/Icons/${name}.svg draws the same shapes`);
+    assert.equal((inner.match(/<rect/g) || []).length, 1, `${name}: one frame, no grid of panes`);
+  }
+  // Fluent Dark is the same window with a filled sky, so the two differ at 14 px, where the toggle shows icons only
+  assert.ok(inners.fluentdark.startsWith(inners.fluent.slice(0, inners.fluent.indexOf('<circle'))), 'the same frame and wave');
+  assert.match(inners.fluentdark, /fill="#18212b" stroke="none" fill-rule="evenodd"/);
+});
+
+test('a dark theme is a flag of AO.MODES: the engine sets K.dark, and the window, the screen glow, the desk light and the note card read it', () => {
+  assert.match(source('Stage.prototype.applyMode=function', '\n'), /K=this\.K,prev=K\.look;K\.dark=!!DARK\[lk\];K\.look=lk;/);
+  assert.match(bundle, /function Kit\(el\)\{[^\n]*this\.dark=false;/);
+  // no night flag: one keyed on the look name "night" would be false in Fluent Dark (x1.7 review)
+  assert.ok(!/K\.night\b|this\.night\b|prototype\.night\b/.test(bundle), 'no K.night, Kit night or Stage.night');
+  const win = source('Parts.window=function', '};\n');
+  assert.match(win, /else if\(lk==="fluent-dark"\)\{/, 'Fluent Dark paints its own dusk window, not the Day sky');
+  assert.match(win, /emissiveIntensity:K\.dark\?\.95:\.7/);
+  assert.match(bundle, /emissiveIntensity=\(b\.status==="resting"\?\.15:\.9\)\*\(K\.dark\?1\.3:1\)/, 'the monitor glow');
+  assert.ok(!/isNight|K\.night\?/.test(bundle), 'nothing in the engine keys a dark scene on the Night look');
+  const term = readFileSync(join(root, 'public', 'terminal.js'), 'utf8'), board = readFileSync(join(root, 'public', 'board.js'), 'utf8');
+  for (const [f, src] of [['terminal.js', term], ['board.js', board]]) assert.doesNotMatch(src, /=== 'night'|look === "night"/, `${f} reads K.dark, not the look name`);
+  assert.match(term, /glow: K\.dark \? 7 : sub \? 5 : 0/);
+  assert.match(term, /dark = !!K\.dark, sub = K\.look === 'sublevel';/);
+  assert.match(board, /paint\(bd\.canvas\.getContext\('2d'\), bd\.canvas\.width, bd\.canvas\.height, d, K\.tok, K\.f \|\| \{\}, !!K\.dark\);/);
+});
+
+test('OfficeTypeCard: a dark theme with no pictures of its own shows the Night set, any other theme the Day set', () => {
+  const h = (tag, props, ...kids) => ({ tag, props, kids });
+  const AO = { MODES: modes(), THUMBS: { team: 'DAY' }, THUMBS_BY_THEME: { light: { team: 'DAY' }, dark: { team: 'NIGHT' }, sublevel: { team: 'SUB' } } };
+  const card = new Function('AO', 'h', 'useTheme', 'OfficeTypeBadge', source('function OfficeTypeCard(p){') + 'return OfficeTypeCard;')(AO, h, (p) => p.theme, function () {});
+  const pic = (theme) => card({ type: 'team', theme }).kids[0].props.dangerouslySetInnerHTML.__html;
+  assert.deepEqual(['light', 'dark', 'sublevel', 'fluent', 'fluent-dark'].map(pic), ['DAY', 'NIGHT', 'SUB', 'DAY', 'NIGHT']);
+});
+
+test('the modes fit a narrow box: under 520 px a segment with an icon shows the icon, the pressed one keeps its label (office HUD and City)', () => {
+  const css = readFileSync(join(root, 'components', 'bundle.css'), 'utf8'), office = readFileSync(join(root, 'public', 'office.css'), 'utf8');
+  assert.match(bundle, /title:o\.icon\?o\.label:undefined,onClick:[^\n]*o\.icon\?h\("span",\{className:"ao-seg-l"\},o\.label\):o\.label\)/, 'the label is a span, and the tooltip names the mode');
+  assert.match(css, /@container \(max-width:520px\)\{\.ao-seg button:not\(\[aria-pressed="true"\]\) \.ao-seg-l\{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect\(0 0 0 0\)/);
+  assert.match(css, /\.ao-office\{[^}]*container-type:inline-size/, 'the office is the container');
+  assert.match(office, /\.city-tools \{[^}]*container-type: inline-size;/, 'the City tools are a container too');
+});
+
+// The rules of a style sheet in order: { cond, sel, body }, where cond is the @container or @media line around the rule ('' at top level).
+function cssRules(text) {
+  const s = text.replace(/\r\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, ''), out = [];
+  (function walk(from, to, cond) {
+    for (let j = from; j < to;) {
+      const open = s.indexOf('{', j);
+      if (open < 0 || open >= to) break;
+      let depth = 1, k = open + 1;
+      for (; depth && k < to; k++) { if (s[k] === '{') depth++; else if (s[k] === '}') depth--; }
+      const head = s.slice(j, open).trim().replace(/\s+/g, ' ');
+      if (head.startsWith('@')) walk(open + 1, k - 1, head);
+      else out.push({ cond, sel: head, body: s.slice(open + 1, k - 1).replace(/\s*([:;])\s*/g, '$1').trim() });
+      j = k;
+    }
+  })(0, s.length, '');
+  return out;
+}
+
+test('the office top bar keeps to the rows above the side columns: icons only where the labels do not fit, the counts hide, the columns start below the last toggle', () => {
+  const css = cssRules(readFileSync(join(root, 'components', 'bundle.css'), 'utf8'));
+  const office = cssRules(readFileSync(join(root, 'public', 'office.css'), 'utf8'));
+  // the bar holds the brand, the mode toggle, the view toggle and the counts, in this order: the view toggle is the last .ao-seg of the bar
+  assert.match(bundle, /h\("div",\{className:"ao-hud-top"\},h\("div",\{className:"ao-panel ao-brand"\}[^\n]*\n\s*h\(A\.ModeToggle,[^\n]*\n\s*h\(A\.ViewToggle,[^\n]*\n\s*h\("div",\{className:"ao-hud-counts"\}/);
+  assert.match(source('function ViewToggle(p){'), /className:"ao-panel ao-seg"/);
+  const rule = (cond, sel) => css.filter((r) => r.cond === cond && r.sel === sel);
+  const sr = 'position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)';
+  const label = '.ao-hud-top .ao-seg button:not([aria-pressed="true"]) .ao-seg-l';
+  assert.ok(rule('@container (max-width:999px)', label).some((r) => r.body.startsWith(sr)), 'in the bar the mode toggle shows icons only to 999 px');
+  assert.ok(rule('@container (max-width:1199px)', '[data-theme="sublevel"] ' + label).some((r) => r.body.startsWith(sr)), 'and to 1199 px in Sublevel');
+  assert.ok(rule('@container (max-width:959px)', '.ao-hud-counts').some((r) => r.body === 'display:none'), 'the counts hide below 960 px, where a second row would touch the right column');
+  assert.ok(rule('', '.ao-hud-top>.ao-seg').some((r) => r.body === 'anchor-name:--ao-hud-seg'), 'each toggle of the bar is the anchor; the last one in the tree wins');
+  // The top of a column, from the last rule that sets it in each band. The anchored rule comes after every fixed top, so it has the last word.
+  const isCol = (sel, col) => sel.split(',').map((x) => x.trim()).includes(col);
+  const tops = (col) => css.map((r, i) => ({ ...r, i })).filter((r) => isCol(r.sel, col) && /(^|;)top:/.test(r.body)).map((r) => ({ i: r.i, cond: r.cond, top: r.body.match(/(?:^|;)top:([^;]*)/)[1] }));
+  const last = (col, cond) => tops(col).filter((t) => t.cond === cond).pop();
+  const net = (min, gap) => `max(${min}px,calc(anchor(--ao-hud-seg bottom,0px) + ${gap}px))`;
+  assert.equal(last('.ao-hud-left', '').top, net(68, 16), 'above 820 px the Floors column is never above 68 px, and starts below the last toggle');
+  assert.equal(last('.ao-hud-right', '').top, net(68, 16));
+  assert.equal(last('.ao-hud-left', '@container (max-width:820px)').top, net(108, 10), 'two rows of the bar to 521 px');
+  assert.equal(last('.ao-hud-right', '@container (max-width:820px)').top, 'auto', 'to 820 px the right column sits at the bottom');
+  assert.equal(last('.ao-hud-left', '@container (max-width:520px)').top, net(154, 10), 'three rows below 521 px');
+  // A later rule wins over an earlier one of the same weight, also across bands: after the top-level net, a column top is set only by the net of a band.
+  const after = last('.ao-hud-left', '').i;
+  for (const col of ['.ao-hud-left', '.ao-hud-right']) {
+    for (const t of tops(col).filter((x) => x.i > after)) assert.ok(t.cond && (/anchor\(--ao-hud-seg bottom/.test(t.top) || t.top === 'auto'), `${col} top after the net: ${t.cond} ${t.top}`);
+  }
+  // the page does not move the columns: a page top would undo the net
+  for (const r of office) {
+    const lastPart = r.sel.split(',').map((x) => x.trim().split(' ').pop());
+    if (lastPart.some((p) => /\.ao-hud-(left|right)\b/.test(p))) assert.doesNotMatch(r.body, /(^|;)top:/, `office.css sets no top on ${r.sel}`);
+  }
+});
+
 // ---- #82: walk speed is a DS token; a temporary helper walks about twice as fast, in and out ----
 function walkRig() {
   const WALK = { bot: 2.6, ephemeral: 5.2 };
@@ -841,5 +1086,5 @@ test('walk: no literal speed is left in the walk step or the bot animation, and 
   const at = bundle.indexOf('function animateBot(');
   assert.ok(at >= 0 && !/sp=2\.6/.test(bundle.slice(at, at + 600)), 'no literal speed in animateBot');
   assert.ok(bundle.slice(at, at + 200).includes('walkStep(b,dt)'), 'animateBot still calls walkStep, or bots would stop walking');
-  assert.match(source('function readScene(el)', '\n [["day","day"]'), /WALK\.bot=num\(cs,"scene-walk-speed",2\.6\).*WALK\.ephemeral=num\(cs,"scene-walk-speed-ephemeral",5\.2\)/);
+  assert.match(source('function readScene(el)', '\n (AO.MODES||[])'), /WALK\.bot=num\(cs,"scene-walk-speed",2\.6\).*WALK\.ephemeral=num\(cs,"scene-walk-speed-ephemeral",5\.2\)/);
 });

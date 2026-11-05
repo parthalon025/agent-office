@@ -106,23 +106,45 @@ export async function repoTop(cwd) {
   try { return (await git(['rev-parse', '--show-toplevel'], cwd)).trim(); } catch { throw new Error('That folder is not in a git repository, so it cannot get a worktree.'); }
 }
 
-/** Where a folder sits in git: the main repository, this worktree's top folder and its branch. Null outside git. */
-/**
- * Where a folder sits in git: { repo, root, branch }, or null when it is not in a repository or the folder is gone.
- * A failure that is only passing (git passed its time limit on a loaded machine, a lock) is tried again, `attempts` times
- * in all, because null is an answer the office acts on: a recent folder that gets null is never a building until the next
- * start (#98). `deps` (`exec`, `exists`, `wait`) are for tests.
- */
-export async function locate(cwd, { exec = git, exists = fs.existsSync, wait = (ms) => new Promise((r) => setTimeout(r, ms)), attempts = 3 } = {}) {
+// A git failure that asking again does not change: git says the folder is not a repository; git refuses a repository
+// that another user owns ("detected dubious ownership"; `run` keeps only the last lines of git's message, and they name
+// safe.directory); or there is no git to start (resolveExe found none, or the program is gone: ENOENT). Git is asked for
+// English, because this check reads its message.
+const LASTING_GIT_FAILURE = /not a git repository|dubious ownership|unsafe repository|safe\.directory|was not found on PATH|is installed as a script|\bENOENT\b/i;
+
+// Where a folder sits in git, or KEEP when git still failed for a passing reason after `attempts` tries. See locate and locateOrKeep.
+async function placeOrKeep(cwd, { exec = git, exists = fs.existsSync, wait = (ms) => new Promise((r) => setTimeout(r, ms)), attempts = 3 } = {}) {
   for (let i = 1; ; i++) try {
-    const [top, branch, common] = (await exec(['rev-parse', '--show-toplevel', '--abbrev-ref', 'HEAD', '--path-format=absolute', '--git-common-dir'], cwd, 8000)).trim().split(/\r?\n/);
+    const [top, branch, common] = (await exec(['rev-parse', '--show-toplevel', '--abbrev-ref', 'HEAD', '--path-format=absolute', '--git-common-dir'], cwd, 8000, ENGLISH)).trim().split(/\r?\n/);
     const dir = path.resolve(cwd, common);
     const repo = path.basename(dir).toLowerCase() === '.git' ? path.dirname(dir) : dir;
     return { repo: path.normalize(repo), root: path.normalize(top), branch: branch === 'HEAD' ? 'detached' : branch };
   } catch (e) {
-    if (i >= attempts || !exists(cwd) || /not a git repository/i.test(String(e && e.message))) return null;
+    if (!exists(cwd) || LASTING_GIT_FAILURE.test(String(e && e.message))) return null;
+    if (i >= attempts) return KEEP;
     await wait(250 * i);
   }
+}
+
+/**
+ * Where a folder sits in git: { repo, root, branch }, or null when it is not in a repository, the folder is gone, git
+ * refuses it (dubious ownership) or there is no git. A failure that is only passing (git passed its time limit on a
+ * loaded machine, a lock) is tried again, `attempts` times in all, because null is an answer the office acts on (#98);
+ * after the last try the answer is null too. `deps` (`exec`, `exists`, `wait`, `attempts`) are for tests.
+ */
+export async function locate(cwd, deps) {
+  const g = await placeOrKeep(cwd, deps);
+  return g === KEEP ? null : g;
+}
+
+/**
+ * `locate` for the office start, which must not read a passing git failure as "outside git": it picks the branch port
+ * and makes the recent folders buildings. The same tries, but after the last one the answer is `KEEP` (git kept passing
+ * its time limit on a busy computer, or the repository has no commit yet): the caller asks again later. `null` is final:
+ * not a repository, the folder is gone, git refuses it, or there is no git. Same `deps` as `locate`.
+ */
+export async function locateOrKeep(cwd, deps) {
+  return placeOrKeep(cwd, deps);
 }
 
 // ---------- ports ----------
@@ -271,7 +293,7 @@ export async function layout(repo) {
   return list.filter((w) => !w.bare && !w.prunable);
 }
 
-/** What `relayout` answers when git failed for a passing reason: change nothing. */
+/** What `relayout` and `locateOrKeep` answer when git failed for a passing reason: change nothing, ask again later. */
 export const KEEP = Symbol('keep');
 
 /**

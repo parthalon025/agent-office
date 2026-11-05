@@ -1,5 +1,5 @@
 // Readable in every theme: the text and ink pairs that the page and the 3D scripts draw, from tokens.json.
-// Each pair needs 4.5:1 (text) or 3:1 (a status dot) in Day, Night and Sublevel. The CSS checks pin the rules
+// Each pair needs 4.5:1 (text) or 3:1 (a dot or another mark) in every theme of tokens.json (Day, Night, Sublevel, Fluent, Fluent Dark). The CSS checks pin the rules
 // that use those pairs, so a later edit cannot put a status color back on text.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,7 +8,7 @@ import fs from 'node:fs';
 const root = new URL('../', import.meta.url);
 const read = (f) => fs.readFileSync(new URL(f, root), 'utf8');
 const tokens = JSON.parse(read('tokens.json')).color.tokens;
-const TH = ['light', 'dark', 'sublevel'];
+const TH = JSON.parse(read('tokens.json')).color.themes.map((t) => t.id);   // every theme, Fluent and Fluent Dark included
 const val = (name, th) => { let v = tokens.find((t) => t.name === name).value[th]; while (/^\{/.test(v)) v = tokens.find((t) => t.name === v.slice(1, -1)).value[th]; return v; };
 const rgb = (h) => {
   const m = h.match(/rgba?\(([^)]+)\)/);
@@ -21,7 +21,11 @@ const lum = (c) => { const f = (x) => { x /= 255; return x <= 0.03928 ? x / 12.9
 const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
 
 function each(fn) { for (const th of TH) { const T = (n) => rgb(val(n, th)); fn(T, th, over(T('panel'), T('bg'))); } }
-function atLeast(label, min, a, b, th) { const r = ratio(a, b); assert.ok(r >= min, `${label} in ${th}: ${r.toFixed(2)} < ${min}`); }
+function atLeast(label, min, a, b, th) { const r = ratio(a, b); assert.ok(r >= min, `${label} in ${th}: ${r.toFixed(3)} < ${min}`); }
+
+test('the pairs run in every theme: Day, Night, Sublevel, Fluent and Fluent Dark', () => {
+  assert.deepEqual(TH, ['light', 'dark', 'sublevel', 'fluent', 'fluent-dark']);
+});
 
 test('notes editor: ink and placeholder on the whiteboard face', () => each((T, th) => {
   const ink = mix(T('scene-dark'), T('status-finished'), 0.7), hint = mix(T('scene-dark'), T('bubble'), 0.82);
@@ -41,6 +45,39 @@ test('status words: ink on the panel, the chip and the page', () => each((T, th,
 test('status dots next to the words read at 3:1 on the panel', () => each((T, th, panel) => {
   for (const s of ['working', 'waiting', 'error', 'resting', 'finished']) atLeast('dot ' + s, 3, T('status-' + s), panel, th);
   atLeast('dot emphasis', 3, T('emphasis'), panel, th);
+}));
+
+// The other pairs of the ContrastCheck card (components/ContrastCheck/preview.html): the label of a primary button, the
+// text of a floor header (Reference.md promises 4.9:1 for on-floor), and the type and accent marks.
+test('on-accent on accent: 4.5:1; on-floor on every floor-* fill: 4.9:1', () => each((T, th) => {
+  atLeast('on-accent on accent', 4.5, T('on-accent'), T('accent'), th);
+  for (const f of ['ops', 'sales', 'research', 'content', 'hq']) atLeast(`on-floor on floor-${f}`, 4.9, T('on-floor'), T('floor-' + f), th);
+}));
+
+// Accent is text in the DS too: the More link of a decision card sits on chip when the card is selected or focused
+// (.ao-dec-more, .ao-dec.is-sel), and a ghost button can sit on a chip row. Day is 4.21:1, an older gap (#117): it is
+// held as a known failure, so this test fails once Day passes and the exception must go.
+test('accent text on chip: 4.5:1 (Day: known gap, agent-office #117)', () => each((T, th) => {
+  if (th === 'light') { assert.ok(ratio(T('accent'), T('chip')) < 4.5, 'Day passes now: remove the Day exception (#117)'); return; }
+  atLeast('accent on chip', 4.5, T('accent'), T('chip'), th);
+}));
+
+// The check mark of the finished bubble is a cut-out of the bubble face, drawn in bubble on the status-finished-on-bubble
+// disk (StatusBubble and Kit.prototype.bubble). It is a glyph: 3:1. on-status is for text on a raw status fill and is
+// dark in Fluent Dark, where it was 2.77:1 on the disk.
+test('finished bubble: the check (bubble) on its disk (status-finished-on-bubble), 3:1', () => each((T, th) => {
+  atLeast('check on the finished disk', 3, T('bubble'), T('status-finished-on-bubble'), th);
+}));
+
+test('the finished check is drawn in bubble, in 2D and in 3D', () => {
+  const b = read('components/bundle.js');
+  assert.ok(/h\("path",\{d:"M6\.5 11\.5l3 3 6-6",style:\{stroke:"var\(--bubble\)"\}/.test(b), 'StatusBubble draws the check in bubble');
+  assert.ok(/if\(st==="finished"\)\{c\.beginPath\(\);c\.arc\(64,64,40,0,7\);c\.fill\(\);c\.strokeStyle=K\.tok\.bubble;/.test(b), 'Kit.prototype.bubble draws the check in bubble');
+});
+
+test('type colors on chip and accent on bg: 3:1', () => each((T, th) => {
+  for (const t of ['team', 'lab', 'studio', 'hq']) atLeast(`type-${t} on chip`, 3, T('type-' + t), T('chip'), th);
+  atLeast('accent on bg', 3, T('accent'), T('bg'), th);
 }));
 
 // The DS contrast pairs for status text (Reference.md, "Contrast pairs the DS checks"). The raw status-* colors fail

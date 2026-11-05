@@ -116,7 +116,8 @@
   function seeded(seed) { var s = seed; return function () { s = (s * 9301 + 49297) % 233280; return s / 233280; }; }
 
   // ---------- the blackboard: slate, wood frame, chalk ----------
-  function paint(c, w, h, d, tok, f, look) {
+  // dark: the theme is a dark one (stage.K.dark: Night, Fluent Dark)
+  function paint(c, w, h, d, tok, f, dark) {
     var sans = f.sans || 'sans-serif', mono = f.mono || 'monospace';
     var col = function (k, fb) { return tok[k] || fb || '#888'; };
     var slate = mix(col('scene-dark'), col('status-working'), 0.12);
@@ -151,13 +152,13 @@
     var dot = function (x, y, status) { c.fillStyle = tone(status); c.globalAlpha = 0.95; c.beginPath(); c.arc(x, y, 7, 0, 7); c.fill(); c.globalAlpha = 1; };
     var X0 = F + 30, X1 = w - F - 30, W2 = X1 - X0, y = F + 24;
     c.textBaseline = 'top'; c.textAlign = 'left';
-    // pinned note from an agent: a paper card, so the text is dark in every theme (ink is light at night)
+    // pinned note from an agent: a paper card, so the text is dark in every theme (ink is light in the dark themes)
     if (d.pin) {
       c.font = '500 24px ' + sans;
       var pw = W2 - 88, lines = wrap(c, 'Note from ' + d.pin.by + ': ' + d.pin.text, pw);
       var msg = lines.slice(0, 2).map(function (l, i) { return clipW(c, i === 1 && lines.length > 2 ? l + '…' : l, pw); }), ch = 26 + msg.length * 30;
-      // at night the composer blooms a lit white card and the text washes out: a shade darker keeps it sharp
-      c.fillStyle = look === 'night' ? mix(col('bubble'), slate, 0.3) : col('bubble'); c.globalAlpha = 0.96; rr(c, X0, y, W2, ch, 12); c.fill(); c.globalAlpha = 1;
+      // in a dark theme the composer blooms a lit white card and the text washes out: a shade darker keeps it sharp
+      c.fillStyle = dark ? mix(col('bubble'), slate, 0.3) : col('bubble'); c.globalAlpha = 0.96; rr(c, X0, y, W2, ch, 12); c.fill(); c.globalAlpha = 1;
       c.fillStyle = col('status-error'); c.beginPath(); c.arc(X0 + 30, y + 30, 9, 0, 7); c.fill();
       c.fillStyle = mix(col('status-error'), col('bubble'), 0.55); c.beginPath(); c.arc(X0 + 27, y + 27, 3, 0, 7); c.fill();
       c.fillStyle = col('scene-dark'); c.font = '500 24px ' + sans;
@@ -226,7 +227,7 @@
   }
 
   // ---------- the whiteboard: bright surface, thin metal frame, marker ----------
-  // The face is bubble in every theme, so the marker is scene-dark based: ink is light at night.
+  // The face is bubble in every theme, so the marker is scene-dark based: ink is light in the dark themes.
   function paintNotes(c, w, h, text, tok, f) {
     var col = function (k, fb) { return tok[k] || fb || '#888'; }, sans = f.sans || 'sans-serif';
     var metal = col('scene-metal'), face = col('bubble'), ink = mix(col('scene-dark'), col('status-finished'), 0.3);
@@ -530,7 +531,7 @@
         var sig = skinVersion + K.look + JSON.stringify(d);
         if (sig === bd.sig) return;
         bd.sig = sig; bd.data = d;
-        paint(bd.canvas.getContext('2d'), bd.canvas.width, bd.canvas.height, d, K.tok, K.f || {}, K.look);
+        paint(bd.canvas.getContext('2d'), bd.canvas.width, bd.canvas.height, d, K.tok, K.f || {}, !!K.dark);
         bd.tex.needsUpdate = true;
       });
       notes.forEach(function (n) {
