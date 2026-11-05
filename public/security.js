@@ -49,11 +49,9 @@
     return e.reason || (e.rows && e.rows[row]) || '';
   }
   function tone(v) { return v === 'allow' || v === 'on' ? 'allow' : v === 'deny' ? 'deny' : 'ask'; }
-  function confirmText(p) {
-    var r = S().rows[p.row];
-    var to = p.to === null ? 'the office rule (' + S().word(p.office) + ')' : S().word(p.to);
-    return 'Confirm: ' + r.label + ', ' + colLabel(p.col) + ': ' + to;
-  }
+  // The painted Confirm: the change, then what it is for.
+  function confirmText(p) { return 'Confirm: ' + (p.to === null ? 'the office rule (' + S().word(p.office) + ')' : S().word(p.to)); }
+  function confirmWhat(p) { return S().rows[p.row].label + ', ' + colLabel(p.col); }
   function money(n) { var F = root.OfficeFormat; return F && F.money ? F.money(n) : '$' + (+n || 0).toFixed(2); }
   function monthName(m) {
     var a = String(m || '').split('-'), names = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -75,10 +73,12 @@
     if (hovered) stroke(p, x - 5, y - 5, w + 10, h + 10, 'focus', 4, h / 2 + 5);
     text(p, x + w / 2, y + h / 2 + s * 0.36, s, 'ink', S().word(v), { wt: 600, align: 'center', maxW: w - 16 });
   }
+  // A button with a label, or with a DS icon (label { icon: name }: the icon set, never a text glyph).
   function button(p, x, y, w, h, label, s, h0, hovered, kind) {
     fill(p, x, y, w, h, kind === 'primary' ? 'primary' : 'buttonFill', 12);
     if (hovered) stroke(p, x - 4, y - 4, w + 8, h + 8, 'focus', 4, 14);
-    text(p, x + w / 2, y + h / 2 + s * 0.36, s, kind === 'primary' ? 'onPrimary' : 'ink', label, { wt: 600, align: 'center', maxW: w - 12 });
+    if (label && label.icon) p.items.push({ t: 'icon', name: label.icon, x: x + w / 2 - s / 2, y: y + h / 2 - s / 2, s: s, c: 'ink' });
+    else text(p, x + w / 2, y + h / 2 + s * 0.36, s, kind === 'primary' ? 'onPrimary' : 'ink', label, { wt: 600, align: 'center', maxW: w - 12 });
     h0.x = x; h0.y = y; h0.w = w; h0.h = h;
     return h0;
   }
@@ -165,7 +165,8 @@
     if (view.pending) {
       var bh = 96, by = H - bh - 28;
       fill(p, 48, by, W - 96, bh, 'pendingBand', 16);
-      text(p, 76, by + bh / 2 + 11, 30, 'onPending', confirmText(view.pending), { wt: 600, maxW: W - 96 - 520 });
+      text(p, 76, by + 42, 30, 'onPending', confirmText(view.pending), { wt: 600, maxW: W - 96 - 520 });
+      text(p, 76, by + 76, 22, 'onPending', confirmWhat(view.pending), { maxW: W - 96 - 520 });
       hot(p, button(p, W - 48 - 470, by + 16, 220, 64, 'Confirm', 30, { kind: 'confirm', id: 'confirm' }, isHover(view, 'confirm'), 'primary'));
       hot(p, button(p, W - 48 - 236, by + 16, 220, 64, 'Cancel', 30, { kind: 'cancel', id: 'cancel' }, isHover(view, 'cancel')));
       return;
@@ -189,7 +190,7 @@
       fill(p, 48, y, W - 96, 2, 'line');
       if (pend) {
         fill(p, 48, y + 6, W - 96, rowH - 12, 'pendingBand', 16);
-        text(p, 72, y + rowH / 2 + 15, 40, 'onPending', 'Confirm: ' + S().word(view.pending.to === null ? view.pending.office : view.pending.to), { wt: 600, maxW: W - 96 - 500 });
+        text(p, 72, y + rowH / 2 + 15, 40, 'onPending', confirmText(view.pending), { wt: 600, maxW: W - 96 - 500 });
         hot(p, button(p, W - 48 - 460, y + (rowH - chH) / 2, 220, chH, 'Confirm', 42, { kind: 'confirm', id: 'confirm' }, isHover(view, 'confirm'), 'primary'));
         hot(p, button(p, W - 48 - 228, y + (rowH - chH) / 2, 220, chH, 'Cancel', 42, { kind: 'cancel', id: 'cancel' }, isHover(view, 'cancel')));
         y += rowH; return;
@@ -214,13 +215,13 @@
     var s = big ? 46 : 28, y = big ? 120 : 168;
     text(p, 48, y + (big ? 60 : 44), s, 'ink', 'Spend limit, new sessions', { maxW: big ? W - 96 : 420 });
     var bx = big ? 48 : 480, by = big ? y + 84 : y, bh = big ? 96 : 64, bw = big ? 120 : 80, vw = big ? 340 : 240;
-    hot(p, button(p, bx, by, bw, bh, '−', big ? 56 : 36, { kind: 'spend-minus', id: 'spend-minus' }, isHover(view, 'spend-minus')));
+    hot(p, button(p, bx, by, bw, bh, { icon: 'remove' }, big ? 56 : 36, { kind: 'spend-minus', id: 'spend-minus' }, isHover(view, 'spend-minus')));
     var vx = bx + bw + 16, editing = !!view.edit;
     if (editing) { fill(p, vx, by, vw, bh, 'editFill', 12); stroke(p, vx, by, vw, bh, 'focus', 4, 12); }
     else { stroke(p, vx + 1.5, by + 1.5, vw - 3, bh - 3, isHover(view, 'spend-edit') ? 'focus' : 'line', 3, 12); }
     text(p, vx + vw / 2, by + bh / 2 + s * 0.36, s, 'ink', editing ? '$' + view.edit.text + '|' : limit > 0 ? money(limit) : 'No limit', { wt: 600, align: 'center', maxW: vw - 16, mono: editing });
     hot(p, { kind: 'spend-edit', id: 'spend-edit', x: vx, y: by, w: vw, h: bh });
-    hot(p, button(p, vx + vw + 16, by, bw, bh, '+', big ? 56 : 36, { kind: 'spend-plus', id: 'spend-plus' }, isHover(view, 'spend-plus')));
+    hot(p, button(p, vx + vw + 16, by, bw, bh, { icon: 'add' }, big ? 56 : 36, { kind: 'spend-plus', id: 'spend-plus' }, isHover(view, 'spend-plus')));
     y = by + bh + (big ? 40 : 34);
     fill(p, 48, y, W - 96, 2, 'line');
     text(p, 48, y + (big ? 56 : 46), s, 'ink', 'Cost, ' + monthName(sp.month), { maxW: W - 96 });
@@ -359,8 +360,8 @@
     function colors() {
       var face = tk('scene-dark'), ink = tk('bubble');
       return { face: face, ink: ink, muted: mix(ink, face, 0.42), line: mix(ink, face, 0.7), accent: tk('type-security') || tk('accent'), onAccent: tk('bubble'),
-        focus: tk('accent'), allowFill: mix(tk('status-finished'), face, 0.45), denyFill: mix(tk('status-error'), face, 0.4), askFill: face,
-        pending: tk('status-waiting'), pendingBand: tk('status-waiting'), onPending: face, primary: tk('bubble'), onPrimary: face,
+        focus: tk('accent'), allowFill: mix(tk('status-working'), face, 0.45), denyFill: mix(tk('status-error'), face, 0.4), askFill: face,
+        pending: tk('status-waiting'), pendingBand: tk('status-waiting'), onPending: face, primary: tk('accent'), onPrimary: tk('on-accent') || ink,
         buttonFill: mix(ink, face, 0.82), editFill: mix(ink, face, 0.88), error: mix(tk('status-error'), ink, 0.35) };
     }
     function viewOf(it) {
@@ -399,6 +400,13 @@
         if (d.t === 'fill') { c.fillStyle = cc; if (d.r) { rr(c, d.x, d.y, d.w, d.h, d.r); c.fill(); } else c.fillRect(d.x, d.y, d.w, d.h); }
         else if (d.t === 'stroke') { c.strokeStyle = cc; c.lineWidth = d.lw; if (d.r) { rr(c, d.x, d.y, d.w, d.h, d.r); c.stroke(); } else c.strokeRect(d.x, d.y, d.w, d.h); }
         else if (d.t === 'mark') { c.fillStyle = cc; c.beginPath(); c.moveTo(d.x - d.s, d.y); c.lineTo(d.x, d.y); c.lineTo(d.x, d.y + d.s); c.closePath(); c.fill(); }
+        else if (d.t === 'icon') {   // a DS icon (24 x 24 path data, stroked like the DS Icon component)
+          var svg = (root.AgentOffice && root.AgentOffice.ICONS && root.AgentOffice.ICONS[d.name]) || '', re = /\sd="([^"]+)"/g, m;
+          c.save(); c.translate(d.x, d.y); c.scale(d.s / 24, d.s / 24);
+          c.strokeStyle = cc; c.lineWidth = 2.25; c.lineCap = 'round'; c.lineJoin = 'round';
+          while ((m = re.exec(svg))) c.stroke(new Path2D(m[1]));
+          c.restore();
+        }
         else if (d.t === 'text') {
           c.fillStyle = cc; c.textAlign = d.align; c.textBaseline = 'alphabetic';
           c.font = d.wt + ' ' + d.s + 'px ' + (d.mono ? f.mono || 'monospace' : f.sans || 'sans-serif');
@@ -544,7 +552,8 @@
       var o = office, bl = o.getBuilding && o.getBuilding(), fl = null, rid = opts.roomId ? opts.roomId() : null;
       ((bl && bl.floors) || []).forEach(function (f) { (f.rooms || []).forEach(function (r) { if (r.type === 'security' && (!rid || r.id === rid)) fl = f; }); });
       if (!fl) return false;
-      want = { screen: screenId || 'files', until: Date.now() + 4000 };
+      // From the building view the floor comes with the engine's framing (and its intro the first time): about 3 s.
+      want = { screen: screenId || 'files', until: Date.now() + 10000 };
       var ins = o.inspect ? o.inspect() : null;
       if (!ins || ins.floor !== fl.id || host.inBuilding()) { if (o.setFloor) o.setFloor(fl.id); }
       tryOpen();
@@ -555,7 +564,8 @@
       if (Date.now() > want.until) { want = null; return; }
       try { scan(); } catch (x) { /* next frame */ }
       var it = items.filter(function (x) { return x.screen === want.screen; })[0];
-      if (it && host.onShownFloor(it.front, host.shownFloor()) && !st.goal && host.show(target, it, false)) want = null;
+      // the flight starts once the engine's own camera moves (a floor goal, the intro) are over
+      if (it && host.onShownFloor(it.front, host.shownFloor()) && !st.goal && !st.intro && host.show(target, it, false)) want = null;
     }
     var offWant = host.frame(function () { if (want) tryOpen(); });
 

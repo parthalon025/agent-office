@@ -38,7 +38,7 @@ test('a click on Ask paints the Confirm; a second click moves on to Deny; Confir
   assert.equal(r1.send, undefined, 'a looser change waits');
   assert.deepEqual(r1.view.pending, { row: 'files-outside', col: 'claude-code', to: 'allow', office: null });
   const p1 = P.plan(r1.view, d);
-  assert.ok(texts(p1).includes('Confirm: Read or edit outside it, Claude Code: Allow'));
+  assert.ok(texts(p1).includes('Confirm: Allow') && texts(p1).includes('Read or edit outside it, Claude Code'), 'the change, then what it is for');
   assert.ok(texts(p1).includes('Confirm?'), 'the cell itself turns to the Confirm');
   assert.ok(p1.items.some((i) => i.t === 'fill' && i.c === 'pending'), 'amber');
   assert.ok(hotOf(p1, 'confirm') && hotOf(p1, 'cancel'));
@@ -70,7 +70,7 @@ test('This building: a click changes the building rule; Use office rule clears i
   const r = P.step(v, clear, d);
   assert.equal(r.send, undefined, 'back to the office Allow is looser');
   assert.deepEqual(r.view.pending, { row: 'shell', col: 'claude-code', to: null, office: 'allow' });
-  assert.ok(texts(P.plan(r.view, d)).includes('Confirm: Shell commands, Claude Code: the office rule (Allow)'));
+  assert.ok(texts(P.plan(r.view, d)).includes('Confirm: the office rule (Allow)'));
   const ok = P.step(r.view, hotOf(P.plan(r.view, d), 'confirm'), d);
   assert.deepEqual(ok.send.body, { scope: 'building', building: B, row: 'shell', col: 'claude-code', value: null, confirmed: true });
   // the scope switch
@@ -119,6 +119,7 @@ test('Spend: minus and plus in 1 dollar steps, never under 0; a click on the val
   assert.ok(texts(p).includes('$2.00') && texts(p).includes('$1.50') && texts(p).includes('Not set up'), 'the limit and the cost per agent kind');
   assert.ok(texts(p).includes('Cost, November 2026'));
   assert.ok(texts(p).includes('Extensions: local or project scope only. User scope stays out of reach.'));
+  assert.deepEqual(p.items.filter((i) => i.t === 'icon').map((i) => i.name), ['remove', 'add'], 'minus and plus are DS icons, not text glyphs');
   let e = P.step(v, hotOf(p, 'spend-edit'), d).view;
   assert.deepEqual(e.edit, { text: '2' });
   e = P.key(e, { key: 'Backspace' }).view;

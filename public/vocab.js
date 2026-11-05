@@ -129,9 +129,9 @@
     // Agents screen. Ungated agents run tool calls without asking the office (ADR 0001): off until the user turns them on.
     ungated: { label: 'Turn on ungated agents', options: TOGGLE, def: 'off', office: true, only: ['openclaw'], na: 'Gated' },
     // Paperclip's Claude Code runs go through the office hooks (#76).
-    supervise: { label: 'Paperclip: Supervise in office', options: TOGGLE, def: 'off', office: true, only: ['claude-code'], na: 'No Paperclip runs' },
+    supervise: { label: 'Paperclip: Supervise in office', options: TOGGLE, def: 'off', office: true, only: ['claude-code'], na: 'Not used' },
     // An agent that reports no cost: Ask (the office asks once per session), Allow (it runs without asking), Deny (it never runs).
-    'no-cost': { label: 'Run agents without cost reports', options: RULE, def: 'ask', office: true, only: ['hermes', 'dsh', 'openclaw'], na: { 'claude-code': 'Reports cost', local: 'Free' } }
+    'no-cost': { label: 'Run without cost reports', options: RULE, def: 'ask', office: true, only: ['hermes', 'dsh', 'openclaw'], na: { 'claude-code': 'Reports cost', local: 'Free' } }
   };
   var SEC_SCREENS = [
     { id: 'files', title: 'Files', rows: ['read-inside', 'edit-inside', 'files-outside'] },

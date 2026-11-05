@@ -1513,6 +1513,7 @@
             post: function (route, body) { return api(route, body); },
             onError: function (text) { toast({ tone: 'error', title: 'Security', text: text }); }
           });
+          window.officeSecurity = securityRef.current;   // the Security room screens (open a screen), for the console and tests
         }
         if (st && host && window.OfficeTerminal) {
           terminalRef.current = window.OfficeTerminal.attach(o, {
