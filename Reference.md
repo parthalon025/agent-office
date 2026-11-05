@@ -163,7 +163,7 @@ Globals: `AgentOffice.BODY_COLORS` (the 10 bot body colors, a frozen array), `Ag
 | `HermesOffice` | Solutions | The Hermes orchestrator office. |
 | `Icon` | Foundations | The icon set: 34 line icons on a 24px grid with a 1.75px stroke, round caps and joins. |
 | `Logo` | Foundations | The Agent Office mark, wordmark and lockup. |
-| `ModeToggle` | Actions | A segmented control for the scene mode: Day, Night, Tour. |
+| `ModeToggle` | Actions | A segmented control for the scene mode: Day, Night, Sublevel, Tour. Each option has an icon. |
 | `ModelBadge` | Orchestration | The model an agent runs on. |
 | `Notifier` | Daily | Alerts for a person who works in another tab. |
 | `OfficeScene` | 3D office | The 3D office itself and the main component of the system. |

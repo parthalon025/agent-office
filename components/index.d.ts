@@ -3,7 +3,7 @@ export type Status = "working" | "waiting" | "error" | "resting" | "finished";
 export type FloorKey = "ops" | "sales" | "research" | "content";
 export interface PanelProps { title?: string; count?: ReactNode; flush?: boolean; className?: string; children?: ReactNode }
 export interface StatusDotProps { status: Status }
-export interface ModeToggleProps { value?: string; active?: string[]; options?: { id: string; label: string }[]; onChange?: (id: string) => void; label?: string }
+export interface ModeToggleProps { value?: string; active?: string[]; options?: { id: string; label: string; icon?: string }[]; onChange?: (id: string) => void; label?: string }
 export interface StatusCountsProps { counts: Partial<Record<"working" | "waiting" | "error" | "resting", number>> }
 export interface FloorHeaderProps { floor: FloorKey; name: string; number: number; bots: number; working: number }
 export interface ApprovalItemProps { name: string; floor?: number; ask: string; status?: "waiting" | "error"; onApprove?: () => void; onDecline?: () => void }

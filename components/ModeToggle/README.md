@@ -1,6 +1,6 @@
 # ModeToggle
 
-A segmented control for the scene mode: Day, Night, Tour. Day, Night and Sublevel are exclusive; Tour can be on with any of them. The consumer owns state.
+A segmented control for the scene mode: Day, Night, Sublevel, Tour. Each option has an icon. Day, Night and Sublevel are exclusive; Tour can be on with any of them. The consumer owns state.
 
 ## Props
 
@@ -8,6 +8,6 @@ A segmented control for the scene mode: Day, Night, Tour. Day, Night and Subleve
 | --- | --- | --- |
 | `value` | no | `string` |
 | `active` | no | `string[]` |
-| `options` | no | `{ id: string; label: string }[]` |
+| `options` | no | `{ id: string; label: string; icon?: string }[]` |
 | `onChange` | no | `(id: string) => void` |
 | `label` | no | `string` |

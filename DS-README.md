@@ -1,4 +1,4 @@
-# Agent Office DS x1.6.7 (design system README)
+# Agent Office DS x1.6.8 (design system README)
 
 Agent Office is **the control room for any agent harness**. A harness (Claude Code, Hermes Agent, Copilot Studio, the Claude or OpenAI Agents SDK, a local model in LM Studio with an agent loop) runs the agents. Agent Office shows what they do and lets people steer them. Each agent is a bot. Bots sit in rooms, rooms sit on floors, floors stack into a building.
 
@@ -14,7 +14,7 @@ Read four files. Do not guess a value, a prop or an event name.
 | --- | --- | --- |
 | **README** (this page) | Quickstart | Load, mount, connect, the rules, the definition of done |
 | **Recipes** | How-to | Do one task: daily use (since you left, replay, decisions, palette, alerts), show agents, connect Hermes or Copilot, mount a scene again, sessions, agent talk, add a role, a part or a theme, test |
-| **Reference** | Reference (generated) | Look up a token, an event, a command, the office API or a component |
+| **Reference** | Reference (edited by hand) | Look up a token, an event, a command, the office API or a component |
 | **Concepts** | Explanation | Learn why: the model, orchestration map, scene behavior, visual rules, words, accessibility |
 
 `Changelog` lists the versions. `kit/` has starter files: `page.html`, `adapter.js`, `part.js`, `manager.js` (a reference Manager for platforms with no orchestrator), `schema.json` and `check.py`. `components/index.d.ts` has the types. Each component has a README with a props table.
@@ -25,7 +25,7 @@ Read four files. Do not guess a value, a prop or an event name.
 
 | # | File |
 | --- | --- |
-| 1 | `tokens.css` (generated from `tokens.json` by the build; one block per theme) |
+| 1 | `tokens.css` (edited by hand, in step with `tokens.json`; one block per theme) |
 | 2 | `components/bundle.css` (the fonts: in this copy the page loads them first from `public/vendor/fonts/fonts.css`; `bundle.css` imports none) |
 | 3 | React 18 and ReactDOM 18 (only for React components; this copy serves them from `public/vendor`) |
 | 4 | `components/lib/three.min.js` (three.js 0.147.0) |
@@ -70,7 +70,7 @@ Start from `kit/page.html` and `kit/adapter.js`. The starter page runs the mock 
 - Change the scene only with adapter events. Never move bots with your own code; the engine walks them around objects.
 - Map risky steps (dangerous tools, spend, publishing) to `request` events.
 - Respect `prefers-reduced-motion`. Keep the HUD keyboard path complete.
-- Keep the x version prefix (x1.6.7) until the design is a SKU: in file names, titles, scene signs and the changelog.
+- Keep the x version prefix (x1.6.8) until the design is a SKU: in file names, titles, scene signs and the changelog.
 
 ## Definition of done
 
