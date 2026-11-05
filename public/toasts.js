@@ -3,11 +3,11 @@
    - A toast with an action or an error stays until the user closes it.
    - Every other toast closes after AFTER_MS. The time stands still while the pointer or the focus is on the stack.
    - The stack holds MAX toasts. A new toast pushes out the oldest timed toast first, so one that needs action stays.
-   - On a narrow screen the stack sits above the boxes that stand on the dock (lift, #79). */
+   - On a narrow screen the stack sits above the boxes that stand on the dock and below the top controls (lift, #79). */
 (function (root) {
   'use strict';
   var MAX = 4, AFTER_MS = 8000;
-  var GAP = 8, TOP = 64, ROOM = 96;   // px: gap above a box; top of the view kept for the DS header; room the stack needs (about one toast)
+  var GAP = 8, MIN_H = 64;   // px: gap between the stack and a box or the top controls; least height of the stack (a toast title and a line of text, then it scrolls)
 
   function sticky(t) { return !!(t && (t.action || t.tone === 'error')); }
 
@@ -35,18 +35,23 @@
   function hasTimed(list) { return list.some(function (t) { return !!t.until; }); }
   function remove(list, id) { return list.filter(function (t) { return t.id !== id; }); }
 
-  // Distance (px) from the bottom of the view to the bottom edge of the stack. viewH is the window height, strip is
-  // --strip-clear (the dock and its gap), boxes are { top, bottom } rects of visible boxes. A box on the dock ends at
-  // the dock (within 1 px); the stack goes above the highest one. It never goes lower than the dock, and never so high
-  // that fewer than ROOM px stay between it and the top of the view.
-  function lift(viewH, strip, boxes) {
-    var top = viewH;
+  // Where the stack stands on a narrow screen: { bottom, maxH } in px. viewH is the window height, strip is --strip-clear
+  // (the dock and its gap), boxes are { top, bottom } rects of the visible boxes, topEdge is the bottom of the top
+  // controls (the DS header and the floors card; 0 when none shows). A box on the dock ends at the dock (within 1 px);
+  // the stack goes above the highest one, and its height is the free band between the top controls and its bottom edge
+  // (it scrolls when a toast is taller). When that band is shorter than MIN_H, the stack does not rise: it stands on the
+  // dock edge over the boxes and takes the band above the dock, because a request must stay in sight and the top
+  // controls stay free. Never less than MIN_H high.
+  function lift(viewH, strip, boxes, topEdge) {
+    var top = viewH, edge = topEdge > 0 ? topEdge : 0;
     (boxes || []).forEach(function (b) {
       if (b.bottom - b.top > 0 && b.bottom >= viewH - strip - 1 && b.top < top) top = b.top;
     });
-    if (top >= viewH) return strip;
-    return Math.max(strip, Math.min(viewH - top + GAP, viewH - TOP - ROOM));
+    var bottom = top >= viewH ? strip : Math.max(strip, viewH - top + GAP);
+    var room = viewH - bottom - edge - GAP;
+    if (room < MIN_H) { bottom = strip; room = viewH - strip - edge - GAP; }
+    return { bottom: bottom, maxH: Math.max(MIN_H, room) };
   }
 
-  root.OfficeToasts = { MAX: MAX, AFTER_MS: AFTER_MS, GAP: GAP, TOP: TOP, ROOM: ROOM, lift: lift, sticky: sticky, add: add, tick: tick, hasTimed: hasTimed, remove: remove };
+  root.OfficeToasts = { MAX: MAX, AFTER_MS: AFTER_MS, GAP: GAP, MIN_H: MIN_H, lift: lift, sticky: sticky, add: add, tick: tick, hasTimed: hasTimed, remove: remove };
 })(typeof globalThis !== 'undefined' ? globalThis : window);
