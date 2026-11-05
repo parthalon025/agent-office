@@ -109,8 +109,13 @@ export function createTracker(deps = {}) {
     if (s.status === 'ended') return Promise.resolve();
     if (!s.cwd) { s.placed = true; return Promise.resolve(); }
     if (!force && s.gitCwd === s.cwd && now() - s.gitAt < 15000) return Promise.resolve();
+    const sameDir = s.gitCwd === s.cwd;
     s.gitCwd = s.cwd; s.gitAt = now();
-    return locate(s.cwd).then((g) => {
+    return locate(s.cwd).then((found) => {
+      // locate gives null both outside git and when git fails for a moment (a lock, a timeout). A session that had a
+      // place in this same folder keeps it, so it does not jump to Other folders. A new folder is believed.
+      if (found === null && sameDir && s.git) return;
+      const g = found;
       const first = !s.placed;
       const diff = first || JSON.stringify(g) !== JSON.stringify(s.git);
       s.git = g; s.placed = true;
