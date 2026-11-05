@@ -116,6 +116,12 @@ test('status text in the DS CSS and StatusBubble uses the -text and -on-bubble t
   assert.equal(bub.props.style.color, 'var(--status-waiting-on-bubble)');
 });
 
+test('the 3D bubble sprite draws its glyph in status-*-on-bubble, with a fallback for every status', () => {
+  const b = read('components/bundle.js');
+  for (const s of ['working', 'waiting', 'error', 'resting', 'finished']) assert.match(b, new RegExp(`"status-${s}-on-bubble":"#[0-9a-f]{6}"`), `FALL has status-${s}-on-bubble`);
+  assert.match(b, /Kit\.prototype\.bubble=[\s\S]{0,600}var ink=K\.tok\["status-"\+st\+"-on-bubble"\]\|\|col;c\.fillStyle=ink;c\.strokeStyle=ink;/);
+});
+
 test('kit/check.py: events are checked against the bot type and the usage fields', { skip: !python }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-kit-'));
   const log = path.join(dir, 'events.jsonl');
