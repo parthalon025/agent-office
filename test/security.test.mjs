@@ -3,13 +3,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
+import { FIXTURE_ROOT, OFFICE, holds } from './fixtures/fixture-root.mjs';
 import { cleanRules, setRule, decide, permissionModeFor, openRefusal, costAsk, enforcement, preToolDecision, addCost, costThisMonth } from '../security.mjs';
 
 const WIN = process.platform === 'win32';
-const root = WIN ? 'C:\\work\\repo' : '/work/repo';
+const root = FIXTURE_ROOT; // outside the office folder, wherever the checkout is (#127)
+test('the fixture root is outside the office folder (#127)', () => {
+  assert.equal(holds(OFFICE, root), false, root + ' is inside ' + OFFICE);
+  assert.equal(holds(root, OFFICE), false, 'the office folder is inside the fixture root');
+});
 const inside = path.join(root, 'src', 'a.js');
 const outside = WIN ? 'C:\\Windows\\win.ini' : '/etc/hosts';
-const B = 'c:\\work\\repo';
+const B = root.toLowerCase();
 const none = () => cleanRules(null);
 // worktree: the root is inside a git worktree (the server knows it from the session's worktree or its git place).
 const call = (tool, input, extra = {}) => ({ building: B, kind: 'claude-code', tool, input, root, worktree: true, ...extra });

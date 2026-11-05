@@ -8,17 +8,23 @@ import { fileURLToPath } from 'node:url';
 import { riskOf, actionOf, inside, realInside, isProtectedPart, fileKey } from '../risk.mjs';
 import { officeFiles } from '../files.mjs';
 import { shortOf } from './fixtures/short-name.mjs';
+import { FIXTURE_ROOT, OFFICE, holds } from './fixtures/fixture-root.mjs';
 import '../public/vocab.js';
 
 const V = globalThis.OfficeVocab;
 const WIN = process.platform === 'win32';
-const cwd = WIN ? 'C:\\work\\repo' : '/work/repo';
-const inFolder = WIN ? 'C:\\Work\\Repo\\src\\a.js' : '/work/repo/src/a.js';
+const cwd = FIXTURE_ROOT; // outside the office folder, wherever the checkout is (#127)
+const inFolder = path.join(cwd, 'src', 'a.js');
 const outFolder = WIN ? 'C:\\Windows\\system32\\drivers\\etc\\hosts' : '/etc/hosts';
 const outDir = path.dirname(outFolder);
 const home = os.homedir();
 const at = (...p) => path.join(cwd, ...p);
 const wtRoot = at('.claude', 'worktrees', 'wt1'); // Claude Code puts its own worktrees in .claude
+
+test('the fixture root is outside the office folder (#127)', () => {
+  assert.equal(holds(OFFICE, cwd), false, cwd + ' is inside ' + OFFICE);
+  assert.equal(holds(cwd, OFFICE), false, 'the office folder is inside the fixture root');
+});
 
 const cases = [
   // shells
@@ -229,12 +235,13 @@ test('the office state and history files of every port: an edit is high, a look-
 });
 
 test('Windows path forms that point inside stay outside (the safe direction)', { skip: !WIN && 'Windows only' }, () => {
-  for (const f of ['\\\\?\\C:\\work\\repo\\src\\a.js', '\\\\localhost\\C$\\work\\repo\\src\\a.js', 'C:\\work\\repo.\\src\\a.js', '\\\\.\\C:\\work\\repo\\src\\a.js']) {
+  const drv = cwd.slice(0, 2), tail = cwd.slice(3);
+  for (const f of [`\\\\?\\${drv}\\${tail}\\src\\a.js`, `\\\\localhost\\${drv[0]}$\\${tail}\\src\\a.js`, `${drv}\\${tail}.\\src\\a.js`, `\\\\.\\${drv}\\${tail}\\src\\a.js`]) {
     assert.equal(inside(cwd, f), false, f);
     assert.equal(riskOf('Edit', { file_path: f }, cwd), 'medium', f);
     assert.equal(riskOf('Read', { file_path: f }, cwd), 'medium', f);
   }
-  assert.equal(riskOf('Edit', { file_path: '\\\\?\\C:\\work\\repo\\.git\\config' }, cwd), 'high', 'a .git part counts in any form');
+  assert.equal(riskOf('Edit', { file_path: `\\\\?\\${drv}\\${tail}\\.git\\config` }, cwd), 'high', 'a .git part counts in any form');
 });
 
 function scratch() {
