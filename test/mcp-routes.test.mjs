@@ -307,3 +307,40 @@ test('a live reopen swaps the past record for its own as soon as it has a sid', 
   assert.equal((await call('/api/reopen', { uid: PAST_UID })).status, 404, 'there is no old record to reopen');
   await call('/api/close', { uid: re.json.uid });
 });
+
+// ---------- agent rooms (#69): POST /api/open makes a room for each agent ----------
+test('/api/open gives each agent a worktree on the base floor; isolation "same" and a folder outside git work in the folder', { skip: SKIP }, async () => {
+  const { resolveExe } = await import('../git.mjs');
+  const { execFileSync } = await import('node:child_process');
+  const repo = path.join(base, 'rooms-repo');
+  fs.mkdirSync(repo);
+  const g = (...a) => execFileSync(resolveExe('git'), ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8', windowsHide: true });
+  g('init', '-q', '-b', 'trunk'); fs.writeFileSync(path.join(repo, 'a.txt'), 'a\n'); g('add', '-A'); g('commit', '-q', '-m', 'init');
+  const openIn = async (cwd, name, extra = {}) => {
+    const r = await call('/api/open', { cwd, name, provider: 'ollama', model: 'fake-model', where: 'office', ...extra });
+    assert.equal(r.status, 200, JSON.stringify(r.json));
+    return r.json.uid;
+  };
+  const placed = (uid, what) => until(async () => { const s = await sessionOf(uid); return s?.place ? s : null; }, what);
+  const a = await openIn(repo, 'room-a'), b = await openIn(repo, 'room-b');
+  const sa = await placed(a, 'the place of the first agent'), sb = await placed(b, 'the place of the second agent');
+  for (const s of [sa, sb]) {
+    assert.match(s.worktree.branch, /^agent\/room-[ab]-[0-9a-f]{4}$/);
+    assert.equal(s.place.floor, 'trunk', 'the room sits on the floor of the base branch');
+    assert.equal(s.place.room, s.worktree.branch, 'the sign shows the worktree branch');
+    assert.ok(s.cwd.toLowerCase().includes('rooms-repo.worktrees'), s.cwd);
+  }
+  assert.notEqual(sa.place.roomId, sb.place.roomId, 'two agents, two rooms');
+  // "Use this folder": both agents share the room of the folder
+  const c = await openIn(repo, 'shared-c', { isolation: 'same' }), d = await openIn(repo, 'shared-d', { isolation: 'same' });
+  const sc = await placed(c, 'the place of the third agent'), sd = await placed(d, 'the place of the fourth agent');
+  assert.equal(sc.worktree, null);
+  assert.equal(sc.place.roomId, sd.place.roomId);
+  assert.equal((await snapshot()).figures[sc.place.noteKey].sessions, 2, 'the shared room counts two agents');
+  // a folder outside git has no room to make: the agent works in the folder, and the feed says so
+  const e = await openIn(work, 'no-git-e');
+  const snap = await snapshot();
+  assert.equal(snap.sessions.find((s) => s.uid === e).worktree, null);
+  assert.ok(snap.feed.some((x) => x.uid === e && /not in git/.test(x.text)), JSON.stringify(snap.feed.slice(-5)));
+  for (const u of [a, b, c, d, e]) await call('/api/close', { uid: u });
+});

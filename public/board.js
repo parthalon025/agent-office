@@ -286,9 +286,13 @@
     c.fillStyle = col('scene-dark'); rr(c, 0, 0, w, h, 26); c.fill();
     c.strokeStyle = mix(col('status-waiting'), col('scene-dark'), 0.35); c.lineWidth = 6; rr(c, 6, 6, w - 12, h - 12, 22); c.stroke();
     c.textBaseline = 'middle'; c.textAlign = 'left';
-    c.fillStyle = col('bubble'); c.font = '600 62px ' + sans; c.fillText('Agents', 36, h / 2 + 3);
-    c.fillStyle = col('status-working'); rr(c, w - 150, 28, 114, h - 56, (h - 56) / 2); c.fill();
-    c.fillStyle = col('on-status', col('bubble')); c.font = '700 56px ' + mono; c.textAlign = 'center'; c.fillText(String(count), w - 93, h / 2 + 3);
+    // A room that two or more agents share says "N agents" (OfficeVocab.agentsSign); any other room says "Agents" and the count.
+    var shared = window.OfficeVocab.agentsSign(count);
+    c.fillStyle = col('bubble'); c.font = '600 62px ' + sans; c.fillText(shared || 'Agents', 36, h / 2 + 3);
+    if (!shared) {
+      c.fillStyle = col('status-working'); rr(c, w - 150, 28, 114, h - 56, (h - 56) / 2); c.fill();
+      c.fillStyle = col('on-status', col('bubble')); c.font = '700 56px ' + mono; c.textAlign = 'center'; c.fillText(String(count), w - 93, h / 2 + 3);
+    }
     c.textAlign = 'left';
   }
 

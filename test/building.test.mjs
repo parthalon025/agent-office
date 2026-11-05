@@ -297,6 +297,66 @@ test('room info, figures and note keys come from the snapshot', async () => {
   assert.equal(m.roomInfo(main.roomId, { sessions: [], repos: [] }).sessions.length, 0, 'an older snapshot can be passed');
 });
 
+// ---------- agent rooms (#69) ----------
+const WT = (n) => `C:\\work\\repo.worktrees\\${n}`;
+for (const n of ['a', 'b', 'c']) GITS[WT(n)] = { repo: REPO_A, root: WT(n), branch: `agent/${n}-1`, base: 'main' };
+
+test('three agents in three agent worktrees: three rooms on one floor (the base branch), each named by its branch', async () => {
+  const r = rig({ repos: [{ path: REPO_A, worktrees: [{ branch: 'main', root: REPO_A }] }] });
+  for (const n of ['a', 'b', 'c']) await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'sid-' + n, cwd: WT(n) });
+  const m = r.mount(KEY_A);
+  assert.deepEqual(m.def.floors.map((f) => f.name), ['main'], 'one floor, no floor per agent branch');
+  assert.deepEqual(m.def.floors[0].rooms.map((x) => x.name), ['repo', 'agent/a-1', 'agent/b-1', 'agent/c-1']);
+  const adds = of(m.ev, 'bot.add');
+  assert.equal(new Set(adds.map((e) => e.roomId)).size, 3, 'each agent has its own room');
+  assert.equal(of(m.ev, 'floor.add').length, 0, 'the scene has the floor from its definition');
+});
+
+test('an agent worktree with no session yet is a room on the base floor', () => {
+  const r = rig({ repos: [{ path: REPO_A, worktrees: [{ branch: 'main', root: REPO_A }, { branch: 'agent/z-9', root: WT('z'), base: 'main' }] }] });
+  r.push();
+  const m = r.mount(KEY_A);
+  assert.equal(m.def.floors.length, 1);
+  assert.equal(m.def.floors[0].rooms.length, 2);
+});
+
+test('room sign count: two top-level sessions share one room, helpers do not count', async () => {
+  const r = rig();
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'one', cwd: REPO_A });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'two', cwd: REPO_A });
+  const m = r.mount(KEY_A);
+  const room = m.def.floors[0].rooms[0].id;
+  assert.equal(m.def.floors[0].rooms.length, 1, 'one folder, one room');
+  assert.equal(m.roomInfo(room).sessions.length, 2);
+  assert.equal(m.figures(room).sessions, 2);
+  // a subagent of one of them is a helper in that room, and the count stays 2
+  await r.play(HOOKS.subagent.map((p) => ({ ...p, session_id: 'one', cwd: REPO_A })));
+  assert.ok(of(m.ev, 'delegate').length >= 1, 'helpers appear');
+  assert.equal(m.roomInfo(room).sessions.length, 2, 'helpers are not agents');
+  assert.equal(m.figures(room).sessions, 2);
+  assert.equal(V.agentsSign(m.figures(room).sessions), '2 agents');
+  assert.ok(of(m.ev, 'delegate').every((e) => e.roomId === room), 'helpers sit in the parent room');
+});
+
+test('room sign text: only a shared room says how many agents', () => {
+  assert.equal(V.agentsSign(0), '');
+  assert.equal(V.agentsSign(1), '');
+  assert.equal(V.agentsSign(2), '2 agents');
+  assert.equal(V.agentsSign(5), '5 agents');
+  assert.equal(V.agentsSign(undefined), '');
+});
+
+test('a session ended or closed leaves the room count', async () => {
+  const r = rig();
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'one', cwd: REPO_A });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'two', cwd: REPO_A });
+  const m = r.mount(KEY_A);
+  const room = m.def.floors[0].rooms[0].id;
+  r.tracker.onHook(slimPayload({ hook_event_name: 'SessionEnd', session_id: 'one', cwd: REPO_A }, null)); r.push();
+  assert.equal(m.roomInfo(room).sessions.length, 1);
+  assert.equal(V.agentsSign(m.figures(room).sessions), '');
+});
+
 test('buildings: waiting first, then the busiest; preview carries the bots', async () => {
   const r = rig({ repos: [{ path: REPO_B, worktrees: [{ branch: 'main', root: REPO_B }] }] });
   await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
