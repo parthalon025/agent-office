@@ -366,3 +366,36 @@ test('the office\'s own state.json and history.json are settings: the Security r
   }
   assert.equal(actionOf('Write', { file_path: at('state.json') }, cwd), 'edit-inside', 'a state.json of another project is a plain file');
 });
+
+// Review M3: the agents' own config homes (~/.claude, ~/.hermes, or where CLAUDE_CONFIG_DIR and HERMES_HOME move them) hold
+// settings, hooks, skills and memory that run code. A session rooted in one of them must never rate those files low, whatever
+// the root: only the parts below the root count inside a root, so .claude in the root's own path was not seen. Real temp
+// folders stand in for the home folder (opts.home, opts.env).
+test('M3: files in the home .claude and .hermes folders are settings that run code, also for a session rooted there', (c) => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-risk-home-'));
+  try {
+    const fake = path.join(base, 'home'), claude = path.join(fake, '.claude'), hermes = path.join(fake, '.hermes');
+    for (const d of [path.join(claude, 'hooks'), path.join(hermes, 'skills', 'x'), path.join(fake, 'src', 'app')]) fs.mkdirSync(d, { recursive: true });
+    const opts = { home: fake, env: {} };
+    for (const [root, file] of [[claude, path.join(claude, 'settings.json')], [claude, path.join(claude, 'hooks', 'x.ps1')], [claude, path.join(claude, 'CLAUDE.md')],
+      [path.join(claude, 'hooks'), path.join(claude, 'hooks', 'x.ps1')], [hermes, path.join(hermes, 'config.yaml')], [path.join(hermes, 'skills'), path.join(hermes, 'skills', 'x', 'SKILL.md')]]) {
+      assert.equal(riskOf('Edit', { file_path: file, old_string: 'a', new_string: 'b' }, root, opts), 'high', `edit ${path.relative(fake, file)} from ${path.relative(fake, root)}`);
+      assert.equal(actionOf('Edit', { file_path: file }, root, opts), 'settings');
+      assert.notEqual(riskOf('Read', { file_path: file }, root, opts), 'low', `read ${path.relative(fake, file)}`);
+      assert.equal(actionOf('Read', { file_path: file }, root, opts), 'settings');
+    }
+    assert.equal(riskOf('Edit', { file_path: path.join(fake, 'src', 'app', 'a.js') }, path.join(fake, 'src', 'app'), opts), 'low', 'a project folder in home is still a project');
+    // moved by the env: CLAUDE_CONFIG_DIR and HERMES_HOME
+    const moved = path.join(base, 'cfg');
+    fs.mkdirSync(moved);
+    for (const env of [{ CLAUDE_CONFIG_DIR: moved }, { HERMES_HOME: moved }]) {
+      assert.equal(actionOf('Edit', { file_path: path.join(moved, 'settings.json') }, moved, { home: fake, env }), 'settings', JSON.stringify(env));
+    }
+    assert.equal(riskOf('Edit', { file_path: path.join(moved, 'a.txt') }, moved, opts), 'low', 'without the env it is a plain folder');
+    // a root reached through a junction is the same folder
+    const alias = path.join(base, 'alias');
+    try { fs.symlinkSync(claude, alias, 'junction'); } catch { c.diagnostic('links are not allowed here'); return; }
+    assert.equal(actionOf('Edit', { file_path: path.join(alias, 'settings.json') }, alias, opts), 'settings', 'through a junction');
+    assert.equal(riskOf('Edit', { file_path: path.join(alias, 'settings.json') }, alias, opts), 'high');
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
