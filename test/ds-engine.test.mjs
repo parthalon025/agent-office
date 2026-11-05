@@ -840,5 +840,6 @@ test('walk: no literal speed is left in the walk step or the bot animation, and 
   assert.ok(!/\b2\.6\b/.test(source('function walkStep(b,dt)', 'return walking;}\n')), 'no 2.6 in walkStep');
   const at = bundle.indexOf('function animateBot(');
   assert.ok(at >= 0 && !/sp=2\.6/.test(bundle.slice(at, at + 600)), 'no literal speed in animateBot');
+  assert.ok(bundle.slice(at, at + 200).includes('walkStep(b,dt)'), 'animateBot still calls walkStep, or bots would stop walking');
   assert.match(source('function readScene(el)', '\n [["day","day"]'), /WALK\.bot=num\(cs,"scene-walk-speed",2\.6\).*WALK\.ephemeral=num\(cs,"scene-walk-speed-ephemeral",5\.2\)/);
 });
