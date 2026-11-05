@@ -10,7 +10,10 @@
    Deny). A looser rule (to Allow, or an agent toggle to On) turns the cell amber and paints "Confirm: <change>" with Confirm
    and Cancel hotspots: no dialog. Ask and Deny apply at once. Below 700 px of free view a screen in focus shows one agent kind
    at a time, with Previous and Next. No keyboard or screen reader path (ADR 0003); the Spend value takes digits while it is
-   being typed, after a click on it.
+   being typed, after a click on it. Minus stops at $1, and No limit (a typed 0 or an empty value) is the loosest spend
+   setting: it waits for the same painted Confirm.
+   A cell the office cannot enforce says "Not enforced"; an Ask cell that the agent decides by itself (Claude Code asks only
+   when its own rules and mode say so) says "Partly enforced". Each with its reason (security.mjs enforcement).
    The rules and words come from the snapshot (snap.security) and the shared vocabulary (vocab.js OfficeVocab.security); the
    server checks every change again (security.mjs), so this file keeps no rule of its own beyond what to paint.
 
@@ -46,12 +49,26 @@
   function notEnforced(data, row, col) {
     var e = data && data.sec && data.sec.enforce && data.sec.enforce[col];
     if (!e) return '';
-    return e.reason || (e.rows && e.rows[row]) || '';
+    return e.reason || (e.rows && S().own(e.rows, row) && e.rows[row]) || '';
+  }
+  // Why an Ask cell is only partly enforced ('' = fully, or not Ask): the agent decides by itself whether to ask.
+  function partly(data, scope, row, col) {
+    var e = data && data.sec && data.sec.enforce && data.sec.enforce[col];
+    if (!e || !e.asks || !S().own(e.asks, row) || notEnforced(data, row, col)) return '';
+    return shown(data, scope, row, col) === 'ask' ? e.asks[row] : '';
+  }
+  // The note under a cell: { word, why } or null.
+  function noteOf(data, scope, row, col) {
+    var n = notEnforced(data, row, col);
+    if (n) return { word: 'Not enforced', why: n };
+    var q = partly(data, scope, row, col);
+    return q ? { word: 'Partly enforced', why: q } : null;
   }
   function tone(v) { return v === 'allow' || v === 'on' ? 'allow' : v === 'deny' ? 'deny' : 'ask'; }
   // The painted Confirm: the change, then what it is for.
-  function confirmText(p) { return 'Confirm: ' + (p.to === null ? 'the office rule (' + S().word(p.office) + ')' : S().word(p.to)); }
-  function confirmWhat(p) { return S().rows[p.row].label + ', ' + colLabel(p.col); }
+  function isSpend(p) { return !!p && p.spend !== undefined; }
+  function confirmText(p) { return 'Confirm: ' + (isSpend(p) ? 'No limit' : p.to === null ? 'the office rule (' + S().word(p.office) + ')' : S().word(p.to)); }
+  function confirmWhat(p) { return isSpend(p) ? 'Spend limit, new sessions' : S().rows[p.row].label + ', ' + colLabel(p.col); }
   function money(n) { var F = root.OfficeFormat; return F && F.money ? F.money(n) : '$' + (+n || 0).toFixed(2); }
   function monthName(m) {
     var a = String(m || '').split('-'), names = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -132,10 +149,11 @@
         chip(p, cx + 8, cy, cw, ch, shown(data, view.scope, row, c.id), 24, isHover(view, id), pend);
         if (overridden(data, row, c.id) && !pend) p.items.push({ t: 'mark', x: cx + 8 + cw - 4, y: cy + 4, s: 18, c: 'accent' });
         hot(p, { kind: 'cell', id: id, row: row, col: c.id, x: cx + 4, y: cy - 4, w: cw + 8, h: ch + 8 });
-        if (notEnforced(data, row, c.id)) text(p, cx + colW / 2, cy + ch + 26, 18, 'muted', 'Not enforced', { align: 'center', maxW: colW - 8 });
+        var nt = noteOf(data, view.scope, row, c.id);
+        if (nt) text(p, cx + colW / 2, cy + ch + 26, 18, 'muted', nt.word, { align: 'center', maxW: colW - 8 });
         if (view.scope === 'building' && overridden(data, row, c.id) && !pend && view.focused) {
           var cid = 'clear:' + row + '|' + c.id;
-          text(p, cx + colW / 2, cy + ch + 26 + (notEnforced(data, row, c.id) ? 22 : 0), 18, isHover(view, cid) ? 'ink' : 'muted', 'Use office rule', { align: 'center', maxW: colW - 8 });
+          text(p, cx + colW / 2, cy + ch + 26 + (nt ? 22 : 0), 18, isHover(view, cid) ? 'ink' : 'muted', 'Use office rule', { align: 'center', maxW: colW - 8 });
           hot(p, { kind: 'clear', id: cid, row: row, col: c.id, x: cx + 4, y: cy + ch + 8, w: cw + 8, h: 26 });
         }
       });
@@ -144,33 +162,36 @@
     return y;
   }
 
-  // The reasons of the cells that are not enforced, one line per reason: "Not enforced for this agent: ...".
+  // The reasons of the cells that are not or partly enforced, one line per reason: "Not enforced for Hermes, dsh. ...".
   function reasons(view, data) {
     var sc = screenOf(view.screen), by = {}, order = [];
     S().columns.forEach(function (c) {
       sc.rows.forEach(function (row) {
         if (!S().applies(row, c.id)) return;
-        var why = notEnforced(data, row, c.id);
-        if (!why) return;
-        if (!by[why]) { by[why] = []; order.push(why); }
-        if (by[why].indexOf(c.label) < 0) by[why].push(c.label);
+        var nt = noteOf(data, view.scope, row, c.id);
+        if (!nt) return;
+        var k = nt.word + '\u0000' + nt.why;
+        if (!by[k]) { by[k] = { word: nt.word, why: nt.why, cols: [] }; order.push(k); }
+        if (by[k].cols.indexOf(c.label) < 0) by[k].cols.push(c.label);
       });
     });
-    return order.map(function (w) { return 'Not enforced for ' + by[w].join(', ') + '. ' + w; });
+    return order.map(function (k) { var x = by[k]; return x.word + ' for ' + x.cols.join(', ') + '. ' + x.why; });
+  }
+
+  // The painted Confirm at the bottom of a screen: the change, what it is for, Confirm and Cancel. big: the paged view.
+  function confirmBand(p, view, big) {
+    var W = view.w, H = view.h, bh = big ? 132 : 96, by = H - bh - 28, bw = big ? 260 : 220, bt = big ? 92 : 64;
+    fill(p, 48, by, W - 96, bh, 'pendingBand', 16);
+    text(p, 76, by + (big ? 58 : 42), big ? 42 : 30, 'onPending', confirmText(view.pending), { wt: 600, maxW: W - 96 - 2 * bw - 80 });
+    text(p, 76, by + (big ? 104 : 76), big ? 30 : 22, 'onPending', confirmWhat(view.pending), { maxW: W - 96 - 2 * bw - 80 });
+    hot(p, button(p, W - 48 - 2 * bw - 30, by + (bh - bt) / 2, bw, bt, 'Confirm', big ? 42 : 30, { kind: 'confirm', id: 'confirm' }, isHover(view, 'confirm'), 'primary'));
+    hot(p, button(p, W - 48 - bw - 16, by + (bh - bt) / 2, bw, bt, 'Cancel', big ? 42 : 30, { kind: 'cancel', id: 'cancel' }, isHover(view, 'cancel')));
   }
 
   // The bottom of a full screen: the painted Confirm, else the reasons and a hint (or the last error).
   function footer(p, view, data, yTop) {
     var W = view.w, H = view.h;
-    if (view.pending) {
-      var bh = 96, by = H - bh - 28;
-      fill(p, 48, by, W - 96, bh, 'pendingBand', 16);
-      text(p, 76, by + 42, 30, 'onPending', confirmText(view.pending), { wt: 600, maxW: W - 96 - 520 });
-      text(p, 76, by + 76, 22, 'onPending', confirmWhat(view.pending), { maxW: W - 96 - 520 });
-      hot(p, button(p, W - 48 - 470, by + 16, 220, 64, 'Confirm', 30, { kind: 'confirm', id: 'confirm' }, isHover(view, 'confirm'), 'primary'));
-      hot(p, button(p, W - 48 - 236, by + 16, 220, 64, 'Cancel', 30, { kind: 'cancel', id: 'cancel' }, isHover(view, 'cancel')));
-      return;
-    }
+    if (view.pending) { confirmBand(p, view, false); return; }
     var lines = reasons(view, data), y = Math.max(yTop + 34, H - 40 - 30 * (Math.min(lines.length, 3) + 1));
     lines.slice(0, 3).forEach(function (l) { text(p, 48, y, 21, 'muted', l, { maxW: W - 96 }); y += 30; });
     var hint = view.note || (!view.focused ? 'Click to look closer.' : view.screen === 'secrets' ? 'Click a cell to change it: Ask or Deny.' : view.screen === 'agents' ? 'Click a cell to change it.' : 'Click a cell to change it: Ask, Allow, Deny.');
@@ -195,9 +216,9 @@
         hot(p, button(p, W - 48 - 228, y + (rowH - chH) / 2, 220, chH, 'Cancel', 42, { kind: 'cancel', id: 'cancel' }, isHover(view, 'cancel')));
         y += rowH; return;
       }
-      var why = S().applies(row, col.id) ? notEnforced(data, row, col.id) : '';
-      text(p, 48, y + rowH / 2 + (why ? 0 : 18), 52, 'ink', r.label, { maxW: W - 96 - cw - 24 });
-      if (why) text(p, 48, y + rowH / 2 + 44, 28, 'muted', 'Not enforced for this agent', { maxW: W - 96 - cw - 24 });
+      var nt = S().applies(row, col.id) ? noteOf(data, view.scope, row, col.id) : null;
+      text(p, 48, y + rowH / 2 + (nt ? 0 : 18), 52, 'ink', r.label, { maxW: W - 96 - cw - 24 });
+      if (nt) text(p, 48, y + rowH / 2 + 44, 28, 'muted', nt.word + ' for this agent', { maxW: W - 96 - cw - 24 });
       if (!S().applies(row, col.id)) { text(p, W - 48 - cw / 2, y + rowH / 2 + 18, 44, 'muted', S().na(row, col.id), { align: 'center', maxW: cw }); y += rowH; return; }
       var id = 'cell:' + row + '|' + col.id, cy = y + (rowH - chH) / 2;
       chip(p, W - 48 - cw, cy, cw, chH, shown(data, view.scope, row, col.id), 52, isHover(view, id), false);
@@ -205,7 +226,7 @@
       hot(p, { kind: 'cell', id: id, row: row, col: col.id, x: W - 48 - cw - 6, y: cy - 6, w: cw + 12, h: chH + 12 });
       y += rowH;
     });
-    var why2 = sc.rows.map(function (row) { return S().applies(row, col.id) ? notEnforced(data, row, col.id) : ''; }).filter(Boolean)[0];
+    var why2 = sc.rows.map(function (row) { var n = S().applies(row, col.id) ? noteOf(data, view.scope, row, col.id) : null; return n ? n.why : ''; }).filter(Boolean)[0];
     if (!view.pending) text(p, 48, H - 30, 32, view.note ? 'error' : 'muted', view.note || (why2 ? why2 : 'Click a value to change it.'), { maxW: W - 96 });
   }
 
@@ -216,10 +237,11 @@
     text(p, 48, y + (big ? 60 : 44), s, 'ink', 'Spend limit, new sessions', { maxW: big ? W - 96 : 420 });
     var bx = big ? 48 : 480, by = big ? y + 84 : y, bh = big ? 96 : 64, bw = big ? 120 : 80, vw = big ? 340 : 240;
     hot(p, button(p, bx, by, bw, bh, { icon: 'remove' }, big ? 56 : 36, { kind: 'spend-minus', id: 'spend-minus' }, isHover(view, 'spend-minus')));
-    var vx = bx + bw + 16, editing = !!view.edit;
-    if (editing) { fill(p, vx, by, vw, bh, 'editFill', 12); stroke(p, vx, by, vw, bh, 'focus', 4, 12); }
+    var vx = bx + bw + 16, editing = !!view.edit, asking = isSpend(view.pending);
+    if (asking) { fill(p, vx, by, vw, bh, 'pending', 12); text(p, vx + vw / 2, by + bh / 2 + s * 0.36, s, 'onPending', 'No limit?', { wt: 600, align: 'center', maxW: vw - 16 }); }
+    else if (editing) { fill(p, vx, by, vw, bh, 'editFill', 12); stroke(p, vx, by, vw, bh, 'focus', 4, 12); }
     else { stroke(p, vx + 1.5, by + 1.5, vw - 3, bh - 3, isHover(view, 'spend-edit') ? 'focus' : 'line', 3, 12); }
-    text(p, vx + vw / 2, by + bh / 2 + s * 0.36, s, 'ink', editing ? '$' + view.edit.text + '|' : limit > 0 ? money(limit) : 'No limit', { wt: 600, align: 'center', maxW: vw - 16, mono: editing });
+    if (!asking) text(p, vx + vw / 2, by + bh / 2 + s * 0.36, s, 'ink', editing ? '$' + view.edit.text + '|' : limit > 0 ? money(limit) : 'No limit', { wt: 600, align: 'center', maxW: vw - 16, mono: editing });
     hot(p, { kind: 'spend-edit', id: 'spend-edit', x: vx, y: by, w: vw, h: bh });
     hot(p, button(p, vx + vw + 16, by, bw, bh, { icon: 'add' }, big ? 56 : 36, { kind: 'spend-plus', id: 'spend-plus' }, isHover(view, 'spend-plus')));
     y = by + bh + (big ? 40 : 34);
@@ -248,6 +270,7 @@
       y += 100;
     }
     fill(p, 48, y, W - 96, 2, 'line');
+    if (asking) { confirmBand(p, view, big); return; }   // the band takes the bottom of the screen until Confirm or Cancel
     text(p, 48, y + (big ? 56 : 44), big ? 40 : 26, 'ink', 'Extensions: local or project scope only. User scope stays out of reach.', { maxW: W - 96 });
     var hint = view.note || (editing ? 'Type a number of dollars. Enter saves, Esc cancels. 0 means no limit.' : !view.focused ? 'Click to look closer.' : 'Minus and plus change the limit by $1. Click the value to type it.');
     text(p, 48, H - 34, big ? 32 : 24, view.note ? 'error' : big ? 'muted' : 'ink', hint, { maxW: W - 96 });
@@ -300,6 +323,7 @@
       case 'confirm': {
         var pd = view.pending;
         if (!pd) return { view: view };
+        if (isSpend(pd)) return { view: with_(view, { pending: null }), send: { route: '/api/settings/spend', body: { limit: pd.spend, confirmed: true } } };
         return { view: with_(view, { pending: null }), send: setBody(view, data, pd.row, pd.col, pd.to, true) };
       }
       case 'cell': {
@@ -316,26 +340,33 @@
         return { view: with_(view, { pending: null }), send: setBody(Object.assign({}, view, { scope: 'building' }), data, h.row, h.col, null, false) };
       }
       case 'spend-minus': case 'spend-plus': {
-        var lim = +((data.sec && data.sec.spend && data.sec.spend.limit) || 0), d = h.kind === 'spend-plus' ? 1 : -1;
-        var to = Math.max(0, Math.min(1000, Math.round(lim) + d));
-        return { view: with_(view, { edit: null }), send: { route: '/api/settings/spend', body: { limit: to } } };
+        // Minus stops at $1: No limit (0) is never one click away (it needs the Confirm, after typing 0).
+        var lim = +((data.sec && data.sec.spend && data.sec.spend.limit) || 0), up = h.kind === 'spend-plus';
+        if (!up && lim <= 1) return { view: with_(view, { edit: null, pending: null, note: lim > 0 ? 'The lowest step is $1. Click the value to type a lower limit.' : null }) };
+        var to = up ? Math.min(1000, Math.round(lim) + 1) : Math.max(1, Math.round(lim) - 1);
+        return { view: with_(view, { edit: null, pending: null }), send: { route: '/api/settings/spend', body: { limit: to } } };
       }
       case 'spend-edit': {
         var l0 = +((data.sec && data.sec.spend && data.sec.spend.limit) || 0);
-        return { view: with_(view, { edit: { text: l0 > 0 ? String(l0) : '' } }) };
+        return { view: with_(view, { edit: { text: l0 > 0 ? String(l0) : '' }, pending: null }) };
       }
       default: return { view: view };
     }
   }
 
   // A key while the Spend value is being typed: digits and one point, Backspace, Enter saves, Esc cancels.
-  function key(view, e) {
+  // A typed 0 (or nothing) is No limit: the loosest spend setting, so it waits for the painted Confirm like Allow does.
+  function key(view, e, data) {
     if (!view.edit) return { view: view, taken: false };
     var k = e && e.key, t = view.edit.text;
     if (k === 'Escape') return { view: with_(view, { edit: null }), taken: true };
     if (k === 'Enter') {
       var n = t === '' ? 0 : Number(t);
       if (!isFinite(n) || n < 0 || n > 1000) return { view: Object.assign({}, view, { note: 'The spend limit is a number from 0 to 1000. 0 means no limit.' }), taken: true };
+      if (n === 0) {
+        var cur = +((data && data.sec && data.sec.spend && data.sec.spend.limit) || 0);
+        return { view: with_(view, { edit: null, pending: data && cur === 0 ? null : { spend: 0 } }), taken: true };
+      }
       return { view: with_(view, { edit: null }), send: { route: '/api/settings/spend', body: { limit: n } }, taken: true };
     }
     if (k === 'Backspace') return { view: with_(view, { edit: { text: t.slice(0, -1) } }), taken: true };
@@ -536,7 +567,7 @@
       if (!edit || dead) return;
       var it = items.filter(function (x) { return x.screen === 'spend'; })[0];
       if (!it) return;
-      var r = key(viewOf(it), e);
+      var r = key(viewOf(it), e, opts.data());
       if (!r.taken) return;
       e.preventDefault(); e.stopPropagation();
       apply(it, r);

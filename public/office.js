@@ -149,7 +149,9 @@
         h(A.TextInput, { id: 'f-budget', label: 'Spend limit in USD', value: form.maxBudget, placeholder: 'No limit', disabled: terminal, onChange: set('maxBudget'), hint: terminal ? undefined : LIMIT_HINT })),
       Pair(
         h(A.Select, { id: 'f-model', label: 'Model', options: MODELS, value: form.model, onChange: set('model') }),
-        h(A.Select, { id: 'f-mode', label: 'Permissions', options: MODES, value: form.permissionMode, onChange: set('permissionMode') })),
+        // The server opens Claude Code in Default mode while a Security room rule for it is Ask (security.mjs permissionModeFor).
+        h(A.Select, { id: 'f-mode', label: 'Permissions', options: MODES, value: form.permissionMode, onChange: set('permissionMode'),
+          hint: form.permissionMode === 'acceptEdits' ? 'While a Security room rule for Claude Code is Ask, the session opens in Default mode. The office then answers its edits by the rules.' : undefined })),
       p.templates.length ? h(A.Select, { id: 'f-template', label: 'Template', options: tpl, value: form.template, onChange: pickTemplate }) : null,
       h(Area, { id: 'f-prompt', label: 'First instruction (optional)', value: form.prompt, placeholder: 'Review the open PRs and list what blocks merge.', rows: 4, onChange: set('prompt') }),
       saving === null
@@ -378,7 +380,8 @@
     var le = useState(''), limitErr = le[0], setLimitErr = le[1];
     function saveLimit() {
       setLimitBusy(true); setLimitErr('');
-      api('/api/settings/spend', { limit: limitSent(limit, true) }).then(function (r) {
+      // An empty field is No limit; Save on the typed field is the confirm the server asks for (it refuses 0 without one).
+      api('/api/settings/spend', { limit: limitSent(limit, true), confirmed: true }).then(function (r) {
         setLimitBusy(false);
         if (p.onSaved) p.onSaved();
         if (p.toast) p.toast({ tone: 'info', title: r.spendLimit > 0 ? 'Default spend limit saved' : 'Default spend limit cleared', text: r.spendLimit > 0 ? 'New Claude Code sessions stop at $' + r.spendLimit + '.' : 'New Claude Code sessions have no limit.' });

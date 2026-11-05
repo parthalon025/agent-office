@@ -109,12 +109,13 @@ test('Agents: turning on an ungated agent needs the Confirm; a gated kind has no
   assert.ok(texts(p).includes('Office-wide'));
 });
 
-test('Spend: minus and plus in 1 dollar steps, never under 0; a click on the value types it; Enter saves, Esc cancels', () => {
+test('Spend: minus and plus in 1 dollar steps, minus never under $1; a click on the value types it; Enter saves, Esc cancels', () => {
   const d = data(), v = view({ screen: 'spend', h: 738 }), p = P.plan(v, d);
   assert.deepEqual(P.step(v, hotOf(p, 'spend-plus'), d).send, { route: '/api/settings/spend', body: { limit: 3 } });
   assert.deepEqual(P.step(v, hotOf(p, 'spend-minus'), d).send.body, { limit: 1 });
   const zero = data(undefined, { limit: 0, month: '2026-11', byColumn: {} });
-  assert.deepEqual(P.step(v, hotOf(P.plan(v, zero), 'spend-minus'), zero).send.body, { limit: 0 });
+  assert.equal(P.step(v, hotOf(P.plan(v, zero), 'spend-minus'), zero).send, undefined, 'No limit: minus does nothing');
+  assert.deepEqual(P.step(v, hotOf(P.plan(v, zero), 'spend-plus'), zero).send.body, { limit: 1 }, 'plus sets a limit of $1');
   assert.ok(texts(P.plan(v, zero)).includes('No limit'));
   assert.ok(texts(p).includes('$2.00') && texts(p).includes('$1.50') && texts(p).includes('Not set up'), 'the limit and the cost per agent kind');
   assert.ok(texts(p).includes('Cost, November 2026'));
@@ -134,6 +135,51 @@ test('Spend: minus and plus in 1 dollar steps, never under 0; a click on the val
   const big = P.key({ ...e, edit: { text: '5000' } }, { key: 'Enter' });
   assert.equal(big.send, undefined);
   assert.match(big.view.note, /from 0 to 1000/);
+});
+
+// #70 review: No limit is the loosest spend setting, and paid spend is the owner's one-way door. It never comes from one click.
+test('Spend: minus at $1 (or under $1.50) never removes the limit; No limit needs the painted Confirm', () => {
+  const v = view({ screen: 'spend', h: 738 });
+  for (const limit of [1, 1.4, 0.5]) {
+    const d = data(undefined, { limit, month: '2026-11', byColumn: {} });
+    const r = P.step(v, hotOf(P.plan(v, d), 'spend-minus'), d);
+    assert.ok(!r.send || r.send.body.limit >= 1, `minus at $${limit} sends ${JSON.stringify(r.send)}`);
+    if (limit <= 1) { assert.equal(r.send, undefined, `minus at $${limit}`); assert.match(r.view.note, /lowest step is \$1/); }
+  }
+  const d = data(undefined, { limit: 5, month: '2026-11', byColumn: {} });
+  for (const typed of ['0', '']) {
+    const e = { ...v, edit: { text: typed } };
+    const r = P.key(e, { key: 'Enter' });
+    assert.equal(r.send, undefined, `typed "${typed}": nothing is sent yet`);
+    assert.deepEqual(r.view.pending, { spend: 0 });
+    assert.equal(r.view.edit, null);
+    const p = P.plan(r.view, d), t = texts(p);
+    assert.ok(t.includes('Confirm: No limit'), t.join(' / '));
+    assert.ok(p.items.some((i) => i.c === 'pending'), 'the value turns amber');
+    const ok = P.step(r.view, hotOf(p, 'confirm'), d);
+    assert.deepEqual(ok.send, { route: '/api/settings/spend', body: { limit: 0, confirmed: true } });
+    assert.equal(ok.view.pending, null);
+    assert.equal(P.step(r.view, hotOf(p, 'cancel'), d).view.pending, null);
+    assert.equal(P.step(r.view, hotOf(p, 'cancel'), d).send, undefined);
+  }
+  const paged = P.key({ ...v, paged: true, edit: { text: '0' } }, { key: 'Enter' }).view;
+  assert.ok(texts(P.plan(paged, d)).includes('Confirm: No limit'), 'the paged view paints it too');
+  const already = data(undefined, { limit: 0, month: '2026-11', byColumn: {} });
+  assert.equal(P.key({ ...v, edit: { text: '' } }, { key: 'Enter' }, already).view.pending, null, 'No limit again: nothing to confirm');
+});
+
+test('an Ask that Claude Code decides by itself says Partly enforced, and why; Deny there says nothing', () => {
+  const why = 'Ask holds only the calls Claude Code asks about. Its own allow rules and permission mode can run a call without asking.';
+  const enf = { ...enforce, 'claude-code': { ...enforce['claude-code'], asks: { shell: why } } };
+  const d = (rules) => ({ sec: { rules, enforce: enf, spend: {} }, building: B, buildingName: 'repo' });
+  const v = view({ screen: 'commands' });
+  const t = texts(P.plan(v, d({ office: {}, buildings: {} })));
+  assert.ok(t.includes('Partly enforced'), t.join(' / '));
+  assert.ok(t.includes('Partly enforced for Claude Code. ' + why));
+  const deny = texts(P.plan(v, d({ office: { 'shell|claude-code': 'deny' }, buildings: {} })));
+  assert.ok(!deny.includes('Partly enforced'), 'a Deny is enforced');
+  const pagedT = texts(P.plan(view({ screen: 'commands', paged: true }), d({ office: {}, buildings: {} })));
+  assert.ok(pagedT.includes('Partly enforced for this agent'), pagedT.join(' / '));
 });
 
 test('the outside plate of a right-wall screen shows its title and has no hotspot; a click in flight is ignored', () => {
