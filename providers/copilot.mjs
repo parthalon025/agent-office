@@ -4,6 +4,7 @@
 //   SELF_APPROVE               the environment switches that approve tool calls by themselves: taken out of its environment
 //   requestCall(raw)           Copilot's own permission request body (rawInput.kind shell, write, read, url, mcp...) as the
 //                              tool name and input the office rates; null for anything else (a tool's own arguments)
+//   argsCall(card, raw, loc)   a call's own arguments in the shape of that card, so a change after the request is seen
 //   MODEL_RE                   a model id the office passes as --model
 // From Copilot CLI 1.0.105 (copilot help config, copilot help permissions, copilot help environment; the handshake in
 // test/fixtures/copilot-acp.json, signed out). Its request bodies come from the SDK schema of that version
@@ -46,4 +47,29 @@ export function requestCall(raw) {
     // memory, custom tools, hooks, extensions, workflows: a name risk.mjs does not know, so it is medium and the user reads it.
     default: return { kind: 'other', tool_name: 'Copilot ' + raw.kind, tool_input: { description: str(raw.intention || raw.toolName || raw.kind).slice(0, 300) } };
   }
+}
+
+/**
+ * A call's own arguments (the rawInput of a later tool_call update, and its location) in the shape of the card its request
+ * body gave (requestCall): { tool_name, tool_input } with the field that card shows (command, file_path, url, or an MCP
+ * tool's arguments). The provider compares it with what the user saw, so a call that changed after the request is seen
+ * (#125). null: the arguments do not say (no such field, a request body, or a card such as memory that they cannot be read
+ * against), so the card stands. Only fields read from the arguments: never the title, which would look like a change.
+ */
+export function argsCall(card, raw, loc = null) {
+  if (!card || !card.tool_input || !raw || typeof raw !== 'object' || Array.isArray(raw) || requestCall(raw)) return null;
+  const text = (v) => (typeof v === 'string' && v ? v : null);
+  const as = (tool_input) => ({ tool_name: card.tool_name, tool_input });
+  if (card.tool_name.startsWith('mcp__')) return Object.keys(raw).length ? as({ ...raw }) : null;
+  const input = card.tool_input;
+  if ('command' in input) {
+    const command = Array.isArray(raw.command) ? raw.command.map(String).join(' ') : text(raw.command);
+    return command ? as({ command }) : null;
+  }
+  if ('file_path' in input) {
+    const file = text(loc) || text(raw.file_path) || text(raw.path) || text(raw.filePath) || text(raw.fileName);
+    return file ? as({ file_path: file }) : null;
+  }
+  if ('url' in input) return text(raw.url) ? as({ url: raw.url }) : null;
+  return null;
 }

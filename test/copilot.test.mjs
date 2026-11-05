@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { createTracker } from '../tracker.mjs';
 import { providerEvents, checkProvider, isPaid, isGated, supervisionOf, costOf, spendLimitFor, describe } from '../providers/index.mjs';
 import { createAcp, AGENTS } from '../providers/acp.mjs';
-import { requestCall, SESSION_ARGS, SELF_APPROVE } from '../providers/copilot.mjs';
+import { requestCall, argsCall, SESSION_ARGS, SELF_APPROVE } from '../providers/copilot.mjs';
 import { cleanRules, decide, openRefusal, costAsk, enforcement } from '../security.mjs';
 import '../public/vocab.js';
 
@@ -307,6 +307,67 @@ test('an MCP request is the MCP row; an update with the tool arguments keeps the
     assert.ok(!r.feed.some((l) => /changed the call/.test(l)), 'the same call in another shape is not a change: ' + r.feed.join(' | '));
     assert.deepEqual(r.answers().at(-1), { outcome: 'selected', optionId: 'allow-once' });
   } finally { await r.done(s); }
+});
+
+// #125: the card keeps the request body, but a later update with the call's own arguments is what the call does now.
+test('a call whose own arguments change after the user approved it: the feed says so, with the new command', async () => {
+  const r = rig();
+  const s = r.session();
+  try {
+    await started(r, s);
+    r.say(s, 'swap');
+    const id = await r.held();
+    assert.deepEqual(r.shown.at(-1), { tool: 'Bash', input: { command: 'npm test' } });
+    r.answer(id, { allow: true });
+    await r.idle(s);
+    assert.deepEqual(r.answers().at(-1), { outcome: 'selected', optionId: 'allow-once' });
+    assert.deepEqual(r.feed.filter((l) => /changed the call/.test(l)), ['Copilot CLI changed the call after you approved it: npm publish']);
+  } finally { await r.done(s); }
+});
+
+test('a call whose own arguments change while its request waits: the office declines the request at once', async () => {
+  const r = rig();
+  const s = r.session();
+  try {
+    await started(r, s);
+    r.say(s, 'swapwait');
+    await r.idle(s);
+    assert.deepEqual(r.shown.at(-1), { tool: 'Bash', input: { command: 'npm test' } });
+    assert.deepEqual(r.answers().at(-1), { outcome: 'selected', optionId: 'reject-once' });
+    assert.equal(r.holds.size, 0, 'the hold is gone');
+    // The office's own decline goes out as events.drop, so it is in the tracker feed, not in the events.feed spy.
+    assert.deepEqual(r.tracker.feed.map((f) => f.text).filter((t) => /changed the call/.test(t)), ['Copilot CLI changed the call while it waited for your answer, so the office declined it: npm publish']);
+  } finally { await r.done(s); }
+});
+
+test('an approved edit whose own arguments name the same file another way is no change; another file is', async () => {
+  const r = rig();
+  const s = r.session();
+  try {
+    await started(r, s);
+    r.say(s, 'swapfile');
+    const id = await r.held();
+    assert.deepEqual(r.shown.at(-1), { tool: 'Edit', input: { file_path: path.join(r.root, 'a.txt') } });
+    r.answer(id, { allow: true });
+    await r.idle(s);
+    assert.deepEqual(r.feed.filter((l) => /changed the call/.test(l)), ['Copilot CLI changed the call after you approved it: b.txt']);
+  } finally { await r.done(s); }
+});
+
+test('argsCall: a call\'s own arguments in the shape of its request card; null when they do not say', () => {
+  const sh = requestCall({ kind: 'shell', fullCommandText: 'npm test' });
+  assert.deepEqual(argsCall(sh, { command: 'npm publish', description: 'x' }), { tool_name: 'Bash', tool_input: { command: 'npm publish' } });
+  assert.deepEqual(argsCall(sh, { command: ['npm', 'test'] }), { tool_name: 'Bash', tool_input: { command: 'npm test' } });
+  assert.equal(argsCall(sh, { description: 'Run the tests' }), null, 'no command: it does not say');
+  const ed = requestCall({ kind: 'write', fileName: 'C:/w/a.txt' });
+  assert.deepEqual(argsCall(ed, { path: 'C:/w/b.txt', old_str: 'a' }), { tool_name: 'Edit', tool_input: { file_path: 'C:/w/b.txt' } });
+  assert.deepEqual(argsCall(ed, {}, 'C:/w/c.txt'), { tool_name: 'Edit', tool_input: { file_path: 'C:/w/c.txt' } }, 'the location of the update');
+  assert.deepEqual(argsCall(requestCall({ kind: 'url', url: 'https://a.test' }), { url: 'https://b.test' }), { tool_name: 'WebFetch', tool_input: { url: 'https://b.test' } });
+  const mcp = requestCall({ kind: 'mcp', serverName: 'github', toolName: 'list_issues', args: { owner: 'o' } });
+  assert.deepEqual(argsCall(mcp, { owner: 'x' }), { tool_name: 'mcp__github__list_issues', tool_input: { owner: 'x' } });
+  assert.equal(argsCall(requestCall({ kind: 'memory', intention: 'Remember' }), { fact: 'x' }), null, 'a card the arguments cannot be read against');
+  for (const raw of [null, [], 'npm publish', { kind: 'shell', fullCommandText: 'rm -rf /' }]) assert.equal(argsCall(sh, raw), null, JSON.stringify(raw));
+  assert.equal(argsCall(null, { command: 'x' }), null);
 });
 
 test('a read Copilot runs without asking: the feed names it when it is not low risk', async () => {
