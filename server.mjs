@@ -773,6 +773,8 @@ async function openSession(opts) {
       if (await git.locate(cwd)) {
         const wt = await git.createWorktree(cwd, name);
         workdir = wt.path; worktree = { root: wt.root, branch: wt.branch, repo: wt.repo, base: wt.base || null };
+        // The building knows the new room before the bot sits in it (the room board reads its files at once).
+        addRepo(wt.repo); await refreshRepo(repoKey(wt.repo));
       } else noRoom = true;
     }
     if (worktree) rememberDir(cwd);
