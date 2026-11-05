@@ -7,6 +7,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { riskOf, actionOf, inside, realInside, isProtectedPart, fileKey } from '../risk.mjs';
 import { officeFiles } from '../files.mjs';
+import { shortOf } from './fixtures/short-name.mjs';
 import '../public/vocab.js';
 
 const V = globalThis.OfficeVocab;
@@ -259,6 +260,46 @@ test('a link to the folder\'s own .git, a broken link, and a root reached throug
     assert.equal(riskOf('Edit', { file_path: path.join(alias, 'src', 'a.js') }, alias), 'low');
     assert.equal(riskOf('Edit', { file_path: path.join(s.root, 'src', 'a.js') }, alias), 'medium', 'the text path must be inside too');
     assert.equal(riskOf('Read', { file_path: path.join(alias, 'src', 'a.js') }, s.root), 'medium', 'a link outside the root that leads in is outside');
+  } finally { s.done(); }
+});
+
+// GitHub's Windows runner has TEMP in C:\Users\RUNNER~1\..., and git gives the long path of a worktree, so a session root and
+// a tool path can name one folder in two spellings. The scratch folder is used when its path has a short name (the runner);
+// else Program Files (PROGRA~1), read only, on a volume that keeps 8.3 names.
+test('an 8.3 short name and the long name are one folder: either spelling is inside, and links still count', { skip: !WIN && 'Windows only' }, (c) => {
+  const s = scratch();
+  try {
+    const long = fs.realpathSync.native(s.base), short = shortOf(long);
+    let root, sroot;
+    if (short) { root = path.join(long, 'repo'); sroot = path.join(short, 'repo'); }
+    else {
+      const pf = process.env.ProgramFiles && fs.realpathSync.native(process.env.ProgramFiles), spf = pf && shortOf(pf);
+      if (!spf) { c.skip('no 8.3 short name on the temp folder or on Program Files here (8.3 names are off on this volume)'); return; }
+      root = path.join(pf, 'ao-none'); sroot = path.join(spf, 'ao-none');
+    }
+    const file = (r, ...p) => path.join(r, 'src', ...p);
+    assert.equal(inside(root, file(sroot, 'a.js')), false, 'inside() compares the text only, as before');
+    // the server's worktree check: git gives the long root, the session started in the short one
+    assert.equal(realInside(root, sroot), true);
+    assert.equal(realInside(sroot, root), true);
+    assert.equal(realInside(root, file(sroot, 'a.js')), true);
+    for (const [r, f] of [[root, file(sroot, 'a.js')], [sroot, file(root, 'a.js')], [sroot, file(sroot, 'a.js')]]) {
+      assert.equal(riskOf('Edit', { file_path: f }, r), 'low', `${f} in ${r}`);
+      assert.equal(actionOf('Edit', { file_path: f }, r), 'edit-inside', `${f} in ${r}`);
+      assert.equal(actionOf('Read', { file_path: f }, r), 'read-inside', `${f} in ${r}`);
+    }
+    assert.equal(riskOf('Write', { file_path: file(sroot, 'new', 'b.js') }, root), 'low', 'a file that does not exist yet');
+    assert.equal(riskOf('Read', { file_path: 'src/a.js' }, sroot), 'low', 'a relative path in a short root');
+    assert.equal(riskOf('Edit', { file_path: path.join(sroot, '.git', 'config') }, root), 'high', '.git in the short spelling');
+    assert.equal(actionOf('Edit', { file_path: path.join(sroot, '..', 'secret', 'k.txt') }, root), 'files-outside');
+    if (!short) return;
+    // links: a junction inside that leads out is outside, and a link outside that leads in is outside, in either spelling
+    try { fs.symlinkSync(s.out, path.join(root, 'esc'), 'junction'); } catch { c.skip('links are not allowed here'); return; }
+    fs.symlinkSync(root, path.join(long, 'alias'), 'junction');
+    assert.equal(riskOf('Edit', { file_path: path.join(sroot, 'esc', 'k.txt') }, root), 'medium');
+    assert.equal(riskOf('Edit', { file_path: path.join(root, 'esc', 'k.txt') }, sroot), 'medium');
+    assert.equal(riskOf('Read', { file_path: path.join(short, 'alias', 'src', 'a.js') }, root), 'medium', 'a link outside the root that leads in');
+    assert.equal(realInside(root, path.join(short, 'alias')), false);
   } finally { s.done(); }
 });
 

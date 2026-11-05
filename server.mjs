@@ -25,7 +25,7 @@ import * as startup from './startup.mjs';
 import { createNotes, cleanPin, PIN_MAX, NOTES_MAX, AGENT_WRITE_MAX } from './notes.mjs';
 import { createSkills } from './skills.mjs';
 import { cleanRules, setRule, decide, preToolDecision, permissionModeFor, openRefusal, costAsk, cellsOf, enforcement, addCost, costThisMonth } from './security.mjs';
-import { inside } from './risk.mjs';
+import { realInside } from './risk.mjs';
 import { mcpAddArgs, mcpRemoveArgs, pluginArgs } from './extensions.mjs';
 import * as auth from './auth.mjs';
 import { officeFiles, portArgs, DEFAULT_PORT } from './files.mjs';
@@ -276,10 +276,12 @@ const { sessions, feed, addFeed, newSession, placeSession, findSession, onHook, 
 const buildingOfSession = (s) => (s.placed ? roomPlace(s).buildingKey : null);
 // The root is in a git worktree: the office made one for the session, or git placed the session in a repository whose
 // worktree holds the root. Only then do the rows Read inside and Edit inside apply (a terminal session in the home folder
-// or in a folder outside git has no worktree, so its edits are Ask by default).
+// or in a folder outside git has no worktree, so its edits are Ask by default). git gives the long path of the root, and
+// the session's folder can be an 8.3 short name of it (TEMP on GitHub's Windows runner is C:\Users\RUNNER~1\...), so the
+// check is realInside, not a text compare: else a user's rule on Edit inside would not apply to that session.
 function inWorktree(s, root) {
   if (s.worktree && s.worktree.root) return true;
-  return !!(s.placed && s.git && s.git.root && root && inside(s.git.root, root));
+  return !!(s.placed && s.git && s.git.root && root && realInside(s.git.root, root));
 }
 function callOf(s, p, opts = {}) {
   const root = tracker.rootOf(s);

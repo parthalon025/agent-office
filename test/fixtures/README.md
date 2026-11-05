@@ -26,3 +26,5 @@ SubagentStop, and the tool events a subagent makes) still follows the documented
 Hook payloads go through payload.mjs slimPayload, as the server does.
 
 `office-server.mjs` is not a recording. It starts a real `server.mjs` copy for the tests that need one: ready on the server's own "is open" line, a fast failure when the server stops first, and a new port when the free port was taken before the bind (#98). Its own test is `test/office-server.test.mjs`.
+
+`short-name.mjs` is not a recording. `shortOf(dir)` gives the 8.3 short spelling of a folder (cmd's `%~s`), or null when the volume keeps none. GitHub's Windows runner has TEMP in `C:\Users\RUNNER~1\...`, so the tests that check that both spellings of one folder are one place (`test/risk.test.mjs`, `test/security-routes.test.mjs`) use it.

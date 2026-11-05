@@ -89,8 +89,8 @@ export function isProtectedPart(name) {
 /**
  * True when target is the folder root or inside it (case-insensitive on Windows). It compares the path text
  * only and follows no link: a junction inside the folder that leads out still counts as inside. Use
- * realInside() where a link must not lead out. Paths in another form (\\?\, UNC, 8.3, trailing dots) are
- * outside, the safe direction.
+ * realInside() where a link must not lead out, or where one side can be an 8.3 short name. Paths in another
+ * form (\\?\, UNC, 8.3, trailing dots) are outside, the safe direction.
  */
 export function inside(root, target) {
   if (!root || !target) return false;
@@ -116,11 +116,39 @@ function realPath(p) {
   try { return path.join(fs.realpathSync.native(probe), ...rest); } catch { return null; }
 }
 
-// Where an absolute path points: inside the root as text and after links, and its real path.
+/**
+ * The path with each 8.3 short name spelled out (C:\Users\RUNNER~1 is C:\Users\runneradmin), and every link kept as it
+ * is. git, os.homedir() and realpathSync.native give the long name, but a shell, TEMP or a script can give the short
+ * one: on GitHub's Windows runner TEMP is C:\Users\RUNNER~1\AppData\Local\Temp. Windows only, and only for parts with
+ * a '~' (each short name Windows makes has one), so other paths cost no file access. A part takes its long name only
+ * when that name opens the same entry (same volume and file id). A link, a part that does not exist and a part that
+ * cannot be read keep their spelling.
+ */
+function longPath(p) {
+  const abs = path.resolve(String(p));
+  if (!WIN || !abs.includes('~')) return abs;
+  const { root } = path.parse(abs);
+  let out = root;
+  for (const part of abs.slice(root.length).split(/[\\/]+/).filter(Boolean)) out = path.join(out, part.includes('~') ? longName(out, part) : part);
+  return out;
+}
+function longName(dir, part) {
+  try {
+    const here = path.join(dir, part), st = fs.lstatSync(here, { bigint: true });
+    if (st.isSymbolicLink()) return part;
+    const name = path.basename(fs.realpathSync.native(here));
+    const same = fs.lstatSync(path.join(dir, name), { bigint: true });
+    return same.ino === st.ino && same.dev === st.dev ? name : part;
+  } catch { return part; }
+}
+
+// Where an absolute path points: inside the root as text (8.3 short names spelled out on both sides) and after links,
+// and its real path. longRoot, longAbs: the two texts that were compared.
 function resolveIn(root, abs) {
   const real = realPath(abs);
   const realRoot = root ? realPath(root) : null;
-  return { real, realRoot, in: !!root && inside(root, abs) && !!real && !!realRoot && inside(realRoot, real) };
+  const longRoot = root ? longPath(root) : null, longAbs = longPath(abs);
+  return { real, realRoot, longRoot, longAbs, in: !!root && inside(longRoot, longAbs) && !!real && !!realRoot && inside(realRoot, real) };
 }
 
 // The office's own saved state (#70): state.json holds the Security room rules and the schedules (prompts the office runs),
@@ -190,9 +218,11 @@ export function fileKey(root, p) {
 }
 
 /**
- * True when target is inside root both as text (inside()) and after every junction, symbolic link and short
- * name is resolved (fs.realpathSync.native on the target, or its nearest existing parent, and on the root).
- * A link that leads out, a broken link and a path that cannot be read are not inside.
+ * True when target is inside root both as text (inside(), with 8.3 short names spelled out on both sides, so
+ * C:\Users\RUNNER~1\x and C:\Users\runneradmin\x are one folder) and after every junction, symbolic link and
+ * short name is resolved (fs.realpathSync.native on the target, or its nearest existing parent, and on the root).
+ * A link that leads out, a broken link and a path that cannot be read are not inside. A link outside the root
+ * that leads in is not inside either: the text must be inside too.
  */
 export function realInside(root, target) {
   if (!root || !target || !path.isAbsolute(String(target))) return false;
@@ -214,7 +244,8 @@ function place(root, p, opts) {
   const r = resolveIn(root, abs), real = r.real, realRoot = r.realRoot;
   const isIn = r.in && !wideRoot(root); // a wide root (home, a drive) has no inside
   const whole = [...parts(abs), ...(real ? parts(real) : [])];
-  const k = kinds(isIn ? [...parts(path.relative(norm(root), norm(abs))), ...parts(path.relative(norm(realRoot), norm(real)))] : whole);
+  // Inside, the parts below the root: of the texts resolveIn compared (one spelling on both sides), and of the real paths.
+  const k = kinds(isIn ? [...parts(path.relative(norm(r.longRoot), norm(r.longAbs))), ...parts(path.relative(norm(realRoot), norm(real)))] : whole);
   // A .git folder anywhere on the path holds git's config and hooks, and the Start Menu holds the Startup folder, also when
   // the root is below them.
   if (!k.runs && whole.some((x) => forms(x).some((n) => n === '.git' || n === 'start menu'))) k.runs = true;
