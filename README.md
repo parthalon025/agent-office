@@ -145,7 +145,7 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 | `hook.mjs` | Command hook. Sends one event to the server. |
 | `mcp.mjs` | MCP server with `office_inbox`, `office_ask`, `office_room` and `office_room_update`. |
 | `launch.ps1` | Starts a session in a terminal window. |
-| `startup.mjs` | Adds or removes the Start with Windows entry (a .cmd in your Startup folder). At sign-in the office starts and opens its launch link. |
+| `startup.mjs` | Adds or removes the Start with Windows entry (a .cmd in your Startup folder). At sign-in the office starts and opens its launch link. Only the office on port 4317 in the main folder can change the entry; an office on another port or in a worktree shows it read-only with the reason. |
 | `probe.mjs` | Tests HTTP hooks on this Claude Code version. |
 | `public/` | The page: `vocab.js` (shared status words, tool names and room figures), `wheel-gate.js` (one scroll-out gesture leaves one level), `scene-host.js` (the one reader of the 3D stage: floor, view, rooms, pick, cursor), `building.js` (snapshot store and building adapter), `toasts.js` (toast rules), `adapter.js`, `office.js`, `office.css`, `chat-extras.js`, `index.html`. `vendor/` holds React 18.3.1 and the fonts, byte for byte as published (`vendor/README.md`: sources, SHA-256, how to update). |
 | `test/*.test.mjs` | Offline unit tests (`npm test`): access rules (with a real server on a free port), vendored files and the static file list (also on a real server), click-to-load chat images in the design system, place rules, risk classifier, session vocabulary, hook payload, session tracker, scene host, notes merge, snapshot store and building adapter, contrast pairs, wheel gate, toast rules. |
@@ -170,7 +170,7 @@ An office on a port other than 4317 (`OFFICE_PORT`, `npm run start:branch`) writ
 - "Always allow" writes the rule Claude suggests to that project's `.claude/settings.local.json`, and only when you click it.
 - Creating a pull request runs `git push` and `gh pr create`. The office asks you to confirm and lists the steps first.
 - The office never edits `~/.claude/settings.json` or your credentials.
-- Saved sessions (`history.json`) contain Claude's replies, and `state.json` keeps schedule prompts and room notes. They stay on this machine, and only your Windows user, SYSTEM and Administrators can read them (set when the office starts).
+- Saved sessions (`history.json`) contain Claude's replies, and `state.json` keeps schedule prompts and room notes. They stay on this machine, and only your Windows user, SYSTEM and Administrators can read them (set when the office starts). An agent edit of `state.json`, `history.json` or their per-port files is rated high, because schedules in them run later.
 - Remote access is not supported. Reaching an agent that can run commands needs real login and encryption. If you want it from a phone, put the office behind Tailscale.
 
 ## Troubleshooting

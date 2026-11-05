@@ -12,6 +12,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as auth from '../auth.mjs';
+import * as startup from '../startup.mjs';
 import { officeFiles, portArg, portArgs, DEFAULT_PORT } from '../files.mjs';
 import { startOffice, startOnFreePort } from './fixtures/office-server.mjs';
 
@@ -168,6 +169,20 @@ function page(port, env, p) {
     r.on('error', reject);
   });
 }
+// A POST to a page route: { status, json }. The Startup folder of these offices is a temp one (APPDATA in the env).
+function postPage(port, env, p, body) {
+  const token = JSON.parse(fs.readFileSync(auth.pageFile(env, port), 'utf8')).token;
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(body || {});
+    const r = http.request({ host: '127.0.0.1', port, path: p, method: 'POST', headers: { host: `127.0.0.1:${port}`, 'x-office-token': token, 'content-type': 'application/json', 'content-length': Buffer.byteLength(data) } }, (res) => {
+      let b = '';
+      res.on('data', (c) => { b += c; });
+      res.on('end', () => { try { resolve({ status: res.statusCode, json: JSON.parse(b) }); } catch (e) { reject(e); } });
+    });
+    r.on('error', reject);
+    r.end(data);
+  });
+}
 const sessionNames = async (port, env) => (await page(port, env, '/events')).sessions.map((s) => s.name);
 
 // A command line from a settings file, split the way a shell does for these quoted paths and plain words.
@@ -239,6 +254,19 @@ test('a second office in the same folder never rewrites the first office\'s file
     const infoA = await page(portA, envA, '/api/info');
     assert.equal(infoA.port, portA);
     assert.ok(!infoA.schedules.some((s) => s.id === 'owner-schedule'), 'the first office took over the owner\'s schedule');
+    // The Start with Windows entry is one file for the user, so an office on another port shows it read-only and cannot change it (#108).
+    assert.equal(infoA.startup.canChange, false);
+    assert.match(infoA.startup.reason, /port 4317/);
+    const startupDir = startup.startupDir(envA.APPDATA);
+    startup.enable(startupDir, dir, process.execPath); // the owner's entry, in the temp Startup folder
+    const entry = fs.readFileSync(startup.entryPath(startupDir), 'utf8');
+    for (const enabled of [true, false]) {
+      const r = await postPage(portA, envA, '/api/startup', { enabled });
+      assert.equal(r.status, 403, JSON.stringify(r.json));
+      assert.match(r.json.error, /port 4317/);
+    }
+    assert.equal(fs.readFileSync(startup.entryPath(startupDir), 'utf8'), entry, 'a refused turn-on or turn-off changed the owner\'s entry');
+    assert.equal((await page(portA, envA, '/api/info')).startup.enabled, true, 'the office shows the real state');
     const filesA = launchFiles(infoA);
     for (const f of Object.values(filesA)) assert.ok(!Object.keys(owner).includes(path.basename(f)), `the first office uses the owner's ${path.basename(f)}`);
     const own = officeFiles(dir, portA);
