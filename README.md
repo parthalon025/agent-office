@@ -305,6 +305,7 @@ The office knows six kinds of session. A session **in the office** runs `claude 
 ### Sessions in the office
 
 - **A session stops at start.** The bot's chat shows Claude Code's error. The usual cause is a signed-out login. Sign in with Claude Code, then open the session again.
+- **Claude Code says "Not ready: Sign in to Claude Code", but you use Bedrock, Vertex, Foundry or an API key.** The office does not block when `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_USE_FOUNDRY`, `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` is set in the environment of the office, or when `claude auth status` says you are logged in. Set the variable before `npm start`. A setting that exists only in a project's `.claude/settings.json` is not visible to this check.
 - **The `/` list is empty.** Claude reports its commands after the first message. The office reuses the last known list until then.
 - **A turn failed.** The bot shows a red badge until you click Retry or Dismiss.
 

@@ -25,6 +25,18 @@ const MODELS = [
 const HEADLESS = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages'];
 const ENDED = { subtype: 'error', error: 'The session ended.' };
 
+const CLOUD_SWITCHES = ['CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY'];
+const KEY_VARS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'];
+
+/**
+ * True when the environment gives Claude Code a key source that needs no claude.ai sign-in: a Bedrock, Vertex or Foundry
+ * switch that is on (Claude Code reads 0, false and an empty value as off), or an API key or an auth token.
+ */
+export function hasKeySource(env) {
+  const on = (v) => typeof v === 'string' && v.trim() !== '' && !/^(0|false|no|off)$/i.test(v.trim());
+  return CLOUD_SWITCHES.some((k) => on(env[k])) || KEY_VARS.some((k) => typeof env[k] === 'string' && env[k] !== '');
+}
+
 /**
  * The absolute path of a program, or an error (status 409) the user can act on. resolveExe refuses a .cmd or .ps1 shim,
  * because the office starts programs without a shell. The office requires claude.exe (owner decision): a shim means an npm
@@ -151,7 +163,9 @@ export function createClaudeCode(deps) {
       // An older Claude Code has no `auth status`: then the office does not know, and does not block.
       let auth = null;
       try { auth = JSON.parse(await run('claude', ['auth', 'status', '--json'], 15000)); } catch { /* unknown */ }
-      if (auth && auth.loggedIn === false && !env.ANTHROPIC_API_KEY) {
+      // Only `loggedIn: false` blocks, and only with no other key source. A logged-in status counts whatever its authMethod
+      // (claude.ai, an API key, third_party for Bedrock, Vertex or Foundry). Any other shape does not block (#103).
+      if (auth && auth.loggedIn === false && !hasKeySource(env)) {
         return { ready: false, version, needs: ['Sign in to Claude Code: run claude auth login in a terminal.'] };
       }
       return { ready: true, version, needs: [] };
