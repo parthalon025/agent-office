@@ -13,7 +13,9 @@
    being typed, after a click on it. Minus stops at $1, and No limit (a typed 0 or an empty value) is the loosest spend
    setting: it waits for the same painted Confirm.
    A cell the office cannot enforce says "Not enforced"; an Ask cell that the agent decides by itself (Claude Code asks only
-   when its own rules and mode say so) says "Partly enforced". Each with its reason (security.mjs enforcement).
+   when its own rules and mode say so) says "Partly enforced". So does a default Ask that forces nothing (review B1: Claude
+   Code decides until the user sets the cell); a click on it sets Ask, and Use default under an office-wide rule the user set
+   takes it back to the default. Each with its reason (security.mjs enforcement).
    The rules and words come from the snapshot (snap.security) and the shared vocabulary (vocab.js OfficeVocab.security); the
    server checks every change again (security.mjs), so this file keeps no rule of its own beyond what to paint.
 
@@ -41,6 +43,17 @@
   function shown(data, scope, row, col) {
     return S().valueOf(rulesOf(data), scope === 'building' ? data.building : null, row, col);
   }
+  // Where that value comes from: 'building', 'office' or 'default' (a cell the user never set).
+  function sourceIn(data, scope, row, col) {
+    return S().sourceOf(rulesOf(data), scope === 'building' ? data.building : null, row, col);
+  }
+  // The office-wide rule of a cell was set by the user (Use default takes it back).
+  function officeSet(data, row, col) { return S().own(rulesOf(data).office, S().key(row, col)) && !S().rows[row].office; }
+  // A default Ask the agent decides by itself (enforce unset): a click sets Ask, so the office makes the agent ask (B1).
+  function unsetAsk(data, scope, row, col) {
+    var e = data && data.sec && data.sec.enforce && data.sec.enforce[col];
+    return !!(e && e.unset && S().own(e.unset, row) && !notEnforced(data, row, col) && shown(data, scope, row, col) === 'ask' && sourceIn(data, scope, row, col) === 'default');
+  }
   function overridden(data, row, col) {
     var b = rulesOf(data).buildings[data.building];
     return !!(b && b[S().key(row, col)] && !S().rows[row].office);
@@ -56,6 +69,7 @@
     var e = data && data.sec && data.sec.enforce && data.sec.enforce[col];
     if (!e || notEnforced(data, row, col)) return '';
     if (e.partly && S().own(e.partly, row)) return e.partly[row];   // only some calls reach the office, whatever the value
+    if (unsetAsk(data, scope, row, col)) return e.unset[row];        // a default Ask: the agent decides until the user sets it
     if (!e.asks || !S().own(e.asks, row)) return '';
     return shown(data, scope, row, col) === 'ask' ? e.asks[row] : '';
   }
@@ -69,7 +83,7 @@
   function tone(v) { return v === 'allow' || v === 'on' ? 'allow' : v === 'deny' ? 'deny' : 'ask'; }
   // The painted Confirm: the change, then what it is for.
   function isSpend(p) { return !!p && p.spend !== undefined; }
-  function confirmText(p) { return 'Confirm: ' + (isSpend(p) ? 'No limit' : p.to === null ? 'the office rule (' + S().word(p.office) + ')' : S().word(p.to)); }
+  function confirmText(p) { return 'Confirm: ' + (isSpend(p) ? 'No limit' : p.to === null ? (p.def ? 'the default (' : 'the office rule (') + S().word(p.office) + ')' : S().word(p.to)); }
   function confirmWhat(p) { return isSpend(p) ? 'Spend limit, new sessions' : S().rows[p.row].label + ', ' + colLabel(p.col); }
   function money(n) { var F = root.OfficeFormat; return F && F.money ? F.money(n) : '$' + (+n || 0).toFixed(2); }
   function monthName(m) {
@@ -153,9 +167,11 @@
         hot(p, { kind: 'cell', id: id, row: row, col: c.id, x: cx + 4, y: cy - 4, w: cw + 8, h: ch + 8 });
         var nt = noteOf(data, view.scope, row, c.id);
         if (nt) text(p, cx + colW / 2, cy + ch + 26, 18, 'muted', nt.word, { align: 'center', maxW: colW - 8 });
-        if (view.scope === 'building' && overridden(data, row, c.id) && !pend && view.focused) {
+        // Back to the office rule (a building override), or to the default (an office-wide rule the user set).
+        var back = view.scope === 'building' ? overridden(data, row, c.id) && 'Use office rule' : officeSet(data, row, c.id) && 'Use default';
+        if (back && !pend && view.focused) {
           var cid = 'clear:' + row + '|' + c.id;
-          text(p, cx + colW / 2, cy + ch + 26 + (nt ? 22 : 0), 18, isHover(view, cid) ? 'ink' : 'muted', 'Use office rule', { align: 'center', maxW: colW - 8 });
+          text(p, cx + colW / 2, cy + ch + 26 + (nt ? 22 : 0), 18, isHover(view, cid) ? 'ink' : 'muted', back, { align: 'center', maxW: colW - 8 });
           hot(p, { kind: 'clear', id: cid, row: row, col: c.id, x: cx + 4, y: cy + ch + 8, w: cw + 8, h: 26 });
         }
       });
@@ -331,15 +347,17 @@
       case 'cell': {
         var pend = view.pending && view.pending.row === h.row && view.pending.col === h.col ? view.pending : null;
         var cur = shown(data, sc, h.row, h.col);
+        // a default Ask the agent decides by itself: the click sets Ask (a tightening, at once), and the office makes it ask
+        if (!pend && unsetAsk(data, sc, h.row, h.col)) return { view: with_(view, { pending: null }), send: setBody(view, data, h.row, h.col, 'ask', false) };
         // a click on a cell that waits for its Confirm moves on to the next value (so Deny can be reached from Ask)
         var next = S().next(h.row, pend && pend.to !== null ? pend.to : cur);
         if (S().loosens(h.row, cur, next)) return { view: with_(view, { pending: { row: h.row, col: h.col, to: next, office: null } }) };
         return { view: with_(view, { pending: null }), send: setBody(view, data, h.row, h.col, next, false) };
       }
-      case 'clear': {   // back to the office rule in this building
-        var now = shown(data, 'building', h.row, h.col), office = S().valueOf(rulesOf(data), null, h.row, h.col);
-        if (S().loosens(h.row, now, office)) return { view: with_(view, { pending: { row: h.row, col: h.col, to: null, office: office } }) };
-        return { view: with_(view, { pending: null }), send: setBody(Object.assign({}, view, { scope: 'building' }), data, h.row, h.col, null, false) };
+      case 'clear': {   // back to the office rule in this building, or office-wide back to the default
+        var def = sc === 'office', now = shown(data, sc, h.row, h.col), office = def ? S().defaultOf(h.row, h.col) : S().valueOf(rulesOf(data), null, h.row, h.col);
+        if (S().loosens(h.row, now, office)) return { view: with_(view, { pending: Object.assign({ row: h.row, col: h.col, to: null, office: office }, def ? { def: true } : {}) }) };
+        return { view: with_(view, { pending: null }), send: setBody(Object.assign({}, view, { scope: sc }), data, h.row, h.col, null, false) };
       }
       case 'spend-minus': case 'spend-plus': {
         // Minus stops at $1: No limit (0) is never one click away (it needs the Confirm, after typing 0).

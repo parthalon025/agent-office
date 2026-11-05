@@ -141,10 +141,14 @@ test('the rule route is a page route: the agent token does not open it', async (
 });
 
 // Owner decision pending (#67): with the default cells nothing is answered for the user, a low-risk edit in a worktree included.
-test('with the default cells a low-risk Claude Code edit in a worktree is held for the user, and PreToolUse makes Claude Code ask', async () => {
+// Review B1: a default cell forces no prompt either. Claude Code decides, as on main (PreToolUse has no answer), and the office
+// holds what Claude Code asks.
+test('with the default cells a low-risk Claude Code edit in a worktree is held only when Claude Code asks; PreToolUse forces nothing', async () => {
   const edit = { file_path: path.join(repo, 'a.txt'), old_string: 'a', new_string: 'b' };
-  const pre = await hook({ hook_event_name: 'PreToolUse', session_id: 'sid-sec-git', cwd: repo, tool_name: 'Edit', tool_use_id: 'toolu_sec_edit', tool_input: edit });
-  assert.deepEqual(pre.json, { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: 'The Security room asks for edit inside the worktree.' } });
+  for (const [tool, input] of [['Edit', edit], ['Read', { file_path: path.join(repo, 'a.txt') }], ['Read', { file_path: path.join(repo, '.env') }]]) {
+    const pre = await hook({ hook_event_name: 'PreToolUse', session_id: 'sid-sec-git', cwd: repo, tool_name: tool, tool_use_id: 'toolu_sec_free_' + tool + path.basename(input.file_path), tool_input: input });
+    assert.deepEqual([pre.status, pre.text], [200, ''], tool + ' ' + input.file_path + ': no forced ask in a terminal session');
+  }
   const r = await heldThenDeclined(permission('Edit', edit, { session_id: 'sid-sec-git', cwd: repo }), repo);
   assert.equal(r.hookSpecificOutput.decision.behavior, 'deny', 'the user declined it: Security answered nothing');
   assert.ok(!(await feedOf(repo)).some((t) => /by Security/.test(t)), 'no Security line');
@@ -157,7 +161,7 @@ test('Allow set by the user answers at once, with a feed line', async () => {
   assert.equal(r.status, 200);
   assert.deepEqual(r.json, { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } });
   assert.ok(await feedHas('allowed by Security: Edit inside the worktree', repo));
-  assert.equal((await set({ scope: 'office', row: 'edit-inside', col: 'claude-code', value: 'ask' })).status, 200); // the default again
+  assert.equal((await set({ scope: 'office', row: 'edit-inside', col: 'claude-code', value: null })).status, 200); // Use default
   assert.deepEqual((await snapshot()).security.rules, { office: {}, buildings: {} });
 });
 
@@ -175,9 +179,12 @@ test('a session outside git, or in the home folder, has no worktree: its edits a
   assert.ok(!(await feedOf(home)).some((t) => /allowed by Security/.test(t)), 'nothing in the home folder was allowed by Security');
 });
 
-test('PreToolUse makes Claude Code ask before it reads a secret file in its own folder (it would not ask by itself)', async () => {
+test('an Ask the user set makes Claude Code ask before it reads a secret file in its own folder (it would not ask by itself)', async () => {
+  assert.equal((await set({ scope: 'office', row: 'secrets', col: 'claude-code', value: 'ask' })).status, 200);
+  assert.equal((await snapshot()).security.rules.office['secrets|claude-code'], 'ask', 'the user set it: stored');
   const pre = await hook({ hook_event_name: 'PreToolUse', session_id: 'sid-sec-git', cwd: repo, tool_name: 'Read', tool_use_id: 'toolu_sec_env', tool_input: { file_path: path.join(repo, '.env') } });
   assert.deepEqual(pre.json, { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: 'The Security room asks for secret files.' } });
+  assert.equal((await set({ scope: 'office', row: 'secrets', col: 'claude-code', value: null })).status, 200);
 });
 
 test('the wall cannot remove the spend limit in one step: No limit needs confirmed', async () => {

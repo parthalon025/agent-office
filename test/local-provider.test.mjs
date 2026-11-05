@@ -166,17 +166,16 @@ test('a Deny rule refuses a call at once: no hold, the model hears why, one feed
   } finally { await o.done(); }
 });
 
-// #70 review: Read inside the worktree (default Allow) is for a git worktree. "Use this folder" outside git has none.
-test('a local agent in a folder outside git asks before it reads: its folder is not a worktree', async () => {
+// Review M4: the local model reads and edits its own folder unasked also outside git, as on main (its folder is all it
+// works in). Claude Code outside git still has no worktree (test/security.test.mjs).
+test('a local agent in a folder outside git reads its folder unasked, as before the Security room', async () => {
   const o = await rig([{ toolCalls: [{ name: 'Read', args: { file_path: 'a.txt' } }] }, { text: 'ok' }], { worktree: false });
   try {
     const s = o.session();
     o.provider.open(s, { model: 'm' });
     o.say(s, 'go');
-    await until(() => o.holds.size === 1, 'the read to wait');
-    assert.equal(s.pending[0].tool, 'Read');
-    o.release([...o.holds.keys()][0], { allow: true });
     await until(() => s.status === 'idle', 'the turn to end');
+    assert.equal(o.holds.size, 0, 'no question for a read in its folder');
     assert.match(o.fake.requests[1].messages.at(-1).content, /hello file/);
   } finally { await o.done(); }
 });

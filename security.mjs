@@ -6,8 +6,9 @@
 //   setRule(rules, change)           one change from the wall, checked: { rules, from, to }, or a status error
 //   decide(rules, call)              the check before a hold: { allow, line, message?, quiet } or null (hold as today)
 //   preToolDecision(rules, call)     Claude Code's PreToolUse answer: a Deny refuses before Claude Code's own check, and an
-//                                    Ask on a row Claude Code does not ask about by itself makes it ask
-//   permissionModeFor(rules, b, m)   the permission mode of a new Claude Code office session ('default' while any cell is Ask)
+//                                    Ask the user set on a row Claude Code does not ask about by itself makes it ask
+//   permissionModeFor(rules, b, m)   the permission mode of a new Claude Code office session ('default' while a cell the
+//                                    user set is Ask; a default Ask keeps the asked mode)
 //   openRefusal(rules, provider)     why the office does not open an agent kind now (ungated and off, no cost reports and Deny)
 //   costAsk(rules, provider)         an agent without cost reports asks once per session unless its cell is Allow
 //   cellsOf(rules, building, col)    the call cells of one agent kind, for an agent whose own config carries them (OpenClaw)
@@ -19,8 +20,8 @@
 // A provider may list the rows its agent's own config takes (enforces: ['shell']) when it is ungated (gated: false, ADR 0001).
 // call: { building, kind, tool, input, root, worktree, provider?, firm? }. building: the session's building key, or null while the
 // session is not placed (git not looked up yet). worktree: true when root is inside a git worktree. The rows Read inside
-// and Edit inside apply only then, and never for a wide root (risk.mjs wideRoot: the home folder, a drive): any other root
-// has no worktree, so its reads and edits are Read or edit outside it (default Ask).
+// and Edit inside apply only then (for the local model also in a plain folder), and never for a wide root (risk.mjs
+// wideRoot: the home folder, a drive): any other root has no worktree, so its reads and edits are Read or edit outside it.
 // The rules apply only while the office runs: a stopped office answers no hook, and Claude Code then decides alone.
 import { ratingOf, wideRoot } from './risk.mjs';
 import './public/vocab.js';
@@ -64,7 +65,8 @@ export function cleanRules(raw) {
 
 /**
  * One change from the wall. change: { scope: 'office' | 'building', building, row, col, value, confirmed }.
- * value null in the building scope clears the override (the office-wide rule applies again).
+ * value null in the building scope clears the override (the office-wide rule applies again); in the office scope it clears
+ * the office-wide rule (Use default). A value equal to the default is stored: the user set it.
  * A change to Allow or On loosens: it needs confirmed: true (the painted Confirm). Ask and Deny apply at once.
  * The two Secrets rows never take Allow. Returns { rules, from, to } with new rules; the old object is not changed.
  */
@@ -79,7 +81,7 @@ export function setRule(rules, change) {
     if (S.rows[row].office) throw rulesError(400, 'The Agents rules are office-wide.');
     if (!okBuilding(building)) throw rulesError(400, 'Give the building.');
   }
-  if (value !== null || scope === 'office') {
+  if (value !== null) {
     if (!S.options(row).includes(value)) {
       if (value === 'allow' && S.options(row).includes('ask')) throw rulesError(400, `${label(row)} offer only Ask or Deny.`);
       throw rulesError(400, 'Unknown value.');
@@ -90,7 +92,9 @@ export function setRule(rules, change) {
   const from = S.valueOf(r, building, row, col);
   const next = { office: { ...r.office }, buildings: Object.fromEntries(Object.entries(r.buildings).map(([b, m]) => [b, { ...m }])) };
   if (scope === 'office') {
-    if (value === S.defaultOf(row, col)) delete next.office[k]; else next.office[k] = value;
+    // The user's value is kept even when it equals the default: a cell the user set is what decides (review B1). null is
+    // Use default: the office-wide rule goes, and the cell is its default again.
+    if (value === null) delete next.office[k]; else next.office[k] = value;
   } else {
     const m = own(next.buildings, building) ? next.buildings[building] : {};
     if (value === null) delete m[k]; else m[k] = value;
@@ -104,24 +108,29 @@ export function setRule(rules, change) {
 // Rows Claude Code asks about by itself in default mode, unless its own allow rules or permission mode let the call run.
 // On these rows an Ask cell keeps the user's Claude Code settings (the office holds what Claude Code asks), so it is only
 // partly enforced (enforcement asks). On every other call row (read or edit inside, settings, secrets) Claude Code does
-// not ask by itself (it reads files in its folder without asking), so an Ask there makes Claude Code ask (preToolDecision).
+// not ask by itself (it reads files in its folder without asking), so an Ask there that the USER set makes Claude Code ask
+// (preToolDecision). A default Ask forces nothing (review B1): Claude Code decides, as before the Security room (unset).
 const CLAUDE_ASKS = new Set(['files-outside', 'shell', 'web', 'mcp']);
 const INSIDE_ROWS = new Set(['read-inside', 'edit-inside']);
 const STRICT = { deny: 3, ask: 2, allow: 1 };
 
-// The rule for one call: { risk, action, col, value, unsure }. unsure: the session is not placed yet and some building has
-// a stricter override than the office rule, so the value is Ask (hold), never a guess that could be looser.
+// The rule for one call: { risk, action, col, value, set, unsure }. set: the user set the cell (a building override or an
+// office-wide rule), not its default. unsure: the session is not placed yet and some building has a stricter override than
+// the office rule (or a user-set Ask where the office has only the default), so the value is a user-set Ask (hold), never
+// a guess that could be looser.
+// The inside rows are for a git worktree. The local model is the exception (review M4): it works only in its own folder and
+// ran its low calls there unasked before the Security room, also in a plain folder outside git, so that folder counts.
 function verdict(rules, call) {
   const col = S.columnOf(call.kind);
   let { risk, action } = ratingOf(call.tool, call.input, call.root);
-  if (INSIDE_ROWS.has(action) && (call.worktree !== true || wideRoot(call.root))) action = 'files-outside';
-  if (!col || !S.rows[action] || S.rows[action].office || !S.applies(action, col)) return { risk, action, col, value: null, unsure: false };
-  const office = S.valueOf(rules, null, action, col);
-  if (call.building != null) return { risk, action, col, value: S.valueOf(rules, call.building, action, col), unsure: false };
+  if (INSIDE_ROWS.has(action) && ((call.worktree !== true && col !== 'local') || wideRoot(call.root))) action = 'files-outside';
+  if (!col || !S.rows[action] || S.rows[action].office || !S.applies(action, col)) return { risk, action, col, value: null, set: false, unsure: false };
+  const office = S.valueOf(rules, null, action, col), officeSet = S.sourceOf(rules, null, action, col) !== 'default';
+  if (call.building != null) return { risk, action, col, value: S.valueOf(rules, call.building, action, col), set: S.sourceOf(rules, call.building, action, col) !== 'default', unsure: false };
   const k = S.key(action, col), all = Object.values((rules && rules.buildings) || {});
   // Only a stricter override matters: a looser one is applied once the session is placed, and the office rule is safe.
-  const stricter = all.some((m) => own(m, k) && (STRICT[m[k]] || 0) > (STRICT[office] || 0));
-  return stricter ? { risk, action, col, value: 'ask', unsure: true } : { risk, action, col, value: office, unsure: false };
+  const stricter = all.some((m) => own(m, k) && ((STRICT[m[k]] || 0) > (STRICT[office] || 0) || (m[k] === 'ask' && office === 'ask' && !officeSet)));
+  return stricter ? { risk, action, col, value: 'ask', set: true, unsure: true } : { risk, action, col, value: office, set: officeSet, unsure: false };
 }
 
 /**
@@ -142,26 +151,29 @@ export function decide(rules, call) {
 /**
  * Claude Code's PreToolUse answer: { decision: 'deny' | 'ask', reason, line } or null (no answer: Claude Code decides).
  * Deny refuses the call before Claude Code's own permission check, so its allow rules and modes cannot run it.
- * Ask on a row Claude Code does not ask about by itself (read or edit inside, settings, secrets) makes Claude Code ask;
- * the office then holds the prompt. So does a session not placed yet whose building may differ (unsure). Ask on the
- * other rows (outside files, shell, web, MCP) keeps Claude Code's own rules and mode: it asks as it does, and the office
- * holds what it asks. That Ask is only partly enforced, and the wall says so (enforcement asks).
+ * An Ask the user set on a row Claude Code does not ask about by itself (read or edit inside, settings, secrets) makes
+ * Claude Code ask; the office then holds the prompt. So does a session not placed yet whose building may differ (unsure).
+ * A default Ask forces nothing (review B1): Claude Code decides as it did before the Security room, in terminal and office
+ * sessions alike. Ask on the other rows (outside files, shell, web, MCP) keeps Claude Code's own rules and mode: it asks as
+ * it does, and the office holds what it asks. Those Asks are only partly enforced, and the wall says so (asks, unset).
  */
 export function preToolDecision(rules, call) {
   const v = verdict(rules, call);
   if (v.value === 'deny') return { decision: 'deny', reason: `Denied by the Security room: ${label(v.action)}.`, line: `denied by Security: ${label(v.action)}` };
-  if (v.value === 'ask' && (v.unsure || !CLAUDE_ASKS.has(v.action))) return { decision: 'ask', reason: `The Security room asks for ${label(v.action).toLowerCase()}.`, line: null };
+  if (v.value === 'ask' && v.set && (v.unsure || !CLAUDE_ASKS.has(v.action))) return { decision: 'ask', reason: `The Security room asks for ${label(v.action).toLowerCase()}.`, line: null };
   return null;
 }
 
 /**
- * The permission mode of a new Claude Code office session. While any of its call cells is Ask (in this building), the
- * session opens in 'default' mode, so Claude Code asks and the rules apply; Allow cells are then answered at once.
- * 'plan' stays (it runs no tool). With no Ask cell the requested mode stays (null: Claude Code's own default).
+ * The permission mode of a new Claude Code office session. While any of its call cells is an Ask the user set (in this
+ * building), the session opens in 'default' mode, so Claude Code asks and the rules apply; Allow cells are then answered at
+ * once. A default Ask changes nothing (review B1): the Open dialog's Permissions picker takes effect. 'plan' stays (it runs
+ * no tool). Else the requested mode stays (null: Claude Code's own default).
  */
 export function permissionModeFor(rules, building, requested) {
   if (requested === 'plan') return 'plan';
-  const anyAsk = CALL_ROWS.some((row) => S.valueOf(rules, building ?? null, row, 'claude-code') === 'ask');
+  const b = building ?? null;
+  const anyAsk = CALL_ROWS.some((row) => S.valueOf(rules, b, row, 'claude-code') === 'ask' && S.sourceOf(rules, b, row, 'claude-code') !== 'default');
   return anyAsk ? 'default' : requested || null;
 }
 
@@ -196,8 +208,11 @@ const NOT_SET_UP = 'The office has no provider for this agent kind yet. The rule
 const UNGATED = 'This agent runs this kind of call without asking the office.';
 // Short enough for one line on the wall (public/security.js footer). The agent: Claude Code, the only kind with these rows.
 const CLAUDE_DECIDES = 'The agent asks only when its own allow rules and permission mode say so.';
+// A default Ask on a row Claude Code does not ask about by itself: nothing is forced until the user sets the cell (B1).
+const CLAUDE_UNSET = 'The agent decides until you click the cell: then the office makes it ask.';
 /**
- * Per agent kind (column): { reason, rows, asks, partly }. partly: a reason for one row of an ungated agent where only some
+ * Per agent kind (column): { reason, rows, asks, unset, partly }. unset: a reason for one row while its cell is a default
+ * Ask ("Partly enforced"): Claude Code decides until the user sets the cell (B1). partly: a reason for one row of an ungated agent where only some
  * calls come to the office (Hermes: its edit requests do, its reads and its own skill and memory writes do not), "Partly
  * enforced" whatever the value. reason '' means the office enforces the cells of that kind; else every
  * cell shows "Not enforced for this agent" with the reason. rows: a reason for one row only. asks: a reason for one row
@@ -227,9 +242,9 @@ export function enforcement(providers, policies = {}) {
       for (const row of CALL_ROWS) if (S.applies(row, c.id) && !takes.has(row) && !own(partly, row)) rows[row] = own(why, row) ? why[row] : UNGATED;
     }
     if (S.applies('supervise', c.id)) rows.supervise = 'Paperclip is not connected to this office.';
-    const asks = {};
-    if (c.id === 'claude-code') for (const row of CLAUDE_ASKS) asks[row] = CLAUDE_DECIDES;
-    out[c.id] = { reason, rows, asks, partly };
+    const asks = {}, unset = {};
+    if (c.id === 'claude-code') for (const row of CALL_ROWS) if (CLAUDE_ASKS.has(row)) asks[row] = CLAUDE_DECIDES; else unset[row] = CLAUDE_UNSET;
+    out[c.id] = { reason, rows, asks, unset, partly };
   }
   return out;
 }

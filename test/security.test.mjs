@@ -29,7 +29,9 @@ test('setRule: a tightening change applies at once; a looser one needs the paint
   r = setRule(r, { scope: 'office', row: 'shell', col: 'claude-code', value: 'allow', confirmed: true }).rules;
   assert.equal(r.office['shell|claude-code'], 'allow');
   r = setRule(r, { scope: 'office', row: 'shell', col: 'claude-code', value: 'ask' }).rules;
-  assert.equal(r.office['shell|claude-code'], undefined, 'the default is not stored');
+  assert.equal(r.office['shell|claude-code'], 'ask', 'the user set Ask: it is stored, so it counts as set (B1)');
+  r = setRule(r, { scope: 'office', row: 'shell', col: 'claude-code', value: null }).rules;
+  assert.equal(r.office['shell|claude-code'], undefined, 'Use default');
 });
 
 test('setRule: the Secrets cells never take Allow, even with a confirm', () => {
@@ -87,7 +89,7 @@ test('decide: the inside rows are for a git worktree; a root outside git or a wi
   const r = none();
   assert.equal(decide(r, call('Edit', { file_path: inside }, { worktree: false })), null, 'an edit in a folder outside git waits for the user');
   assert.equal(decide(r, call('Read', { file_path: inside }, { worktree: false })), null);
-  assert.equal(decide(r, call('Read', { file_path: inside }, { worktree: false, kind: 'ollama', provider: true })), null, 'a local agent outside git asks too');
+  assert.equal(decide(r, call('Read', { file_path: inside }, { worktree: false, kind: 'ollama', provider: true })).quiet, true, 'the local model: its folder counts (M4)');
   const home = os.homedir();
   const startup = path.join(home, 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'x.cmd');
   assert.equal(decide(r, call('Write', { file_path: startup }, { root: home, worktree: true })), null, 'the home folder is no worktree, even in git');
@@ -137,8 +139,9 @@ test('a session not placed yet: the office rule when no building differs, else t
   assert.equal(decide(r, call('Bash', { command: 'ls' })).allow, false, 'once placed, its building decides');
 });
 
-test('preToolDecision: Ask on Settings and Secrets makes Claude Code ask, since it reads files in its folder without asking', () => {
-  const r = none();
+test('preToolDecision: an Ask the user set on Settings and Secrets makes Claude Code ask, since it reads files in its folder without asking', () => {
+  let r = setRule(none(), { scope: 'office', row: 'secrets', col: 'claude-code', value: 'ask' }).rules;
+  r = setRule(r, { scope: 'office', row: 'settings', col: 'claude-code', value: 'ask' }).rules;
   const env = preToolDecision(r, call('Read', { file_path: path.join(root, '.env') }));
   assert.deepEqual(env, { decision: 'ask', reason: 'The Security room asks for secret files.', line: null });
   assert.equal(preToolDecision(r, call('Read', { file_path: path.join(root, '.git', 'config') })).decision, 'ask');
@@ -191,19 +194,20 @@ test('preToolDecision: Claude Code refuses a Deny before its own permission chec
   assert.equal(preToolDecision(r, call('WebFetch', { url: 'https://x.test' })), null, 'Ask on a row whose default is Ask: Claude Code decides, the office holds its prompt');
   r = setRule(r, { scope: 'office', row: 'read-inside', col: 'claude-code', value: 'ask' }).rules;
   assert.equal(preToolDecision(r, call('Read', { file_path: inside })).decision, 'ask', 'Claude Code does not ask about reads by itself');
-  assert.equal(preToolDecision(none(), call('Read', { file_path: inside })).decision, 'ask', 'by default Claude Code is made to ask about a read inside too');
+  assert.equal(preToolDecision(none(), call('Read', { file_path: inside })), null, 'the default Ask forces nothing: Claude Code decides (B1)');
   const allow = setRule(none(), { scope: 'office', row: 'read-inside', col: 'claude-code', value: 'allow', confirmed: true }).rules;
   assert.equal(preToolDecision(allow, call('Read', { file_path: inside })), null, 'a user-set Allow: no question');
 });
 
 // Owner decision pending (#67): by default no call is answered for the user, also a low-risk read or edit inside the worktree.
+// A Claude Code call is held only when Claude Code asks (B1: a default Ask forces no prompt).
 test('decide: with the default cells a low-risk Claude Code edit or read inside a worktree is held; only a cell the user set answers', () => {
   const edit = call('Edit', { file_path: inside, old_string: 'a', new_string: 'b' });
   const read = call('Read', { file_path: inside });
   for (const c of [edit, read, call('Write', { file_path: inside, content: 'x' }), call('Edit', { file_path: inside, old_string: 'a', new_string: 'b' }, { kind: 'hermes', provider: true })]) {
     assert.equal(decide(none(), c), null, `${c.tool} ${c.kind}: held`);
   }
-  assert.equal(preToolDecision(none(), edit).decision, 'ask');
+  assert.equal(preToolDecision(none(), edit), null, 'Claude Code decides whether to ask');
   const allow = setRule(none(), { scope: 'office', row: 'edit-inside', col: 'claude-code', value: 'allow', confirmed: true }).rules;
   assert.deepEqual(decide(allow, edit), { allow: true, line: 'allowed by Security: Edit inside the worktree', quiet: false });
   assert.equal(decide(allow, read), null, 'the Read row is a cell of its own');
@@ -214,8 +218,8 @@ test('decide: with the default cells a low-risk Claude Code edit or read inside 
   assert.deepEqual(decide(none(), local), { allow: true, line: 'allowed by Security: Edit inside the worktree', quiet: true });
 });
 
-test('permissionModeFor: a Claude Code session opens in default mode while any of its cells is Ask', () => {
-  const r = none();
+test('permissionModeFor: a Claude Code session opens in default mode while any cell the user set is Ask', () => {
+  const r = setRule(none(), { scope: 'office', row: 'web', col: 'claude-code', value: 'ask' }).rules;
   assert.equal(permissionModeFor(r, B, null), 'default');
   assert.equal(permissionModeFor(r, B, 'acceptEdits'), 'default');
   assert.equal(permissionModeFor(r, B, 'plan'), 'plan', 'plan mode runs no tool: it stays');
@@ -226,6 +230,49 @@ test('permissionModeFor: a Claude Code session opens in default mode while any o
   assert.equal(permissionModeFor(all, B, 'acceptEdits'), 'acceptEdits');
   const back = setRule(all, { scope: 'building', building: B, row: 'shell', col: 'claude-code', value: 'ask' }).rules;
   assert.equal(permissionModeFor(back, B, null), 'default', 'the building override counts');
+});
+
+// Review B1 (#67): a default cell never forces a prompt. Claude Code decides, as on main, and the office holds what it asks.
+// Only a cell the user set (sourceOf !== 'default') makes Claude Code ask, or opens the session in default mode.
+test('B1: a default Ask forces nothing; a cell the user set to Ask makes Claude Code ask and opens default mode', () => {
+  const r = none();
+  for (const c of [call('Read', { file_path: inside }), call('Edit', { file_path: inside, old_string: 'a', new_string: 'b' }),
+    call('Read', { file_path: path.join(root, '.env') }), call('Edit', { file_path: path.join(root, '.claude', 'settings.json'), old_string: 'a', new_string: 'b' }),
+    call('Read', { file_path: inside }, { worktree: false })]) {
+    assert.equal(preToolDecision(r, c), null, `${c.tool} ${c.input.file_path}: Claude Code decides`);
+  }
+  assert.equal(permissionModeFor(r, B, 'acceptEdits'), 'acceptEdits', 'the Permissions picker of the Open dialog takes effect');
+  assert.equal(permissionModeFor(r, B, null), null);
+  // the user clicks Ask on the wall: stored, so it counts as set, also office-wide
+  const set = setRule(r, { scope: 'office', row: 'read-inside', col: 'claude-code', value: 'ask' }).rules;
+  assert.equal(set.office['read-inside|claude-code'], 'ask');
+  assert.equal(preToolDecision(set, call('Read', { file_path: inside })).decision, 'ask');
+  assert.equal(permissionModeFor(set, B, 'acceptEdits'), 'default');
+  // a building override counts in its building only
+  const here = setRule(r, { scope: 'building', building: B, row: 'secrets', col: 'claude-code', value: 'ask' }).rules;
+  assert.equal(preToolDecision(here, call('Read', { file_path: path.join(root, '.env') })).decision, 'ask');
+  assert.equal(preToolDecision(here, call('Read', { file_path: path.join(root, '.env') }, { building: 'c:\\other' })), null);
+  assert.equal(preToolDecision(here, call('Read', { file_path: path.join(root, '.env') }, { building: null })).decision, 'ask', 'not placed yet: its building may have set Ask');
+  assert.equal(permissionModeFor(here, 'c:\\other', 'acceptEdits'), 'acceptEdits');
+  // Use default: null at the office scope clears the user's rule
+  assert.equal(setRule(set, { scope: 'office', row: 'read-inside', col: 'claude-code', value: null }).rules.office['read-inside|claude-code'], undefined);
+  assert.equal(status(() => setRule(setRule(r, { scope: 'office', row: 'read-inside', col: 'local', value: 'ask' }).rules, { scope: 'office', row: 'read-inside', col: 'local', value: null }))[0], 409, 'back to the local default Allow loosens');
+});
+
+test('B1: the wall says Partly enforced for a default Ask that Claude Code decides, on every row', () => {
+  const e = enforcement([{ kind: 'claude-code', label: 'Claude Code' }])['claude-code'];
+  for (const row of ['read-inside', 'edit-inside', 'settings', 'secrets']) assert.match(e.unset[row], /decides until you click the cell/, row);
+  for (const row of ['files-outside', 'shell', 'web', 'mcp']) assert.equal(e.unset[row], undefined, `${row}: partly enforced at any Ask (asks)`);
+});
+
+test('M4: the local model runs its low calls unasked in a plain folder outside git too, as on main; never in a wide root', () => {
+  const local = (tool, input, extra) => call(tool, input, { kind: 'ollama', provider: true, worktree: false, ...extra });
+  assert.deepEqual(decide(none(), local('Read', { file_path: inside })), { allow: true, line: 'allowed by Security: Read inside the worktree', quiet: true });
+  assert.equal(decide(none(), local('Edit', { file_path: inside, old_string: 'a', new_string: 'b' })).quiet, true);
+  assert.equal(decide(none(), local('Read', { file_path: outside })), null, 'outside the folder: held');
+  const home = os.homedir();
+  assert.equal(decide(none(), local('Read', { file_path: path.join(home, 'notes.txt') }, { root: home })), null, 'a home-folder root has no inside');
+  assert.equal(decide(none(), call('Read', { file_path: inside }, { worktree: false })), null, 'Claude Code outside git: held (it decides)');
 });
 
 test('openRefusal: an ungated agent kind is off until turned on; an agent without cost reports can be denied', () => {

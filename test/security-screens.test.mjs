@@ -202,3 +202,27 @@ test('the outside plate of a right-wall screen shows its title and has no hotspo
   const v = view({ busy: true }), c = cell(P.plan(v, data()), 'shell', 'claude-code') || cell(P.plan(view(), data()), 'read-inside', 'local');
   assert.deepEqual(P.step(v, c, data()), { view: v });
 });
+
+// Review B1: a default Ask on a row Claude Code does not ask about by itself forces nothing, so the wall says Partly enforced.
+// A click on it sets Ask (the office then makes Claude Code ask, at once: a tightening). Use default takes a set cell back.
+test('B1: a default Ask that Claude Code decides says Partly enforced; a click sets it; Use default clears it', () => {
+  const why = 'The agent decides until you click the cell: then the office makes it ask.';
+  const enf = { ...enforce, 'claude-code': { ...enforce['claude-code'], asks: {}, unset: { 'read-inside': why, 'edit-inside': why } } };
+  const d = (office) => ({ sec: { rules: { office, buildings: {} }, enforce: enf, spend: {} }, building: B, buildingName: 'repo' });
+  const v = view(), p = P.plan(v, d({}));
+  assert.ok(texts(p).includes('Partly enforced for Claude Code. ' + why), texts(p).join(' / '));
+  const r = P.step(v, cell(p, 'read-inside', 'claude-code'), d({}));
+  assert.deepEqual(r.send, { route: SET, body: { scope: 'office', row: 'read-inside', col: 'claude-code', value: 'ask' } }, 'the same word, now set by the user');
+  const setD = d({ 'read-inside|claude-code': 'ask' }), sp = P.plan(v, setD);
+  assert.equal(texts(sp).filter((x) => x === 'Partly enforced').length, 1, 'only Edit inside still has its note');
+  assert.equal(P.step(v, cell(sp, 'read-inside', 'claude-code'), setD).view.pending.to, 'allow', 'a set Ask cycles on to Allow');
+  const use = sp.hots.find((h) => h.kind === 'clear' && h.row === 'read-inside' && h.col === 'claude-code');
+  assert.ok(use && texts(sp).includes('Use default'), 'a set cell offers Use default');
+  assert.deepEqual(P.step(v, use, setD).send, { route: SET, body: { scope: 'office', row: 'read-inside', col: 'claude-code', value: null } });
+  // back to a looser default (the local model's Allow) waits for the Confirm
+  const ld = d({ 'read-inside|local': 'ask' }), lp = P.plan(v, ld);
+  const lr = P.step(v, lp.hots.find((h) => h.kind === 'clear' && h.col === 'local'), ld);
+  assert.equal(lr.send, undefined);
+  assert.ok(texts(P.plan(lr.view, ld)).includes('Confirm: the default (Allow)'));
+  assert.ok(!P.plan(view({ focused: false }), setD).hots.some((h) => h.kind === 'clear'), 'only in focus');
+});
