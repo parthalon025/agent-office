@@ -5,7 +5,12 @@
 //     member becomes a helper bot: a delegation (an Agent tool call and SubagentStart, like a Claude Code subagent). When the
 //     member hands back or finishes, the helper finishes (SubagentStop).
 //   - A hand-off (the framework's handoff_sent event) is a delegation. A member that speaks or calls a tool before any hand-off
-//     (a sequential team) is delegated to at that moment.
+//     (a sequential team) is delegated to at that moment. In a handoff team the member's next hand-off, or the end of the
+//     run, closes it; executor_completed does not, because the framework sends every reply to every member first, and each
+//     of those messages is its own executor_invoked and executor_completed (test/fixtures/README.md). In a sequential team
+//     each member runs once, so its executor_completed closes it.
+//   - A member calls only the tools of its own list in the team file; the office refuses any other name.
+//   - A team turn has at most MAX_STEPS steps (tool calls and hand-offs). Then the office stops the run and the turn fails.
 //   - Tool calls are tool calls. Every tool of a team member is a proxy: the runner sends the call here, and the office runs it
 //     through the same gate as a local model (providers/local.mjs createToolGate): risk.mjs rates it, a risky call comes to
 //     you, and the tool runs inside the worktree (providers/local-tools.mjs). The runner never runs a tool itself.
@@ -27,6 +32,7 @@
 //        handoff_sent { source, target }   executor_invoked / executor_completed { executor_id }   executor_failed { executor_id, error }
 //     { type: 'tool', id, agent, name, input }                      a member calls a tool and waits for tool_result
 //     { type: 'turn_end', stopped?, error? }                        the run ended: the team waits for the user, stopped, or failed
+//                                                                   (a message that came during a run is kept and runs next)
 //     { type: 'fatal', error }                                      the team could not be built
 //   `python agent_framework_runner.py --check` prints { ok, version } or { ok: false, error } and exits.
 //
@@ -53,6 +59,7 @@ const NAME_RE = /^[a-z][a-z0-9_]{0,31}$/; // the framework names a hand-off tool
 const MAX_AGENTS = 8, MAX_INSTRUCTIONS = 4000, MAX_TEAM_BYTES = 64_000;
 const CHECK_MS = 14_000;     // importing the framework takes some seconds; under the registry's 15 s, so this file's reason shows
 const CLOSE_MS = 1500;       // a runner that does not end after close is killed
+export const MAX_STEPS = 60;   // tool calls and hand-offs in one team turn (a local agent has MAX_ROUNDS model calls)
 // Only these variables reach the runner. No OPENAI_*, AZURE_* or ANTHROPIC_* key: the team talks to the local server only.
 const ENV_KEEP = /^(SystemRoot|windir|SystemDrive|PATH|PATHEXT|TEMP|TMP|USERPROFILE|HOMEDRIVE|HOMEPATH|HOME|APPDATA|LOCALAPPDATA|ComSpec|PROCESSOR_ARCHITECTURE|NUMBER_OF_PROCESSORS|OS|LANG|LC_ALL|PYTHONPATH|PYTHONHOME|VIRTUAL_ENV)$/i;
 
@@ -256,31 +263,67 @@ export function createAgentFramework(deps) {
       case 'output': case 'intermediate': return output(s, st, m);
       case 'handoff_sent': {
         flush(s, st);
+        step(s, st);
         const from = String(m.source || ''), to = String(m.target || '');
         if (isMember(st, from)) handBack(s, st, from);
         if (isMember(st, to)) delegate(s, st, to, `Hand-off from ${from || 'the team'}`);
         else if (to) events.feed(s, 'tool', `${from || 'a member'} handed back to ${to}`);
         return;
       }
-      case 'executor_completed': if (isMember(st, id)) { flush(s, st); handBack(s, st, id); } return;
+      // Only a sequential member is done when its executor completes (see the top of this file).
+      case 'executor_completed': if (st.team.pattern === 'sequential' && isMember(st, id)) { flush(s, st); handBack(s, st, id); } return;
       case 'executor_failed': if (isMember(st, id)) { flush(s, st); handBack(s, st, id, String(m.error || 'Failed')); } return;
       default: return; // executor_invoked and the rest: no change a bot shows
     }
   }
 
-  // A member's tool call: through the gate, then the answer goes back to the runner.
+  // One more step of this turn. Over the limit the office stops the run, and the turn fails with the reason.
+  function step(s, st) {
+    if (++st.steps <= MAX_STEPS) return true;
+    if (!st.failure) {
+      st.failure = `The team used all ${MAX_STEPS} steps of one turn.`;
+      st.tools.stop();
+      for (const resolve of st.waiting.values()) resolve(false);
+      st.waiting.clear();
+      send(st, { type: 'stop' });
+    }
+    return false;
+  }
+
+  // A member's tool call: through the gate, then the answer goes back to the runner. Every path answers the runner (it waits
+  // for the answer) and nothing rejects: an error here would end the office (no unhandledRejection handler).
   async function onTool(s, st, m) {
-    const id = String(m.id || '').slice(0, 40), agent = String(m.agent || '');
+    const id = String(m.id || '').slice(0, 40), agent = String(m.agent || ''), name = String(m.name || '');
     if (!id) return;
     flush(s, st);
+    const member = st.team.agents.find((a) => a.name === agent);
     const d = isMember(st, agent) ? delegate(s, st, agent, `${agent} works on it`) : null;
     const input = m.input && typeof m.input === 'object' && !Array.isArray(m.input) ? m.input : null;
-    const text = await gate.call(s, st, { id: `af-${id}`, name: String(m.name || ''), input, agentId: d ? d.agent : undefined });
+    const base = { tool_name: name, tool_use_id: `af-${id}`, tool_input: input || {}, ...(d ? { agent_id: d.agent } : {}) };
+    // A call the office does not run: shown as a failed call, and the text goes back to the team.
+    const refuse = (error) => {
+      try {
+        emit(st, () => events.hook(s, { hook_event_name: 'PreToolUse', ...base }));
+        emit(st, () => events.hook(s, { hook_event_name: 'PostToolUseFailure', ...base, error }));
+      } catch { /* the answer below still goes */ }
+      send(st, { type: 'tool_result', id, text: error });
+    };
+    // The runner builds proxies only for a member's own tools; this second check holds even if it did not.
+    if (!member) return refuse(`${agent || 'An unnamed agent'} is not an agent of the team ${st.team.name}.`);
+    if (!member.tools.includes(name)) return refuse(`${name || 'A tool with no name'} is not a tool of ${agent}.`);
+    if (!step(s, st)) return refuse(`Stopped: ${st.failure}`);
+    let text;
+    try {
+      text = await gate.call(s, st, { id: base.tool_use_id, name, input, agentId: d ? d.agent : undefined });
+    } catch (e) {
+      text = `Error: ${textOf(e)}`;
+      try { emit(st, () => events.hook(s, { hook_event_name: 'PostToolUseFailure', ...base, error: text })); } catch { /* still answer */ }
+    }
     send(st, { type: 'tool_result', id, text: String(text) });
   }
 
   function startRun(s, st, text) {
-    st.busy = true; st.interrupted = false; st.failure = null; st.last = '';
+    st.busy = true; st.interrupted = false; st.failure = null; st.last = ''; st.steps = 0;
     const back = emit(st, () => events.hook(s, { hook_event_name: 'UserPromptSubmit', prompt: text }));
     send(st, { type: 'message', text: noteOf(back) ? text + '\n\n' + noteOf(back) : text });
   }
@@ -289,13 +332,14 @@ export function createAgentFramework(deps) {
     for (const resolve of st.waiting.values()) resolve(false);
     st.waiting.clear();
     if (st.closed) return;
-    const failure = m.error ? String(m.error) : null;
-    if (st.interrupted || m.stopped) {
-      for (const name of [...st.deleg.keys()]) handBack(s, st, name, 'Stopped');
-      events.stream(s, { type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Stopped', total_cost_usd: 0 });
-    } else if (failure) {
+    // The step limit stops the run like Stop does, but the turn failed: that reason comes first.
+    const failure = st.failure || (m.error ? String(m.error) : null);
+    if (failure && !st.interrupted) {
       for (const name of [...st.deleg.keys()]) handBack(s, st, name, failure);
       events.stream(s, { type: 'result', subtype: 'success', is_error: true, result: `Agent Framework: ${clip(failure, 300)}`, total_cost_usd: 0 });
+    } else if (st.interrupted || m.stopped) {
+      for (const name of [...st.deleg.keys()]) handBack(s, st, name, 'Stopped');
+      events.stream(s, { type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Stopped', total_cost_usd: 0 });
     } else {
       // The team waits for the user. A member that still holds the work has done its part.
       for (const name of [...st.deleg.keys()]) handBack(s, st, name);
@@ -374,7 +418,7 @@ export function createAgentFramework(deps) {
       const child = spawn(file, ['-u', runner], { cwd: helperCwd(), env: runnerEnv(env), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
       const st = {
         child, team, names: new Set(team.agents.map((a) => a.name)), tools: makeTools(s.cwd),
-        busy: false, closed: false, ended: false, interrupted: false, failure: null, fatal: null, version: null,
+        busy: false, closed: false, ended: false, interrupted: false, failure: null, fatal: null, version: null, steps: 0,
         queue: [], waiting: new Map(), deleg: new Map(), resp: null, last: '', seq: 0,
       };
       teams.set(s.uid, st);

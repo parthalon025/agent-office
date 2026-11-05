@@ -144,9 +144,9 @@ The **Agent Framework** kind runs a team of agents built with Microsoft Agent Fr
       { "name": "writer", "description": "Writes the docs.", "instructions": "Write, then hand back to lead.", "tools": ["Read", "Edit", "Write"] } ] }
   ```
   `pattern` is `handoff` (agents hand the work to each other) or `sequential` (each agent in turn). `start` is the agent that gets your message first (default: the first one). A name is lower-case letters, digits and `_`. At most 8 agents. `tools` takes `Read`, `LS`, `Grep`, `Edit`, `Write`, `Bash`, `office_inbox`, `office_ask`, `office_room` and `office_room_update` (default: `Read`, `LS`, `Grep`). A file with a mistake is refused when you open the session, with what to fix.
-- **What you see.** The start agent is the bot at the desk. When the work passes to another member (a hand-off), that member walks in as a helper bot; when it hands back or finishes, the helper leaves. Each member's tool calls show on its helper. A member's reply in the chat starts with its name.
-- **Approvals (job 3).** Every tool of every member goes through the office: the same risk rule as a local agent, and the same cards. The framework never runs a tool by itself.
-- **Turns.** A turn ends when the team waits for you. Your next message is the answer. **Stop turn** stops the run; the team then starts again and forgets that conversation.
+- **What you see.** The start agent is the bot at the desk. When the work passes to another member (a hand-off, or the next agent of a sequential team), that member walks in as a helper bot; when it hands on or finishes, the helper leaves. Each member's tool calls show on its helper. A member's reply in the chat starts with its name.
+- **Approvals (job 3).** Every tool of every member goes through the office: the same risk rule as a local agent, and the same cards. The framework never runs a tool by itself. A member can use only the tools of its own `tools` list; the office refuses any other.
+- **Turns.** A turn ends when the team waits for you. Your next message is the answer. **Stop turn** stops the run; the team then starts again and forgets that conversation. A turn has at most 60 steps (tool calls and hand-offs). Then the office stops the run, and the turn fails with that reason.
 - **Cloud keys.** The team process gets no `OPENAI_*`, `AZURE_*` or `ANTHROPIC_*` variable, and its model client points at the local server, so it never reaches a paid service.
 - **Not available.** No attachments, no model or permission switch, no Extensions, no Reopen of the conversation (Reopen starts a new team in the same folder). Schedules start Claude Code.
 
@@ -264,6 +264,8 @@ The office knows four kinds of session. A session **in the office** runs `claude
 - **Agent kinds says "Start LM Studio or Ollama with a chat model."** The framework loads, but no local server lists a model.
 - **"agent-team.json: ..." when you open a session.** The team file has a mistake. The message says what to fix.
 - **A turn fails with "Agent Framework: APIConnectionError ...".** The local server stopped or does not answer at its address. Start it, then send the message again.
+- **A turn fails with "Agent Framework: The team used all 60 steps of one turn."** The members handed the work back and forth, or called tools, without an end. The team starts again. Send a smaller task, or make the instructions in `agent-team.json` say when to stop.
+- **A tool call fails with "... is not a tool of ...".** That member asked for a tool that is not in its `tools` list. Add the tool to the list in `agent-team.json` if the member needs it.
 - **"Agent Framework stopped: ..." and the session ends.** The team process ended. The text is its last error output. If it names a framework class or option, the installed framework is newer or older than the one the runner was written for (1.24); tell the office maintainers.
 
 ### Terminal sessions

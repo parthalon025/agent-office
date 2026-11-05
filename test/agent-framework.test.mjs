@@ -12,7 +12,8 @@ import { PassThrough } from 'node:stream';
 import { execFileSync } from 'node:child_process';
 import { createTracker } from '../tracker.mjs';
 import { providerEvents, checkProvider, createRegistry, describe as describeKind } from '../providers/index.mjs';
-import { createAgentFramework, readTeam, teamOf, runnerEnv, DEFAULT_TEAM, TEAM_FILE, TOOL_NAMES, RUNNER, SETUP } from '../providers/agent-framework.mjs';
+import { createAgentFramework, readTeam, teamOf, runnerEnv, DEFAULT_TEAM, TEAM_FILE, TOOL_NAMES, RUNNER, SETUP, MAX_STEPS } from '../providers/agent-framework.mjs';
+import { TOOL_DEFINITIONS } from '../providers/local-tools.mjs';
 import { createLocal } from '../providers/local.mjs';
 import { resolveExe } from '../git.mjs';
 
@@ -237,6 +238,109 @@ test('a recorded team turn: the lead is the bot, members are helpers by hand-off
   assert.equal(s.cost, 0, 'a local team costs nothing');
   assert.equal(s.error, null);
   assert.equal(s.tool, null);
+  o.done();
+});
+
+test('a sequential team: each member is a helper from its first word until its executor completes', async () => {
+  const o = rig();
+  fs.writeFileSync(path.join(o.cwd, TEAM_FILE), JSON.stringify({ pattern: 'sequential', agents: [
+    { name: 'writer', instructions: 'Write.' }, { name: 'editor', instructions: 'Edit.' }, { name: 'checker', instructions: 'Check.' }] }));
+  const s = o.session();
+  o.provider.open(s, { model: 'lmstudio:qwen/qwen3-8b' });
+  const child = o.child();
+  o.say(s, 'Write the docs');
+  await until(() => child.lines().some((m) => m.type === 'message'), 'the message');
+  const ev = (event, id, extra = {}) => JSON.stringify({ type: 'event', event, executor_id: id, ...extra });
+  const said = (id, rid, text) => ev('output', id, { author: id, response_id: rid, contents: [{ type: 'text', text }] });
+  await play(child, [ev('executor_invoked', 'writer'), said('writer', 'w1', 'Draft done.'), ev('executor_completed', 'writer'),
+    ev('executor_invoked', 'editor'), said('editor', 'e1', 'Edited.'),
+    JSON.stringify({ type: 'tool', id: 't1', agent: 'editor', name: 'Read', input: { file_path: 'a.txt' } }), ev('executor_completed', 'editor')]);
+  assert.deepEqual(s.agents.map((a) => ({ type: a.type, done: a.done, ok: a.ok })), [{ type: 'editor', done: true, ok: true }], 'the editor finished when its executor completed');
+  await play(child, [ev('executor_invoked', 'checker'), said('checker', 'c1', 'Checked.'), ev('executor_completed', 'checker'), JSON.stringify({ type: 'turn_end' })]);
+  await until(() => s.status === 'idle', 'the end of the turn');
+  assert.deepEqual(s.agents.map((a) => ({ type: a.type, done: a.done, ok: a.ok })), [{ type: 'editor', done: true, ok: true }, { type: 'checker', done: true, ok: true }]);
+  assert.deepEqual(s.replies.map((r) => r.text), ['Draft done.', 'editor: Edited.', 'checker: Checked.']);
+  o.done();
+});
+
+test('a tool call that throws in the office goes back to the team as a failed call; the office does not crash', async () => {
+  const o = rig({ tools: () => ({ run: async () => { throw new Error('disk gone'); }, stop: () => {} }) });
+  const s = o.session();
+  o.provider.open(s, { model: 'lmstudio:qwen/qwen3-8b' });
+  const child = o.child();
+  o.say(s, 'go');
+  await until(() => child.lines().some((m) => m.type === 'message'), 'the message');
+  child.say({ type: 'tool', id: 't1', agent: 'lead', name: 'Read', input: { file_path: 'a.txt' } });
+  await until(() => child.lines().some((m) => m.type === 'tool_result' && m.id === 't1'), 'the answer to t1');
+  assert.deepEqual(child.lines().find((m) => m.id === 't1'), { type: 'tool_result', id: 't1', text: 'Error: disk gone' });
+  assert.deepEqual(((c) => ({ ok: c.ok, err: c.err }))(s.calls.find((c) => c.name === 'Read')), { ok: false, err: 'Error: disk gone' }, 'the call shows as failed at once');
+  // A throw before the tool runs (here: the approval hold of a risky call) is caught the same way.
+  o.events.permission = () => { throw new Error('hold broke'); };
+  child.say({ type: 'event', event: 'handoff_sent', source: 'lead', target: 'coder' });
+  child.say({ type: 'tool', id: 't2', agent: 'coder', name: 'Bash', input: { command: 'git push' } });
+  await until(() => child.lines().some((m) => m.type === 'tool_result' && m.id === 't2'), 'the answer to t2');
+  assert.equal(child.lines().find((m) => m.id === 't2').text, 'Error: hold broke');
+  assert.deepEqual(((c) => ({ ok: c.ok, err: c.err, agent: c.agent }))(s.calls.find((c) => c.name === 'Bash')), { ok: false, err: 'Error: hold broke', agent: s.agents[0].id });
+  assert.deepEqual(o.ran, [], 'nothing ran');
+  child.say({ type: 'turn_end' });
+  await until(() => s.status === 'idle', 'the end of the turn');
+  assert.equal(s.error, null, 'a failed call is not a failed turn');
+  o.done();
+});
+
+test('a member calls only its own tools: a tool not in its list, or an agent not in the team, is refused', async () => {
+  const o = rig();
+  const s = o.session();
+  o.provider.open(s, { model: 'lmstudio:qwen/qwen3-8b' });
+  const child = o.child();
+  o.say(s, 'go');
+  await until(() => child.lines().some((m) => m.type === 'message'), 'the message');
+  child.say({ type: 'event', event: 'handoff_sent', source: 'lead', target: 'reviewer' });
+  child.say({ type: 'tool', id: 't1', agent: 'reviewer', name: 'Edit', input: { file_path: 'a.txt', old_string: 'a', new_string: 'b' } });
+  child.say({ type: 'tool', id: 't2', agent: 'ghost', name: 'Read', input: { file_path: 'a.txt' } });
+  child.say({ type: 'tool', id: 't3', agent: 'lead', name: 'Bash', input: { command: 'dir' } });
+  await until(() => child.lines().filter((m) => m.type === 'tool_result').length === 3, 'three answers');
+  const text = (id) => child.lines().find((m) => m.type === 'tool_result' && m.id === id).text;
+  assert.equal(text('t1'), 'Edit is not a tool of reviewer.');
+  assert.equal(text('t2'), 'ghost is not an agent of the team Team.');
+  assert.equal(text('t3'), 'Bash is not a tool of lead.');
+  assert.deepEqual(o.ran, [], 'nothing ran');
+  assert.equal(s.pending.length, 0, 'nothing asked');
+  const edit = s.calls.find((c) => c.name === 'Edit');
+  assert.equal(edit.ok, false);
+  assert.equal(edit.agent, s.agents[0].id, 'the refused call shows on the reviewer\'s helper');
+  o.done();
+});
+
+test(`a team turn has at most ${MAX_STEPS} steps (tool calls and hand-offs); then the office stops the run and says why`, async () => {
+  const o = rig();
+  const s = o.session();
+  o.provider.open(s, { model: 'lmstudio:qwen/qwen3-8b' });
+  const child = o.child();
+  o.say(s, 'loop');
+  await until(() => child.lines().some((m) => m.type === 'message'), 'the message');
+  const lines = [JSON.stringify({ type: 'event', event: 'handoff_sent', source: 'lead', target: 'coder' })];
+  for (let i = 1; i < MAX_STEPS; i++) lines.push(JSON.stringify({ type: 'tool', id: `t${i}`, agent: 'coder', name: 'Read', input: { file_path: 'a.txt' } }));
+  await play(child, lines);
+  assert.equal(o.ran.length, MAX_STEPS - 1, 'every step up to the limit ran');
+  assert.equal(child.lines().some((m) => m.type === 'stop'), false, 'no stop yet');
+  child.say({ type: 'tool', id: 'over', agent: 'coder', name: 'Read', input: { file_path: 'a.txt' } });
+  await until(() => child.lines().some((m) => m.type === 'tool_result' && m.id === 'over'), 'the answer to the step over the limit');
+  assert.equal(o.ran.length, MAX_STEPS - 1, 'the step over the limit did not run');
+  assert.match(child.lines().find((m) => m.id === 'over').text, new RegExp(`^Stopped: The team used all ${MAX_STEPS} steps of one turn\\.`));
+  assert.equal(child.lines().filter((m) => m.type === 'stop').length, 1, 'the office stopped the run');
+  child.say({ type: 'turn_end', stopped: true });
+  await until(() => s.status === 'idle' && s.error, 'the failed turn');
+  assert.equal(s.error.text, `Agent Framework: The team used all ${MAX_STEPS} steps of one turn.`);
+  assert.equal(s.agents[0].ok, false, 'the coder did not finish');
+  // The next turn has its own steps.
+  o.say(s, 'again');
+  await until(() => child.lines().filter((m) => m.type === 'message').length === 2, 'the next message');
+  child.say({ type: 'tool', id: 'n1', agent: 'lead', name: 'Read', input: { file_path: 'a.txt' } });
+  await until(() => child.lines().some((m) => m.type === 'tool_result' && m.id === 'n1'), 'the answer to n1');
+  assert.equal(o.ran.length, MAX_STEPS);
+  const readme = fs.readFileSync(path.join(HERE, '..', 'README.md'), 'utf8');
+  assert.ok(readme.includes(`at most ${MAX_STEPS} steps`) && readme.includes(`all ${MAX_STEPS} steps of one turn`), 'the README says the same limit');
   o.done();
 });
 
@@ -493,4 +597,43 @@ test('the real runner with a stand-in framework: a team run, two proxied tools, 
   await o.provider.close(s);
   await until(() => child.exitCode !== null, 'the runner exit', 10000);
   assert.equal(child.exitCode, 0, 'the runner ends on close');
+});
+
+test('the real runner with a stand-in framework: a sequential team shows every member\'s reply, not only the last one', { skip: !PY && 'no Python on this machine' }, async (t) => {
+  const o = await realRig(t);
+  fs.writeFileSync(path.join(o.cwd, TEAM_FILE), JSON.stringify({ pattern: 'sequential', agents: [
+    { name: 'writer', instructions: 'Write.' }, { name: 'editor', instructions: 'Edit.' }, { name: 'checker', instructions: 'Check.' }] }));
+  const s = o.session();
+  o.provider.open(s, { model: 'lmstudio:qwen/qwen3-8b' });
+  o.say(s, 'Write the docs');
+  await until(() => s.status === 'idle' && s.replies.length >= 3, 'the sequential run', 15000);
+  // Each later member gets a user turn after the one before it (a chat server can answer an assistant-last prompt with nothing).
+  assert.deepEqual(s.replies.map((r) => r.text), ['writer did its part.', 'editor: editor did its part (user turn).', 'checker: checker did its part (user turn).']);
+  assert.deepEqual(s.agents.map((a) => ({ type: a.type, ok: a.ok })), [{ type: 'editor', ok: true }, { type: 'checker', ok: true }]);
+  assert.equal(s.error, null);
+});
+
+test('the real runner: a message that comes while a run runs is kept and runs next, never dropped', { skip: !PY && 'no Python on this machine' }, async (t) => {
+  const real = await import('node:child_process');
+  const child = real.spawn(PY, ['-u', RUNNER], { env: { ...runnerEnv(process.env), PYTHONPATH: path.join(HERE, 'fixtures', 'fake-af') }, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  t.after(() => { if (child.exitCode === null) child.kill(); });
+  const got = [];
+  let buf = '';
+  child.stdout.setEncoding('utf8');
+  child.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (l) got.push(JSON.parse(l)); } });
+  const send = (m) => child.stdin.write(JSON.stringify(m) + '\n');
+  const tool = (name) => got.find((m) => m.type === 'tool' && m.name === name);
+  send({ type: 'start', model: 'm', base_url: 'http://127.0.0.1:1234/v1', team: DEFAULT_TEAM, tools: TOOL_DEFINITIONS });
+  send({ type: 'message', text: 'one' });
+  await until(() => tool('LS'), 'the LS call of the first run', 15000);
+  send({ type: 'message', text: 'two' }); // the first run still waits for its tool
+  send({ type: 'tool_result', id: tool('LS').id, text: 'a.txt' });
+  await until(() => tool('Bash'), 'the Bash call', 15000);
+  send({ type: 'tool_result', id: tool('Bash').id, text: 'checked' });
+  await until(() => got.filter((m) => m.type === 'turn_end').length === 2, 'two runs', 15000);
+  const last = got.filter((m) => m.type === 'event' && m.event === 'output').pop();
+  assert.match(last.contents[0].text, /^Done\. You said: two\./, 'the kept message ran as the next run');
+  assert.deepEqual(got.filter((m) => m.type === 'turn_end'), [{ type: 'turn_end' }, { type: 'turn_end' }]);
+  send({ type: 'close' });
+  await until(() => child.exitCode !== null, 'the runner exit', 10000);
 });

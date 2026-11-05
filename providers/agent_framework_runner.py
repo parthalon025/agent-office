@@ -84,6 +84,7 @@ class Runner:
         self.ids = itertools.count(1)
         self.task = None
         self.pending = []  # the team's open requests for user input (a handoff team waits for the user)
+        self.queued = []  # messages that came while a run ran: each one is the next run
         self.start = None
         self.workflow = None
         self.af = None
@@ -143,7 +144,13 @@ class Runner:
                 "require_per_service_call_history_persistence": True,
             })))
         if team["pattern"] == "sequential":
-            self.workflow = orch.SequentialBuilder(**accepted(orch.SequentialBuilder, {"participants": agents})).build()
+            # output_from="all": without it only the last agent's replies are workflow output, and the office never sees the
+            # others (1.24 _sequential.py build: default_output_from=[participants[-1]]). ensure_trailing_user_turn: the next
+            # agent gets a user turn after the one before it, because a chat server can answer an assistant-last prompt with
+            # nothing.
+            self.workflow = orch.SequentialBuilder(**accepted(orch.SequentialBuilder, {
+                "participants": agents, "output_from": "all", "ensure_trailing_user_turn": True,
+            })).build()
         else:
             lead = next(x for x in agents if x.name == team["start"])
             self.workflow = orch.HandoffBuilder(**accepted(orch.HandoffBuilder, {"name": team["name"], "participants": agents})).with_start_agent(lead).build()
@@ -208,6 +215,12 @@ class Runner:
         except Exception as e:
             self.rebuild()
             out({"type": "turn_end", "error": error_text(e)})
+        self.next_run()
+
+    def next_run(self):
+        """Starts the next kept message, if there is one. A stop drops the kept messages (the office drops its own too)."""
+        if self.queued:
+            self.task = asyncio.ensure_future(self.turn(self.queued.pop(0)))
 
     def rebuild(self):
         for fut in self.waiting.values():
@@ -238,14 +251,19 @@ class Runner:
             m = await self.inbox.get()
             t = m.get("type")
             if t == "message":
+                text = str(m.get("text", ""))
                 if self.task and not self.task.done():
-                    continue  # the office sends one message per run
-                self.task = asyncio.ensure_future(self.turn(str(m.get("text", ""))))
+                    # The office sends a message on its way after turn_end (a Stop hook block); this run may not have ended
+                    # yet. Keep it, so it is the next run: a dropped message would leave the office busy for ever.
+                    self.queued.append(text)
+                    continue
+                self.task = asyncio.ensure_future(self.turn(text))
             elif t == "tool_result":
                 fut = self.waiting.pop(str(m.get("id", "")), None)
                 if fut and not fut.done():
                     fut.set_result(str(m.get("text", "")))
             elif t == "stop":
+                self.queued.clear()
                 if self.task and not self.task.done():
                     self.task.cancel()
             elif t == "close":

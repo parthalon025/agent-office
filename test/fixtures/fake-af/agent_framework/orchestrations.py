@@ -4,6 +4,11 @@ Run 1 (a user message): the lead says it looks, lists the folder (LS), hands off
 tokens, finishes; the team asks the user for input (HandoffAgentUserRequest). Run 2 (the user's answer): the lead answers
 with the text it got, the model client's address and model, and the run ends. A run that stays in a tool call is stopped
 by the runner (cancel), as the office's Stop does.
+
+The sequential workflow runs each participant in turn: invoked, one reply, completed. Like the real SequentialBuilder
+(1.24, `_sequential.py` build: `default_output_from=[participants[-1]]`), only the participants named by `output_from`
+surface as `output` events, and without it only the last one does. `ensure_trailing_user_turn` is recorded, so a test can
+see the runner asked for it.
 """
 from . import AgentResponseUpdate, Content, WorkflowEvent
 
@@ -70,9 +75,35 @@ class HandoffBuilder:
         return Workflow(self.participants, self.start)
 
 
+class SequentialWorkflow:
+    def __init__(self, participants, shown, trailing_user_turn):
+        self.participants = participants
+        self.shown = shown
+        self.trailing_user_turn = trailing_user_turn
+
+    async def run(self, message=None, *, responses=None, stream=False):
+        for i, a in enumerate(self.participants):
+            yield WorkflowEvent("executor_invoked", executor_id=a.name)
+            if a.name in self.shown:
+                trailing = " (user turn)" if self.trailing_user_turn and i else ""
+                yield text(a.name, f"s{i}", f"{a.name} did its part{trailing}.")
+            yield WorkflowEvent("executor_completed", executor_id=a.name)
+        yield WorkflowEvent("output", [])  # the whole conversation: the runner skips it
+
+
 class SequentialBuilder:
-    def __init__(self, *, participants=()):
+    def __init__(self, *, name=None, participants=(), checkpoint_storage=None, chain_only_agent_responses=False,
+                 output_from=None, intermediate_output_from=None, ensure_trailing_user_turn=False):
         self.participants = list(participants)
+        self.output_from = output_from
+        self.ensure_trailing_user_turn = ensure_trailing_user_turn
 
     def build(self):
-        return Workflow(self.participants, self.participants[0])
+        names = [a.name for a in self.participants]
+        if self.output_from == "all":
+            shown = set(names)
+        elif self.output_from:
+            shown = {getattr(x, "name", x) for x in self.output_from}
+        else:
+            shown = {names[-1]}
+        return SequentialWorkflow(self.participants, shown, self.ensure_trailing_user_turn)
