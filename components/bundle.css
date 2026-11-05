@@ -45,6 +45,7 @@
 
 /* 3D office */
 .ao-scene{position:relative;width:100%;background:var(--bg);overflow:hidden;border-radius:var(--radius-lg)}
+:root,.ao-office{scrollbar-color:color-mix(in srgb,var(--muted) 55%,transparent) transparent}
 .ao-office{position:relative;width:100%;overflow:hidden;background:var(--bg);container-type:inline-size;font-family:var(--font-sans);color:var(--ink)}
 .ao-scene-fill{position:absolute;inset:0;height:100%!important;border-radius:0}
 .ao-hud{position:absolute;inset:0;pointer-events:none}
@@ -665,7 +666,7 @@ details.panel summary .cnt.hot,.ao-ph .hot{color:var(--emphasis)}
 [data-theme="sublevel"] .ao-rt-code-h,[data-theme="sublevel"] .ao-rt-copy,[data-theme="sublevel"] .ao-rt-dl{text-transform:uppercase;letter-spacing:.06em;font-size:10px}
 [data-theme="sublevel"] .ao-lb{font-family:var(--font-sublevel-sans)}
 .ao-rt-copy{display:inline-flex;align-items:center;gap:4px}
-/* x1.7 Fluent and Fluent Dark: a soft look after the open Fluent 2 design tokens. System faces (no font file), 4 px controls and 8 px surfaces
+/* x1.7.1 Fluent and Fluent Dark: a soft look after the open Fluent 2 design tokens. System faces (no font file), 4 px controls and 8 px surfaces
    (radius-fluent-*), the two-layer elevation shadow in shadow-panel, sentence-case heads, and an accent pill on the current row and the pressed segment.
    [data-theme|="fluent"] is the Fluent family: "fluent" and every "fluent-<variant>" (fluent-dark). The colors come from the tokens of each theme. */
 [data-theme|="fluent"]{--font-sans:var(--font-fluent-sans);--font-mono:var(--font-fluent-mono);--radius-sm:var(--radius-fluent-sm);--radius-md:var(--radius-fluent-md);--radius-lg:var(--radius-fluent-lg)}
@@ -677,10 +678,10 @@ details.panel summary .cnt.hot,.ao-ph .hot{color:var(--emphasis)}
 [data-theme|="fluent"] .ao-row[aria-current="true"]::before,[data-theme|="fluent"] .ao-bot[aria-selected="true"]::before{content:"";position:absolute;left:0;top:50%;width:3px;height:16px;margin-top:-8px;border-radius:var(--radius-full);background:var(--accent)}
 [data-theme|="fluent"] .ao-row[aria-current="true"] .ao-fnum{background:var(--accent);color:var(--on-accent)}
 [data-theme|="fluent"] .ao-seg button[aria-pressed="true"]::after{content:"";position:absolute;left:50%;bottom:1px;width:16px;height:3px;margin-left:-8px;border-radius:var(--radius-full);background:var(--accent)}
-/* x1.7 five themes and Tour: in a container under 520 px (the office, or a page box with container-type) a mode segment with an icon shows the icon only,
+/* x1.7.1 five themes and Tour: in a container under 520 px (the office, or a page box with container-type) a mode segment with an icon shows the icon only,
    and the pressed one keeps its label. The label stays for screen readers and as the tooltip. */
 @container (max-width:520px){.ao-seg button:not([aria-pressed="true"]) .ao-seg-l{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.ao-seg button:not([aria-pressed="true"]):has(.ao-seg-l){padding:6px 9px}}
-/* x1.7 the office top bar. The side columns start below one row of the bar above 820 px (.ao-hud-left and .ao-hud-right at 68 px), two rows to 521 px (108 px)
+/* x1.7.1 the office top bar. The side columns start below one row of the bar above 820 px (.ao-hud-left and .ao-hud-right at 68 px), two rows to 521 px (108 px)
    and three rows below (154 px). So the brand, the mode toggle and the view toggle keep to those rows:
    1. In the bar the mode toggle shows icons only (the pressed mode keeps its label) where the labels do not fit in one row: to 999 px, and to 1199 px in
       Sublevel (wide capitals). Above that width it shows every label.

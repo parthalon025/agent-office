@@ -1,5 +1,6 @@
-/* Agent Office DS x1.7: tokens.css. Edited by hand. Keep it in step with tokens.json (test/ds-kit.test.mjs checks every token). */
+/* Agent Office DS x1.7.1: tokens.css. Edited by hand. Keep it in step with tokens.json (test/ds-kit.test.mjs checks every token). */
 :root, [data-theme="light"] {
+  color-scheme: light;
   --bg: #e9edf1;
   --panel: rgba(255,255,255,0.86);
   --chip: #f1f4f7;
@@ -202,6 +203,7 @@
   --type-sl-terminal-tracking: 0.08em;
 }
 [data-theme="dark"] {
+  color-scheme: dark;
   --bg: #10141a;
   --panel: rgba(24,30,38,0.86);
   --chip: #1f2630;
@@ -256,6 +258,7 @@
   --shadow-panel: 0 6px 24px rgba(0,0,0,0.35);
 }
 [data-theme="sublevel"] {
+  color-scheme: light;
   --bg: #dfe6e1;
   --panel: rgba(246,248,245,0.93);
   --chip: #e7ece8;
@@ -419,6 +422,7 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
+  color-scheme: dark;
     --bg: #10141a;
     --panel: rgba(24,30,38,0.86);
     --chip: #1f2630;

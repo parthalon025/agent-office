@@ -1,4 +1,4 @@
-"""Agent Office kit x1.7: checks for a page or an adapter built with the system.
+"""Agent Office kit x1.7.1: checks for a page or an adapter built with the system.
 Usage: python3 kit/check.py [files...] [--events log.jsonl]
 Checks: no literal colors in CSS, only known tokens (DS tokens, and custom properties the checked files define) and icons, an x version mark in each title,
 no emoji, and (with --events) each event against kit/schema.json. Exit code 1 on an error."""

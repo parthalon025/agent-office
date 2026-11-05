@@ -304,4 +304,24 @@ test('bundle.js defines ModeToggle once, with an icon on every mode; the types a
   }
 });
 
+test('native scrollbars follow the theme: color-scheme in each theme block, and one token-based scrollbar-color (#97)', () => {
+  const scheme = (text) => text.match(/\n\s*color-scheme: ([^;]+);/)?.[1];
+  const light = cssBlock(css, ':root, [data-theme="light"] {');
+  const dark = cssBlock(css, '[data-theme="dark"] {');
+  const sublevel = cssBlock(css, '[data-theme="sublevel"] {');
+  const system = cssBlock(css, ':root:not([data-theme]) {');
+  assert.equal(scheme(light), 'light', 'Day');
+  assert.equal(scheme(dark), 'dark', 'Night');
+  assert.equal(scheme(sublevel), 'light', 'Sublevel has a light palette');
+  assert.equal(scheme(system), 'dark', 'system dark');
+  const b = read('components/bundle.css');
+  const rule = b.match(/(^|\n)([^{}\n]*)\{scrollbar-color:([^;}]*)[;}]/);
+  assert.ok(rule, 'bundle.css sets scrollbar-color once, on the office and the page root');
+  assert.match(rule[2], /(^|,)\.ao-office(,|$)/, 'on .ao-office, where the theme is set');
+  assert.match(rule[2], /(^|,):root(,|$)/, 'on the page root, for page panels and dialogs');
+  assert.match(rule[3], /var\(--muted\)/, 'the thumb is a token');
+  assert.doesNotMatch(rule[3], /#[0-9a-f]{3,8}\b|rgba?\(/i, 'no literal color');
+  assert.equal(b.match(/scrollbar-color/g).length, 1, 'one scrollbar-color rule');
+});
+
 function fileUrl(rel) { return new URL(rel, root).pathname.replace(/^\/([A-Za-z]:)/, '$1').replace(/%20/g, ' '); }
