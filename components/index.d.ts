@@ -18,12 +18,13 @@ export interface UsageMeterProps { percent?: number; cost?: number; costLimit?: 
 export interface StatusBubbleProps { status: Status; frame?: number }
 export interface BotLineupProps { bots?: { shape: "blob" | "cone" | "octa" | "capsule"; color: string; status: Status }[]; spin?: number; height?: number; mode?: "auto" | Look }
 export type Role = "research" | "writer" | "coder" | "analyst" | "designer" | "ops" | "sales" | "planner" | "media" | "ae" | "specialist" | "partner" | "se" | "csa" | "csam" | "fde";
-export type OfficeType = "team" | "lab" | "studio" | "hq";
+export type OfficeType = "team" | "lab" | "studio" | "hq" | "security";
 /** Render quality. "auto" picks "high" on desktop and "medium" on touch devices and narrow views. "low" turns off post effects and the extra motion. */
 export type Quality = "auto" | "high" | "medium" | "low";
 export type Shape = "blob" | "cone" | "octa" | "capsule";
 export interface BotDef { name?: string; sessions?: "agent" | "session"; orchestrator?: boolean; ephemeral?: boolean; shape?: Shape; color?: string; role?: Role; tasks?: string[]; status?: Status; task?: string; usage?: number; parent?: string; session?: string; platform?: string; identity?: string; owner?: string; model?: string; fallback?: string; tools?: string[]; knowledge?: string[]; skills?: string[]; channels?: string[]; triggers?: string[]; cost?: string; word?: string }
-export interface RoomDef { id?: string; type: OfficeType; name?: string; bots: BotDef[] }
+/** A room. type "security": no bots; screens names its six wall screens (slots 0 to 5: back wall left and right, left wall back and front, right wall back and front). */
+export interface RoomDef { id?: string; type: OfficeType; name?: string; bots: BotDef[]; screens?: string[] }
 export interface FloorDef { id?: number; key?: FloorKey | "hq"; name?: string; rooms: RoomDef[] }
 export interface BuildingDef { name?: string; sessions?: "agent" | "session"; floors: FloorDef[] }
 export interface BuildingViewProps { building?: BuildingDef; quality?: Quality; simulate?: boolean; controls?: boolean; height?: number; mode?: "auto" | Look }

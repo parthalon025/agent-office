@@ -134,6 +134,25 @@
     }
     return out;
   }
+  // The timeline of a session (#72): one line per tool call with its clock time, the time since the session began, how long it
+  // ran and how it ended. OfficeFormat.timeline owns the rows, so Export carries the same times. Newest last, like the terminal.
+  function timeline(s, cols) {
+    cols = Math.max(12, Math.floor(+cols) || 80);
+    if (!s) return [{ text: 'No session at this desk.', tone: 'muted' }];
+    var F = window.OfficeFormat, rows = F.timeline((s.calls || []).filter(function (c) { return c && !c.agent; }), { start: s.startedAt });
+    if (!rows.length) return [{ text: 'No tool calls yet.', tone: 'muted' }];
+    var out = [{ text: clipCols('Time      After    Took      Call', cols), tone: 'muted' }];
+    rows.forEach(function (r) {
+      var lead = r.time + '  ' + pad(r.after, 7) + '  ' + pad(r.duration, 8) + '  ';
+      var mark = r.state === 'failed' ? ' failed' : r.state === 'open' ? ' ...' : '';
+      var room = Math.max(4, cols - lead.length - mark.length);
+      var body = clipCols(oneLine(r.text), room);
+      out.push({ text: lead + body + spaces(room - body.length) + mark, tone: r.state === 'failed' ? 'err' : r.state === 'open' ? 'tool' : 'ok' });
+      if (r.state === 'failed' && r.err && !/^failed$/i.test(r.err)) wrapCols(oneLine(r.err), cols, '  ', '  ').slice(0, 2).forEach(function (t) { out.push({ text: t, tone: 'err' }); });
+    });
+    return out;
+  }
+  function pad(t, n) { t = String(t == null ? '' : t); return t + spaces(Math.max(0, n - t.length)); }
   function textLines(text, cols, full) {
     var out = [];
     md(text).forEach(function (p) {
@@ -177,6 +196,8 @@
     (s.pending || []).forEach(function (r) {
       wrapCols(oneLine('Allow ' + str(r.tool) + (r.detail ? ': ' + r.detail : '') + '?'), cols, '? ', '  ').slice(0, full ? 4 : 2)
         .forEach(function (t) { tail.push({ text: t, tone: 'prompt', ask: true }); });
+      // The reason the agent gives for the request (#72), under it.
+      if (r.reason) wrapCols(oneLine('Reason: ' + r.reason), cols, '  ', '  ').slice(0, full ? 3 : 1).forEach(function (t) { tail.push({ text: t, tone: 'prompt', ask: true }); });
     });
     (s.questions || []).forEach(function (q) {
       wrapCols(oneLine(q && q.text), cols, '? ', '  ').slice(0, full ? 6 : 2).forEach(function (t) { tail.push({ text: t, tone: 'prompt', ask: true }); });
@@ -190,9 +211,19 @@
     var flat = function (bs) { var o = []; bs.forEach(function (b) { o = o.concat(b.lines); }); return o; };
     if (full) {
       var all = flat(before).concat(head, flat(after), tail);
-      return all.length > 400 ? all.slice(-400) : all;
+      all = all.length > 400 ? all.slice(-400) : all;
+      // An ungated agent (ADR 0001): the label stays at the top of the terminal panel.
+      var sup = window.OfficeVocab.supervision(s);
+      return sup ? [{ text: sup, tone: 'muted' }].concat(all) : all;
     }
-    // a screen: the prompt on top, the questions at the bottom, the newest steps between them
+    // a screen: the label of an ungated agent (ADR 0001, whole, up to two lines) and the prompt on top, the questions at the
+    // bottom, the newest steps between them
+    var supLines = [];
+    window.OfficeVocab.supervisionLines(window.OfficeVocab.supervision(s)).forEach(function (t) {
+      wrapCols(t, cols, '', '  ').forEach(function (u) { supLines.push({ text: u, tone: 'muted' }); });
+    });
+    supLines = supLines.slice(0, rows > 6 ? 3 : 2);
+    rows = Math.max(1, rows - supLines.length);
     tail = tail.slice(-Math.max(1, rows - 1));
     head = head.slice(0, Math.max(0, Math.min(head.length, rows - tail.length)));
     var avail = rows - head.length - tail.length, body = [];
@@ -201,7 +232,7 @@
       if (ls.length <= avail) { body = ls.concat(body); avail -= ls.length; }
       else { body = (after[j].text ? ls.slice(ls.length - avail) : ls.slice(0, avail)).concat(body); avail = 0; }
     }
-    return head.concat(body, tail);
+    return supLines.concat(head, body, tail);
   }
 
   // ---------- stats ----------
@@ -217,8 +248,9 @@
     return m + (big ? ' 1M' : '');
   }
   function ctxPct(s) { return s && s.ctxTokens && s.ctxWindow ? Math.min(100, Math.round(100 * s.ctxTokens / s.ctxWindow)) : null; }
-  function fmtTok(n) { n = +n || 0; return n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k' : String(Math.round(n)); }
-  function money(c) { return window.OfficeFormat.money(c); }
+  function fmtTok(n) { return window.OfficeFormat.tokens(n); }
+  // A session's spend: "unknown" when its agent reports no cost (an ACP agent), never $0.00 (format.js cost).
+  function money(c, unknown) { return window.OfficeFormat.cost(c, unknown); }
   function age(ms) { var m = Math.floor(Math.max(0, ms) / 60000); return m < 1 ? 'under 1 min' : m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60) + ' min'; }
   function failedCalls(calls) { return calls.filter(function (c) { return c.ok === false && !/^stopped$/i.test(str(c.err)); }).length; }
   // The stats monitor's rows. kind: the agent kind as a word (vocab.js kindWord), '' when unknown.
@@ -239,9 +271,10 @@
     var pre = kind ? kind + DOT : '';
     if (todos.length) S.rows.push(['Agent', pre + model]);
     else S.rows.push(['Agent', pre + (s.headless ? 'in the office' : 'in a terminal')], ['Model', model]);
+    if (window.OfficeVocab.supervision(s)) S.rows.push(['Oversight', window.OfficeVocab.supervision(s)]);
     S.rows.push(['Context', pct == null ? '--' : pct + '%', 'bar', pct]);
     if (!todos.length) S.rows.push(['Tokens', u.tokens ? fmtTok(u.tokens) + (u.input ? DOT + Math.round(100 * (u.cached || 0) / u.input) + '% cached' : '') : '--']);
-    S.rows.push(['Spend', money(s.cost) + DOT + plural(+s.turns || 0, 'turn', 'turns')]);
+    S.rows.push(['Spend', money(s.cost, s.costUnknown) + DOT + plural(+s.turns || 0, 'turn', 'turns')]);
     if (!todos.length) S.rows.push(['Time', age(Date.now() - (+s.startedAt || Date.now()))], ['Tools', tools]);
     return S;
   }
@@ -252,7 +285,7 @@
     if (s.helper) return { left: 'Subagent', right: plural((s.calls || []).length, 'call', 'calls'), pct: null };
     var pct = ctxPct(s), right = [];
     if (pct != null) right.push('context ' + pct + '%');
-    if (typeof s.cost === 'number') right.push(money(s.cost));
+    if (s.costUnknown || typeof s.cost === 'number') right.push(window.OfficeFormat.costLabel(s.cost, s.costUnknown));
     return { left: s.git && s.git.branch ? s.git.branch : base(s.cwd), right: right.join(DOT), pct: pct };
   }
 
@@ -525,7 +558,7 @@
     function viewOf(e, s, info) {
       var v = { k: e.kind, name: e.name, word: info.word, key: info.key, live: info.live, hover: e.hover && e.uid ? e.hover : '', look: K.look, th: themeN };
       if (e.kind === 'term') {
-        v.sub = s && s.helper ? 'subagent' : shortModel(s && s.model);
+        v.sub = s && s.helper ? 'subagent' : [shortModel(s && s.model), window.OfficeVocab.supervisionHead(window.OfficeVocab.supervision(s))].filter(Boolean).join(DOT);
         v.lines = lines(s, e.P.cols, e.P.rows);
         if (e.footer) v.foot = footOf(s);
       } else { v.sub = 'Stats'; v.stats = statsOf(s, kindOf(s)); }
@@ -783,5 +816,5 @@
     };
   }
 
-  window.OfficeTerminal = { attach: attach, lines: lines, status: status, toolName: toolName, stats: statsOf };
+  window.OfficeTerminal = { attach: attach, lines: lines, timeline: timeline, status: status, toolName: toolName, stats: statsOf };
 })();

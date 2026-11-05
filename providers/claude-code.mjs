@@ -32,8 +32,7 @@ const ENDED = { subtype: 'error', error: 'The session ended.' };
  */
 export function programPath(name, exe = resolveExe) {
   try { return exe(name); } catch (e) {
-    const shim = /installed as a script \((.+)\)\. The office/.exec(String(e.message));
-    if (name === 'claude' && shim) throw providerError(409, `The office needs claude.exe. It found only ${shim[1]} (an npm install). Install the native Claude Code, then try again.`);
+    if (name === 'claude' && e.code === 'SCRIPT_INSTALL') throw providerError(409, `The office needs claude.exe. It found only ${e.file} (an npm install). Install the native Claude Code, then try again.`);
     if (name === 'claude') throw providerError(409, 'The office cannot find Claude Code: claude.exe is not on the PATH. Install it, then try again.');
     throw providerError(409, e.message);
   }
@@ -142,6 +141,7 @@ export function createClaudeCode(deps) {
     paid: true, // runs on the user's account: new sessions get the default spend limit
     canResume: true, // claude --resume continues a past conversation
     modes: [...MODES], // the permission modes open() takes (--permission-mode)
+    gated: true, // its PermissionRequest hook holds every call Claude Code asks about
 
     async readiness() {
       let version;
@@ -240,11 +240,20 @@ export function createClaudeCode(deps) {
     },
 
     // The PermissionRequest hook's answer. No decision ({}) lets Claude Code decide: its terminal dialog, or it moves on.
+    // A refusal says why (d.message: the Security room rule), else that the user declined.
     answer(_s, request, d = {}) {
       if (typeof d.allow !== 'boolean') return {};
-      const decision = d.allow ? { behavior: 'allow' } : { behavior: 'deny', message: 'Declined from Agent Office.' };
+      const decision = d.allow ? { behavior: 'allow' } : { behavior: 'deny', message: typeof d.message === 'string' && d.message ? d.message : 'Declined from Agent Office.' };
       if (d.allow && d.always && request?.suggestions?.length) decision.updatedPermissions = request.suggestions;
       return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision } };
+    },
+
+    // The PreToolUse hook's answer (#70, security.mjs preToolDecision): 'deny' refuses the call before Claude Code's own
+    // permission check, 'ask' makes Claude Code ask (the office then holds the prompt). The office never answers 'allow'
+    // here: an Allow rule answers only the prompts Claude Code raises, so Claude Code's own deny and ask rules stay.
+    preToolAnswer(d) {
+      if (!d || (d.decision !== 'deny' && d.decision !== 'ask')) return null;
+      return { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: d.decision, permissionDecisionReason: String(d.reason || '') } };
     },
 
     interrupt(s) { control(s, { subtype: 'interrupt' }); },

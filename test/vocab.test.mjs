@@ -74,8 +74,36 @@ test('room figures count once, with the same waiting rule', () => {
     mk({ status: 'working', pending: [{ id: 'p' }], calls: [1], usage: { tokens: 500 }, lastEvent: 20 }),
     mk({ turns: 1, error: { id: 1, text: 'x' }, cost: 0.5 }),
   ];
-  assert.deepEqual(V.figures(list), { sessions: 3, working: 1, waiting: 1, toolCalls: 3, tokens: 2000, cost: 0.75, priced: 2, todosDone: 1, todosTotal: 2, lastEvent: 20 });
+  assert.deepEqual(V.figures(list), { sessions: 3, working: 1, waiting: 1, toolCalls: 3, tokens: 2000, cost: 0.75, priced: 2, unknown: 0, supervision: '', todosDone: 1, todosTotal: 2, lastEvent: 20 });
   assert.equal(V.figures([]).sessions, 0);
+});
+
+test('room figures count the sessions whose agent reports no cost, apart from the priced ones', () => {
+  const f = V.figures([mk({ cost: 0.25 }), mk({ cost: null, costUnknown: true }), mk({ cost: null, costUnknown: true })]);
+  assert.deepEqual([f.cost, f.priced, f.unknown], [0.25, 1, 2]);
+});
+
+const PARTLY = 'Partly supervised: commands ask, file edits do not';
+
+test('supervision words (ADR 0001): the label of an ungated agent, its short form for a small sign, and the bot platform line', () => {
+  assert.equal(V.supervision(mk({ supervision: PARTLY })), PARTLY);
+  assert.equal(V.supervision(mk({})), '', 'a gated agent has none');
+  assert.equal(V.supervision(null), '');
+  assert.equal(V.supervisionHead(PARTLY), 'Partly supervised');
+  assert.equal(V.supervisionHead('Unsupervised'), 'Unsupervised');
+  assert.equal(V.supervisionHead(''), '');
+  // The room sign and the desk screen show the whole label on two lines, split at the colon, never cut.
+  assert.deepEqual(V.supervisionLines(PARTLY), ['Partly supervised:', 'commands ask, file edits do not']);
+  assert.deepEqual(V.supervisionLines('Unsupervised'), ['Unsupervised']);
+  assert.deepEqual(V.supervisionLines(''), []);
+  assert.equal(V.platform(mk({})), 'Claude Code');
+  assert.equal(V.platform(mk({ supervision: PARTLY })), PARTLY, 'the label is on the bot card');
+});
+
+test('room figures carry the supervision label of the least supervised agent in the room, "" when every agent is gated', () => {
+  assert.equal(V.figures([mk({}), mk({})]).supervision, '');
+  assert.equal(V.figures([mk({}), mk({ supervision: PARTLY })]).supervision, PARTLY);
+  assert.equal(V.figures([mk({ supervision: PARTLY }), mk({ supervision: 'Unsupervised' })]).supervision, 'Unsupervised');
 });
 
 test('requests lists every permission prompt and question, oldest first', () => {
@@ -104,6 +132,98 @@ test('always allow is offered for low and medium risk, never for high risk or a 
   assert.equal(V.alwaysOffer(mk({ questions: [{ id: 'q', text: 'x', t: 1 }] })), null);
   assert.equal(V.alwaysOffer(mk({ pending: [p('a', 'high', 'Bash(rm:*)'), p('b', 'medium', 'Bash(ls:*)')] })).id, 'b');
   assert.equal(V.alwaysOffer(mk({ pending: [p('a', 'low', 'Read')] })).always, 'Read');
+});
+
+// ---------- the Security room grid (#70): one vocabulary for the wall screens and the server ----------
+const S = V.security;
+const RULES = (office = {}, buildings = {}) => ({ office, buildings });
+
+test('security: six screens on three walls, each with its rows; five agent kinds as columns', () => {
+  assert.deepEqual(S.screens.map((x) => x.title), ['Files', 'Commands', 'Network', 'Secrets', 'Agents', 'Spend']);
+  assert.deepEqual(S.screens.find((x) => x.id === 'files').rows, ['read-inside', 'edit-inside', 'files-outside']);
+  assert.deepEqual(S.screens.find((x) => x.id === 'secrets').rows, ['settings', 'secrets']);
+  assert.deepEqual(S.columns.map((c) => c.label), ['Claude Code', 'Hermes', 'dsh', 'OpenClaw', 'Local model']);
+  assert.equal(S.rows.shell.label, 'Shell commands');
+  assert.equal(S.rows['files-outside'].label, 'Read or edit outside it');
+});
+
+test('security: an agent kind is the column of its provider; the two local providers share one', () => {
+  assert.equal(S.columnOf('claude-code'), 'claude-code');
+  assert.equal(S.columnOf('ollama'), 'local');
+  assert.equal(S.columnOf('lmstudio'), 'local');
+  assert.equal(S.columnOf('hermes'), 'hermes');
+  assert.equal(S.columnOf(undefined), 'claude-code', 'a session first seen in a hook is Claude Code');
+  assert.equal(S.columnOf('something-new'), null);
+});
+
+test('security: every call row is Ask by default for every agent kind, also reads and edits inside the worktree (owner decision pending, Claude Code asks today)', () => {
+  const none = RULES();
+  for (const col of ['claude-code', 'hermes', 'dsh', 'openclaw']) {
+    for (const row of ['read-inside', 'edit-inside', 'files-outside', 'shell', 'web', 'mcp', 'settings', 'secrets']) {
+      if (S.applies(row, col)) assert.equal(S.valueOf(none, '', row, col), 'ask', row + ' ' + col);
+    }
+  }
+  assert.equal(S.valueOf(none, '', 'ungated', 'openclaw'), 'off', 'an ungated agent is off until the user turns it on');
+});
+
+test('security: the local model keeps what it did before the Security room: its reads and edits inside the worktree run without a question', () => {
+  const none = RULES();
+  // Its low calls never were requests (providers/local.mjs ran them at once); the other rows were asked.
+  assert.equal(S.valueOf(none, '', 'read-inside', 'local'), 'allow');
+  assert.equal(S.valueOf(none, '', 'edit-inside', 'local'), 'allow');
+  assert.equal(S.sourceOf(none, '', 'edit-inside', 'local'), 'default');
+  for (const row of ['files-outside', 'shell', 'web', 'mcp', 'settings', 'secrets']) assert.equal(S.valueOf(none, '', row, 'local'), 'ask', row);
+});
+
+test('security: a click cycles Ask, Allow, Deny; the Secrets rows offer only Ask and Deny', () => {
+  assert.equal(S.next('shell', 'ask'), 'allow');
+  assert.equal(S.next('shell', 'allow'), 'deny');
+  assert.equal(S.next('shell', 'deny'), 'ask');
+  assert.equal(S.next('secrets', 'ask'), 'deny');
+  assert.equal(S.next('secrets', 'deny'), 'ask');
+  assert.deepEqual(S.options('settings'), ['ask', 'deny']);
+  assert.equal(S.next('ungated', 'off'), 'on');
+});
+
+test('security: a loosening change is a change to Allow or On; Ask and Deny apply at once', () => {
+  assert.equal(S.loosens('shell', 'ask', 'allow'), true);
+  assert.equal(S.loosens('shell', 'deny', 'allow'), true);
+  assert.equal(S.loosens('shell', 'allow', 'deny'), false);
+  assert.equal(S.loosens('shell', 'deny', 'ask'), false);
+  assert.equal(S.loosens('ungated', 'off', 'on'), true);
+  assert.equal(S.loosens('supervise', 'off', 'on'), true);
+  assert.equal(S.loosens('shell', 'allow', 'allow'), false, 'no change is no loosening');
+});
+
+test('security: a building override wins over the office-wide rule; the Agents rows are office-wide only', () => {
+  const repo = 'c:/work/repo';
+  const r = RULES({ 'shell|claude-code': 'deny', 'ungated|openclaw': 'on' }, { [repo]: { 'shell|claude-code': 'allow', 'ungated|openclaw': 'off' } });
+  assert.equal(S.valueOf(r, repo, 'shell', 'claude-code'), 'allow');
+  assert.equal(S.sourceOf(r, repo, 'shell', 'claude-code'), 'building');
+  assert.equal(S.valueOf(r, 'c:/work/other', 'shell', 'claude-code'), 'deny');
+  assert.equal(S.sourceOf(r, 'c:/work/other', 'shell', 'claude-code'), 'office');
+  assert.equal(S.sourceOf(r, 'c:/work/other', 'web', 'claude-code'), 'default');
+  assert.equal(S.valueOf(r, repo, 'ungated', 'openclaw'), 'on', 'no building override on the Agents screen');
+  assert.equal(S.valueOf(r, null, 'shell', 'claude-code'), 'deny', 'no building known: the office-wide rule');
+});
+
+test('security: a stored value the row does not offer is never used (Secrets is never Allow)', () => {
+  const r = RULES({ 'secrets|claude-code': 'allow', 'shell|local': 'maybe' }, { b: { 'settings|local': 'allow' } });
+  assert.equal(S.valueOf(r, '', 'secrets', 'claude-code'), 'ask');
+  assert.equal(S.valueOf(r, '', 'shell', 'local'), 'ask');
+  assert.equal(S.valueOf(r, 'b', 'settings', 'local'), 'ask');
+});
+
+test('security: a row that is only for some agent kinds has no cell in the others', () => {
+  assert.equal(S.applies('ungated', 'openclaw'), true);
+  assert.equal(S.applies('ungated', 'claude-code'), false);
+  assert.equal(S.applies('supervise', 'claude-code'), true);
+  assert.equal(S.applies('supervise', 'local'), false);
+  assert.equal(S.applies('no-cost', 'hermes'), true);
+  assert.equal(S.applies('no-cost', 'claude-code'), false);
+  assert.equal(S.applies('shell', 'local'), true);
+  assert.equal(typeof S.na('ungated', 'claude-code'), 'string', 'a cell with no rule says why');
+  assert.deepEqual([S.word('ask'), S.word('allow'), S.word('deny'), S.word('off'), S.word('on')], ['Ask', 'Allow', 'Deny', 'Off', 'On']);
 });
 
 test('the agent kind word: the label of the session\'s kind, from the snapshot\'s kinds', () => {
@@ -172,4 +292,37 @@ test('the agents of a building as one word: the kinds of its sessions, in the or
   assert.equal(V.kindsWord([{ provider: 'copilot' }, { provider: 'ollama' }], kinds), 'Ollama, copilot', 'a kind the list does not know comes last, as its id');
   assert.equal(V.kindsWord([{}], kinds), '', 'a session with no kind adds nothing');
   assert.equal(V.kindsWord([], kinds), '');
+});
+
+// ----- adapter features (#72) -----
+test('features: only what the agent kind declares, in the table order, with the words the page shows', () => {
+  assert.deepEqual(V.featuresOf(mk({ features: ['fork', 'skills', 'resume', 'images', 'nonsense'] })).map((f) => f.key), ['skills', 'fork']);
+  assert.deepEqual(V.featuresOf(mk({ features: ['reason', 'teams', 'schedules'] })).map((f) => f.label), ['Reasons', 'Agent teams', 'Scheduled tasks']);
+  assert.deepEqual(V.featuresOf(mk({})), []);
+  assert.deepEqual(V.featuresOf(null), []);
+  assert.equal(V.hasFeature(mk({ features: ['skills'] }), 'skills'), true);
+  assert.equal(V.hasFeature(mk({ features: ['skills'] }), 'fork'), false);
+  assert.equal(V.hasFeature(mk({}), 'skills'), false);
+});
+
+test('requests: the reason an agent gives for a request comes with it, trimmed to one line', () => {
+  const s = mk({ pending: [{ id: 'p1', tool: 'Bash', detail: 'npm test', risk: 'medium', t: 1, reason: 'To check\nthe fix.' }, { id: 'p2', tool: 'Read', detail: 'a', risk: 'low', t: 2 }] });
+  const r = V.requests(s);
+  assert.equal(r[0].reason, 'To check the fix.');
+  assert.equal(r[1].reason, '');
+});
+
+// Review M2: an agent kind that reports no cost has no spend limit (nothing could stop it), so the Open dialog shows no limit
+// field and no "stops at this limit" hint for it: it says that cost is unknown.
+test('M2: the spend limit field is for a paid kind that reports cost; a cost-unknown kind says why it has none', () => {
+  const CC = { kind: 'claude-code', label: 'Claude Code', paid: true };
+  const HERMES = { kind: 'hermes', label: 'Hermes Agent', paid: true, cost: 'unknown' };
+  const LOCAL = { kind: 'ollama', label: 'Ollama', paid: false };
+  assert.equal(V.limitShown(null), true, 'before the kinds come: Claude Code');
+  assert.equal(V.limitShown(CC), true);
+  assert.equal(V.limitShown(HERMES), false);
+  assert.equal(V.limitShown(LOCAL), false, 'a local model costs nothing');
+  assert.equal(V.costNote(HERMES), 'Hermes Agent does not report cost, so the office shows it as unknown and no spend limit can stop it. Check the spend in its own account.');
+  assert.equal(V.costNote(CC), '');
+  assert.equal(V.costNote(LOCAL), '');
 });

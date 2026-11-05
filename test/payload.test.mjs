@@ -55,3 +55,16 @@ test('a subagent request is settled only by the same subagent', () => {
   assert.equal(apply([r], post({ agent_id: 'a2' })).length, 1);
   assert.equal(apply([r], post({ agent_id: 'a1' })).length, 0);
 });
+
+// The Security room rates a PreToolUse call before it runs (#70): it needs the whole path and the glob, never contents.
+test('PreToolUse keeps the path fields the rating needs, whole: file_path, notebook_path, path, pattern, glob', () => {
+  const long = 'C:/work/repo/' + 'a/'.repeat(200) + '../'.repeat(210) + '.env';
+  const p = slimPayload({ hook_event_name: 'PreToolUse', session_id: 's', tool_name: 'Grep',
+    tool_input: { pattern: 'KEY', glob: '.env*', path: long, content: 'secret text', old_string: 'x' } });
+  assert.deepEqual(p.rate_input, { path: long, pattern: 'KEY', glob: '.env*' });
+  assert.ok(p.tool_input.path.length < long.length, 'the shown input stays short');
+  assert.equal(p.tool_input.glob, undefined, 'the shown input is unchanged');
+  const e = slimPayload({ hook_event_name: 'PreToolUse', session_id: 's', tool_name: 'NotebookEdit', tool_input: { notebook_path: 'n.ipynb', new_source: 'code' } });
+  assert.deepEqual(e.rate_input, { notebook_path: 'n.ipynb' });
+  assert.equal(slimPayload({ hook_event_name: 'PostToolUse', session_id: 's', tool_name: 'Read', tool_input: { file_path: 'a' } }).rate_input, undefined);
+});

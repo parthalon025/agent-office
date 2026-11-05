@@ -13,8 +13,11 @@
      toolArg(name)    -> the argument name of the tool's detail text
      todoStatus(t)    -> a DS plan step status
      figures(list)    -> the numbers of a room, from its open sessions
+     agentsSign(n)    -> "N agents" for a room shared by 2 or more agents (top-level sessions; helpers do not count), else ''
      requests(s)      -> every open request of a session, oldest first: { id, kind, tool, text, detail, risk, always, t }
                          kind is 'permission' (Approve or Decline) or 'question' (Yes or No; no risk value)
+     featuresOf(s)    -> the office features the session's agent kind declares (#72): [{ key, label }], in table order
+     hasFeature(s, k) -> true when the agent kind declares feature k. The page shows a feature only then, never a greyed-out control.
      alwaysOffer(s)   -> the first permission request that may offer "Always allow", or null. Never a question,
                          never a high-risk request, never one without a rule to save.
      kindWord(s, kinds) -> the agent kind of a session as a word ('Claude Code', 'Ollama'): the label of s.provider in
@@ -30,6 +33,13 @@
      noModelFor(k)    -> true when the kind needs a model and has none to pick (Open session waits)
      withKind(form, k, id) -> the form after a kind change: its first model, and only the options that kind takes
      kindNote(k, terminal) -> the line that says where a kind runs and what it costs
+     security         -> the Security room grid (#70), shared by its wall screens and the server's rules (security.mjs):
+                         screens [{ id, title, rows }], rows { id: { label, options, def, office?, only? } }, columns
+                         [{ id, label }] (agent kinds), columnOf(providerKind), options(row), valueOf(rules, building, row,
+                         col), sourceOf(...) ('building' | 'office' | 'default'), next(row, value), loosens(row, from, to),
+                         applies(row, col), na(row, col), word(value), key(row, col), own(map, key) (an own key, never
+                         an inherited one: rule maps come from requests and state.json).
+                         rules: { office: { 'row|col': value }, buildings: { buildingKey: { 'row|col': value } } }.
 */
 (function (root) {
   'use strict';
@@ -39,6 +49,17 @@
 
   function clip(t, n) { t = String(t || ''); return t.length > n ? t.slice(0, n - 1) + '…' : t; }
   function has(a) { return !!(a && a.length); }
+  function oneLine(t) { return clip(String(t == null ? '' : t).replace(/\s+/g, ' ').trim(), 300); }
+
+  // What an agent kind has beyond the seam (#72), in the order the page shows it. A provider declares the keys (providers/index.mjs
+  // features); the resume and images keys are not office features and have no entry. The server puts the list on the session.
+  var FEATURES = [
+    ['skills', 'Skills'], ['memory', 'Memory'], ['fork', 'Fork'], ['reason', 'Reasons'], ['teams', 'Agent teams'], ['schedules', 'Scheduled tasks']
+  ];
+  function hasFeature(s, key) { return !!(s && s.features && s.features.indexOf(key) >= 0); }
+  function featuresOf(s) {
+    return FEATURES.filter(function (f) { return hasFeature(s, f[0]); }).map(function (f) { return { key: f[0], label: f[1] }; });
+  }
 
   function isWaiting(s) { return !!s && s.status !== 'ended' && (has(s.pending) || has(s.questions)); }
 
@@ -77,31 +98,54 @@
   }
   function todoStatus(t) { return TODO[t && t.status !== undefined ? t.status : t] || 'resting'; }
 
+  // Supervision (ADR 0001): an ungated agent carries a label. The server sets it on the session (providers/index.mjs
+  // supervisionOf); the words come from the provider. This is the one place the page reads it.
+  //   supervision(s)     the full label, '' for a gated agent. On the bot card, the desk terminal and the stats.
+  //   supervisionHead(l) the words before the colon, for the one-line title bar of a desk monitor.
+  //   supervisionLines(l) the whole label as one or two lines, split after the colon: the room sign and the desk screen.
+  //   platform(s, kinds) the line under the bot's name: the label when it has one, else the agent kind (kindWord), else Claude Code.
+  function supervision(s) { return s && typeof s.supervision === 'string' ? s.supervision : ''; }
+  function supervisionHead(label) { return String(label || '').split(':')[0]; }
+  function supervisionLines(label) {
+    var t = String(label || ''), i = t.indexOf(': ');
+    return !t ? [] : i < 0 ? [t] : [t.slice(0, i + 1), t.slice(i + 2)];
+  }
+  function platform(s, kinds) { return supervision(s) || kindWord(s, kinds) || 'Claude Code'; }
+
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
+  // priced: sessions with a cost figure. unknown: sessions whose agent reports no cost (costUnknown), shown as "unknown".
+  // supervision: the label of the least supervised agent in the room ('Unsupervised' before any other), '' when all are gated.
   function figures(list) {
-    var o = { sessions: 0, working: 0, waiting: 0, toolCalls: 0, tokens: 0, cost: 0, priced: 0, todosDone: 0, todosTotal: 0, lastEvent: 0 };
+    var o = { sessions: 0, working: 0, waiting: 0, toolCalls: 0, tokens: 0, cost: 0, priced: 0, unknown: 0, supervision: '', todosDone: 0, todosTotal: 0, lastEvent: 0 };
     (list || []).forEach(function (s) {
+      var sup = supervision(s);
+      if (sup && (!o.supervision || (sup.indexOf('Unsupervised') === 0 && o.supervision.indexOf('Unsupervised') !== 0))) o.supervision = sup;
       o.sessions++;
       var k = status(s).key;
       if (k === 'working') o.working++;
       if (k === 'waiting') o.waiting++;
       o.toolCalls += (s.calls || []).length;
       o.tokens += (s.usage && s.usage.tokens) || 0;
-      if (typeof s.cost === 'number') { o.cost += s.cost; o.priced++; }
+      if (s.costUnknown) o.unknown++;
+      else if (typeof s.cost === 'number') { o.cost += s.cost; o.priced++; }
       (s.todos || []).forEach(function (t) { o.todosTotal++; if (t.status === 'completed') o.todosDone++; });
       if ((s.lastEvent || 0) > o.lastEvent) o.lastEvent = s.lastEvent;
     });
     return o;
   }
 
+  // The text of a room sign that counts agents. An agent is a top-level session: the count comes from figures().sessions,
+  // which never includes helpers (subagents sit in the parent's room as guests). A room with one agent or none says nothing.
+  function agentsSign(n) { return n >= 2 ? n + ' agents' : ''; }
+
   function requests(s) {
     if (!s || s.status === 'ended') return [];
     var out = [];
     (s.pending || []).forEach(function (r, i) {
-      out.push({ id: r.id, kind: 'permission', tool: r.tool, detail: r.detail || '', text: 'Allow ' + r.tool + (r.detail ? ': ' + clip(r.detail, 160) : '') + '?', risk: r.risk, always: r.always || null, t: +r.t || 0, i: i });
+      out.push({ id: r.id, kind: 'permission', tool: r.tool, detail: r.detail || '', reason: oneLine(r.reason), text: 'Allow ' + r.tool + (r.detail ? ': ' + clip(r.detail, 160) : '') + '?', risk: r.risk, always: r.always || null, t: +r.t || 0, i: i });
     });
     (s.questions || []).forEach(function (q, i) {
-      out.push({ id: q.id, kind: 'question', tool: 'office_ask', detail: '', text: clip(q.text, 400), risk: undefined, always: null, t: +q.t || 0, i: 1000 + i });
+      out.push({ id: q.id, kind: 'question', tool: 'office_ask', detail: '', reason: '', text: clip(q.text, 400), risk: undefined, always: null, t: +q.t || 0, i: 1000 + i });
     });
     out.sort(function (a, b) { return a.t - b.t || a.i - b.i; });
     return out.map(function (r) { delete r.i; return r; });
@@ -109,6 +153,78 @@
   function alwaysOffer(s) {
     return requests(s).filter(function (r) { return r.kind === 'permission' && r.always && r.risk !== 'high'; })[0] || null;
   }
+
+  // ---------- the Security room grid (#70) ----------
+  // Rows are action kinds (risk.mjs actionOf names the row of a tool call) and settings of the Agents screen; columns
+  // are agent kinds. A cell is Ask, Allow or Deny (a toggle is Off or On). Every call cell is Ask by default, also the low
+  // ones (read or edit inside the worktree): the office answers a request only when the user set the cell to Allow or Deny
+  // (owner decision pending, #67; Claude Code asks about such calls by itself today). One exception, `defs`: the local model
+  // keeps what it did before the Security room, its reads and edits inside the worktree run with no question (they never were
+  // requests, providers/local.mjs). The two Secrets rows never offer Allow. The Agents rows are office-wide;
+  // every other row can have a per-building override. A rule the row does not offer is never used.
+  var SEC_COLUMNS = [{ id: 'claude-code', label: 'Claude Code' }, { id: 'hermes', label: 'Hermes' }, { id: 'dsh', label: 'dsh' },
+    { id: 'openclaw', label: 'OpenClaw' }, { id: 'local', label: 'Local model' }];
+  // The tables are looked up by names that come from requests and saved files, so they have no prototype: '__proto__' or
+  // 'constructor' is no row, agent kind or word. Rule maps (rules.office, rules.buildings) are read by own keys only (own).
+  function bare(o) { return Object.assign(Object.create(null), o); }
+  function own(o, k) { return !!o && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k); }
+  var SEC_KIND = bare({ 'claude-code': 'claude-code', ollama: 'local', lmstudio: 'local', hermes: 'hermes', dsh: 'dsh', openclaw: 'openclaw' });
+  var RULE = ['ask', 'allow', 'deny'], ASK_DENY = ['ask', 'deny'], TOGGLE = ['off', 'on'];
+  var SEC_ROWS = bare({
+    'read-inside': { label: 'Read inside the worktree', options: RULE, def: 'ask', defs: { local: 'allow' } },
+    'edit-inside': { label: 'Edit inside the worktree', options: RULE, def: 'ask', defs: { local: 'allow' } },
+    'files-outside': { label: 'Read or edit outside it', options: RULE, def: 'ask' },
+    shell: { label: 'Shell commands', options: RULE, def: 'ask' },
+    web: { label: 'Web and network', options: RULE, def: 'ask' },
+    mcp: { label: 'MCP tools', options: RULE, def: 'ask' },
+    settings: { label: 'Settings files that run code', options: ASK_DENY, def: 'ask' },
+    secrets: { label: 'Secret files', options: ASK_DENY, def: 'ask' },
+    // Agents screen. Ungated agents run tool calls without asking the office (ADR 0001): off until the user turns them on.
+    // only: the kinds whose provider is gated: false (providers/acp.mjs AGENTS); the others ask the office, so "Gated".
+    ungated: { label: 'Turn on ungated agents', options: TOGGLE, def: 'off', office: true, only: ['hermes', 'openclaw'], na: 'Gated' },
+    // Paperclip's Claude Code runs go through the office hooks (#76).
+    supervise: { label: 'Paperclip: Supervise in office', options: TOGGLE, def: 'off', office: true, only: ['claude-code'], na: 'Not used' },
+    // An agent that reports no cost: Ask (the office asks once per session), Allow (it runs without asking), Deny (it never runs).
+    'no-cost': { label: 'Run without cost reports', options: RULE, def: 'ask', office: true, only: ['hermes', 'dsh', 'openclaw'], na: { 'claude-code': 'Reports cost', local: 'Free' } }
+  });
+  var SEC_SCREENS = [
+    { id: 'files', title: 'Files', rows: ['read-inside', 'edit-inside', 'files-outside'] },
+    { id: 'commands', title: 'Commands', rows: ['shell'] },
+    { id: 'network', title: 'Network', rows: ['web', 'mcp'] },
+    { id: 'secrets', title: 'Secrets', rows: ['settings', 'secrets'] },
+    { id: 'agents', title: 'Agents', rows: ['ungated', 'supervise', 'no-cost'] },
+    { id: 'spend', title: 'Spend', rows: [] }
+  ];
+  var SEC_WORD = bare({ ask: 'Ask', allow: 'Allow', deny: 'Deny', off: 'Off', on: 'On' });
+  function secKey(row, col) { return row + '|' + col; }
+  function secApplies(row, col) { var r = SEC_ROWS[row]; return !!r && (!r.only || r.only.indexOf(col) >= 0); }
+  // The default of a cell: the row's, unless the row names another for that agent kind.
+  function secDef(row, col) { var r = SEC_ROWS[row]; return r.defs && own(r.defs, col) ? r.defs[col] : r.def; }
+  function secOk(row, v) { return SEC_ROWS[row].options.indexOf(v) >= 0; }
+  // The rule of a cell and where it comes from: the building's override, the office-wide rule, or the default.
+  function secLook(rules, building, row, col) {
+    if (!secApplies(row, col)) return null;
+    var r = SEC_ROWS[row], k = secKey(row, col), b = rules && building != null && own(rules.buildings, building) ? rules.buildings[building] : null;
+    if (!r.office && own(b, k) && secOk(row, b[k])) return { value: b[k], source: 'building' };
+    var o = rules && rules.office;
+    if (own(o, k) && secOk(row, o[k])) return { value: o[k], source: 'office' };
+    return { value: secDef(row, col), source: 'default' };
+  }
+  var security = {
+    roomName: 'Security', screens: SEC_SCREENS, rows: SEC_ROWS, columns: SEC_COLUMNS, key: secKey, applies: secApplies, own: own,
+    columnOf: function (kind) { return SEC_KIND[kind || 'claude-code'] || null; },
+    options: function (row) { return SEC_ROWS[row] ? SEC_ROWS[row].options.slice() : []; },
+    valueOf: function (rules, building, row, col) { var x = secLook(rules, building, row, col); return x ? x.value : null; },
+    sourceOf: function (rules, building, row, col) { var x = secLook(rules, building, row, col); return x ? x.source : null; },
+    defaultOf: secDef,
+    next: function (row, v) {
+      var o = SEC_ROWS[row].options, i = o.indexOf(v);
+      return o[((i < 0 ? o.indexOf(SEC_ROWS[row].def) : i) + 1) % o.length];
+    },
+    loosens: function (row, from, to) { return from !== to && (to === 'allow' || to === 'on'); },
+    na: function (row, col) { var n = SEC_ROWS[row] && SEC_ROWS[row].na; return secApplies(row, col) ? '' : (n && typeof n === 'object' ? n[col] || '' : n || ''); },
+    word: function (v) { return SEC_WORD[v] || ''; }
+  };
 
   function kindWord(s, kinds) {
     var id = s && s.provider;
@@ -153,5 +269,12 @@
     return 'Runs ' + label + ' inside the office. You talk to it in the chat and approve its steps here. It has no terminal window.';
   }
 
-  root.OfficeVocab = { kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, modelChoices: modelChoices, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures };
+  // The spend limit field of the Open dialog: a paid kind that reports cost (#33, Q22). A kind with cost 'unknown' has no
+  // limit (providers/index.mjs spendLimitFor gives null: nothing could stop it), so its form says why instead (review M2).
+  function limitShown(k) { return !k || (k.paid !== false && k.cost !== 'unknown'); }
+  function costNote(k) {
+    return k && k.paid !== false && k.cost === 'unknown' ? (k.label || 'This agent') + ' does not report cost, so the office shows it as unknown and no spend limit can stop it. Check the spend in its own account.' : '';
+  }
+
+  root.OfficeVocab = { limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, modelChoices: modelChoices, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

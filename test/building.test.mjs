@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createTracker } from '../tracker.mjs';
 import { slimPayload } from '../payload.mjs';
-import { placeOfSession, placeOfWorktree, normPath } from '../place.mjs';
+import { placeOfSession, placeOfWorktree, normPath, securityRoomIdOf } from '../place.mjs';
 import '../public/vocab.js';
 import '../public/wire.js';
 import '../public/building.js';
@@ -60,7 +60,7 @@ function rig(over = {}) {
     for (const k of Object.keys(by)) figures[k] = V.figures(by[k]);
     return {
       sessions, figures, notes: {}, pins: {}, plan: r.plan || null, now: r.t, kinds: over.kinds || [],
-      repos: r.repos.map((p) => ({ key: normPath(p.path), path: p.path, name: p.path.split('\\').pop(), worktrees: p.worktrees.map((w) => ({ ...w, place: placeOfWorktree(p.path, w) })) })),
+      repos: r.repos.map((p) => ({ key: normPath(p.path), path: p.path, name: p.path.split('\\').pop(), securityRoomId: securityRoomIdOf(normPath(p.path)), worktrees: p.worktrees.map((w) => ({ ...w, place: placeOfWorktree(p.path, w) })) })),
     };
   };
   // as over SSE. wire: the server's way (wire.js): the lean snapshot, whole once, then patches; r.reconnect() starts again.
@@ -86,6 +86,8 @@ function rig(over = {}) {
   return r;
 }
 const types = (ev) => ev.map((e) => e.type);
+// the worktree rooms of a floor (the ground floor also has the Security room, #70)
+const labs = (f) => f.rooms.filter((x) => x.type === 'lab');
 const of = (ev, type) => ev.filter((e) => e.type === type);
 const fromHooks = (name, cwd, sid) => HOOKS[name].map((p) => ({ ...p, cwd, session_id: sid }));
 
@@ -148,6 +150,35 @@ test('a building names the agent kinds of its open sessions (the HUD connection 
   assert.equal(B.createStore().mount(KEY_A).agentName(), '', 'no snapshot: no name (the page has its own word)');
 });
 
+test('the bot of an ungated agent carries its supervision label on its card; a gated one says its agent kind (ADR 0001, #73)', async () => {
+  const r = rig({ kinds: [{ kind: 'claude-code', label: 'Claude Code' }] });
+  await r.hook(HOOKS.turnWithEdit[0]);
+  assert.equal(of(r.mount(KEY_A).ev, 'bot.add')[0].bot.platform, 'Claude Code');
+  const r2 = rig();
+  await r2.hook(HOOKS.turnWithEdit[0]);
+  [...r2.tracker.sessions.values()][0].supervision = 'Partly supervised: commands ask, file edits do not';
+  r2.push();
+  assert.equal(of(r2.mount(KEY_A).ev, 'bot.add')[0].bot.platform, 'Partly supervised: commands ask, file edits do not');
+});
+
+test('a supervision label that changes after the bot is seated seats it again, so the card never keeps a label that is no longer true', async () => {
+  const r = rig();
+  const m = r.mount(KEY_A);
+  await r.hook(HOOKS.turnWithEdit[0]);
+  const s = [...r.tracker.sessions.values()][0];
+  s.supervision = 'Partly supervised: commands ask, file edits do not';
+  r.push();
+  assert.equal(of(m.ev, 'bot.add').at(-1).bot.platform, 'Partly supervised: commands ask, file edits do not');
+  const adds = of(m.ev, 'bot.add').length;
+  s.supervision = 'Unsupervised';   // the config said commands do not ask
+  r.push();
+  assert.equal(of(m.ev, 'bot.add').length, adds + 1);
+  assert.equal(of(m.ev, 'bot.add').at(-1).bot.platform, 'Unsupervised');
+  assert.ok(of(m.ev, 'bot.remove').length >= 2, 'the old card is removed first');
+  r.push();   // nothing changed: nothing is seated again
+  assert.equal(of(m.ev, 'bot.add').length, adds + 1);
+});
+
 test('a turn with an edit: working, tool call without a bubble on replay, result, finished', async () => {
   const r = rig();
   const m0 = r.mount(KEY_A);
@@ -168,7 +199,7 @@ test('a turn with an edit: working, tool call without a bubble on replay, result
   const late = r.mount(KEY_A);
   assert.deepEqual(types(late.ev), ['bot.add', 'session.start', 'model', 'tool.call', 'tool.result']);
   assert.equal(of(late.ev, 'tool.call')[0].say, false);
-  assert.equal(late.def.floors[0].rooms[0].name, 'repo', 'the definition already holds the room');
+  assert.equal(labs(late.def.floors[0])[0].name, 'repo', 'the definition already holds the room');
   assert.equal(late.stale(), false);
 });
 
@@ -210,6 +241,16 @@ test('a permission prompt becomes one request; a question has no risk value', as
   assert.equal(reqs.length, new Set(reqs.map((e) => e.id)).size, 'each request once');
   for (const q of reqs.filter((e) => e.tool === 'office_ask')) assert.equal(q.risk, undefined);
   assert.equal(m.ev.filter((e) => e.type === 'status').at(-1).status, 'waiting');
+});
+
+test('the reason an agent gives for a request goes with the request to the scene (#72)', async () => {
+  const r = rig();
+  const m = r.mount(KEY_A);
+  await r.hook(HOOKS.turnWithEdit[0]);
+  r.tracker.permissionRequest(slimPayload({ ...HOOKS.permission, ask_reason: 'The test failed; I need the full log.' }, null));
+  r.push(); r.push();
+  const req = of(m.ev, 'request').find((e) => e.tool === 'Bash');
+  assert.match(req.text, /^Allow Bash.*\? Reason: The test failed; I need the full log\.$/);
 });
 
 test('subagents: a helper bot is spawned, its tool calls show on it, and it leaves when done', async () => {
@@ -403,6 +444,66 @@ test('room info, figures and note keys come from the snapshot', async () => {
   assert.equal(m.roomInfo(main.roomId, { sessions: [], repos: [] }).sessions.length, 0, 'an older snapshot can be passed');
 });
 
+// ---------- agent rooms (#69) ----------
+const WT = (n) => `C:\\work\\repo.worktrees\\${n}`;
+for (const n of ['a', 'b', 'c']) GITS[WT(n)] = { repo: REPO_A, root: WT(n), branch: `agent/${n}-1`, base: 'main' };
+
+test('three agents in three agent worktrees: three rooms on one floor (the base branch), each named by its branch', async () => {
+  const r = rig({ repos: [{ path: REPO_A, worktrees: [{ branch: 'main', root: REPO_A }] }] });
+  for (const n of ['a', 'b', 'c']) await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'sid-' + n, cwd: WT(n) });
+  const m = r.mount(KEY_A);
+  assert.deepEqual(m.def.floors.map((f) => f.name), ['main'], 'one floor, no floor per agent branch');
+  assert.deepEqual(labs(m.def.floors[0]).map((x) => x.name), ['repo', 'agent/a-1', 'agent/b-1', 'agent/c-1']);
+  const adds = of(m.ev, 'bot.add');
+  assert.equal(new Set(adds.map((e) => e.roomId)).size, 3, 'each agent has its own room');
+  assert.equal(of(m.ev, 'floor.add').length, 0, 'the scene has the floor from its definition');
+});
+
+test('an agent worktree with no session yet is a room on the base floor', () => {
+  const r = rig({ repos: [{ path: REPO_A, worktrees: [{ branch: 'main', root: REPO_A }, { branch: 'agent/z-9', root: WT('z'), base: 'main' }] }] });
+  r.push();
+  const m = r.mount(KEY_A);
+  assert.equal(m.def.floors.length, 1);
+  assert.equal(labs(m.def.floors[0]).length, 2);
+});
+
+test('room sign count: two top-level sessions share one room, helpers do not count', async () => {
+  const r = rig();
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'one', cwd: REPO_A });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'two', cwd: REPO_A });
+  const m = r.mount(KEY_A);
+  const room = labs(m.def.floors[0])[0].id;
+  assert.equal(labs(m.def.floors[0]).length, 1, 'one folder, one room');
+  assert.equal(m.roomInfo(room).sessions.length, 2);
+  assert.equal(m.figures(room).sessions, 2);
+  // a subagent of one of them is a helper in that room, and the count stays 2
+  await r.play(HOOKS.subagent.map((p) => ({ ...p, session_id: 'one', cwd: REPO_A })));
+  assert.ok(of(m.ev, 'delegate').length >= 1, 'helpers appear');
+  assert.equal(m.roomInfo(room).sessions.length, 2, 'helpers are not agents');
+  assert.equal(m.figures(room).sessions, 2);
+  assert.equal(V.agentsSign(m.figures(room).sessions), '2 agents');
+  assert.ok(of(m.ev, 'delegate').every((e) => e.roomId === room), 'helpers sit in the parent room');
+});
+
+test('room sign text: only a shared room says how many agents', () => {
+  assert.equal(V.agentsSign(0), '');
+  assert.equal(V.agentsSign(1), '');
+  assert.equal(V.agentsSign(2), '2 agents');
+  assert.equal(V.agentsSign(5), '5 agents');
+  assert.equal(V.agentsSign(undefined), '');
+});
+
+test('a session ended or closed leaves the room count', async () => {
+  const r = rig();
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'one', cwd: REPO_A });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'two', cwd: REPO_A });
+  const m = r.mount(KEY_A);
+  const room = labs(m.def.floors[0])[0].id;
+  r.tracker.onHook(slimPayload({ hook_event_name: 'SessionEnd', session_id: 'one', cwd: REPO_A }, null)); r.push();
+  assert.equal(m.roomInfo(room).sessions.length, 1);
+  assert.equal(V.agentsSign(m.figures(room).sessions), '');
+});
+
 test('buildings: waiting first, then the busiest; preview carries the bots', async () => {
   const r = rig({ repos: [{ path: REPO_B, worktrees: [{ branch: 'main', root: REPO_B }] }] });
   await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
@@ -414,7 +515,7 @@ test('buildings: waiting first, then the busiest; preview carries the bots', asy
   const list = r.store.buildings();
   assert.deepEqual(list.map((b) => [b.name, b.waiting]), [['other', 1], ['repo', 0]]);
   const pv = r.store.preview(KEY_B);
-  assert.deepEqual(pv.floors[0].rooms[0].bots.map((b) => [b.name, b.status]), [['other', 'waiting']]);
+  assert.deepEqual(labs(pv.floors[0])[0].bots.map((b) => [b.name, b.status]), [['other', 'waiting']]);
   assert.equal(r.store.buildingOf(r.store.latest().sessions[0]), KEY_A);
 });
 
@@ -756,6 +857,42 @@ test('two sessions with one name in one building get unique scene names, found b
   const pv = r.store.preview(KEY_A).floors.flatMap((f) => f.rooms.flatMap((rm) => rm.bots));
   assert.deepEqual(pv.map((x) => x.name), names);
   assert.deepEqual(pv.map((x) => x.uid), [a.uid, b.uid]);
+});
+
+// ---------- the Security room (#70): first on the ground floor of every building, no bots, never a worktree ----------
+const SEC_A = securityRoomIdOf(KEY_A);
+test('every building has a Security room first on its ground floor: no bots, no notes key, never stale', async () => {
+  const r = rig({ repos: [{ path: REPO_A, worktrees: [{ branch: 'main', root: REPO_A }, { branch: 'feat/x', root: 'C:\\work\\repo-feat' }] }] });
+  r.push();
+  const m = r.mount(KEY_A);
+  const sec = m.def.floors[0].rooms[0];
+  assert.deepEqual(sec, { id: SEC_A, type: 'security', name: 'Security', bots: [], screens: ['Files', 'Commands', 'Network', 'Secrets', 'Agents', 'Spend'] });
+  assert.equal(m.def.floors[1].rooms.some((x) => x.type === 'security'), false, 'one Security room, on the ground floor');
+  assert.equal(m.securityRoom(), SEC_A);
+  assert.equal(m.noteKey(SEC_A), '');
+  assert.deepEqual(m.roomInfo(SEC_A).sessions, []);
+  assert.equal(m.roomsShown().length, 2, 'the worktree rooms only');
+  assert.equal(m.stale(), false);
+  assert.equal(of(m.ev, 'room.add').length, 0, 'the scene has it from its definition');
+});
+
+test('an empty building has its Security room too, and it stays when the first session comes', async () => {
+  const r = rig({ repos: [{ path: REPO_A, worktrees: [] }] });
+  r.push();
+  const m = r.mount(KEY_A);
+  assert.deepEqual(m.def.floors[0].rooms.map((x) => x.type), ['security', 'lab']);
+  await r.hook(HOOKS.turnWithEdit[0]);
+  const ru = of(m.ev, 'room.update')[0];
+  assert.equal(ru.roomId, 'spare-room', 'the spare room takes the session, not the Security room');
+  assert.ok(!m.ev.some((e) => e.roomId === SEC_A), 'nothing is said to the Security room');
+});
+
+test('a building known only from a session gets its Security room from the session place', async () => {
+  const r = rig();
+  await r.hook(HOOKS.turnWithEdit[0]);
+  const m = r.mount(KEY_A);
+  assert.equal(m.def.floors[0].rooms[0].id, SEC_A);
+  assert.notEqual(of(m.ev, 'bot.add')[0].roomId, SEC_A);
 });
 
 // #58: a reply that came before the page saw the session must be in that bot's chat, whichever way the bot first shows.

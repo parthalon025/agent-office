@@ -47,6 +47,19 @@
   function escTaken(e) { return e.defaultPrevented || escLayer || layerOpen(); }
   function none() { return null; }
   function empty() { return []; }
+  // Taller walls, and the room sign above the cable tray (the engine builds walls 5.2 high, sign at 4.45). Returns what it
+  // moved, [mesh, y, scale y], for lowerRoom. The Security room (security.js) gets the same walls as the lab rooms beside it.
+  function raiseRoom(rg) {
+    var raised = [];
+    rg.children.forEach(function (c) {
+      if (isWall(c) && !c.userData.tall) { raised.push([c, c.position.y, c.scale.y]); c.userData.tall = 1; c.scale.y = WALL_H / 5.2; c.position.y = WALL_H / 2; c.updateMatrix(); c.updateMatrixWorld(true); }
+      if (isSign(c) && !c.userData.moved) { raised.push([c, c.position.y, c.scale.y]); c.userData.moved = 1; c.position.y = SIGN_Y; c.updateMatrix(); c.updateMatrixWorld(true); }
+    });
+    return raised;
+  }
+  function lowerRoom(raised) {
+    (raised || []).forEach(function (q) { var c = q[0]; c.position.y = q[1]; c.scale.y = q[2]; delete c.userData.tall; delete c.userData.moved; c.updateMatrix(); c.updateMatrixWorld(true); });
+  }
 
   // Short names for tools on the board come from the shared vocabulary (vocab.js).
   function toolWord(name) { return window.OfficeVocab.toolShort(name); }
@@ -77,7 +90,8 @@
   // The room's numbers. Used when the page gives no stats(roomId).
   function statsFrom(info) { return window.OfficeVocab.figures(info.sessions || []); }
   function fmtTokens(n) { n = +n || 0; return n < 1000 ? String(Math.round(n)) : n < 1e6 ? (n / 1000).toFixed(n < 10000 ? 1 : 0) + 'k' : (n / 1e6).toFixed(1) + 'M'; }
-  function fmtCost(c) { return window.OfficeFormat.money(+c || 0); }
+  // unknown: the count of sessions whose agent reports no cost; they read "unknown", never $0.00 (format.js cost).
+  function fmtCost(c, unknown) { return window.OfficeFormat.cost(+c || 0, unknown); }
   function fmtAgo(t, now) {
     if (!t) return 'none yet';
     var s = Math.max(0, Math.round((now - t) / 1000));
@@ -268,7 +282,7 @@
       ['Needs you', String(s.waiting), s.waiting ? 'status-waiting' : null],
       ['Tool calls', String(s.toolCalls), null],
       ['Tokens', fmtTokens(s.tokens), null],
-      ['Cost', fmtCost(s.cost), null],
+      ['Cost', fmtCost(s.cost, s.unknown), null],
       ['To-dos done', s.todosTotal ? s.todosDone + ' / ' + s.todosTotal : 'none', null],
       ['Last event', ago, null]
     ];
@@ -282,14 +296,32 @@
   }
 
   // ---------- the door sign ----------
-  function paintSign(c, w, h, count, tok, f) {
+  // sup: the supervision label of the least supervised agent in the room ('' when all are gated; ADR 0001), whole, on two
+  // lines (OfficeVocab.supervisionLines). The font shrinks until the longer line fits left of the count (or the sign's edge
+  // when there is no count); it is never cut.
+  function paintSign(c, w, h, count, tok, f, sup) {
     var col = function (k, fb) { return tok[k] || fb || '#888'; }, sans = f.sans || 'sans-serif', mono = f.mono || 'monospace';
     c.fillStyle = col('scene-dark'); rr(c, 0, 0, w, h, 26); c.fill();
     c.strokeStyle = mix(col('status-waiting'), col('scene-dark'), 0.35); c.lineWidth = 6; rr(c, 6, 6, w - 12, h - 12, 22); c.stroke();
     c.textBaseline = 'middle'; c.textAlign = 'left';
-    c.fillStyle = col('bubble'); c.font = '600 62px ' + sans; c.fillText('Agents', 36, h / 2 + 3);
-    c.fillStyle = col('status-working'); rr(c, w - 150, 28, 114, h - 56, (h - 56) / 2); c.fill();
-    c.fillStyle = col('on-status', col('bubble')); c.font = '700 56px ' + mono; c.textAlign = 'center'; c.fillText(String(count), w - 93, h / 2 + 3);
+    // A room that two or more agents share says "N agents" (OfficeVocab.agentsSign) and has no count; any other room says
+    // "Agents" and the count. The supervision label goes under that title.
+    var shared = window.OfficeVocab.agentsSign(count), title = shared || 'Agents';
+    c.fillStyle = col('bubble');
+    var rows = sup ? window.OfficeVocab.supervisionLines(sup) : [];
+    if (rows.length) {
+      var room = (shared ? w - 36 : w - 150) - 36 - 16, px = 32;
+      c.font = '600 ' + px + 'px ' + sans;
+      while (px > 18 && Math.max.apply(null, rows.map(function (t) { return c.measureText(t).width; })) > room) { px -= 1; c.font = '600 ' + px + 'px ' + sans; }
+      c.globalAlpha = 0.85;
+      rows.forEach(function (t, i) { c.fillText(t, 36, h * (rows.length === 1 ? 0.7 : 0.58 + 0.24 * i)); });
+      c.globalAlpha = 1;
+      c.font = '600 46px ' + sans; c.fillText(title, 36, h * 0.24);
+    } else { c.font = '600 62px ' + sans; c.fillText(title, 36, h / 2 + 3); }
+    if (!shared) {
+      c.fillStyle = col('status-working'); rr(c, w - 150, 28, 114, h - 56, (h - 56) / 2); c.fill();
+      c.fillStyle = col('on-status', col('bubble')); c.font = '700 56px ' + mono; c.textAlign = 'center'; c.fillText(String(count), w - 93, h / 2 + 3);
+    }
     c.textAlign = 'left';
   }
 
@@ -409,12 +441,7 @@
       }
       var m = rg.children.filter(isBoard)[0];
       if (!m) return;
-      var added = [], items = [], raised = [];   // raised: [mesh, y, scale y] to put back on dispose
-      // taller walls, and the room sign above the cable tray
-      rg.children.forEach(function (c) {
-        if (isWall(c) && !c.userData.tall) { raised.push([c, c.position.y, c.scale.y]); c.userData.tall = 1; c.scale.y = WALL_H / 5.2; c.position.y = WALL_H / 2; c.updateMatrix(); c.updateMatrixWorld(true); }
-        if (isSign(c) && !c.userData.moved) { raised.push([c, c.position.y, c.scale.y]); c.userData.moved = 1; c.position.y = SIGN_Y; c.updateMatrix(); c.updateMatrixWorld(true); }
-      });
+      var added = [], items = [], raised = raiseRoom(rg);   // raised: [mesh, y, scale y] to put back on dispose
 
       // the blackboard: the engine's board gets our picture (its own picture is freed)
       var t = newTex(1024, 640), mt = m.material;
@@ -544,17 +571,17 @@
       });
       statsList.forEach(function (s) {
         var v = statsOf(s.roomId), ago = fmtAgo(v.lastEvent, now);
-        var sig = skinVersion + K.look + [v.sessions, v.working, v.waiting, v.toolCalls, v.tokens, v.cost, v.todosDone, v.todosTotal, ago].join('|');
+        var sig = skinVersion + K.look + [v.sessions, v.working, v.waiting, v.toolCalls, v.tokens, v.cost, v.unknown, v.todosDone, v.todosTotal, ago].join('|');
         if (sig === s.sig) return;
         s.sig = sig; s.data = v;
         paintStats(s.canvas.getContext('2d'), s.canvas.width, s.canvas.height, v, ago, K.tok, K.f || {});
         s.tex.needsUpdate = true;
       });
       doors.forEach(function (d) {
-        var n = statsOf(d.roomId).sessions, sig = skinVersion + K.look + n;
+        var v = statsOf(d.roomId), n = v.sessions, sup = v.supervision || '', sig = skinVersion + K.look + n + '|' + sup;
         if (sig === d.sig) return;
         d.sig = sig;
-        paintSign(d.canvas.getContext('2d'), d.canvas.width, d.canvas.height, n, K.tok, K.f || {});
+        paintSign(d.canvas.getContext('2d'), d.canvas.width, d.canvas.height, n, K.tok, K.f || {}, sup);
         d.tex.needsUpdate = true;
       });
       repaint = false;
@@ -733,7 +760,7 @@
       Object.keys(hints).forEach(function (h) { hints[h].dispose(); }); hints = {};
       decorRooms.forEach(function (r) {
         r.added.forEach(function (x) { if (x.parent) x.parent.remove(x); });
-        r.raised.forEach(function (q) { var c = q[0]; c.position.y = q[1]; c.scale.y = q[2]; delete c.userData.tall; delete c.userData.moved; c.updateMatrix(); c.updateMatrixWorld(true); });
+        lowerRoom(r.raised);
         if (r.lamp) { if (r.lamp.parent) r.lamp.parent.remove(r.lamp); if (st.lamps) st.lamps = st.lamps.filter(function (l) { return l !== r.lamp; }); }
         var b = r.board, mt = b.mat, og = b.orig;
         mt.map = og.map; mt.emissiveMap = og.emissiveMap; mt.emissiveIntensity = og.ei; if (og.emissive) mt.emissive = og.emissive; mt.needsUpdate = true;
@@ -761,5 +788,5 @@
     };
   }
 
-  window.OfficeBoard = { attach: attach, layerOpen: layerOpen, escTaken: escTaken, data: boardData, toolWord: toolWord };
+  window.OfficeBoard = { attach: attach, layerOpen: layerOpen, escTaken: escTaken, data: boardData, toolWord: toolWord, raiseRoom: raiseRoom, lowerRoom: lowerRoom };
 })();

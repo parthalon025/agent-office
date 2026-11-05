@@ -76,7 +76,7 @@ test('the finished check is drawn in bubble, in 2D and in 3D', () => {
 });
 
 test('type colors on chip and accent on bg: 3:1', () => each((T, th) => {
-  for (const t of ['team', 'lab', 'studio', 'hq']) atLeast(`type-${t} on chip`, 3, T('type-' + t), T('chip'), th);
+  for (const t of ['team', 'lab', 'studio', 'hq', 'security']) atLeast(`type-${t} on chip`, 3, T('type-' + t), T('chip'), th);
   atLeast('accent on bg', 3, T('accent'), T('bg'), th);
 }));
 
@@ -144,4 +144,47 @@ test('the City label draws on bg, not a bubble', () => {
   const city = read('public/city.js');
   assert.match(city, /g\.fillStyle = tok\['bg'\]/);
   assert.doesNotMatch(city, /g\.fillStyle = tok\['bubble'\]/);
+});
+
+// Review minor: the Security room's wall screens (public/security.js) paint canvas text on token colors and token mixes. Every
+// text item of every screen state, on the fill drawn under it, reads at 4.5:1 in Day, Night and Sublevel. The colors come from
+// the table the page paints with (OfficeSecurity.pure.TONES, resolved by toneColors as THREE.Color.lerp does in three r147:
+// sRGB, legacy color management), so a new tone or a new pair cannot slip past.
+test('Security room wall: every canvas text reads at 4.5:1 on the fill under it, in every theme', async () => {
+  await import('../public/vocab.js'); await import('../public/format.js'); await import('../public/security.js');
+  const P = globalThis.OfficeSecurity.pure;
+  const NS = { reason: 'The office has no provider for this agent kind yet. The rule applies when it has one.', rows: {} };
+  const enforce = { 'claude-code': { reason: '', rows: {}, asks: { shell: 'The agent asks only when its own allow rules and permission mode say so.' }, unset: { 'read-inside': 'The agent decides until you click the cell: then the office makes it ask.' } },
+    hermes: { reason: '', rows: { 'read-inside': 'This agent reads files without asking the office.' }, partly: { shell: 'Commands that Hermes rates dangerous come to the office.' } }, dsh: NS, openclaw: NS, local: { reason: '', rows: {} } };
+  const rules = { office: { 'shell|claude-code': 'deny', 'web|claude-code': 'allow', 'edit-inside|claude-code': 'ask' }, buildings: { b: { 'mcp|claude-code': 'deny' } } };
+  const data = { sec: { rules, enforce, spend: { limit: 2, month: '2026-11', byColumn: { 'claude-code': 1.5 } } }, building: 'b', buildingName: 'repo' };
+  const views = [];
+  for (const s of globalThis.OfficeVocab.security.screens) {
+    for (const paged of [false, true]) for (const scope of ['office', 'building']) for (const focused of [false, true]) {
+      const v = { screen: s.id, w: 1280, h: paged ? 1100 : 738, focused, paged, page: 0, scope, pending: null, edit: null, hover: 'cell:shell|claude-code', busy: false, note: null };
+      views.push(v, { ...v, note: 'The office did not take the change.' }, { ...v, face: 'back' });
+      if (s.id === 'spend') views.push({ ...v, pending: { spend: 0 } }, { ...v, edit: { text: '12' } });
+      else views.push({ ...v, pending: { row: s.rows[0], col: 'claude-code', to: s.id === 'agents' ? 'on' : 'allow', office: null } });
+    }
+  }
+  const pairs = new Set();
+  for (const v of views) {
+    const p = P.plan(v, data), fills = p.items.filter((i) => i.t === 'fill');
+    for (const t of p.items.filter((i) => i.t === 'text')) {
+      const x = t.align === 'center' ? t.x : t.align === 'right' ? t.x - 2 : t.x + 2, y = t.y - t.s * 0.35;
+      const under = fills.filter((f) => x >= f.x && x <= f.x + f.w && y >= f.y && y <= f.y + f.h).pop();
+      pairs.add(t.c + ' on ' + (under ? under.c : 'face'));
+    }
+  }
+  assert.ok(pairs.has('ink on pending') || pairs.has('onPending on pending'), 'the Confirm cell is checked: ' + [...pairs].join(', '));
+  const lerp = (a, b, k) => [0, 1, 2].map((i) => a[i] * (1 - k) + b[i] * k);
+  for (const th of TH) {
+    const tok = (n) => (tokens.some((t) => t.name === n) ? rgb(val(n, th)).slice(0, 3) : null);
+    const C = P.toneColors(tok, lerp);
+    for (const pr of pairs) {
+      const [a, b] = pr.split(' on ');
+      assert.ok(C[a] && C[b], `${pr}: both tones are in the table`);
+      atLeast('wall ' + pr, 4.5, C[a].concat(1), C[b].concat(1), th);
+    }
+  }
 });

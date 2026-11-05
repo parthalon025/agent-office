@@ -34,7 +34,12 @@
   function call(path, opts) { return window.officeAdapter.ready.then(function () { return fetch(path, opts); }); }
   function api(path, body) {
     return call(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) })
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) { var e = new Error(j.error || 'The office could not do that (' + r.status + ').'); e.status = r.status; e.body = j; throw e; } return j; }); });
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok) { var e = new Error(j.error || 'The office could not do that (' + r.status + ').'); e.status = r.status; e.body = j; throw e; }
+        // A question before the call can run (the cost question: 200 { confirm, question }): the caller asks, as for a 409.
+        if (j && j.confirm && j.question) { var q = new Error(j.question); q.status = r.status; q.body = j; throw q; }
+        return j;
+      }); });
   }
   function getInfo(first) { return call('/api/info' + (first ? '?first=' + encodeURIComponent(first) : '')).then(function (r) { return r.json(); }); }
   function ago(t) {
@@ -92,6 +97,35 @@
   }
   function Tag(p) { return h('span', { className: 'tag' }, p.children); }
   function Pair(a, b) { return h('div', { className: 'row' }, a, b); }
+  // Export (#72): the server writes the Markdown of a session (every agent kind has it); the browser saves it as a file.
+  function exportSession(uid, toast) {
+    return api('/api/export', { uid: uid }).then(function (j) {
+      var url = URL.createObjectURL(new Blob([j.text], { type: 'text/markdown;charset=utf-8' }));
+      var a = document.createElement('a');
+      a.href = url; a.download = j.filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      if (toast) toast({ tone: 'success', title: 'Exported', text: j.filename });
+    }, function (x) { if (toast) toast({ tone: 'error', title: 'Export failed', text: x.message }); });
+  }
+  // An agent that reports no cost asks once before it runs while its Security room cell is Ask (security.mjs costAsk): the
+  // server answers 200 with confirm: 'cost' and the question (api() turns it into an Error with .body); the page asks, then sends the same call with confirmCost: true.
+  function costAsked(x) { return !!(x && x.body && x.body.confirm === 'cost'); }
+  // p: { title, text (the server's question), busy, err, onCancel, onRun }
+  function CostDialog(p) {
+    return h(A.Dialog, { open: true, title: p.title, onClose: p.onCancel, actions: [
+      h(A.Button, { key: 'c', variant: 'quiet', onClick: p.onCancel }, 'Cancel'),
+      h(A.Button, { key: 'r', variant: 'primary', icon: 'approve', loading: !!p.busy, onClick: p.onRun }, 'Run it')] },
+      h('div', { className: 'form' },
+        h('p', { className: 'note' }, p.text),
+        h('p', { className: 'note' }, 'The office shows its cost as unknown, and no spend limit can stop it. The Security room can run such agents without this question.'),
+        p.err ? h('p', { className: 'ao-err', role: 'alert' }, p.err) : null));
+  }
+  // The words of what an agent kind has beyond the seam (vocab.js featuresOf): only the ones it declares.
+  function FeatureTags(p) {
+    var list = window.OfficeVocab.featuresOf(p.session);
+    return list.length ? h('span', { className: 'feature-tags', 'aria-label': 'Features of ' + (window.officeAdapter.kindWord(p.session) || 'this agent') }, list.map(function (f) { return h(Tag, { key: f.key }, f.label); })) : null;
+  }
   function Busy(p) { return p.on ? h(A.Skeleton, { lines: p.lines || 3, label: 'Loading' }) : null; }
   // Fields two to a row; a field that is null leaves no gap.
   function Pairs(list) {
@@ -168,12 +202,32 @@
   }
 
   // ---------- open a session ----------
+  // "Use this folder": the opt-out of a room of its own. The DS has no Checkbox, so this is a native checkbox on DS tokens (.check in office.css).
+  function UseFolder(p) {
+    return h('div', { className: 'ao-field' },
+      h('label', { className: 'check', htmlFor: 'f-usefolder' },
+        h('input', { id: 'f-usefolder', type: 'checkbox', checked: !!p.checked, disabled: !!p.disabled, 'aria-describedby': 'f-usefolder-hint', onChange: function (e) { p.onChange(e.target.checked); } }),
+        h('span', null, 'Use this folder')),
+      h('span', { id: 'f-usefolder-hint', className: 'ao-hint' }, p.hint));
+  }
+  // True while the user set an Ask for a Claude Code call cell, in the office or in any building (snap.security.rules, the rules
+  // the server sends). Only such an Ask opens the session in Default mode; a default Ask does not (security.mjs permissionModeFor).
+  function userAskSet(sec) {
+    var rules = sec && sec.rules, V = window.OfficeVocab.security;
+    if (!rules) return false;
+    var scopes = [null].concat(Object.keys(rules.buildings || {}));
+    return Object.keys(V.rows).some(function (row) {
+      return !V.rows[row].office && scopes.some(function (b) { return V.valueOf(rules, b, row, 'claude-code') === 'ask' && V.sourceOf(rules, b, row, 'claude-code') !== 'default'; });
+    });
+  }
   function OpenDialog(p) {
-    var f = useState({ cwd: p.shownPath || p.recent[0] || '', name: '', provider: p.kind || DEFAULT_KIND, where: 'office', isolation: 'same', model: '', permissionMode: '', maxBudget: limitText(p.spendLimit), prompt: '', template: '' }), form = f[0], setForm = f[1];
+    var snapOpen = useSnapshot();
+    var f = useState({ cwd: p.shownPath || p.recent[0] || '', name: '', provider: p.kind || DEFAULT_KIND, where: 'office', useFolder: false, model: '', permissionMode: '', maxBudget: limitText(p.spendLimit), prompt: '', template: '' }), form = f[0], setForm = f[1];
     var K = useKinds(), k = kindOf(K.list, form.provider);
     useFirstModel(k, form, setForm);
     // The options of the kind (providers/index.mjs describe). Without kinds yet, the dialog offers what Claude Code takes.
-    var canWindow = !k || k.terminal, paid = !k || k.paid;
+    // limited: the kind takes a spend limit (paid and it reports cost); a kind whose cost is unknown has none (review M2).
+    var canWindow = !k || k.terminal, limited = KV.limitShown(k), costNote = KV.costNote(k);
     var modes = k ? MODES.filter(function (o) { return !o.value || k.modes.indexOf(o.value) >= 0; }) : MODES;
     var hasModes = modes.length > 1;
     var b = useState(false), busy = b[0], setBusy = b[1];
@@ -184,11 +238,19 @@
       var t = p.templates.filter(function (x) { return x.id === id; })[0];
       setForm(Object.assign({}, form, { template: id, prompt: t ? t.text : form.prompt }));
     }
-    function submit() {
+    var cq = useState(null), costQ = cq[0], setCostQ = cq[1];   // the cost question of an agent that reports no cost, or null
+    function submit(confirmed) {
       setBusy(true); setErr('');
+      // Each agent gets its own room (a new worktree) unless the user keeps the folder. A terminal window always uses the folder.
       // Only the options the kind takes go to the server: a local model has no spend limit, window or permission mode.
-      var body = Object.assign({}, form, { where: canWindow ? form.where : 'office', permissionMode: hasModes ? form.permissionMode : '', maxBudget: paid ? limitSent(form.maxBudget, p.spendLimit !== undefined) : undefined });
-      api('/api/open', body).then(function () { setBusy(false); p.onClose(); }, function (x) { setBusy(false); setErr(x.message); });
+      var where = canWindow ? form.where : 'office';
+      var body = Object.assign({}, form, { where: where, isolation: form.useFolder || where === 'terminal' ? 'same' : 'worktree', permissionMode: hasModes ? form.permissionMode : '', maxBudget: limited ? limitSent(form.maxBudget, p.spendLimit !== undefined) : undefined, confirmCost: confirmed === true });
+      delete body.useFolder;
+      api('/api/open', body).then(function () { setBusy(false); setCostQ(null); p.onClose(); }, function (x) {
+        setBusy(false);
+        if (costAsked(x) && confirmed !== true) { setCostQ(x.message); return; }
+        setErr(x.message);
+      });
     }
     function saveTemplate() {
       api('/api/template/save', { name: saving, text: form.prompt }).then(function (t) { setSaving(null); p.onTemplates(); setForm(Object.assign({}, form, { template: t.id })); }, function (x) { setErr(x.message); });
@@ -204,6 +266,7 @@
     }, [p.shownPath]);
     var folders = fetched || (p.recent || []).slice(0, 6);
     var tpl = [{ value: '', label: 'No template' }].concat(p.templates.map(function (t) { return { value: t.id, label: t.name }; }));
+    if (costQ) return h(CostDialog, { title: 'Run ' + (k ? k.label : 'the agent'), text: costQ, busy: busy, err: err, onCancel: function () { setCostQ(null); setErr(''); }, onRun: function () { submit(true); } });
     return h(A.Dialog, {
       open: true, title: 'Open a session', onClose: p.onClose,
       actions: [
@@ -218,9 +281,13 @@
       Pairs([
         h(A.TextInput, { key: 'n', id: 'f-name', label: 'Bot name (optional)', value: form.name, placeholder: 'Defaults to the folder name', onChange: set('name') }),
         canWindow ? h(A.Select, { key: 'w', id: 'f-where', label: 'Runs', options: WHERE, value: form.where, onChange: set('where') }) : null,
-        h(A.Select, { key: 'i', id: 'f-isolation', label: 'Work in', options: ISOLATION, value: terminal ? 'same' : form.isolation, disabled: terminal, onChange: set('isolation'), hint: form.isolation === 'worktree' && !terminal ? 'A new branch in its own folder. Your main branch stays untouched.' : undefined }),
-        paid ? h(A.TextInput, { key: 'b', id: 'f-budget', label: 'Spend limit in USD', value: form.maxBudget, placeholder: 'No limit', disabled: terminal, onChange: set('maxBudget'), hint: terminal ? undefined : limitHint(k ? k.label : 'Claude Code') }) : null,
-        hasModes ? h(A.Select, { key: 'm', id: 'f-mode', label: 'Permissions', options: modes, value: form.permissionMode, onChange: set('permissionMode') }) : null]),
+        h(UseFolder, { key: 'i', checked: form.useFolder || terminal, disabled: terminal, onChange: set('useFolder'),
+          hint: terminal ? 'A terminal window works in the folder.' : form.useFolder ? 'The agent works in this folder. Other agents in it share its room.' : 'The agent gets its own room: a new branch in its own folder next to the repository. Your branch stays untouched.' }),
+        limited ? h(A.TextInput, { key: 'b', id: 'f-budget', label: 'Spend limit in USD', value: form.maxBudget, placeholder: 'No limit', disabled: terminal, onChange: set('maxBudget'), hint: terminal ? undefined : limitHint(k ? k.label : 'Claude Code') })
+          : costNote ? h('p', { key: 'b', className: 'note' }, costNote) : null,
+        // The server opens Claude Code in Default mode while a rule the user set to Ask applies (security.mjs permissionModeFor); the hint shows only then.
+        hasModes ? h(A.Select, { key: 'm', id: 'f-mode', label: 'Permissions', options: modes, value: form.permissionMode, onChange: set('permissionMode'),
+          hint: form.permissionMode === 'acceptEdits' && form.provider === 'claude-code' && userAskSet(snapOpen && snapOpen.security) ? 'A Security room rule you set to Ask opens the session in Default mode. The office then answers its edits by the rules.' : undefined }) : null]),
       p.templates.length ? h(A.Select, { id: 'f-template', label: 'Template', options: tpl, value: form.template, onChange: pickTemplate }) : null,
       h(Area, { id: 'f-prompt', label: 'First instruction (optional)', value: form.prompt, placeholder: 'Review the open PRs and list what blocks merge.', rows: 4, onChange: set('prompt') }),
       saving === null
@@ -233,6 +300,70 @@
             h(A.Button, { variant: 'quiet', onClick: function () { setSaving(null); } }, 'Cancel'))));
   }
 
+  // ---------- skills an agent writes (#72) ----------
+  // The room panel opens this for an agent kind that declares skills (Hermes). The user reads, edits and deletes. A write is held:
+  // the server answers 409 with confirm: 'skill' and the question, the dialog asks, and the same call goes again with confirmed: true.
+  function SkillsDialog(p) {
+    var ls = useState(null), list = ls[0], setList = ls[1];
+    var ed = useState(null), edit = ed[0], setEdit = ed[1];       // { name, text, orig }: the skill in the editor
+    var cf = useState(null), ask = cf[0], setAsk = cf[1];         // { action, name, text, question }: waiting for the user's yes
+    var bz = useState(''), busy = bz[0], setBusy = bz[1];
+    var er = useState(''), err = er[0], setErr = er[1];
+    function load() { api('/api/skills/list', { provider: p.kind }).then(function (j) { setList(j); }, function (x) { setList({ skills: [] }); setErr(x.message); }); }
+    useEffect(load, []);
+    function openEdit(name) {
+      setBusy(name); setErr('');
+      api('/api/skills/read', { provider: p.kind, name: name }).then(function (j) { setBusy(''); setEdit({ name: name, text: j.text, orig: j.text }); }, function (x) { setBusy(''); setErr(x.message); });
+    }
+    // action: 'save' or 'delete'. The first call asks; the call with confirmed: true writes.
+    function write(action, name, text, confirmed) {
+      setBusy(action + name); setErr('');
+      api('/api/skills/' + action, { provider: p.kind, name: name, text: text, confirmed: confirmed === true }).then(function () {
+        setBusy(''); setAsk(null); setEdit(null);
+        p.toast({ tone: 'success', title: p.agent, text: action === 'delete' ? 'Skill ' + name + ' deleted' : 'Skill ' + name + ' saved' });
+        load();
+      }, function (x) {
+        setBusy('');
+        if (x.body && x.body.confirm === 'skill' && !confirmed) { setAsk({ action: action, name: name, text: text, question: x.message }); return; }
+        setErr(x.message);
+      });
+    }
+    if (ask) {
+      var back = function () { setAsk(null); setErr(''); };
+      var del = ask.action === 'delete';
+      return h(A.Dialog, { key: 'ask', open: true, title: (del ? 'Delete ' : 'Save ') + ask.name, onClose: back, actions: [
+        h(A.Button, { key: 'c', variant: 'quiet', onClick: back }, 'Keep it as it is'),
+        h(A.Button, { key: 'y', variant: del ? 'danger' : 'primary', icon: del ? 'remove' : 'approve', loading: busy === ask.action + ask.name, onClick: function () { write(ask.action, ask.name, ask.text, true); } }, del ? 'Delete skill' : 'Save skill')] },
+        h('div', { className: 'form' }, h('p', { className: 'note' }, ask.question), err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
+    }
+    if (edit) {
+      var changed = edit.text !== edit.orig, leave = function () { setEdit(null); setErr(''); };
+      return h(A.Dialog, { key: 'edit', open: true, title: 'Skill ' + edit.name, onClose: leave, actions: [
+        h(A.Button, { key: 'c', variant: 'quiet', onClick: leave }, 'Back to the list'),
+        h(A.Button, { key: 's', variant: 'primary', icon: 'approve', disabled: !changed, loading: busy === 'save' + edit.name, onClick: function () { write('save', edit.name, edit.text, false); } }, 'Save skill')] },
+        h('div', { className: 'form wide' },
+          h('p', { className: 'note' }, p.agent + ' follows this skill in later sessions. Saving asks you first.'),
+          h(Area, { id: 'sk-text', label: 'SKILL.md', value: edit.text, rows: 14, onChange: function (v) { setEdit(Object.assign({}, edit, { text: v })); }, error: err || undefined })));
+    }
+    var skills = list ? list.skills : null;
+    return h(A.Dialog, { key: 'list', open: true, title: 'Skills of ' + p.agent, onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
+      h('div', { className: 'form wide' },
+        h('p', { className: 'note' }, 'Skills that ' + p.agent + ' wrote for itself. You can read, edit and delete them. It makes new ones on its own.'),
+        err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
+        h(Busy, { on: skills === null }),
+        skills && !skills.length ? h(A.EmptyState, { icon: 'skill', title: 'No skills yet', text: p.agent + ' has not written a skill.' }) : null,
+        h('ul', { className: 'past' }, (skills || []).map(function (k) {
+          return h('li', { key: k.name, className: 'past-row' },
+            h('div', { className: 'past-main' },
+              h('div', { className: 'past-title' }, h('b', null, k.title), h(Tag, null, k.name)),
+              k.description ? h('div', { className: 'past-snip' }, k.description) : null,
+              h('div', { className: 'past-meta mono' }, ago(k.at) + ' · ' + k.bytes + ' bytes')),
+            h('div', { className: 'past-actions' },
+              h(A.Button, { variant: 'quiet', icon: 'tool', loading: busy === k.name, onClick: function () { openEdit(k.name); } }, 'Edit'),
+              h(A.Button, { variant: 'quiet', icon: 'remove', onClick: function () { write('delete', k.name, '', false); } }, 'Delete')));
+        }))));
+  }
+
   // ---------- past sessions and search ----------
   function PastDialog(p) {
     var l = useState(null), list = l[0], setList = l[1];
@@ -241,6 +372,8 @@
     var er = useState(''), err = er[0], setErr = er[1];
     var bz = useState(''), busy = bz[0], setBusy = bz[1];
     var ak = useState(null), ask = ak[0], setAsk = ak[1];   // the session the user is about to forget
+    var rc = useState(null), runAsk = rc[0], setRunAsk = rc[1];   // { s, text }: its agent reports no cost, so ask before it runs
+    var fa = useState(null), forkAsk = fa[0], setForkAsk = fa[1];   // { s, text }: Fork waits for the user's yes
     function load() { api('/api/history').then(function (j) { setList(j.sessions); }, function (x) { setErr(x.message); }); }
     useEffect(load, []);
     useEffect(function () {
@@ -249,7 +382,26 @@
       return function () { clearTimeout(t); };
     }, [q]);
     function act(uid, fn) { setBusy(uid); setErr(''); fn().then(function () { setBusy(''); }, function (x) { setBusy(''); setErr(x.message); }); }
-    function reopen(uid) { act(uid, function () { return api('/api/reopen', { uid: uid }).then(function () { p.onClose(); }); }); }
+    // The server answers confirm: 'cost' for an agent that reports no cost: the user says yes once, then the same call runs it.
+    function reopen(s, confirmed) {
+      act(s.uid, function () {
+        return api('/api/reopen', { uid: s.uid, confirmCost: confirmed === true }).then(function () { setRunAsk(null); p.onClose(); }, function (x) {
+          if (costAsked(x) && !confirmed) { setRunAsk({ s: s, text: x.message }); return; }
+          throw x;
+        });
+      });
+    }
+    // Fork (#72) writes a worktree and a session, so the server holds it: 409 with confirm: 'fork' and the question; the same call with confirmed: true runs it.
+    function fork(s, confirmed) {
+      act(s.uid, function () {
+        return api('/api/fork', { uid: s.uid, confirmed: confirmed === true }).then(function () {
+          setForkAsk(null); if (p.toast) p.toast({ tone: 'success', title: s.name, text: 'Forked into a new worktree' }); p.onClose();
+        }, function (x) {
+          if (x.body && x.body.confirm === 'fork' && !confirmed) { setForkAsk({ s: s, text: x.message }); return; }
+          throw x;
+        });
+      });
+    }
     function forget(uid) { act(uid, function () { return api('/api/history/forget', { uid: uid }).then(function () { setAsk(null); if (p.toast) p.toast({ tone: 'info', title: 'Session forgotten', text: 'It is gone from Past sessions.' }); load(); }); }); }
     if (ask) {
       return h(A.Dialog, { open: true, title: 'Forget ' + ask.name, onClose: function () { setAsk(null); setErr(''); }, actions: [
@@ -259,6 +411,16 @@
           h('p', { className: 'note' }, 'Removes this session from Past sessions, with its saved history. You cannot reopen it after that. Files in the folder stay.'),
           err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
     }
+    if (forkAsk) {
+      var stopFork = function () { setForkAsk(null); setErr(''); };
+      return h(A.Dialog, { open: true, title: 'Fork ' + forkAsk.s.name, onClose: stopFork, actions: [
+        h(A.Button, { key: 'c', variant: 'quiet', onClick: stopFork }, 'Cancel'),
+        h(A.Button, { key: 'f', variant: 'primary', icon: 'flow', loading: busy === forkAsk.s.uid, onClick: function () { fork(forkAsk.s, true); } }, 'Fork session')] },
+        h('div', { className: 'form' },
+          h('p', { className: 'note' }, forkAsk.text),
+          err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
+    }
+    if (runAsk) return h(CostDialog, { title: 'Reopen ' + runAsk.s.name, text: runAsk.text, busy: busy === runAsk.s.uid, err: err, onCancel: function () { setRunAsk(null); setErr(''); }, onRun: function () { reopen(runAsk.s, true); } });
     var hit = {};
     (results || []).forEach(function (r) { hit[r.uid] = hit[r.uid] || r; });
     var shown = results ? (list || []).filter(function (s) { return hit[s.uid]; }) : list;
@@ -273,9 +435,11 @@
               h('div', { className: 'past-title' }, h('b', null, s.name), h(Tag, null, window.officeAdapter.kindWord(s)), s.branch ? h(Tag, null, s.branch) : null, s.model ? h(A.ModelBadge, { model: s.model }) : null),
               h('div', { className: 'past-sub mono', title: s.cwd }, F.shortPath(s.cwd)),
               hit[s.uid] ? h('div', { className: 'past-snip' }, h('em', null, hit[s.uid].kind + ': '), hit[s.uid].snippet) : (s.last ? h('div', { className: 'past-snip past-clip' }, s.last) : null),
-              h('div', { className: 'past-meta mono' }, ago(s.endedAt) + ' · ' + plural(s.turns || 0, 'turn') + ' · ' + money(s.cost))),
+              h('div', { className: 'past-meta mono' }, ago(s.endedAt) + ' · ' + plural(s.turns || 0, 'turn') + ' · ' + F.costLabel(s.cost, s.costUnknown))),
             h('div', { className: 'past-actions' },
-              h(A.Button, { variant: 'quiet', icon: 'rollback', loading: busy === s.uid, onClick: function () { reopen(s.uid); } }, 'Reopen'),
+              h(A.Button, { variant: 'quiet', icon: 'rollback', loading: busy === s.uid, onClick: function () { reopen(s); } }, 'Reopen'),
+              window.OfficeVocab.hasFeature(s, 'fork') ? h(A.Button, { variant: 'quiet', icon: 'flow', disabled: busy === s.uid, title: 'Open a copy of this session in a new worktree', onClick: function () { fork(s, false); } }, 'Fork') : null,
+              h(A.Button, { variant: 'quiet', icon: 'copy', title: 'Save this session as a Markdown file', onClick: function () { exportSession(s.uid, p.toast); } }, 'Export'),
               h(A.Button, { variant: 'quiet', icon: 'trace', onClick: function () { p.onChanges(s.uid, s.name); } }, 'Changes'),
               h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setAsk(s); } }, 'Forget')));
         }))));
@@ -449,7 +613,8 @@
     var le = useState(''), limitErr = le[0], setLimitErr = le[1];
     function saveLimit() {
       setLimitBusy(true); setLimitErr('');
-      api('/api/settings/spend', { limit: limitSent(limit, true) }).then(function (r) {
+      // An empty field is No limit; Save on the typed field is the confirm the server asks for (it refuses 0 without one).
+      api('/api/settings/spend', { limit: limitSent(limit, true), confirmed: true }).then(function (r) {
         setLimitBusy(false);
         if (p.onSaved) p.onSaved();
         if (p.toast) p.toast({ tone: 'info', title: r.spendLimit > 0 ? 'Default spend limit saved' : 'Default spend limit cleared', text: r.spendLimit > 0 ? 'New Claude Code sessions stop at $' + r.spendLimit + '.' : 'New Claude Code sessions have no limit.' });
@@ -497,7 +662,7 @@
         h(Busy, { on: !K.list.length }),
         h('ul', { className: 'past' }, K.list.map(function (k) {
           var r = KV.kindState(k);
-          var facts = [k.terminal ? 'Runs in the office or a terminal window' : 'Runs in the office', k.paid ? 'Spend limit applies' : 'No cost',
+          var facts = [k.terminal ? 'Runs in the office or a terminal window' : 'Runs in the office', KV.limitShown(k) ? 'Spend limit applies' : KV.costNote(k) ? 'Cost unknown, no spend limit' : 'No cost',
             k.modes.length ? 'Permission modes' : null, k.needsModel ? 'You pick the model' : null].filter(Boolean).join(' · ');
           var names = k.models.map(function (m) { return m.label || m.id; }).join(', ');
           return h('li', { key: k.kind, className: 'past-row' },
@@ -558,7 +723,8 @@
         h(A.EmptyState, { icon: 'floor', title: 'No repository here', text: 'Folders outside git have no branches. Open a session in a git repository to get floors.' }));
     }
     var floors = {}, order = [];
-    repo.worktrees.forEach(function (w) { if (!floors[w.branch]) { floors[w.branch] = []; order.push(w.branch); } floors[w.branch].push(w); });
+    // The floor of a room is the server's place rule: an agent room sits on the floor of its base branch.
+    repo.worktrees.forEach(function (w) { var fl = w.place.floor; if (!floors[fl]) { floors[fl] = []; order.push(fl); } floors[fl].push(w); });
     var main = repo.worktrees.filter(function (w) { return w.main; })[0];
 
     if (clean) {
@@ -590,7 +756,7 @@
         h('div', { className: 'form' },
           h('p', { className: 'note' }, isFloor
             ? 'Deletes the branch ' + confirm.branch + ' and removes its rooms (worktree folders). Git refuses when the branch has commits that are not merged. ' + IGNORED_NOTE
-            : 'Deletes the folder ' + confirm.root + '. The branch ' + confirm.branch + ' and its floor stay. ' + IGNORED_NOTE),
+            : 'Deletes the folder ' + confirm.root + '. The branch ' + confirm.branch + (confirm.floor && confirm.floor !== confirm.branch ? ' stays, and so does the floor ' + confirm.floor + '. ' : ' and its floor stay. ') + IGNORED_NOTE),
           err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
     }
 
@@ -617,9 +783,9 @@
               rooms.map(function (w) {
                 var here = (snap ? snap.sessions : []).filter(function (s) { return s.status !== 'ended' && s.place && s.place.rootKey === w.place.rootKey; });
                 return h('div', { key: w.root, className: 'room-row' },
-                  h(A.OfficeTypeBadge, { type: 'lab', label: w.root.split(/[\\/]/).pop() }), h('span', { className: 'past-sub mono', title: w.root }, F.shortPath(w.root)),
+                  h(A.OfficeTypeBadge, { type: 'lab', label: w.place.room }), h('span', { className: 'past-sub mono', title: w.root }, F.shortPath(w.root)),
                   here.map(function (s) { return h('span', { key: s.uid, className: 'room-bot', title: s.name }, h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: colorOf(s.uid), status: statusOf(s), size: 20 }), s.name); }),
-                  w.main ? null : h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setConfirm({ kind: 'room', branch: b, root: w.root }); } }, 'Remove room'));
+                  w.main ? null : h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setConfirm({ kind: 'room', branch: w.branch, floor: b, root: w.root }); } }, 'Remove room'));
               }),
               newRoom && newRoom.branch === b ? h('div', { className: 'inline-actions' },
                 h(A.TextInput, { id: 'r-name', label: 'Room name (optional)', value: newRoom.name, placeholder: 'review', onChange: function (v) { setNewRoom({ branch: b, name: v }); } }),
@@ -632,7 +798,7 @@
         form ? null : h('div', { className: 'inline-actions' },
           h(A.AddButton, { label: 'Add a floor', onClick: function () { setErr(''); setForm({ branch: '', from: main ? main.branch : '', name: '' }); } }),
           h(A.Button, { variant: 'quiet', icon: 'remove', loading: busy === 'stale', onClick: function () { setBusy('stale'); setErr(''); api('/api/floor/stale', { repo: p.repo }).then(function (j) { setBusy(''); setClean({ floors: j.floors }); }, function (x) { setBusy(''); setErr(x.message); }); } }, 'Clean up unused floors')),
-        h(FloorsWithoutRooms, { repo: p.repo, busy: busy, run: run, shown: order })));
+        h(FloorsWithoutRooms, { repo: p.repo, busy: busy, run: run, shown: repo.worktrees.map(function (w) { return w.branch; }) })));
   }
   // Branches with no worktree: a room brings the floor into the building.
   function FloorsWithoutRooms(p) {
@@ -937,7 +1103,7 @@
           h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onClose }, 'Back to the room'), h('span', { className: 'note' }, 'Esc also goes back.')),
           h('ul', { className: 'stats-list' },
             row('Working', String(v.working)), row('Needs you', String(v.waiting)), row('Tool calls', String(v.toolCalls)),
-            row('Tokens', String(v.tokens)), row('Cost', money(v.cost)), row('To do done', v.todosDone + ' of ' + v.todosTotal),
+            row('Tokens', v.tokens ? F.tokens(v.tokens) : 'none reported'), row('Cost', F.cost(v.cost, v.unknown)), row('To do done', v.todosDone + ' of ' + v.todosTotal),
             row('Last event', v.lastEvent ? ago(v.lastEvent) : 'none')))));
   }
 
@@ -1061,22 +1227,35 @@
     var bz = useState(false), busy = bz[0], setBusy = bz[1];
     var ad = useState(null), add = ad[0], setAdd = ad[1];
     var er = useState(''), err = er[0], setErr = er[1];
+    var sk = useState(null), skills = sk[0], setSkills = sk[1];   // { kind, agent }: the Skills dialog of an agent kind (#72)
     var cur = confirm ? list.filter(function (s) { return s.uid === confirm; })[0] : null;
+    // The agent kinds in this room that write skills (they declare the feature): one Skills button each, nothing for the others.
+    var skillKinds = [];
+    list.forEach(function (s) { if (window.OfficeVocab.hasFeature(s, 'skills') && s.provider && !skillKinds.some(function (k) { return k.kind === s.provider; })) skillKinds.push({ kind: s.provider, agent: window.officeAdapter.kindWord(s) }); });
     useEffect(function () { if (confirm && !cur) setConfirm(null); }, [confirm, !!cur]);
-    var K = useKinds(!!add), addKind = add ? kindOf(K.list, add.provider) : null;
+    // An ungated kind (ADR 0001) opens only in a room of its own, so a room's Add agent does not offer it.
+    var KA = useKinds(!!add), K = Object.assign({}, KA, { list: KA.list.filter(function (x) { return x.gated !== false; }) });
+    var addKind = add ? kindOf(K.list, add.provider) : null;
+    var cq = useState(null), costQ = cq[0], setCostQ = cq[1];   // the cost question of an agent that reports no cost, or null
     useFirstModel(addKind, add || {}, function (fn) { setAdd(function (a) { return a ? fn(a) : a; }); });
     function closeSession() {
       setBusy(true);
       api('/api/close', { uid: cur.uid }).then(function () { setBusy(false); setConfirm(null); p.toast({ tone: 'success', title: cur.name, text: 'Session closed' }); }, function (x) { setBusy(false); setErr(x.message); });
     }
-    function addAgent() {
+    function addAgent(confirmed) {
       var cwd = list.length && list[0].cwd ? list[0].cwd : place && place.path;
       if (!cwd) { setErr('This room has no folder yet.'); return; }
       setBusy(true); setErr('');
-      api('/api/open', { cwd: cwd, name: add.name.trim(), provider: add.provider, where: 'office', isolation: 'same', model: add.model, prompt: add.prompt })
-        .then(function () { setBusy(false); setAdd(null); p.toast({ tone: 'success', title: 'Office', text: 'Agent added' }); }, function (x) { setBusy(false); setErr(x.message); });
+      api('/api/open', { cwd: cwd, name: add.name.trim(), provider: add.provider, where: 'office', isolation: 'same', model: add.model, prompt: add.prompt, confirmCost: confirmed === true })
+        .then(function () { setBusy(false); setCostQ(null); setAdd(null); p.toast({ tone: 'success', title: 'Office', text: 'Agent added' }); }, function (x) {
+          setBusy(false);
+          if (costAsked(x) && confirmed !== true) { setCostQ(x.message); return; }
+          setErr(x.message);
+        });
     }
     var title = 'Agents in ' + ((place && place.roomName) || 'this room');
+    if (costQ) return h(CostDialog, { title: 'Run ' + (addKind ? addKind.label : 'the agent'), text: costQ, busy: busy, err: err, onCancel: function () { setCostQ(null); setErr(''); }, onRun: function () { addAgent(true); } });
+    if (skills) return h(SkillsDialog, { kind: skills.kind, agent: skills.agent, toast: p.toast, onClose: function () { setSkills(null); } });
     if (cur) {
       return h(A.Dialog, { key: 'confirm', open: true, title: 'Close ' + cur.name, onClose: function () { setConfirm(null); setErr(''); }, actions: [
         h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setConfirm(null); setErr(''); } }, 'Keep session'),
@@ -1099,9 +1278,10 @@
           list.length ? h('ul', { className: 'agent-list' }, list.map(function (s) {
             return h('li', { key: s.uid, className: 'agent-row' },
               h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: colorOf(s.uid), status: statusOf(s), size: 28 }),
-              h('span', { className: 'agent-who' }, h('b', null, s.name), h('span', { className: 'agent-sub' }, window.OfficeVocab.status(s).word + ' · ' + window.officeAdapter.kindWord(s) + ' · ' + modelWord(s.model))),
+              h('span', { className: 'agent-who' }, h('b', null, s.name), h('span', { className: 'agent-sub' }, window.OfficeVocab.status(s).word + ' · ' + window.officeAdapter.kindWord(s) + ' · ' + modelWord(s.model)), h(FeatureTags, { session: s })),
               h(A.Button, { variant: 'quiet', icon: 'remove', onClick: function () { setErr(''); setConfirm(s.uid); } }, 'Close session'));
           })) : h(A.EmptyState, { icon: 'identity', compact: true, title: 'No agents here', text: 'Add an agent to start work in this room.' }),
+          skillKinds.map(function (k) { return h(A.Button, { key: k.kind, variant: 'quiet', icon: 'skill', onClick: function () { setSkills(k); } }, 'Skills of ' + k.agent); }),
           h(A.AddButton, { label: 'Add an agent', onClick: function () { setErr(''); setAdd({ name: '', provider: DEFAULT_KIND, model: '', prompt: '' }); } }))));
   }
 
@@ -1124,6 +1304,7 @@
         var q = r.kind === 'question', busyR = answering === r.id;
         return h('div', { key: r.id, className: 'ask' + (r.risk === 'high' ? ' is-high' : ''), role: 'group', 'aria-label': q ? 'Question' : 'Request' },
           h('div', { className: 'ask-t' }, r.risk ? h(A.RiskBadge, { risk: r.risk }) : null, p.showName ? h('b', null, who) : null, h('span', { className: 'ask-x' }, r.text)),
+          r.reason ? h('p', { className: 'ask-why' }, h('em', null, 'Reason: '), r.reason) : null,
           h('div', { className: 'ask-a' },
             h(A.Button, { variant: 'emphasis', icon: 'approve', loading: busyR, onClick: function () { answerReq(r, true, false); } }, q ? 'Yes' : 'Approve'),
             h(A.Button, { variant: 'quiet', icon: 'decline', disabled: busyR, onClick: function () { answerReq(r, false, false); } }, q ? 'No' : 'Decline'),
@@ -1144,9 +1325,13 @@
   var LOOK_ICON = { board: 'plan', notes: 'memory', stats: 'cost', terminal: 'terminal' };
   // While the camera looks at a screen: back to the room, or the screen's second step (the same as a second click).
   // It sits at the bottom of the free part of the view, and the screen is framed above it.
+  // asks: sessions with open requests, shown in the bar while the page hides the HUD columns for the look (a Security screen
+  // at 820 px and below, review M6), so an approval never hides. The bar is placed again when they change.
   function LookBar(p) {
     var ref = React.useRef(null);
     var ps = useState(null), pos = ps[0], setPos = ps[1];
+    var asks = p.asks || [], askKey = asks.map(function (s) { return s.uid + ':' + window.OfficeVocab.requests(s).length; }).join('|');
+    var placeRef = React.useRef(null);
     React.useLayoutEffect(function () {
       function place() {
         var el = ref.current, f = el && p.free(el);
@@ -1154,14 +1339,20 @@
         var n = { left: Math.round(Math.max(f.left, (f.left + f.right - el.offsetWidth) / 2)), top: Math.round(f.bottom - el.offsetHeight) };
         setPos(function (o) { return o && o.left === n.left && o.top === n.top ? o : n; });
       }
+      placeRef.current = place;
       place();
       window.addEventListener('resize', place);
       return function () { window.removeEventListener('resize', place); };
-    }, []);
+    }, [askKey]);
+    // layout: the page hides HUD columns for this look (sec-look) in a layout effect of the same commit, which runs after this
+    // bar's own. A passive effect runs after every layout effect, so the bar is placed again in the view the screen gets.
+    useEffect(function () { if (placeRef.current) placeRef.current(); }, [p.layout]);
     useEffect(function () { if (pos) p.onPlaced(); }, [pos]);
+    // A screen with no second step (a Security room screen: its cells take the clicks) has the Back button only.
     return h('div', { ref: ref, className: 'look-bar', role: 'group', 'aria-label': 'Screen in view', style: pos ? { left: pos.left, top: pos.top } : { visibility: 'hidden' } },
+      asks.map(function (s) { return h(RequestBar, { key: s.uid, session: s, showName: true, toast: p.toast }); }),
       h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onBack }, 'Back to the room'),
-      h(A.Button, { variant: 'quiet', icon: p.icon, onClick: p.onOpen }, p.verb));
+      p.verb ? h(A.Button, { variant: 'quiet', icon: p.icon, onClick: p.onOpen }, p.verb) : null);
   }
 
   // ---------- one session as a full terminal ----------
@@ -1213,8 +1404,11 @@
       window.addEventListener('keydown', onKey);
       return function () { window.removeEventListener('keydown', onKey); };
     }, []);
-    var rows = window.OfficeTerminal ? window.OfficeTerminal.lines(s, cols) : [{ text: 'The terminal view is not loaded.', tone: 'muted' }];
-    if (s && s.headless && rows.length && rows[rows.length - 1].text === '> ') rows = rows.slice(0, -1);
+    // The Timeline view lists the tool calls with their times (#72); Export saves the whole session as Markdown (every agent kind).
+    var tl = useState(false), showTimeline = tl[0], setShowTimeline = tl[1];
+    var OT = window.OfficeTerminal;
+    var rows = OT ? (showTimeline ? OT.timeline(s, cols) : OT.lines(s, cols)) : [{ text: 'The terminal view is not loaded.', tone: 'muted' }];
+    if (!showTimeline && s && s.headless && rows.length && rows[rows.length - 1].text === '> ') rows = rows.slice(0, -1);
     useEffect(function () { var v = vw.current; if (v && stick.current) v.scrollTop = v.scrollHeight; });
     function onScroll() { var v = vw.current; if (v) stick.current = v.scrollHeight - v.scrollTop - v.clientHeight < 24; }
     function send() {
@@ -1231,6 +1425,8 @@
         h(A.StatusDot, { status: s ? statusOf(s) : 'resting' }),
         h('b', { className: 'term-name' }, s ? s.name : p.name),
         h('span', { className: 'term-model mono' }, s ? window.officeAdapter.kindWord(s) + ' · ' + modelWord(s.model) : ''),
+        s ? h(A.Button, { variant: 'quiet', icon: 'trace', 'aria-pressed': showTimeline, title: showTimeline ? 'Show the terminal' : 'Show the tool calls with their times', onClick: function () { setShowTimeline(!showTimeline); stick.current = true; } }, showTimeline ? 'Terminal' : 'Timeline') : null,
+        s ? h(A.Button, { variant: 'quiet', icon: 'copy', title: 'Save this session as a Markdown file', onClick: function () { exportSession(s.uid, p.toast); } }, 'Export') : null,
         h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onClose }, 'Back')),
       h('div', { className: 'term-view', ref: vw, onScroll: onScroll, role: 'log', 'aria-live': 'off', tabIndex: 0 },
         h('span', { className: 'term-probe', ref: probe, 'aria-hidden': 'true' }, 'MMMMMMMMMM'),
@@ -1282,6 +1478,7 @@
             h('div', { className: 'past-main' },
               h('div', { className: 'past-title' }, h('b', null, sceneName({ uid: r.uid, name: r.bot })), h(Tag, null, r.buildingName), q ? null : h(A.RiskBadge, { risk: r.risk })),
               h('div', { className: 'past-snip' }, r.text),
+              r.reason ? h('div', { className: 'past-snip' }, h('em', null, 'reason: '), r.reason) : null,
               !q && r.preview && r.preview !== r.detail ? h('div', { className: 'past-sub mono', title: r.preview }, clip(String(r.preview).replace(/\s+/g, ' '), 140)) : null,
               h('div', { className: 'past-meta mono' }, r.roomName + ' · ' + ago(r.t))),
             h('div', { className: 'past-actions' },
@@ -1297,8 +1494,8 @@
     var snap = useSnapshot();
     var sess = p.sel ? window.officeAdapter.session(p.sel) : null;
     var live = snap ? snap.sessions.filter(function (s) { return s.status !== 'ended'; }) : [];
-    // spend of the sessions that are open now (closed ones are under Past)
-    var total = live.reduce(function (n, s) { return n + (typeof s.cost === 'number' ? s.cost : 0); }, 0);
+    // spend of the sessions that are open now (closed ones are under Past); "unknown" is part of it when an agent reports none
+    var spend = window.OfficeVocab.figures(live), total = F.cost(spend.cost, spend.unknown);
     function fail(x) { p.toast({ tone: 'error', title: sess ? sess.name : 'Office', text: x.message }); }
     function ctl(action, value) { api('/api/control', { uid: sess.uid, action: action, value: value }).catch(fail); }
     function stopTurn() { api('/api/interrupt', { uid: sess.uid }).catch(fail); }
@@ -1332,7 +1529,8 @@
 
     // With no live session the welcome card shows. One card at a time: it waits while the DS Since you left card
     // shows (they share the middle of the screen, and do not both fit on a phone), and the dock holds the primary button then (#66).
-    var welcome = !!snap && !live.length && !p.syl;
+    // It also waits while the camera looks at a screen (p.look): the Security room screens work with no session (#70).
+    var welcome = !!snap && !live.length && !p.syl && !p.look;
     return h(React.Fragment, null,
       welcome ? h('div', { className: 'welcome' },
         h('div', { className: 'welcome-logo' }, h(A.Logo, { variant: 'lockup', height: 28 })),
@@ -1344,7 +1542,7 @@
                 options: p.buildings.map(function (b) { return { value: b.key, label: b.name + ' · ' + plural(b.sessions, 'session', 'sessions') + (b.waiting ? ' · ' + b.waiting + ' need you' : '') }; })
                   .concat(p.buildings.some(function (b) { return b.key === p.shown; }) ? [] : [{ value: p.shown, label: (p.shownName || 'This building') + ' · no sessions' }]) }) : null,
           p.needs ? h(A.Button, { variant: 'emphasis', icon: 'waiting', title: 'Every request that waits for you, in every building', onClick: p.onNeeds }, 'Needs you · ' + p.needs) : null,
-          live.length ? h('span', { className: 'strip-total mono' }, live.length + ' open · ' + money(total)) : null),
+          live.length ? h('span', { className: 'strip-total mono' }, live.length + ' open · ' + total) : null),
         h('div', { className: 'strip-group strip-nav' },
           p.view === 'city' ? h(A.Button, { variant: 'quiet', icon: 'floor', title: 'Go inside ' + (p.shownName || 'the building'), onClick: p.onOffice }, 'Go inside') : h(A.Button, { variant: 'quiet', icon: 'building', onClick: p.onCity }, p.needs ? 'City · ' + p.needs : 'City'),
           p.shown ? h(A.Button, { variant: 'quiet', icon: 'floor', onClick: p.onFloors }, 'Floors') : null,
@@ -1363,7 +1561,8 @@
                 h(A.Button, { variant: 'quiet', icon: 'trace', onClick: function () { setMore(false); p.onChanges(sess.uid, sess.name); } }, 'Changes'),
                 steer ? h(A.Button, { variant: 'quiet', icon: 'connector', onClick: function () { setMore(false); p.onExtensions(sess.uid, sess.name); } }, 'Extensions') : null,
                 ask ? h(A.Button, { variant: 'quiet', icon: 'approve', onClick: function () { setMore(false); always(); }, title: 'Approve and allow this from now on: ' + ask.always }, 'Always allow ' + clip(ask.always, 28)) : null,
-                sess.headless && (sess.cost || usage) ? h(A.CostMeter, { tokens: usage ? usage.tokens : 0, cost: sess.cost || 0, cached: usage && usage.input ? usage.cached / usage.input : undefined }) : null,
+                // The DS meter shows dollars only, so an agent that reports no cost gets none (it would read $0.00).
+                sess.headless && !sess.costUnknown && (sess.cost || usage) ? h(A.CostMeter, { tokens: usage ? usage.tokens : 0, cost: sess.cost || 0, cached: usage && usage.input ? usage.cached / usage.input : undefined }) : null,
                 sess.headless && steer ? h(A.Select, { id: 'c-model', label: 'Model', options: modelOpts, value: sess.model || '', onChange: function (v) { ctl('model', v); } }) : null,
                 sess.headless && steer ? h(A.Select, { id: 'c-mode', label: 'Permissions', options: modeOpts, value: sess.mode || '', onChange: function (v) { ctl('mode', v); } }) : null,
                 sess.headless && !steer ? h('p', { className: 'strip-more-note' }, window.officeAdapter.kindWord(sess) + ' · ' + modelWord(sess.model) + '. Open a new session to use another model.') : null) : null) : null),
@@ -1554,6 +1753,9 @@
     var terminalRef = React.useRef(null);
     // the scene host (scene-host.js): the one reader of the DS stage; board, terminal, streets and birds are its adapters
     var hostRef = React.useRef(null);
+    // the Security room's wall screens (security.js): the user picks the permission rules on them
+    var securityRef = React.useRef(null);
+    useEffect(function () { if (securityRef.current) securityRef.current.refresh(); }, [snap]);
     var tm = useState(null), term = tm[0], setTerm = tm[1];
     // the screen the camera looks at (step 1 of a screen: scene-host.js focus), or null
     var lk = useState(null), look = lk[0], setLook = lk[1];
@@ -1569,6 +1771,7 @@
     useEffect(function () { return function () {
       if (boardRef.current) { boardRef.current.dispose(); boardRef.current = null; }
       if (terminalRef.current) { terminalRef.current.dispose(); terminalRef.current = null; }
+      if (securityRef.current) { securityRef.current.dispose(); securityRef.current = null; }
       if (hostRef.current) { hostRef.current.dispose(); hostRef.current = null; }
       setBoard(null); setTerm(null); setLook(null);
     }; }, [sceneKey, cur2.view]);
@@ -1638,6 +1841,12 @@
     useEffect(function () { var el = document.getElementById('office'); if (el) el.classList.toggle('has-panel', panelOpen); }, [panelOpen]);
     // A side panel changes the free part of the view: the screen in focus is framed again beside it. The window too.
     useEffect(function () { if (hostRef.current) hostRef.current.refit(); }, [panelOpen]);
+    // A Security room screen in focus (review M6): at 820 px and below office.css hides the floor list and the room card (the
+    // Decisions inbox stays), so the screen gets the height of the view; it is framed again when that changes. The look bar
+    // then shows the open requests (LookBar asks).
+    var secLook = !!(look && look.kind === 'security');
+    React.useLayoutEffect(function () { var el = document.getElementById('office'); if (el) el.classList.toggle('sec-look', secLook); }, [secLook]);
+    useEffect(function () { if (hostRef.current) hostRef.current.refit(); }, [secLook]);
     // The scene is as tall as the window. The DS sets its height inline from the height prop, so a resize renders
     // the page again with the new size (once per frame), and then frames the screen in focus again (#55).
     useEffect(function () {
@@ -1715,13 +1924,15 @@
         var st = o.inspect && o.inspect().stage;
         if (boardRef.current) boardRef.current.dispose();
         if (terminalRef.current) terminalRef.current.dispose();
+        if (securityRef.current) { securityRef.current.dispose(); securityRef.current = null; }
         if (hostRef.current) hostRef.current.dispose();
         var host = hostRef.current = window.OfficeSceneHost && st ? window.OfficeSceneHost.attach(o, { covers: sceneCovers }) : null;
         window.officeHost = host;   // the scene host (focus, flights), for the console and tests
         // A screen in focus: a look shows the look bar; a look, a look at another screen or a way back closes the panels.
         // The second step opens a panel through the board's or the terminal's onOpen.
+        // A Security room screen keeps the look bar in focus: every click on it is a click on a cell, never a panel.
         if (host) host.onFocus(function (f) {
-          setLook(f && !f.open ? f : null);
+          setLook(f && (!f.open || f.kind === 'security') ? f : null);
           if (!f || !f.open) { setBoard(null); setTerm(null); }
         });
         if (st && host && window.OfficeBoard) {
@@ -1735,6 +1946,18 @@
             onDoor: function (id) { setTerm(null); setDlg({ name: 'room', roomId: id }); },
             onOpen: function (id, kind) { setTerm(null); setBoard({ id: id, kind: kind }); }
           });
+        }
+        if (st && host && window.OfficeSecurity) {
+          var secMount = mount;
+          securityRef.current = window.OfficeSecurity.attach(o, {
+            host: host,
+            roomId: function () { return secMount.securityRoom(); },
+            // the rules, what each agent kind enforces and the Spend figures (snap.security), for this building
+            data: function () { var sn = latestSnap.current; return sn && sn.security ? { sec: sn.security, building: secMount.repo, buildingName: (def && def.name) || '' } : null; },
+            post: function (route, body) { return api(route, body); },
+            onError: function (text) { toast({ tone: 'error', title: 'Security', text: text }); }
+          });
+          window.officeSecurity = securityRef.current;   // the Security room screens (open a screen), for the console and tests
         }
         if (st && host && window.OfficeTerminal) {
           terminalRef.current = window.OfficeTerminal.attach(o, {
@@ -1828,7 +2051,12 @@
 
     // Room tools and sessions are built when the palette draws, so the rooms of the floor on screen are current.
     function liveActions() {
-      var out = [], b = boardRef.current, sn = latestSnap.current;
+      var out = [], b = boardRef.current, sn = latestSnap.current, sec = securityRef.current;
+      // Permissions: fly to the Security room of the building on screen (its floor first), at its Files screen
+      if (sec && mount && cur2.view === 'office' && mount.repo === shown && mount.securityRoom()) {
+        out.push({ id: 'page-permissions', label: 'Permissions', icon: 'security', group: 'Office', keywords: 'security room rules ask allow deny agents spend limit',
+          run: function () { if (!sec.open('files')) toast({ tone: 'info', title: 'Permissions', text: 'This building shows no Security room yet.' }); } });
+      }
       if (b && mount && cur2.view === 'office' && mount.repo === shown) {
         var tools = [['board', 'Board of ', 'plan', 'blackboard overview plan steps'], ['notes', 'Notes of ', 'memory', 'whiteboard notes reminder'],
           ['stats', 'Stats of ', 'cost', 'numbers tokens cost calls'], ['door', 'Agents in ', 'team', 'door add remove agents']];
@@ -1850,7 +2078,7 @@
 
     return h(React.Fragment, null,
       h('div', { className: 'view' + (fading ? ' is-fading' : '') }, scene),
-      ambient ? null : h(Controls, { sel: cur2.view === 'office' ? sel : null, syl: syl && cur2.view === 'office', buildings: list, shown: shown, shownName: (list.filter(function (b) { return b.key === shown; })[0] || def || {}).name, toast: toast, needs: needs.length, onNeeds: function () { setDlg({ name: 'needs' }); }, onBuilding: function (k) { pick(k); if (view === 'city') go('office'); }, onCity: function () { go('city'); }, onOffice: function () { introNext.current = true; go('office'); }, view: cur2.view, onSessions: function () { setDlg({ name: 'sessions' }); }, onCompact: function () { setAmbient(true); },
+      ambient ? null : h(Controls, { sel: cur2.view === 'office' ? sel : null, syl: syl && cur2.view === 'office', look: !!look, buildings: list, shown: shown, shownName: (list.filter(function (b) { return b.key === shown; })[0] || def || {}).name, toast: toast, needs: needs.length, onNeeds: function () { setDlg({ name: 'needs' }); }, onBuilding: function (k) { pick(k); if (view === 'city') go('office'); }, onCity: function () { go('city'); }, onOffice: function () { introNext.current = true; go('office'); }, view: cur2.view, onSessions: function () { setDlg({ name: 'sessions' }); }, onCompact: function () { setAmbient(true); },
         onFloors: function () { setDlg({ name: 'floors' }); }, onExtensions: extensions, onTerminal: openTerminal, onOpen: function () { show('open'); }, onPast: function () { show('past'); }, onSchedules: function () { show('schedules'); }, onHooks: function () { show('hooks'); }, onKinds: function () { setDlg({ name: 'kinds' }); }, onChanges: changes }),
       d === 'open' ? h(OpenDialog, { shownPath: shownPath, kind: dlg.kind, spendLimit: info.spendLimit, recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
       d === 'kinds' ? h(KindsDialog, { onOpen: function (kind) { refresh().then(function () { setDlg({ name: 'open', kind: kind }); }); }, onClose: close }) : null,
@@ -1867,7 +2095,8 @@
       !term && board && boardRef.current && board.kind === 'notes' ? h(NotesEditor, { key: board.id, noteKey: noteKey(board.id), text: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).text || '', version: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).v || 0, toast: toast,
         rect: function () { return hostRef.current ? hostRef.current.rect() : null; }, flying: function () { return hostRef.current ? hostRef.current.flying() : false; },
         onClose: function () { if (boardRef.current) boardRef.current.refresh(); blurScene(); } }) : null,
-      look && !term && !board && hostRef.current ? h(LookBar, { key: look.key, verb: look.verb, icon: LOOK_ICON[look.kind] || 'zoom-in',
+      look && !term && !board && hostRef.current ? h(LookBar, { key: look.key, verb: look.verb, icon: LOOK_ICON[look.kind] || 'zoom-in', toast: toast, layout: secLook,
+        asks: secLook && snap ? (snap.sessions || []).filter(function (s) { return window.OfficeVocab.requests(s).length > 0; }) : [],
         free: function (el) { return hostRef.current ? hostRef.current.free(sceneCovers(el)) : null; },
         onPlaced: function () { if (hostRef.current) hostRef.current.refit(); },
         onBack: blurScene, onOpen: function () { if (hostRef.current) hostRef.current.open(); } }) : null,

@@ -1,7 +1,7 @@
 // Floors and rooms: a named room, and the clean-up list of unused floors (git.mjs staleFloors).
 // Offline: a throwaway repo in os.tmpdir. Rooms are made under the office's worktree folder with a unique
 // name and removed at the end of each test.
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,8 +14,13 @@ const GIT = git.resolveExe('git');
 const IDENT = ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false'];
 const plain = (cwd, ...a) => execFileSync(GIT, [...IDENT, ...a], { cwd, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
 
+// Every repository this file makes, and the <repo>.worktrees folder next to it that an agent room (createWorktree) makes:
+// removed at the end, so no run leaves folders in %TEMP% (a test's own finally may have removed them already).
+const made = [];
+after(() => { for (const d of made) for (const x of [d, d + '.worktrees']) fs.rmSync(x, { recursive: true, force: true }); });
 function repo() {
   const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-floors-')));
+  made.push(dir);
   plain(dir, 'init', '-b', 'main');
   fs.writeFileSync(path.join(dir, 'a.txt'), 'a');
   plain(dir, 'add', '-A'); plain(dir, 'commit', '-m', 'one');
@@ -64,6 +69,24 @@ test('staleFloors lists merged clean floors only', async () => {
     assert.deepEqual(await git.staleFloors(dir, { minAgeMs: 0 }), [{ branch: 'done', rooms: 1 }]);
   } finally {
     for (const b of ['done', 'dirty', 'ahead']) await git.deleteFloor(dir, b, true).catch(() => {});
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// #69 with #86: an agent room (createWorktree) sits on the floor of its base branch. Its branch is no floor, and the floor it
+// sits on is in use (deleteFloor refuses it until the agent room is removed), so neither is offered for clean-up.
+test('staleFloors offers no agent branch, and no floor an agent room sits on', async () => {
+  const dir = repo();
+  const tag = 'aotest' + crypto.randomBytes(3).toString('hex');
+  let agent = null;
+  try {
+    await git.createFloor(dir, 'done', '', tag + 'a');
+    const busy = await git.createFloor(dir, 'busy', '', tag + 'b');
+    agent = await git.createWorktree(busy.root, tag + 'bot');   // an agent opened from the busy floor
+    assert.deepEqual(await git.staleFloors(dir, { minAgeMs: 0 }), [{ branch: 'done', rooms: 1 }]);
+  } finally {
+    if (agent) await git.removeRoom(dir, agent.root, true).catch(() => {});
+    for (const b of ['done', 'busy']) await git.deleteFloor(dir, b, true).catch(() => {});
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -214,6 +237,87 @@ test('relayout, with real git: a repo stays, a plain folder and a removed folder
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
     fs.rmSync(plainDir, { recursive: true, force: true });
+  }
+});
+
+// Review M5: two agent rooms opened at once in one repository wrote the repo config at the same time, and one failed with
+// "could not lock config file". Room creation is serialized per repository, so every open gets its room and its base.
+test('M5: agent rooms opened at once in one repository all get their room and their base branch', async () => {
+  const dir = repo();
+  const made = [];
+  try {
+    const all = await Promise.allSettled(Array.from({ length: 8 }, (_, i) => git.createWorktree(dir, 'bot' + i)));
+    for (const r of all) if (r.status === 'fulfilled') made.push(r.value);
+    assert.deepEqual(all.map((r) => r.status === 'rejected' ? String(r.reason && r.reason.message) : 'ok'), Array(8).fill('ok'));
+    assert.equal(new Set(made.map((w) => w.root.toLowerCase())).size, 8, 'eight folders');
+    for (const w of made) assert.equal(plain(dir, 'config', '--get', `branch.${w.branch}.officebase`).trim(), 'main', w.branch);
+  } finally {
+    for (const w of made) await git.removeRoom(dir, w.root, true).catch(() => {});
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir + '.worktrees', { recursive: true, force: true });
+  }
+});
+
+test('M5: perRepo runs the tasks of one repository one after the other, also after a failure; other repositories do not wait', async () => {
+  const log = [];
+  const step = (name, ms, fail) => () => new Promise((res, rej) => { log.push(name + '+'); setTimeout(() => { log.push(name + '-'); fail ? rej(new Error(name)) : res(name); }, ms); });
+  // Platform paths under a temp root: a hand-written 'C:\Repo' is drive-relative in a JS string and means another thing on Linux.
+  const root = os.tmpdir();
+  const repoA = path.join(root, 'ao-perrepo', 'Repo');
+  const same = path.join(root, 'ao-perrepo', '.', 'Repo') + path.sep;    // the same repository in another spelling
+  const repoB = path.join(root, 'ao-perrepo', 'Other');
+  const a = git.perRepo(repoA, step('a', 40, true));
+  const b = git.perRepo(same, step('b', 5));
+  const c = git.perRepo(repoB, step('c', 5));
+  await assert.rejects(a, /a/);
+  assert.equal(await b, 'b');
+  assert.equal(await c, 'c');
+  assert.ok(log.indexOf('b+') > log.indexOf('a-'), 'b starts after a ends: ' + log.join(' '));
+  assert.ok(log.indexOf('c+') < log.indexOf('a-'), 'c does not wait for a: ' + log.join(' '));
+});
+
+// The one exception to "the office never removes a worktree by itself" (CLAUDE.md): a fork that did not start removes the
+// worktree the same call made for it, which never held work. discardNew takes only an object createWorktree returned in this
+// process: a copy (a past record, a session's worktree field) is refused, so no other worktree can be removed this way.
+test('discardNew removes only a worktree createWorktree made in this call; a copy of one is refused and the worktree stays', async () => {
+  const dir = repo();
+  let keep = null;
+  try {
+    const wt = await git.createWorktree(dir, 'fork');
+    await git.discardNew(wt);
+    assert.equal(fs.existsSync(wt.root), false, 'the new worktree is gone');
+    assert.equal(plain(dir, 'branch', '--list', wt.branch).trim(), '', 'and its branch');
+    keep = await git.createWorktree(dir, 'keep');
+    for (const copy of [{ ...keep }, JSON.parse(JSON.stringify(keep)), { root: keep.root, repo: keep.repo, branch: keep.branch }]) {
+      await assert.rejects(git.discardNew(copy), /made in this call/);
+    }
+    assert.equal(fs.existsSync(keep.root), true, 'a worktree it did not just make stays');
+    await assert.rejects(git.discardNew(wt), /made in this call/, 'once only');
+  } finally {
+    if (keep) await git.removeRoom(dir, keep.root, true).catch(() => {});
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir + '.worktrees', { recursive: true, force: true });
+  }
+});
+
+// Review minor: layout read the base branches, then the branch list. When the list failed after the bases had been read,
+// live stayed null and live.has threw, so the whole layout failed. Now a room keeps the base its config names.
+test('layout: when the branch list cannot be read after the bases, the rooms still come back with the base their config names', async () => {
+  const dir = repo();
+  let agent = null;
+  try {
+    agent = await git.createWorktree(dir, 'based');
+    const broken = async () => { throw new Error('git for-each-ref timed out'); };
+    const list = await git.layout(dir, { readBranches: broken });
+    const room = list.find((w) => w.branch === agent.branch);
+    assert.ok(room, 'the layout is there');
+    assert.equal(room.base, 'main');
+    const noBases = await git.layout(dir, { readBases: broken });
+    assert.equal(noBases.find((w) => w.branch === agent.branch).base, undefined, 'bases unreadable: no base, and no throw');
+  } finally {
+    if (agent) await git.removeRoom(dir, agent.root, true).catch(() => {});
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir + '.worktrees', { recursive: true, force: true });
   }
 });
 

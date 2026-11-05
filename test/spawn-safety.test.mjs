@@ -91,6 +91,9 @@ test('resolveExe refuses a .cmd shim: it cannot start without a shell', { skip: 
   try {
     fs.writeFileSync(path.join(s.dir, 'ao-shim-7d1e.cmd'), '@echo off\r\n');
     assert.throws(() => resolveExe('ao-shim-7d1e', { Path: s.dir, SystemRoot: process.env.SystemRoot }), /installed as a script .*ao-shim-7d1e\.cmd.*needs ao-shim-7d1e\.exe/);
+    // Callers read the code and the file, not the words of the message (providers name the file in their own text).
+    assert.throws(() => resolveExe('ao-shim-7d1e', { Path: s.dir, SystemRoot: process.env.SystemRoot }),
+      (e) => e.code === 'SCRIPT_INSTALL' && e.file === path.join(s.dir, 'ao-shim-7d1e.cmd'));
   } finally { s.done(); }
 });
 
@@ -197,6 +200,7 @@ function sources() {
 test('no source starts a program by a bare name, through a shell, or with shell: true', () => {
   const files = sources();
   assert.ok(files.some((f) => path.basename(f) === 'server.mjs') && files.some((f) => path.basename(f) === 'git.mjs'));
+  for (const p of ['claude-code.mjs', 'local.mjs', 'local-tools.mjs', 'acp.mjs']) assert.ok(files.includes(path.join(ROOT, 'providers', p)), `providers/${p} is scanned`);
   const bad = [];
   for (const f of files) {
     const src = fs.readFileSync(f, 'utf8');

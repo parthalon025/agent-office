@@ -75,16 +75,19 @@ function findExe(name, env, win) {
   if (win) {
     for (const d of dirs) for (const x of ['.cmd', '.bat', '.ps1']) {
       const f = p.join(d, name + x);
-      if (isFile(f)) throw new Error(`${name} is installed as a script (${f}). The office starts programs without a shell, so it needs ${name}.exe on PATH.`);
+      // code and file: callers name the file in their own words without reading this message (providers' programPath).
+      if (isFile(f)) throw Object.assign(new Error(`${name} is installed as a script (${f}). The office starts programs without a shell, so it needs ${name}.exe on PATH.`), { code: 'SCRIPT_INSTALL', file: f });
     }
   }
   throw new Error(`${name} was not found on PATH.`);
 }
 
+// A failed program rejects with its last stderr lines, and keeps the exit code (err.code: a number when the program
+// exited, null when it was killed) and killed, so gitNoMatch can tell git's "nothing matches" (code 1) from a failure.
 function run(cmd, args, cwd, timeout = 30000, env) {
   return new Promise((resolve, reject) => {
     execFile(resolveExe(cmd), args, { cwd, windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout, ...(env ? { env: { ...process.env, ...env } } : {}) }, (err, out, stderr) => {
-      if (err) return reject(new Error((String(stderr || '').trim() || err.message).split('\n').slice(-3).join(' ')));
+      if (err) return reject(Object.assign(new Error((String(stderr || '').trim() || err.message).split('\n').slice(-3).join(' ')), { code: err.code ?? null, killed: !!err.killed }));
       resolve(String(out));
     });
   });
@@ -106,6 +109,26 @@ export async function repoTop(cwd) {
   try { return (await git(['rev-parse', '--show-toplevel'], cwd)).trim(); } catch { throw new Error('That folder is not in a git repository, so it cannot get a worktree.'); }
 }
 
+// The base branch of an agent worktree: the branch it was made from. The office writes it into the repository
+// config as branch.<agent branch>.officebase when it makes the worktree (`git branch -d` removes it with the branch).
+// place.mjs puts the room of such a worktree on the floor of its base branch. Nothing else reads it.
+const BASE_VAR = 'officebase';
+const baseKey = (branch) => `branch.${branch}.${BASE_VAR}`;
+/** `git config --get` and `--get-regexp` exit with code 1 and no output when nothing matches. Any other failure
+ *  (a kill, a timeout, a lock, a bad config) has another code, or none, and is a real error. */
+export const gitNoMatch = (e) => e?.code === 1;
+
+// The office makes only agent/<name>-<id> branches with a base, so no other branch costs a config read.
+const hasBase = (branch) => String(branch || '').startsWith('agent/');
+const branchExists = (cwd, branch) => git(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], cwd, 8000).then(() => true, (e) => { if (gitNoMatch(e)) return false; throw e; });
+
+/** The base branch of one branch, or '' when it has none. */
+async function baseOf(cwd, branch) {
+  if (!hasBase(branch)) return '';
+  try { return (await git(['config', '--local', '--get', baseKey(branch)], cwd, 8000)).trim(); }
+  catch (e) { if (gitNoMatch(e)) return ''; throw e; }
+}
+
 // A git failure that asking again does not change: git says the folder is not a repository; git refuses a repository
 // that another user owns ("detected dubious ownership"; `run` keeps only the last lines of git's message, and they name
 // safe.directory); or there is no git to start (resolveExe found none, or the program is gone: ENOENT). Git is asked for
@@ -118,7 +141,14 @@ async function placeOrKeep(cwd, { exec = git, exists = fs.existsSync, wait = (ms
     const [top, branch, common] = (await exec(['rev-parse', '--show-toplevel', '--abbrev-ref', 'HEAD', '--path-format=absolute', '--git-common-dir'], cwd, 8000, ENGLISH)).trim().split(/\r?\n/);
     const dir = path.resolve(cwd, common);
     const repo = path.basename(dir).toLowerCase() === '.git' ? path.dirname(dir) : dir;
-    return { repo: path.normalize(repo), root: path.normalize(top), branch: branch === 'HEAD' ? 'detached' : branch };
+    const out = { repo: path.normalize(repo), root: path.normalize(top), branch: branch === 'HEAD' ? 'detached' : branch };
+    // A failed base read is not a reason to lose the location: the room sits on its own floor, and the log says why.
+    // A base branch that is gone (deleted, renamed) is no base either.
+    try {
+      const base = await baseOf(cwd, out.branch);
+      if (base && await branchExists(cwd, base)) out.base = base;
+    } catch (e2) { console.warn(`Agent Office: could not read the base branch of ${out.branch}: ${e2.message}`); }
+    return out;
   } catch (e) {
     if (!exists(cwd) || LASTING_GIT_FAILURE.test(String(e && e.message))) return null;
     if (i >= attempts) return KEEP;
@@ -127,8 +157,8 @@ async function placeOrKeep(cwd, { exec = git, exists = fs.existsSync, wait = (ms
 }
 
 /**
- * Where a folder sits in git: { repo, root, branch }, or null when it is not in a repository, the folder is gone, git
- * refuses it (dubious ownership) or there is no git. A failure that is only passing (git passed its time limit on a
+ * Where a folder sits in git: { repo, root, branch } and, for an agent worktree, `base` (the branch it was made from),
+ * or null when it is not in a repository, the folder is gone, git refuses it (dubious ownership) or there is no git. A failure that is only passing (git passed its time limit on a
  * loaded machine, a lock) is tried again, `attempts` times in all, because null is an answer the office acts on (#98);
  * after the last try the answer is null too. `deps` (`exec`, `exists`, `wait`, `attempts`) are for tests.
  */
@@ -145,6 +175,19 @@ export async function locate(cwd, deps) {
  */
 export async function locateOrKeep(cwd, deps) {
   return placeOrKeep(cwd, deps);
+}
+
+/** Every agent branch's base in one call: branch -> base branch. */
+async function bases(repo) {
+  const map = new Map();
+  let out = '';
+  try { out = await git(['config', '--local', '--get-regexp', `^branch\\..*\\.${BASE_VAR}$`], repo, 8000); }
+  catch (e) { if (!gitNoMatch(e)) throw e; }
+  for (const line of out.split(/\r?\n/)) {
+    const m = line.match(new RegExp(`^branch\\.(.+)\\.${BASE_VAR} (.+)$`));
+    if (m) map.set(m[1], m[2].trim());
+  }
+  return map;
 }
 
 // ---------- ports ----------
@@ -192,18 +235,86 @@ export function checkoutName(loc) {
 }
 
 const WORKTREE_ROOT = path.join(os.homedir(), '.agent-office', 'worktrees');
+const nameSlug = (name) => String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'session';
 
-/** Creates a branch `office/<name>-<id>` in its own folder and returns where Claude should work. */
+/**
+ * Makes a room for one agent: a branch `agent/<name>-<id>` from the current branch, in the folder
+ * `<repo>.worktrees/<name>` next to the main repository (`<name>-<id>` when that folder is taken). Returns where
+ * the agent works. `base` is the floor the room sits on: the current branch, or the base of the agent worktree
+ * it was made in. It is '' on a detached HEAD, and the room then keeps a floor of its own.
+ * The office never removes the folder by itself (removeWorktree runs only after a click and a confirm).
+ */
+// One task at a time per repository (review M5): two agent rooms opened at once wrote the repository's config together
+// (`git config --local` for the base, `worktree add -b`), and git refused one with "could not lock config file". The key
+// is the repository folder in any spelling (case, slashes, a trailing slash). A failed task does not stop the next one;
+// tasks of other repositories do not wait. Returns what fn gives back.
+// keyedQueue(keyOf) makes one such queue: (key, fn) -> what fn gives back. server.mjs keeps its own for due schedules.
+export function keyedQueue(keyOf = (k) => k) {
+  const queues = new Map();
+  return (key, fn) => {
+    const k = keyOf(key);
+    const run = (queues.get(k) || Promise.resolve()).then(() => fn());
+    const tail = run.catch(() => {});
+    queues.set(k, tail);
+    tail.then(() => { if (queues.get(k) === tail) queues.delete(k); });
+    return run;
+  };
+}
+const repoKeyOf = (repo) => { const r = path.resolve(String(repo || '')); return process.platform === 'win32' ? r.toLowerCase() : r; };
+export const perRepo = keyedQueue(repoKeyOf);
+
 export async function createWorktree(cwd, name) {
+  // The main repository is common to all its worktrees, so it is the key of the queue.
+  const main = (await locate(cwd))?.repo || (await repoTop(cwd));
+  const wt = await perRepo(main, () => makeWorktree(cwd, name));
+  minted.add(wt);
+  return wt;
+}
+// The one exception to "the office never removes a worktree by itself" (CLAUDE.md Safety rules): a caller that made a
+// worktree and could not start its session in it (a fork that ended before init, or whose open threw: server.mjs failedFork and forkSession) removes it again. It
+// never held work. discardNew takes only the object createWorktree returned in this process, once: a copy (a past record,
+// a session's worktree field, JSON) is refused, so no other worktree can be removed this way. Not forced: a change in it,
+// or a commit on its branch, keeps it.
+const minted = new WeakSet();
+export async function discardNew(wt) {
+  if (!wt || typeof wt !== 'object' || !minted.has(wt)) throw new Error('The office removes only a worktree it made in this call.');
+  minted.delete(wt);
+  return removeWorktree(wt, false);
+}
+async function makeWorktree(cwd, name) {
   const top = await repoTop(cwd);
   const rel = path.relative(top, path.resolve(cwd));
-  const slug = String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'session';
+  const main = (await locate(cwd))?.repo || top;
+  const current = (await git(['rev-parse', '--abbrev-ref', 'HEAD'], top, 8000)).trim();
+  // A failed config read stops the open: a wrong base would put the room on the wrong floor with no warning.
+  const base = current === 'HEAD' ? '' : (await baseOf(top, current)) || current;
+  const slug = nameSlug(name);
   const id = crypto.randomBytes(2).toString('hex');
-  const branch = `office/${slug}-${id}`;
-  const root = path.join(WORKTREE_ROOT, `${path.basename(top)}-${slug}-${id}`);
-  fs.mkdirSync(WORKTREE_ROOT, { recursive: true });
-  await git(['worktree', 'add', '-b', branch, root, 'HEAD'], top, 120000);
-  return { root, branch, repo: top, path: rel && !rel.startsWith('..') ? path.join(root, rel) : root };
+  const branch = `agent/${slug}-${id}`;
+  const parent = path.join(path.dirname(main), `${path.basename(main)}.worktrees`);
+  try { fs.mkdirSync(parent, { recursive: true }); }
+  catch (e) { throw new Error(`The office cannot make the folder ${parent} (${e.code || e.message}). Check that you can write next to the repository, or use the folder as it is.`); }
+  // Claim the folder with a plain mkdir (it fails when the folder exists, so two opens never take one name), then
+  // let git fill the empty folder.
+  const claim = (dir) => {
+    try { fs.mkdirSync(dir); return true; }
+    catch (e) { if (e.code === 'EEXIST') return false; throw new Error(`The office cannot make the folder ${dir} (${e.code || e.message}).`); }
+  };
+  let root = path.join(parent, slug);
+  if (!claim(root)) { root = path.join(parent, `${slug}-${id}`); if (!claim(root)) throw new Error(`The folder ${root} exists. Try again.`); }
+  try { await git(['worktree', 'add', '-b', branch, root, 'HEAD'], top, 120000); }
+  catch (e) { fs.rmSync(root, { recursive: true, force: true }); throw e; }
+  if (base) {
+    try { await git(['config', '--local', baseKey(branch), base], top, 8000); }
+    catch (e) {
+      // No half-made room: without its base the new room would sit on a floor of its own.
+      await git(['worktree', 'remove', '--force', root], top, 60000).catch(() => {});
+      await git(['branch', '-D', branch], top, 8000).catch(() => {});
+      fs.rmSync(root, { recursive: true, force: true });
+      throw new Error(`The office could not save the base branch of the new room: ${e.message}`);
+    }
+  }
+  return { root, branch, base, repo: main, path: rel && !rel.startsWith('..') ? path.join(root, rel) : root };
 }
 
 const STATUS_WORD = { M: 'modified', A: 'added', D: 'deleted', R: 'renamed', C: 'copied', U: 'conflict', '?': 'new' };
@@ -241,7 +352,8 @@ export async function removeWorktree({ root, repo, branch }, force = false) {
   await git(['worktree', 'remove', ...(force ? ['--force'] : []), root], repo, 60000)
     .catch((e) => { throw new Error(/contains modified or untracked files|uncommitted/i.test(e.message) ? 'The worktree has uncommitted changes. Remove it anyway to discard them.' : e.message); });
   let branchKept = false;
-  try { await git(['branch', force ? '-D' : '-d', branch], repo); } catch { branchKept = true; }
+  // A branch delete rewrites the repository config (its branch section): one config writer at a time (perRepo, M5).
+  try { await perRepo(repo, () => git(['branch', force ? '-D' : '-d', branch], repo)); } catch { branchKept = true; }
   return { removed: true, branchKept };
 }
 
@@ -253,7 +365,7 @@ export async function removeWorktree({ root, repo, branch }, force = false) {
 export async function assertNoFilters(cwd) {
   let out = '';
   try { out = await git(['config', '--show-scope', '--get-regexp', '^filter\\.'], cwd, 8000); }
-  catch (e) { if (!/^Command failed/.test(e.message)) throw e; } // exit code 1 with no output = none set
+  catch (e) { if (!gitNoMatch(e)) throw e; } // exit code 1 with no output = none set
   const names = new Set();
   for (const line of out.split(/\r?\n/).filter(Boolean)) {
     const [scope, rest = ''] = line.split('\t');
@@ -280,7 +392,8 @@ export async function createPr(cwd, branch, title) {
 // The office draws a repository as a building, a branch as a floor and a worktree as a room.
 
 /** The worktrees of a repository: each one's folder, branch, and whether it is the main folder. */
-export async function layout(repo) {
+// deps (readBases, readBranches) are for tests.
+export async function layout(repo, { readBases = bases, readBranches = branches } = {}) {
   const out = await git(['worktree', 'list', '--porcelain'], repo, 15000, ENGLISH); // relayout reads the error text
   const list = [];
   let cur = null;
@@ -290,6 +403,16 @@ export async function layout(repo) {
     else if (cur && line.startsWith('prunable')) cur.prunable = true;
     else if (cur && line === 'bare') cur.bare = true;
   }
+  // A base is reported only while its branch is there. When the branch list cannot be read (a timeout, a lock), the base the
+  // config names stays: a passing failure must not move a room to a floor of its own for one refresh. live null: unknown.
+  let base = new Map(), live = null;
+  try { base = await readBases(repo); }
+  catch (e) { console.warn(`Agent Office: could not read the base branches of ${repo}: ${e.message}`); }
+  if (base.size) {
+    try { live = new Set(await readBranches(repo, Infinity)); }
+    catch (e) { console.warn(`Agent Office: could not read the branches of ${repo}, so the bases are not checked: ${e.message}`); }
+  }
+  for (const w of list) if (base.has(w.branch) && (!live || live.has(base.get(w.branch)))) w.base = base.get(w.branch);
   return list.filter((w) => !w.bare && !w.prunable);
 }
 
@@ -338,8 +461,15 @@ export async function files(root) {
 }
 
 /** Local branches, the most recent commit first. */
-export async function branches(repo) {
-  return (await git(['for-each-ref', '--sort=-committerdate', '--format=%(refname:short)', 'refs/heads'], repo, 15000)).split(/\r?\n/).filter(Boolean).slice(0, 200);
+export async function branches(repo, limit = 200) {
+  return (await git(['for-each-ref', '--sort=-committerdate', '--format=%(refname:short)', 'refs/heads'], repo, 15000)).split(/\r?\n/).filter(Boolean).slice(0, limit);
+}
+
+/** Branches that can become a floor: all of them but the agent branches the office made (they have a base and
+ *  sit on the floor of that base; a finished agent's branch stays in git but is not a floor of its own). */
+export async function floorCandidates(repo) {
+  const agents = await bases(repo);
+  return (await branches(repo)).filter((b) => !agents.has(b));
 }
 
 const BRANCH_RE = /^(?!-)(?!.*\.\.)(?!.*\/\/)(?!.*@\{)[A-Za-z0-9._\/-]{1,100}(?<![./])$/;
@@ -400,8 +530,11 @@ export async function removeRoom(repo, root, force = false) {
 export async function deleteFloor(repo, branch, force = false) {
   const wts = await layout(repo);
   if (wts.some((w) => w.main && w.branch === branch)) throw new Error(`The main folder has ${branch} checked out. Switch it to another branch first.`);
+  // The office removes a room only after a click on that room. An agent room that sits on this floor is not part of it.
+  const agents = wts.filter((w) => w.base === branch && w.branch !== branch);
+  if (agents.length) throw new Error(`${agents.length === 1 ? 'An agent room sits' : agents.length + ' agent rooms sit'} on the floor ${branch}. Remove ${agents.length === 1 ? 'it' : 'them'} first.`);
   for (const w of wts.filter((x) => x.branch === branch)) await removeRoom(repo, w.root, force);
-  await git(['branch', force ? '-D' : '-d', branch], repo)
+  await perRepo(repo, () => git(['branch', force ? '-D' : '-d', branch], repo))
     .catch((e) => { throw new Error(/not fully merged/i.test(e.message) ? `The branch ${branch} has commits that are not merged. Delete it anyway to lose them.` : e.message); });
   return { deleted: true };
 }
@@ -428,8 +561,12 @@ export async function staleFloors(repo, { minAgeMs = FLOOR_MIN_AGE_MS } = {}) {
   const merged = new Set((await git(['branch', '--merged', main.branch, '--format=%(refname:short)'], repo, 15000)).split(/\r?\n/).filter(Boolean));
   const keep = await defaultBranch(repo);
   const out = [];
-  for (const b of new Set(wts.map((w) => w.branch))) {
+  // An agent room (base set, #69) sits on the floor of its base: its branch is no floor, and a floor with an agent room on
+  // it is in use (deleteFloor refuses it until the agent room is removed).
+  const agentOf = (w) => !!w.base && w.base !== w.branch;
+  for (const b of new Set(wts.filter((w) => !agentOf(w)).map((w) => w.branch))) {
     if (b === main.branch || b === keep || b === 'detached' || !merged.has(b)) continue;
+    if (wts.some((w) => agentOf(w) && w.base === b)) continue;
     const rooms = wts.filter((w) => w.branch === b);
     if (rooms.some((w) => w.main)) continue;
     const young = rooms.some((w) => { try { return Date.now() - fs.statSync(w.root).birthtimeMs < minAgeMs; } catch { return true; } });

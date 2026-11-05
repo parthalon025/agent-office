@@ -1,4 +1,4 @@
-/* Agent Office DS x1.7.1: tokens.css. Edited by hand. Keep it in step with tokens.json (test/ds-kit.test.mjs checks every token). */
+/* Agent Office DS x1.7.2: tokens.css. Edited by hand. Keep it in step with tokens.json (test/ds-kit.test.mjs checks every token). */
 :root, [data-theme="light"] {
   color-scheme: light;
   --bg: #e9edf1;
@@ -39,6 +39,7 @@
   --type-lab: #0f8b8d;
   --type-studio: #c2477a;
   --type-hq: #a36a12;
+  --type-security: #6650b8;
   --scene-floor: #f3f2ee;
   --scene-wall: #e3e6ea;
   --scene-wood: #d8b98a;
@@ -242,6 +243,7 @@
   --type-lab: #2fb3b5;
   --type-studio: #e0709a;
   --type-hq: #d0922e;
+  --type-security: #9a86e8;
   --scene-floor: #2a3039;
   --scene-wall: #232a34;
   --scene-wood: #8f7656;
@@ -297,6 +299,7 @@
   --type-lab: #0f7f7c;
   --type-studio: #b03f6e;
   --type-hq: #946010;
+  --type-security: #5a48a6;
   --scene-floor: #2f6456;
   --scene-wall: #e9ede7;
   --scene-wood: #f1f1ea;
@@ -351,6 +354,7 @@
   --type-lab: #038387;
   --type-studio: #c239b3;
   --type-hq: #9a6a00;
+  --type-security: #8764b8;
   --scene-floor: #eeeeee;
   --scene-wall: #e8e8e8;
   --scene-wood: #e2cfae;
@@ -405,6 +409,7 @@
   --type-lab: #4cb4b7;
   --type-studio: #da7ed0;
   --type-hq: #efb839;
+  --type-security: #b49dd4;
   --scene-floor: #2e2e2e;
   --scene-wall: #292929;
   --scene-wood: #8c7a5e;
@@ -461,6 +466,7 @@
     --type-lab: #2fb3b5;
     --type-studio: #e0709a;
     --type-hq: #d0922e;
+    --type-security: #9a86e8;
     --scene-floor: #2a3039;
     --scene-wall: #232a34;
     --scene-wood: #8f7656;

@@ -10,7 +10,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { createTracker } from '../tracker.mjs';
 import { slimPayload } from '../payload.mjs';
-import { createRegistry, providerEvents, checkProvider, providerError, DEFAULT_PROVIDER, PROVIDER_METHODS, DEFAULT_SPEND_LIMIT, isPaid, spendLimitFor } from '../providers/index.mjs';
+import { createRegistry, providerEvents, checkProvider, providerError, DEFAULT_PROVIDER, PROVIDER_METHODS, DEFAULT_SPEND_LIMIT, isPaid, isGated, supervisionOf, spendLimitFor, featuresOf } from '../providers/index.mjs';
 import { createLocal } from '../providers/local.mjs';
 import { createClaudeCode, claudeVersion, programPath, MODEL_RE } from '../providers/claude-code.mjs';
 import { resolveExe } from '../git.mjs';
@@ -127,13 +127,15 @@ test('status: readiness and models of each provider; a failing or silent one is 
   const silent = { ...createFake(o.events), kind: 'silent', label: 'Silent', readiness: () => new Promise(() => {}) };
   const off = { ...createFake(o.events), kind: 'off', label: 'Off', readiness: async () => ({ ready: false, version: null, needs: ['Start the server.'] }), models: async () => { asked++; return [{ id: 'x' }]; } };
   const out = await createRegistry([fake, broken, silent, off]).status({ timeoutMs: 30 });
-  // Each entry starts with what kinds() says of the provider (the Open dialog's options), then its readiness.
-  const plain = { paid: true, terminal: false, modes: [], needsModel: false, control: false };
+  // Each entry starts with what kinds() says of the provider (the Open dialog's options), then its readiness, then what
+  // a provider says after readiness (canResume, features: an ACP agent learns them at its handshake).
+  const plain = { paid: true, terminal: false, modes: [], needsModel: false, control: false, gated: true, supervision: null, cost: 'reported' };
+  const after = { canResume: false, features: [] };
   assert.deepEqual(out, [
-    { kind: 'fake', label: 'Fake agent', ...plain, ready: true, version: '1.0', needs: [], models: [{ id: 'fake-1', label: 'Fake 1' }] },
-    { kind: 'broken', label: 'Broken', ...plain, ready: false, version: null, needs: ['The office could not check Broken: boom'], models: [] },
-    { kind: 'silent', label: 'Silent', ...plain, ready: false, version: null, needs: ['The office could not check Silent: No answer in time.'], models: [] },
-    { kind: 'off', label: 'Off', ...plain, ready: false, version: null, needs: ['Start the server.'], models: [] },
+    { kind: 'fake', label: 'Fake agent', ...plain, ready: true, version: '1.0', needs: [], models: [{ id: 'fake-1', label: 'Fake 1' }], ...after },
+    { kind: 'broken', label: 'Broken', ...plain, ready: false, version: null, needs: ['The office could not check Broken: boom'], models: [], ...after },
+    { kind: 'silent', label: 'Silent', ...plain, ready: false, version: null, needs: ['The office could not check Silent: No answer in time.'], models: [], ...after },
+    { kind: 'off', label: 'Off', ...plain, ready: false, version: null, needs: ['Start the server.'], models: [], ...after },
   ]);
   assert.equal(asked, 0, 'models are asked only of a ready provider');
 });
@@ -149,12 +151,12 @@ test('kinds: each provider\'s options for the Open dialog, from the provider its
   const reg = createRegistry([claude, ollama, lmstudio, createFake(o.events)]);
   assert.deepEqual(reg.kinds(), [
     // Claude Code: paid (a spend limit), a terminal window, permission modes, a default model, and live changes (control)
-    { kind: 'claude-code', label: 'Claude Code', paid: true, terminal: true, modes: ['default', 'acceptEdits', 'plan'], needsModel: false, control: true },
+    { kind: 'claude-code', label: 'Claude Code', paid: true, terminal: true, modes: ['default', 'acceptEdits', 'plan'], needsModel: false, control: true, gated: true, supervision: null, cost: 'reported' },
     // a local model: free, in the office only, no permission modes, a model to pick, no live changes
-    { kind: 'ollama', label: 'Ollama', paid: false, terminal: false, modes: [], needsModel: true, control: false },
-    { kind: 'lmstudio', label: 'LM Studio', paid: false, terminal: false, modes: [], needsModel: true, control: false },
+    { kind: 'ollama', label: 'Ollama', paid: false, terminal: false, modes: [], needsModel: true, control: false, gated: true, supervision: null, cost: 'reported' },
+    { kind: 'lmstudio', label: 'LM Studio', paid: false, terminal: false, modes: [], needsModel: true, control: false, gated: true, supervision: null, cost: 'reported' },
     // a provider that says nothing is paid, has no window, no modes, needs no model and takes no control request
-    { kind: 'fake', label: 'Fake agent', paid: true, terminal: false, modes: [], needsModel: false, control: false },
+    { kind: 'fake', label: 'Fake agent', paid: true, terminal: false, modes: [], needsModel: false, control: false, gated: true, supervision: null, cost: 'reported' },
   ]);
   assert.equal(calls, 0, 'kinds() asks no provider anything: the snapshot sends it');
   const k = reg.kinds();
@@ -450,6 +452,18 @@ test('claude-code answer: the PermissionRequest hook body for allow, always allo
   assert.deepEqual(p.answer(null, { id: 'p1', suggestions: sug }, { allow: false, always: true }), out({ behavior: 'deny', message: 'Declined from Agent Office.' }));
   assert.deepEqual(p.answer(null, { id: 'p1' }, {}), {}, 'no decision: Claude Code decides');
   assert.deepEqual(p.answer(null, { id: 'p1' }), {});
+  // the Security room refused: Claude hears why
+  assert.deepEqual(p.answer(null, { id: 'p1', suggestions: [] }, { allow: false, message: 'Denied by the Security room: Shell commands.' }),
+    out({ behavior: 'deny', message: 'Denied by the Security room: Shell commands.' }));
+});
+
+test('claude-code preToolAnswer: the PreToolUse hook body that refuses a call or makes Claude Code ask (#70)', () => {
+  const p = claudeRig().p;
+  assert.deepEqual(p.preToolAnswer({ decision: 'deny', reason: 'Denied by the Security room: Shell commands.' }),
+    { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Denied by the Security room: Shell commands.' } });
+  assert.deepEqual(p.preToolAnswer({ decision: 'ask', reason: 'x' }).hookSpecificOutput.permissionDecision, 'ask');
+  assert.equal(p.preToolAnswer(null), null);
+  assert.equal(p.preToolAnswer({ decision: 'allow', reason: 'x' }), null, 'the office never allows a call before Claude Code\'s own check');
 });
 
 test('claude-code check: unknown model or mode is 400; a missing program is 409, before any worktree', () => {
@@ -649,10 +663,129 @@ test('spend limit: the user can change it or clear it; a bad value falls back to
   assert.equal(paid(3, 0), 3, 'a limit asked for still counts when the default is cleared');
 });
 
+// ---------- gated, cost and features (#71) ----------
+
+test('gated: a provider holds every tool call unless it says gated: false; gated must be true or false', () => {
+  const base = { kind: 'x', label: 'X', ...Object.fromEntries(PROVIDER_METHODS.map((m) => [m, () => {}])) };
+  assert.equal(isGated(base), true, 'a provider that does not say is gated');
+  assert.equal(isGated({ ...base, gated: true }), true);
+  assert.equal(isGated({ ...base, gated: false }), false);
+  assert.throws(() => checkProvider({ ...base, gated: 'yes' }), /gated/);
+  assert.equal(createClaudeCode({ events: {}, files: () => ({}) }).gated, true);
+  assert.equal(createLocal({ events: {}, kind: 'ollama' }).gated, true);
+});
+
+test('supervision: an ungated provider has a label (ADR 0001), "Unsupervised" when it gives none; a gated one has none', async () => {
+  const base = { kind: 'x', label: 'X', ...Object.fromEntries(PROVIDER_METHODS.map((m) => [m, () => {}])), readiness: async () => ({ ready: false, needs: [] }) };
+  const partly = { ...base, kind: 'partly', gated: false, supervision: 'Partly supervised: file edits ask, commands do not' };
+  assert.equal(supervisionOf(partly), 'Partly supervised: file edits ask, commands do not');
+  assert.equal(supervisionOf({ ...base, gated: false }), 'Unsupervised');
+  assert.equal(supervisionOf(base), null);
+  assert.throws(() => checkProvider({ ...base, supervision: 'Partly supervised' }), /supervision/, 'a gated provider has no label');
+  assert.throws(() => checkProvider({ ...base, gated: false, supervision: 3 }), /supervision/);
+  const rows = await createRegistry([base, partly]).status({ timeoutMs: 30 });
+  assert.deepEqual(rows.map((r) => [r.kind, r.gated, r.supervision]), [['x', true, null], ['partly', false, 'Partly supervised: file edits ask, commands do not']]);
+});
+
+test('cost unknown: such a provider is paid, has no spend limit the office could enforce, and cannot say it is free', () => {
+  const base = { kind: 'x', label: 'X', ...Object.fromEntries(PROVIDER_METHODS.map((m) => [m, () => {}])) };
+  assert.doesNotThrow(() => checkProvider({ ...base, cost: 'unknown' }));
+  assert.throws(() => checkProvider({ ...base, cost: 'free' }), /cost/);
+  assert.throws(() => checkProvider({ ...base, cost: 'unknown', paid: false }), /cost/);
+  assert.equal(isPaid({ ...base, cost: 'unknown' }), true);
+  assert.equal(spendLimitFor({ paid: true, cost: 'unknown', requested: undefined }), null, 'no limit: nothing reports what it spent');
+  assert.equal(spendLimitFor({ paid: true, cost: 'unknown', requested: 5 }), null);
+  assert.equal(spendLimitFor({ paid: true, requested: undefined }), 2, 'a provider that reports cost keeps the default');
+});
+
+test('features: a list of names, also from a getter', () => {
+  const base = { kind: 'x', label: 'X', ...Object.fromEntries(PROVIDER_METHODS.map((m) => [m, () => {}])) };
+  assert.doesNotThrow(() => checkProvider({ ...base, features: ['fork', 'skills'] }));
+  assert.doesNotThrow(() => checkProvider({ ...base, get features() { return ['resume']; } }));
+  assert.throws(() => checkProvider({ ...base, features: 'fork' }), /features/);
+  assert.throws(() => checkProvider({ ...base, features: ['Fork It'] }), /features/);
+});
+
+test('status: each kind also says whether it is gated, paid, its cost, whether it can resume, and its features', async () => {
+  const o = office();
+  const fake = { ...createFake(o.events), gated: true, cost: 'unknown', get canResume() { return this.learned; }, learned: false,
+    get features() { return this.learned ? ['resume', 'fork'] : ['fork']; },
+    async readiness() { this.learned = true; return { ready: true, version: '2', needs: [] }; } };
+  const [row] = await createRegistry([fake]).status({ timeoutMs: 30 });
+  assert.deepEqual([row.gated, row.paid, row.cost, row.canResume, row.features], [true, true, 'unknown', true, ['resume', 'fork']],
+    'read after readiness: what the agent told it at the handshake counts');
+  const [claude] = await createRegistry([createClaudeCode({ events: o.events, files: () => ({}), exe: () => { throw new Error('none'); } })]).status({ timeoutMs: 30 });
+  assert.deepEqual([claude.gated, claude.paid, claude.cost, claude.canResume, claude.features], [true, true, 'reported', true, []]);
+});
+
+test('events.fresh: a provider that could not continue a past conversation says so, and the office learns it before the sid', () => {
+  const freshened = [];
+  const o = office();
+  const events = providerEvents({ tracker: o.tracker, fresh: (s) => freshened.push(s.uid) });
+  const s = o.session();
+  events.fresh(s, 'Hermes Agent cannot load a past session now. A new session started.');
+  assert.deepEqual(freshened, [s.uid]);
+  assert.equal(o.tracker.feed.at(-1).text, 'Hermes Agent cannot load a past session now. A new session started.');
+  assert.doesNotThrow(() => providerEvents({ tracker: o.tracker }).fresh(s, 'x'), 'without the callback it only writes the feed');
+});
+
+test('events.permission: the Security room check hears that a provider asks, and whether the request is firm (the user must answer)', () => {
+  const seen = [];
+  const tracker = createTracker({ now: () => 1, locate: async () => null, screen: (s, p, opts) => { seen.push(opts); return null; } });
+  const events = providerEvents({ tracker, hold: () => {} });
+  const s = tracker.newSession({ uid: 'o1', officeId: 'o1', provider: 'hermes', name: 'a', cwd: 'C:\\w', headless: true, status: 'working' });
+  events.permission(s, { tool_name: 'Write', tool_input: { file_path: 'C:\\w\\a.txt' } });
+  events.permission(s, { tool_name: 'Write', tool_input: { file_path: 'C:\\w\\b.txt' } }, { firm: true });
+  assert.deepEqual(seen, [{ provider: true, firm: false }, { provider: true, firm: true }]);
+});
+
+test('events.drop: the provider frees a request its agent no longer waits for, and the feed says why', () => {
+  const released = [];
+  const o = office();
+  const events = providerEvents({ tracker: o.tracker, hold: () => {}, release: (id) => released.push(id) });
+  const s = o.session();
+  const id = events.permission(s, { tool_name: 'Bash', tool_input: { command: 'npm test' } });
+  events.drop(s, id, 'Hermes Agent moved on without your answer.');
+  assert.deepEqual(released, [id]);
+  assert.equal(o.tracker.feed.at(-1).text, 'Hermes Agent moved on without your answer.');
+});
+
 test('spend limit: a provider that does not say it is free is paid; paid must be true or false', () => {
   const base = { kind: 'x', label: 'X', ...Object.fromEntries(PROVIDER_METHODS.map((m) => [m, () => {}])) };
   assert.equal(isPaid(base), true);
   assert.equal(isPaid({ ...base, paid: false }), false);
   assert.doesNotThrow(() => checkProvider({ ...base, paid: true }));
   assert.throws(() => checkProvider({ ...base, paid: 'no' }), /paid/);
+});
+
+// ---------- the subagent rule of the contract (#69): any provider that tags hooks with agent_id gets helpers ----------
+test('contract: a provider other than Claude Code reports a subagent with agent_id, and it is a helper in the parent session', () => {
+  const o = office();
+  const fake = createFake(o.events);
+  const s = o.session({ provider: fake.kind });
+  const hook = (p) => o.events.hook(s, p);
+  hook({ hook_event_name: 'UserPromptSubmit', prompt: 'go' });
+  hook({ hook_event_name: 'PreToolUse', tool_name: 'Task', tool_use_id: 't1', tool_input: { description: 'Look around', subagent_type: 'Explore' } });
+  const parentTask = JSON.stringify(s.tool);
+  hook({ hook_event_name: 'SubagentStart', agent_id: 'sub-1', agent_type: 'Explore' });
+  hook({ hook_event_name: 'PreToolUse', tool_name: 'Read', tool_use_id: 'r1', agent_id: 'sub-1', tool_input: { file_path: 'a.js' } });
+  assert.equal(o.tracker.sessions.size, 1, 'a subagent never becomes a session (no room, no desk, no count)');
+  assert.deepEqual(s.agents.map((a) => [a.type, a.id, a.done]), [['Explore', 'sub-1', false]]);
+  assert.equal(s.calls.find((c) => c.id === 'r1').agent, 'sub-1', 'its call is on the helper');
+  assert.equal(JSON.stringify(s.tool), parentTask, 'its call is not the parent task line');
+  hook({ hook_event_name: 'SubagentStop', agent_id: 'sub-1' });
+  assert.equal(s.agents[0].done, true);
+});
+
+test('featuresOf: a copy of what the provider declares, read when asked (a getter), [] when it declares none (#72)', () => {
+  let learned = false;
+  const p = { get features() { return learned ? ['resume', 'skills'] : ['skills']; } };
+  assert.deepEqual(featuresOf(p), ['skills']);
+  learned = true;
+  const f = featuresOf(p);
+  assert.deepEqual(f, ['resume', 'skills']);
+  f.push('x');
+  assert.deepEqual(featuresOf(p), ['resume', 'skills']);
+  assert.deepEqual(featuresOf({}), []);
+  assert.deepEqual(featuresOf(null), []);
 });

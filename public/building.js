@@ -84,7 +84,13 @@
   // Where a session sits: building (repo), floor (branch), room (worktree folder). The server computes it
   // (place.mjs) and sends it as session.place and worktree.place; this only renames the fields.
   function fromPlace(p) {
-    return { repo: p.buildingKey, repoName: p.building, branch: p.floor, root: p.rootKey, roomName: p.room, roomId: p.roomId, noteKey: p.noteKey, path: p.root };
+    return { repo: p.buildingKey, repoName: p.building, branch: p.floor, root: p.rootKey, roomName: p.room, roomId: p.roomId, noteKey: p.noteKey, path: p.root, securityRoomId: p.securityRoomId };
+  }
+  // The Security room (#70): first on the ground floor of every building, no bots, never a worktree (no layout entry, no
+  // notes key, never stale). Its id comes from the server (place.mjs securityRoomIdOf, in each place and repo entry).
+  function securityDef(id) {
+    var S = V.security;
+    return { id: id, type: 'security', name: S.roomName, bots: [], screens: S.screens.map(function (x) { return x.title; }) };
   }
   function placeOf(s) { return fromPlace(s.place); }
   function placeKey(pl) { return pl.repo + '|' + pl.branch + '|' + pl.root; }
@@ -183,7 +189,10 @@
     var empty = !floors.length;
     // It holds one spare room: the first session renames the floor and the room in place (floor.update, room.update), so the scene is not mounted again.
     if (empty) { floors = [floorDef(1, 'No sessions', [{ id: SPARE_ROOM, type: 'lab', name: 'Empty room', bots: [] }])]; nextId = 2; }
-    return { def: { name: name || (repo ? base(repo) : OTHER), sessions: 'agent', floors: floors }, floors: map, nextId: nextId, keys: keys, empty: empty };
+    var mine = places.filter(function (pl) { return pl.repo === repo && pl.securityRoomId; })[0];
+    var sec = (rp && rp.securityRoomId) || (mine && mine.securityRoomId) || null;
+    if (sec) floors[0].rooms.unshift(securityDef(sec));
+    return { def: { name: name || (repo ? base(repo) : OTHER), sessions: 'agent', floors: floors }, floors: map, nextId: nextId, keys: keys, empty: empty, security: sec };
   }
 
   function createStore(opts) {
@@ -357,8 +366,9 @@
         snapshot.sessions.forEach(function (s) {
           if (!s.place) return;   // wait until the server knows the repo and branch
           var pl = placeOf(s), k = known[s.uid], emit = base, prev = null, firstSight = false;
-          // the session checked out another branch, or moved to another folder: seat it again
-          if (k && !k.ended && k.place !== placeKey(pl)) {
+          // the session checked out another branch, or moved to another folder: seat it again. So does a changed supervision
+          // label (an agent whose config turned out not to ask): the DS sets the card's platform line only when the bot is added.
+          if (k && !k.ended && (k.place !== placeKey(pl) || k.sup !== V.supervision(s))) {
             dismissHelpers(k, emit, 'Moved with its session');
             emit({ type: 'bot.remove', bot: k.name }); delete taken[k.name]; delete known[s.uid];
             prev = k; k = null;
@@ -372,9 +382,10 @@
             if (s.status === 'ended') return;
             firstSight = true;
             var name = uniqueName(s.name);
-            k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: V.status(s).key, task: V.taskLine(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, model: s.model, ended: false, place: placeKey(pl), room: roomOf(pl, emit) };
-            // platform: the agent kind on the bot's card (Claude Code, Ollama, ...), the same word every list shows (vocab.js)
-            var bot = withColor({ name: name, role: 'coder', shape: shapeOf(s.uid), status: k.status, task: k.task, platform: V.kindWord(s, snapshot.kinds), identity: s.cwd }, s.uid);
+            k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: V.status(s).key, task: V.taskLine(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, model: s.model, ended: false, place: placeKey(pl), sup: V.supervision(s), room: roomOf(pl, emit) };
+            // platform: the line on the bot's card: the supervision label of an ungated agent, else its agent kind (Claude Code,
+            // Ollama, ...), the same word every list shows (vocab.js)
+            var bot = withColor({ name: name, role: 'coder', shape: shapeOf(s.uid), status: k.status, task: k.task, platform: V.platform(s, snapshot.kinds), identity: s.cwd }, s.uid);
             if (s.skills && s.skills.length) bot.skills = s.skills.slice(0, 16);
             if (s.scheduleId) bot.triggers = [s.name];
             emit(stamp({ type: 'bot.add', roomId: k.room, bot: bot }, s.startedAt));
@@ -402,7 +413,7 @@
           (s.pending || []).forEach(function (r) {
             if (k.asked[r.id]) return;
             k.asked[r.id] = true;
-            pick(prev && prev.asked[r.id])(stamp({ type: 'request', bot: bot0, id: r.id, text: 'Allow ' + r.tool + (r.detail ? ': ' + clip(r.detail, 80) : '') + '?', risk: r.risk, tool: r.tool, preview: r.preview || r.detail }, r.t));
+            pick(prev && prev.asked[r.id])(stamp({ type: 'request', bot: bot0, id: r.id, text: 'Allow ' + r.tool + (r.detail ? ': ' + clip(r.detail, 80) : '') + '?' + (r.reason ? ' Reason: ' + clip(r.reason, 160) : ''), risk: r.risk, tool: r.tool, preview: r.preview || r.detail }, r.t));
           });
           // free-form questions from the session (office_ask): answer with Yes or No, or reply in the chat
           (s.questions || []).forEach(function (q) {
@@ -487,6 +498,8 @@
         attached = attached.filter(function (x) { return x !== m; });
       };
 
+      // The id of this building's Security room, or null (the server gave none: a building with no place yet).
+      m.securityRoom = function () { return d.security; };
       m.roomsShown = function () {
         var out = [];
         Object.keys(layout.floors).forEach(function (br) { Object.keys(layout.floors[br].rooms).forEach(function (root) { out.push(br + '|' + root); }); });

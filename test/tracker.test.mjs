@@ -23,11 +23,14 @@ function rig(over = {}) {
     onChange: () => { r.changes++; },
     releaseHold: (id, decision) => r.released.push({ id, decision }),
     setTimer: (fn, ms) => { r.timers.push({ fn, ms }); return r.timers.length; },
+    // over.screen: the check before a hold (the server passes the Security room rules)
+    ...(over.screen ? { screen: over.screen } : {}),
     persist: {
       history: (s) => r.history.push({ uid: s.uid, status: s.status }),
       recentDir: (d) => r.dirs.push(d),
       commands: (c) => r.commands.push(c),
       placed: (s, g) => r.placed.push({ uid: s.uid, git: g }),
+      spent: (s, dollars) => (r.spent = r.spent || []).push({ uid: s.uid, kind: s.provider, dollars }),
     },
   });
   r.hook = (raw, officeId = null) => r.tracker.onHook(slimPayload(raw, officeId));
@@ -599,6 +602,35 @@ test('a session is a Claude Code session unless the office opened it with anothe
   assert.equal(r.tracker.newSession({ uid: 'l1', provider: 'local' }).provider, 'local');
 });
 
+test('a usage line sets the token total of an agent that reports totals (ACP usage_update); it sets no context and no cost', () => {
+  const r = rig();
+  const s = r.tracker.newSession({ uid: 'o1', headless: true, costUnknown: true });
+  r.line(s, { type: 'usage', used: 1200, size: 200000 });
+  assert.equal(s.usage.tokens, 1200);
+  assert.deepEqual([s.ctxTokens, s.ctxWindow], [null, null], 'a session total is not the tokens in context: the Context bar must not read it');
+  r.line(s, { type: 'usage', used: 3400, size: 200000 });
+  assert.equal(s.usage.tokens, 3400, 'a total replaces the last total; it does not add to it');
+  r.line(s, { type: 'usage', used: 'x', size: -5 });
+  r.line(s, { type: 'usage' });
+  assert.equal(s.usage.tokens, 3400, 'a line without numbers changes nothing');
+  assert.equal(s.cost, null);
+  assert.equal(s.costUnknown, true);
+});
+
+// An ACP agent can send both: per-turn usage in its prompt answer (#72) and session totals in usage_update (#73).
+test('an agent that reports a token total: its per-turn usage after that does not add to the total a second time', () => {
+  const r = rig();
+  const s = r.tracker.newSession({ uid: 'o1', headless: true, costUnknown: true });
+  const turn = (id) => r.line(s, { type: 'assistant', message: { id, usage: { input_tokens: 100, output_tokens: 50, cache_read_input_tokens: 0 }, content: [] } });
+  turn('acp-1');
+  assert.equal(s.usage.tokens, 150, 'no total yet: the turns add up');
+  r.line(s, { type: 'usage', used: 4200, size: 128000 });
+  turn('acp-2');
+  assert.equal(s.usage.tokens, 4200, 'the total already holds that turn');
+  r.line(s, { type: 'usage', used: 4400, size: 128000 });
+  assert.equal(s.usage.tokens, 4400);
+});
+
 test('the feed keeps the last 200 lines', () => {
   const r = rig();
   const s = r.tracker.newSession({ uid: 'o1', name: 'n' });
@@ -726,4 +758,87 @@ test('outside git, a call opened before locate resolves gets its file against th
   release();
   await wait();
   assert.deepEqual(s.calls.map((c) => c.file), ['sub/hello.txt', null], 'a call with no path stays null');
+});
+
+// ---------- the Security room: the check before a hold (#70) ----------
+test('an Allow or Deny rule answers a request at once: no wait, no pending request, one feed line', () => {
+  const seen = [];
+  const r = rig({ screen: (s, p, opts) => { seen.push({ tool: p.tool_name, opts }); return p.tool_input.command === 'git push origin main' ? { allow: false, line: 'denied by Security: Shell commands', message: 'Denied by the Security room: Shell commands.' } : null; } });
+  r.hook(HOOKS.turnWithEdit[1]);
+  const s = r.only();
+  const got = r.tracker.permissionRequest(slimPayload(HOOKS.permission), { provider: true });
+  assert.deepEqual(got.auto, { allow: false, message: 'Denied by the Security room: Shell commands.' });
+  assert.equal(got.s, s);
+  assert.ok(got.id, 'the answer still has a request id for the provider');
+  assert.deepEqual(s.pending, []);
+  assert.notEqual(s.status, 'waiting');
+  assert.equal(r.tracker.feed.at(-1).text, 'denied by Security: Shell commands');
+  assert.deepEqual(seen, [{ tool: 'Bash', opts: { provider: true } }]);
+  // Ask (the screen says nothing): held as today
+  const held = r.tracker.permissionRequest(slimPayload({ ...HOOKS.permission, tool_input: { command: 'npm test' } }));
+  assert.equal(held.auto, undefined);
+  assert.equal(s.pending.length, 1);
+  assert.equal(s.status, 'waiting');
+});
+
+test('a quiet answer (a low call a provider may run) writes no feed line', () => {
+  const r = rig({ screen: () => ({ allow: true, line: 'allowed by Security: Read inside the worktree', quiet: true }) });
+  r.hook(HOOKS.turnWithEdit[1]);
+  const before = r.tracker.feed.length;
+  const s = r.only(), seen = s.lastEvent;
+  r.t += 1000;
+  const [changes, located] = [r.changes, r.located.length];
+  const got = r.tracker.permissionRequest(slimPayload(HOOKS.permission), { provider: true });
+  assert.deepEqual(got.auto, { allow: true });
+  assert.equal(got.quiet, true, 'the server sends no snapshot for it');
+  assert.equal(r.tracker.feed.length, before);
+  // #70 review: a local agent asks about every Read, LS and Grep. A quiet answer changes nothing the page shows, so it
+  // costs no snapshot and no git lookup.
+  assert.equal(r.changes, changes, 'no change callback');
+  assert.equal(r.located.length, located, 'no git lookup');
+  assert.equal(s.lastEvent, seen, 'the session is not touched');
+});
+
+test('refuseCall: a call the office refused before it ran ends as failed, with the reason and a feed line', () => {
+  const r = rig();
+  r.hook(HOOKS.turnWithEdit[1]);
+  const s = r.only();
+  const pre = { hook_event_name: 'PreToolUse', session_id: 'sid-1', cwd: REPO, tool_name: 'Bash', tool_use_id: 'toolu_x', tool_input: { command: 'ls' } };
+  r.hook(pre);
+  r.tracker.refuseCall(s, slimPayload(pre), 'Denied by the Security room: Shell commands.', 'denied by Security: Shell commands');
+  const c = s.calls.find((x) => x.id === 'toolu_x');
+  assert.deepEqual([c.ok, c.err], [false, 'Denied by the Security room: Shell commands.']);
+  assert.equal(r.tracker.feed.at(-1).text, 'denied by Security: Shell commands');
+});
+
+test('a turn result adds what the session spent since the last result (the Spend screen ledger)', () => {
+  const r = rig();
+  r.hook(HOOKS.turnWithEdit[1]);
+  const s = r.only();
+  r.line(s, { type: 'result', subtype: 'success', total_cost_usd: 0.25 });
+  r.line(s, { type: 'result', subtype: 'success', total_cost_usd: 0.4 });
+  r.line(s, { type: 'result', subtype: 'success', total_cost_usd: 0.4 });
+  assert.deepEqual(r.spent.map((x) => [x.kind, Math.round(x.dollars * 100) / 100]), [['claude-code', 0.25], ['claude-code', 0.15]]);
+});
+
+test('rootOf: requests are rated against the worktree, else the folder the session started in', () => {
+  const r = rig();
+  const s = r.tracker.newSession({ cwd: 'C:\\w\\sub', startDir: 'C:\\w' });
+  assert.equal(r.tracker.rootOf(s), 'C:\\w');
+  s.worktree = { root: 'C:\\wt' };
+  assert.equal(r.tracker.rootOf(s), 'C:\\wt');
+});
+
+// The reason an agent gives for a request (dsh asks again with a reason, #72) rides on the payload as ask_reason and shows on the request.
+test('a permission request keeps the reason the agent gave, trimmed; a request without one has none', () => {
+  const r = rig();
+  const s = r.tracker.newSession({ officeId: 'o1', uid: 'o1', name: 'a', cwd: ROOT, headless: true, status: 'working' });
+  const ask = (extra) => slimPayload({ hook_event_name: 'PermissionRequest', session_id: 'sid-q', cwd: ROOT, tool_name: 'Bash', tool_input: { command: 'npm test' }, ...extra }, 'o1');
+  r.tracker.permissionRequest(ask({ ask_reason: 'The last run failed. I need to see the full output. ' + 'x'.repeat(400) }));
+  r.tracker.permissionRequest(ask({ tool_input: { command: 'ls' } }));
+  assert.equal(s.pending[0].reason.length, 301);
+  assert.match(s.pending[0].reason, /^The last run failed\./);
+  assert.equal(s.pending[1].reason, null);
+  // Only a permission request carries it.
+  assert.equal(slimPayload({ hook_event_name: 'PostToolUse', tool_name: 'Bash', ask_reason: 'x' }).ask_reason, undefined);
 });

@@ -57,6 +57,10 @@ const defaultId = (kind) => (ID_PREFIX[kind] ?? '') + crypto.randomBytes(ID_BYTE
  * @param {(dir: string) => void} [deps.persist.recentDir] a folder a session started in.
  * @param {(list: {commands: string[], skills: string[]}) => void} [deps.persist.commands] last known slash commands.
  * @param {(s: object, git: object|null) => void} [deps.persist.placed] a session's place was looked up.
+ * @param {(s: object, dollars: number) => void} [deps.persist.spent] a turn result says the session spent more (the Spend screen).
+ * @param {(s: object, p: object, opts: {provider?: boolean}) => ({allow: boolean, line?: string, message?: string, quiet?: boolean}|null)} [deps.screen]
+ *   the check before a hold (the Security room rules, security.mjs decide): a decision answers the request at once,
+ *   null holds it. Default: hold every request.
  */
 export function createTracker(deps = {}) {
   const now = deps.now || Date.now;
@@ -66,6 +70,7 @@ export function createTracker(deps = {}) {
   const releaseHold = deps.releaseHold || (() => {});
   const setTimer = deps.setTimer || ((fn, ms) => setTimeout(fn, ms));
   const persist = deps.persist || {};
+  const screen = deps.screen || (() => null);
 
   /** @type {Map<string, any>} uid -> session */
   const sessions = new Map();
@@ -82,10 +87,11 @@ export function createTracker(deps = {}) {
       uid: makeId('session'),
       // provider: the agent kind (providers/). A session first seen in a hook is a Claude Code session.
       sid: null, officeId: null, provider: 'claude-code', name: '', cwd: '', model: null, status: 'idle',
-      tool: null, prompt: '', note: '', pending: [], questions: [], inbox: [], replies: [], replySeq: 0, headless: false, commands: [], skills: [], cost: null, costBase: 0, live: '', mode: null,
+      // cost: dollars the agent reported, or null. costUnknown: the agent reports no cost (an ACP agent): show "unknown".
+      tool: null, prompt: '', note: '', pending: [], questions: [], inbox: [], replies: [], replySeq: 0, headless: false, commands: [], skills: [], cost: null, costUnknown: false, supervision: null, costBase: 0, live: '', mode: null,
       ctxTokens: null, ctxWindow: null, worktree: null, budget: null, scheduleId: null, interrupted: false, turns: 0,
       // calls: tool calls, newest last. agents: subagents (Task or Agent tool). todos: the TodoWrite plan.
-      calls: [], agents: [], todos: [], usage: { tokens: 0, cached: 0, input: 0 }, error: null, errorSeq: 0,
+      calls: [], agents: [], todos: [], usage: { tokens: 0, cached: 0, input: 0 }, usageTotal: false, error: null, errorSeq: 0,
       // git: { repo, root, branch } of cwd, or null outside git. placed: git was looked up at least once.
       git: null, placed: false, gitCwd: '', gitAt: 0,
       // startDir: the folder the session started in (the office's launch folder, or the first cwd a hook
@@ -301,18 +307,41 @@ export function createTracker(deps = {}) {
 
   // A PermissionRequest hook. Records the prompt on the session and returns what the server needs to
   // hold the request: { s, id, suggestions }. Null when no session is known (the server answers {}).
-  function permissionRequest(p) {
+  // The check before a hold (screen, the Security room rules) comes first: when it decides, nothing waits, the request is
+  // not pending, and the result has auto: { allow, message? } for the server to answer at once. A feed line says so
+  // unless the decision is quiet. opts.provider: the request comes from a provider (providers/index.mjs), not a hook.
+  // A quiet decision (a low call the local model asks about, allowed by its default cell) changes nothing the page shows: it skips the
+  // hook record, the git place check and the change callback, and the result says quiet so the server sends no snapshot.
+  function permissionRequest(p, opts = {}) {
+    const auto = (d) => (d.message ? { allow: d.allow === true, message: d.message } : { allow: d.allow === true });
+    const known = findSession(p);
+    const early = known ? screen(known, p, opts) : null;
+    if (early && early.quiet) return { s: known, id: makeId('permission'), suggestions: [], auto: auto(early), quiet: true };
     onHook({ ...p, hook_event_name: 'PermissionRequest' });
     const s = findSession(p);
     if (!s) return null;
     const id = makeId('permission');
+    const d = s === known ? early : screen(s, p, opts);
+    if (d) {
+      if (!d.quiet && d.line) addFeed(s, 'tool', d.line);
+      changed();
+      return { s, id, suggestions: [], auto: auto(d) };
+    }
     const detail = describeTool(p.tool_name, p.tool_input);
     const suggestions = allowRules(p.permission_suggestions);
-    s.pending.push({ id, key: callKey(p), agent: p.agent_id || null, tool: p.tool_name, detail, risk: riskOf(p.tool_name, p.full_input || p.tool_input, rootOf(s)), preview: makePreview(p.tool_name, p.full_input || p.tool_input), always: ruleLabel(suggestions), t: now() });
+    s.pending.push({ id, key: callKey(p), agent: p.agent_id || null, tool: p.tool_name, detail, risk: riskOf(p.tool_name, p.full_input || p.tool_input, rootOf(s)), preview: makePreview(p.tool_name, p.full_input || p.tool_input), always: ruleLabel(suggestions), reason: p.ask_reason || null, t: now() });
     s.status = 'waiting'; s.note = `${p.tool_name} ${detail}`.trim();
     addFeed(s, 'wait', `asks to use ${s.note}`);
     changed();
     return { s, id, suggestions };
+  }
+
+  // The office refused a call before it ran (Claude Code's PreToolUse, a Deny rule): the call ends as failed with the reason.
+  function refuseCall(s, p, why, line) {
+    closeCall(s, p.tool_use_id, false, 0, why);
+    if (!p.agent_id && s.tool && s.tool.name === p.tool_name) s.tool = null;
+    if (line) addFeed(s, 'tool', line);
+    changed();
   }
 
   // An office_ask question from the agent. Returns its id.
@@ -389,14 +418,27 @@ export function createTracker(deps = {}) {
       const mid = m.message?.id;
       if (u && mid && mid !== s.lastUsageId) {
         s.lastUsageId = mid;
-        s.usage.tokens += s.ctxTokens + (u.output_tokens || 0);
+        // An agent that reports totals (a usage line) already counts this turn in its total: no second count.
+        if (!s.usageTotal) s.usage.tokens += s.ctxTokens + (u.output_tokens || 0);
         s.usage.input += s.ctxTokens;
         s.usage.cached += u.cache_read_input_tokens || 0;
       }
       for (const b of m.message?.content || []) if (b.type === 'text' && b.text && b.text.trim()) pushReply(s, b.text);
+    } else if (m.type === 'usage') {
+      // An agent that reports a token total, not per message (ACP usage_update: used, size). It replaces the last total. It
+      // sets the Tokens figure only: the OpenClaw bridge sends Gateway session totals, not the tokens in context, so the
+      // Context bar (ctxTokens, ctxWindow) stays unknown rather than read 100% by mistake. It carries no cost either.
+      // From the first total on, the total is the Tokens figure (usageTotal): per-turn usage no longer adds to it.
+      const used = Number(m.used);
+      if (Number.isFinite(used) && used >= 0) { s.usage.tokens = used; s.usageTotal = true; }
+      changed();
     } else if (m.type === 'result') {
       s.live = '';
-      if (typeof m.total_cost_usd === 'number') s.cost = (s.costBase || 0) + m.total_cost_usd;
+      if (typeof m.total_cost_usd === 'number') {
+        const before = s.cost || 0;
+        s.cost = (s.costBase || 0) + m.total_cost_usd;
+        if (s.cost > before) persist.spent?.(s, s.cost - before);
+      }
       const mu = m.modelUsage && Object.values(m.modelUsage)[0];
       if (mu?.contextWindow) s.ctxWindow = mu.contextWindow;
       // The turn is over: show the bot at rest even when the stop hook did not run (a stopped turn, a spending limit).
@@ -418,7 +460,7 @@ export function createTracker(deps = {}) {
 
   return {
     sessions, feed, addFeed, newSession, findSession, placeSession,
-    onHook, permissionRequest, askQuestion, settle, interrupt, userMessage, startTurn, dismissError, fail,
+    onHook, permissionRequest, refuseCall, rootOf, askQuestion, settle, interrupt, userMessage, startTurn, dismissError, fail,
     onStream, pushReply, endSession, dropPending, dropQuestions,
   };
 }

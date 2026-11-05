@@ -54,7 +54,9 @@ test('office.js: the scene height follows the window, and no CSS overrides the D
 
 test('office.js: the welcome card waits while the Since you left card shows, and the dock holds the primary button then (#66)', () => {
   assert.match(office, /h\(A\.OfficeScene, \{[^\n]*\n(?:[^\n]*\n){0,12}?[^\n]*onSinceYouLeft: setSyl/, 'the scene reports the card');
-  assert.match(office, /var welcome = !!snap && !live\.length && !p\.syl;/);
+  // It also waits while the camera looks at a screen: the Security room screens work with no session (#70).
+  assert.match(office, /var welcome = !!snap && !live\.length && !p\.syl && !p\.look;/);
+  assert.match(office, /h\(Controls, \{[^\n]*\blook: !!look\b/);
   assert.match(office, /welcome \? h\('div', \{ className: 'welcome' \}/);
   assert.match(office, /h\(A\.Button, \{ variant: welcome \? 'quiet' : 'primary', icon: 'add'/);
   assert.match(office, /h\(Controls, \{[^\n]*\bsyl: syl && cur2\.view === 'office'/);
@@ -113,4 +115,35 @@ test('office.css: short windows shrink the welcome card, and landscape drops it 
   assert.match(land[1], /top:\s*calc\(50% \+ var\(--space-4\)\)/);
   // none of the short rules touches the centring, z-index or animation (#47)
   for (const m of [tier[1], tight[1], land[1]]) { assert.doesNotMatch(m, /z-index|animation|transform|translate/); }
+});
+
+// Review minor: the security office type (#70) had no picture, so OfficeTypeCard showed its badge only. Every office type has a
+// flat picture in each theme, and the bundle's copy is the asset file byte for byte; the DS preview shows the security card.
+test('OfficeTypeCard: every office type has a picture in Day, Night and Sublevel, the same as its file in assets/Offices', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const bundle = readFileSync(join(root, 'components', 'bundle.js'), 'utf8');
+  const at = bundle.indexOf('AO.THUMBS = {'), end = bundle.indexOf('\n  };', bundle.indexOf('sublevel: {', at));
+  const block = bundle.slice(at, end);
+  for (const [theme, sfx] of [['light', ''], ['dark', '-night'], ['sublevel', '-sublevel']]) {
+    const part = theme === 'light' ? block.slice(0, block.indexOf('AO.THUMBS_BY_THEME')) : block.slice(block.indexOf(theme + ': {'));
+    for (const type of ['team', 'lab', 'studio', 'hq', 'security']) {
+      const m = new RegExp('"' + type + '": ("(?:[^"\\\\]|\\\\.)*")').exec(part);
+      assert.ok(m, `${type} in ${theme}`);
+      assert.equal(JSON.parse(m[1]), readFileSync(join(root, 'assets', 'Offices', `${type}${sfx}.svg`), 'utf8').trim(), `${type}${sfx}.svg`);
+    }
+  }
+  assert.match(readFileSync(join(root, 'components', 'OfficeTypeCard', 'preview.html'), 'utf8'), /\["security",/);
+});
+
+// Review M6: at 400 px the Security wall was a 172 px strip between the floor list and the room card. While a Security screen
+// is in focus at 820 px and below, the page hides those two (as has-panel hides the right column; the Decisions inbox stays),
+// frames the screen again, and the look bar shows the open requests, so an approval never hides.
+test('office.js and office.css: a Security screen in focus at 820 px and below gets the floor list and the room card out of the way (M6)', () => {
+  const js = readFileSync(join(pub, 'office.js'), 'utf8');
+  assert.match(js, /useLayoutEffect\(function \(\) \{ var el = document\.getElementById\('office'\); if \(el\) el\.classList\.toggle\('sec-look', secLook\)/, 'set in the commit, before the look bar places itself');
+  assert.match(js, /layout: secLook/);
+  assert.match(js, /\[secLook\]\);/, 'the screen is framed again when the class changes');
+  assert.match(js, /h\(LookBar, \{[^}]*asks:/, 'the look bar gets the open requests');
+  const m = /@media \(max-width: 820px\) \{\s*#office\.sec-look \.ao-hud-left, #office\.sec-look \.ao-hud-right:not\(\.ao-hud-inbox\) \{ visibility: hidden; pointer-events: none; \}/.exec(css);
+  assert.ok(m, 'the rule in office.css');
 });
