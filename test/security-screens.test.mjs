@@ -226,3 +226,23 @@ test('B1: a default Ask that Claude Code decides says Partly enforced; a click s
   assert.ok(texts(P.plan(lr.view, ld)).includes('Confirm: the default (Allow)'));
   assert.ok(!P.plan(view({ focused: false }), setD).hots.some((h) => h.kind === 'clear'), 'only in focus');
 });
+
+// Review minor: the Spend screen cut "Not reported" off (the five cost columns sat right of the 480 px label column, 142 px
+// each). Node has no canvas to measure text, so the check is a safe estimate: 0.62 of the font size per character at 600.
+test('Spend: every cost word fits its column, in the full and the paged view', () => {
+  const NONE = { reason: '', rows: {} };
+  const enf = { 'claude-code': NONE, hermes: NONE, dsh: NONE, openclaw: { reason: 'The office has no provider for this agent kind yet.', rows: {} }, local: NONE };
+  const d = { sec: { rules: { office: {}, buildings: {} }, enforce: enf, spend: { limit: 2, month: '2026-11', byColumn: { 'claude-code': 1234.5 } } }, building: B, buildingName: 'repo' };
+  const words = /^(Not reported|Not set up|Free|\$[\d,.]+)$/;
+  for (const v of [view({ screen: 'spend', h: 686 }), view({ screen: 'spend', h: 738 })]) {
+    const items = P.plan(v, d).items.filter((i) => i.t === 'text' && words.test(i.text));
+    assert.deepEqual(items.map((i) => i.text).sort(), ['$2.00', '$1234.50', 'Free', 'Not reported', 'Not reported', 'Not set up'].sort(), 'the limit and the five cost words');
+    for (const i of items) assert.ok(i.text.length * i.s * 0.62 <= i.maxW, `${i.text} at ${i.s} px needs about ${Math.round(i.text.length * i.s * 0.62)} px, has ${i.maxW}`);
+    const labels = P.plan(v, d).items.filter((i) => i.t === 'text' && /^(Claude Code|Hermes|dsh|OpenClaw|Local model)$/.test(i.text));
+    for (const i of labels) assert.ok(i.text.length * i.s * 0.62 <= i.maxW, `${i.text} fits`);
+  }
+  for (let page = 0; page < 5; page++) {
+    const t = P.plan(view({ screen: 'spend', h: 1100, paged: true, page }), d).items.find((i) => i.t === 'text' && /: /.test(i.text) && i.s === 44);
+    assert.ok(t.text.length * t.s * 0.62 <= t.maxW, `${t.text} fits the paged view`);
+  }
+});

@@ -281,12 +281,14 @@
       text(p, W / 2, ny + 54, 44, 'ink', col.label + ': ' + costWord(col), { wt: 600, align: 'center', maxW: W - 520 });
       y = ny + 110;
     } else {
-      var gx = 480, colW = Math.floor((W - 48 - gx) / cols.length);
+      // the five columns take the full width under the "Cost, month" line: right of the 480 px label column they were 142 px
+      // each, and "Not reported" did not fit (review minor)
+      var gx = 48, colW = Math.floor((W - 48 - gx) / cols.length), gy = y + 66;
       cols.forEach(function (c, i) {
-        text(p, gx + i * colW + colW / 2, y + 30, 22, 'muted', c.label, { wt: 600, align: 'center', maxW: colW - 8 });
-        text(p, gx + i * colW + colW / 2, y + 68, 28, 'ink', costWord(c), { wt: 600, align: 'center', maxW: colW - 8, mono: c.id === 'claude-code' });
+        text(p, gx + i * colW + colW / 2, gy + 30, 22, 'muted', c.label, { wt: 600, align: 'center', maxW: colW - 8 });
+        text(p, gx + i * colW + colW / 2, gy + 68, 28, 'ink', costWord(c), { wt: 600, align: 'center', maxW: colW - 8, mono: c.id === 'claude-code' });
       });
-      y += 100;
+      y = gy + 92;
     }
     fill(p, 48, y, W - 96, 2, 'line');
     if (asking) { confirmBand(p, view, big); return; }   // the band takes the bottom of the screen until Confirm or Cancel
