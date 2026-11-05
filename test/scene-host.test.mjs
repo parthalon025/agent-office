@@ -622,6 +622,27 @@ test('host: a theme change frames the floor at once; the camera goes back on the
   host.dispose();
 });
 
+test('host: a theme change with a panel over the whole view (a phone) still puts the camera back on the screen (#63)', () => {
+  const s = focusStage({ a: 5 }), log = [];
+  s.cv.clientHeight = 800; s.cv.getBoundingClientRect = () => ({ left: 0, top: 0, right: 1000, bottom: 800, width: 1000, height: 800 });
+  let covers = [];
+  const host = globalThis.OfficeSceneHost.attach(s.office, { covers: () => covers });
+  host.register(screens(s, log).t);
+  click(s); land(s);
+  covers = [{ left: 0, top: 0, right: 1000, bottom: 780 }];   // the board panel takes the view: no free part
+  host.refit();
+  assert.equal(host.flying(), false, 'a plain refit keeps the camera where it is');
+  const z = s.stage.cam.zoom;
+  s.stage.cam.zoom = 1; s.stage.ctl.target.set(-5, 1, 0);   // the engine's rebuildAll: frameFloor(true)
+  s.K.tok = {};                                             // new theme tokens
+  s.anim[0](0.016, 0);
+  assert.equal(host.flying(), false);
+  assert.ok(Math.abs(s.stage.cam.zoom - z) < 1e-9, 'zoom is back on the screen, not on the whole floor');
+  assert.notEqual(s.stage.ctl.target.x, -5, 'the target is back on the screen');
+  assert.equal(host.focused().key, 'k:a');
+  host.dispose();
+});
+
 test('host: when the floor is no longer shown the focus lets go without a flight', () => {
   const s = focusStage({ a: 5 }), log = [];
   const host = globalThis.OfficeSceneHost.attach(s.office);
