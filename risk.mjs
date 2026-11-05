@@ -8,6 +8,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const READS = new Set(['Read', 'Grep', 'Glob', 'LS', 'NotebookRead']); // read-only tools that take a path
 const NO_FILES = new Set(['TodoWrite', 'WebSearch']);                  // read-only tools that touch no file
@@ -36,8 +37,12 @@ const DANGER = [
 // Path parts (folders or files) whose content a program runs without asking: git config, hooks and the
 // worktree link file; Claude Code settings, hooks, commands and skills; MCP server lists; editor tasks and
 // run settings; ssh config; the office's own hook and MCP files. An edit to one of them is high.
+// The Start Menu folder holds the Startup folder (Programs\Startup): Windows runs what is in it at sign-in.
 const RUNS = new Set(['.git', '.claude', '.vscode', '.idea', '.ssh', '.mcp.json', '.claude.json', '.gitconfig',
-  'office-hooks.json', 'office-hooks-http.json', 'office-mcp.json']);
+  'office-hooks.json', 'office-hooks-http.json', 'office-mcp.json', 'start menu']);
+// File names a shell runs at its start: PowerShell profiles (profile.ps1, Microsoft.PowerShell_profile.ps1,
+// Microsoft.VSCode_profile.ps1) and sh, bash, zsh, csh and ksh profiles.
+const RUNS_FILE = /^((microsoft\.[\w.]+_)?profile\.ps1|\.(bashrc|bash_profile|bash_login|bash_logout|profile|zshrc|zprofile|zshenv|zlogin|cshrc|tcshrc|kshrc))$/;
 // Credential folders and secret-looking file names. A read outside the root is high, inside it is medium.
 // office-page-<port>.json holds the office's page token for the user's own tools (auth.mjs pageFile).
 const SECRET_DIRS = new Set(['.ssh', '.gnupg', '.aws', '.azure', '.kube']);
@@ -57,7 +62,7 @@ function kinds(list) {
   let secret = false, runs = false;
   for (const part of list) for (const n of forms(part)) {
     if (SECRET_DIRS.has(n) || SECRET_FILE.test(n)) secret = true;
-    if (RUNS.has(n)) runs = true;
+    if (RUNS.has(n) || RUNS_FILE.test(n)) runs = true;
   }
   return { secret, runs };
 }
@@ -108,6 +113,30 @@ function resolveIn(root, abs) {
   return { real, realRoot, in: !!root && inside(root, abs) && !!real && !!realRoot && inside(realRoot, real) };
 }
 
+// The office's own saved state (#70): state.json holds the Security room rules and the schedules (prompts the office runs),
+// history.json the past sessions. A change to them changes what the office does at its next start, so they are settings
+// that run code. Matched by absolute path in the office folder (this file's folder), not by name: another project's
+// state.json is a plain file.
+const OFFICE_DIR = path.dirname(fileURLToPath(import.meta.url));
+const OWN_STATE = new Set(['state.json', 'history.json'].map((f) => norm(path.join(OFFICE_DIR, f))));
+let realHome;   // the real path of the home folder, looked up once
+/**
+ * True when a root holds the user's own settings, so nothing in it counts as inside: a drive root, the home folder or a
+ * folder above it, as text or after links (a terminal session started in the home folder, #70). Writes there reach the
+ * Startup folder, profiles and app settings, which no list of names covers.
+ */
+export function wideRoot(root) {
+  if (!root) return false;
+  const r = path.resolve(String(root));
+  if (path.parse(r).root === r) return true;
+  const home = os.homedir();
+  if (!home) return false;
+  if (inside(r, home)) return true;
+  if (realHome === undefined) realHome = realPath(home);
+  const real = realPath(r);
+  return !!(real && realHome && (inside(real, realHome) || path.parse(real).root === real));
+}
+
 /**
  * True when target is inside root both as text (inside()) and after every junction, symbolic link and short
  * name is resolved (fs.realpathSync.native on the target, or its nearest existing parent, and on the root).
@@ -130,11 +159,14 @@ function place(root, p) {
   if (/^~(?=[\\/]|$)/.test(s)) s = path.join(os.homedir(), s.slice(1));
   if (!path.isAbsolute(s) && !root) return { inside: false, ...kinds(parts(s)) };
   const abs = path.resolve(root || '', s);
-  const { real, realRoot, in: isIn } = resolveIn(root, abs);
+  const r = resolveIn(root, abs), real = r.real, realRoot = r.realRoot;
+  const isIn = r.in && !wideRoot(root); // a wide root (home, a drive) has no inside
   const whole = [...parts(abs), ...(real ? parts(real) : [])];
   const k = kinds(isIn ? [...parts(path.relative(norm(root), norm(abs))), ...parts(path.relative(norm(realRoot), norm(real)))] : whole);
-  // A .git folder anywhere on the path holds git's config and hooks, also when the root is below it.
-  if (!k.runs && whole.some((x) => forms(x).includes('.git'))) k.runs = true;
+  // A .git folder anywhere on the path holds git's config and hooks, and the Start Menu holds the Startup folder, also when
+  // the root is below them.
+  if (!k.runs && whole.some((x) => forms(x).some((n) => n === '.git' || n === 'start menu'))) k.runs = true;
+  if (OWN_STATE.has(norm(abs)) || (real && OWN_STATE.has(norm(real)))) k.runs = true;
   return { inside: isIn, ...k };
 }
 

@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { riskOf, actionOf, inside, realInside } from '../risk.mjs';
 import '../public/vocab.js';
 
@@ -283,4 +284,45 @@ test('actionOf and riskOf use one rule: read-inside and edit-inside are the low 
     assert.equal(low, a === 'read-inside' || a === 'edit-inside', `${what}: ${a} vs ${riskOf(tool, input, root)}`);
   }
   for (const [what, tool, input] of cases.filter(([, tool]) => tool === 'Bash' || tool === 'PowerShell')) assert.equal(actionOf(tool, input, cwd), 'shell', what);
+});
+
+// #70 review: a root that holds the user's settings is no sandbox. A terminal session started in the home folder (or a
+// drive root) must not get its writes to the Startup folder or a shell profile rated low, and so allowed by the Security room.
+test('a wide root (the home folder, a folder above it, a drive root) has no inside: reads and edits there are not low', () => {
+  const startup = path.join(home, 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'x.cmd');
+  const doc = path.join(home, 'Documents', 'notes.txt');
+  for (const root of [home, path.dirname(home), path.parse(home).root]) {
+    assert.notEqual(riskOf('Write', { file_path: doc }, root), 'low', `write under ${root}`);
+    assert.equal(actionOf('Write', { file_path: doc }, root), 'files-outside', `write under ${root}`);
+    assert.equal(actionOf('Read', { file_path: doc }, root), 'files-outside', `read under ${root}`);
+    assert.equal(actionOf('Write', { file_path: startup }, root), 'settings', `the Startup folder under ${root}`);
+  }
+  const below = path.join(home, 'src', 'app');
+  assert.equal(riskOf('Edit', { file_path: path.join(below, 'a.js') }, below), 'low', 'a project folder below home still has an inside');
+});
+
+test('files that run code at sign-in or in every shell are settings: the Startup folder, PowerShell and shell profiles', () => {
+  const runs = [
+    path.join(home, 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'x.cmd'),
+    path.join(WIN ? 'C:\\ProgramData' : '/opt', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'StartUp', 'y.lnk'),
+    path.join(home, 'Documents', 'PowerShell', 'Microsoft.PowerShell_profile.ps1'),
+    path.join(home, 'Documents', 'WindowsPowerShell', 'profile.ps1'),
+    path.join(home, 'Documents', 'PowerShell', 'Microsoft.VSCode_profile.ps1'),
+    path.join(home, '.bashrc'), path.join(home, '.bash_profile'), path.join(home, '.profile'), path.join(home, '.zshrc'),
+  ];
+  for (const f of runs) {
+    assert.equal(actionOf('Write', { file_path: f }, home), 'settings', f);
+    assert.equal(riskOf('Write', { file_path: f }, path.dirname(f)), 'high', `${f}, even with its own folder as the root`);
+  }
+  assert.equal(actionOf('Edit', { file_path: at('src', 'startup', 'boot.js') }, cwd), 'edit-inside', 'a folder that is only named startup is not the Startup folder');
+  assert.equal(actionOf('Edit', { file_path: at('scripts', 'powershell', 'build.ps1') }, cwd), 'edit-inside', 'a script in a powershell folder is not a profile');
+});
+
+test('the office\'s own state.json and history.json are settings: the Security rules and schedules live there', () => {
+  const office = path.dirname(fileURLToPath(new URL('../risk.mjs', import.meta.url)));
+  for (const f of ['state.json', 'history.json']) {
+    assert.equal(actionOf('Write', { file_path: path.join(office, f) }, office), 'settings', f);
+    assert.equal(riskOf('Write', { file_path: path.join(office, f) }, office), 'high', f);
+  }
+  assert.equal(actionOf('Write', { file_path: at('state.json') }, cwd), 'edit-inside', 'a state.json of another project is a plain file');
 });
