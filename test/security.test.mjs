@@ -63,7 +63,7 @@ test('setRule: a building override, and clearing it (a clear that loosens needs 
 });
 
 test('decide: Allow answers, Deny refuses, Ask holds, with the feed line', () => {
-  let r = none();
+  let r = setRule(none(), { scope: 'office', row: 'edit-inside', col: 'claude-code', value: 'allow', confirmed: true }).rules;
   const allow = decide(r, call('Edit', { file_path: inside }));
   assert.deepEqual([allow.allow, allow.line], [true, 'allowed by Security: Edit inside the worktree']);
   assert.equal(decide(r, call('Bash', { command: 'npm test' })), null, 'Ask holds as today');
@@ -170,17 +170,19 @@ test('costAsk: an agent without cost reports asks once before it runs while its 
 test('decide: a provider asks about every call; a low call it may run is allowed without a feed line', () => {
   const r = none();
   assert.equal(decide(r, call('Read', { file_path: inside }, { kind: 'ollama', provider: true })).quiet, true);
-  assert.equal(decide(r, call('Read', { file_path: inside }, { kind: 'claude-code' })).quiet, false, 'Claude Code asked: the answer is news');
+  const allowRead = setRule(r, { scope: 'office', row: 'read-inside', col: 'claude-code', value: 'allow', confirmed: true }).rules;
+  assert.equal(decide(allowRead, call('Read', { file_path: inside }, { kind: 'claude-code' })).quiet, false, 'Claude Code asked: the answer is news');
   const tight = setRule(r, { scope: 'office', row: 'read-inside', col: 'local', value: 'ask' }).rules;
   assert.equal(decide(tight, call('Read', { file_path: inside }, { kind: 'ollama', provider: true })), null, 'a tightened read is held');
 });
 
 test('decide: a firm request (the provider must ask the user) is held under an Allow rule; a Deny still refuses it', () => {
   const firm = (tool, input) => call(tool, input, { kind: 'hermes', provider: true, firm: true });
-  assert.equal(decide(none(), firm('Write', { file_path: inside, content: 'x' })), null, 'Edit inside is Allow by default, but this one asks');
+  const allowEdit = setRule(none(), { scope: 'office', row: 'edit-inside', col: 'hermes', value: 'allow', confirmed: true }).rules;
+  assert.equal(decide(allowEdit, firm('Write', { file_path: inside, content: 'x' })), null, 'Edit inside is Allow, but this one asks');
   const deny = setRule(none(), { scope: 'office', row: 'edit-inside', col: 'hermes', value: 'deny' }).rules;
   assert.equal(decide(deny, firm('Write', { file_path: inside, content: 'x' })).allow, false);
-  assert.equal(decide(none(), call('Write', { file_path: inside, content: 'x' }, { kind: 'hermes', provider: true })).allow, true, 'not firm: the Allow rule answers');
+  assert.equal(decide(allowEdit, call('Write', { file_path: inside, content: 'x' }, { kind: 'hermes', provider: true })).allow, true, 'not firm: the Allow rule answers');
 });
 
 test('preToolDecision: Claude Code refuses a Deny before its own permission check, and asks for a tightened low row', () => {
@@ -189,7 +191,27 @@ test('preToolDecision: Claude Code refuses a Deny before its own permission chec
   assert.equal(preToolDecision(r, call('WebFetch', { url: 'https://x.test' })), null, 'Ask on a row whose default is Ask: Claude Code decides, the office holds its prompt');
   r = setRule(r, { scope: 'office', row: 'read-inside', col: 'claude-code', value: 'ask' }).rules;
   assert.equal(preToolDecision(r, call('Read', { file_path: inside })).decision, 'ask', 'Claude Code does not ask about reads by itself');
-  assert.equal(preToolDecision(none(), call('Read', { file_path: inside })), null);
+  assert.equal(preToolDecision(none(), call('Read', { file_path: inside })).decision, 'ask', 'by default Claude Code is made to ask about a read inside too');
+  const allow = setRule(none(), { scope: 'office', row: 'read-inside', col: 'claude-code', value: 'allow', confirmed: true }).rules;
+  assert.equal(preToolDecision(allow, call('Read', { file_path: inside })), null, 'a user-set Allow: no question');
+});
+
+// Owner decision pending (#67): by default no call is answered for the user, also a low-risk read or edit inside the worktree.
+test('decide: with the default cells a low-risk Claude Code edit or read inside a worktree is held; only a cell the user set answers', () => {
+  const edit = call('Edit', { file_path: inside, old_string: 'a', new_string: 'b' });
+  const read = call('Read', { file_path: inside });
+  for (const c of [edit, read, call('Write', { file_path: inside, content: 'x' }), call('Edit', { file_path: inside, old_string: 'a', new_string: 'b' }, { kind: 'hermes', provider: true })]) {
+    assert.equal(decide(none(), c), null, `${c.tool} ${c.kind}: held`);
+  }
+  assert.equal(preToolDecision(none(), edit).decision, 'ask');
+  const allow = setRule(none(), { scope: 'office', row: 'edit-inside', col: 'claude-code', value: 'allow', confirmed: true }).rules;
+  assert.deepEqual(decide(allow, edit), { allow: true, line: 'allowed by Security: Edit inside the worktree', quiet: false });
+  assert.equal(decide(allow, read), null, 'the Read row is a cell of its own');
+  const deny = setRule(none(), { scope: 'office', row: 'edit-inside', col: 'claude-code', value: 'deny' }).rules;
+  assert.equal(decide(deny, edit).allow, false);
+  // the local model keeps its old behaviour: a low call it asks about is answered without a feed line, until the user tightens the cell
+  const local = call('Edit', { file_path: inside, old_string: 'a', new_string: 'b' }, { kind: 'ollama', provider: true });
+  assert.deepEqual(decide(none(), local), { allow: true, line: 'allowed by Security: Edit inside the worktree', quiet: true });
 });
 
 test('permissionModeFor: a Claude Code session opens in default mode while any of its cells is Ask', () => {
@@ -198,7 +220,7 @@ test('permissionModeFor: a Claude Code session opens in default mode while any o
   assert.equal(permissionModeFor(r, B, 'acceptEdits'), 'default');
   assert.equal(permissionModeFor(r, B, 'plan'), 'plan', 'plan mode runs no tool: it stays');
   let all = r;
-  for (const row of ['files-outside', 'shell', 'web', 'mcp']) all = setRule(all, { scope: 'office', row, col: 'claude-code', value: 'allow', confirmed: true }).rules;
+  for (const row of ['read-inside', 'edit-inside', 'files-outside', 'shell', 'web', 'mcp']) all = setRule(all, { scope: 'office', row, col: 'claude-code', value: 'allow', confirmed: true }).rules;
   for (const row of ['settings', 'secrets']) all = setRule(all, { scope: 'office', row, col: 'claude-code', value: 'deny' }).rules;
   assert.equal(permissionModeFor(all, B, null), null, 'no Ask cell: Claude Code\'s own default');
   assert.equal(permissionModeFor(all, B, 'acceptEdits'), 'acceptEdits');
@@ -226,11 +248,27 @@ test('enforcement: a gated provider enforces every cell; a missing or ungated on
   assert.equal(e.openclaw.rows['edit-inside'], 'This agent runs this kind of call without asking the office.');
 });
 
+test('enforcement: Hermes edit requests are enforced; reads and its own skill and memory writes are not, and say why', () => {
+  const EDITS = 'Edit requests come to the office and the rule applies. Reads, and writes to its own skills and memory, run without asking.';
+  const READS = 'This agent reads files without asking the office.';
+  const hermes = { kind: 'hermes', label: 'Hermes Agent', gated: false, enforces: ['edit-inside'], unenforced: { 'read-inside': READS, secrets: READS }, partly: { 'files-outside': EDITS, settings: EDITS } };
+  const e = enforcement([hermes]).hermes;
+  assert.equal(e.reason, '');
+  assert.equal(e.rows['edit-inside'], undefined, 'an edit request inside the worktree comes through session/request_permission: enforced');
+  assert.equal(e.rows['read-inside'], READS);
+  assert.equal(e.rows.secrets, READS);
+  assert.equal(e.rows.shell, 'This agent runs this kind of call without asking the office.', 'a row with no reason of its own keeps the general one');
+  assert.equal(e.rows['files-outside'], undefined, 'partly enforced is not "Not enforced"');
+  assert.deepEqual(e.partly, { 'files-outside': EDITS, settings: EDITS });
+  // an agent with no such fields shows no partly rows
+  assert.deepEqual(enforcement([{ kind: 'openclaw', label: 'OpenClaw', gated: false, enforces: ['shell'] }]).openclaw.partly, {});
+});
+
 test('cellsOf: the call cells of one agent kind in a building, for an agent whose own config carries the rules (OpenClaw)', () => {
   let r = setRule(none(), { scope: 'office', row: 'shell', col: 'openclaw', value: 'deny' }).rules;
   r = setRule(r, { scope: 'building', building: B, row: 'web', col: 'openclaw', value: 'deny' }).rules;
   const office = cellsOf(r, null, 'openclaw');
-  assert.deepEqual(office, { 'read-inside': 'allow', 'edit-inside': 'allow', 'files-outside': 'ask', shell: 'deny', web: 'ask', mcp: 'ask', settings: 'ask', secrets: 'ask' });
+  assert.deepEqual(office, { 'read-inside': 'ask', 'edit-inside': 'ask', 'files-outside': 'ask', shell: 'deny', web: 'ask', mcp: 'ask', settings: 'ask', secrets: 'ask' });
   assert.equal(cellsOf(r, B, 'openclaw').web, 'deny', 'the building override counts');
   assert.equal(cellsOf(r, null, 'openclaw').ungated, undefined, 'no Agents row: those are not calls');
 });

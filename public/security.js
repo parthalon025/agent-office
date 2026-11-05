@@ -51,10 +51,12 @@
     if (!e) return '';
     return e.reason || (e.rows && S().own(e.rows, row) && e.rows[row]) || '';
   }
-  // Why an Ask cell is only partly enforced ('' = fully, or not Ask): the agent decides by itself whether to ask.
+  // Why a cell is only partly enforced ('' = fully): only some calls reach the office (partly), or an Ask the agent decides by itself.
   function partly(data, scope, row, col) {
     var e = data && data.sec && data.sec.enforce && data.sec.enforce[col];
-    if (!e || !e.asks || !S().own(e.asks, row) || notEnforced(data, row, col)) return '';
+    if (!e || notEnforced(data, row, col)) return '';
+    if (e.partly && S().own(e.partly, row)) return e.partly[row];   // only some calls reach the office, whatever the value
+    if (!e.asks || !S().own(e.asks, row)) return '';
     return shown(data, scope, row, col) === 'ask' ? e.asks[row] : '';
   }
   // The note under a cell: { word, why } or null.

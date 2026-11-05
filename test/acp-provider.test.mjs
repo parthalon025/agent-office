@@ -32,10 +32,12 @@ async function until(fn, what, ms = 10_000) {
 }
 
 // The Security room rules the rig's office applies before a hold (#70, security.mjs decide), as server.mjs does. DEFAULTS: what a
-// new office has (reads and edits inside the worktree are Allow, the rest is Ask). ASK_ALL: every call row of every agent kind
+// new office has (every call row is Ask, also reads and edits inside the worktree: nothing is answered unless the user set a cell). ASK_ALL: every call row of every agent kind
 // is Ask, so each request waits for the user: the tests of the hold itself run with it.
 const SEC = globalThis.OfficeVocab.security;
 const DEFAULTS = cleanRules(null);
+// The user set Allow on reads and edits inside the worktree, for the ACP agents.
+const ALLOW_INSIDE = cleanRules({ office: Object.fromEntries(['hermes', 'dsh', 'openclaw'].flatMap((c) => ['read-inside', 'edit-inside'].map((row) => [`${row}|${c}`, 'allow']))) });
 const ASK_ALL = cleanRules({ office: Object.fromEntries(SEC.columns.flatMap((c) => Object.keys(SEC.rows)
   .filter((row) => !SEC.rows[row].office && SEC.applies(row, c.id) && SEC.options(row).includes('ask')).map((row) => [SEC.key(row, c.id), 'ask']))) });
 
@@ -191,8 +193,8 @@ test('an agent that offers only Always allow is never given it: Approve declines
 
 // ---------- the office serves files (fs) ----------
 
-test('fs: a read and a write inside the worktree run at once under the default rules; the text comes back raw', async () => {
-  const r = rig({ rules: DEFAULTS });
+test('fs: a read and a write inside the worktree run at once when the user set Allow; the text comes back raw', async () => {
+  const r = rig({ rules: ALLOW_INSIDE });
   const s = await started(r, r.session());
   try {
     r.steps(s, [{ read: { path: path.join(r.root, 'a.txt') } }, { read: { path: path.join(r.root, 'a.txt'), line: 2, limit: 1 } }, { write: { path: path.join(r.root, 'new', 'b.txt'), content: 'bee' } }]);
@@ -200,6 +202,19 @@ test('fs: a read and a write inside the worktree run at once under the default r
     assert.deepEqual(r.replies(s), ['read: one\ntwo\n', 'read: two', 'write: ok']);
     assert.equal(fs.readFileSync(path.join(r.root, 'new', 'b.txt'), 'utf8'), 'bee');
     assert.equal(r.holds.size, 0);
+  } finally { await r.done(s); }
+});
+
+test('fs: with the default cells a read inside the worktree waits for the user (nothing is answered unless the user set a cell)', async () => {
+  const r = rig({ rules: DEFAULTS });
+  const s = await started(r, r.session());
+  try {
+    r.steps(s, [{ read: { path: path.join(r.root, 'a.txt') } }]);
+    await until(() => s.pending.length === 1, 'the read to wait');
+    assert.equal(s.pending[0].tool, 'Read');
+    r.release(s.pending[0].id, { allow: true });
+    await r.idle(s);
+    assert.deepEqual(r.replies(s), ['read: one\ntwo\n']);
   } finally { await r.done(s); }
 });
 
@@ -221,13 +236,13 @@ test('fs: the Security room decides each served call: Deny on reads refuses with
 });
 
 test('a request the agent raises is answered by an Allow rule at once (allow once), and a Deny rule rejects it', async () => {
-  const r = rig({ rules: cleanRules({ office: { 'shell|hermes': 'deny' } }) });
+  const r = rig({ rules: cleanRules({ office: { 'shell|hermes': 'deny', 'edit-inside|hermes': 'allow' } }) });
   const s = await started(r, r.session());
   try {
     r.steps(s, [{ ask: { toolCall: EDIT_CALL(r.root), options: OPTIONS } },
       { ask: { toolCall: { toolCallId: 'tc9', title: 'npm test', kind: 'execute', rawInput: { command: 'npm test' } }, options: OPTIONS } }]);
     await r.idle(s);
-    assert.deepEqual(r.replies(s), ['asked: selected once', 'asked: selected no'], 'the edit inside is Allow by default; the command is denied');
+    assert.deepEqual(r.replies(s), ['asked: selected once', 'asked: selected no'], 'the user set the edit inside to Allow; the command is denied');
     assert.equal(r.holds.size, 0, 'nothing waited');
   } finally { await r.done(s); }
 });

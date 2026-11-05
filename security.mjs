@@ -90,7 +90,7 @@ export function setRule(rules, change) {
   const from = S.valueOf(r, building, row, col);
   const next = { office: { ...r.office }, buildings: Object.fromEntries(Object.entries(r.buildings).map(([b, m]) => [b, { ...m }])) };
   if (scope === 'office') {
-    if (value === S.rows[row].def) delete next.office[k]; else next.office[k] = value;
+    if (value === S.defaultOf(row, col)) delete next.office[k]; else next.office[k] = value;
   } else {
     const m = own(next.buildings, building) ? next.buildings[building] : {};
     if (value === null) delete m[k]; else m[k] = value;
@@ -197,7 +197,9 @@ const UNGATED = 'This agent runs this kind of call without asking the office.';
 // Short enough for one line on the wall (public/security.js footer). The agent: Claude Code, the only kind with these rows.
 const CLAUDE_DECIDES = 'The agent asks only when its own allow rules and permission mode say so.';
 /**
- * Per agent kind (column): { reason, rows, asks }. reason '' means the office enforces the cells of that kind; else every
+ * Per agent kind (column): { reason, rows, asks, partly }. partly: a reason for one row of an ungated agent where only some
+ * calls come to the office (Hermes: its edit requests do, its reads and its own skill and memory writes do not), "Partly
+ * enforced" whatever the value. reason '' means the office enforces the cells of that kind; else every
  * cell shows "Not enforced for this agent" with the reason. rows: a reason for one row only. asks: a reason for one row
  * while its cell is Ask ("Partly enforced"): Claude Code decides itself whether to ask on some rows (CLAUDE_ASKS). Allow and
  * Deny on those rows are enforced. The no-cost cell is enforced: Ask asks once per session (costAsk), Deny refuses (openRefusal).
@@ -211,19 +213,23 @@ export function enforcement(providers, policies = {}) {
   const out = {};
   for (const c of S.columns) {
     const list = (providers || []).filter((p) => S.columnOf(p.kind) === c.id);
-    const rows = {};
+    const rows = {}, partly = {};
     let reason = '';
     const read = list.map((p) => own(policies, p.kind) && policies[p.kind]).find((x) => x && x.config);
     if (!list.length) reason = NOT_SET_UP;
     else if (read) Object.assign(rows, policyRows(read));
     else if (list.some((p) => p.gated === false)) {
+      // enforces: rows the agent's own config or its requests carry. unenforced: a reason of its own for a row that is not.
+      // partly: rows where only some calls reach the office (the other calls run without asking), enforced for those.
       const takes = new Set(list.flatMap((p) => (Array.isArray(p.enforces) ? p.enforces : [])));
-      for (const row of CALL_ROWS) if (S.applies(row, c.id) && !takes.has(row)) rows[row] = UNGATED;
+      const why = Object.assign({}, ...list.map((p) => p.unenforced || {}));
+      for (const [row, reason] of Object.entries(Object.assign({}, ...list.map((p) => p.partly || {})))) if (S.rows[row] && S.applies(row, c.id) && !takes.has(row)) partly[row] = reason;
+      for (const row of CALL_ROWS) if (S.applies(row, c.id) && !takes.has(row) && !own(partly, row)) rows[row] = own(why, row) ? why[row] : UNGATED;
     }
     if (S.applies('supervise', c.id)) rows.supervise = 'Paperclip is not connected to this office.';
     const asks = {};
     if (c.id === 'claude-code') for (const row of CLAUDE_ASKS) asks[row] = CLAUDE_DECIDES;
-    out[c.id] = { reason, rows, asks };
+    out[c.id] = { reason, rows, asks, partly };
   }
   return out;
 }

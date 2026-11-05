@@ -156,14 +156,23 @@ test('security: an agent kind is the column of its provider; the two local provi
   assert.equal(S.columnOf('something-new'), null);
 });
 
-test('security: defaults copy riskOf: reads and edits inside the worktree are Allow, the rest is Ask', () => {
+test('security: every call row is Ask by default for every agent kind, also reads and edits inside the worktree (owner decision pending, Claude Code asks today)', () => {
   const none = RULES();
-  for (const col of ['claude-code', 'local']) {
-    assert.equal(S.valueOf(none, '', 'read-inside', col), 'allow');
-    assert.equal(S.valueOf(none, '', 'edit-inside', col), 'allow');
-    for (const row of ['files-outside', 'shell', 'web', 'mcp', 'settings', 'secrets']) assert.equal(S.valueOf(none, '', row, col), 'ask', row);
+  for (const col of ['claude-code', 'hermes', 'dsh', 'openclaw']) {
+    for (const row of ['read-inside', 'edit-inside', 'files-outside', 'shell', 'web', 'mcp', 'settings', 'secrets']) {
+      if (S.applies(row, col)) assert.equal(S.valueOf(none, '', row, col), 'ask', row + ' ' + col);
+    }
   }
   assert.equal(S.valueOf(none, '', 'ungated', 'openclaw'), 'off', 'an ungated agent is off until the user turns it on');
+});
+
+test('security: the local model keeps what it did before the Security room: its reads and edits inside the worktree run without a question', () => {
+  const none = RULES();
+  // Its low calls never were requests (providers/local.mjs ran them at once); the other rows were asked.
+  assert.equal(S.valueOf(none, '', 'read-inside', 'local'), 'allow');
+  assert.equal(S.valueOf(none, '', 'edit-inside', 'local'), 'allow');
+  assert.equal(S.sourceOf(none, '', 'edit-inside', 'local'), 'default');
+  for (const row of ['files-outside', 'shell', 'web', 'mcp', 'settings', 'secrets']) assert.equal(S.valueOf(none, '', row, 'local'), 'ask', row);
 });
 
 test('security: a click cycles Ask, Allow, Deny; the Secrets rows offer only Ask and Deny', () => {

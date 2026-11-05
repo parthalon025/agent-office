@@ -40,6 +40,7 @@ export const PROTOCOL_VERSION = 1;
 // variable that moves it and the folder under the user's home (the office lists them, #72; only with the 'skills' feature). pin: the version the office was tested against (null: not tested with a real one yet).
 // gated (ADR 0001): true only when the agent asks the office before every tool call that is not low risk; an agent where only
 // some calls ask is ungated, with its supervision label. None of the agents has been run against the office yet (pin: null).
+const HERMES_EDITS = 'Edit requests come to the office and the rule applies. Reads, and writes to its own skills and memory, run without asking.';
 export const AGENTS = {
   hermes: {
     label: 'Hermes Agent', program: 'hermes', args: ['acp'],
@@ -47,6 +48,12 @@ export const AGENTS = {
     // only for commands that match its danger patterns) and upstream issue #139074 (0.21.5, a client with terminal: true:
     // a write asked, a touch ran without asking). Its default mode asks before edits.
     gated: false, supervision: 'Partly supervised: file edits ask, commands do not',
+    // The Security room cells (security.mjs enforcement): an edit request inside the worktree comes through
+    // session/request_permission, so the office's rule decides it. Reads do not ask. An edit outside the worktree or of a
+    // settings file asks too, but Hermes writes its own skills and memory (under .hermes) with no request: partly enforced.
+    enforces: ['edit-inside'],
+    unenforced: { 'read-inside': 'This agent reads files without asking the office.', secrets: 'This agent reads files without asking the office.' },
+    partly: { 'files-outside': HERMES_EDITS, settings: HERMES_EDITS },
     askTimeoutMs: 60_000, // Hermes issue #63302: a fixed 60 s timeout on edit approval (command approval has its own setting)
     features: ['skills', 'memory'], skillsHome: { env: 'HERMES_HOME', dir: '.hermes' }, pin: null,
     needs: ['Install Hermes Agent so that hermes.exe is on the PATH, then run hermes acp --check in a terminal.'],
@@ -530,7 +537,7 @@ export function createAcp(deps) {
   // ----- what the office serves: files and terminals (local-tools.mjs, limited to the root) -----
   // A call the office runs for the agent is refused when its path is outside the root (before anyone is asked), and runs at once
   // when the user just approved that same call. Every other call goes to the office like a local agent's (#70): the Security
-  // room rules decide (by default a read or edit inside the worktree runs with no question, riskOf's low), else it is held. So
+  // room rules decide (by default every call is held until the user answers; a cell the user set to Allow or Deny answers it), else it is held. So
   // this file keeps no approval rule of its own. Returns { ok, why }: why the office refused, for the agent.
   function allowed(s, st, toolName, input) {
     const file = toolName === 'Write' ? norm(st, input.file_path) : null;
@@ -817,6 +824,8 @@ export function createAcp(deps) {
     spec,
     // The Security room rows the agent's own config takes (providers/index.mjs; security.mjs enforcement()).
     ...(spec.enforces ? { enforces: [...spec.enforces] } : {}),
+    ...(spec.unenforced ? { unenforced: { ...spec.unenforced } } : {}),
+    ...(spec.partly ? { partly: { ...spec.partly } } : {}),
     // OpenClaw: the config check for the current Security room cells, and the cells its config cannot carry (null: no config).
     policy: (fresh) => policy(fresh === true),
 

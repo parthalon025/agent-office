@@ -309,7 +309,7 @@ async function refreshEnforce(fresh = false) {
 // Code's hooks come in over the hook routes below, and a permission decision goes back as the hook's answer (claude.answer
 // gives the body). The other providers raise their requests through events.permission; events.drop frees one their agent no
 // longer waits for (releaseHold with no decision); events.fresh says a reopen could not continue the conversation (freshReopen).
-// A quiet answer (a low call a provider asks about, allowed by default) changes nothing the page shows: no snapshot.
+// A quiet answer (a low call the local model asks about, allowed by its default cell) changes nothing the page shows: no snapshot.
 const events = providerEvents({ tracker, onChange: () => broadcast(), hold: (r) => { holdRequest(r); if (!r.quiet) broadcast(); }, release: (id) => releaseHold(id, {}), fresh: freshReopen });
 const claude = createClaudeCode({ events, files: () => ({ settings: activeHooksFile(), mcp: MCP_FILE, launcher: path.join(ROOT, 'launch.ps1') }) });
 // The four office tools for agents the office runs itself (no MCP process): the same handlers the /mcp/* routes call.

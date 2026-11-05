@@ -58,9 +58,9 @@ export function versionAtLeast(v, min = MIN_VERSION) {
 // What the Security room cells (row -> ask | allow | deny) were before the user changes them. #70 owns the real rules; the
 // caller passes the cells of the OpenClaw column.
 // The server passes the OpenClaw column of the Security room (security.mjs cellsOf, for the session's building) as the cells.
-// DEFAULT_CELLS (the room's defaults) is what a caller without the room gets. workspaceOnly and exec ask decide whether a
+// DEFAULT_CELLS (the room's defaults: every cell Ask) is what a caller without the room gets. workspaceOnly and exec ask decide whether a
 // session starts and how it is labelled (providers/acp.mjs start()); the rest says which cells the wall marks Not enforced.
-export const DEFAULT_CELLS = { 'read-inside': 'allow', 'edit-inside': 'allow', 'files-outside': 'ask', shell: 'ask', web: 'ask', mcp: 'ask', settings: 'ask', secrets: 'ask' };
+export const DEFAULT_CELLS = { 'read-inside': 'ask', 'edit-inside': 'ask', 'files-outside': 'ask', shell: 'ask', web: 'ask', mcp: 'ask', settings: 'ask', secrets: 'ask' };
 // A Deny cell is these tool ids in tools.deny (tool groups and ids as OpenClaw names them).
 const DENY = { shell: ['group:runtime'], web: ['group:web'], 'edit-inside': ['write', 'edit', 'apply_patch'], mcp: ['group:plugins'], 'read-inside': ['read'] };
 const DENY_ORDER = ['shell', 'web', 'edit-inside', 'mcp', 'read-inside'];

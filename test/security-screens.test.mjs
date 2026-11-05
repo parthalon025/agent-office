@@ -182,6 +182,19 @@ test('an Ask that Claude Code decides by itself says Partly enforced, and why; D
   assert.ok(pagedT.includes('Partly enforced for this agent'), pagedT.join(' / '));
 });
 
+test('a row where only some calls reach the office says Partly enforced with its reason, whatever the value (Hermes edits outside)', () => {
+  const why = 'Edit requests come to the office and the rule applies. Reads, and writes to its own skills and memory, run without asking.';
+  const enf = { ...enforce, hermes: { reason: '', rows: {}, asks: {}, partly: { 'files-outside': why } } };
+  const d = (rules) => ({ sec: { rules, enforce: enf, spend: {} }, building: B, buildingName: 'repo' });
+  const v = view({ screen: 'files' });
+  for (const rules of [{ office: {}, buildings: {} }, { office: { 'files-outside|hermes': 'deny' }, buildings: {} }]) {
+    const t = texts(P.plan(v, d(rules)));
+    assert.ok(t.includes('Partly enforced'), t.join(' / '));
+    assert.ok(t.includes('Partly enforced for Hermes. ' + why));
+  }
+  assert.ok(!texts(P.plan(v, d({ office: {}, buildings: {} }))).some((x) => /^Not enforced for [^.]*Hermes/.test(x)), 'it is not "Not enforced"');
+});
+
 test('the outside plate of a right-wall screen shows its title and has no hotspot; a click in flight is ignored', () => {
   const p = P.plan(view({ screen: 'agents', face: 'back' }), data());
   assert.deepEqual(p.hots, []);

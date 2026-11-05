@@ -156,8 +156,11 @@
 
   // ---------- the Security room grid (#70) ----------
   // Rows are action kinds (risk.mjs actionOf names the row of a tool call) and settings of the Agents screen; columns
-  // are agent kinds. A cell is Ask, Allow or Deny (a toggle is Off or On). Defaults copy riskOf: low (read or edit inside
-  // the worktree) is Allow, the rest is Ask. The two Secrets rows never offer Allow. The Agents rows are office-wide;
+  // are agent kinds. A cell is Ask, Allow or Deny (a toggle is Off or On). Every call cell is Ask by default, also the low
+  // ones (read or edit inside the worktree): the office answers a request only when the user set the cell to Allow or Deny
+  // (owner decision pending, #67; Claude Code asks about such calls by itself today). One exception, `defs`: the local model
+  // keeps what it did before the Security room, its reads and edits inside the worktree run with no question (they never were
+  // requests, providers/local.mjs). The two Secrets rows never offer Allow. The Agents rows are office-wide;
   // every other row can have a per-building override. A rule the row does not offer is never used.
   var SEC_COLUMNS = [{ id: 'claude-code', label: 'Claude Code' }, { id: 'hermes', label: 'Hermes' }, { id: 'dsh', label: 'dsh' },
     { id: 'openclaw', label: 'OpenClaw' }, { id: 'local', label: 'Local model' }];
@@ -168,8 +171,8 @@
   var SEC_KIND = bare({ 'claude-code': 'claude-code', ollama: 'local', lmstudio: 'local', hermes: 'hermes', dsh: 'dsh', openclaw: 'openclaw' });
   var RULE = ['ask', 'allow', 'deny'], ASK_DENY = ['ask', 'deny'], TOGGLE = ['off', 'on'];
   var SEC_ROWS = bare({
-    'read-inside': { label: 'Read inside the worktree', options: RULE, def: 'allow' },
-    'edit-inside': { label: 'Edit inside the worktree', options: RULE, def: 'allow' },
+    'read-inside': { label: 'Read inside the worktree', options: RULE, def: 'ask', defs: { local: 'allow' } },
+    'edit-inside': { label: 'Edit inside the worktree', options: RULE, def: 'ask', defs: { local: 'allow' } },
     'files-outside': { label: 'Read or edit outside it', options: RULE, def: 'ask' },
     shell: { label: 'Shell commands', options: RULE, def: 'ask' },
     web: { label: 'Web and network', options: RULE, def: 'ask' },
@@ -194,6 +197,8 @@
   var SEC_WORD = bare({ ask: 'Ask', allow: 'Allow', deny: 'Deny', off: 'Off', on: 'On' });
   function secKey(row, col) { return row + '|' + col; }
   function secApplies(row, col) { var r = SEC_ROWS[row]; return !!r && (!r.only || r.only.indexOf(col) >= 0); }
+  // The default of a cell: the row's, unless the row names another for that agent kind.
+  function secDef(row, col) { var r = SEC_ROWS[row]; return r.defs && own(r.defs, col) ? r.defs[col] : r.def; }
   function secOk(row, v) { return SEC_ROWS[row].options.indexOf(v) >= 0; }
   // The rule of a cell and where it comes from: the building's override, the office-wide rule, or the default.
   function secLook(rules, building, row, col) {
@@ -202,7 +207,7 @@
     if (!r.office && own(b, k) && secOk(row, b[k])) return { value: b[k], source: 'building' };
     var o = rules && rules.office;
     if (own(o, k) && secOk(row, o[k])) return { value: o[k], source: 'office' };
-    return { value: r.def, source: 'default' };
+    return { value: secDef(row, col), source: 'default' };
   }
   var security = {
     roomName: 'Security', screens: SEC_SCREENS, rows: SEC_ROWS, columns: SEC_COLUMNS, key: secKey, applies: secApplies, own: own,
@@ -210,6 +215,7 @@
     options: function (row) { return SEC_ROWS[row] ? SEC_ROWS[row].options.slice() : []; },
     valueOf: function (rules, building, row, col) { var x = secLook(rules, building, row, col); return x ? x.value : null; },
     sourceOf: function (rules, building, row, col) { var x = secLook(rules, building, row, col); return x ? x.source : null; },
+    defaultOf: secDef,
     next: function (row, v) {
       var o = SEC_ROWS[row].options, i = o.indexOf(v);
       return o[((i < 0 ? o.indexOf(SEC_ROWS[row].def) : i) + 1) % o.length];

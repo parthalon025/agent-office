@@ -116,9 +116,15 @@ test('the snapshot carries the rules, what each agent kind enforces, and the Spe
   const s = await snapshot();
   assert.deepEqual(s.security.rules, { office: {}, buildings: {} });
   assert.equal(s.security.enforce['claude-code'].reason, '');
-  // Hermes Agent (#71) is ungated: it runs commands and edits through its own tools, so no call row is enforced for it.
-  assert.equal(s.security.enforce.hermes.reason, '');
-  assert.match(s.security.enforce.hermes.rows.shell, /without asking the office/);
+  // Hermes Agent (#71) is ungated: it runs commands through its own tools, but its edit requests come to the office
+  // (session/request_permission), so the Edit inside cell is enforced. Reads and its own skill and memory writes are not.
+  const h = s.security.enforce.hermes;
+  assert.equal(h.reason, '');
+  assert.match(h.rows.shell, /without asking the office/);
+  assert.equal(h.rows['edit-inside'], undefined, 'Edit inside the worktree is enforced for Hermes');
+  assert.match(h.rows['read-inside'], /reads files without asking/);
+  assert.match(h.partly['files-outside'], /its own skills and memory/);
+  assert.match(h.partly.settings, /its own skills and memory/);
   assert.equal(s.security.enforce.dsh.reason, '', 'dsh is gated: it asks the office before its tool calls');
   assert.deepEqual(s.security.enforce.dsh.rows, {});
   // OpenClaw (#73) is ungated: off, and its config not read, it takes only the shell rule into its own config.
@@ -134,11 +140,25 @@ test('the rule route is a page route: the agent token does not open it', async (
   assert.equal((await post('/api/security/set', { scope: 'office', row: 'shell', col: 'claude-code', value: 'deny' }, agentToken)).status, 401);
 });
 
-test('Allow answers at once, with a feed line (the default for an edit inside the worktree)', async () => {
-  const r = await hook(permission('Edit', { file_path: path.join(repo, 'a.txt'), old_string: 'a', new_string: 'b' }, { session_id: 'sid-sec-git', cwd: repo }));
+// Owner decision pending (#67): with the default cells nothing is answered for the user, a low-risk edit in a worktree included.
+test('with the default cells a low-risk Claude Code edit in a worktree is held for the user, and PreToolUse makes Claude Code ask', async () => {
+  const edit = { file_path: path.join(repo, 'a.txt'), old_string: 'a', new_string: 'b' };
+  const pre = await hook({ hook_event_name: 'PreToolUse', session_id: 'sid-sec-git', cwd: repo, tool_name: 'Edit', tool_use_id: 'toolu_sec_edit', tool_input: edit });
+  assert.deepEqual(pre.json, { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: 'The Security room asks for edit inside the worktree.' } });
+  const r = await heldThenDeclined(permission('Edit', edit, { session_id: 'sid-sec-git', cwd: repo }), repo);
+  assert.equal(r.hookSpecificOutput.decision.behavior, 'deny', 'the user declined it: Security answered nothing');
+  assert.ok(!(await feedOf(repo)).some((t) => /by Security/.test(t)), 'no Security line');
+});
+
+test('Allow set by the user answers at once, with a feed line', async () => {
+  const edit = { file_path: path.join(repo, 'a.txt'), old_string: 'a', new_string: 'b' };
+  assert.equal((await set({ scope: 'office', row: 'edit-inside', col: 'claude-code', value: 'allow', confirmed: true })).status, 200);
+  const r = await hook(permission('Edit', edit, { session_id: 'sid-sec-git', cwd: repo }));
   assert.equal(r.status, 200);
   assert.deepEqual(r.json, { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } });
   assert.ok(await feedHas('allowed by Security: Edit inside the worktree', repo));
+  assert.equal((await set({ scope: 'office', row: 'edit-inside', col: 'claude-code', value: 'ask' })).status, 200); // the default again
+  assert.deepEqual((await snapshot()).security.rules, { office: {}, buildings: {} });
 });
 
 // #70 review (blocker): the default Allow of the inside rows is for a git worktree only. A terminal session in a folder

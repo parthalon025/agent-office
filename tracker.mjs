@@ -310,7 +310,7 @@ export function createTracker(deps = {}) {
   // The check before a hold (screen, the Security room rules) comes first: when it decides, nothing waits, the request is
   // not pending, and the result has auto: { allow, message? } for the server to answer at once. A feed line says so
   // unless the decision is quiet. opts.provider: the request comes from a provider (providers/index.mjs), not a hook.
-  // A quiet decision (a low call a provider asks about, allowed by default) changes nothing the page shows: it skips the
+  // A quiet decision (a low call the local model asks about, allowed by its default cell) changes nothing the page shows: it skips the
   // hook record, the git place check and the change callback, and the result says quiet so the server sends no snapshot.
   function permissionRequest(p, opts = {}) {
     const auto = (d) => (d.message ? { allow: d.allow === true, message: d.message } : { allow: d.allow === true });

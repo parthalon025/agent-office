@@ -176,7 +176,7 @@ export function createLocal(deps) {
   }
 
   // One tool call: Pre hook, the office's decision, the tool, then Post or PostFailure. Returns the text for the model.
-  // The office decides every call (the Security room rules, then a hold): by default a low-risk call runs with no question,
+  // The office decides every call (the Security room rules, then a hold): a low-risk call inside the worktree runs with no question while its cell is the default Allow of the local model,
   // as riskOf rated it, and the user can tighten that on the wall. So this file keeps no approval rule of its own.
   async function callTool(s, st, c) {
     let input;
