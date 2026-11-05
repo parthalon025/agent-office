@@ -495,15 +495,18 @@ test('an ACP session: cost unknown and no spend limit, a held request answered f
   assert.equal(onPage.costUnknown, true, 'the page gets it, so it shows unknown, never $0.00');
   assert.ok(feed.includes('Hermes Agent does not report cost. The office shows it as unknown, and no spend limit can stop it.'), feed.join('\n'));
   assert.ok(feed.includes('Hermes Agent: Partly supervised: file edits ask, commands do not. The feed says what it ran without asking.'), feed.join('\n'));
-  // A request the agent raises goes to the Security room first (#70): an edit inside its worktree is Allow by default, so it
-  // is answered at once (allow once). A command is Ask by default: it waits in the office until the user answers there.
+  // A request the agent raises goes to the Security room first (#70). Every cell is Ask by default, an edit inside its
+  // worktree too: both requests wait in the office until the user answers there.
   const options = [{ optionId: 'always', name: 'Always', kind: 'allow_always' }, { optionId: 'once', name: 'Allow', kind: 'allow_once' }, { optionId: 'no', name: 'Reject', kind: 'reject_once' }];
   const steps = [{ ask: { toolCall: { toolCallId: 't1', title: 'Edit a', kind: 'edit', locations: [{ path: path.join(s.cwd, 'a.txt') }] }, options } },
     { ask: { toolCall: { toolCallId: 't2', title: 'npm test', kind: 'execute', rawInput: { command: 'npm test' } }, options } }];
   assert.equal((await call('/api/message', { uid, text: JSON.stringify(steps) })).status, 200);
   const waiting = await until(async () => { const x = await sessionOf(uid); return x.pending.length ? x : null; }, 'the request to wait');
-  assert.deepEqual([waiting.pending.length, waiting.pending[0].tool], [1, 'Bash'], 'the edit did not wait');
+  assert.deepEqual([waiting.pending.length, waiting.pending[0].tool], [1, 'Edit'], 'the edit waits too: nothing is answered unless the user set a cell');
   assert.equal((await call('/api/answer', { id: waiting.pending[0].id, allow: true, always: true })).status, 200);
+  const second = await until(async () => { const x = await sessionOf(uid); return x.pending.length ? x : null; }, 'the command to wait');
+  assert.deepEqual([second.pending.length, second.pending[0].tool], [1, 'Bash']);
+  assert.equal((await call('/api/answer', { id: second.pending[0].id, allow: true, always: true })).status, 200);
   const done = await until(async () => { const x = await sessionOf(uid); return x.status === 'idle' && x.replies.length === 2 ? x : null; }, 'the turn to end');
   assert.deepEqual(done.replies.map((x) => x.text), ['asked: selected once', 'asked: selected once'], 'allow once, never always');
   assert.equal(done.cost, null, 'never $0.00');
@@ -646,10 +649,13 @@ test('OpenClaw (#73): off until the Security room turns it on; then ungated and 
   assert.equal((await call('/api/security/set', on)).status, 409, 'turning it on loosens: the wall asks for the Confirm');
   assert.equal((await call('/api/security/set', { ...on, confirmed: true })).status, 200);
   // On: the office reads its config (read-only) and the wall shows what the config really carries.
-  const enforce = await until(async () => { const e = (await snapshot()).security.enforce.openclaw; return e.rows['edit-inside'] ? null : e; }, 'the wall to show what the config carries');
+  const enforce = await until(async () => { const e = (await snapshot()).security.enforce.openclaw; return /no approval step/.test(e.rows.web || '') ? e : null; }, 'the wall to show what the config carries');
   assert.equal(enforce.rows.shell, undefined, 'exec approval is on: the shell cell is enforced');
-  assert.equal(enforce.rows['edit-inside'], undefined, 'Allow: it edits, as the cell says');
+  assert.match(enforce.rows['edit-inside'], /no approval step/, 'Ask on edit inside (the default): OpenClaw cannot ask about edits, so the wall says so');
   assert.match(enforce.rows.web, /no approval step/, 'Ask on web: its config cannot ask');
+  // A cell the user sets to Allow is what OpenClaw does with edits, so the wall then shows it as enforced.
+  assert.equal((await call('/api/security/set', { scope: 'office', row: 'edit-inside', col: 'openclaw', value: 'allow', confirmed: true })).status, 200);
+  await until(async () => (await snapshot()).security.enforce.openclaw.rows['edit-inside'] === undefined, 'Allow on edit inside to show as enforced');
   info = await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
   row = info.providers.find((p) => p.kind === 'openclaw');
   // The Gateway answered, so the check went on to the handshake. That one runs in the temp folder, where the stand-in agent
