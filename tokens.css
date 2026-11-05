@@ -1,4 +1,4 @@
-/* Agent Office DS x1.6.8: tokens.css. Edited by hand. Keep it in step with tokens.json (test/ds-kit.test.mjs checks every token). */
+/* Agent Office DS x1.6.9: tokens.css. Edited by hand. Keep it in step with tokens.json (test/ds-kit.test.mjs checks every token). */
 :root, [data-theme="light"] {
   --bg: #e9edf1;
   --panel: rgba(255,255,255,0.86);
@@ -102,6 +102,8 @@
   --scene-bot-h: 1.1;
   --scene-nav-pad: 0.45;
   --scene-nav-cell: 0.25;
+  --scene-walk-speed: 2.6;
+  --scene-walk-speed-ephemeral: 5.2;
   --light-day-sky: 0.75;
   --light-day-sun: 0.9;
   --light-day-lamp: 0;
