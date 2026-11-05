@@ -241,20 +241,24 @@ function ViewToggle(p){var opts=[{id:"building",label:"Building",icon:"building"
  return h("div",{className:"ao-panel ao-seg",role:"group","aria-label":"View"},opts.map(function(o){return h("button",{key:o.id,type:"button","aria-pressed":String(p.value===o.id),onClick:function(){p.onChange&&p.onChange(o.id);}},h(Icon,{name:o.icon,size:14}),o.label);}));}
 /* The narrow floor strip scrolls sideways: the scrollLeft that centers the current row (sw scrollWidth, cw clientWidth, off and w the row's left and width inside the strip). Null when every floor fits. */
 function floorScroll(sw,cw,off,w){if(!(sw>cw))return null;return Math.max(0,Math.min(sw-cw,Math.round(off+w/2-cw/2)));}
+/* The list scrolls its current row (aria-current) to the middle, sideways in the narrow strip and down in the capped list of the left menu. Used by FloorList and RoomList. */
+function keepInView(el){var row=el&&el.querySelector('[aria-current="true"]');if(!row)return;var eb=el.getBoundingClientRect(),rb=row.getBoundingClientRect(),x=floorScroll(el.scrollWidth,el.clientWidth,rb.left-eb.left+el.scrollLeft,row.offsetWidth),y=floorScroll(el.scrollHeight,el.clientHeight,rb.top-eb.top+el.scrollTop,row.offsetHeight);if(x!=null)el.scrollLeft=x;if(y!=null)el.scrollTop=y;}
 function FloorList(p){var fl=p.floors||[],box=R.useRef(null);
- R.useEffect(function(){function fit(){var el=box.current,row=el&&el.querySelector('[aria-current="true"]');if(!row)return;var x=floorScroll(el.scrollWidth,el.clientWidth,row.getBoundingClientRect().left-el.getBoundingClientRect().left+el.scrollLeft,row.offsetWidth);if(x!=null)el.scrollLeft=x;if(el.scrollHeight>el.clientHeight+1)el.scrollTop=Math.max(0,row.getBoundingClientRect().top-el.getBoundingClientRect().top+el.scrollTop-(el.clientHeight-row.offsetHeight)/2);}
+ R.useEffect(function(){function fit(){keepInView(box.current);}
   fit();window.addEventListener("resize",fit);return function(){window.removeEventListener("resize",fit);};},[p.current,fl.length]);
  return h(AO.Panel,{title:"Floors",count:fl.length,flush:true},h("div",{className:"ao-floors",ref:box},fl.map(function(f){var w=(f.statuses||[]).filter(function(s){return s==="working";}).length;
   return h("button",{key:f.id,type:"button",className:"ao-row","aria-current":String(f.id===p.current),onClick:function(){p.onSelect&&p.onSelect(f.id);}},
    h("span",{className:"ao-fnum"},f.id),h("span",{style:{minWidth:0}},h("div",{style:{fontWeight:500}},f.name,f.rooms>1&&h("span",{className:"ao-muted ao-mono",style:{fontSize:10,marginLeft:6}},f.rooms+" rooms")),h("div",{className:"ao-pips"},(f.statuses||[]).map(function(s,i){return h("i",{key:i,style:{background:"var(--status-"+s+")"}});}))),
-   h("span",{className:"ao-mono ao-muted ao-ct"},w+"/"+(f.statuses||[]).length));}),p.onAdd&&h("div",{className:"ao-addrow"},h(AddButton,{onClick:p.onAdd},"Add floor"))));}
-function RoomList(p){var st=R.useState(false),pick=st[0],setPick=st[1];var rooms=p.rooms||[];
- return h(AO.Panel,{title:"Rooms",count:rooms.length,flush:true},h("div",{className:"ao-floors"},rooms.map(function(r){return h("div",{key:r.id,className:"ao-roomrow"},
+   h("span",{className:"ao-mono ao-muted ao-ct"},w+"/"+(f.statuses||[]).length));})),p.onAdd&&h("div",{className:"ao-addrow"},h(AddButton,{onClick:p.onAdd},"Add floor")));}
+function RoomList(p){var st=R.useState(false),pick=st[0],setPick=st[1],box=R.useRef(null);var rooms=p.rooms||[];
+ R.useEffect(function(){function fit(){keepInView(box.current);}
+  fit();window.addEventListener("resize",fit);return function(){window.removeEventListener("resize",fit);};},[p.current,rooms.length]);
+ return h(AO.Panel,{title:"Rooms",count:rooms.length,flush:true},h("div",{className:"ao-floors",ref:box},rooms.map(function(r){return h("div",{key:r.id,className:"ao-roomrow"},
    h("button",{type:"button",className:"ao-row","aria-current":String(r.id===p.current),onClick:function(){p.onSelect&&p.onSelect(r.id);}},h("span",{className:"ao-typeicon",style:{color:"var(--type-"+r.type+")"}},h(Icon,{name:r.type,size:16})),
     h("span",{style:{minWidth:0}},h("div",{style:{fontWeight:500}},r.name),h("div",{className:"ao-muted",style:{fontSize:11}},TYPE_LBL[r.type])),h("span",{className:"ao-mono ao-muted ao-ct"},r.working+"/"+r.bots)),
-   p.onAddBot&&h("button",{type:"button",className:"ao-iconbtn","aria-label":"Add a bot to "+r.name,title:"Add bot",onClick:function(){p.onAddBot(r.id);}},h(Icon,{name:"bot",size:15})));}),
+   p.onAddBot&&h("button",{type:"button",className:"ao-iconbtn","aria-label":"Add a bot to "+r.name,title:"Add bot",onClick:function(){p.onAddBot(r.id);}},h(Icon,{name:"bot",size:15})));})),
   p.onAddRoom&&h("div",{className:"ao-addrow"},pick?h("div",{className:"ao-typepick",role:"group","aria-label":"Room type"},Object.keys(TYPE_LBL).map(function(t){return h("button",{key:t,type:"button",onClick:function(){setPick(false);p.onAddRoom(t);}},h("span",{style:{color:"var(--type-"+t+")"}},h(Icon,{name:t,size:16})),TYPE_LBL[t]);}),h("button",{type:"button",className:"ao-muted",onClick:function(){setPick(false);}},"Cancel"))
-   :h(AddButton,{onClick:function(){setPick(true);}},"Add room"))));}
+   :h(AddButton,{onClick:function(){setPick(true);}},"Add room")));}
 function BotRow(p){return h("button",{type:"button",className:"ao-bot",role:"option","aria-selected":String(!!p.selected),onClick:p.onClick},h(BotAvatar,{shape:p.shape,color:p.color,status:p.status,size:26}),
  h("span",{style:{minWidth:0,flex:1}},h("div",{className:"ao-bot-n"},p.name,p.role&&h("span",{className:"ao-bot-role"},h(Icon,{name:"role-"+p.role,size:12,label:ROLE_LBL[p.role]}))),h("div",{className:"ao-bot-s"},LBL[p.status||"working"]+" · "+p.task)));}
 function OfficeTypeCard(p){var t=p.type||"team",th=useTheme(p),TB=AO.THUMBS_BY_THEME||{},md=(AO.MODES||[]).filter(function(m){return m.theme===th;})[0],set=TB[th]||(md&&md.dark&&TB.dark)||AO.THUMBS||{};return h("div",{className:"ao-panel ao-typecard"},h("div",{className:"ao-typecard-img",dangerouslySetInnerHTML:{__html:set[t]||""}}),h("div",{className:"ao-typecard-b"},h(OfficeTypeBadge,{type:t}),h("div",{className:"ao-muted",style:{fontSize:12,marginTop:4}},p.note)));}

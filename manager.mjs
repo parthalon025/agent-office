@@ -28,8 +28,8 @@ export const DEFAULT_LIMITS = { maxSteps: 12, maxHops: 4, maxMessages: 30, maxAt
 const STATUS_TO_DS = { pending: 'resting', working: 'working', finished: 'finished', error: 'error' };
 const MARK = { pending: '[ ]', working: '[~]', finished: '[x]', error: '[!]' };
 const WORD = { planning: 'Planning', 'awaiting-approval': 'Waiting for your approval', running: 'Running', finished: 'Done', blocked: 'Blocked', stopped: 'Stopped', failed: 'Failed', cancelled: 'Cancelled' };
-const GOAL_MAX = 2000; // a goal is stored up to this; the board shows 300
-const BOARD_GOAL = 300, BOARD_STEP = 240; // 12 steps of 240 and a goal of 300 leave room for status, reason and spend
+const GOAL_MAX = 2000; // a longer goal is refused (never planned from a cut text); the board shows 300
+const BOARD_GOAL = 300, BOARD_STEP = 240, BOARD_OWNER = 40; // 12 steps of 240 and a goal of 300 leave room for status, reason and spend
 const clip = (s, n) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 
 export function createManager(deps = {}) {
@@ -49,19 +49,19 @@ export function createManager(deps = {}) {
   /** The plan as a to-do list (TodoWrite shape, read by OfficeVocab.todoStatus): the step that works is in_progress, a failed step is error (not a TodoWrite status; the vocab shows it as error). */
   const todosOf = (g) => g.steps.map((s) => ({ content: s.text, activeForm: s.owner ? `${s.owner}: ${s.text}` : s.text, status: s.status === 'finished' ? 'completed' : s.status === 'working' ? 'in_progress' : s.status === 'error' ? 'error' : 'pending' }));
 
-  /** The board text: goal and status first, one line per step, then what the user must know (reason, waiting, spend). */
+  /** The board text: goal and status first, one line per step, then what the user must know (reason, waiting, spend). The plural of steps follows format.js `plural`. */
   function boardText(g) {
     const done = g.steps.filter((s) => s.status === 'finished').length;
-    const head = [`Goal: ${clip(g.goal, BOARD_GOAL)}`, `${WORD[g.status] || g.status}${g.steps.length ? `. ${done} of ${g.steps.length} steps done.` : '.'}`];
+    const head = [`Goal: ${clip(g.goal, BOARD_GOAL)}`, `${WORD[g.status] || g.status}${g.steps.length ? `. ${done} of ${g.steps.length} ${g.steps.length === 1 ? 'step' : 'steps'} done.` : '.'}`];
     const tail = [];
     if (g.reason) tail.push(clip(g.reason, BOARD_STEP));
     if (g.waitingFor) tail.push('The next step waits for a free agent.');
     if (g.spendLimit > 0) tail.push(`Spent $${spent(g).toFixed(2)} of $${g.spendLimit.toFixed(2)}.`);
-    // The head and the tail (status, reason, wait, spend) are what the user must see, so they are never clipped. The step lines
-    // shrink together (240, 180, 120, ... characters of text) until everything fits; every line keeps its mark at the start.
+    // The status, the wait and the spend lines are what the user must see, so they are never clipped (the goal line is cut at 300, the reason at
+    // 240, an owner name at 40). The step lines shrink together (240, 180, 120, ... characters of text) until everything fits; every line keeps its mark.
     const build = (n) => head.concat(g.steps.map((s) => {
       let line = `${MARK[s.status] || '[ ]'} ${clip(s.text, n)}`;
-      if (s.owner) line += ` (${s.owner})`;
+      if (s.owner) line += ` (${clip(s.owner, BOARD_OWNER)})`;
       if (s.status === 'error' && s.result) line += `: ${clip(s.result, n)}`;
       return line;
     }), tail).join('\n');
@@ -71,7 +71,7 @@ export function createManager(deps = {}) {
   }
 
   /** Keep the board current: every change reports once, a repeat of the same text reports nothing. The text always carries the status word and the mark of
-   *  every step (boardText never clips them), so a change of status or of one to-do is always a change of text. A bad board never stops a goal. */
+   *  every step (boardText never clips the status word or a mark), so a change of status or of one to-do is always a change of text. A bad board never stops a goal. */
   function report(g) {
     if (typeof deps.board !== 'function') return;
     const text = boardText(g), todos = todosOf(g);
@@ -108,7 +108,7 @@ export function createManager(deps = {}) {
     return spendLimitFor({ paid, requested, fallback: defaultSpend }) ?? 0;
   }
 
-  function stop(g, status, reason) { g.status = status; g.reason = reason; touch(g); }
+  function stop(g, status, reason) { g.status = status; g.reason = reason; g.waitingFor = ''; touch(g); }
 
   /** Give the next pending step to a free agent. Called after every change that could free one. */
   async function pump(g) {
@@ -141,8 +141,9 @@ export function createManager(deps = {}) {
   return {
     /** A goal in. Plans it, then runs it, or waits for approve() when approveFirst is set. Resolves to the goal id. */
     async submit(building, goal, opts = {}) {
-      const text = clip(String(goal || '').trim(), GOAL_MAX);
+      const text = String(goal || '').trim();
       if (!text) throw new Error('A goal is required.');
+      if (text.length > GOAL_MAX) throw new Error(`The goal is too long. Keep it under ${GOAL_MAX} characters.`);
       const g = {
         id: 'g' + makeId(), building: String(building || ''), goal: text, status: 'planning', reason: '', steps: [],
         approveFirst: opts.approveFirst === true, spendLimit: limitOf(building, opts.spendLimit), messages: 0,

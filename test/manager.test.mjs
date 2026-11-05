@@ -302,12 +302,14 @@ test('the board names a failed step and a wait, and a bad board does not stop th
   assert.match(u.boards.at(-1).text, /\[!\] Find the bug \(Scout\): no access/);
 });
 
-test('a long goal still gets every later report (the goal line is clipped, the dedupe covers status and to-dos)', async () => {
+test('a goal over 2000 characters is refused, never planned from a cut text; one of 2000 gets every report', async () => {
   const w = world();
-  const id = await w.m.submit('b1', 'x'.repeat(4000));
-  assert.ok(w.m.get(id).goal.length <= 2000);
-  const lines = w.boards.at(-1).text.split('\n');
-  assert.ok(lines[0].length <= 'Goal: '.length + 300);
+  await assert.rejects(() => w.m.submit('b1', 'x'.repeat(2001)), /too long/);
+  assert.equal(w.planCalls, 0, 'the planner never saw it');
+  assert.equal(w.m.snapshot().length, 0);
+  const id = await w.m.submit('b1', 'x'.repeat(2000));
+  assert.equal(w.m.get(id).goal.length, 2000);
+  assert.ok(w.boards.at(-1).text.split('\n')[0].length <= 'Goal: '.length + 300);
   const n = w.boards.length;
   await w.m.finish('a1', { ok: true }); free(w, 'a1');
   await w.m.agentFreed();
@@ -394,4 +396,34 @@ test('a change of status alone, or of one to-do alone, is a new report', async (
 
 test('the default board limit fits a notes board', () => {
   assert.equal(DEFAULT_LIMITS.boardMax, NOTES_MAX - 100);
+});
+
+test('a cancelled goal does not say it waits for an agent', async () => {
+  const w = world();
+  w.agents.forEach((x) => { x.free = false; });
+  const id = await w.m.submit('b1', 'g');
+  assert.match(w.boards.at(-1).text, /waits for a free agent/);
+  w.m.cancel(id);
+  assert.equal(w.m.get(id).waitingFor, '');
+  assert.match(w.boards.at(-1).text, /Cancelled/);
+  assert.doesNotMatch(w.boards.at(-1).text, /waits for a free agent/);
+});
+
+test('a 300-character agent name is cut on the board, and the status and spend lines stay', async () => {
+  const plan = Array.from({ length: 12 }, (_, i) => ({ text: `${i} ` + 'y'.repeat(500), role: 'analyst' }));
+  const w = world({ plan, limits: { maxSteps: 12, boardMax: 1500 } });
+  w.agents[0].name = 'N'.repeat(300);
+  await w.m.submit('b1', 'g', { spendLimit: 5 });
+  await w.m.finish('a1', { ok: false, text: 'z'.repeat(500) });
+  const text = w.boards.at(-1).text;
+  assert.ok(text.length <= 1500);
+  assert.doesNotMatch(text, /N{41}/);
+  assert.match(text, /Blocked\. 0 of 12 steps done\./);
+  assert.match(text, /Spent \$0\.00 of \$5\.00\.$/);
+});
+
+test('one step is "1 step", not "1 steps"', async () => {
+  const w = world({ plan: [{ text: 'only', role: 'analyst' }] });
+  await w.m.submit('b1', 'g');
+  assert.match(w.boards.at(-1).text, /Running\. 0 of 1 step done\./);
 });
