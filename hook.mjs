@@ -29,8 +29,9 @@ const body = {
 
 // A permission prompt waits for the office to answer; every other event is fire-and-forget.
 const ask = payload.hook_event_name === 'PermissionRequest';
-// These three can carry a queued office message back to the session.
-const reads = ['PostToolUse', 'UserPromptSubmit', 'Stop'].includes(payload.hook_event_name);
+// These three can carry a queued office message back to the session. PreToolUse can carry the Security room's refusal
+// (permissionDecision deny) or its ask (#70).
+const reads = ['PostToolUse', 'UserPromptSubmit', 'Stop', 'PreToolUse'].includes(payload.hook_event_name);
 try {
   const res = await fetch(`http://127.0.0.1:${cfg.port}/hook${ask ? '/permission' : ''}`, {
     method: 'POST',
