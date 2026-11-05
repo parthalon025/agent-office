@@ -269,5 +269,12 @@
     return 'Runs ' + label + ' inside the office. You talk to it in the chat and approve its steps here. It has no terminal window.';
   }
 
-  root.OfficeVocab = { kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, modelChoices: modelChoices, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform };
+  // The spend limit field of the Open dialog: a paid kind that reports cost (#33, Q22). A kind with cost 'unknown' has no
+  // limit (providers/index.mjs spendLimitFor gives null: nothing could stop it), so its form says why instead (review M2).
+  function limitShown(k) { return !k || (k.paid !== false && k.cost !== 'unknown'); }
+  function costNote(k) {
+    return k && k.paid !== false && k.cost === 'unknown' ? (k.label || 'This agent') + ' does not report cost, so the office shows it as unknown and no spend limit can stop it. Check the spend in its own account.' : '';
+  }
+
+  root.OfficeVocab = { limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, modelChoices: modelChoices, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

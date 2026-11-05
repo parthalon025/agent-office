@@ -210,7 +210,8 @@
     var K = useKinds(), k = kindOf(K.list, form.provider);
     useFirstModel(k, form, setForm);
     // The options of the kind (providers/index.mjs describe). Without kinds yet, the dialog offers what Claude Code takes.
-    var canWindow = !k || k.terminal, paid = !k || k.paid;
+    // limited: the kind takes a spend limit (paid and it reports cost); a kind whose cost is unknown has none (review M2).
+    var canWindow = !k || k.terminal, limited = KV.limitShown(k), costNote = KV.costNote(k);
     var modes = k ? MODES.filter(function (o) { return !o.value || k.modes.indexOf(o.value) >= 0; }) : MODES;
     var hasModes = modes.length > 1;
     var b = useState(false), busy = b[0], setBusy = b[1];
@@ -227,7 +228,7 @@
       // Each agent gets its own room (a new worktree) unless the user keeps the folder. A terminal window always uses the folder.
       // Only the options the kind takes go to the server: a local model has no spend limit, window or permission mode.
       var where = canWindow ? form.where : 'office';
-      var body = Object.assign({}, form, { where: where, isolation: form.useFolder || where === 'terminal' ? 'same' : 'worktree', permissionMode: hasModes ? form.permissionMode : '', maxBudget: paid ? limitSent(form.maxBudget, p.spendLimit !== undefined) : undefined, confirmCost: confirmed === true });
+      var body = Object.assign({}, form, { where: where, isolation: form.useFolder || where === 'terminal' ? 'same' : 'worktree', permissionMode: hasModes ? form.permissionMode : '', maxBudget: limited ? limitSent(form.maxBudget, p.spendLimit !== undefined) : undefined, confirmCost: confirmed === true });
       delete body.useFolder;
       api('/api/open', body).then(function () { setBusy(false); setCostQ(null); p.onClose(); }, function (x) {
         setBusy(false);
@@ -266,7 +267,8 @@
         canWindow ? h(A.Select, { key: 'w', id: 'f-where', label: 'Runs', options: WHERE, value: form.where, onChange: set('where') }) : null,
         h(UseFolder, { key: 'i', checked: form.useFolder || terminal, disabled: terminal, onChange: set('useFolder'),
           hint: terminal ? 'A terminal window works in the folder.' : form.useFolder ? 'The agent works in this folder. Other agents in it share its room.' : 'The agent gets its own room: a new branch in its own folder next to the repository. Your branch stays untouched.' }),
-        paid ? h(A.TextInput, { key: 'b', id: 'f-budget', label: 'Spend limit in USD', value: form.maxBudget, placeholder: 'No limit', disabled: terminal, onChange: set('maxBudget'), hint: terminal ? undefined : limitHint(k ? k.label : 'Claude Code') }) : null,
+        limited ? h(A.TextInput, { key: 'b', id: 'f-budget', label: 'Spend limit in USD', value: form.maxBudget, placeholder: 'No limit', disabled: terminal, onChange: set('maxBudget'), hint: terminal ? undefined : limitHint(k ? k.label : 'Claude Code') })
+          : costNote ? h('p', { key: 'b', className: 'note' }, costNote) : null,
         // The server opens Claude Code in Default mode while a Security room rule for it is Ask (security.mjs permissionModeFor).
         hasModes ? h(A.Select, { key: 'm', id: 'f-mode', label: 'Permissions', options: modes, value: form.permissionMode, onChange: set('permissionMode'),
           hint: form.permissionMode === 'acceptEdits' ? 'While a Security room rule for Claude Code is Ask, the session opens in Default mode. The office then answers its edits by the rules.' : undefined }) : null]),
@@ -642,7 +644,7 @@
         h(Busy, { on: !K.list.length }),
         h('ul', { className: 'past' }, K.list.map(function (k) {
           var r = KV.kindState(k);
-          var facts = [k.terminal ? 'Runs in the office or a terminal window' : 'Runs in the office', k.paid ? 'Spend limit applies' : 'No cost',
+          var facts = [k.terminal ? 'Runs in the office or a terminal window' : 'Runs in the office', KV.limitShown(k) ? 'Spend limit applies' : KV.costNote(k) ? 'Cost unknown, no spend limit' : 'No cost',
             k.modes.length ? 'Permission modes' : null, k.needsModel ? 'You pick the model' : null].filter(Boolean).join(' · ');
           var names = k.models.map(function (m) { return m.label || m.id; }).join(', ');
           return h('li', { key: k.kind, className: 'past-row' },

@@ -311,3 +311,18 @@ test('requests: the reason an agent gives for a request comes with it, trimmed t
   assert.equal(r[0].reason, 'To check the fix.');
   assert.equal(r[1].reason, '');
 });
+
+// Review M2: an agent kind that reports no cost has no spend limit (nothing could stop it), so the Open dialog shows no limit
+// field and no "stops at this limit" hint for it: it says that cost is unknown.
+test('M2: the spend limit field is for a paid kind that reports cost; a cost-unknown kind says why it has none', () => {
+  const CC = { kind: 'claude-code', label: 'Claude Code', paid: true };
+  const HERMES = { kind: 'hermes', label: 'Hermes Agent', paid: true, cost: 'unknown' };
+  const LOCAL = { kind: 'ollama', label: 'Ollama', paid: false };
+  assert.equal(V.limitShown(null), true, 'before the kinds come: Claude Code');
+  assert.equal(V.limitShown(CC), true);
+  assert.equal(V.limitShown(HERMES), false);
+  assert.equal(V.limitShown(LOCAL), false, 'a local model costs nothing');
+  assert.equal(V.costNote(HERMES), 'Hermes Agent does not report cost, so the office shows it as unknown and no spend limit can stop it. Check the spend in its own account.');
+  assert.equal(V.costNote(CC), '');
+  assert.equal(V.costNote(LOCAL), '');
+});
