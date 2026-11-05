@@ -1063,6 +1063,30 @@ test('older replies that cannot load: the newest ones show, the page is told onc
   assert.deepEqual(names(m2.ev), upTo(12), 'a new scene gets them all');
 });
 
+test('older replies that never answer: after a wait the newest ones show and the page is told once', async () => {
+  const problems = [], asked = [];
+  const r = rig({ wire: true, onProblem: (t) => problems.push(t), fetchReplies: (uid) => (asked.push(uid), new Promise(() => {})) });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  const s = [...r.tracker.sessions.values()][0];
+  bigReplies(r, s, 12);
+  s.error = { id: 1, text: 'Out of budget.', at: r.t + 1 }; r.push();
+  const lean = r.store.sessionByUid(s.uid);
+  const m = r.mount(KEY_A);
+  await settle();
+  assert.deepEqual([of(m.ev, 'message').length, of(m.ev, 'error').length], [0, 0], 'the bot waits whole');
+  assert.equal(r.timers.length, 1, 'one timer for the request');
+  assert.equal(r.timers[0].ms, 15000);
+  r.timers[0].fn();
+  await settle();
+  assert.deepEqual(names(m.ev), upTo(12).slice(12 - lean.replies.length), 'the replies the snapshot carries');
+  assert.equal(of(m.ev, 'error').length, 1, 'the error comes after them');
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /older replies/i);
+  r.timers[0].fn(); r.push(); await settle();
+  assert.equal(problems.length, 1, 'a late timer tells nothing twice');
+  assert.equal(asked.length, 1);
+});
+
 test('a second scene of the building has the older replies at once: the page asks the server once', async () => {
   const asked = [], r = rig({ wire: true, fetchReplies: (uid) => serverReplies(r, asked)(uid) });
   await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
@@ -1121,6 +1145,43 @@ test('a failed turn shows after the replies it followed, not before them', async
   const line = m.ev.filter((e) => e.type === 'message' || e.type === 'error').map((e) => (e.type === 'error' ? 'ERROR' : e.text.split(' ')[0]));
   assert.deepEqual(line, [...upTo(12), 'ERROR']);
   assert.equal(of(m.ev, 'status').filter((e) => e.status === 'error').length, 0, 'the error is told once, as the error');
+  const err = of(m.ev, 'error')[0];
+  assert.equal(err.seeded, true, 'an old error is not news: no sound, no toast');
+  assert.equal(err.at, s.error.at, 'it keeps its own time');
+});
+
+test('an old error stays restored when the bot moves in from another building while its replies load', async () => {
+  const asked = [], r = rig({ wire: true, fetchReplies: (uid) => serverReplies(r, asked)(uid) });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_B });
+  const s = [...r.tracker.sessions.values()][0];
+  bigReplies(r, s, 12);
+  s.error = { id: 1, text: 'Out of budget.', at: r.t + 1 }; r.push();
+  const m = r.mount(KEY_A);
+  s.git = { ...GITS[REPO_A] }; s.cwd = REPO_A; r.t += 5; r.push();   // first seen here, in a live pass
+  assert.deepEqual(of(m.ev, 'error'), [], 'the error waits for the replies');
+  await settle();
+  const line = m.ev.filter((e) => e.type === 'message' || e.type === 'error').map((e) => (e.type === 'error' ? 'ERROR' : e.text.split(' ')[0]));
+  assert.deepEqual(line, [...upTo(12), 'ERROR']);
+  const err = of(m.ev, 'error')[0];
+  assert.equal(err.seeded, true);
+  assert.equal(err.at, undefined, 'restored in a live pass: no time, so the DS records it once');
+});
+
+test('an old error stays seeded when the bot is seated again while its replies load, and a new error is news', async () => {
+  const asked = [], r = rig({ wire: true, fetchReplies: (uid) => serverReplies(r, asked)(uid) });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  const s = [...r.tracker.sessions.values()][0];
+  bigReplies(r, s, 12);
+  s.error = { id: 1, text: 'Out of budget.', at: r.t + 1 }; r.push();
+  const m = r.mount(KEY_A);
+  s.git = { ...GITS['C:\\work\\repo-feat'] }; s.cwd = 'C:\\work\\repo-feat'; r.t += 5; r.push();
+  await settle();
+  const errs = of(m.ev, 'error');
+  assert.equal(errs.length, 1, 'told once');
+  assert.equal(errs[0].seeded, true, 'the old seat never told it, so it is not news');
+  assert.deepEqual(m.ev.filter((e) => e.type === 'message' || e.type === 'error').map((e) => e.type).slice(-2), ['message', 'error']);
+  s.error = { id: 2, text: 'Again.', at: r.t + 9 }; r.t += 10; r.push();
+  assert.equal(of(m.ev, 'error').at(-1).seeded, undefined, 'a new failure is live');
 });
 
 test('a session that ends while the older replies load still shows its replies, then its end', async () => {

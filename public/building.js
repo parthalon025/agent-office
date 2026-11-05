@@ -209,7 +209,7 @@
     // gives the session's whole reply list) and keeps the answer; a failure is told once (opts.onProblem(text)) and the chat
     // shows the newest replies. A new scene tries again (attach clears the failures), so a failure that stays tells the page once per scene,
     // one more error toast for each building change. Entries of sessions that are gone are dropped.
-    var oldReplies = {}, oldAsked = {}, oldFailed = {};
+    var oldReplies = {}, oldAsked = {}, oldFailed = {}, FETCH_MS = 15000;
     // firstId: the id of the newest-window's first reply. Answers { list } (replies older than that, in order), { wait } or { none }.
     function loadOlder(uid, firstId) {
       var have = oldReplies[uid];
@@ -217,11 +217,20 @@
       if (have) return { list: have.filter(function (r) { return r.id < firstId; }) };
       if (!opts.fetchReplies || oldFailed[uid]) return { none: true };
       if (!oldAsked[uid]) {
-        oldAsked[uid] = true;
-        Promise.resolve().then(function () { return opts.fetchReplies(uid); }).then(function (list) { oldReplies[uid] = Array.isArray(list) ? list : []; }, function () {
-          oldFailed[uid] = true;
-          if (opts.onProblem) { try { opts.onProblem('The chat shows only the newest replies. The older replies did not load.'); } catch (x) { /* a bad listener must not stop the office */ } }
-        }).then(function () { delete oldAsked[uid]; attached.slice().forEach(function (m) { m._follow(latest); }); });
+        // A request that never answers fails after FETCH_MS, like one that fails: a held bot must not wait for ever.
+        var token = oldAsked[uid] = {};
+        var finish = function (list) {
+          if (oldAsked[uid] !== token) return;   // settled already (the answer or the wait ran out)
+          delete oldAsked[uid];
+          if (list) oldReplies[uid] = Array.isArray(list) ? list : [];
+          else {
+            oldFailed[uid] = true;
+            if (opts.onProblem) { try { opts.onProblem('The chat shows only the newest replies. The older replies did not load.'); } catch (x) { /* a bad listener must not stop the office */ } }
+          }
+          attached.slice().forEach(function (m) { m._follow(latest); });
+        };
+        Promise.resolve().then(function () { return opts.fetchReplies(uid); }).then(function (list) { finish(list || []); }, function () { finish(null); });
+        later(function () { finish(null); }, FETCH_MS);
       }
       return { wait: true };
     }
@@ -389,7 +398,7 @@
         if (rp) rp.worktrees.forEach(function (w) { roomOf(fromPlace(w.place), base); });
         snapshot.sessions.forEach(function (s) {
           if (!s.place) return;   // wait until the server knows the repo and branch
-          var pl = placeOf(s), k = known[s.uid], emit = base, prev = null, firstSight = false;
+          var pl = placeOf(s), k = known[s.uid], emit = base, prev = null;
           // the session checked out another branch, or moved to another folder: seat it again. So does a changed supervision
           // label (an agent whose config turned out not to ask): the DS sets the card's platform line only when the bot is added.
           if (k && !k.ended && (k.place !== placeKey(pl) || k.sup !== V.supervision(s))) {
@@ -404,14 +413,14 @@
           var pick = function (old) { return prev && !old ? out : emit; };
           if (!k) {
             if (s.status === 'ended') return;
-            firstSight = true;
             var name = uniqueName(s.name);
-            k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: V.status(s).key, task: V.taskLine(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, olderDone: false, held: false, firstKind: seedAll ? 'seed' : 'restore', prevSeen: prev ? prev.replySeen : null, model: s.model, ended: false, place: placeKey(pl), sup: V.supervision(s), room: roomOf(pl, emit) };
+            k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: V.status(s).key, task: V.taskLine(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, olderDone: false, held: false, firstKind: seedAll ? 'seed' : 'restore', prevSeen: prev ? prev.replySeen : null, errKind: seedAll ? 'seed' : 'restore', errPrev: prev ? prev.errorSeen : null, model: s.model, ended: false, place: placeKey(pl), sup: V.supervision(s), room: roomOf(pl, emit) };
             // platform: the line on the bot's card: the supervision label of an ungated agent, else its agent kind (Claude Code,
             // Ollama, ...), the same word every list shows (vocab.js)
             // The old seat held its replies (the older ones were still loading), so it told none of them: this seat tells them
             // the way the old seat would have (a first sight, or what it had seen before), and keeps the wait for newer ones.
-            if (prev && prev.held) { k.firstKind = prev.firstKind; k.prevSeen = prev.prevSeen; k.holdTop = prev.holdTop; }
+            // The same for its error: errKind and errPrev say how the error is told, because the pass that tells it may come later.
+            if (prev && prev.held) { k.firstKind = prev.firstKind; k.prevSeen = prev.prevSeen; k.holdTop = prev.holdTop; k.errKind = prev.errKind; k.errPrev = prev.errPrev; }
             var bot = withColor({ name: name, role: 'coder', shape: shapeOf(s.uid), status: k.status, task: k.task, platform: V.platform(s, snapshot.kinds), identity: s.cwd }, s.uid);
             if (s.skills && s.skills.length) bot.skills = s.skills.slice(0, 16);
             if (s.scheduleId) bot.triggers = [s.name];
@@ -473,6 +482,9 @@
           // The rest of the pass waits too: the error, the end and the status of a bot come after its replies in the chat. Every
           // path of the store's request ends with a pass over this snapshot, so nothing is lost (#80).
           if (hold) return;
+          // How the error is told was fixed when the bot was seated (errKind, errPrev); from this pass on, a failure is news.
+          var errKind = k.errKind, errPrev = k.errPrev;
+          k.errKind = 'live'; k.errPrev = null;
           list.forEach(function (r) {
             if (r.id <= k.replySeen) return;
             k.replySeen = r.id;
@@ -497,10 +509,11 @@
           }
           // a failed turn: the bot shows the error until a new turn starts, or Retry or Dismiss.
           // A bot first seen in a live pass (it moved in from another building) had its error before this scene saw it:
-          // the error is restored, not news. A bot seated again restores the error its old seat showed.
+          // the error is restored, not news. A bot seated again restores the error its old seat showed. A bot of the first
+          // pass has its error seeded, with its time. All of this holds when the pass that tells it comes after a hold.
           if (s.error && s.error.id > k.errorSeen) {
             k.errorSeen = s.error.id; k.status = 'error'; k.task = s.error.text;
-            var ee = prev ? pick(s.error.id <= prev.errorSeen) : (firstSight && !seedAll ? restore : emit);
+            var ee = errPrev !== null ? (s.error.id <= errPrev ? restore : out) : errKind === 'seed' ? seeded : errKind === 'restore' ? restore : emit;
             ee(stamp({ type: 'error', bot: bot0, text: s.error.text }, s.error.at));
             return;
           }
