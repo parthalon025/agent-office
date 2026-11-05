@@ -392,6 +392,22 @@ test('plan, skill, knowledge, message, trigger and stream error events all pass 
   assert.ok(of(m.ev, 'tool.result').some((e) => e.ok === false && e.summary), 'no failed tool.result with a summary');
 });
 
+test('an agent reply goes to the chat as Markdown with its text unchanged: the DS RichText makes remote images click-to-load (M1)', async () => {
+  const r = rig();
+  const m = r.mount(KEY_A);
+  await r.play(HOOKS.turnWithEdit.slice(0, 2));
+  const s = [...r.tracker.sessions.values()][0];
+  const reply = 'Done. ![Coverage](https://img.example/c.png?d=secret) and ![dot](data:image/png;base64,iVBORw0KGgo=)';
+  r.tracker.pushReply(s, reply); r.push();
+  const msgs = of(m.ev, 'message').filter((e) => e.text === reply);
+  assert.equal(msgs.length, 1);
+  // No format: 'plain' and no attachments: the text reaches RichText, where the click-to-load rule lives
+  // (test/rich.test.mjs). The adapter turns no image into an event of its own.
+  assert.equal(msgs[0].format, undefined);
+  assert.equal(msgs[0].attachments, undefined);
+  assert.equal(m.ev.filter((e) => JSON.stringify(e).includes('img.example')).length, 1, 'the URL is only in the message text');
+});
+
 test('botName gives the scene name of a seated bot, with the number of a repeated folder name', async () => {
   const r = rig();
   const m = r.mount(KEY_A);

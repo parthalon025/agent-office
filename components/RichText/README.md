@@ -9,12 +9,13 @@ Rules:
 - Links open in a new tab with `rel="noopener noreferrer nofollow"`. The domain shows on hover.
 - Links accept `http`, `https` and `mailto` only. A link with a different scheme shows as text.
 - Images accept `http`, `https` and `data:image/png`, `jpeg`, `gif` or `webp` only. A different image URL shows the card "Image not available".
+- A remote image (`http`, `https`) loads only after a click. Until then it shows a card with its alt text and the button `Load image from <host>` (the host the browser would ask; the full URL shows on hover). A request would tell the host that the message was read, and the URL can carry data. The click counts for that URL until the page reloads. Inside a link, a remote image shows its alt text only. The image viewer asks the same way. `data:` and `blob:` images show at once. Image attachments follow the same rule.
 - Text that is not complete is safe to show while it streams. A code block that does not close shows to the end of the text.
 - Set `collapseAt` to collapse long text behind "Show more".
 
 Use `tone="inverse"` on an accent fill (the user bubble). Outside a `ChatMessage`, RichText has its own image viewer.
 
-API: `AgentOffice.RichText` (component) and `AgentOffice.rich.parse(markdown)` (React elements). `AgentOffice.rich.tokens(markdown)` gives the token tree; `AgentOffice.rich.safeUrl(url, kind)` gives the safe URL or `null`.
+API: `AgentOffice.RichText` (component) and `AgentOffice.rich.parse(markdown)` (React elements). `AgentOffice.rich.tokens(markdown)` gives the token tree; `AgentOffice.rich.safeUrl(url, kind)` gives the safe URL or `null`. `AgentOffice.rich.remoteHost(url)` gives the host of a remote image or `null`; `AgentOffice.rich.imageShown(url)` is false for a remote image until its click.
 
 **The consumer provides:** the text and, if necessary, the format, the tone and the collapse length.
 

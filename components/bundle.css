@@ -603,6 +603,12 @@ details.panel summary .cnt.hot,.ao-ph .hot{color:var(--emphasis)}
 .ao-rt-file.is-broken .ao-rt-file-i{color:var(--muted)}
 .ao-rt-dl{flex:none;padding:3px 8px;border:1px solid var(--line);border-radius:var(--radius-sm);font:500 11px/18px var(--font-sans);color:var(--ink);text-decoration:none}
 .ao-rt-dl:hover{background:var(--chip)}
+/* remote image: loads only after a click */
+.ao-rt-remote .ao-rt-file-i{color:var(--muted)}
+.ao-rt-load{align-self:flex-start;max-width:100%;margin-top:4px;min-width:0}
+.ao-rt-load-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.ao-rt-imgoff{font-style:italic}
+.ao-lb-wait .ao-rt-file{margin:0}
 /* link card */
 .ao-rt-link{display:flex;gap:10px;align-items:flex-start;margin:4px 0;padding:8px 10px;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:var(--radius-md);background:var(--panel);color:var(--ink);text-decoration:none;width:340px;max-width:100%;box-sizing:border-box;line-height:1.35}
 .ao-rt-link:hover .ao-rt-link-t{text-decoration:underline}
