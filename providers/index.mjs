@@ -1,6 +1,6 @@
 // Provider seam: one interface for every agent tool the office runs. Claude Code is the first provider
-// (providers/claude-code.mjs). Local models (#19, with providers/local-tools.mjs), Copilot CLI (#22) and Agent Framework (#23)
-// are the next ones. Each is a factory that gets `events` (providerEvents below) and returns a provider object.
+// (providers/claude-code.mjs). Local models (#19, providers/local.mjs with providers/local-tools.mjs) and Agent Framework teams
+// (#23, providers/agent-framework.mjs) are next to it; Copilot CLI (#22) is the next one. Each is a factory that gets `events` (providerEvents below) and returns a provider object.
 //
 // The server calls the provider's methods. The provider reports what its agent does through `events`, in the session
 // tracker's input vocabulary (hook-shaped events and stream messages). The rules stay in tracker.mjs: a provider never
@@ -49,6 +49,8 @@
 //                                      memory, fork, reason, teams, schedules. May be a getter. status() reads it after readiness.
 //   modes                  (optional)  the permission modes open() takes (opts.permissionMode), as names. Without it: none.
 //   needsModel             (optional)  true when open() needs opts.model (a local model). Without it the agent has a default.
+//   team                   (optional)  true when the session is a team of agents (Agent Framework): its members show as helper
+//                                      bots when the work passes to them. Without it: one agent.
 //   openWindow(s, opts)    (optional)  open the agent in its own terminal window (Claude Code). Without it: in the office only.
 //   control(s, request, onDone) (optional) a control request to a running session: change mode or model, connectors
 //                                      (Claude Code). Without it the office refuses those requests (409).
@@ -145,6 +147,7 @@ export function checkProvider(p) {
   if (p.canResume !== undefined && typeof p.canResume !== 'boolean') missing.push('canResume (optional, but then true or false)');
   if (p.modes !== undefined && !(Array.isArray(p.modes) && p.modes.every((m) => typeof m === 'string' && m))) missing.push('modes (optional, but then a list of mode names)');
   if (p.needsModel !== undefined && typeof p.needsModel !== 'boolean') missing.push('needsModel (optional, but then true or false)');
+  if (p.team !== undefined && typeof p.team !== 'boolean') missing.push('team (optional, but then true or false)');
   if (p.openWindow !== undefined && typeof p.openWindow !== 'function') missing.push('openWindow() (optional, but then a function)');
   if (p.control !== undefined && typeof p.control !== 'function') missing.push('control() (optional, but then a function)');
   if (p.learn !== undefined && typeof p.learn !== 'function') missing.push('learn() (optional, but then a function)');
@@ -205,11 +208,13 @@ function settled(p, ms, fallback) {
  * { kind, label, paid (a spend limit applies), terminal (it can open in a terminal window), modes (permission modes it
  * takes), needsModel (the user must pick a model), control (a running session takes control requests: a model or mode
  * change, connectors; the dock offers them only then), gated and supervision (ADR 0001: an ungated kind opens only in a
- * room of its own, with its label), cost ('unknown': the office asks before it runs and shows no dollars) }.
+ * room of its own, with its label), cost ('unknown': the office asks before it runs and shows no dollars),
+ * team (a team of agents: members show as helper bots) }.
  */
 export function describe(p) {
   return { kind: p.kind, label: p.label, paid: isPaid(p), terminal: typeof p.openWindow === 'function', modes: Array.isArray(p.modes) ? [...p.modes] : [],
-    needsModel: p.needsModel === true, control: typeof p.control === 'function', gated: isGated(p), supervision: supervisionOf(p), cost: costOf(p) };
+    needsModel: p.needsModel === true, control: typeof p.control === 'function', gated: isGated(p), supervision: supervisionOf(p), cost: costOf(p),
+    team: p.team === true };
 }
 
 /** The providers of one office, by kind. */

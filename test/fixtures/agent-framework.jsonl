@@ -1,0 +1,37 @@
+{"type":"ready","version":"1.24.0"}
+{"type":"event","event":"executor_invoked","executor_id":"lead"}
+{"type":"event","event":"output","executor_id":"lead","author":"lead","response_id":"r1","contents":[{"type":"text","text":"I plan "},{"type":"text","text":"the work."}]}
+{"type":"tool","id":"t1","agent":"lead","name":"Read","input":{"file_path":"a.txt"}}
+{"type":"event","event":"output","executor_id":"lead","author":"lead","response_id":"r1","contents":[{"type":"usage","input_tokens":100,"output_tokens":20}]}
+{"type":"event","event":"handoff_sent","source":"lead","target":"coder"}
+{"type":"event","event":"executor_completed","executor_id":"lead"}
+{"type":"event","event":"executor_invoked","executor_id":"coder"}
+{"type":"event","event":"executor_invoked","executor_id":"reviewer"}
+{"type":"event","event":"executor_completed","executor_id":"coder"}
+{"type":"event","event":"executor_completed","executor_id":"reviewer"}
+{"type":"event","event":"executor_invoked","executor_id":"coder"}
+{"type":"event","event":"executor_invoked","executor_id":"reviewer"}
+{"type":"event","event":"executor_completed","executor_id":"coder"}
+{"type":"event","event":"executor_completed","executor_id":"reviewer"}
+{"type":"event","event":"executor_invoked","executor_id":"coder"}
+{"type":"event","event":"output","executor_id":"coder","author":"coder","response_id":"r2","contents":[{"type":"text","text":"I change a.txt."}]}
+{"type":"tool","id":"t2","agent":"coder","name":"Bash","input":{"command":"git push"}}
+{"type":"event","event":"output","executor_id":"coder","author":"coder","response_id":"r2","contents":[{"type":"usage","input_tokens":200,"output_tokens":40}]}
+{"type":"event","event":"handoff_sent","source":"coder","target":"reviewer"}
+{"type":"event","event":"executor_completed","executor_id":"coder"}
+{"type":"event","event":"executor_invoked","executor_id":"reviewer"}
+{"type":"event","event":"executor_invoked","executor_id":"lead"}
+{"type":"event","event":"executor_completed","executor_id":"reviewer"}
+{"type":"event","event":"executor_completed","executor_id":"lead"}
+{"type":"event","event":"executor_invoked","executor_id":"reviewer"}
+{"type":"event","event":"output","executor_id":"reviewer","author":"reviewer","response_id":"r3","contents":[{"type":"text","text":"Looks right."}]}
+{"type":"event","event":"handoff_sent","source":"reviewer","target":"lead"}
+{"type":"event","event":"executor_completed","executor_id":"reviewer"}
+{"type":"event","event":"executor_invoked","executor_id":"lead"}
+{"type":"event","event":"executor_invoked","executor_id":"coder"}
+{"type":"event","event":"executor_completed","executor_id":"lead"}
+{"type":"event","event":"executor_completed","executor_id":"coder"}
+{"type":"event","event":"executor_invoked","executor_id":"lead"}
+{"type":"event","event":"output","executor_id":"lead","author":"lead","response_id":"r4","contents":[{"type":"text","text":"The team changed a.txt."}]}
+{"type":"event","event":"executor_completed","executor_id":"lead"}
+{"type":"turn_end"}

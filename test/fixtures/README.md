@@ -28,3 +28,17 @@ Hook payloads go through payload.mjs slimPayload, as the server does.
 `office-server.mjs` is not a recording. It starts a real `server.mjs` copy for the tests that need one: ready on the server's own "is open" line, a fast failure when the server stops first, and a new port when the free port was taken before the bind (#98). Its own test is `test/office-server.test.mjs`.
 
 `short-name.mjs` is not a recording. `shortOf(dir)` gives the 8.3 short spelling of a folder (cmd's `%~s`), or null when the volume keeps none. GitHub's Windows runner has TEMP in `C:\Users\RUNNER~1\...`, so the tests that check that both spellings of one folder are one place (`test/risk.test.mjs`, `test/security-routes.test.mjs`) use it.
+
+`agent-framework.jsonl` is not a recording. It is the stdout of `providers/agent_framework_runner.py` for one team turn
+(a lead, a hand-off to coder, coder to reviewer, back to lead), written by hand from the Microsoft Agent Framework 1.24
+Python sources (`WorkflowEvent` types `output`, `handoff_sent`, `executor_invoked`, `executor_completed`; `Content`
+types `text` and `usage`), in the order those sources make:
+- `handoff_sent` comes before the source's `executor_completed`: the hand-off executor adds it inside its handler
+  (`agent_framework_orchestrations/_handoff.py` `_run_agent_and_emit`).
+- Before the request to the target, the source sends its reply to every other member with `should_respond=False`
+  (`_broadcast_messages`; the start agent also sends the first input on its first run). Each such message is one
+  `executor_invoked` and one `executor_completed` of that member (`agent_framework/_workflows/_executor.py` `execute`),
+  in the next superstep, before the target runs. So a member's `executor_completed` does not mean it finished.
+- Members in one superstep run in parallel, so their events interleave.
+The framework is not installed on the build machine, so no live run has checked it yet (#23).
+`fake-af/` is a stand-in `agent_framework` package with the same names, for the test that runs the real runner with Python.

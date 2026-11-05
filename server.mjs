@@ -19,6 +19,7 @@ import { createTracker, clip } from './tracker.mjs';
 import { createRegistry, providerEvents, isPaid, isGated, supervisionOf, costOf, spendLimitFor, featuresOf, DEFAULT_SPEND_LIMIT, DEFAULT_PROVIDER } from './providers/index.mjs';
 import { createLocal } from './providers/local.mjs';
 import { createAcp, AGENTS as ACP_AGENTS } from './providers/acp.mjs';
+import { createAgentFramework } from './providers/agent-framework.mjs';
 import { createClaudeCode, claudeVersion, MODEL_RE, MODES } from './providers/claude-code.mjs';
 import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, cleanRecent, recentChoices, securityRoomIdOf } from './place.mjs';
 import * as startup from './startup.mjs';
@@ -337,7 +338,7 @@ async function refreshEnforce(fresh = false) {
 }
 
 // ---------- providers: the agent tools behind the sessions (providers/) ----------
-// Every provider reports through the same events into the tracker: Claude Code, Ollama, LM Studio and the ACP agents. Claude
+// Every provider reports through the same events into the tracker: Claude Code, Ollama, LM Studio, Agent Framework and the ACP agents. Claude
 // Code's hooks come in over the hook routes below, and a permission decision goes back as the hook's answer (claude.answer
 // gives the body). The other providers raise their requests through events.permission; events.drop frees one their agent no
 // longer waits for (releaseHold with no decision); events.fresh says a reopen could not continue the conversation (freshReopen).
@@ -352,7 +353,11 @@ const officeTools = {
   room: async (s) => describeRoom(await roomOf(s)),
   roomUpdate: async (s, args) => updateRoom(await roomOf(s), args),
 };
-const providers = createRegistry([claude, createLocal({ events, kind: 'ollama', baseUrl: process.env.OFFICE_OLLAMA_URL, officeTools }), createLocal({ events, kind: 'lmstudio', baseUrl: process.env.OFFICE_LMSTUDIO_URL, officeTools }),
+const ollama = createLocal({ events, kind: 'ollama', baseUrl: process.env.OFFICE_OLLAMA_URL, officeTools });
+const lmstudio = createLocal({ events, kind: 'lmstudio', baseUrl: process.env.OFFICE_LMSTUDIO_URL, officeTools });
+// An Agent Framework team runs on one of the local servers (#23): LM Studio first, the order of its models list.
+const agentFramework = createAgentFramework({ events, servers: [lmstudio, ollama], officeTools });
+const providers = createRegistry([claude, ollama, lmstudio, agentFramework,
   // ACP agents (providers/acp.mjs): Hermes Agent, DeepSeek Harness and OpenClaw, one entry each in its AGENTS list.
   // blocked: the Security room's answer to whether this kind may run now (its Agents screen: an ungated kind is off until
   // turned on, a no-cost Deny); cells: its call cells, for an agent whose own config carries them (OpenClaw). One rule source.

@@ -26,7 +26,7 @@ const SYSTEM = (cwd) => `You are a coding agent working in the folder ${cwd}. Us
   + 'Paths are relative to the folder. Keep answers short. When the work is done, say what you did.';
 
 // The four office tools, for agents the office runs itself. The same words as the MCP server (mcp.mjs) uses.
-const OFFICE_TOOLS = [
+export const OFFICE_TOOLS = [
   { name: 'office_inbox', description: 'Read new messages the user sent to this session from Agent Office. Returns them and clears the queue.', parameters: { type: 'object', properties: {} } },
   { name: 'office_ask', description: 'Ask the user a question in Agent Office and wait for the answer (up to 10 minutes). Use it for decisions you cannot make alone.',
     parameters: { type: 'object', properties: { question: { type: 'string', description: 'A short, specific question. A yes or no question works best.' } }, required: ['question'] } },
@@ -37,6 +37,76 @@ const OFFICE_TOOLS = [
 const OFFICE_NAMES = new Set(OFFICE_TOOLS.map((t) => t.function.name));
 
 const textOf = (e) => String((e && e.message) || e || 'unknown error');
+/** The office messages that waited, as the tracker hands them back on a hook: context on the prompt and on a tool result. */
+export const noteOf = (back) => back?.hookSpecificOutput?.additionalContext || '';
+
+/**
+ * The tool gate: one tool call of an agent the office runs itself (a local model here, an Agent Framework team member in
+ * providers/agent-framework.mjs). One rule for both: PreToolUse; the office's decision on every call (events.permission:
+ * the Security room rules first, rated by risk.mjs, else a hold for the user), so this file keeps no approval rule of its
+ * own; the tool inside the worktree (st.tools, providers/local-tools.mjs); then PostToolUse or PostToolUseFailure.
+ * The office tools (office_inbox, office_ask, office_room, office_room_update) need no approval: they are the office's own.
+ *
+ * st: the agent state of a session: { closed, interrupted, waiting: Map(request id -> resolve), tools }. The provider's
+ *   answer() resolves a waiting request with { allow, message } (message: why the office refused, for the model). A close
+ *   or an interrupt resolves every waiting request as { allow: false } (the provider does it), so a call never hangs.
+ * c: { id, name, input (an object; null when the model sent arguments that are not JSON), agentId (a team member, or none) }
+ * Resolves the text the model gets back. After close, nothing is reported (the seam's timing rule 2).
+ * @param {{events: object, office: object|null}} deps office: the office tools as in-process calls (server.mjs officeTools).
+ */
+export function createToolGate({ events, office = null }) {
+  const emit = (st, fn) => (st.closed ? undefined : fn());
+
+  // Ask the office and wait: { allow, message }. The office checks the Security room rules first (Allow and Deny answer at
+  // once, on a later tick), else it holds the request for the user and calls the provider's answer(), which resolves it.
+  function ask(st, s, name, input, agentId) {
+    return new Promise((resolve) => {
+      const id = events.permission(s, { tool_name: name, tool_input: input, permission_suggestions: [], ...(agentId ? { agent_id: agentId } : {}) });
+      if (!id) return resolve({ allow: false });
+      st.waiting.set(id, resolve);
+    });
+  }
+
+  async function call(s, st, c) {
+    const input = c.input;
+    const shown = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
+    const base = { tool_name: c.name, tool_use_id: c.id, tool_input: shown, ...(c.agentId ? { agent_id: c.agentId } : {}) };
+    emit(st, () => events.hook(s, { hook_event_name: 'PreToolUse', ...base }));
+    const t0 = Date.now();
+    const failed = (error, interrupt = false) => { emit(st, () => events.hook(s, { hook_event_name: 'PostToolUseFailure', ...base, error, is_interrupt: interrupt, duration_ms: Date.now() - t0 })); return error; };
+    const done = (text) => {
+      if (st.interrupted || st.closed) return failed('Stopped', true);
+      const back = emit(st, () => events.hook(s, { hook_event_name: 'PostToolUse', ...base, duration_ms: Date.now() - t0 }));
+      return noteOf(back) ? String(text) + '\n\n' + noteOf(back) : String(text);
+    };
+    if (input === null || typeof input !== 'object' || Array.isArray(input)) return failed('The arguments are not valid JSON.');
+    if (OFFICE_NAMES.has(c.name)) {
+      if (!office) return failed('The office tools are not available.');
+      let text;
+      try {
+        if (c.name === 'office_inbox') text = await office.inbox(s);
+        else if (c.name === 'office_room') text = await office.room(s);
+        else if (c.name === 'office_room_update') text = await office.roomUpdate(s, shown);
+        else {
+          if (typeof shown.question !== 'string' || !shown.question.trim()) return failed('question must be text.');
+          text = await office.ask(s, shown.question.slice(0, 1000));
+        }
+      } catch (e) { return failed(textOf(e)); }
+      return done(text);
+    }
+    // The office decides every call: a low-risk call runs with no question only while a rule allows it (the local model's
+    // default Allow for reads and edits in its folder; for any other kind a cell the user set), as risk.mjs rated it.
+    if (!st.closed) {
+      const d = await ask(st, s, c.name, shown, c.agentId);
+      if (!d.allow) return failed(st.interrupted || st.closed ? 'Stopped' : d.message || 'Declined from Agent Office.', st.interrupted);
+    }
+    if (st.interrupted || st.closed) return failed('Stopped', true);
+    const r = await st.tools.run(c.name, shown);
+    if (!r.ok && !(st.interrupted || st.closed)) return failed(r.text);
+    return done(r.text);
+  }
+  return { call };
+}
 
 /**
  * @param {object} deps
@@ -126,19 +196,14 @@ export function createLocal(deps) {
   // It gives back what fn gives back: a hook answers with the office messages that waited (see note below).
   const emit = (st, fn) => (st.closed ? undefined : fn());
   // A message the user sent while a turn ran waits in the session's inbox. The tracker hands it back as the answer of a hook:
-  // as context on the prompt and on a tool result, and as a block on Stop (go on, here is a new message).
-  const noteOf = (back) => back?.hookSpecificOutput?.additionalContext || '';
-
-  // Ask the office and wait: { allow, message }. The office checks the Security room rules first (Allow and Deny answer at
-  // once, on a later tick), else it holds the request for the user and calls answer(). A close or an interrupt drops it as
-  // a decline. message: why the office refused, for the model.
-  function ask(st, s, name, input) {
-    return new Promise((resolve) => {
-      const id = events.permission(s, { tool_name: name, tool_input: input, permission_suggestions: [] });
-      if (!id) return resolve({ allow: false });
-      st.waiting.set(id, resolve);
-    });
-  }
+  // as context on the prompt and on a tool result (noteOf), and as a block on Stop (go on, here is a new message).
+  const gate = createToolGate({ events, office });
+  // A tool call of the model through the gate. Arguments that are not JSON reach the gate as null: it reports the failure.
+  const callTool = (s, st, c) => {
+    let input;
+    try { input = c.args ? JSON.parse(c.args) : {}; } catch { input = null; }
+    return gate.call(s, st, { id: c.id, name: c.name, input });
+  };
 
   async function runTurn(s, st, prompt) {
     st.busy = true;
@@ -175,49 +240,6 @@ export function createLocal(deps) {
     finishTurn(s, st, last, failure);
   }
 
-  // One tool call: Pre hook, the office's decision, the tool, then Post or PostFailure. Returns the text for the model.
-  // The office decides every call (the Security room rules, then a hold): a low-risk call in its folder (a worktree, or a plain folder outside git, review M4) runs with no question while its cell is the default Allow of the local model,
-  // as riskOf rated it, and the user can tighten that on the wall. So this file keeps no approval rule of its own.
-  async function callTool(s, st, c) {
-    let input;
-    try { input = c.args ? JSON.parse(c.args) : {}; } catch { input = null; }
-    const shown = input && typeof input === 'object' && !Array.isArray(input) ? input : {};
-    const base = { tool_name: c.name, tool_use_id: c.id, tool_input: shown };
-    emit(st, () => events.hook(s, { hook_event_name: 'PreToolUse', ...base }));
-    const t0 = Date.now();
-    const failed = (error, interrupt = false) => { emit(st, () => events.hook(s, { hook_event_name: 'PostToolUseFailure', ...base, error, is_interrupt: interrupt, duration_ms: Date.now() - t0 })); return error; };
-    if (input === null) return failed('The arguments are not valid JSON.');
-    if (OFFICE_NAMES.has(c.name)) return officeCall(s, st, c, shown, base, t0, failed);
-    if (!st.closed) {
-      const d = await ask(st, s, c.name, shown);
-      if (!d.allow) return failed(st.interrupted || st.closed ? 'Stopped' : d.message || 'Declined from Agent Office.', st.interrupted);
-    }
-    if (st.interrupted || st.closed) return failed('Stopped', true);
-    const r = await st.tools.run(c.name, shown);
-    if (st.interrupted || st.closed) return failed('Stopped', true);
-    if (!r.ok) return failed(r.text);
-    const back = emit(st, () => events.hook(s, { hook_event_name: 'PostToolUse', ...base, duration_ms: Date.now() - t0 }));
-    return noteOf(back) ? r.text + '\n\n' + noteOf(back) : r.text;
-  }
-
-  // An office tool: the office's own, so it needs no approval (office_ask asks the user itself). Not offered without deps.officeTools.
-  async function officeCall(s, st, c, input, base, t0, failed) {
-    if (!office) return failed('The office tools are not available.');
-    let text;
-    try {
-      if (c.name === 'office_inbox') text = await office.inbox(s);
-      else if (c.name === 'office_room') text = await office.room(s);
-      else if (c.name === 'office_room_update') text = await office.roomUpdate(s, input);
-      else {
-        if (typeof input.question !== 'string' || !input.question.trim()) return failed('question must be text.');
-        text = await office.ask(s, input.question.slice(0, 1000));
-      }
-    } catch (e) { return failed(textOf(e)); }
-    if (st.interrupted || st.closed) return failed('Stopped', true);
-    const back = emit(st, () => events.hook(s, { hook_event_name: 'PostToolUse', ...base, duration_ms: Date.now() - t0 }));
-    return noteOf(back) ? String(text) + '\n\n' + noteOf(back) : String(text);
-  }
-
   function finishTurn(s, st, last, failure) {
     st.busy = false;
     for (const resolve of st.waiting.values()) resolve({ allow: false });
@@ -237,6 +259,7 @@ export function createLocal(deps) {
   return {
     kind: deps.kind,
     label: spec.label,
+    baseUrl, // the chat server this kind uses; an Agent Framework team runs on it too (providers/agent-framework.mjs)
     paid: false, // a model on this machine costs nothing: no spend limit
     canResume: false, // a local conversation lives in memory: Reopen starts a fresh session in the same folder
     needsModel: true, // the server has no default model the office knows: the user picks one of models()

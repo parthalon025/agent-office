@@ -26,7 +26,7 @@ It is built on the Agent Office design system (x1.7.3), which lives in this fold
 - **Trace every step.** Select a bot and open Trace: the plan from TodoWrite with each step's state, every tool call with its argument, time and failure, skills loaded, pages read, and the schedule that started the run.
 - **No terminal needed.** A session can run inside the office. You chat with it, and its replies appear as they are written.
 - **Approve from the office.** Permission prompts become Approve and Decline cards that show the edit or command. One click can also allow it from now on.
-- **Pick the permissions in the Security room.** The ground floor of each building has a Security room with six wall screens: Files, Commands, Network, Secrets, Agents and Spend. Each screen has one row per kind of tool call and one column per agent kind (Claude Code, Hermes, dsh, OpenClaw, local model). Click a screen to look at it, then click a cell: Ask, Allow, Deny. Allow makes the cell amber with a Confirm on the wall; Ask and Deny apply at once. Secret files and settings files that run code offer only Ask or Deny. The rules are for all buildings, or for this building only. The office answers Allow and Deny at once and writes a line in the activity feed; Ask waits for you as before. By default every cell is Ask, reads and edits inside the worktree too: the office answers a request only when you set a cell to Allow or Deny. A default cell makes no new prompts: Claude Code asks what it asks today (it reads files in its folder without asking), the office holds those requests, and the Permissions choice of the Open dialog applies. The wall says "Partly enforced" there; click the cell once to set Ask, and the office then makes Claude Code ask. **Use default** under a cell takes your rule back. (The local model keeps what it did before: its reads and edits in its folder run without a question, also in a folder outside git, until you set them to Ask.) Inside the worktree means a git worktree: a session that started in a folder outside git, in your home folder or at a drive root has no worktree, so its reads and edits fall under Read or edit outside it. Files that run code at sign-in or in every shell (the Startup folder, PowerShell and shell profiles) and the office's own `state.json` and `history.json` count as settings files that run code. Ctrl+K **Permissions** goes there. A cell the office cannot enforce for an agent says "Not enforced" and why. "Partly enforced" marks an Ask that Claude Code decides by itself: for outside files, shell commands, web and MCP calls, Claude Code asks only when its own allow rules and permission mode say so, and the office holds what it asks. For secret files, settings files and reads or edits inside the worktree, the office makes Claude Code ask once you set the cell to Ask. On the Spend screen, minus stops at $1; No limit (type 0) needs the Confirm on the wall. The rules work only while the office runs: when it is stopped, Claude Code decides alone, and a Deny does not apply. The screens take pointer clicks only: they have no keyboard path.
+- **Pick the permissions in the Security room.** The ground floor of each building has a Security room with six wall screens: Files, Commands, Network, Secrets, Agents and Spend. Each screen has one row per kind of tool call and one column per agent kind (Claude Code, Hermes, dsh, OpenClaw, local model, Agent Framework). Click a screen to look at it, then click a cell: Ask, Allow, Deny. Allow makes the cell amber with a Confirm on the wall; Ask and Deny apply at once. Secret files and settings files that run code offer only Ask or Deny. The rules are for all buildings, or for this building only. The office answers Allow and Deny at once and writes a line in the activity feed; Ask waits for you as before. By default every cell is Ask, reads and edits inside the worktree too: the office answers a request only when you set a cell to Allow or Deny. A default cell makes no new prompts: Claude Code asks what it asks today (it reads files in its folder without asking), the office holds those requests, and the Permissions choice of the Open dialog applies. The wall says "Partly enforced" there; click the cell once to set Ask, and the office then makes Claude Code ask. **Use default** under a cell takes your rule back. (The local model keeps what it did before: its reads and edits in its folder run without a question, also in a folder outside git, until you set them to Ask.) Inside the worktree means a git worktree: a session that started in a folder outside git, in your home folder or at a drive root has no worktree, so its reads and edits fall under Read or edit outside it. Files that run code at sign-in or in every shell (the Startup folder, PowerShell and shell profiles) and the office's own `state.json` and `history.json` count as settings files that run code. Ctrl+K **Permissions** goes there. A cell the office cannot enforce for an agent says "Not enforced" and why. "Partly enforced" marks an Ask that Claude Code decides by itself: for outside files, shell commands, web and MCP calls, Claude Code asks only when its own allow rules and permission mode say so, and the office holds what it asks. For secret files, settings files and reads or edits inside the worktree, the office makes Claude Code ask once you set the cell to Ask. On the Spend screen, minus stops at $1; No limit (type 0) needs the Confirm on the wall. The rules work only while the office runs: when it is stopped, Claude Code decides alone, and a Deny does not apply. The screens take pointer clicks only: they have no keyboard path.
 - **Control a live session.** Stop the current turn, switch model or permissions, attach images and text files, and run slash commands and skills (type `/` in the chat).
 - **See the work.** A Changes view shows the branch, the files and a colored diff. A session runs in its own git worktree by default, so your main branch stays clean, and you can open a pull request from the office.
 - **Come back later.** Closed sessions are saved. Reopen one and Claude continues with its context. Search every past session.
@@ -125,6 +125,31 @@ Two agent kinds speak the Agent Client Protocol (ACP): **Hermes Agent** (`hermes
 - **Your OpenClaw config decides.** The Gateway runs the tools, so its config limits them. The office only reads it (`openclaw config get`) and never writes it. Before a session starts, the office reads it. `tools.fs.workspaceOnly` must be on (file tools stay in the worktree): if it is off or unreadable, the session does not start, and the reply gives the command, `openclaw config set tools.fs.workspaceOnly true`. Exec approval must be on too, so that every command asks: if it is off or unreadable, OpenClaw is not ready, the open is refused before the cost question and before a worktree, and the message gives the command, `openclaw config set tools.exec.ask always`. So the label "commands ask" is true for every session that runs.
 - **Cost and tokens.** OpenClaw reports token totals. The office shows them in the stats. The cost stays "unknown".
 
+### Agent Framework teams
+
+The **Agent Framework** kind runs a team of agents built with Microsoft Agent Framework, on a model of LM Studio or Ollama. It costs nothing. The team runs in its own Python process (`providers/agent_framework_runner.py`); the office does the rest.
+
+- **Set it up once.** The office does not install the framework. Make a Python environment for it, install the framework there, and tell the office where its Python is:
+  1. `python -m venv %USERPROFILE%\.agent-office-af`
+  2. `%USERPROFILE%\.agent-office-af\Scripts\pip install agent-framework`
+  3. Set `OFFICE_AF_PYTHON` to `%USERPROFILE%\.agent-office-af\Scripts\python.exe`, then restart the office.
+  4. Start LM Studio or Ollama with a chat model that supports tool calling.
+  **More**, then **Agent kinds**, shows Ready when the framework loads and a local server has a model. Until then it says which step is missing.
+- **Start one.** In **Open session**, set **Agent** to Agent Framework and pick a model. The list has the models of both servers, with the server name after each one.
+- **The team.** The office reads `agent-team.json` in the session folder. Without it, the team is a **lead** that hands work to a **coder** and a **reviewer**. The file looks like this:
+  ```json
+  { "name": "Docs", "pattern": "handoff", "start": "lead",
+    "agents": [
+      { "name": "lead", "description": "Plans and reports.", "instructions": "Hand writing to writer.", "tools": ["Read", "LS", "Grep"] },
+      { "name": "writer", "description": "Writes the docs.", "instructions": "Write, then hand back to lead.", "tools": ["Read", "Edit", "Write"] } ] }
+  ```
+  `pattern` is `handoff` (agents hand the work to each other) or `sequential` (each agent in turn). `start` is the agent that gets your message first (default: the first one). A name is lower-case letters, digits and `_`. At most 8 agents. `tools` takes `Read`, `LS`, `Grep`, `Edit`, `Write`, `Bash`, `office_inbox`, `office_ask`, `office_room` and `office_room_update` (default: `Read`, `LS`, `Grep`). A file with a mistake is refused when you open the session, with what to fix.
+- **What you see.** The start agent is the bot at the desk. When the work passes to another member (a hand-off, or the next agent of a sequential team), that member walks in as a helper bot; when it hands on or finishes, the helper leaves. Each member's tool calls show on its helper. A member's reply in the chat starts with its name.
+- **Approvals (job 3).** Every tool of every member goes through the office, and the framework never runs a tool by itself. The Security room decides first, in its own **Agent Framework** column: by default every call waits for you, a read inside the worktree too (the local model's old exception is not for this new kind). Set a cell to Allow (with the Confirm on the wall) or Deny, and the office answers that kind of call at once; a Deny tells the member why. The cards are the same as for a local agent, with no Always allow. A team in a folder outside git has no worktree, so its reads and edits fall under Read or edit outside it. A member can use only the tools of its own `tools` list; the office refuses any other.
+- **Turns.** A turn ends when the team waits for you. Your next message is the answer. **Stop turn** stops the run; the team then starts again and forgets that conversation. A turn has at most 60 steps (tool calls and hand-offs). Then the office stops the run, and the turn fails with that reason.
+- **Cloud keys.** The team process gets no `OPENAI_*`, `AZURE_*` or `ANTHROPIC_*` variable, and its model client points at the local server, so it never reaches a paid service.
+- **Not available.** No attachments, no model or permission switch, no Extensions, no Reopen of the conversation (Reopen starts a new team in the same folder). Schedules start Claude Code.
+
 ## How it works
 
 ```
@@ -153,6 +178,7 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 | `OFFICE_ASK_TIMEOUT_S` | `60` | How long a terminal session's permission prompt waits for the office before the terminal dialog decides. Sessions in the office wait 15 minutes. |
 | `OFFICE_OLLAMA_URL` | `http://127.0.0.1:11434/v1` | Where the Ollama agents find their server. Loopback addresses only (127.0.0.1, localhost, ::1). Any other host stops the office at start. |
 | `OFFICE_LMSTUDIO_URL` | `http://127.0.0.1:1234/v1` | The same for LM Studio agents. The office only lists models and sends chat requests. It never loads or unloads a model. |
+| `OFFICE_AF_PYTHON` | `python` on the PATH | The full path of the Python that has Microsoft Agent Framework (see **Agent Framework teams**). Agent Framework teams use the two server addresses above. |
 
 ## Files
 
@@ -167,6 +193,7 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 | `notes.mjs` | The notes board of a room: the user's save with a base version, agent appends, the pin, and a three-way merge so an agent's line and the user's edit both stay. |
 | `hook.mjs` | Command hook. Sends one event to the server. |
 | `mcp.mjs` | MCP server with `office_inbox`, `office_ask`, `office_room` and `office_room_update`. |
+| `providers/` | The agent kinds behind one seam (`index.mjs`): Claude Code, local models (Ollama, LM Studio, with their tools in `local-tools.mjs`), and Agent Framework teams (`agent-framework.mjs`, with the Python runner `agent_framework_runner.py`). |
 | `launch.ps1` | Starts a session in a terminal window. |
 | `startup.mjs` | Adds or removes the Start with Windows entry (a .cmd in your Startup folder). At sign-in the office starts and opens its launch link. Only the office on port 4317 in the main folder can change the entry; an office on another port or in a worktree shows it read-only with the reason. |
 | `probe.mjs` | Tests HTTP hooks on this Claude Code version. |
@@ -198,7 +225,7 @@ An office on a port other than 4317 (`OFFICE_PORT`, `npm run start:branch`) writ
 
 ## Troubleshooting
 
-The office knows three kinds of session. A session **in the office** runs `claude -p` with a pipe. A **terminal session** is one you start yourself with the office settings. A **local agent** runs a model on this PC through Ollama or LM Studio. Find your kind below.
+The office knows four kinds of session. A session **in the office** runs `claude -p` with a pipe. A **terminal session** is one you start yourself with the office settings. A **local agent** runs a model on this PC through Ollama or LM Studio. An **Agent Framework team** runs a team of agents on such a model. Find your kind below.
 
 ### Any session
 
@@ -229,6 +256,17 @@ The office knows three kinds of session. A session **in the office** runs `claud
 - **A turn fails with "The model used all 25 steps of one turn."** Send a smaller task.
 - **"Pick a model for this agent."** The open call has no `model`.
 - **"Local agents take text only."** Remove the attachment.
+
+### Agent Framework teams
+
+- **Agent kinds says "The office cannot find Python" or "OFFICE_AF_PYTHON does not point to a program".** Do the setup steps in **Agent Framework teams**, and check the path in `OFFICE_AF_PYTHON`.
+- **Agent kinds says "The office could not load Agent Framework: ModuleNotFoundError ...".** That Python does not have the framework. Install it in that environment (`pip install agent-framework`), or point `OFFICE_AF_PYTHON` at the environment that has it.
+- **Agent kinds says "Start LM Studio or Ollama with a chat model."** The framework loads, but no local server lists a model.
+- **"agent-team.json: ..." when you open a session.** The team file has a mistake. The message says what to fix.
+- **A turn fails with "Agent Framework: APIConnectionError ...".** The local server stopped or does not answer at its address. Start it, then send the message again.
+- **A turn fails with "Agent Framework: The team used all 60 steps of one turn."** The members handed the work back and forth, or called tools, without an end. The team starts again. Send a smaller task, or make the instructions in `agent-team.json` say when to stop.
+- **A tool call fails with "... is not a tool of ...".** That member asked for a tool that is not in its `tools` list. Add the tool to the list in `agent-team.json` if the member needs it.
+- **"Agent Framework stopped: ..." and the session ends.** The team process ended. The text is its last error output. If it names a framework class or option, the installed framework is newer or older than the one the runner was written for (1.24); tell the office maintainers.
 
 ### Terminal sessions
 
