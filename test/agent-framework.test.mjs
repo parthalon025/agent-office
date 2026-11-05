@@ -94,6 +94,7 @@ async function play(child, lines) {
   }
 }
 
+const RIG_PY = 'C:\\py\\' + (process.platform === 'win32' ? 'python' : 'python3') + '.exe'; // the rig's path for the name the provider asks for
 test('the provider has the seam shape: free, gated, a model to pick, no resume, a team', () => {
   const o = rig();
   const p = checkProvider(o.provider);
@@ -179,7 +180,7 @@ test('readiness: no Python, no framework, no model server, ready; each not-ready
   assert.match(r.needs[0], /could not load Agent Framework: ModuleNotFoundError: No module named 'agent_framework'/);
   assert.match(r.needs.join(' '), /pip install agent-framework/);
   assert.match(r.needs.join(' '), /OFFICE_AF_PYTHON/);
-  assert.equal(calls[0].file, 'C:\\py\\python.exe', 'Python by its full path');
+  assert.equal(calls[0].file, RIG_PY, 'Python by its full path');
   assert.deepEqual(calls[0].args, ['-u', RUNNER, '--check']);
   assert.equal(calls[0].opts.env.OPENAI_API_KEY, undefined, 'the check gets the scrubbed environment too');
   const broken = rig({ execFile: (f, a, o, cb) => cb(new Error('Command failed: exit 1'), 'Traceback ...\n') });
@@ -196,7 +197,7 @@ test('open: Python runs the runner outside the worktree with a scrubbed environm
   const s = o.session();
   o.provider.open(s, { model: 'lmstudio:qwen/qwen3-8b' });
   const sp = o.spawned[0];
-  assert.equal(sp.file, 'C:\\py\\python.exe');
+  assert.equal(sp.file, RIG_PY);
   assert.deepEqual(sp.args, ['-u', RUNNER]);
   assert.notEqual(sp.opts.cwd, o.cwd, 'not the worktree: a planted module there is never imported');
   assert.equal(sp.opts.env.OPENAI_API_KEY, undefined);
