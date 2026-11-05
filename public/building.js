@@ -30,6 +30,9 @@
      detach()              the scene stops: later snapshots and timers do nothing
      stale(snap?)          true when the scene shows a worktree room that is gone.
                            The DS has no event that removes a floor or a room, so the page mounts a new adapter.
+     floorBranch(floorId)  the branch of a DS floor id in this scene, or null
+     floorId(branch)       the DS floor id of a branch in this scene's definition, or null
+                           OfficeBuilding.keepFloor(fromMount, floorId, toMount) joins them for a rebuild.
      roomInfo(roomId)      { sessions, place } of one room of this building
      figures(roomId)       the server's figures for that room
      noteKey(roomId)       the server's notes key for that room
@@ -468,6 +471,13 @@
         Object.keys(layout.floors).forEach(function (br) { Object.keys(layout.floors[br].rooms).forEach(function (root) { out.push(br + '|' + root); }); });
         return out;
       };
+      // The branch a DS floor id stands for in this scene (the layout follows the floors added later), or null.
+      m.floorBranch = function (id) {
+        for (var br in layout.floors) { if (layout.floors[br].id === id) return br; }
+        return null;
+      };
+      // The id of the floor of a branch in the definition this scene starts with, or null.
+      m.floorId = function (branch) { var f = d.floors[branch]; return f ? f.id : null; };
       m.stale = function (snap) {
         var nowRooms = roomsNow(snap || latest, repo);
         seeWorktrees(snap || latest);
@@ -512,5 +522,14 @@
     return store;
   }
 
-  root.OfficeBuilding = { createStore: createStore, shapeOf: shapeOf, colorOf: colorOf, buildings: buildings, requests: requests, describe: describe, roomsNow: roomsNow };
+  // The floor a new scene of a building starts on, so a rebuild keeps the floor the user picked: the floor id in
+  // the old scene (fromMount) as a floor id in the new scene (toMount). Floor ids are new for each mount, so the
+  // match is by branch. Null when the floor is gone or unknown: the scene then uses its own default.
+  function keepFloor(fromMount, floorId, toMount) {
+    if (!fromMount || !toMount || floorId == null) return null;
+    var br = fromMount.floorBranch(floorId);
+    return br == null ? null : toMount.floorId(br);
+  }
+
+  root.OfficeBuilding = { createStore: createStore, keepFloor: keepFloor, shapeOf: shapeOf, colorOf: colorOf, buildings: buildings, requests: requests, describe: describe, roomsNow: roomsNow };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

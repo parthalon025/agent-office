@@ -22,6 +22,7 @@
    Browser part: attach(office, { covers() -> [rect] }) -> host, one per mounted office.
      covers: the page's boxes over the scene (HUD columns, the dock, a side panel), in client px.
      host.view(), host.inBuilding(), host.shownFloor(), host.onShownFloor(m, fg), host.inScene(m), host.shown(m)
+     host.floorId()                    -> the DS id of the floor the user looks at, or null (building view, or unclear)
      host.rooms()                      -> [{ rg, room }] of the shown floor
      host.frame(fn)                    -> off(); fn(dt, t) runs every frame before the engine draws
      host.onRebuild(fn)                -> off(); fn(reasons) runs before the frame when the scene changed
@@ -549,6 +550,7 @@
       shown: function (m) { return shown(scene, m); },
       floorOf: function (m) { return floorOf(scene, m); },
       shownFloor: curShownFloor,
+      floorId: function () { var ins = inspect(); return ins && viewOf(scene) === 'floor' ? ins.floor : null; },
       onShownFloor: onShownFloor,
       view: function () { return viewOf(scene); },
       inBuilding: function () { return viewOf(scene) === 'building'; },

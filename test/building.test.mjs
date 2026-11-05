@@ -822,3 +822,49 @@ test('receive: a patch that does not start from the latest snapshot changes noth
   assert.equal(r.store.latest().sessions, before.sessions, 'what did not change is shared');
   assert.equal(B.createStore().receive({ patch: 1, base: 1, seq: 2 }), false, 'a patch before any snapshot does not fit');
 });
+
+test('a rebuild keeps the floor the user picked, by branch, when that floor still exists (#85)', () => {
+  const wt = (branch, root) => ({ branch, root });
+  const r = rig({ repos: [{ path: REPO_A, worktrees: [wt('main', REPO_A), wt('feat/x', 'C:\\work\\repo-feat'), wt('feat/y', 'C:\\work\\repo-y')] }] });
+  r.push();
+  const m = r.mount(KEY_A);
+  const picked = m.def.floors.filter((f) => f.name === 'feat/y')[0].id;
+  assert.equal(m.floorBranch(picked), 'feat/y');
+  // a worktree of another floor goes: the page mounts again, and the ids of the floors move
+  r.repos[0].worktrees.splice(1, 1);
+  r.push();
+  assert.equal(m.stale(), true);
+  const next = r.mount(KEY_A);
+  const nextId = next.def.floors.filter((f) => f.name === 'feat/y')[0].id;
+  assert.notEqual(nextId, picked, 'the id changed, so the page must not carry the id');
+  assert.equal(B.keepFloor(m, picked, next), nextId, 'the picked floor stays');
+});
+
+test('a rebuild does not keep a floor that is gone, a spare floor, or an unknown floor (#85)', () => {
+  const r = rig({ repos: [{ path: REPO_A, worktrees: [{ branch: 'main', root: REPO_A }, { branch: 'feat/x', root: 'C:\\work\\repo-feat' }] }] });
+  r.push();
+  const m = r.mount(KEY_A);
+  const x = m.def.floors.filter((f) => f.name === 'feat/x')[0].id;
+  r.repos[0].worktrees.pop();
+  r.push();
+  const next = r.mount(KEY_A);
+  assert.equal(B.keepFloor(m, x, next), null, 'the floor is gone: the scene uses its default');
+  assert.equal(B.keepFloor(m, 999, next), null);
+  assert.equal(B.keepFloor(m, null, next), null);
+  assert.equal(B.keepFloor(null, x, next), null);
+  const empty = rig().mount(KEY_A);
+  assert.equal(B.keepFloor(m, x, empty), null, 'the spare floor is not a branch');
+});
+
+test('a floor added after mount is kept by its branch too (#85)', async () => {
+  const r = rig();
+  const m = r.mount(KEY_A);
+  await r.hook(HOOKS.turnWithEdit[0]);   // the spare floor takes the first branch
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'sid-2', cwd: 'C:\\work\\repo-feat' });
+  const add = of(m.ev, 'floor.add')[0];
+  assert.ok(add, 'a second floor is added');
+  assert.equal(m.floorBranch(add.floor.id), 'feat/x');
+  const next = r.mount(KEY_A);
+  const want = next.def.floors.filter((f) => f.name === 'feat/x')[0].id;
+  assert.equal(B.keepFloor(m, add.floor.id, next), want);
+});

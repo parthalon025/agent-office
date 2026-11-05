@@ -1321,7 +1321,7 @@
     // cur2.mount is the building adapter of the scene on screen (null in the city, or before the first snapshot).
     // A scene gets a new one when the building changes, and when the adapter says it is stale: the DS has no
     // event that removes a floor or a room, so a removal mounts the building again.
-    var fd = useState({ key: wantKey, repo: shown, view: view, mount: null }), cur2 = fd[0], setCur2 = fd[1];
+    var fd = useState({ key: wantKey, repo: shown, view: view, mount: null, floor: null }), cur2 = fd[0], setCur2 = fd[1];
     var stale = !!snap && !!cur2.mount && cur2.mount.stale();
     var needsMount = !!snap && view === 'office' && !cur2.mount && cur2.view === 'office';
     var mount = cur2.mount, def = mount ? mount.def : null;
@@ -1332,7 +1332,14 @@
     useEffect(function () {
       if (!fading) return undefined;
       var t = setTimeout(function () {
-        setCur2({ key: wantKey, repo: shown, view: view, mount: view === 'office' && window.officeAdapter.latest() ? window.officeAdapter.mount(shown) : null });
+        var next = view === 'office' && window.officeAdapter.latest() ? window.officeAdapter.mount(shown) : null;
+        // A rebuild of the same building keeps the floor the user looks at, if it still exists (#85). Floor ids are new
+        // for each mount, so the match is by branch. Another building or the city starts on the scene's default floor.
+        var floor = null;
+        if (next && cur2.mount && cur2.view === 'office' && cur2.repo === shown && hostRef.current) {
+          try { floor = window.OfficeBuilding.keepFloor(cur2.mount, hostRef.current.floorId(), next); } catch (x) { floor = null; }
+        }
+        setCur2({ key: wantKey, repo: shown, view: view, mount: next, floor: floor });
       }, reduced() ? 0 : cssMs('duration-base', 240));
       return function () { clearTimeout(t); };
     }, [wantKey, view, stale, needsMount, sceneKey]);
@@ -1500,7 +1507,7 @@
     }, [cur2.view]);
     // notifier: false: the page runs the one Notifier (alerts and the tab title for every building, below).
     // Since you left shows on every scene: the adapter seeds the state it sends again, so the card counts only news.
-    var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: mount.adapter, height: win.h, quality: 'auto', intro: intro, editable: false, simulate: false, toasts: false,
+    var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: mount.adapter, floor: cur2.floor == null ? undefined : cur2.floor, height: win.h, quality: 'auto', intro: intro, editable: false, simulate: false, toasts: false,
       inbox: inbox, onInbox: setInbox, notifier: false, onSinceYouLeft: setSyl,
       // The scene's live request and error toasts go to the page stack, where they stay until closed. Seeded events
       // (a scene mounted again) send none: an open request stays in Needs you, the inbox and the tab title.
