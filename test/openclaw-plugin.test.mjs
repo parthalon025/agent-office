@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { load, DEFAULT_HOOK_MS } from './fixtures/fake-openclaw.mjs';
-import { OFFICE_KEY as PLUGIN_KEY, officeIdOf as pluginIdOf, ROUTE, WAIT_MS, createGate } from '../integrations/openclaw-plugin/gate.js';
+import { OFFICE_KEY as PLUGIN_KEY, officeIdOf as pluginIdOf, ROUTE, WAIT_MS, HOOK_MS, createGate, hookLimit, waitFor } from '../integrations/openclaw-plugin/gate.js';
 import { OFFICE_KEY, officeKey, officeIdOf, gateRequest, PLUGIN_ID, PLUGIN_DIR } from '../providers/openclaw.mjs';
 import { routeOf } from '../auth.mjs';
 
@@ -38,6 +38,7 @@ async function office(answer) {
   fs.writeFileSync(tokenFile, JSON.stringify({ token: 'agent-token-1', port: srv.address().port }));
   return { seen, tokenFile, base, port: srv.address().port, close: () => { srv.closeAllConnections?.(); srv.close(); fs.rmSync(base, { recursive: true, force: true }); } };
 }
+const until = async (fn, what, ms = 5000) => { const t0 = Date.now(); while (!fn()) { if (Date.now() - t0 > ms) assert.fail('timed out waiting for ' + what); await new Promise((r) => setTimeout(r, 10)); } };
 const call = (over = {}) => ({ toolName: 'edit', params: { path: 'src/a.js', old_string: 'a', new_string: 'b' }, toolCallId: 'call-1', runId: 'run-1', ...over });
 const ctxOf = (over = {}) => ({ sessionKey: KEY, sessionId: 'sess-1', agentId: 'main', toolName: 'edit', ...over });
 
@@ -92,13 +93,46 @@ test('no answer means deny: the wait limit blocks the call and closes the reques
   const o = await office(() => new Promise(() => {})); // the office never answers
   try {
     let fire;
-    const gate = createGate({ config: () => ({ tokenFile: o.tokenFile }), readFile: (f) => fs.promises.readFile(f, 'utf8'), fetch, setTimer: (fn) => { fire = fn; return 1; }, clearTimer: () => {} });
+    const gate = createGate({ config: () => ({ tokenFile: o.tokenFile }), readFile: (f) => fs.promises.readFile(f, 'utf8'), setTimer: (fn) => { fire = fn; return 1; }, clearTimer: () => {} });
     const p = gate.beforeToolCall(call(), ctxOf());
     while (!o.seen.length) await new Promise((r) => setTimeout(r, 10));
     fire();
     const r = await p;
     assert.deepEqual(r, { block: true, blockReason: `Agent Office: no answer from the office in ${Math.round(WAIT_MS / 1000)} s. The call is denied.` });
     while (!o.seen[0].closed) await new Promise((r) => setTimeout(r, 10));
+  } finally { o.close(); }
+});
+
+// Review 77 problem 1: the global fetch gives up after 300 s without answer headers (undici headersTimeout), so an approval
+// after 5 minutes was lost, and the host may replace fetch. The plugin posts with node:http and its own wait only.
+test('the plugin posts with node:http, not the host\'s global fetch, and waits for a slow answer', async () => {
+  const o = await office(() => new Promise((r) => setTimeout(() => r({ json: { decision: 'allow' } }), 1200)));
+  const real = globalThis.fetch;
+  globalThis.fetch = () => { throw new Error('the plugin must not use the global fetch'); };
+  try {
+    const host = await load(DIR, { config: { tokenFile: o.tokenFile } });
+    const t0 = Date.now();
+    assert.equal(await host.beforeToolCall(call(), ctxOf()), undefined, 'the answer after a wait still allows the call');
+    assert.ok(Date.now() - t0 >= 1000, 'it waited for the answer');
+    assert.equal(o.seen.length, 1);
+  } finally { globalThis.fetch = real; o.close(); }
+});
+
+test('an operator limit shorter than 600 s: the plugin ends its own wait first, says why, and closes the request (real timers)', async () => {
+  const o = await office(() => new Promise(() => {}));
+  try {
+    // OpenClaw picks hooks.timeouts.before_tool_call, then hooks.timeoutMs, then the plugin's own 600 s.
+    const gateway = (hooks) => ({ plugins: { entries: { 'agent-office': { hooks } } } });
+    assert.equal(hookLimit({}), HOOK_MS);
+    assert.equal(hookLimit(gateway({ timeoutMs: 30_000 })), 30_000);
+    assert.equal(hookLimit(gateway({ timeoutMs: 30_000, timeouts: { before_tool_call: 90_000 } })), 90_000);
+    assert.equal(hookLimit(gateway({ timeoutMs: -1, timeouts: { before_tool_call: 'x' } })), HOOK_MS, 'a value OpenClaw does not take is no limit');
+    assert.deepEqual([waitFor(HOOK_MS), waitFor(30_000), waitFor(2_000)], [WAIT_MS, 25_000, 1_000]);
+    const host = await load(DIR, { config: { tokenFile: o.tokenFile }, gateway: gateway({ timeoutMs: 2_000 }) });
+    assert.equal(host.hooks[0].timeoutMs, 2_000, 'the stand-in host applies the operator limit as OpenClaw does');
+    const r = await host.beforeToolCall(call(), ctxOf());
+    assert.deepEqual(r, { block: true, blockReason: 'Agent Office: no answer from the office in 1 s. The call is denied.' }, 'the plugin\'s reason, not the host timeout');
+    await until(() => o.seen[0].closed, 'the request to close, so the office frees its hold');
   } finally { o.close(); }
 });
 

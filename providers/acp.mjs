@@ -404,13 +404,16 @@ export function createAcp(deps) {
   }
   // The settings that are off, in words and with the command that turns each on. A setting the office could not read is never
   // a pass: it says it cannot confirm.
-  function configNotes(c) {
+  // warn: true gives only the settings that are not preconditions (openclaw.mjs wantedConfig warn), false only the others.
+  function configNotes(c, warn = false) {
     const notes = [];
     for (const x of c.settings) {
-      if (x.ok) continue;
+      if (x.ok || x.warn !== warn) continue;
       const run = x.fix ? ` Run: ${x.fix}` : '';
       if (x.have === 'unknown') notes.push(`the office could not read ${x.path}, so it cannot confirm it.`);
+      else if (x.note) notes.push(`${x.note}${run}`);
       else if (x.path === 'tools.fs.workspaceOnly') notes.push(`${x.path} is ${x.have}, so its file tools can reach outside the worktree.${run}`);
+      else if (x.path === 'tools.exec.host') notes.push(`${x.path} is ${x.have}, so a command that names no host runs on a paired device, outside the worktree.${run}`);
       else notes.push(`${x.path} is ${x.have} (wanted: ${typeof x.value === 'string' ? x.value : JSON.stringify(x.value)}), so the ${PLUGIN_ID} plugin does not send its tool calls to this office.${run}`);
     }
     return notes;
@@ -550,14 +553,20 @@ export function createAcp(deps) {
     // edit that moved to a file the user declined is named. The hooks below keep the card, which the PreToolUse carried.
     const did = c.args || c, input = did.tool_input;
     const file = input.file_path ? norm(st, input.file_path) : null;
-    // A call the office plugin asked about (spec.plugin) went to the office before it ran: it did not run without asking.
-    const gated = st.gated.has(c.id);
+    const gated = st.gated.get(c.id);
     st.gated.delete(c.id);
-    // Hermes #31682: an edit the user declined can come back through another of the agent's own tools. The office cannot
-    // stop the agent's own tools, so it says so when one reports that file changed.
-    if (u.status === 'completed' && EDIT_KINDS.has(c.kind) && file && st.denied.has(file)) {
+    // spec.plugin: every call of the session goes to the office through the plugin before it runs (gate). A call that ran
+    // without the office's yes means the plugin did not hold it: not loaded, a Gateway not restarted after the plugin was
+    // turned on, or another call id. Nothing else stops OpenClaw's calls, so the session ends with an Error that says so.
+    if (spec.plugin && u.status === 'completed' && !c.served && !(file && st.wrote.has(file)) && !(gated && gated.allow)) {
+      gateFailed(s, st, c, gated);
+    } else if (spec.plugin) {
+      // held by the office: nothing to say
+    } else if (u.status === 'completed' && EDIT_KINDS.has(c.kind) && file && st.denied.has(file)) {
+      // Hermes #31682: an edit the user declined can come back through another of the agent's own tools. The office cannot
+      // stop the agent's own tools, so it says so when one reports that file changed.
       emit(st, () => events.feed(s, 'wait', `${label} changed ${path.basename(String(input.file_path))} after you declined that edit.`));
-    } else if (u.status === 'completed' && !c.asked && !c.served && !gated) {
+    } else if (u.status === 'completed' && !c.asked && !c.served) {
       if (c.kind === 'execute') emit(st, () => events.feed(s, 'wait', `${label} ran a command without asking the office: ${clip(input.command || c.title, 100)}`));
       else if (EDIT_KINDS.has(c.kind) && !(file && st.wrote.has(file))) {
         emit(st, () => events.feed(s, 'wait', `${label} changed ${path.basename(String(input.file_path || c.title))} without asking the office.`));
@@ -571,6 +580,18 @@ export function createAcp(deps) {
     const base = { tool_name: c.tool_name, tool_use_id: c.id, tool_input: c.tool_input };
     if (u.status === 'completed') hook(s, st, { hook_event_name: 'PostToolUse', ...base });
     else hook(s, st, { hook_event_name: 'PostToolUseFailure', ...base, error: clip(String(said || 'Failed'), 240), is_interrupt: st.interrupted });
+  }
+
+  // The plugin did not hold a call that ran (spec.plugin). The turn ends with an Error naming the plugin, and the agent stops:
+  // its next calls would not be held either.
+  function gateFailed(s, st, c, gated) {
+    if (st.closed || st.gateFail) return;
+    const why = gated ? 'the office had declined it' : 'the office never got it';
+    st.gateFail = `${label} ran ${c.tool_name} ${what(c)} without the office's yes (${why}). The ${PLUGIN_ID} plugin did not hold this call: it is not loaded, the Gateway was not restarted after openclaw plugins enable ${PLUGIN_ID}, or ${label} gave the call another id. The office stopped the session.`;
+    emit(st, () => events.feed(s, 'wait', st.gateFail));
+    try { st.rpc.notify('session/cancel', { sessionId: st.sid }); } catch { /* the agent is gone */ }
+    if (st.endCancel) st.endCancel({ stopReason: 'cancelled' });
+    setImmediate(() => { if (!st.dead && st.child.pid) killTree(st.child.pid, execFile); }); // the exit ends the session
   }
 
   // ----- approvals -----
@@ -623,10 +644,18 @@ export function createAcp(deps) {
     if (!once && options.some((o) => o.kind === 'allow_always')) {
       emit(st, () => events.feed(s, 'wait', `${label} offers only Always allow for ${c.tool_name} ${c.title}. The office never gives a lasting allow, so Approve declines.`.replace(/\s+\./, '.')));
     }
-    if (st.closed || st.interrupted) return CANCELLED;
+    if (st.closed || st.interrupted || st.gateFail) return CANCELLED;
     // spec.plugin: the office already answered this call when the plugin sent it (gate). OpenClaw's own exec approval for the
-    // same call gets that answer, so the user is not asked twice.
-    if (st.gated.has(c.id)) return st.gated.get(c.id) ? (once ? pick(once) : CANCELLED) : (no ? pick(no) : CANCELLED);
+    // same call gets a no at once, and a yes only for the command the office approved: that request shows the command that
+    // will run, which another plugin may have changed after the office's yes. Another command, or a paired device, is held again.
+    const g = st.gated.get(c.id);
+    if (g && !g.allow) return no ? pick(no) : CANCELLED;
+    if (g && g.allow) {
+      const host = c.raw && typeof c.raw.host === 'string' ? c.raw.host : '';
+      const ran = String(c.tool_input.command || '').trim();
+      if (c.tool_name === 'Bash' && g.command !== null && ran === g.command && host !== 'node') return once ? pick(once) : CANCELLED;
+      emit(st, () => events.feed(s, 'wait', `${label} asks to run ${host === 'node' ? 'on a paired device' : 'another command than the one you approved'}: ${clip(ran || c.title, 100)}`));
+    }
     const shown = { kind: c.kind, tool_name: c.tool_name, tool_input: { ...c.tool_input }, sig: sigOf(c), told: false };
     shown.file = EDIT_KINDS.has(c.kind) && shown.tool_input.file_path ? norm(st, shown.tool_input.file_path) : null;
     return new Promise((resolve) => {
@@ -799,7 +828,7 @@ export function createAcp(deps) {
         st.cancelled = new Promise((resolve) => { st.endCancel = resolve; });
         const r = await Promise.race([st.rpc.request('session/prompt', { sessionId: st.sid, prompt }), st.cancelled]);
         flushText(s, st);
-        if (st.closed || st.interrupted) break;
+        if (st.closed || st.interrupted || st.gateFail) break;
         reportUsage(s, st, r);
         const why = STOP_WORDS[r?.stopReason];
         if (why) { failure = why; break; }
@@ -825,6 +854,7 @@ export function createAcp(deps) {
     st.grants.clear(); st.denied.clear(); st.askFirst.clear(); st.wrote.clear(); st.gated.clear(); st.deniedVague = false;
     st.carry.push(...st.notes.splice(0)); // the inbox gave them up already: they go with the next prompt
     if (st.closed) return;
+    if (st.gateFail) { events.stream(s, { type: 'result', subtype: 'success', is_error: true, result: st.gateFail }); return; }
     if (st.interrupted) events.stream(s, { type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Stopped' });
     else if (failure) events.stream(s, { type: 'result', subtype: 'success', is_error: true, result: failure });
     else events.stream(s, { type: 'result', subtype: 'success', is_error: false, result: st.last });
@@ -846,6 +876,20 @@ export function createAcp(deps) {
     throw rpcError(-32601, `Method not found: ${method}`);
   }
 
+  // One call of the office plugin, held like every request (gate): { allow, reason }. signal: the plugin stopped waiting.
+  function holdOne(s, st, m, signal) {
+    return new Promise((resolve) => {
+      const held = hold(s, st, m.tool_name, m.tool_input, (v, why) => {
+        if (v === 'allow') return resolve({ allow: true, reason: '' });
+        resolve({ allow: false, reason: why || (v === 'cancel' ? 'The turn was stopped in Agent Office.' : v === 'withdraw' ? `${label} stopped waiting for the answer.` : 'Declined in Agent Office.') });
+      }, m.reason || null, m.firm === true);
+      if (held && signal) {
+        if (signal.aborted) withdraw(s, st, held, `${label} stopped waiting for your answer.`);
+        else signal.addEventListener('abort', () => withdraw(s, st, held, `${label} stopped waiting for your answer.`), { once: true });
+      }
+    });
+  }
+
   // ----- the session -----
   // OpenClaw, before the session exists (so before any prompt goes out): the version the plugin is built against, the file tools
   // in the worktree, and the plugin loaded for this office, so every tool call of the session asks the office (#77). The
@@ -860,14 +904,19 @@ export function createAcp(deps) {
     if (block) throw new Error(block);
     return p.config;
   }
-  function announce(s, st) {
+  function announce(s, st, c) {
     emit(st, () => events.feed(s, 'start', `${label} config: workspace-only is on, and the ${PLUGIN_ID} plugin sends every tool call to the office.`));
+    for (const n of configNotes(c, true)) emit(st, () => events.feed(s, 'wait', `${label}: ${n}`));
   }
   // The Gateway session key of an office session (#77): the plugin knows the session by it. A reopened session keeps the key of
   // its past record (session/load rebinds the same Gateway session); a new one gets a key with its own uid.
+  // Two live sessions never share a key: the plugin's calls would show on the first one. So a second Reopen of the same past
+  // record, while the first is open, starts a new conversation with its own key.
   function gatewayKeyOf(s, o) {
     const past = o.prior && typeof o.prior.gatewayKey === 'string' ? o.prior.gatewayKey : null;
-    return o.resume && past ? past : officeKey(s.uid);
+    if (!o.resume || !past) return { key: officeKey(s.uid), taken: false };
+    const taken = [...agents.values()].some((x) => x.session !== s && !x.closed && !x.dead && x.session?.gatewayKey === past);
+    return taken ? { key: officeKey(s.uid), taken: true } : { key: past, taken: false };
   }
 
   async function start(s, st, o) {
@@ -881,11 +930,12 @@ export function createAcp(deps) {
     if (st.closed) return;
     // spec.plugin: the session key the plugin reads goes with session/new and session/load. A past record without one (from
     // before #77) cannot be held, so it starts a new conversation instead.
-    const key = spec.plugin ? gatewayKeyOf(s, o) : null;
+    const gk = spec.plugin ? gatewayKeyOf(s, o) : { key: null, taken: false };
+    const key = gk.key;
     const meta = key ? { _meta: { sessionKey: key } } : {};
     if (key) s.gatewayKey = key;
     let r, sid;
-    if (o.resume && st.caps.loadSession === true && (!spec.plugin || o.prior?.gatewayKey)) {
+    if (o.resume && st.caps.loadSession === true && (!spec.plugin || (o.prior?.gatewayKey && !gk.taken))) {
       // The agent replays the past conversation as updates before it answers. The office already has those replies
       // (the past record), so the replay is not shown again.
       st.loading = true;
@@ -901,7 +951,7 @@ export function createAcp(deps) {
       sid = r && r.sessionId;
     } else {
       // Before the session id: the office keeps the past record of a conversation that did not continue.
-      if (o.resume) emit(st, () => events.fresh(s, `${label} cannot load a past session now. A new session started.`));
+      if (o.resume) emit(st, () => events.fresh(s, gk.taken ? `That ${label} conversation is open in another session. A new session started.` : `${label} cannot load a past session now. A new session started.`));
       r = await within(st.rpc.request('session/new', { cwd: s.cwd, mcpServers: [], ...meta }), INIT_MS, 'it did not start a session in time', setTimer, clearTimer);
       sid = r && r.sessionId;
     }
@@ -910,7 +960,7 @@ export function createAcp(deps) {
     learnModels(r);
     // The session id first (the tracker saves the session when its sid arrives), then the bot sits down at rest.
     emit(st, () => events.stream(s, { type: 'system', subtype: 'init', session_id: sid, model: r.models?.currentModelId || (spec.modelArg && o.model && spec.modelRe.test(String(o.model)) ? String(o.model) : null) || null, permissionMode: 'default' }));
-    if (gate) announce(s, st);
+    if (gate) announce(s, st, gate);
     // With a first prompt waiting, the turn starts at once instead (no flicker from at rest to working).
     if (!st.queue.length) hook(s, st, { hook_event_name: 'SessionStart', source: o.resume ? 'resume' : 'startup' });
     const next = st.queue.shift();
@@ -980,27 +1030,32 @@ export function createAcp(deps) {
     // gateRequest). It is held like every request of the session (the Security room rules, then the user), and the answer goes
     // back as { allow, reason }. A call that starts work outside the session is denied at once (openclaw.mjs toolCall). signal:
     // the plugin stopped waiting (its limit, or OpenClaw cancelled the call); the hold then goes, and the feed says so.
-    gate(s, call, signal) {
+    // The answer is kept by toolCallId (st.gated) for endCall and for OpenClaw's own exec approval of the same call, so a call
+    // with no id is denied: the office could not tell later whether it ran unheld. A patch of several files is held as an Edit
+    // of each, one after another, and runs only when every one is allowed.
+    async gate(s, call, signal) {
       const st = agents.get(s.uid);
-      if (!spec.plugin || !st || st.closed || st.dead) return Promise.resolve({ allow: false, reason: `This ${label} session is not open in Agent Office.` });
-      const m = toolCall(call.toolName, call.params, call.derivedPaths);
+      if (!spec.plugin || !st || st.closed || st.dead || st.gateFail) return { allow: false, reason: `This ${label} session is not open in Agent Office.` };
       const id = call.toolCallId ? String(call.toolCallId) : null;
-      const done = (allow, reason = '') => { if (id) st.gated.set(id, allow); return { allow, reason }; };
+      const m = toolCall(call.toolName, call.params, call.derivedPaths, s.cwd);
+      const done = (allow, reason = '') => { if (id) st.gated.set(id, { allow, command: m.tool_name === 'Bash' && typeof m.tool_input.command === 'string' ? m.tool_input.command.trim() : null }); return { allow, reason }; };
       if (m.handoff) {
         emit(st, () => events.feed(s, 'tool', `refused ${call.toolName}: ${m.handoff}`));
-        return Promise.resolve(done(false, m.handoff));
+        return done(false, m.handoff);
       }
-      if (st.interrupted) return Promise.resolve(done(false, 'The turn was stopped in Agent Office.'));
-      return new Promise((resolve) => {
-        const held = hold(s, st, m.tool_name, m.tool_input, (v, why) => {
-          if (v === 'allow') return resolve(done(true));
-          resolve(done(false, why || (v === 'cancel' ? 'The turn was stopped in Agent Office.' : v === 'withdraw' ? `${label} stopped waiting for the answer.` : 'Declined in Agent Office.')));
-        });
-        if (held && signal) {
-          if (signal.aborted) withdraw(s, st, held, `${label} stopped waiting for your answer.`);
-          else signal.addEventListener('abort', () => withdraw(s, st, held, `${label} stopped waiting for your answer.`), { once: true });
-        }
-      });
+      if (!id) {
+        emit(st, () => events.feed(s, 'tool', `refused ${call.toolName}: the ${PLUGIN_ID} plugin sent no tool call id`));
+        return { allow: false, reason: `The ${PLUGIN_ID} plugin sent no tool call id, so the office cannot match the call to what ${label} reports. The call is denied.` };
+      }
+      const parts = m.files && m.files.length > 1 ? m.files.map((f) => ({ ...m, tool_input: { file_path: f } })) : [m];
+      for (const part of parts) {
+        if (st.closed || st.dead || st.gateFail) return done(false, `This ${label} session is not open in Agent Office.`);
+        if (st.interrupted) return done(false, 'The turn was stopped in Agent Office.');
+        if (signal?.aborted) return done(false, `${label} stopped waiting for the answer.`);
+        const d = await holdOne(s, st, part, signal);
+        if (!d.allow) return done(false, d.reason);
+      }
+      return done(true);
     },
 
     async readiness() {
@@ -1022,7 +1077,7 @@ export function createAcp(deps) {
         try {
           const c = (await policy()).config;
           if (gateBlock(c)) ready = false;   // start() refuses the same way (gateCheck)
-          needs.push(...configNotes(c).map((n) => `${label}: ${n}`));
+          needs.push(...[...configNotes(c), ...configNotes(c, true)].map((n) => `${label}: ${n}`));
         } catch (e) { ready = false; needs.push(`${label}: the office could not check its config: ${textOf(e)}`); }
       }
       return { ready, version: learned.version || 'unknown', needs };
@@ -1063,7 +1118,7 @@ export function createAcp(deps) {
       s.pid = child.pid;
       const root = s.worktree?.root || s.startDir || s.cwd;
       const st = {
-        child, root, tools: makeTools(root), sid: null, caps: null, busy: false, closed: false, interrupted: false, failed: false,
+        session: s, child, root, tools: makeTools(root), sid: null, caps: null, busy: false, closed: false, interrupted: false, failed: false, gateFail: null,
         loading: false, queue: [], notes: [], carry: [], text: '', last: '', msgId: null, cancelled: null, endCancel: null, err: '',
         calls: new Map(),        // toolCallId -> what the office knows of the call
         asks: new Map(),         // request id -> a held request: the agent's own, or a file or command the office serves
@@ -1072,7 +1127,7 @@ export function createAcp(deps) {
         askFirst: new Set(),     // this turn: files whose edit request went unanswered or changed; a write to them asks first
         deniedVague: false,      // this turn: the user declined an edit that named no file, so every write asks first
         wrote: new Set(),        // this turn: files the office wrote for the agent
-        gated: new Map(),        // spec.plugin: toolCallId -> the office's answer to the plugin (true: allowed), until the call ends
+        gated: new Map(),        // spec.plugin: toolCallId -> { allow, command } the office's answer to the plugin, until the call ends
         terminals: new Map(),    // terminalId -> a running or finished command (local-tools start())
         terminalIds: new Set(),  // every terminal id the office gave out
       };
@@ -1095,7 +1150,7 @@ export function createAcp(deps) {
         st.tools.stop();
         if (st.closed) return; // the office closes it: the close ends the session
         if (!st.sid && !st.failed) events.reply(s, `${label} stopped before it started: ` + (clip(st.err.trim(), 400) || 'exit code ' + code));
-        events.end(s, code ? `exited (${code})` : 'finished');
+        events.end(s, st.gateFail ? `stopped: the ${PLUGIN_ID} plugin did not hold a call` : code ? `exited (${code})` : 'finished');
       });
       start(s, st, o).catch((e) => {
         if (st.closed || st.dead) return;

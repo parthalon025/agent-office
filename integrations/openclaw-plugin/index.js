@@ -7,12 +7,9 @@
 // A plain entry object, the shape definePluginEntry returns (src/plugin-sdk/plugin-entry.ts, v2026.10.10), so the plugin
 // needs no package from OpenClaw and nothing is installed for it.
 import fs from 'node:fs/promises';
-import { createGate } from './gate.js';
+import { createGate, hookLimit, waitFor, HOOK_MS } from './gate.js';
 
-// OpenClaw's limit for this handler: 600 s, the most its hooks.timeoutMs setting takes (docs/plugins/hooks/reference.md). The
-// plugin's own wait (gate.js WAIT_MS) ends 5 s before it.
-const HOOK_MS = 600_000;
-
+const ID = 'agent-office';
 const SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -20,7 +17,7 @@ const SCHEMA = {
 };
 
 export default {
-  id: 'agent-office',
+  id: ID,
   name: 'Agent Office',
   description: 'Sends every tool call of an Agent Office session to the office and waits for the decision.',
   configSchema: {
@@ -35,13 +32,15 @@ export default {
     },
   },
   register(api) {
+    // The plugin's wait ends a little before OpenClaw's limit for the handler, also when an operator setting in the Gateway
+    // config (api.config) makes that limit shorter than the 600 s the plugin asks for: the plugin then says why it denies,
+    // and its request closes, so the office card goes too. The office warns about a shorter limit (providers/openclaw.mjs).
     const gate = createGate({
       config: () => api.pluginConfig || {},
       readFile: (file) => fs.readFile(file, 'utf8'),
-      fetch: (...a) => globalThis.fetch(...a),
+      waitMs: waitFor(hookLimit(api.config, ID)),
     });
-    // No matcher: every tool. OpenClaw's own limit for the handler is a little longer than the plugin's wait, so the plugin
-    // says why it denies; a timeout or an error in the handler blocks the call (OpenClaw's rule for before_tool_call).
+    // No matcher: every tool. A timeout or an error in the handler blocks the call (OpenClaw's rule for before_tool_call).
     api.on('before_tool_call', (event, ctx) => gate.beforeToolCall(event, ctx), { priority: 1000, timeoutMs: HOOK_MS });
   },
 };

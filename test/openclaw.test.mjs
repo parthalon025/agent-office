@@ -6,7 +6,9 @@ import assert from 'node:assert/strict';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { gatewayPort, probeGateway, versionAtLeast, wantedConfig, checkConfig, configReader, toolCall, PLUGIN_DIR } from '../providers/openclaw.mjs';
+import { gatewayPort, probeGateway, versionAtLeast, wantedConfig, checkConfig, configReader, toolCall, patchFiles, hookLimit, HOOK_LIMIT_MS, PLUGIN_DIR } from '../providers/openclaw.mjs';
+import { hookLimit as pluginHookLimit, HOOK_MS as PLUGIN_HOOK_MS } from '../integrations/openclaw-plugin/gate.js';
+import { riskOf, actionOf } from '../risk.mjs';
 
 const listen = (srv) => new Promise((resolve) => srv.listen(0, '127.0.0.1', () => resolve(srv.address().port)));
 
@@ -56,9 +58,11 @@ const DIR = PLUGIN_DIR.replace(/\\/g, '/').replace(/\/$/, '');
 
 test('wantedConfig: workspace-only, plugins on, the office plugin allowed, enabled and given this office\'s token file', () => {
   const w = wantedConfig({ tokenFile: TOKEN });
-  assert.deepEqual(w.want.map((x) => x.path), ['tools.fs.workspaceOnly', 'plugins.enabled', 'plugins.allow', 'plugins.deny', 'plugins.entries.agent-office.enabled', 'plugins.entries.agent-office.config.tokenFile']);
+  assert.deepEqual(w.want.map((x) => x.path), ['tools.fs.workspaceOnly', 'tools.exec.host', 'plugins.enabled', 'plugins.allow', 'plugins.deny', 'plugins.entries.agent-office.enabled', 'plugins.entries.agent-office.config.tokenFile', 'plugins.entries.agent-office.hooks']);
   assert.deepEqual(w.want[0].rows, ['files-outside']);
-  for (const x of w.want.slice(1)) assert.deepEqual(x.rows, CALLS, x.path + ': every call goes through the plugin');
+  assert.deepEqual(w.want[1].rows, ['shell'], 'an exec that names no host runs on tools.exec.host');
+  for (const x of w.want.slice(2, -1)) assert.deepEqual(x.rows, CALLS, x.path + ': every call goes through the plugin');
+  assert.deepEqual([w.want.at(-1).rows, w.want.at(-1).warn], [[], true], 'the wait limit carries no row and is not a precondition');
   assert.deepEqual(w.gaps, [], 'the office decides every call: no cell is out of its reach');
 });
 
@@ -77,6 +81,26 @@ test('checkConfig: a good config passes; each setting that is off names the comm
     'openclaw plugins install --link "' + DIR + '" --force',
     'openclaw config set plugins.entries.agent-office.config.tokenFile "' + UNIX + '"',
   ]);
+  // Review 77 (8b, 4): a shorter OpenClaw wait for the plugin is said, but does not block; an exec host of "node" blocks.
+  const short = await checkConfig(w, have({ ...GOOD, 'plugins.entries.agent-office.hooks': { timeoutMs: 30_000 } }));
+  assert.equal(short.ok, true, 'a shorter limit only denies sooner');
+  const h = short.settings.find((x) => x.path.endsWith('.hooks'));
+  assert.deepEqual([h.ok, h.warn, h.fix], [false, true, 'openclaw config unset plugins.entries.agent-office.hooks.timeoutMs']);
+  assert.match(h.note, /hooks\.timeoutMs is 30000 ms, so OpenClaw waits 30 s for your answer to a tool call; a call you do not answer by then is denied\./);
+  const perHook = await checkConfig(w, have({ ...GOOD, 'plugins.entries.agent-office.hooks': { timeoutMs: 600_000, timeouts: { before_tool_call: 60_000 } } }));
+  assert.equal(perHook.settings.find((x) => x.path.endsWith('.hooks')).fix, 'openclaw config unset plugins.entries.agent-office.hooks.timeouts.before_tool_call');
+  assert.equal((await checkConfig(w, have({ ...GOOD, 'plugins.entries.agent-office.hooks': { timeouts: { before_tool_call: 600_000 } } }))).settings.every((x) => x.ok), true);
+  const lost = await checkConfig(w, async (p) => (p.endsWith('.hooks') ? { state: 'unreadable', why: 'x' } : have(GOOD)(p)));
+  assert.deepEqual([lost.ok, lost.unreadable], [true, false], 'an unreadable warning is not a precondition');
+  const node = await checkConfig(w, have({ ...GOOD, 'tools.exec.host': 'node' }));
+  assert.equal(node.ok, false, 'every exec without a host would run on a paired device');
+  assert.deepEqual(node.fix, ['openclaw config set tools.exec.host auto']);
+  for (const v of ['auto', 'gateway', 'sandbox']) assert.equal((await checkConfig(w, have({ ...GOOD, 'tools.exec.host': v }))).ok, true, v);
+  // The office reads the limit the way the plugin does.
+  for (const hooks of [undefined, {}, { timeoutMs: 30_000 }, { timeoutMs: 30_000, timeouts: { before_tool_call: 90_000 } }, { timeoutMs: 0, timeouts: { before_tool_call: -5 } }]) {
+    assert.equal(hookLimit(hooks), pluginHookLimit({ plugins: { entries: { 'agent-office': { hooks } } } }), JSON.stringify(hooks));
+  }
+  assert.equal(HOOK_LIMIT_MS, PLUGIN_HOOK_MS);
   const off = await checkConfig(w, have({ ...GOOD, 'plugins.enabled': false, 'plugins.allow': ['x'], 'plugins.deny': ['Agent-Office'], 'plugins.entries.agent-office.enabled': false, 'plugins.entries.agent-office.config.tokenFile': 'E:/other/.office-token-4392' }));
   assert.deepEqual(off.fix, [
     'openclaw config set plugins.enabled true',
@@ -99,13 +123,14 @@ test('checkConfig: a config the office cannot read is unknown, never a pass; an 
   assert.equal(odd.settings.find((s) => s.path.endsWith('tokenFile')).fix, null);
 });
 
+// An apply_patch text in OpenClaw's patch format that changes each file.
+const PATCH = (...files) => ['*** Begin Patch', ...files.map((f) => `*** Update File: ${f}\n@@\n-a\n+b`), '*** End Patch'].join('\n');
 test('toolCall: OpenClaw tool ids as the tool names and inputs the office rates and shows', () => {
   const t = (name, params, paths) => { const c = toolCall(name, params, paths); return [c.tool_name, c.tool_input, c.handoff]; };
   assert.deepEqual(t('read', { path: 'src/a.js' }), ['Read', { file_path: 'src/a.js' }, null]);
   assert.deepEqual(t('write', { file_path: 'b.md', content: 'x' }), ['Write', { file_path: 'b.md' }, null], 'an edit carries only its file, like every ACP edit');
   assert.deepEqual(t('edit', { path: 'c.js', old_string: 'a', new_string: 'b' }), ['Edit', { file_path: 'c.js' }, null]);
-  assert.deepEqual(t('apply_patch', { input: '*** Begin Patch' }, ['d.js']), ['Edit', { file_path: 'd.js' }, null]);
-  assert.deepEqual(t('apply_patch', { input: '*** Begin Patch' }, ['d.js', 'e.js']), ['openclaw:apply_patch', { description: 'd.js, e.js' }, null], 'more than one file: no single file to rate, so it asks as an other call');
+  assert.deepEqual(t('apply_patch', { input: PATCH('d.js') }, ['d.js']), ['Edit', { file_path: 'd.js' }, null]);
   assert.deepEqual(t('exec', { command: 'npm test' }), ['Bash', { command: 'npm test' }, null]);
   assert.deepEqual(t('bash', { command: 'ls' }), ['Bash', { command: 'ls' }, null]);
   assert.deepEqual(t('process', { action: 'kill', sessionId: 's1' }), ['Bash', { command: 'process {"action":"kill","sessionId":"s1"}' }, null]);
@@ -117,6 +142,63 @@ test('toolCall: OpenClaw tool ids as the tool names and inputs the office rates 
   for (const name of ['sessions_spawn', 'sessions_send', 'subagents', 'cron', 'automations', 'gateway', 'plugins', 'nodes']) {
     assert.match(toolCall(name, {}).handoff, /outside this session/, name);
   }
+});
+
+// Review 77 problem 4: exec takes host, node, elevated, workdir and env (src/agents/bash-tools.schemas.ts, v2026.10.10). Only
+// command reached the card, so `exec {command: "dir", node: "phone"}` showed as a plain dir and ran on a paired device.
+test('toolCall exec: a paired device is denied; elevated is high and asks the user; env and the folder are on the card', () => {
+  for (const p of [{ command: 'dir', node: 'phone' }, { command: 'dir', host: 'node' }]) {
+    const c = toolCall('exec', p);
+    assert.match(c.handoff, /^exec on a paired device \(node\) runs outside this PC/, JSON.stringify(p));
+  }
+  assert.equal(toolCall('bash', { command: 'ls', node: 'pi' }).handoff !== null, true, 'bash is the alias of exec');
+  const up = toolCall('exec', { command: 'dir', elevated: true });
+  assert.deepEqual([up.tool_name, up.tool_input, up.firm, up.handoff], ['Bash', { command: 'dir', elevated: true }, true, null]);
+  assert.match(up.reason, /^Runs with host elevation\./);
+  assert.equal(riskOf('Bash', up.tool_input, '/r'), 'high', 'elevated is high risk: no Always allow');
+  assert.equal(riskOf('Bash', { command: 'dir' }, '/r'), 'medium');
+  const env = toolCall('exec', { command: 'node x.js', env: { NODE_OPTIONS: '--require ./y.js', API_TOKEN: 'sk-1' }, workdir: 'C:/other', background: true, host: 'gateway' });
+  assert.deepEqual([env.tool_input, env.firm], [{ command: 'node x.js' }, true], 'an env change asks the user, whatever an Allow rule says');
+  assert.equal(env.reason, 'Folder: C:/other. Environment: NODE_OPTIONS=--require ./y.js, API_TOKEN=(hidden). Host: gateway. Keeps running after the turn (background).');
+  const plain = toolCall('exec', { command: 'npm test', workdir: 'sub', host: 'auto' });
+  assert.deepEqual([plain.reason, plain.firm], ['Folder: sub.', false]);
+  assert.deepEqual([toolCall('exec', { command: 'npm test' }).reason, toolCall('exec', { command: 'npm test' }).firm], [null, false]);
+});
+
+// Review 77 problem 5: derivedPaths are "best-effort ... may be incomplete" (src/plugins/hook-types.ts). One hinted file rated a
+// patch that also wrote .git/hooks as one Edit, so an Allow on Edit inside let it through.
+test('toolCall apply_patch: the files come from the patch text and the hints together; each is an Edit of its own', () => {
+  assert.deepEqual(patchFiles('*** Begin Patch\n*** Add File: a.js\n+x\n*** Update File: b.js\n*** Move to: c.js\n*** Delete File: d.js\n*** End Patch'), ['a.js', 'b.js', 'c.js', 'd.js']);
+  assert.deepEqual(patchFiles(undefined), []);
+  const sneaky = toolCall('apply_patch', { input: PATCH('src/a.js', '.git/hooks/pre-commit') }, ['src/a.js'], '/r');
+  assert.deepEqual([sneaky.tool_name, sneaky.files], ['Edit', ['src/a.js', '.git/hooks/pre-commit']], 'the hint missed a file: the text names it');
+  assert.match(sneaky.reason, /^A patch of 2 files: src\/a\.js, \.git\/hooks\/pre-commit\.$/);
+  const extra = toolCall('apply_patch', { input: PATCH('a.js') }, ['a.js', 'b.js'], '/r');
+  assert.deepEqual(extra.files, ['a.js', 'b.js'], 'a hint the text does not name is held too');
+  const same = toolCall('apply_patch', { input: PATCH('a.js') }, [path.resolve('/r', 'a.js')], '/r');
+  assert.deepEqual([same.files.length, same.reason, same.tool_input], [1, null, { file_path: 'a.js' }], 'a hint and a line for one file are one file');
+  const blind = toolCall('apply_patch', { input: 'garbage' }, ['a.js'], '/r');
+  assert.deepEqual([blind.tool_name, blind.files], ['openclaw:apply_patch', undefined], 'a text that names no file is not rated as an edit from the hints');
+  assert.match(blind.tool_input.description, /names no file it changes \(OpenClaw's hints: a\.js\)/);
+});
+
+// Review 77 problem 6: browser and MCP tools had no row, so the Web and MCP Deny did not reach them.
+test('toolCall browser and MCP tools: the Web and MCP rows; a paired device is denied; an upload asks the user', () => {
+  const nav = toolCall('browser', { action: 'navigate', targetUrl: 'https://example.com' });
+  assert.deepEqual([nav.tool_name, nav.tool_input, nav.handoff, nav.firm], ['WebFetch', { url: 'https://example.com' }, null, false]);
+  assert.equal(actionOf(nav.tool_name, nav.tool_input, '/r'), 'web');
+  assert.deepEqual(toolCall('browser', { action: 'snapshot' }).tool_input, { url: 'browser snapshot' });
+  assert.match(toolCall('browser', { action: 'navigate', node: 'phone' }).handoff, /^browser on a paired device/);
+  assert.match(toolCall('browser', { action: 'navigate', target: 'node' }).handoff, /^browser on a paired device/);
+  const up = toolCall('browser', { action: 'upload', paths: ['C:/Users/me/.ssh/id_rsa'] });
+  assert.deepEqual([up.firm, up.reason], [true, 'Uploads files from this PC: C:/Users/me/.ssh/id_rsa.']);
+  assert.deepEqual(toolCall('web_fetch', {}).tool_name, 'WebFetch', 'a web tool is on the Web row by its name, not by its params');
+  assert.equal(actionOf(toolCall('web_search', {}).tool_name, {}, '/r'), 'web');
+  const mcp = toolCall('outlook-graph__send_mail', { to: 'a' });
+  assert.deepEqual([mcp.tool_name, actionOf(mcp.tool_name, mcp.tool_input, '/r')], ['mcp__outlook-graph__send_mail', 'mcp']);
+  const office = toolCall('office__room', {});
+  assert.deepEqual([office.tool_name, actionOf(office.tool_name, office.tool_input, '/r')], ['mcp__openclaw-office__room', 'mcp'], 'a server called office is not the office\'s own tools');
+  assert.equal(toolCall('memory_search', {}).tool_name, 'openclaw:memory_search', 'a tool with no row stays an other call');
 });
 
 // A fake execFile for the config reader: `config get <path> --json` answers by path, `config validate` by `valid`.

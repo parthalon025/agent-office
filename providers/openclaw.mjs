@@ -98,23 +98,95 @@ const FILE_TOOLS = { read: 'Read', write: 'Write', edit: 'Edit' };
 // automations), a paired device (nodes, computer), or a change to the Gateway itself (gateway, plugins, openclaw), which could
 // turn this plugin off. The office denies them in its sessions.
 const OUTSIDE = new Set(['sessions_spawn', 'sessions_send', 'subagents', 'conversations_send', 'conversations_turn', 'automations', 'cron', 'gateway', 'plugins', 'openclaw', 'nodes', 'computer']);
+const HANDOFF = (name) => `${name} starts work outside this session (another session, a later run, a paired device) or changes the Gateway. The office cannot hold that work, so it denies the call.`;
+const NODE_HANDOFF = (name) => `${name} on a paired device (node) runs outside this PC and its worktree. The office cannot hold that work, so it denies the call.`;
 const short = (v) => clip(JSON.stringify(v ?? {}), 300);
-/** One OpenClaw tool call as { tool_name, tool_input, handoff }: handoff is why the office denies it, or null. */
-export function toolCall(name, params = {}, derivedPaths = []) {
+// apply_patch names its files in its own text (OpenClaw's patch format). OpenClaw's derivedPaths are hints only ("best-effort,
+// may be incomplete", src/plugins/hook-types.ts), so the office reads these lines itself.
+const PATCH_FILE = /^\*\*\* (?:(?:Add|Update|Delete) File|Move to):\s*(.+?)\s*$/gm;
+/** The files an apply_patch text names (Add, Update, Delete File and Move to), in order, or [] when it names none. */
+export function patchFiles(text) {
+  if (typeof text !== 'string') return [];
+  return [...text.matchAll(PATCH_FILE)].map((m) => m[1]).filter(Boolean);
+}
+// The MCP tools of OpenClaw's bundle-mcp are named "<server>__<tool>" (docs.openclaw.ai/gateway/config-tools/tool-policy, "MCP
+// servers"); no core tool id has "__". They become "mcp__<server>__<tool>", so the Security room MCP row rates them (risk.mjs).
+// A server called "office" would read as the office's own tools (mcp__office__, no row), so it keeps an "openclaw-" prefix.
+const MCP_NAME = /^([A-Za-z][\w-]*)__(.+)$/;
+const SECRET_NAME = /key|token|secret|passw|auth|cred/i;
+
+/**
+ * One OpenClaw tool call as the office holds it: { tool_name, tool_input, handoff, reason, firm, files }.
+ *   handoff: why the office denies the call at once, or null. reason: what the card adds to the tool and input (the fields of
+ *   an exec that change what it does), or null. firm: the user answers it (an Allow rule does not), a Deny rule still does.
+ *   files: apply_patch only, every file it changes (resolved against cwd for the compare); the office holds each as an Edit.
+ */
+export function toolCall(name, params = {}, derivedPaths = [], cwd = '') {
   const p = params && typeof params === 'object' ? params : {};
   const s = (v) => (typeof v === 'string' && v ? v : null);
-  const other = (input = { description: short(p) }) => ({ tool_name: `openclaw:${name}`, tool_input: input, handoff: null });
-  if (OUTSIDE.has(name)) return { tool_name: `openclaw:${name}`, tool_input: { description: short(p) }, handoff: `${name} starts work outside this session (another session, a later run, a paired device) or changes the Gateway. The office cannot hold that work, so it denies the call.` };
-  if (FILE_TOOLS[name]) { const f = s(p.path) || s(p.file_path) || s(p.filePath); return f ? { tool_name: FILE_TOOLS[name], tool_input: { file_path: f }, handoff: null } : other(); }
-  if (name === 'apply_patch') {
-    const paths = (Array.isArray(derivedPaths) ? derivedPaths : []).map(String);
-    return paths.length === 1 ? { tool_name: 'Edit', tool_input: { file_path: paths[0] }, handoff: null } : other({ description: clip(paths.join(', ') || 'a patch', 300) });
-  }
-  if (SHELL_TOOLS.has(name)) return s(p.command) ? { tool_name: 'Bash', tool_input: { command: p.command }, handoff: null } : other();
-  if (RUN_TOOLS.has(name)) return { tool_name: 'Bash', tool_input: { command: `${name} ${short(p)}` }, handoff: null };
-  if (name === 'web_fetch' && s(p.url)) return { tool_name: 'WebFetch', tool_input: { url: p.url }, handoff: null };
-  if ((name === 'web_search' || name === 'x_search') && s(p.query)) return { tool_name: 'WebSearch', tool_input: { query: p.query }, handoff: null };
+  const out = (tool_name, tool_input, more = {}) => ({ tool_name, tool_input, handoff: null, reason: null, firm: false, ...more });
+  const other = (input = { description: short(p) }) => out(`openclaw:${name}`, input);
+  if (OUTSIDE.has(name)) return out(`openclaw:${name}`, { description: short(p) }, { handoff: HANDOFF(name) });
+  if (FILE_TOOLS[name]) { const f = s(p.path) || s(p.file_path) || s(p.filePath); return f ? out(FILE_TOOLS[name], { file_path: f }) : other(); }
+  if (name === 'apply_patch') return patchCall(p, derivedPaths, cwd, other);
+  if (SHELL_TOOLS.has(name)) return s(p.command) ? execCall(name, p) : other();
+  if (RUN_TOOLS.has(name)) return out('Bash', { command: `${name} ${short(p)}` });
+  if (name === 'web_fetch') return out('WebFetch', { url: s(p.url) || short(p) });
+  if (name === 'web_search' || name === 'x_search') return out('WebSearch', { query: s(p.query) || short(p) });
+  if (name === 'browser') return browserCall(p);
+  const mcp = MCP_NAME.exec(name);
+  if (mcp) return out(`mcp__${mcp[1].toLowerCase() === 'office' ? 'openclaw-' : ''}${mcp[1]}__${mcp[2]}`, { description: short(p) });
   return other();
+}
+
+// exec (bash is its alias), src/agents/bash-tools.schemas.ts at v2026.10.10. host "node" or a node name runs on a paired
+// device: denied, like the nodes tool. elevated runs with host elevation: high risk (risk.mjs), and the user answers it. env
+// changes what the command does (NODE_OPTIONS, a PATH-like variable): the user answers it. workdir, env, elevated, host and
+// background go on the card as its reason line, so what the user approves is what runs.
+function execCall(name, p) {
+  if (p.host === 'node' || (typeof p.node === 'string' && p.node.trim())) {
+    return { tool_name: 'Bash', tool_input: { command: p.command }, handoff: NODE_HANDOFF(name), reason: null, firm: false };
+  }
+  const env = p.env && typeof p.env === 'object' && !Array.isArray(p.env) ? Object.entries(p.env) : [];
+  const elevated = p.elevated === true;
+  const parts = [];
+  if (elevated) parts.push('Runs with host elevation.');
+  if (typeof p.workdir === 'string' && p.workdir.trim()) parts.push(`Folder: ${p.workdir}.`);
+  // A value under a name that reads as a secret is not shown: the card is on the screen.
+  if (env.length) parts.push(`Environment: ${env.map(([k, v]) => `${k}=${SECRET_NAME.test(k) ? '(hidden)' : String(v)}`).join(', ')}.`);
+  if (typeof p.host === 'string' && p.host && p.host !== 'auto') parts.push(`Host: ${p.host}.`);
+  if (p.background === true) parts.push('Keeps running after the turn (background).');
+  return {
+    tool_name: 'Bash', tool_input: elevated ? { command: p.command, elevated: true } : { command: p.command },
+    handoff: null, reason: parts.length ? clip(parts.join(' '), 300) : null, firm: elevated || env.length > 0,
+  };
+}
+
+// apply_patch: the files its text names, together with OpenClaw's hints. One file: an Edit of that file. More: an Edit of
+// each, so each file meets its own Security room row (a hook or a settings file asks, a secret file asks or is denied).
+// A patch text that names no file is not rated as an edit: the office cannot see what it changes, so it asks.
+function patchCall(p, derivedPaths, cwd, other) {
+  const named = patchFiles(p.input ?? p.patch);
+  const hints = (Array.isArray(derivedPaths) ? derivedPaths : []).map(String).filter(Boolean);
+  if (!named.length) return other({ description: clip(`a patch that names no file it changes${hints.length ? ` (OpenClaw's hints: ${hints.join(', ')})` : ''}`, 300) });
+  const seen = new Map();
+  const keyOf = (f) => { const a = path.resolve(String(cwd || '.'), f); return process.platform === 'win32' ? a.replace(/\//g, '\\').toLowerCase() : a; };
+  for (const f of [...named, ...hints]) if (!seen.has(keyOf(f))) seen.set(keyOf(f), f);
+  const files = [...seen.values()];
+  return { tool_name: 'Edit', tool_input: { file_path: files[0] }, handoff: null, reason: files.length > 1 ? clip(`A patch of ${files.length} files: ${files.join(', ')}.`, 300) : null, firm: false, files };
+}
+
+// browser (extensions/browser/src/browser-tool.schema.ts at v2026.10.10): the Web row. target "node" or a node name is a paired
+// device: denied. An upload sends files from this PC to a page: the user answers it, and the card names the files.
+function browserCall(p) {
+  const s = (v) => (typeof v === 'string' && v ? v : null);
+  const where = s(p.targetUrl) || s(p.url) || `browser ${s(p.action) || short(p)}`;
+  if (p.target === 'node' || (typeof p.node === 'string' && p.node.trim())) return { tool_name: 'WebFetch', tool_input: { url: where }, handoff: NODE_HANDOFF('browser'), reason: null, firm: false };
+  const files = Array.isArray(p.paths) ? p.paths.map(String).filter(Boolean) : [];
+  if (p.action === 'upload' || files.length) {
+    return { tool_name: 'WebFetch', tool_input: { url: where }, handoff: null, reason: clip(`Uploads files from this PC: ${files.join(', ') || 'files the call does not name'}.`, 300), firm: true };
+  }
+  return { tool_name: 'WebFetch', tool_input: { url: where }, handoff: null, reason: null, firm: false };
 }
 
 // ---------- the config an office session needs ----------
@@ -136,16 +208,22 @@ const listOf = (r) => (r.state === 'set' && Array.isArray(r.value) ? r.value.map
 
 /**
  * What an office session needs in the Gateway config. tokenFile: this office's token file (the plugin reads its token and
- * port there). Returns { want: [{ path, value, rows, check }], gaps: [] }. check(read result) -> { ok, fix }.
+ * port there). Returns { want: [{ path, value, rows, check, warn? }], gaps: [] }. check(read result) -> { ok, fix, note? }.
  *   tools.fs.workspaceOnly = true (spec #73): its file tools stay in the worktree.
+ *   tools.exec.host not "node": an exec that names no host runs where this says, and "node" is a paired device (the plugin
+ *   denies an exec that names a node itself, toolCall).
  *   plugins.enabled not false, the plugin not left out by plugins.allow or named in plugins.deny, plugins.entries.agent-office
  *   enabled, and its tokenFile this office's: then the plugin is loaded and asks this office about every tool call.
+ *   warn (not a precondition, carries no row): plugins.entries.agent-office.hooks gives OpenClaw's wait for the plugin's
+ *   answer no shorter limit than the 600 s the plugin asks for. A shorter one only denies sooner: the plugin ends its own wait
+ *   before it (integrations/openclaw-plugin/gate.js hookLimit), so the card goes with the call.
  * No gap: the office decides every call (the Security room rules, then a hold).
  */
 export function wantedConfig({ tokenFile = null } = {}) {
   const set = (r) => r.state === 'set';
   const want = [
     { path: 'tools.fs.workspaceOnly', value: true, rows: ['files-outside'], check: (r) => ({ ok: set(r) && r.value === true, fix: 'openclaw config set tools.fs.workspaceOnly true' }) },
+    { path: 'tools.exec.host', value: 'unset, auto, gateway or sandbox', rows: ['shell'], check: (r) => ({ ok: !set(r) || norm(r.value) !== 'node', fix: 'openclaw config set tools.exec.host auto' }) },
     { path: 'plugins.enabled', value: true, rows: CALL_ROWS, check: (r) => ({ ok: !set(r) || r.value !== false, fix: 'openclaw config set plugins.enabled true' }) },
     { path: 'plugins.allow', value: `unset, or a list with ${PLUGIN_ID}`, rows: CALL_ROWS, check: (r) => {
       const list = listOf(r);
@@ -164,17 +242,32 @@ export function wantedConfig({ tokenFile = null } = {}) {
       ok: Boolean(tokenFile) && set(r) && typeof r.value === 'string' && samePath(r.value, tokenFile),
       fix: tokenFile && quotedPath(tokenFile) ? `openclaw config set ${ENTRY}.config.tokenFile ${quotedPath(tokenFile)}` : null,
     }) },
+    { path: `${ENTRY}.hooks`, value: `no limit under ${HOOK_LIMIT_MS / 1000} s for before_tool_call`, rows: [], warn: true, check: (r) => {
+      const h = set(r) && r.value && typeof r.value === 'object' ? r.value : {};
+      const limit = hookLimit(h);
+      if (limit >= HOOK_LIMIT_MS) return { ok: true, fix: null };
+      const key = positive(h.timeouts?.before_tool_call) !== undefined ? `${ENTRY}.hooks.timeouts.before_tool_call` : `${ENTRY}.hooks.timeoutMs`;
+      return { ok: false, fix: `openclaw config unset ${key}`, note: `${key} is ${limit} ms, so OpenClaw waits ${Math.round(limit / 1000)} s for your answer to a tool call; a call you do not answer by then is denied.` };
+    } },
   ];
   return { want, gaps: [] };
 }
+
+// OpenClaw's limit for the plugin's before_tool_call handler, the way it picks it (src/plugins/registry-state.ts
+// resolveTypedHookTimeoutMs): hooks.timeouts.before_tool_call, else hooks.timeoutMs, else the plugin's own 600 s. The plugin
+// keeps the same rule (gate.js hookLimit; test/openclaw-plugin.test.mjs compares the two).
+export const HOOK_LIMIT_MS = 600_000;
+const positive = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? Math.floor(v) : undefined);
+export const hookLimit = (hooks) => positive(hooks?.timeouts?.before_tool_call) ?? positive(hooks?.timeoutMs) ?? HOOK_LIMIT_MS;
 
 const show = (r) => (r.state === 'unreadable' ? 'unknown' : r.state === 'unset' ? 'unset' : JSON.stringify(r.value));
 
 /**
  * Compare the wanted settings with the real ones. read(path) -> { state: 'set', value } | { state: 'unset' } | { state: 'unreadable', why }.
- * Returns { ok, unreadable, settings: [{ path, value, have, ok, fix, rows }], fix: [command text] }. rows: the Security room rows
- * the setting carries (security.mjs enforcement says a cell is not enforced while its setting is off). An unreadable setting is
- * never a pass and gets no command.
+ * Returns { ok, unreadable, settings: [{ path, value, have, ok, fix, rows, warn, note }], fix: [command text] }. rows: the Security
+ * room rows the setting carries (security.mjs enforcement says a cell is not enforced while its setting is off). An unreadable
+ * setting is never a pass and gets no command. warn: a setting that is not a precondition (ok and unreadable leave it out);
+ * note: its words.
  */
 export async function checkConfig(w, read) {
   const got = Object.fromEntries(await Promise.all(w.want.map(async (x) => [x.path, await read(x.path)])));
@@ -183,10 +276,11 @@ export async function checkConfig(w, read) {
     const r = got[x.path];
     const c = r.state === 'unreadable' ? { ok: false, fix: null } : x.check(r);
     const command = c.ok ? null : c.fix || null;
-    settings.push({ path: x.path, value: x.value, have: show(r), ok: c.ok, fix: command, rows: [...x.rows] });
+    settings.push({ path: x.path, value: x.value, have: show(r), ok: c.ok, fix: command, rows: [...x.rows], warn: x.warn === true, note: c.ok ? null : c.note || null });
     if (command) fix.push(command);
   }
-  return { ok: settings.every((s) => s.ok), unreadable: w.want.some((x) => got[x.path].state === 'unreadable'), settings, fix };
+  const needed = w.want.filter((x) => !x.warn);
+  return { ok: settings.every((s) => s.ok || s.warn), unreadable: needed.some((x) => got[x.path].state === 'unreadable'), settings, fix };
 }
 
 /**

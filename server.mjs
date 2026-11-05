@@ -1352,9 +1352,12 @@ async function onOpenClawCall(body, res) {
   const q = openclawRequest(body);
   if (!q.ok) return send(res, 400, { error: q.error });
   const deny = (reason) => send(res, 200, { decision: 'deny', reason });
-  // A reopened session keeps the key of its past record, so the key names the session, not its uid.
+  // A reopened session keeps the key of its past record, so the key names the session, not its uid. The provider gives two live
+  // sessions one key never (acp.mjs gatewayKeyOf); were there two, the call is denied, not put on the first one.
   const id = openclawOfficeId(q.call.sessionKey);
-  const s = id && [...sessions.values()].find((x) => x.provider === 'openclaw' && x.status !== 'ended' && openclawOfficeId(x.gatewayKey) === id);
+  const live = id ? [...sessions.values()].filter((x) => x.provider === 'openclaw' && x.status !== 'ended' && openclawOfficeId(x.gatewayKey) === id) : [];
+  if (live.length > 1) return deny('Two Agent Office sessions have this OpenClaw session key, so the office cannot tell which one asks.');
+  const s = live[0];
   if (!s) {
     return deny('Agent Office has no open session for this OpenClaw session.');
   }
