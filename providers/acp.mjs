@@ -144,6 +144,8 @@ const STOP_WORDS = {
 // ACP tool kinds as the tool names risk.mjs, payload.mjs and vocab.js know.
 const KIND_TOOL = { read: 'Read', edit: 'Edit', delete: 'Delete', move: 'Move', search: 'Grep', execute: 'Bash', fetch: 'WebFetch', think: 'Think', switch_mode: 'SwitchMode' };
 const EDIT_KINDS = new Set(['edit', 'delete', 'move']);
+// JSON with the keys of every object sorted, so two values that differ only in key order give one text (undefined stays undefined).
+const stable = (v) => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((key) => [key, x[key]])) : x));
 
 const textOf = (e) => String((e && e.message) || e || 'unknown error');
 // ACP auth_required: -32000 "Authentication required" (recorded from Copilot CLI 1.0.105). -32000 alone is JSON-RPC's generic
@@ -520,8 +522,19 @@ export function createAcp(deps) {
     return c;
   }
   // What the user sees of a call: its tool and input. A request is answered for this, never for what the call says later.
-  const sigOf = (c) => JSON.stringify([c.tool_name, c.tool_input]);
-  const what = (c) => clip(String(c.tool_input.command || (c.tool_input.file_path && path.basename(String(c.tool_input.file_path))) || c.tool_input.url || c.tool_input.pattern || c.title || c.tool_name), 100);
+  // Keys in any order, at any depth, are the same input: the same MCP arguments sent in another order are no change (#125).
+  const sigOf = (c) => stable([c.tool_name, c.tool_input]);
+  // A call in a few words: its command, file, address or pattern. A call that only its arguments name (an MCP tool) is the
+  // tool and the arguments that are not what the user saw (was), so a feed line says what changed.
+  const what = (c, was) => {
+    const t = c.tool_input;
+    const named = t.command || (t.file_path && path.basename(String(t.file_path))) || t.url || t.pattern;
+    if (named) return clip(String(named), 100);
+    const before = (was && was.tool_input) || {};
+    const keys = [...new Set([...Object.keys(t), ...Object.keys(before)])].filter((k) => k !== 'description' && stable(t[k]) !== stable(before[k]));
+    if (keys.length) return clip(`${c.tool_name} (${keys.map((k) => `${k}: ${clip(stable(t[k]) ?? 'none', 40)}`).join(', ')})`, 100);
+    return clip(String(c.title || c.tool_name), 100);
+  };
   // The agent changed a call after the user saw it. While a request for it waits, that request is declined at once (the
   // user cannot approve what the card no longer shows), and the files of both forms ask first for the rest of the turn.
   // After an approval, the feed says so: the agent runs its own tool with the new input, which the office cannot stop.
@@ -531,11 +544,12 @@ export function createAcp(deps) {
     for (const [id, shown] of [...c.held]) {
       if (shown.sig === sig) continue;
       if (now.tool_input.file_path && EDIT_KINDS.has(c.kind)) st.askFirst.add(norm(st, now.tool_input.file_path));
-      withdraw(s, st, id, `${label} changed the call while it waited for your answer, so the office declined it: ${what(now)}`);
+      withdraw(s, st, id, `${label} changed the call while it waited for your answer, so the office declined it: ${what(now, shown)}`);
     }
     if (c.approved && !c.approved.told && c.approved.sig !== sig) {
       c.approved.told = true;
-      emit(st, () => events.feed(s, 'wait', `${label} changed the call after you approved it: ${what(now)}`));
+      const line = `${label} changed the call after you approved it: ${what(now, c.approved)}`;
+      emit(st, () => events.feed(s, 'wait', line));
     }
   }
   function openCall(s, st, c) {
@@ -550,19 +564,22 @@ export function createAcp(deps) {
     for (const id of [...c.held.keys()]) withdraw(s, st, id, `${label} moved on without your answer.`);
     // What the user approved for this call is used up: a later command or write with the same text asks again.
     for (const [key, callId] of [...st.grants]) if (callId === c.id) st.grants.delete(key);
-    const file = c.tool_input.file_path ? norm(st, c.tool_input.file_path) : null;
+    // What the call did: its card, or for an agent with request bodies its own last arguments (c.args, #125), so an approved
+    // edit that moved to a file the user declined is named. The hooks below keep the card, which the PreToolUse carried.
+    const did = c.args || c, input = did.tool_input;
+    const file = input.file_path ? norm(st, input.file_path) : null;
     // Hermes #31682: an edit the user declined can come back through another of the agent's own tools. The office cannot
     // stop the agent's own tools, so it says so when one reports that file changed.
     if (u.status === 'completed' && EDIT_KINDS.has(c.kind) && file && st.denied.has(file)) {
-      emit(st, () => events.feed(s, 'wait', `${label} changed ${path.basename(String(c.tool_input.file_path))} after you declined that edit.`));
+      emit(st, () => events.feed(s, 'wait', `${label} changed ${path.basename(String(input.file_path))} after you declined that edit.`));
     } else if (u.status === 'completed' && !c.asked && !c.served) {
-      if (c.kind === 'execute') emit(st, () => events.feed(s, 'wait', `${label} ran a command without asking the office: ${clip(c.tool_input.command || c.title, 100)}`));
+      if (c.kind === 'execute') emit(st, () => events.feed(s, 'wait', `${label} ran a command without asking the office: ${clip(input.command || c.title, 100)}`));
       else if (EDIT_KINDS.has(c.kind) && !(file && st.wrote.has(file))) {
-        emit(st, () => events.feed(s, 'wait', `${label} changed ${path.basename(String(c.tool_input.file_path || c.title))} without asking the office.`));
+        emit(st, () => events.feed(s, 'wait', `${label} changed ${path.basename(String(input.file_path || c.title))} without asking the office.`));
       } else if (c.kind === 'read' || c.kind === 'search') {
         // A read the office cannot stop: the feed names it when it is not low risk (a secret, a settings file, outside the root).
-        const risk = riskOf(c.tool_name, c.tool_input, st.root);
-        if (risk !== 'low') emit(st, () => events.feed(s, 'wait', `${label} read ${clip(String((c.tool_input.file_path && path.basename(String(c.tool_input.file_path))) || c.tool_input.pattern || c.title), 100)} without asking the office (risk ${risk}).`));
+        const risk = riskOf(did.tool_name, input, st.root);
+        if (risk !== 'low') emit(st, () => events.feed(s, 'wait', `${label} read ${clip(String((input.file_path && path.basename(String(input.file_path))) || input.pattern || c.title), 100)} without asking the office (risk ${risk}).`));
       }
     }
     const said = (Array.isArray(u.content) ? u.content : []).map((x) => (x?.type === 'content' && x.content?.type === 'text' ? x.content.text : '')).find(Boolean);

@@ -53,14 +53,21 @@ export function requestCall(raw) {
  * A call's own arguments (the rawInput of a later tool_call update, and its location) in the shape of the card its request
  * body gave (requestCall): { tool_name, tool_input } with the field that card shows (command, file_path, url, or an MCP
  * tool's arguments). The provider compares it with what the user saw, so a call that changed after the request is seen
- * (#125). null: the arguments do not say (no such field, a request body, or a card such as memory that they cannot be read
- * against), so the card stands. Only fields read from the arguments: never the title, which would look like a change.
+ * (#125). null: the arguments do not say (no such field, a request body, an MCP wrapper, or a card such as memory, or an MCP
+ * card with no arguments, that they cannot be read against), so the card stands. Only fields read from the arguments: never the title, which would look like a change.
  */
 export function argsCall(card, raw, loc = null) {
   if (!card || !card.tool_input || !raw || typeof raw !== 'object' || Array.isArray(raw) || requestCall(raw)) return null;
   const text = (v) => (typeof v === 'string' && v ? v : null);
   const as = (tool_input) => ({ tool_name: card.tool_name, tool_input });
-  if (card.tool_name.startsWith('mcp__')) return Object.keys(raw).length ? as({ ...raw }) : null;
+  // An MCP tool: only a plain arguments object says, read against a card that showed arguments. A wrapper that names the
+  // server or the tool ({ serverName, toolName, arguments }) is a shape no signed-in run has recorded yet, so it does not
+  // say: read as plain arguments it would look like a change and decline a call that did not change. The provider compares
+  // with the keys sorted, so the same arguments in another order are no change.
+  if (card.tool_name.startsWith('mcp__')) {
+    if (!Object.keys(card.tool_input).length || !Object.keys(raw).length || 'serverName' in raw || 'toolName' in raw) return null;
+    return as({ ...raw });
+  }
   const input = card.tool_input;
   if ('command' in input) {
     const command = Array.isArray(raw.command) ? raw.command.map(String).join(' ') : text(raw.command);
