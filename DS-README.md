@@ -14,7 +14,7 @@ Read four files. Do not guess a value, a prop or an event name.
 | --- | --- | --- |
 | **README** (this page) | Quickstart | Load, mount, connect, the rules, the definition of done |
 | **Recipes** | How-to | Do one task: daily use (since you left, replay, decisions, palette, alerts), show agents, connect Hermes or Copilot, mount a scene again, sessions, agent talk, add a role, a part or a theme, test |
-| **Reference** | Reference (generated) | Look up a token, an event, a command, the office API or a component |
+| **Reference** | Reference (edited by hand) | Look up a token, an event, a command, the office API or a component |
 | **Concepts** | Explanation | Learn why: the model, orchestration map, scene behavior, visual rules, words, accessibility |
 
 `Changelog` lists the versions. `kit/` has starter files: `page.html`, `adapter.js`, `part.js`, `manager.js` (a reference Manager for platforms with no orchestrator), `schema.json` and `check.py`. `components/index.d.ts` has the types. Each component has a README with a props table.
@@ -25,7 +25,7 @@ Read four files. Do not guess a value, a prop or an event name.
 
 | # | File |
 | --- | --- |
-| 1 | `tokens.css` (generated from `tokens.json` by the build; one block per theme) |
+| 1 | `tokens.css` (edited by hand, in step with `tokens.json`; one block per theme) |
 | 2 | `components/bundle.css` (the fonts: in this copy the page loads them first from `public/vendor/fonts/fonts.css`; `bundle.css` imports none) |
 | 3 | React 18 and ReactDOM 18 (only for React components; this copy serves them from `public/vendor`) |
 | 4 | `components/lib/three.min.js` (three.js 0.147.0) |
