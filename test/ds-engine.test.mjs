@@ -858,7 +858,7 @@ test('theme to look and back: Stage.look and setMode follow AO.MODES; an unknown
     source('Stage.prototype.setMode=function', '};\n') + 'return {map:THEME_OF,dark:DARK};')({ MODES: modes() }, Stage, () => theme);
   assert.deepEqual(map, { day: 'light', night: 'dark', sublevel: 'sublevel', fluent: 'fluent', 'fluent-dark': 'fluent-dark' });
   assert.deepEqual(dark, { day: false, night: true, sublevel: false, fluent: false, 'fluent-dark': true });
-  const s = Object.assign(Object.create(Stage.prototype), { mode: 'auto', K: { refresh() {} }, applyMode() {} });
+  const s = Object.assign(Object.create(Stage.prototype), { mode: 'auto', K: { refresh() {} }, applyMode() {}, retheme() {} });
   for (const [t, look] of [['light', 'day'], ['dark', 'night'], ['sublevel', 'sublevel'], ['fluent', 'fluent'], ['fluent-dark', 'fluent-dark'], ['nope', 'day'], [null, 'day']]) {
     theme = t; assert.equal(s.look(), look, `theme ${t}`);
   }
@@ -1087,4 +1087,160 @@ test('walk: no literal speed is left in the walk step or the bot animation, and 
   assert.ok(at >= 0 && !/sp=2\.6/.test(bundle.slice(at, at + 600)), 'no literal speed in animateBot');
   assert.ok(bundle.slice(at, at + 200).includes('walkStep(b,dt)'), 'animateBot still calls walkStep, or bots would stop walking');
   assert.match(source('function readScene(el)', '\n (AO.MODES||[])'), /WALK\.bot=num\(cs,"scene-walk-speed",2\.6\).*WALK\.ephemeral=num\(cs,"scene-walk-speed-ephemeral",5\.2\)/);
+});
+
+// ---- #107: one theme change refreshes the Kit once; Stage.dispose always frees the renderer ----
+// The rig runs the real themeOf (the nearest data-theme, else <html>, else the system scheme) and the real AO.MODES maps. The stage
+// element sits inside its root, as in the office page (the root is .ao-office, the stage is a child of it).
+function themeRig() {
+  const node = (parent = null) => ({ attrs: {}, parentNode: parent, getAttribute(k) { return this.attrs[k] ?? null; }, setAttribute(k, v) { this.attrs[k] = v; },
+    closest(sel) { const k = sel.slice(1, -1); for (let n = this; n; n = n.parentNode) if (n.attrs[k] != null) return n; return null; } });
+  const html = Object.assign(node(), { className: '' });
+  const doc = { documentElement: html };
+  const win = { matchMedia: () => ({ matches: false }) };
+  const C = function () { this.convertSRGBToLinear = () => this; this.set = () => this; };
+  const T = { Color: C, Vector3: V, Fog: function () {} };
+  const look = { hi: 1, hc: 0, hg: 0, si: 1, sc: 0, lamp: 0, sp: [1, 2, 3] };
+  const LOOKS = Object.fromEntries(modes().map((m) => [m.id, look]));
+  const FX = { bloom: {}, thr: {}, exp: {}, vig: {}, fog: Object.fromEntries(modes().map((m) => [m.id, 0])), rad: 1, knee: 1 };
+  function Stage() {}
+  new Function('AO', 'Stage', 'T', 'LOOKS', 'FX', 'document', 'window', 'matchMedia',
+    source('function themeOf(el)', '}\n') +
+    source('var THEME_OF={},LOOK_OF={},DARK={};', '\n') +
+    source('Stage.prototype.look=function', '};\n') +
+    source('Stage.prototype.applyMode=function', ';};\n') +
+    source('Stage.prototype.themeSig=function', '};\n') +
+    source('Stage.prototype.retheme=function', '};\n') +
+    source('Stage.prototype.onThemeMutation=function', '};\n') +
+    source('Stage.prototype.setMode=function', '};\n')
+  )({ MODES: modes() }, Stage, T, LOOKS, FX, doc, win, win.matchMedia);
+  const make = () => {
+    const calls = { refresh: 0, look: [] };
+    const root = node(html);
+    const el = node(root);
+    const s = Object.create(Stage.prototype);
+    const lamp = { intensity: 0 };
+    Object.assign(s, {
+      el, root, scene: {}, mode: 'auto', comp: null, q: 'high', dist: 10, lamps: [lamp], sunClock: false, bloom: null, grade: null,
+      K: { look: 'day', dark: false, tok: { bg: '#fff' }, refresh() { calls.refresh++; } },
+      onLook: (lk) => calls.look.push(lk),
+      hemi: { color: { set() {} }, groundColor: { set() {} } }, sun: { color: { set() {} }, position: { copy() { return { add() {} }; } }, target: { position: {} } },
+    });
+    return { s, calls };
+  };
+  return { make, doc };
+}
+
+test('setMode refreshes the Kit once, and the observer that follows its attribute change does not refresh again (#107)', () => {
+  const { make } = themeRig();
+  const { s, calls } = make();
+  s.setMode('night');                 // sets data-theme on the root, refreshes, applies the look
+  assert.equal(calls.refresh, 1, 'setMode: one refresh');
+  assert.deepEqual(calls.look, ['night']);
+  s.onThemeMutation();                // the MutationObserver callback for that attribute change
+  s.onThemeMutation();                // a second record of the same batch
+  assert.equal(calls.refresh, 1, 'the observer finds the theme already applied');
+  assert.deepEqual(calls.look, ['night'], 'the look is applied once');
+});
+
+test('a theme change from outside the stage refreshes the Kit once (#107)', () => {
+  const { make } = themeRig();
+  const { s, calls } = make();
+  s.themeKey = s.themeSig();
+  s.root.attrs['data-theme'] = 'dark';
+  s.onThemeMutation();
+  assert.equal(calls.refresh, 1, 'an outside change: one refresh, not one from the observer and one from the look change');
+  assert.deepEqual(calls.look, ['night']);
+  s.onThemeMutation();
+  assert.equal(calls.refresh, 1, 'the same state again: no refresh');
+  s.root.attrs['data-theme'] = 'sublevel';
+  s.onThemeMutation();
+  assert.equal(calls.refresh, 2, 'a new theme: one more refresh');
+});
+
+test('the office page: setMode, then chat-extras copies the theme to <html>, then the observer: one refresh in every theme (#107)', () => {
+  const { make, doc } = themeRig();
+  const { s, calls } = make();
+  s.root.attrs['data-theme'] = 'light'; doc.documentElement.attrs['data-theme'] = 'light';
+  s.themeKey = s.themeSig();
+  let n = 0;
+  for (const m of modes()) {
+    if (m.theme === 'light') continue;
+    s.setMode(m.id);                                     // DS ModeToggle: the root gets the theme, one refresh
+    doc.documentElement.attrs['data-theme'] = m.theme;   // chat-extras.js syncTheme: its observer runs first
+    s.onThemeMutation();                                 // the stage's observer: root record and <html> record
+    s.onThemeMutation();
+    n++;
+    assert.equal(calls.refresh, n, `${m.label}: one refresh, not a second one after the <html> copy`);
+    assert.equal(calls.look.at(-1), m.id);
+  }
+  assert.deepEqual(calls.look, modes().filter((m) => m.theme !== 'light').map((m) => m.id), 'each look applied once');
+});
+
+test('a theme change on <html> under a root that keeps its own theme does not refresh; a change the stage reads does (#107)', () => {
+  const { make, doc } = themeRig();
+  const { s, calls } = make();
+  s.root.attrs['data-theme'] = 'dark';
+  s.themeKey = s.themeSig();
+  doc.documentElement.attrs['data-theme'] = 'sublevel';   // the stage still reads dark from its root
+  s.onThemeMutation();
+  assert.equal(calls.refresh, 0, 'the tokens of the stage did not change');
+  delete s.root.attrs['data-theme'];                       // now the stage reads <html>
+  s.onThemeMutation();
+  assert.equal(calls.refresh, 1);
+  assert.deepEqual(calls.look, ['sublevel']);
+  doc.documentElement.className = 'x';
+  s.onThemeMutation();
+  assert.equal(calls.refresh, 2, 'an <html> class change still refreshes, as the observer watches it');
+});
+
+test('Stage.dispose frees the renderer and the context even when a free throws (#107)', () => {
+  const lib = gpuKit();
+  const bad = G('bad'); bad.dispose = () => { order.push('bad'); throw new Error('free failed'); };
+  const scene = new Node3({ isScene: true });
+  scene.add(mesh3(bad, M('m')));
+  const s = lib.stage(scene);
+  s.K.tex = { t: X('t') };
+  assert.throws(() => s.dispose(), /free failed/, 'the error still reaches the caller');
+  assert.deepEqual(order.slice(-3), ['renderer.dispose', 'forceContextLoss', 'canvas.remove'], 'the renderer, the context and the canvas are freed');
+  assert.deepEqual(s.K.tex, {}, 'the Kit caches are empty');
+  assert.equal(s.dead, true);
+  assert.equal(lib.LIVE.includes(s), false);
+  const n = order.length;
+  s.dispose();
+  assert.equal(order.length, n, 'a second dispose does nothing');
+});
+
+test('Stage.dispose frees the context even when the renderer dispose throws (#107)', () => {
+  const lib = gpuKit();
+  const s = lib.stage(new Node3({ isScene: true }));
+  s.r.dispose = () => { order.push('renderer.dispose'); throw new Error('renderer failed'); };
+  assert.throws(() => s.dispose(), /renderer failed/);
+  assert.deepEqual(order.slice(-3), ['renderer.dispose', 'forceContextLoss', 'canvas.remove']);
+});
+
+test('Stage.dispose: when two frees throw, the caller gets the first error, and every free still runs (#107)', () => {
+  const lib = gpuKit();
+  const bad = G('bad'); bad.dispose = () => { order.push('bad'); throw new Error('first'); };
+  const scene = new Node3({ isScene: true });
+  scene.add(mesh3(bad, M('m')));
+  const s = lib.stage(scene);
+  s.r.dispose = () => { order.push('renderer.dispose'); throw new Error('second'); };
+  s.r.forceContextLoss = () => { order.push('forceContextLoss'); throw new Error('third'); };
+  assert.throws(() => s.dispose(), (e) => e.message === 'first', 'the first error reaches the caller, not the last');
+  assert.deepEqual(order.slice(-3), ['renderer.dispose', 'forceContextLoss', 'canvas.remove']);
+});
+
+test('Stage.dispose: a controls dispose that throws does not keep the scene, the Kit or the renderer alive (#107)', () => {
+  const lib = gpuKit();
+  const g = G('g'), t = X('t');
+  const scene = new Node3({ isScene: true });
+  scene.add(mesh3(g, M('m')));
+  const s = lib.stage(scene);
+  s.K.tex = { t };
+  s.ctl.dispose = () => { throw new Error('controls failed'); };
+  assert.throws(() => s.dispose(), /controls failed/);
+  assert.equal(spent.get(g), 1, 'the scene geometry is freed');
+  assert.equal(spent.get(t), 1, 'the Kit texture is freed');
+  assert.deepEqual(order.slice(-3), ['renderer.dispose', 'forceContextLoss', 'canvas.remove']);
 });

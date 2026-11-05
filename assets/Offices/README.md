@@ -1,4 +1,4 @@
-# Office type thumbnails (Agent Office DS x1.7.2)
+# Office type thumbnails (Agent Office DS x1.7.3)
 
 Flat isometric (30 degree) room thumbnails. viewBox `0 0 320 200`. Each room has a floor tile, a back wall, a left wall and the signature items of the room type. All items use the scene colours of the theme. A thin stripe in the type colour runs along the front edges of the floor. Each room shows two or three tiny bots. The layout of a room type is the same in the three drawn themes (Day, Night and Sublevel). Fluent and Fluent Dark have no set of their own yet (see below).
 
