@@ -203,3 +203,39 @@ test('a past local session reopens as a fresh local session in the same folder',
   const snap = await snapshot();
   assert.ok(snap.feed.some((f) => /cannot resume a past session/.test(f.text || '')), 'the feed says why it is a new session');
 });
+
+// ---------- default spend limit (#33). No paid session opens here: a paid one would start claude. ----------
+const info = () => fetch(`http://127.0.0.1:${port}/api/info`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
+
+test('a local session has no spend limit, also when the default is set or one is asked for', { skip: SKIP }, async () => {
+  assert.equal((await info()).spendLimit, 2, 'the built-in default');
+  const a = await open('free-a');
+  assert.equal((await sessionOf(a)).budget, null);
+  const b = await call('/api/open', { cwd: work, name: 'free-b', provider: 'ollama', model: 'fake-model', where: 'office', maxBudget: 9 });
+  assert.equal(b.status, 200, JSON.stringify(b.json));
+  assert.equal((await sessionOf(b.json.uid)).budget, null, 'a model on this machine costs nothing');
+});
+
+test('the default spend limit shows in info, can be changed or cleared, and a bad value is refused', { skip: SKIP }, async () => {
+  assert.equal((await call('/api/settings/spend', { limit: 5 })).json.spendLimit, 5);
+  assert.equal((await info()).spendLimit, 5);
+  assert.equal((await call('/api/settings/spend', { limit: '' })).json.spendLimit, 0, 'cleared: no default limit');
+  assert.equal((await info()).spendLimit, 0);
+  for (const bad of ['abc', -1, 1001]) {
+    const r = await call('/api/settings/spend', { limit: bad });
+    assert.equal(r.status, 400, String(bad));
+    assert.match(r.json.error, /0 to 1000/);
+  }
+  assert.equal((await info()).spendLimit, 0, 'a refused value changes nothing');
+  assert.equal((await call('/api/settings/spend', { limit: 2 })).json.spendLimit, 2);
+});
+
+test('a new schedule gets the default spend limit; the user can change or clear it', { skip: SKIP }, async () => {
+  const save = async (extra) => (await call('/api/schedule/save', { name: 's', prompt: 'p', cwd: work, ...extra })).json.maxBudget;
+  assert.equal(await save({}), 2, 'no limit given: the default');
+  assert.equal(await save({ maxBudget: 6 }), 6);
+  assert.equal(await save({ maxBudget: 0 }), 0, '0 clears it');
+  await call('/api/settings/spend', { limit: 4 });
+  assert.equal(await save({}), 4, 'the default the user set');
+  await call('/api/settings/spend', { limit: 2 });
+});

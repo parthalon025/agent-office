@@ -4,16 +4,20 @@
 //   createManager({ planner, agents, dispatch, interrupt?, deliver?, spendOf?, clock?, makeId?, onChange?, managerName?, limits? })
 //
 //   planner(goal, agents)        -> Promise<[{ text, role?, room?, bot? }]>   any provider can plan (a local model, a paid one, a fake)
-//   agents(building)             -> [{ id, name, role, room, free }]           who could take a step right now
+//   agents(building)             -> [{ id, name, role, room, free, paid? }]    who could take a step right now. paid is false for a local model.
 //   dispatch(agent, task, ctx)   -> void | Promise                            start the step on that agent; ctx = { goalId, stepId }
 //   interrupt(agentId)           -> void                                       optional: stop a step on cancel
 //   deliver(to, from, text, hops)-> void                                       optional: put an allowed mail into the receiver's inbox
 //   spendOf(agentId)             -> number                                     optional: dollars the agent has spent so far
+//   defaultSpendLimit            number                                        optional: dollars for a goal that asks for none of its own (default 2; 0 = none)
 //
+// A goal that can reach a paid agent gets the default spend limit (providers/index.mjs spendLimitFor) unless submit() says otherwise: a
+// number is that limit, 0 is no limit. A goal that only local agents can take has none, because they cost $0.
 // Steps run one after the other. A spend limit is checked before every dispatch, never after. Agent mail has two caps:
 // a hop cap (a reply chain is cut) and a message cap per goal. snapshot() and events() let the server show the same
 // plan again on every scene mount (the design system does not restore a plan itself).
 import crypto from 'node:crypto';
+import { DEFAULT_SPEND_LIMIT, spendLimitFor } from './providers/index.mjs';
 
 export const DEFAULT_LIMITS = { maxSteps: 12, maxHops: 4, maxMessages: 30, maxAttempts: 3 };
 const STATUS_TO_DS = { pending: 'resting', working: 'working', finished: 'finished', error: 'error' };
@@ -27,6 +31,7 @@ export function createManager(deps = {}) {
   const makeId = deps.makeId || (() => crypto.randomBytes(4).toString('hex'));
   const onChange = deps.onChange || (() => {});
   const spendOf = deps.spendOf || (() => 0);
+  const defaultSpend = deps.defaultSpendLimit ?? DEFAULT_SPEND_LIMIT;
   const limits = { ...DEFAULT_LIMITS, ...(deps.limits || {}) };
   const managerName = deps.managerName || ((b) => 'Manager');
   const goals = new Map();
@@ -51,6 +56,13 @@ export function createManager(deps = {}) {
       if (score > bestScore) { best = a; bestScore = score; }
     }
     return best;
+  }
+
+  /** The goal's spend limit in dollars, 0 for none. Local agents only (none paid, at least one agent): no limit. */
+  function limitOf(building, requested) {
+    const agents = deps.agents(String(building || ''));
+    const paid = agents.length === 0 || agents.some((a) => a.paid !== false);
+    return spendLimitFor({ paid, requested, fallback: defaultSpend }) ?? 0;
   }
 
   function stop(g, status, reason) { g.status = status; g.reason = reason; touch(g); }
@@ -90,7 +102,7 @@ export function createManager(deps = {}) {
       if (!text) throw new Error('A goal is required.');
       const g = {
         id: 'g' + makeId(), building: String(building || ''), goal: text, status: 'planning', reason: '', steps: [],
-        approveFirst: opts.approveFirst === true, spendLimit: Number(opts.spendLimit) || 0, messages: 0,
+        approveFirst: opts.approveFirst === true, spendLimit: limitOf(building, opts.spendLimit), messages: 0,
         baseline: new Map(), waitingFor: '', pumping: false, createdAt: now(), updatedAt: now(),
       };
       goals.set(g.id, g);

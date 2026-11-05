@@ -10,7 +10,8 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { createTracker } from '../tracker.mjs';
 import { slimPayload } from '../payload.mjs';
-import { createRegistry, providerEvents, checkProvider, providerError, DEFAULT_PROVIDER, PROVIDER_METHODS } from '../providers/index.mjs';
+import { createRegistry, providerEvents, checkProvider, providerError, DEFAULT_PROVIDER, PROVIDER_METHODS, DEFAULT_SPEND_LIMIT, isPaid, spendLimitFor } from '../providers/index.mjs';
+import { createLocal } from '../providers/local.mjs';
 import { createClaudeCode, claudeVersion, programPath, MODEL_RE } from '../providers/claude-code.mjs';
 import { resolveExe } from '../git.mjs';
 
@@ -585,4 +586,42 @@ test('a provider session keeps its launch folder as startDir; a later cwd does n
   const s = o.session({ startDir: REPO });
   o.events.hook(s, { hook_event_name: 'PreToolUse', cwd: REPO + '\\sub', tool_name: 'Read', tool_use_id: 'r1', tool_input: { file_path: 'a.js' } });
   assert.deepEqual([s.cwd, s.startDir], [REPO + '\\sub', REPO]);
+});
+
+// ---------- default spend limit (#33) ----------
+
+test('spend limit: a new paid session gets the default of $2, a local one gets none', () => {
+  const claude = createClaudeCode({ events: {}, files: () => ({}) });
+  const ollama = createLocal({ events: {}, kind: 'ollama' });
+  const lmstudio = createLocal({ events: {}, kind: 'lmstudio' });
+  assert.equal(DEFAULT_SPEND_LIMIT, 2);
+  assert.equal(isPaid(claude), true);
+  assert.equal(isPaid(ollama), false);
+  assert.equal(isPaid(lmstudio), false);
+  assert.equal(spendLimitFor({ paid: isPaid(claude), requested: undefined }), 2);
+  assert.equal(spendLimitFor({ paid: isPaid(ollama), requested: undefined }), null);
+  assert.equal(spendLimitFor({ paid: isPaid(lmstudio), requested: 50 }), null, 'a local provider has no limit, even when one is asked for');
+});
+
+test('spend limit: the user can change it or clear it; a bad value falls back to the default', () => {
+  const paid = (requested, fallback) => spendLimitFor({ paid: true, requested, fallback });
+  assert.equal(paid(5), 5);
+  assert.equal(paid('0.5'), 0.5);
+  assert.equal(paid(0), null, '0 clears the limit');
+  assert.equal(paid(-1), null);
+  assert.equal(paid(5000), 1000, 'the top of the range');
+  assert.equal(paid(null), 2);
+  assert.equal(paid(''), 2);
+  assert.equal(paid('abc'), 2, 'not a number: the default, never no limit');
+  assert.equal(paid(undefined, 7), 7, 'the default the user set in settings');
+  assert.equal(paid(undefined, 0), null, 'a cleared default means no limit');
+  assert.equal(paid(3, 0), 3, 'a limit asked for still counts when the default is cleared');
+});
+
+test('spend limit: a provider that does not say it is free is paid; paid must be true or false', () => {
+  const base = { kind: 'x', label: 'X', ...Object.fromEntries(PROVIDER_METHODS.map((m) => [m, () => {}])) };
+  assert.equal(isPaid(base), true);
+  assert.equal(isPaid({ ...base, paid: false }), false);
+  assert.doesNotThrow(() => checkProvider({ ...base, paid: true }));
+  assert.throws(() => checkProvider({ ...base, paid: 'no' }), /paid/);
 });

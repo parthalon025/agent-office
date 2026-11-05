@@ -23,6 +23,8 @@
 //   check(opts)            (optional)  throws a status error for options the provider does not take (400) or a program it
 //                                      cannot find (409). The office calls it before it makes a worktree or a session;
 //                                      check({}) checks only that a session can start (Reopen).
+//   paid                   (optional)  false when the agent costs no money (a local model). Without it the provider is paid and gets the
+//                                      default spend limit (spendLimitFor). true or false only.
 //   canResume              (optional)  true when open(s, { resume }) continues a past conversation (Claude Code). Without it,
 //                                      Reopen starts a fresh session in the same folder with the same model (reopenPlan).
 //   Two timing rules. (1) A method returns before the events that follow from it: report them on a later tick. The office
@@ -50,6 +52,26 @@ import { slimPayload } from '../payload.mjs';
 
 export const DEFAULT_PROVIDER = 'claude-code';
 export const PROVIDER_METHODS = ['readiness', 'models', 'open', 'message', 'answer', 'interrupt', 'close'];
+// The default spend limit: a new session of a paid provider, a schedule or a Manager goal stops at this many dollars unless the user
+// changes or clears it. A local provider costs nothing and has no limit. Settings can change the default (server.mjs).
+export const DEFAULT_SPEND_LIMIT = 2;
+export const MAX_SPEND_LIMIT = 1000;
+/** True unless the provider says paid: false. A provider that does not say is treated as paid, so it is never left without a limit. */
+export const isPaid = (p) => !p || p.paid !== false;
+/**
+ * The spend limit of a new session in dollars, or null for no limit.
+ * requested: what the caller asked for. Missing (undefined, null, '' or not a number) means the default; 0 or less means the user
+ * cleared it (no limit); more is that limit, up to MAX_SPEND_LIMIT. fallback: the default (0 or less: no default limit).
+ * A provider that is not paid never has a limit.
+ */
+export function spendLimitFor({ paid, requested, fallback = DEFAULT_SPEND_LIMIT }) {
+  if (!paid) return null;
+  const top = (n) => (n > 0 ? Math.min(n, MAX_SPEND_LIMIT) : null);
+  if (requested === undefined || requested === null || requested === '') return top(Number(fallback));
+  const n = Number(requested);
+  return Number.isFinite(n) ? top(n) : top(Number(fallback));
+}
+
 const KIND_RE = /^[a-z][a-z0-9-]{0,39}$/;
 const STATUS_MS = 15000;
 
@@ -67,6 +89,7 @@ export function checkProvider(p) {
   for (const k of ['kind', 'label']) if (typeof p[k] !== 'string' || !p[k]) missing.push(k);
   for (const m of PROVIDER_METHODS) if (typeof p[m] !== 'function') missing.push(m + '()');
   if (p.check !== undefined && typeof p.check !== 'function') missing.push('check() (optional, but then a function)');
+  if (p.paid !== undefined && typeof p.paid !== 'boolean') missing.push('paid (optional, but then true or false)');
   if (p.canResume !== undefined && typeof p.canResume !== 'boolean') missing.push('canResume (optional, but then true or false)');
   if (missing.length) throw new Error(`The provider ${p.kind || '(no kind)'} lacks: ${missing.join(', ')}.`);
   if (!KIND_RE.test(p.kind)) throw new Error(`The provider kind ${p.kind} must be lower-case letters, digits and dashes.`);

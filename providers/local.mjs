@@ -233,6 +233,7 @@ export function createLocal(deps) {
   return {
     kind: deps.kind,
     label: spec.label,
+    paid: false, // a model on this machine costs nothing: no spend limit
     canResume: false, // a local conversation lives in memory: Reopen starts a fresh session in the same folder
 
     async readiness() {
