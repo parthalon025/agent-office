@@ -257,16 +257,20 @@ test('a second office in the same folder never rewrites the first office\'s file
     // The Start with Windows entry is one file for the user, so an office on another port shows it read-only and cannot change it (#108).
     assert.equal(infoA.startup.canChange, false);
     assert.match(infoA.startup.reason, /port 4317/);
-    const startupDir = startup.startupDir(envA.APPDATA);
-    startup.enable(startupDir, dir, process.execPath); // the owner's entry, in the temp Startup folder
-    const entry = fs.readFileSync(startup.entryPath(startupDir), 'utf8');
+    // The Startup folder is a Windows path (startup.mjs joins it with Windows rules). On Linux CI that is a relative name, so the
+    // test and the server would look in two places: check the entry itself on Windows only.
+    const startupDir = win ? startup.startupDir(envA.APPDATA) : '';
+    if (win) startup.enable(startupDir, dir, process.execPath); // the owner's entry, in the temp Startup folder
+    const entry = win ? fs.readFileSync(startup.entryPath(startupDir), 'utf8') : '';
     for (const enabled of [true, false]) {
       const r = await postPage(portA, envA, '/api/startup', { enabled });
       assert.equal(r.status, 403, JSON.stringify(r.json));
       assert.match(r.json.error, /port 4317/);
     }
-    assert.equal(fs.readFileSync(startup.entryPath(startupDir), 'utf8'), entry, 'a refused turn-on or turn-off changed the owner\'s entry');
-    assert.equal((await page(portA, envA, '/api/info')).startup.enabled, true, 'the office shows the real state');
+    if (win) {
+      assert.equal(fs.readFileSync(startup.entryPath(startupDir), 'utf8'), entry, 'a refused turn-on or turn-off changed the owner\'s entry');
+      assert.equal((await page(portA, envA, '/api/info')).startup.enabled, true, 'the office shows the real state');
+    }
     const filesA = launchFiles(infoA);
     for (const f of Object.values(filesA)) assert.ok(!Object.keys(owner).includes(path.basename(f)), `the first office uses the owner's ${path.basename(f)}`);
     const own = officeFiles(dir, portA);
