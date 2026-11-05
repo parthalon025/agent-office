@@ -47,6 +47,19 @@
   function escTaken(e) { return e.defaultPrevented || escLayer || layerOpen(); }
   function none() { return null; }
   function empty() { return []; }
+  // Taller walls, and the room sign above the cable tray (the engine builds walls 5.2 high, sign at 4.45). Returns what it
+  // moved, [mesh, y, scale y], for lowerRoom. The Security room (security.js) gets the same walls as the lab rooms beside it.
+  function raiseRoom(rg) {
+    var raised = [];
+    rg.children.forEach(function (c) {
+      if (isWall(c) && !c.userData.tall) { raised.push([c, c.position.y, c.scale.y]); c.userData.tall = 1; c.scale.y = WALL_H / 5.2; c.position.y = WALL_H / 2; c.updateMatrix(); c.updateMatrixWorld(true); }
+      if (isSign(c) && !c.userData.moved) { raised.push([c, c.position.y, c.scale.y]); c.userData.moved = 1; c.position.y = SIGN_Y; c.updateMatrix(); c.updateMatrixWorld(true); }
+    });
+    return raised;
+  }
+  function lowerRoom(raised) {
+    (raised || []).forEach(function (q) { var c = q[0]; c.position.y = q[1]; c.scale.y = q[2]; delete c.userData.tall; delete c.userData.moved; c.updateMatrix(); c.updateMatrixWorld(true); });
+  }
 
   // Short names for tools on the board come from the shared vocabulary (vocab.js).
   function toolWord(name) { return window.OfficeVocab.toolShort(name); }
@@ -412,12 +425,7 @@
       }
       var m = rg.children.filter(isBoard)[0];
       if (!m) return;
-      var added = [], items = [], raised = [];   // raised: [mesh, y, scale y] to put back on dispose
-      // taller walls, and the room sign above the cable tray
-      rg.children.forEach(function (c) {
-        if (isWall(c) && !c.userData.tall) { raised.push([c, c.position.y, c.scale.y]); c.userData.tall = 1; c.scale.y = WALL_H / 5.2; c.position.y = WALL_H / 2; c.updateMatrix(); c.updateMatrixWorld(true); }
-        if (isSign(c) && !c.userData.moved) { raised.push([c, c.position.y, c.scale.y]); c.userData.moved = 1; c.position.y = SIGN_Y; c.updateMatrix(); c.updateMatrixWorld(true); }
-      });
+      var added = [], items = [], raised = raiseRoom(rg);   // raised: [mesh, y, scale y] to put back on dispose
 
       // the blackboard: the engine's board gets our picture (its own picture is freed)
       var t = newTex(1024, 640), mt = m.material;
@@ -736,7 +744,7 @@
       Object.keys(hints).forEach(function (h) { hints[h].dispose(); }); hints = {};
       decorRooms.forEach(function (r) {
         r.added.forEach(function (x) { if (x.parent) x.parent.remove(x); });
-        r.raised.forEach(function (q) { var c = q[0]; c.position.y = q[1]; c.scale.y = q[2]; delete c.userData.tall; delete c.userData.moved; c.updateMatrix(); c.updateMatrixWorld(true); });
+        lowerRoom(r.raised);
         if (r.lamp) { if (r.lamp.parent) r.lamp.parent.remove(r.lamp); if (st.lamps) st.lamps = st.lamps.filter(function (l) { return l !== r.lamp; }); }
         var b = r.board, mt = b.mat, og = b.orig;
         mt.map = og.map; mt.emissiveMap = og.emissiveMap; mt.emissiveIntensity = og.ei; if (og.emissive) mt.emissive = og.emissive; mt.needsUpdate = true;
@@ -764,5 +772,5 @@
     };
   }
 
-  window.OfficeBoard = { attach: attach, layerOpen: layerOpen, escTaken: escTaken, data: boardData, toolWord: toolWord };
+  window.OfficeBoard = { attach: attach, layerOpen: layerOpen, escTaken: escTaken, data: boardData, toolWord: toolWord, raiseRoom: raiseRoom, lowerRoom: lowerRoom };
 })();

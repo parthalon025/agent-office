@@ -126,9 +126,9 @@ test('enforcement: a gated provider enforces every cell; a missing or ungated on
   assert.equal(e['claude-code'].reason, '');
   assert.equal(e['claude-code'].rows.supervise, 'Paperclip is not connected to this office.');
   assert.equal(e.local.reason, '');
-  assert.equal(e.hermes.reason, 'Hermes is not set up in this office yet. The rule applies when it is.');
+  assert.equal(e.hermes.reason, 'The office has no provider for this agent kind yet. The rule applies when it has one.');
   assert.equal(e.openclaw.rows.shell, undefined, 'OpenClaw takes the shell rule into its own config');
-  assert.equal(e.openclaw.rows['edit-inside'], 'OpenClaw runs this kind of call without asking the office.');
+  assert.equal(e.openclaw.rows['edit-inside'], 'This agent runs this kind of call without asking the office.');
 });
 
 test('cost per agent kind this month: a ledger by month, the last three months kept', () => {

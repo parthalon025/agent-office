@@ -146,6 +146,9 @@ export function openRefusal(rules, provider) {
   return null;
 }
 
+// The reasons name no agent kind, so a screen can say one reason once for several kinds ("Not enforced for Hermes, dsh.").
+const NOT_SET_UP = 'The office has no provider for this agent kind yet. The rule applies when it has one.';
+const UNGATED = 'This agent runs this kind of call without asking the office.';
 /**
  * Per agent kind (column): { reason, rows }. reason '' means the office enforces the cells of that kind; else every
  * cell shows "Not enforced for this agent" with the reason. rows: a reason for one row only.
@@ -157,10 +160,10 @@ export function enforcement(providers) {
     const list = (providers || []).filter((p) => S.columnOf(p.kind) === c.id);
     const rows = {};
     let reason = '';
-    if (!list.length) reason = `${c.label} is not set up in this office yet. The rule applies when it is.`;
+    if (!list.length) reason = NOT_SET_UP;
     else if (list.some((p) => p.gated === false)) {
       const takes = new Set(list.flatMap((p) => (Array.isArray(p.enforces) ? p.enforces : [])));
-      for (const row of CALL_ROWS) if (S.applies(row, c.id) && !takes.has(row)) rows[row] = `${c.label} runs this kind of call without asking the office.`;
+      for (const row of CALL_ROWS) if (S.applies(row, c.id) && !takes.has(row)) rows[row] = UNGATED;
     }
     if (S.applies('supervise', c.id)) rows.supervise = 'Paperclip is not connected to this office.';
     out[c.id] = { reason, rows };

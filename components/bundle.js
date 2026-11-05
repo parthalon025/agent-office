@@ -1063,7 +1063,7 @@ Parts.wallPanel=function(K,g,x,y,z,ry,w,hh,draw,glow){var t=canvasTex(640,Math.r
    the same title. room.screens names the screens; a page repaints them, like the lab chalkboard. */
 var SEC_SLOTS=[{wall:"back",x:-5},{wall:"back",x:5},{wall:"left",z:-2.9},{wall:"left",z:2.9},{wall:"right",z:-2.9},{wall:"right",z:2.9}];
 Parts.securityWalls=function(K,g,room,W,D){var sl=K.look==="sublevel",names=room.screens||[];
- var gl=mesh(box(.08,5.2,D),K.t("scene-glass",{transparent:true,opacity:.28,roughness:.1}),W/2+.04,2.6,0,g);gl.castShadow=false;mesh(box(.12,.12,D),K.t("scene-metal"),W/2+.04,5.2,0,g);
+ var gl=mesh(box(.08,5.2,D),K.t("scene-glass",{transparent:true,opacity:.28,roughness:.1}),W/2+.04,2.6,0,g);gl.castShadow=false;
  function face(title){return function(c,w,hh){c.fillStyle=K.tok["scene-dark"];c.fillRect(0,0,w,hh);c.strokeStyle=K.tok["type-security"]||K.tok.accent;c.lineWidth=10;c.strokeRect(5,5,w-10,hh-10);
   c.fillStyle=K.tok.bubble;c.font="600 64px "+K.f.sans;c.fillText(sl?String(title).toUpperCase():String(title),48,110);c.fillStyle=K.tok.muted;c.font="400 28px "+K.f.mono;c.fillText(VERSION,w-110,hh-34);};}
  SEC_SLOTS.forEach(function(s,i){var title=names[i]||("Screen "+(i+1)),sw=s.wall==="back"?5.6:5.2,sh=3,y=2.25,m;

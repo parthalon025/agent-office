@@ -88,7 +88,7 @@ test('the snapshot carries the rules, what each agent kind enforces, and the Spe
   const s = await snapshot();
   assert.deepEqual(s.security.rules, { office: {}, buildings: {} });
   assert.equal(s.security.enforce['claude-code'].reason, '');
-  assert.match(s.security.enforce.hermes.reason, /not set up in this office yet/);
+  assert.match(s.security.enforce.hermes.reason, /no provider for this agent kind yet/);
   assert.equal(s.security.spend.limit, 2);
   assert.match(s.security.spend.month, /^\d{4}-\d{2}$/);
   assert.deepEqual(s.security.spend.byColumn, {});
