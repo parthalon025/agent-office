@@ -6,7 +6,7 @@ Each recipe does one task. Do the steps in order. Look up names in Reference.
 
 The office HUD has these by default (set `hud: false` to hide all HUD parts):
 
-- **Since you left.** On open, a card counts what happened since the person last saw this building (the page was hidden, or the scene of this building was disposed while the page showed): finished, needs you, errors, spend, and up to 3 lines. Needs you counts and lists the bots with an open request, the same bots as the decisions inbox. The card follows them while it shows. History is kept in the browser (`localStorage`, key `ao-history:<building name>`). Events with `seeded: true` do not count (see Mount a scene again). Set `sinceYouLeft: false` to hide the card. API: `office.summary(sinceMs)`, `office.history(sinceMs)`.
+- **Since you left.** On open, a card counts what happened since the person last saw this building (the page was hidden, or the scene of this building was disposed while the page showed): finished, needs you, errors, spend, and up to 3 lines. Needs you counts and lists the bots with an open request, the same bots as the decisions inbox. The card follows them while it shows. History is kept in the browser (`localStorage`, key `ao-history:<building name>`). Events with `seeded: true` do not count (see Mount a scene again). Set `sinceYouLeft: false` to hide the card. `onSinceYouLeft(open)` tells the page when the card shows and when it goes. API: `office.summary(sinceMs)`, `office.history(sinceMs)`.
 - **Replay.** "Replay" on the card, the trace button in the zoom panel, or the palette opens the time scrubber. The office replays the recorded events at 1x, 10x or 60x. Live events wait and apply after the replay. "Live" stops it. API: `office.replay({ from, to, speed })`, `office.stopReplay()`.
 - **Decisions.** The decisions button (with the count) opens the inbox: every request, high risk first, with cost and a preview. Keys: J / K move, A approve, D decline, X select, Shift+A approve the selection. Send `risk`, `cost`, `preview` and `tool` on `request` events to fill it. API: `office.approveMany(names)`, `office.declineMany(names)`.
 - **Command palette.** Ctrl+K or Cmd+K: jump to a bot or a floor, approve all low-risk requests, open decisions, replay, change the view, the theme or the sound, or type a request for the Manager.
@@ -137,7 +137,7 @@ Use tokens only. Write a README with a props table and a "consumer provides" lin
 
 ## Prompt templates
 
-**Build a page:** "Build <page> x0.1 with Agent Office DS x1.6.1. Read README, Recipes and Reference. Start from kit/page.html. Use tokens and the icon set only. Write copy in Simplified Technical English. Run kit/check.py and take the screenshots in the definition of done. Report what you checked."
+**Build a page:** "Build <page> x0.1 with Agent Office DS x1.6.2. Read README, Recipes and Reference. Start from kit/page.html. Use tokens and the icon set only. Write copy in Simplified Technical English. Run kit/check.py and take the screenshots in the definition of done. Report what you checked."
 
 **Connect a platform:** "Write an Agent Office adapter x0.1 for <platform>. Read Recipes (Connect a platform) and the events and commands in Reference. Copy kit/adapter.js. Fill the mapping tables first, then the code. Set AgentOffice.strict = true and play a recorded log. Report each event type you saw."
 

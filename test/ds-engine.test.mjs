@@ -402,3 +402,34 @@ test('freeInset: no inset is null; negative sides count as 0; the free area keep
   const fi = s.freeInset();
   assert.ok(Math.abs(fi.left - 195) < 1e-9 && Math.abs(fi.right - 455) < 1e-9, 'both sides shrink in proportion');
 });
+
+// #64: the narrow floor strip (HUD left at 820 px and below) is one row that scrolls sideways. A row keeps the width
+// of its name; it does not shrink (the name has min-width 0), so names do not draw on top of each other.
+const dsCss = readFileSync(join(root, 'components', 'bundle.css'), 'utf8').replace(/\r\n/g, '\n');
+test('narrow floor strip: a floor row does not shrink, so the names do not overlap (#64)', () => {
+  const r = dsCss.match(/@container \(max-width:820px\)\{[^\n]*?\.ao-hud-left \.ao-floors \.ao-row\{([^}]*)\}/);
+  assert.ok(r, 'the floor row rule of the 820 px container query');
+  assert.match(r[1], /(^|;)flex:none(;|$)/);
+  assert.match(r[1], /white-space:nowrap/);
+});
+
+test('floorScroll: the current floor is centered in a strip that scrolls; no scroll when all floors fit (#64)', () => {
+  const floorScroll = new Function(source('function floorScroll(') + 'return floorScroll;')();
+  assert.equal(floorScroll(300, 300, 100, 80), null, 'no overflow');
+  assert.equal(floorScroll(1200, 300, 600, 100), 500, 'centered: 600 + 50 - 150');
+  assert.equal(floorScroll(1200, 300, 20, 100), 0, 'never before the start');
+  assert.equal(floorScroll(1200, 300, 1150, 50), 900, 'never past the end');
+});
+
+test('FloorList scrolls the current floor into view when the floor or the list changes (#64)', () => {
+  const fl = source('function FloorList(p){var fl=p.floors', '));}\n');
+  assert.match(fl, /h\("div",\{className:"ao-floors",ref:box\}/);
+  assert.match(fl, /R\.useEffect\(function\(\)\{[^}]*querySelector\('\[aria-current="true"\]'\)[\s\S]*?floorScroll\(/);
+  assert.match(fl, /\},\[p\.current,fl\.length\]\);/);
+});
+
+// #66: the page lays its own cards out around Since you left, so the scene says when the card shows and when it goes.
+test('OfficeScene reports Since you left: true when the card shows, false when it closes or the scene goes (#66)', () => {
+  assert.ok(bundle.includes('R.useEffect(function(){if(!D.syl)return;var cb=sylCb.current;if(cb)cb(true);return function(){var c=sylCb.current;if(c)c(false);};},[!!D.syl]);'));
+  assert.ok(bundle.includes('sylCb=R.useRef(null);sylCb.current=p.onSinceYouLeft;'));
+});
