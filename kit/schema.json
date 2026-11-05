@@ -1,5 +1,5 @@
 {
- "version": "x1.5",
+ "version": "x1.6",
  "events": {
   "status": {
    "desc": "A bot changes state. The bot walks to rest or back to its seat when needed.",
@@ -684,5 +684,5 @@
   "Icon",
   "Logo"
  ],
- "note": "The one source for events and commands. The build puts it in the bundle (AgentOffice.schema, AgentOffice.validate), in index.d.ts, in Reference.md and in kit/schema.json. common lists the fields every event can carry. Field types: string, number, boolean, object, Status, string[], object[], a name from enums (the value must be one of the list) or a name from types (an object with the listed fields; other fields are reported); a trailing ? means optional."
+ "note": "The one source for events and commands. It is in the bundle (AgentOffice.schema, AgentOffice.validate), in index.d.ts, in Reference.md and in kit/schema.json, kept in step by hand. common lists the fields every event can carry. Field types: string, number, boolean, object, Status, string[], object[], a name from enums (the value must be one of the list) or a name from types (an object with the listed fields; other fields are reported); a trailing ? means optional."
 }
