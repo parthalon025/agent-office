@@ -1000,8 +1000,8 @@ async function openSession(opts) {
 
 // An agent that reports no cost (cost 'unknown') runs only after the user said yes for this session (owner decision Q22),
 // while its "Run without cost reports" cell in the Security room is Ask (security.mjs costAsk); Allow runs it without the
-// question, Deny never gets here (checkOpen). The answer is 409 with confirm: 'cost'; the caller asks the user and sends
-// the same request again with confirmCost: true. An ungated agent's label goes in the question too, so the yes is for what
+// question, Deny never gets here (checkOpen). The answer is 200 with confirm: 'cost' and the question (not an error); the
+// caller asks the user and sends the same request again with confirmCost: true. An ungated agent's label goes in the question too, so the yes is for what
 // it does (ADR 0001).
 // The provider's own gate check that needs no session (an OpenClaw config without workspace-only or exec approval, owner
 // decision 3 B), before the cost question: that question names the label ("commands ask"), so it never comes for an agent

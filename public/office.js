@@ -109,7 +109,7 @@
     }, function (x) { if (toast) toast({ tone: 'error', title: 'Export failed', text: x.message }); });
   }
   // An agent that reports no cost asks once before it runs while its Security room cell is Ask (security.mjs costAsk): the
-  // server answers 409 with confirm: 'cost' and the question; the page asks, then sends the same call with confirmCost: true.
+  // server answers 200 with confirm: 'cost' and the question (api() turns it into an Error with .body); the page asks, then sends the same call with confirmCost: true.
   function costAsked(x) { return !!(x && x.body && x.body.confirm === 'cost'); }
   // p: { title, text (the server's question), busy, err, onCancel, onRun }
   function CostDialog(p) {
@@ -210,7 +210,18 @@
         h('span', null, 'Use this folder')),
       h('span', { id: 'f-usefolder-hint', className: 'ao-hint' }, p.hint));
   }
+  // True while the user set an Ask for a Claude Code call cell, in the office or in any building (snap.security.rules, the rules
+  // the server sends). Only such an Ask opens the session in Default mode; a default Ask does not (security.mjs permissionModeFor).
+  function userAskSet(sec) {
+    var rules = sec && sec.rules, V = window.OfficeVocab.security;
+    if (!rules) return false;
+    var scopes = [null].concat(Object.keys(rules.buildings || {}));
+    return Object.keys(V.rows).some(function (row) {
+      return !V.rows[row].office && scopes.some(function (b) { return V.valueOf(rules, b, row, 'claude-code') === 'ask' && V.sourceOf(rules, b, row, 'claude-code') !== 'default'; });
+    });
+  }
   function OpenDialog(p) {
+    var snapOpen = useSnapshot();
     var f = useState({ cwd: p.shownPath || p.recent[0] || '', name: '', provider: p.kind || DEFAULT_KIND, where: 'office', useFolder: false, model: '', permissionMode: '', maxBudget: limitText(p.spendLimit), prompt: '', template: '' }), form = f[0], setForm = f[1];
     var K = useKinds(), k = kindOf(K.list, form.provider);
     useFirstModel(k, form, setForm);
@@ -274,9 +285,9 @@
           hint: terminal ? 'A terminal window works in the folder.' : form.useFolder ? 'The agent works in this folder. Other agents in it share its room.' : 'The agent gets its own room: a new branch in its own folder next to the repository. Your branch stays untouched.' }),
         limited ? h(A.TextInput, { key: 'b', id: 'f-budget', label: 'Spend limit in USD', value: form.maxBudget, placeholder: 'No limit', disabled: terminal, onChange: set('maxBudget'), hint: terminal ? undefined : limitHint(k ? k.label : 'Claude Code') })
           : costNote ? h('p', { key: 'b', className: 'note' }, costNote) : null,
-        // The server opens Claude Code in Default mode while a Security room rule for it is Ask (security.mjs permissionModeFor).
+        // The server opens Claude Code in Default mode while a rule the user set to Ask applies (security.mjs permissionModeFor); the hint shows only then.
         hasModes ? h(A.Select, { key: 'm', id: 'f-mode', label: 'Permissions', options: modes, value: form.permissionMode, onChange: set('permissionMode'),
-          hint: form.permissionMode === 'acceptEdits' ? 'While a Security room rule for Claude Code is Ask, the session opens in Default mode. The office then answers its edits by the rules.' : undefined }) : null]),
+          hint: form.permissionMode === 'acceptEdits' && form.provider === 'claude-code' && userAskSet(snapOpen && snapOpen.security) ? 'A Security room rule you set to Ask opens the session in Default mode. The office then answers its edits by the rules.' : undefined }) : null]),
       p.templates.length ? h(A.Select, { id: 'f-template', label: 'Template', options: tpl, value: form.template, onChange: pickTemplate }) : null,
       h(Area, { id: 'f-prompt', label: 'First instruction (optional)', value: form.prompt, placeholder: 'Review the open PRs and list what blocks merge.', rows: 4, onChange: set('prompt') }),
       saving === null
