@@ -427,16 +427,18 @@
       if (f && f.mesh && onShownFloor(f.mesh, fg)) {
         foc.item = f.item || foc.item;
         if (f.mesh !== foc.mesh) { foc.mesh = f.mesh; foc.spec = Object.assign({}, foc.spec, { mesh: f.mesh }); }
-        if (why.indexOf('theme') >= 0 || why.indexOf('floors') >= 0) refit(true);
+        if (why.indexOf('theme') >= 0 || why.indexOf('floors') >= 0) refit(true, true);
         return;
       }
       var ins = inspect() || {};
       if (fg && saved && ins.floor === saved.floor) back(); else drop();
     }
     // Frame the item in focus again. now: at once (no flight), unless a flight to it still runs.
-    function refit(now) {
+    // reset: the engine moved the camera (a theme change framed the floor). The camera is no longer where the user left
+    // it, so with no free part (a phone, a panel over the view) the item is framed in the whole view, not left on the floor.
+    function refit(now, reset) {
       if (!foc) return;
-      var pose = poseOf(foc.spec, true);
+      var pose = poseOf(foc.spec, !reset);
       if (!pose) return;
       widenZoom(pose.zoom);
       if (fly && !fly.home) { fly.p1 = pose.pos; fly.t1 = pose.target; fly.z1 = pose.zoom; fly.near = pose.near || null; return; }   // still flying in: land on the new frame
