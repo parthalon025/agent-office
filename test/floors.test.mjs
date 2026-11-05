@@ -234,3 +234,34 @@ test('relayout, with real git: a repo stays, a plain folder and a removed folder
     fs.rmSync(plainDir, { recursive: true, force: true });
   }
 });
+
+// Review M5: two agent rooms opened at once in one repository wrote the repo config at the same time, and one failed with
+// "could not lock config file". Room creation is serialized per repository, so every open gets its room and its base.
+test('M5: agent rooms opened at once in one repository all get their room and their base branch', async () => {
+  const dir = repo();
+  const made = [];
+  try {
+    const all = await Promise.allSettled(Array.from({ length: 8 }, (_, i) => git.createWorktree(dir, 'bot' + i)));
+    for (const r of all) if (r.status === 'fulfilled') made.push(r.value);
+    assert.deepEqual(all.map((r) => r.status === 'rejected' ? String(r.reason && r.reason.message) : 'ok'), Array(8).fill('ok'));
+    assert.equal(new Set(made.map((w) => w.root.toLowerCase())).size, 8, 'eight folders');
+    for (const w of made) assert.equal(plain(dir, 'config', '--get', `branch.${w.branch}.officebase`).trim(), 'main', w.branch);
+  } finally {
+    for (const w of made) await git.removeRoom(dir, w.root, true).catch(() => {});
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir + '.worktrees', { recursive: true, force: true });
+  }
+});
+
+test('M5: perRepo runs the tasks of one repository one after the other, also after a failure; other repositories do not wait', async () => {
+  const log = [];
+  const step = (name, ms, fail) => () => new Promise((res, rej) => { log.push(name + '+'); setTimeout(() => { log.push(name + '-'); fail ? rej(new Error(name)) : res(name); }, ms); });
+  const a = git.perRepo('C:\Repo', step('a', 40, true));
+  const b = git.perRepo('c:/repo/', step('b', 5));          // the same repository in another spelling
+  const c = git.perRepo('C:\Other', step('c', 5));
+  await assert.rejects(a, /a/);
+  assert.equal(await b, 'b');
+  assert.equal(await c, 'c');
+  assert.ok(log.indexOf('b+') > log.indexOf('a-'), 'b starts after a ends: ' + log.join(' '));
+  assert.ok(log.indexOf('c+') < log.indexOf('a-'), 'c does not wait for a: ' + log.join(' '));
+});

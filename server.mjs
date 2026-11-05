@@ -1173,7 +1173,18 @@ async function runSchedule(sch) {
     return null;
   }
 }
-setInterval(() => { const now = Date.now(); for (const sch of persisted.schedules) if (dueNow(sch, now)) void runSchedule(sch); }, 30000).unref();
+// Due schedules of one repository start one after the other (review M5): each waits until the one before it has opened its
+// session (and made its worktree). A queued schedule counts as run, so the next tick does not queue it again. Other
+// repositories do not wait. git.createWorktree is serialized per repository too; this keeps the order and the load sane.
+const scheduleQueue = git.keyedQueue();
+async function runDue(now) {
+  for (const sch of persisted.schedules.filter((x) => dueNow(x, now))) {
+    sch.lastRun = now;
+    const g = await git.locate(sch.cwd).catch(() => null);
+    void scheduleQueue(normPath(g?.repo || sch.cwd || ''), () => runSchedule(sch));
+  }
+}
+setInterval(() => { void runDue(Date.now()); }, 30000).unref();
 
 // ---------- past sessions: list and search ----------
 function pastSummary(h) {

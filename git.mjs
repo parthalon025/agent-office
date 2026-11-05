@@ -189,7 +189,31 @@ const nameSlug = (name) => String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-'
  * it was made in. It is '' on a detached HEAD, and the room then keeps a floor of its own.
  * The office never removes the folder by itself (removeWorktree runs only after a click and a confirm).
  */
+// One task at a time per repository (review M5): two agent rooms opened at once wrote the repository's config together
+// (`git config --local` for the base, `worktree add -b`), and git refused one with "could not lock config file". The key
+// is the repository folder in any spelling (case, slashes, a trailing slash). A failed task does not stop the next one;
+// tasks of other repositories do not wait. Returns what fn gives back.
+// keyedQueue(keyOf) makes one such queue: (key, fn) -> what fn gives back. server.mjs keeps its own for due schedules.
+export function keyedQueue(keyOf = (k) => k) {
+  const queues = new Map();
+  return (key, fn) => {
+    const k = keyOf(key);
+    const run = (queues.get(k) || Promise.resolve()).then(() => fn());
+    const tail = run.catch(() => {});
+    queues.set(k, tail);
+    tail.then(() => { if (queues.get(k) === tail) queues.delete(k); });
+    return run;
+  };
+}
+const repoKeyOf = (repo) => { const r = path.resolve(String(repo || '')); return process.platform === 'win32' ? r.toLowerCase() : r; };
+export const perRepo = keyedQueue(repoKeyOf);
+
 export async function createWorktree(cwd, name) {
+  // The main repository is common to all its worktrees, so it is the key of the queue.
+  const main = (await locate(cwd))?.repo || (await repoTop(cwd));
+  return perRepo(main, () => makeWorktree(cwd, name));
+}
+async function makeWorktree(cwd, name) {
   const top = await repoTop(cwd);
   const rel = path.relative(top, path.resolve(cwd));
   const main = (await locate(cwd))?.repo || top;
@@ -260,7 +284,8 @@ export async function removeWorktree({ root, repo, branch }, force = false) {
   await git(['worktree', 'remove', ...(force ? ['--force'] : []), root], repo, 60000)
     .catch((e) => { throw new Error(/contains modified or untracked files|uncommitted/i.test(e.message) ? 'The worktree has uncommitted changes. Remove it anyway to discard them.' : e.message); });
   let branchKept = false;
-  try { await git(['branch', force ? '-D' : '-d', branch], repo); } catch { branchKept = true; }
+  // A branch delete rewrites the repository config (its branch section): one config writer at a time (perRepo, M5).
+  try { await perRepo(repo, () => git(['branch', force ? '-D' : '-d', branch], repo)); } catch { branchKept = true; }
   return { removed: true, branchKept };
 }
 
@@ -434,7 +459,7 @@ export async function deleteFloor(repo, branch, force = false) {
   const agents = wts.filter((w) => w.base === branch && w.branch !== branch);
   if (agents.length) throw new Error(`${agents.length === 1 ? 'An agent room sits' : agents.length + ' agent rooms sit'} on the floor ${branch}. Remove ${agents.length === 1 ? 'it' : 'them'} first.`);
   for (const w of wts.filter((x) => x.branch === branch)) await removeRoom(repo, w.root, force);
-  await git(['branch', force ? '-D' : '-d', branch], repo)
+  await perRepo(repo, () => git(['branch', force ? '-D' : '-d', branch], repo))
     .catch((e) => { throw new Error(/not fully merged/i.test(e.message) ? `The branch ${branch} has commits that are not merged. Delete it anyway to lose them.` : e.message); });
   return { deleted: true };
 }

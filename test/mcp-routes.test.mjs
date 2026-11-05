@@ -429,6 +429,26 @@ test('/api/open gives each agent a worktree on the base floor; isolation "same" 
   for (const u of [a, b, c, d, e]) await call('/api/close', { uid: u });
 });
 
+// Review M5: agent rooms opened at once in one repository each write the repository config; they are made one at a time.
+test('agents opened at once in one repository all get a room of their own on the base floor', { skip: SKIP }, async () => {
+  const { resolveExe } = await import('../git.mjs');
+  const { execFileSync } = await import('node:child_process');
+  const repo = path.join(base, 'busy-repo');
+  fs.mkdirSync(repo);
+  const g = (...a) => execFileSync(resolveExe('git'), ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8', windowsHide: true });
+  g('init', '-q', '-b', 'trunk'); fs.writeFileSync(path.join(repo, 'a.txt'), 'a\n'); g('add', '-A'); g('commit', '-q', '-m', 'init');
+  const opens = await Promise.all([1, 2, 3, 4, 5].map((i) => call('/api/open', { cwd: repo, name: 'rush-' + i, provider: 'ollama', model: 'fake-model', where: 'office' })));
+  assert.deepEqual(opens.map((r) => r.status), [200, 200, 200, 200, 200], JSON.stringify(opens.map((r) => r.json)));
+  const uids = opens.map((r) => r.json.uid);
+  const ss = await Promise.all(uids.map((u) => until(async () => { const s = await sessionOf(u); return s?.place ? s : null; }, 'the place of ' + u)));
+  assert.equal(new Set(ss.map((s) => s.place.roomId)).size, 5, 'five rooms');
+  for (const s of ss) {
+    assert.equal(s.place.floor, 'trunk', 'its base was saved: the room sits on the base floor');
+    assert.equal(g('config', '--get', `branch.${s.worktree.branch}.officebase`).trim(), 'trunk');
+  }
+  for (const u of uids) await call('/api/close', { uid: u });
+});
+
 // ---------- an ACP agent (#71): the stand-in hermes.exe runs the fake ACP agent ----------
 // Review M1: Hermes is ungated (ADR 0001), so it is off until the user turns it on; the tests below run with it on.
 test('Hermes is off until the Security room turns it on: the open is refused before the cost question and before a worktree', { skip: SKIP }, async () => {
