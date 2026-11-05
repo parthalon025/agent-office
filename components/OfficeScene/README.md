@@ -30,10 +30,10 @@ The 3D office itself and the main component of the system. It holds a building o
 | `building` | no | `BuildingDef` |
 | `solution` | no | `"hq" \| "microsoft" \| "hermes" \| "copilot"` |
 | `adapter` | no | `AgentAdapter \| null` |
-| `theme` | no | `"light" \| "dark" \| "sublevel" \| "fluent"` |
+| `theme` | no | `"light" \| "dark" \| "sublevel" \| "fluent" \| "fluent-dark"` |
 | `floor` | no | `number` |
 | `view` | no | `"floor" \| "building"` |
-| `mode` | no | `"auto" \| "day" \| "night" \| "sublevel" \| "fluent"` |
+| `mode` | no | `"auto" \| "day" \| "night" \| "sublevel" \| "fluent" \| "fluent-dark"` |
 | `simulate` | no | `boolean` |
 | `editable` | no | `boolean` |
 | `hud` | no | `boolean` |

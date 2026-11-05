@@ -1,5 +1,6 @@
 /* Page extras for the Agent Office DS (x0.1):
-   0. Theme: mirrors the office's theme (Day, Night, Sublevel or Fluent) to the page, so the control strip and dialogs match.
+   0. Theme: mirrors the office's theme (any theme of AgentOffice.MODES: Day, Night, Sublevel, Fluent or Fluent Dark) to the page,
+      so the control strip and dialogs match. It copies the data-theme value as is, so a new theme needs no change here.
    1. Resize: drag the left edge, bottom edge or bottom-left corner of the chat. Arrow keys work on a focused grip,
       double-click resets. The size is remembered in this browser.
    2. Slash commands: type "/" in the chat box to pick one of the session's commands or skills.

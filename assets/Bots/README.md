@@ -17,4 +17,4 @@ To use a different body colour, call `AgentOffice.PORTRAITS[shape](color)` from 
 To recolour, call `AgentOffice.PORTRAITS_SUBLEVEL[shape](color)`.
 
 ## Other themes
-Day, Night and Fluent use the portraits above. A portrait has only the body colour of the bot and fixed eye and shadow tones, so it reads the same on each of these themes. `BotAvatar` picks the Sublevel portraits in Sublevel and these in every other theme.
+Day, Night, Fluent and Fluent Dark use the portraits above. A portrait has only the body colour of the bot and fixed eye and shadow tones, so it reads the same on each of these themes. `BotAvatar` picks the Sublevel portraits in Sublevel and these in every other theme.

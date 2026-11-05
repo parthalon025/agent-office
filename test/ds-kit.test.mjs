@@ -20,7 +20,7 @@ test('tokens.css has every color token of tokens.json, with the same value, in e
   const block = (open) => { const at = css.indexOf(open); assert.ok(at >= 0, `tokens.css has ${open}`); return css.slice(at, css.indexOf('\n}', at)); };
   // every theme of tokens.json, in its order: Day is the root block, each other theme has its own block
   const ids = JSON.parse(read('tokens.json')).color.themes.map((t) => t.id);
-  assert.deepEqual(ids, ['light', 'dark', 'sublevel', 'fluent']);
+  assert.deepEqual(ids, ['light', 'dark', 'sublevel', 'fluent', 'fluent-dark']);
   const themes = Object.fromEntries(ids.map((id) => [id, block(id === 'light' ? ':root, [data-theme="light"] {' : `\n[data-theme="${id}"] {`)]));
   for (const [th, text] of Object.entries(themes)) {
     for (const t of tokens) {
@@ -67,9 +67,9 @@ test('tokens.css has every non-color token of tokens.json, with the same value',
 
 test('tokens.css has every per-theme shadow token, with the same value, in each theme and in the system dark block', () => {
   const { perTheme } = nonColorProps();
-  // every theme of tokens.json (Fluent too), plus the system dark block, which takes the Night value
+  // every theme of tokens.json (Fluent and Fluent Dark too), plus the system dark block, which takes the Night value
   const ids = JSON.parse(read('tokens.json')).color.themes.map((t) => t.id);
-  assert.ok(ids.includes('fluent'), 'tokens.json lists the fluent theme');
+  for (const id of ['fluent', 'fluent-dark']) assert.ok(ids.includes(id), `tokens.json lists the ${id} theme`);
   const blocks = Object.fromEntries(ids.map((id) => [id, cssBlock(css, id === 'light' ? ':root, [data-theme="light"] {' : `\n[data-theme="${id}"] {`)]));
   blocks.system = cssBlock(css, ':root:not([data-theme]) {');
   for (const [name, value] of perTheme) {

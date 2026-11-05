@@ -1,4 +1,4 @@
-<!-- @dsCard group="Themes" height=1560 width=1360 -->
+<!-- @dsCard group="Themes" height=2740 width=1360 -->
 <!doctype html>
 <html><head><meta charset="utf-8"><title>FluentOffice</title></head><body style="margin:0;background:var(--bg)">
 <div id="root"></div>
@@ -6,8 +6,10 @@
 var A=window.AgentOffice,h=React.createElement;
 function S(l,c){return h("div",{className:"ao-state",key:l},h("div",{className:"ao-state-l"},l),c);}
 ReactDOM.createRoot(document.getElementById("root")).render(h("div",{className:"ao-page"},
- S("Floor view: the mock office, with bots that work, wait, fail, rest and finish",h(A.FluentOffice,{height:760,floor:2})),
- S("Building view, no HUD",h(A.FluentOffice,{height:340,view:"building",hud:false,intro:false})),
- S("Empty building with no connection: one floor, one empty room",h(A.FluentOffice,{height:340,intro:false,adapter:null,building:{name:"Empty office",floors:[{id:1,name:"Floor 1",key:"ops",rooms:[{id:"r1",name:"Room 1",type:"team",bots:[]}]}]}}))));
+ S("Fluent, floor view: the mock office, with bots that work, wait, fail, rest and finish",h(A.FluentOffice,{height:760,floor:2})),
+ S("Fluent, building view, no HUD",h(A.FluentOffice,{height:340,view:"building",hud:false,intro:false})),
+ S("Fluent, empty building with no connection: one floor, one empty room",h(A.FluentOffice,{height:340,intro:false,adapter:null,building:{name:"Empty office",floors:[{id:1,name:"Floor 1",key:"ops",rooms:[{id:"r1",name:"Room 1",type:"team",bots:[]}]}]}})),
+ S("Fluent Dark (theme \"fluent-dark\"), floor view: the same office at night",h(A.FluentOffice,{theme:"fluent-dark",height:760,floor:2,intro:false})),
+ S("Fluent Dark, building view, no HUD",h(A.FluentOffice,{theme:"fluent-dark",height:340,view:"building",hud:false,intro:false}))));
 </script>
 </body></html>

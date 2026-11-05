@@ -181,7 +181,7 @@
     var plaza = X.mesh(X.box(1, 0.2, 1), mat('scene-floor'), 0, -0.5, 0, world);
     plaza.castShadow = false;
 
-    // streets between the lots, trees on the lot corners, a light at each crossing (lit at night)
+    // streets between the lots, trees on the lot corners, a light at each crossing (lit in a theme with room lamps: Night, Fluent Dark)
     var streets = null, gridKey = '';
     var ROAD = 2.4;
     function buildStreets(cols, rows) {
@@ -503,7 +503,7 @@
 
     return {
       update: update, focus: focus, fit: fit, zoomBy: zoomBy,
-      // the theme of the page: an id of AgentOffice.MODES (day, night, sublevel, fluent); the stage sets data-theme on the root
+      // the theme of the page: an id of AgentOffice.MODES (day, night, sublevel, fluent, fluent-dark); the stage sets data-theme on the root
       setMode: function (m) { s.setMode(m); },
       // for tests and the console: the camera zoom and its limits
       state: function () { return { zoom: s.cam.zoom, min: s.ctl ? s.ctl.minZoom : null, max: s.ctl ? s.ctl.maxZoom : null, buildings: Object.keys(items).length, entering: entering }; },

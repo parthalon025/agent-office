@@ -68,4 +68,4 @@ Fetched 2026-11-04 with a Chromium user agent, so every face is woff2. All subse
 2. Download every `https://fonts.gstatic.com/...woff2` URL in it.
 3. Name each file `<family>-<subset>.woff2`, with the weight between them when the family has one file per weight (IBM Plex Mono: `ibm-plex-mono-500-latin.woff2`). Only lower-case letters, digits and `-`: the server serves no other font name.
 4. Write `fonts/fonts.css`: the Google style sheet with each URL changed to its file name. Keep the header comment.
-5. Put the new hashes in the table above. Run `npm test` (it checks that every file `fonts.css` names is here and served), then load the page in Day, Night, Sublevel and Fluent.
+5. Put the new hashes in the table above. Run `npm test` (it checks that every file `fonts.css` names is here and served), then load the page in Day, Night, Sublevel, Fluent and Fluent Dark.

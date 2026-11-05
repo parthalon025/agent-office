@@ -813,7 +813,7 @@
       return { key: b.key, name: b.name, sessions: b.sessions, waiting: b.waiting, floors: def.floors.map(function (f) { return { name: f.name, key: f.key }; }), bots: bots };
     });
   }
-  // The themes come from the DS (AgentOffice.MODES: Day, Night, Sublevel, Fluent); the page keeps no copy of the list.
+  // The themes come from the DS (AgentOffice.MODES: Day, Night, Sublevel, Fluent, Fluent Dark); the page keeps no copy of the list.
   var CITY_MODES = A.MODES;
   function themeMode() {
     var t = document.documentElement.getAttribute('data-theme');

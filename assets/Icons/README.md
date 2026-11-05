@@ -27,6 +27,7 @@ Orchestration icons (x0.8): `tool` is two meshed gears; `settings` is one gear w
 | `night` | ![](night.svg) | Night lighting mode. |
 | `tour` | ![](tour.svg) | Start the guided camera tour. |
 | `fluent` | ![](fluent.svg) | Fluent theme: a round window with a wave. An original mark, not a product logo. |
+| `fluentdark` | ![](fluentdark.svg) | Fluent Dark theme: the same window with a filled night sky and a crescent moon. The fill is the one large fill in the set: it keeps the icon apart from `fluent` at 14 px, where the mode toggle shows icons only. An original mark, not a product logo. |
 | `sound` | ![](sound.svg) | Sound is on. Select to turn it off. |
 | `sound-off` | ![](sound-off.svg) | Sound is off. Select to turn it on. |
 | `session` | ![](session.svg) | A session: one run or conversation of an agent. |
