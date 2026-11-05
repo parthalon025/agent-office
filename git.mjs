@@ -234,27 +234,39 @@ export async function branches(repo) {
 
 const BRANCH_RE = /^(?!-)(?!.*\.\.)(?!.*\/\/)(?!.*@\{)[A-Za-z0-9._\/-]{1,100}(?<![./])$/;
 const slugOf = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'branch';
-function roomFolder(repo, branch) {
+/** A room name as a folder name: letters, digits, dots and dashes. The folder name is the room name in the office. */
+export function roomNameOf(name) {
+  const n = String(name || '').trim().replace(/[^A-Za-z0-9._]+/g, '-').replace(/^[-.]+|[-.]+$/g, '');
+  if (String(name || '').trim() && !n) throw new Error('Use letters or digits in the room name.');
+  return n.slice(0, 40);
+}
+function roomFolder(repo, branch, name = '') {
   fs.mkdirSync(WORKTREE_ROOT, { recursive: true });
-  return path.join(WORKTREE_ROOT, `${path.basename(repo)}-${slugOf(branch)}-${crypto.randomBytes(2).toString('hex')}`);
+  const n = roomNameOf(name);
+  if (!n) return path.join(WORKTREE_ROOT, `${path.basename(repo)}-${slugOf(branch)}-${crypto.randomBytes(2).toString('hex')}`);
+  for (let i = 1; i < 100; i++) {
+    const dir = path.join(WORKTREE_ROOT, i === 1 ? n : `${n}-${i}`);
+    if (!fs.existsSync(dir)) return dir;
+  }
+  throw new Error('Too many rooms with that name. Pick another name.');
 }
 
 /** New floor: a new branch from `from` (default HEAD), checked out in a new worktree (its first room). */
-export async function createFloor(repo, branch, from = '') {
+export async function createFloor(repo, branch, from = '', roomName = '') {
   if (!BRANCH_RE.test(branch)) throw new Error('Use letters, digits, dots, dashes and slashes for the branch name.');
   try { await git(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], repo); throw new Error(`The branch ${branch} exists. Add a room to its floor instead.`); }
   catch (e) { if (/exists/.test(e.message)) throw e; }
-  const root = roomFolder(repo, branch);
+  const root = roomFolder(repo, branch, roomName);
   await git(['worktree', 'add', '-b', branch, root, from || 'HEAD'], repo, 120000);
   return { root, branch };
 }
 
 /** New room on a floor: one more worktree with the branch checked out. Git refuses a second
  *  worktree for a branch unless --force, so a floor that has rooms gets one with --force. */
-export async function createRoom(repo, branch) {
+export async function createRoom(repo, branch, roomName = '') {
   if (!BRANCH_RE.test(branch)) throw new Error('Use letters, digits, dots, dashes and slashes for the branch name.');
   const taken = (await layout(repo)).some((w) => w.branch === branch);
-  const root = roomFolder(repo, branch);
+  const root = roomFolder(repo, branch, roomName);
   await git(['worktree', 'add', ...(taken ? ['--force'] : []), root, branch], repo, 120000);
   return { root, branch, shared: taken };
 }
@@ -277,4 +289,23 @@ export async function deleteFloor(repo, branch, force = false) {
   await git(['branch', force ? '-D' : '-d', branch], repo)
     .catch((e) => { throw new Error(/not fully merged/i.test(e.message) ? `The branch ${branch} has commits that are not merged. Delete it anyway to lose them.` : e.message); });
   return { deleted: true };
+}
+
+/** Floors nobody needs: not the main folder's branch, merged into it, and every room clean. Deleting
+ *  them loses nothing. Returns [{ branch, rooms }] (rooms = how many worktrees the floor has). */
+export async function staleFloors(repo) {
+  const wts = await layout(repo);
+  const main = wts.find((w) => w.main);
+  if (!main || main.branch === 'detached') return [];
+  const merged = new Set((await git(['branch', '--merged', main.branch, '--format=%(refname:short)'], repo, 15000)).split(/\r?\n/).filter(Boolean));
+  const out = [];
+  for (const b of new Set(wts.map((w) => w.branch))) {
+    if (b === main.branch || b === 'detached' || !merged.has(b)) continue;
+    const rooms = wts.filter((w) => w.branch === b);
+    if (rooms.some((w) => w.main)) continue;
+    let clean = true;
+    for (const w of rooms) if ((await git(['status', '--porcelain'], w.root, 15000).catch(() => 'x')).trim()) { clean = false; break; }
+    if (clean) out.push({ branch: b, rooms: rooms.length });
+  }
+  return out;
 }
