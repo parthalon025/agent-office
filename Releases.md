@@ -41,7 +41,7 @@ Versions keep the `x` prefix.
 - Folder keys follow Windows rules on every host.
 - The room inventory pipeline is gone. The server keeps one decor list.
 - Two tokens. The agent token in `.office-token` opens only the hook and MCP routes. A new page token opens only the page routes, and no file in the office folder holds it. The page no longer holds a token: `npm start` opens a one-time launch link, and the page trades its code for a cookie that scripts cannot read. A reload keeps working. A second `npm start` opens a new link.
-- Only your Windows user, SYSTEM and Administrators can read the files with a token and the hook and MCP settings files.
+- Only your Windows user, SYSTEM and Administrators can read the files with a token, the hook and MCP settings files, saved sessions (`history.json`) and saved state (`state.json`).
 - The server refuses requests from another site or port, takes changes as JSON only, and no page can show the office in a frame.
 - The page loads React and the fonts from the office, not from jsDelivr and Google Fonts, so it needs no internet access. A content security policy allows scripts, style sheets and fonts from the office only.
 - An image from another site in an agent's reply shows a "Load image from" card. Nothing goes to that site until you click, and the request does not send the office address.

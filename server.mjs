@@ -1152,6 +1152,11 @@ server.on('error', async (e) => {
 server.listen(PORT, HOST, () => {
   // Written only once we own the port, so a second copy can never invalidate a running office's tokens.
   writeSecret(TOKEN_FILE, JSON.stringify({ token: AGENT_TOKEN, port: PORT }));
+  // Saved state (schedule prompts, notes) and past sessions (replies) are limited too (#27 L10): once here, with
+  // what this office loaded. savePersisted and saveHistory then write plainly, and a plain write keeps the ACL.
+  // After listen, so a second copy that exits on EADDRINUSE never rewrites them.
+  writeSecret(STATE_FILE, JSON.stringify(persisted, null, 2));
+  writeSecret(HISTORY_FILE, JSON.stringify(history));
   try {
     fs.mkdirSync(path.dirname(PAGE_FILE), { recursive: true });
     writeSecret(PAGE_FILE, JSON.stringify({ token: PAGE_TOKEN, port: PORT }));

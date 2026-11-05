@@ -166,7 +166,7 @@ Generated at run time and ignored by git: `.office-token`, `office-hooks.json`, 
 - "Always allow" writes the rule Claude suggests to that project's `.claude/settings.local.json`, and only when you click it.
 - Creating a pull request runs `git push` and `gh pr create`. The office asks you to confirm and lists the steps first.
 - The office never edits `~/.claude/settings.json` or your credentials.
-- Saved sessions (`history.json`) contain Claude's replies. They stay on this machine.
+- Saved sessions (`history.json`) contain Claude's replies, and `state.json` keeps schedule prompts and room notes. They stay on this machine, and only your Windows user, SYSTEM and Administrators can read them (set when the office starts).
 - Remote access is not supported. Reaching an agent that can run commands needs real login and encryption. If you want it from a phone, put the office behind Tailscale.
 
 ## Troubleshooting
