@@ -2,7 +2,8 @@
 // room grid it falls under (its action kind, #70).
 // An allowlist: only reads and edits inside the session's root folder are low, and never for a secret-looking
 // file or a settings file that runs code (.git, .claude, .mcp.json, .vscode, .idea, Copilot CLI's .copilot, .agents and the
-// RUNS_IN_GITHUB parts below .github). Every agent provider uses
+// RUNS_IN_GITHUB parts below .github), and never an edit of the office's own code, hook and settings files (ownCode, #120,
+// whatever the root). Every agent provider uses
 // this one rule, so a local model or a Copilot session is rated like Claude Code.
 // One classifier (rate) gives both answers, so the grid and riskOf never disagree: the rows read-inside and
 // edit-inside are exactly the reads and edits that are low.
@@ -166,9 +167,29 @@ function resolveIn(root, abs) {
 // history.json the past sessions; an office on another port has state-<port>.json and history-<port>.json (files.mjs).
 // A change to them changes what the office does at its next start, so they are settings that run code. Matched in the
 // office folder (this file's folder) only, not by name alone: another project's state.json is a plain file.
-const OFFICE_DIR = norm(path.dirname(fileURLToPath(import.meta.url)));
+const OFFICE_ROOT = path.dirname(fileURLToPath(import.meta.url));
+const OFFICE_DIR = norm(OFFICE_ROOT);
 const OWN_STATE = /^(state|history)(-\d+)?\.json$/i;
 const ownState = (p) => !!p && path.dirname(norm(p)) === OFFICE_DIR && OWN_STATE.test(path.basename(String(p)));
+// The office's own code, hook and settings files (#120): every file in the office folder or below it. hook.mjs is the command
+// hook each attached Claude Code session runs; server.mjs, launch.ps1, package.json, providers/ and public/ (vocab.js holds the
+// Security defaults, the page answers requests) run at the next start or page load. So an edit there is settings that run
+// code, whatever the session root: also from a root inside the office, above it, in another repo, or through a link or a short
+// name. Two exceptions, which the office never runs: Markdown documents (by the name Windows opens: a.md., not a.mjs:x.md), and
+// the other checkouts in .claude/worktrees (a session there works on a copy, not on the running office; the office's own
+// .claude files stay settings by the RUNS rule). A read stays as for any file: the code holds no secret, and secret files
+// count by name. opts.office for tests; this file's folder by default. As text (8.3 short names spelled out) and after links.
+function ownCode(abs, real, opts) {
+  const dir = (opts && opts.office) || OFFICE_ROOT;
+  for (const [d, t] of [[longPath(dir), longPath(abs)], [realPath(dir), real]]) {
+    if (!d || !t || !inside(d, t)) continue;
+    const rel = parts(path.relative(norm(d), norm(t))).map((x) => winPart(x.toLowerCase()));
+    if (rel.length > 2 && rel[0] === '.claude' && rel[1] === 'worktrees') continue;
+    if (rel.length && rel[rel.length - 1].endsWith('.md')) continue;
+    return true;
+  }
+  return false;
+}
 // The agents' own config homes (review M3): Claude Code's (~/.claude, or CLAUDE_CONFIG_DIR), Hermes's (~/.hermes, or
 // HERMES_HOME) and Copilot CLI's (~/.copilot, or COPILOT_HOME, #22) hold settings, hooks, commands, skills and memory that the agent runs. A path in one of them is settings that
 // run code whatever the root: a session rooted in ~/.claude would else rate its settings.json, hooks and CLAUDE.md as plain
@@ -263,7 +284,7 @@ function place(root, p, opts) {
   if (!k.runs && whole.some((x) => forms(x).some((n) => n === '.git' || n === 'start menu'))) k.runs = true;
   if (ownState(abs) || ownState(real)) k.runs = true;
   if (!k.runs && inConfigHome(abs, real, opts)) k.runs = true;
-  return { inside: isIn, ...k };
+  return { inside: isIn, ...k, own: ownCode(abs, real, opts) };
 }
 
 // {a,b} alternatives of one glob part (a few levels, at most 64).
@@ -316,11 +337,12 @@ function readRisk(name, a, root, opts) {
   return R(secret || runs ? 'medium' : 'low', action);
 }
 
-// Edit, Write, MultiEdit, NotebookEdit: settings that run code and saved state are high anywhere; low only inside the root.
+// Edit, Write, MultiEdit, NotebookEdit: settings that run code, saved state and the office's own code are high anywhere; low
+// only inside the root.
 function editRisk(file, root, opts) {
   if (!file) return R('medium', 'files-outside');
-  const w = place(root, file, opts), action = fileAction(w.secret, w.runs || w.later, w.inside, 'edit-inside');
-  if (w.runs || w.later) return R('high', action);
+  const w = place(root, file, opts), runs = w.runs || w.later || w.own, action = fileAction(w.secret, runs, w.inside, 'edit-inside');
+  if (runs) return R('high', action);
   return R(w.inside && !w.secret ? 'low' : 'medium', action);
 }
 

@@ -472,6 +472,76 @@ test('the office\'s own state.json and history.json are settings: the Security r
   assert.equal(riskOf('Read', { file_path: at('state.json') }, cwd), 'low', 'and a read of it is plain');
 });
 
+// #120: the office's own code, hook and settings files run code. hook.mjs is the command hook every attached Claude Code session
+// runs; server.mjs, launch.ps1, providers/*.mjs and public/*.js (vocab.js holds the Security defaults) run at the next start or
+// page load. An edit of any of them is settings that run code (high) whatever the session root, also with a user-set Allow on
+// edits inside the worktree. A read stays as for any file (the code holds no secret). Markdown documents and the other
+// checkouts in .claude/worktrees are not the running office: they stay ordinary files.
+test('#120: an edit of the office\'s own code, hook or settings files is high, whatever the root', () => {
+  const office = path.dirname(fileURLToPath(new URL('../risk.mjs', import.meta.url)));
+  const code = ['hook.mjs', 'server.mjs', 'risk.mjs', 'security.mjs', 'mcp.mjs', 'launch.ps1', 'package.json', 'tokens.css',
+    path.join('public', 'vocab.js'), path.join('public', 'index.html'), path.join('providers', 'acp.mjs'), path.join('kit', 'check.py'),
+    'new-module.mjs', path.join('public', 'new.js')];
+  for (const rel of code) {
+    const f = path.join(office, rel);
+    for (const root of [office, path.dirname(f), cwd]) {
+      for (const tool of ['Edit', 'Write', 'MultiEdit']) assert.equal(riskOf(tool, { file_path: f }, root), 'high', `${tool} ${rel} from ${root}`);
+      assert.equal(actionOf('Write', { file_path: f }, root), 'settings', `${rel} from ${root}`);
+    }
+    assert.equal(riskOf('NotebookEdit', { notebook_path: f }, office), 'high', 'NotebookEdit ' + rel);
+    assert.equal(riskOf('Edit', { file_path: rel }, office), 'high', 'relative ' + rel);
+    assert.equal(riskOf('Read', { file_path: f }, office), 'low', 'a read of ' + rel + ' stays plain');
+    assert.equal(actionOf('Read', { file_path: f }, office), 'read-inside', 'a read of ' + rel);
+  }
+  if (WIN) {
+    assert.equal(riskOf('Edit', { file_path: path.join(office.toUpperCase(), 'HOOK.MJS') }, office), 'high', 'any case');
+    assert.equal(riskOf('Write', { file_path: path.join(office, 'hook.mjs.') }, office), 'high', 'a trailing dot');
+    assert.equal(riskOf('Write', { file_path: path.join(office, 'hook.mjs::$DATA') }, office), 'high', 'a stream suffix');
+    assert.equal(riskOf('Write', { file_path: path.join(office, 'hook.mjs:x.md') }, office), 'high', 'a stream that looks like a document');
+  }
+  // documents stay ordinary files
+  for (const rel of ['README.md', 'Changelog.md', path.join('docs', 'agents', 'domain.md')]) {
+    assert.equal(riskOf('Edit', { file_path: path.join(office, rel) }, office), 'low', rel);
+    assert.equal(actionOf('Edit', { file_path: path.join(office, rel) }, office), 'edit-inside', rel);
+  }
+});
+
+test('#120: a session rooted above the office, in it, in a link to it or a short name of it; other repos and worktrees keep their inside', (c) => {
+  const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-risk-office-')));
+  try {
+    const projects = path.join(base, 'projects'), office = path.join(projects, 'agent-office');
+    const wt = path.join(office, '.claude', 'worktrees', 'wt1'), twin = path.join(projects, 'agent-office-2'), sib = path.join(projects, 'agent-office.worktrees', 'x');
+    for (const d of [path.join(office, 'public'), path.join(wt, 'public'), twin, sib, path.join(projects, 'app')]) fs.mkdirSync(d, { recursive: true });
+    const opts = { office, home: path.join(base, 'home'), env: {} };
+    const hook = path.join(office, 'hook.mjs');
+    for (const root of [office, projects, path.join(office, 'public'), path.join(projects, 'app')]) {
+      assert.equal(riskOf('Edit', { file_path: hook }, root, opts), 'high', 'hook.mjs from ' + root);
+      assert.equal(riskOf('Write', { file_path: path.join(office, 'public', 'vocab.js') }, root, opts), 'high', 'vocab.js from ' + root);
+    }
+    // not the running office: its worktrees, a look-alike name next to it, a repo next to it
+    assert.equal(riskOf('Edit', { file_path: path.join(wt, 'hook.mjs') }, wt, opts), 'low', 'a worktree of the office is another checkout');
+    assert.equal(riskOf('Edit', { file_path: path.join(wt, 'public', 'vocab.js') }, wt, opts), 'low', 'its public folder too');
+    assert.equal(riskOf('Edit', { file_path: path.join(twin, 'hook.mjs') }, twin, opts), 'low', 'agent-office-2 is not the office');
+    assert.equal(riskOf('Edit', { file_path: path.join(sib, 'hook.mjs') }, sib, opts), 'low', 'agent-office.worktrees is not the office');
+    assert.equal(riskOf('Edit', { file_path: path.join(projects, 'app', 'server.mjs') }, path.join(projects, 'app'), opts), 'low', 'another repo\'s server.mjs');
+    assert.equal(riskOf('Edit', { file_path: path.join(projects, 'app', 'server.mjs') }, path.join(projects, 'app')), 'low', 'and with the real office folder');
+    // the office's own .claude settings stay settings from a worktree root (outside that root, the whole path counts)
+    assert.equal(riskOf('Edit', { file_path: path.join(office, '.claude', 'settings.json') }, wt, opts), 'high');
+    // a link into the office folder from another repo
+    const link = path.join(projects, 'app', 'office-link');
+    let linked = true;
+    try { fs.symlinkSync(office, link, 'junction'); } catch { linked = false; c.diagnostic('links are not allowed here'); }
+    if (linked) {
+      assert.equal(riskOf('Edit', { file_path: path.join(link, 'hook.mjs') }, path.join(projects, 'app'), opts), 'high', 'through a junction');
+      assert.equal(actionOf('Edit', { file_path: path.join(link, 'hook.mjs') }, path.join(projects, 'app'), opts), 'settings');
+      assert.equal(riskOf('Edit', { file_path: path.join(link, 'hook.mjs') }, link, opts), 'high', 'a root that is the link');
+    }
+    const short = shortOf(office);
+    if (short) assert.equal(riskOf('Edit', { file_path: path.join(short, 'hook.mjs') }, short, opts), 'high', 'an 8.3 short name of the office');
+    else c.diagnostic('no 8.3 short name here');
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
 // Review M3: the agents' own config homes (~/.claude, ~/.hermes, or where CLAUDE_CONFIG_DIR and HERMES_HOME move them) hold
 // settings, hooks, skills and memory that run code. A session rooted in one of them must never rate those files low, whatever
 // the root: only the parts below the root count inside a root, so .claude in the root's own path was not seen. Real temp
