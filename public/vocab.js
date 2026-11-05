@@ -265,6 +265,8 @@
   function kindNote(k, terminal) {
     var label = (k && k.label) || 'Claude Code';
     if (terminal) return 'Starts ' + label + ' in a new terminal window with the office hooks attached.';
+    if (k && k.team) return 'Runs a team of ' + label + ' agents on a model on this machine, inside the office. The team comes from agent-team.json in the folder, '
+      + 'or it is a lead, a coder and a reviewer. A member shows as a helper bot while it has the work. Risky steps come to you for approval. It costs nothing.';
     if (k && !k.paid) return 'Runs a model from ' + label + ' on this machine, inside the office. It reads and changes files in the folder and runs commands. Risky steps come to you for approval. It costs nothing.';
     return 'Runs ' + label + ' inside the office. You talk to it in the chat and approve its steps here. It has no terminal window.';
   }

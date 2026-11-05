@@ -663,7 +663,7 @@
         h('ul', { className: 'past' }, K.list.map(function (k) {
           var r = KV.kindState(k);
           var facts = [k.terminal ? 'Runs in the office or a terminal window' : 'Runs in the office', KV.limitShown(k) ? 'Spend limit applies' : KV.costNote(k) ? 'Cost unknown, no spend limit' : 'No cost',
-            k.modes.length ? 'Permission modes' : null, k.needsModel ? 'You pick the model' : null].filter(Boolean).join(' · ');
+            k.modes.length ? 'Permission modes' : null, k.needsModel ? 'You pick the model' : null, k.team ? 'A team: members show as helper bots' : null].filter(Boolean).join(' · ');
           var names = k.models.map(function (m) { return m.label || m.id; }).join(', ');
           return h('li', { key: k.kind, className: 'past-row' },
             h('div', { className: 'past-main' },

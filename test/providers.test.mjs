@@ -129,7 +129,7 @@ test('status: readiness and models of each provider; a failing or silent one is 
   const out = await createRegistry([fake, broken, silent, off]).status({ timeoutMs: 30 });
   // Each entry starts with what kinds() says of the provider (the Open dialog's options), then its readiness, then what
   // a provider says after readiness (canResume, features: an ACP agent learns them at its handshake).
-  const plain = { paid: true, terminal: false, modes: [], needsModel: false, control: false, gated: true, supervision: null, cost: 'reported' };
+  const plain = { paid: true, terminal: false, modes: [], needsModel: false, control: false, gated: true, supervision: null, cost: 'reported', team: false };
   const after = { canResume: false, features: [] };
   assert.deepEqual(out, [
     { kind: 'fake', label: 'Fake agent', ...plain, ready: true, version: '1.0', needs: [], models: [{ id: 'fake-1', label: 'Fake 1' }], ...after },
@@ -151,12 +151,12 @@ test('kinds: each provider\'s options for the Open dialog, from the provider its
   const reg = createRegistry([claude, ollama, lmstudio, createFake(o.events)]);
   assert.deepEqual(reg.kinds(), [
     // Claude Code: paid (a spend limit), a terminal window, permission modes, a default model, and live changes (control)
-    { kind: 'claude-code', label: 'Claude Code', paid: true, terminal: true, modes: ['default', 'acceptEdits', 'plan'], needsModel: false, control: true, gated: true, supervision: null, cost: 'reported' },
+    { kind: 'claude-code', label: 'Claude Code', paid: true, terminal: true, modes: ['default', 'acceptEdits', 'plan'], needsModel: false, control: true, gated: true, supervision: null, cost: 'reported', team: false },
     // a local model: free, in the office only, no permission modes, a model to pick, no live changes
-    { kind: 'ollama', label: 'Ollama', paid: false, terminal: false, modes: [], needsModel: true, control: false, gated: true, supervision: null, cost: 'reported' },
-    { kind: 'lmstudio', label: 'LM Studio', paid: false, terminal: false, modes: [], needsModel: true, control: false, gated: true, supervision: null, cost: 'reported' },
+    { kind: 'ollama', label: 'Ollama', paid: false, terminal: false, modes: [], needsModel: true, control: false, gated: true, supervision: null, cost: 'reported', team: false },
+    { kind: 'lmstudio', label: 'LM Studio', paid: false, terminal: false, modes: [], needsModel: true, control: false, gated: true, supervision: null, cost: 'reported', team: false },
     // a provider that says nothing is paid, has no window, no modes, needs no model and takes no control request
-    { kind: 'fake', label: 'Fake agent', paid: true, terminal: false, modes: [], needsModel: false, control: false, gated: true, supervision: null, cost: 'reported' },
+    { kind: 'fake', label: 'Fake agent', paid: true, terminal: false, modes: [], needsModel: false, control: false, gated: true, supervision: null, cost: 'reported', team: false },
   ]);
   assert.equal(calls, 0, 'kinds() asks no provider anything: the snapshot sends it');
   const k = reg.kinds();

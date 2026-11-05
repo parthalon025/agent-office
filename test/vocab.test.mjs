@@ -283,6 +283,10 @@ test('the note of a kind says where it runs and what it costs', () => {
   assert.match(V.kindNote(CC, false), /^Runs Claude Code inside the office\./);
   assert.match(V.kindNote(OL, false), /^Runs a model from Ollama on this machine.*It costs nothing\.$/);
   assert.match(V.kindNote(OL, true), /^Starts Ollama in a new terminal window/);
+  // A team (Agent Framework): where its team comes from, how its members show, and that it costs nothing
+  const AF = { kind: 'agent-framework', label: 'Agent Framework', paid: false, team: true };
+  assert.equal(V.kindNote(AF, false), 'Runs a team of Agent Framework agents on a model on this machine, inside the office. The team comes from agent-team.json in the folder, '
+    + 'or it is a lead, a coder and a reviewer. A member shows as a helper bot while it has the work. Risky steps come to you for approval. It costs nothing.');
 });
 
 test('the agents of a building as one word: the kinds of its sessions, in the order of the kinds, each once', () => {

@@ -26,3 +26,9 @@ SubagentStop, and the tool events a subagent makes) still follows the documented
 Hook payloads go through payload.mjs slimPayload, as the server does.
 
 `office-server.mjs` is not a recording. It starts a real `server.mjs` copy for the tests that need one: ready on the server's own "is open" line, a fast failure when the server stops first, and a new port when the free port was taken before the bind (#98). Its own test is `test/office-server.test.mjs`.
+
+`agent-framework.jsonl` is not a recording. It is the stdout of `providers/agent_framework_runner.py` for one team turn
+(a lead, a hand-off to coder, coder to reviewer, back to lead), written by hand from the Microsoft Agent Framework 1.24
+Python sources (`WorkflowEvent` types `output`, `handoff_sent`, `executor_invoked`, `executor_completed`; `Content`
+types `text` and `usage`). The framework is not installed on the build machine, so no live run has checked it yet (#23).
+`fake-af/` is a stand-in `agent_framework` package with the same names, for the test that runs the real runner with Python.
