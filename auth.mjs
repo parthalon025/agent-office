@@ -140,59 +140,101 @@ export const KEEP_SIDS = ['S-1-5-18', 'S-1-5-32-544'];
 
 /**
  * icacls arguments that remove inherited entries and give full control to the current user, SYSTEM and
- * Administrators. /grant:r replaces only the grants of those three: other explicit entries stay (writeOwnerOnly
- * checks for them).
+ * Administrators. The user is userSid when it is known (from readAcl), else USERDOMAIN\USERNAME. /grant:r replaces
+ * only the grants of those three: other explicit entries stay (writeOwnerOnly checks for them).
  */
-export function ownerOnlyArgs(file, env = process.env) {
-  const user = String(env.USERNAME || '').trim();
-  if (!user) throw new Error('USERNAME is not set.');
-  const domain = String(env.USERDOMAIN || '').trim();
-  return [file, '/inheritance:r', '/grant:r', `${domain ? domain + '\\' : ''}${user}:F`, ...KEEP_SIDS.map((s) => `*${s}:F`)];
+export function ownerOnlyArgs(file, env = process.env, userSid = null) {
+  let who = userSid ? `*${userSid}` : null;
+  if (!who) {
+    const user = String(env.USERNAME || '').trim();
+    if (!user) throw new Error('USERNAME is not set.');
+    const domain = String(env.USERDOMAIN || '').trim();
+    who = `${domain ? domain + '\\' : ''}${user}`;
+  }
+  return [file, '/inheritance:r', '/grant:r', `${who}:F`, ...KEEP_SIDS.map((s) => `*${s}:F`)];
 }
 
 /**
- * The entries in icacls' list for one file (`icacls <file>`): one per line up to the first blank line, trimmed.
- * The first line also holds the path. The summary line after the blank line (in the language of Windows) is not
- * an entry.
+ * Windows PowerShell script that prints the DACL of the file in env AO_ACL_FILE by SID, with .NET only: no account
+ * names (they change with the language of Windows; SDDL even writes a RID-500 account as LA) and no module cmdlets.
+ * Lines: `me|<SID of the process user>`, `dacl|<protected True/False>|<owner SID>`,
+ * `ace|<SID>|<Allow/Deny>|<rights>|<inherited True/False>`. parseAcl reads them.
  */
-export function aclEntries(out) {
-  const lines = String(out ?? '').split(/\r?\n/);
-  let i = 0;
-  while (i < lines.length && !lines[i].trim()) i++;
-  const entries = [];
-  for (; i < lines.length && lines[i].trim(); i++) entries.push(lines[i].trim());
-  return entries;
+export const ACL_SCRIPT = [
+  "$ErrorActionPreference = 'Stop'",
+  '$S = [System.Security.Principal.SecurityIdentifier]',
+  '$a = [System.IO.File]::GetAccessControl($env:AO_ACL_FILE)',
+  "'me|' + [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
+  "'dacl|' + $a.AreAccessRulesProtected + '|' + $a.GetOwner($S).Value",
+  "foreach ($r in $a.GetAccessRules($true, $true, $S)) { 'ace|' + $r.IdentityReference.Value + '|' + $r.AccessControlType + '|' + $r.FileSystemRights + '|' + $r.IsInherited }",
+].join('\n');
+
+/** ACL_SCRIPT output -> { me, protected, owner, aces: [{ sid, type, rights, inherited }] }. Throws on odd output. */
+export function parseAcl(out) {
+  const acl = { me: null, protected: null, owner: null, aces: [] };
+  for (const line of String(out ?? '').split(/\r?\n/)) {
+    const p = line.trim().split('|');
+    if (p[0] === 'me') acl.me = p[1];
+    else if (p[0] === 'dacl') Object.assign(acl, { protected: p[1] === 'True', owner: p[2] });
+    else if (p[0] === 'ace' && p.length === 5) acl.aces.push({ sid: p[1], type: p[2], rights: p[3], inherited: p[4] === 'True' });
+  }
+  if (!/^S-1-/.test(String(acl.me)) || acl.protected === null) throw new Error('could not read its permissions');
+  return acl;
+}
+
+/**
+ * What keeps a file from being limited, as short texts; [] when it is limited: inheritance off, the owner is the
+ * user, SYSTEM or Administrators, and exactly one explicit allow entry with full control for each of the three.
+ * Never a count alone: an entry list of the right length can still be inherited.
+ */
+export function aclProblems(acl) {
+  const keep = new Set([acl.me, ...KEEP_SIDS]);
+  const out = [];
+  if (acl.protected !== true) out.push('inheritance is on');
+  if (!keep.has(acl.owner)) out.push(`the owner is ${acl.owner}`);
+  for (const a of acl.aces) {
+    if (a.inherited) out.push(`inherited entry for ${a.sid}`);
+    else if (!keep.has(a.sid) || a.type !== 'Allow') out.push(`${a.type} entry for ${a.sid}`);
+    else if (a.rights !== 'FullControl') out.push(`${a.sid} has ${a.rights}`);
+  }
+  for (const s of keep) if (!acl.aces.some((a) => a.sid === s && a.type === 'Allow' && !a.inherited)) out.push(`no entry for ${s}`);
+  if (!out.length && acl.aces.length !== keep.size) out.push(`${acl.aces.length} entries, not ${keep.size}`);
+  return out;
 }
 
 /**
  * Writes a file that only the current user, SYSTEM and Administrators can read, and returns null, or a warning text
- * when the limit could not be set (the file is written anyway; best effort). Elsewhere: mode 0600.
- * deps: { fs, icacls(args) -> its output, platform, env }. On Windows, before the text goes in:
+ * that names the file and what is wrong when the limit could not be set (the file is written anyway; best effort).
+ * Elsewhere: mode 0600. deps: { fs, icacls(args), readAcl(file) -> parseAcl result, platform, env }.
+ * On Windows, before the text goes in:
  * 1. Make the file if it is missing. A new file has the folder's inherited entries, or, in a folder with nothing to
  *    inherit, explicit entries from the process token's default DACL (a normal user: the user, SYSTEM and the logon
- *    session; an elevated administrator: SYSTEM and Administrators).
- * 2. icacls /inheritance:r /grant:r for the three. It removes inherited entries only, so 3. lists the file: more or
- *    fewer than three entries means an explicit entry is left (default DACL, an older office, set by hand).
- * 4. Only then: empty the file, icacls /reset (drops every explicit entry), and the limit of 2. again. Between /reset
- *    and the limit the file has the folder's inherited entries for a moment, so it must be empty. A file that was
- *    already limited never takes this path, so it never opens up and its text stays in place.
- * A later plain write keeps the ACL. Only a failed or missing icacls (or no USERNAME) is best effort. A bug in the
- * caller (a TypeError or ReferenceError, for example an import that is gone) is thrown, never turned into a warning.
+ *    session; an elevated administrator, as on GitHub's runner: SYSTEM, Administrators, sometimes OWNER RIGHTS).
+ * 2. icacls /inheritance:r /grant:r for the three, then readAcl and aclProblems. /inheritance:r removes inherited
+ *    entries only, so explicit ones can be left.
+ * 3. If anything is wrong: /inheritance:d (inherited entries become explicit, inheritance off), /remove every SID
+ *    that is not one of the three or has a deny entry, the limit again (the user by SID now), and check again.
+ * No step gives anyone access they did not have, so the file is never emptied and never opens up (no /reset).
+ * A later plain write keeps the ACL. Only a failed icacls or PowerShell (or no USERNAME) is best effort. A bug in
+ * the caller (a TypeError or ReferenceError, for example an import that is gone) is thrown, never turned into a
+ * warning.
  */
-export function writeOwnerOnly(file, text, { fs, icacls, platform = process.platform, env = process.env }) {
+export function writeOwnerOnly(file, text, { fs, icacls, readAcl, platform = process.platform, env = process.env }) {
   let warning = null;
   if (platform === 'win32') {
     fs.closeSync(fs.openSync(file, 'a')); // make it if missing; keep what is there until the limit is set
     try {
-      const limit = ownerOnlyArgs(file, env);
-      const kept = 1 + KEEP_SIDS.length;
-      const others = () => aclEntries(icacls([file])).length !== kept;
-      icacls(limit);
-      if (others()) {
-        fs.closeSync(fs.openSync(file, 'w'));
-        icacls([file, '/reset']);
-        icacls(limit);
-        if (others()) throw new Error('other entries are still on it after icacls /reset');
+      icacls(ownerOnlyArgs(file, env));
+      let acl = readAcl(file);
+      if (aclProblems(acl).length) {
+        const keep = new Set([acl.me, ...KEEP_SIDS]);
+        if (acl.protected !== true || acl.aces.some((a) => a.inherited)) icacls([file, '/inheritance:d']);
+        const extra = [...new Set(acl.aces.filter((a) => !keep.has(a.sid) || a.type !== 'Allow').map((a) => a.sid))];
+        if (extra.length) icacls([file, '/remove', ...extra.map((s) => `*${s}`)]);
+        icacls(ownerOnlyArgs(file, env, acl.me));
+        acl = readAcl(file);
+        const left = aclProblems(acl);
+        if (left.length) throw new Error(left.join('; '));
       }
     } catch (e) {
       if (e instanceof TypeError || e instanceof ReferenceError || e instanceof SyntaxError) throw e;
