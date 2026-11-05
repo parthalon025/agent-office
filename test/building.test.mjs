@@ -226,6 +226,57 @@ test('subagents: a helper bot is spawned, its tool calls show on it, and it leav
   assert.equal(of(m.ev, 'tool.result').find((e) => e.id === grep.id).bot, d[0].spawn.name);
 });
 
+// ---------- helper bot lifecycle (#94, #95) ----------
+const task = (id, type) => ({ hook_event_name: 'PreToolUse', session_id: 'sid-1', cwd: REPO_A, tool_name: 'Task', tool_use_id: id, tool_input: { description: 'Look ' + id, subagent_type: type } });
+const taskDone = (id, type) => ({ hook_event_name: 'PostToolUse', session_id: 'sid-1', cwd: REPO_A, tool_name: 'Task', tool_use_id: id, duration_ms: 5, tool_input: { subagent_type: type } });
+const helperDone = (ev, bot) => ev.filter((e) => e.type === 'subagent.done' && e.bot === bot);
+
+test('a new helper never reuses the name of a helper bot that is still walking out (#94)', async () => {
+  const r = rig();
+  const m = r.mount(KEY_A);
+  await r.hook(task('t1', 'Explore'));
+  await r.hook(taskDone('t1', 'Explore'));   // the first helper is told to leave; its bot is still in the scene
+  await r.hook(task('t2', 'Explore'));
+  await r.hook(taskDone('t2', 'Explore'));
+  await r.hook(task('t3', 'Explore'));
+  const names = of(m.ev, 'delegate').map((e) => e.spawn.name);
+  assert.equal(names.length, 3);
+  assert.equal(new Set(names).size, 3, `three helpers, three names: ${names}`);
+  assert.equal(helperDone(m.ev, names[0]).length, 1, 'the first helper left once');
+  assert.equal(helperDone(m.ev, names[2]).length, 0, 'the third helper is still at work');
+});
+
+test('a session that moves to another folder sends its open helpers away (#95)', async () => {
+  const r = rig();
+  const m = r.mount(KEY_A);
+  await r.hook(HOOKS.turnWithEdit[0]);
+  await r.hook(task('t1', 'Explore'));
+  await r.hook(task('t2', 'general-purpose'));
+  await r.hook(taskDone('t2', 'general-purpose'));
+  const [h1, h2] = of(m.ev, 'delegate').map((e) => e.spawn.name);
+  const n = m.ev.length;
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'sid-1', cwd: 'C:\\work\\repo-feat' });
+  const after = m.ev.slice(n);
+  assert.equal(helperDone(after, h1).length, 1, 'the open helper is told to leave');
+  assert.equal(helperDone(after, h1)[0].remove, true);
+  assert.equal(helperDone(m.ev, h2).length, 1, 'a helper that was done is not told twice');
+});
+
+test('a session the server forgets sends its open helpers away (#95)', async () => {
+  const r = rig();
+  const m = r.mount(KEY_A);
+  await r.hook(HOOKS.turnWithEdit[0]);
+  await r.hook(task('t1', 'Explore'));
+  const h1 = of(m.ev, 'delegate')[0].spawn.name;
+  const n = m.ev.length;
+  r.tracker.sessions.clear(); r.push();
+  const after = m.ev.slice(n);
+  assert.equal(of(after, 'bot.remove').length, 1);
+  assert.equal(helperDone(after, h1).length, 1, 'the open helper is told to leave');
+  r.push();
+  assert.equal(helperDone(m.ev, h1).length, 1, 'once');
+});
+
 test('two sessions with one name get two bot names; an ended bot leaves after the delay, and not after detach', async () => {
   const r = rig();
   const m = r.mount(KEY_A);
