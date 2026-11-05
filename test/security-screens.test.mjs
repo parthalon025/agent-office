@@ -263,3 +263,15 @@ test('paged view: both scope choices are on the wall, the chosen one marked; a c
     assert.ok(title.x + title.text.length * title.s * 0.62 < Math.min(...hots.map((h) => h.x)), 'the title does not run under the choices');
   }
 });
+
+// Review M6: paged mode (one agent kind, big text) went by the free width only. A wide but short free view framed the screen
+// small too, so the measure is the width the screen can take: the free width, or the free height times the screen's aspect.
+test('M6: paged mode starts on a narrow or a short free view, from the width the screen can take', () => {
+  const at = (w, h) => ({ left: 0, top: 0, right: w, bottom: h });
+  const aspect = 1280 / 700;
+  assert.equal(P.pagedFor(at(1300, 800), aspect), false, 'room for the full grid');
+  assert.equal(P.pagedFor(at(600, 800), aspect), true, 'narrow');
+  assert.equal(P.pagedFor(at(1300, 300), aspect), true, 'wide but short: the screen is only 549 px wide');
+  assert.equal(P.pagedFor(at(1300, 400), aspect), false, '731 px wide');
+  assert.equal(P.pagedFor(null, aspect), false, 'not in focus');
+});

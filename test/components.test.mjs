@@ -133,3 +133,16 @@ test('OfficeTypeCard: every office type has a picture in Day, Night and Sublevel
   }
   assert.match(readFileSync(join(root, 'components', 'OfficeTypeCard', 'preview.html'), 'utf8'), /\["security",/);
 });
+
+// Review M6: at 400 px the Security wall was a 172 px strip between the floor list and the room card. While a Security screen
+// is in focus at 820 px and below, the page hides those two (as has-panel hides the right column; the Decisions inbox stays),
+// frames the screen again, and the look bar shows the open requests, so an approval never hides.
+test('office.js and office.css: a Security screen in focus at 820 px and below gets the floor list and the room card out of the way (M6)', () => {
+  const js = readFileSync(join(pub, 'office.js'), 'utf8');
+  assert.match(js, /useLayoutEffect\(function \(\) \{ var el = document\.getElementById\('office'\); if \(el\) el\.classList\.toggle\('sec-look', secLook\)/, 'set in the commit, before the look bar places itself');
+  assert.match(js, /layout: secLook/);
+  assert.match(js, /\[secLook\]\);/, 'the screen is framed again when the class changes');
+  assert.match(js, /h\(LookBar, \{[^}]*asks:/, 'the look bar gets the open requests');
+  const m = /@media \(max-width: 820px\) \{\s*#office\.sec-look \.ao-hud-left, #office\.sec-look \.ao-hud-right:not\(\.ao-hud-inbox\) \{ visibility: hidden; pointer-events: none; \}/.exec(css);
+  assert.ok(m, 'the rule in office.css');
+});

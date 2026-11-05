@@ -1313,9 +1313,13 @@
   var LOOK_ICON = { board: 'plan', notes: 'memory', stats: 'cost', terminal: 'terminal' };
   // While the camera looks at a screen: back to the room, or the screen's second step (the same as a second click).
   // It sits at the bottom of the free part of the view, and the screen is framed above it.
+  // asks: sessions with open requests, shown in the bar while the page hides the HUD columns for the look (a Security screen
+  // at 820 px and below, review M6), so an approval never hides. The bar is placed again when they change.
   function LookBar(p) {
     var ref = React.useRef(null);
     var ps = useState(null), pos = ps[0], setPos = ps[1];
+    var asks = p.asks || [], askKey = asks.map(function (s) { return s.uid + ':' + window.OfficeVocab.requests(s).length; }).join('|');
+    var placeRef = React.useRef(null);
     React.useLayoutEffect(function () {
       function place() {
         var el = ref.current, f = el && p.free(el);
@@ -1323,13 +1327,18 @@
         var n = { left: Math.round(Math.max(f.left, (f.left + f.right - el.offsetWidth) / 2)), top: Math.round(f.bottom - el.offsetHeight) };
         setPos(function (o) { return o && o.left === n.left && o.top === n.top ? o : n; });
       }
+      placeRef.current = place;
       place();
       window.addEventListener('resize', place);
       return function () { window.removeEventListener('resize', place); };
-    }, []);
+    }, [askKey]);
+    // layout: the page hides HUD columns for this look (sec-look) in a layout effect of the same commit, which runs after this
+    // bar's own. A passive effect runs after every layout effect, so the bar is placed again in the view the screen gets.
+    useEffect(function () { if (placeRef.current) placeRef.current(); }, [p.layout]);
     useEffect(function () { if (pos) p.onPlaced(); }, [pos]);
     // A screen with no second step (a Security room screen: its cells take the clicks) has the Back button only.
     return h('div', { ref: ref, className: 'look-bar', role: 'group', 'aria-label': 'Screen in view', style: pos ? { left: pos.left, top: pos.top } : { visibility: 'hidden' } },
+      asks.map(function (s) { return h(RequestBar, { key: s.uid, session: s, showName: true, toast: p.toast }); }),
       h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onBack }, 'Back to the room'),
       p.verb ? h(A.Button, { variant: 'quiet', icon: p.icon, onClick: p.onOpen }, p.verb) : null);
   }
@@ -1753,6 +1762,12 @@
     useEffect(function () { var el = document.getElementById('office'); if (el) el.classList.toggle('has-panel', panelOpen); }, [panelOpen]);
     // A side panel changes the free part of the view: the screen in focus is framed again beside it. The window too.
     useEffect(function () { if (hostRef.current) hostRef.current.refit(); }, [panelOpen]);
+    // A Security room screen in focus (review M6): at 820 px and below office.css hides the floor list and the room card (the
+    // Decisions inbox stays), so the screen gets the height of the view; it is framed again when that changes. The look bar
+    // then shows the open requests (LookBar asks).
+    var secLook = !!(look && look.kind === 'security');
+    React.useLayoutEffect(function () { var el = document.getElementById('office'); if (el) el.classList.toggle('sec-look', secLook); }, [secLook]);
+    useEffect(function () { if (hostRef.current) hostRef.current.refit(); }, [secLook]);
     // The scene is as tall as the window. The DS sets its height inline from the height prop, so a resize renders
     // the page again with the new size (once per frame), and then frames the screen in focus again (#55).
     useEffect(function () {
@@ -2001,7 +2016,8 @@
       !term && board && boardRef.current && board.kind === 'notes' ? h(NotesEditor, { key: board.id, noteKey: noteKey(board.id), text: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).text || '', version: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).v || 0, toast: toast,
         rect: function () { return hostRef.current ? hostRef.current.rect() : null; }, flying: function () { return hostRef.current ? hostRef.current.flying() : false; },
         onClose: function () { if (boardRef.current) boardRef.current.refresh(); blurScene(); } }) : null,
-      look && !term && !board && hostRef.current ? h(LookBar, { key: look.key, verb: look.verb, icon: LOOK_ICON[look.kind] || 'zoom-in',
+      look && !term && !board && hostRef.current ? h(LookBar, { key: look.key, verb: look.verb, icon: LOOK_ICON[look.kind] || 'zoom-in', toast: toast, layout: secLook,
+        asks: secLook && snap ? (snap.sessions || []).filter(function (s) { return window.OfficeVocab.requests(s).length > 0; }) : [],
         free: function (el) { return hostRef.current ? hostRef.current.free(sceneCovers(el)) : null; },
         onPlaced: function () { if (hostRef.current) hostRef.current.refit(); },
         onBack: blurScene, onOpen: function () { if (hostRef.current) hostRef.current.open(); } }) : null,

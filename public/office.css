@@ -80,6 +80,11 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 /* One panel at a time: the terminal, board and stats panels take the right column. */
 /* hide the column but keep its box: the DS camera reads its left edge to frame the scene */
 #office.has-panel .ao-hud-right:not(.ao-hud-inbox) { visibility: hidden; pointer-events: none; }
+/* A Security room screen in focus on a narrow screen (review M6): the floor list and the room card give the wall the view's
+   height. The Decisions inbox stays, and the look bar shows the open requests (office.js LookBar asks). */
+@media (max-width: 820px) {
+  #office.sec-look .ao-hud-left, #office.sec-look .ao-hud-right:not(.ao-hud-inbox) { visibility: hidden; pointer-events: none; }
+}
 
 /* ---------- dialogs ---------- */
 .ao-dialog { width: min(560px, calc(100vw - 32px)); }

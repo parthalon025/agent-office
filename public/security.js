@@ -8,7 +8,7 @@
    The screens take the host's two steps. The first click looks at a screen; in focus, every click is the second step, and
    the host gives the point of the click on the screen (hit.uv). A click on a cell cycles Ask, Allow, Deny (Secrets: Ask,
    Deny). A looser rule (to Allow, or an agent toggle to On) turns the cell amber and paints "Confirm: <change>" with Confirm
-   and Cancel hotspots: no dialog. Ask and Deny apply at once. Below 700 px of free view a screen in focus shows one agent kind
+   and Cancel hotspots: no dialog. Ask and Deny apply at once. Below 700 px of width that the screen in focus can take (the free width, or the free height times its aspect) it shows one agent kind
    at a time, with Previous and Next. No keyboard or screen reader path (ADR 0003); the Spend value takes digits while it is
    being typed, after a click on it. Minus stops at $1, and No limit (a typed 0 or an empty value) is the loosest spend
    setting: it waits for the same painted Confirm.
@@ -24,7 +24,8 @@
      hotAt(p, uv, w, h)  -> the hotspot under a screen point (uv: { x, y } from the bottom left, as the host gives it), or null
      step(view, hot, data) -> { view, send? }: a click on a hotspot. send: { route, body } for the server
      key(view, e, data)  -> { view, send?, taken } for a key while the Spend value is being typed
-     PAGED_BELOW         -> 700: below this free width (px) a screen in focus shows one agent kind
+     PAGED_BELOW         -> 700: below this width (px) that the screen in focus can take, it shows one agent kind
+     pagedFor(free, aspect) -> that check: the free width, or the free height times the screen aspect (review M6)
    view: { screen, w, h, focused, paged, page, scope, pending, edit, hover, busy, note, face }
    data: { sec (snap.security), building (key), buildingName } */
 (function (root) {
@@ -235,7 +236,7 @@
       }
       var nt = S().applies(row, col.id) ? noteOf(data, view.scope, row, col.id) : null;
       text(p, 48, y + rowH / 2 + (nt ? 0 : 18), 52, 'ink', r.label, { maxW: W - 96 - cw - 24 });
-      if (nt) text(p, 48, y + rowH / 2 + 44, 28, 'muted', nt.word + ' for this agent', { maxW: W - 96 - cw - 24 });
+      if (nt) text(p, 48, y + rowH / 2 + 46, 34, 'muted', nt.word + ' for this agent', { maxW: W - 96 - cw - 24 });   // 34: about 9 px on a 400 px screen
       if (!S().applies(row, col.id)) { text(p, W - 48 - cw / 2, y + rowH / 2 + 18, 44, 'muted', S().na(row, col.id), { align: 'center', maxW: cw }); y += rowH; return; }
       var id = 'cell:' + row + '|' + col.id, cy = y + (rowH - chH) / 2;
       chip(p, W - 48 - cw, cy, cw, chH, shown(data, view.scope, row, col.id), 52, isHover(view, id), false);
@@ -421,7 +422,14 @@
     return out;
   }
 
-  var pure = { plan: plan, hotAt: hotAt, step: step, key: key, PAGED_BELOW: PAGED_BELOW, CANVAS_W: CANVAS_W, TONES: TONES, toneColors: toneColors };
+  // One agent kind at a time when the screen in focus cannot be wide: the width it can take is the free width, or the free
+  // height times its aspect (a wide but short free view frames it small too; review M6). free: the host's free rect, or null.
+  function pagedFor(free, aspect) {
+    if (!free) return false;
+    return Math.min(free.right - free.left, (free.bottom - free.top) * (aspect || 1)) < PAGED_BELOW;
+  }
+
+  var pure = { plan: plan, hotAt: hotAt, step: step, key: key, pagedFor: pagedFor, PAGED_BELOW: PAGED_BELOW, CANVAS_W: CANVAS_W, TONES: TONES, toneColors: toneColors };
 
   // ---------- browser ----------
   // opts: { host, data() -> data, post(route, body) -> Promise, onError(text) }
@@ -438,7 +446,7 @@
     function viewOf(it) {
       var v = views[it.screen] || (views[it.screen] = { page: 0, pending: null, hover: null, note: null });
       var f = host.focused(), focused = !!f && f.key === keyOf(it);
-      var fr = focused ? host.free() : null, paged = !!fr && (fr.right - fr.left) < PAGED_BELOW;
+      var paged = pagedFor(focused ? host.free() : null, it.w / it.h);
       return { screen: it.screen, w: it.w, h: it.h, focused: focused, paged: paged, page: v.page, scope: scope, pending: v.pending, edit: it.screen === 'spend' ? edit : null,
         hover: focused ? v.hover : null, busy: busy, note: v.note };
     }
