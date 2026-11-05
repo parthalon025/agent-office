@@ -954,8 +954,10 @@ test('the fluent and fluentdark icons are in the bundle, the schema and assets/I
 });
 
 test('a dark theme is a flag of AO.MODES: the engine sets K.dark, and the window, the screen glow, the desk light and the note card read it', () => {
-  assert.match(source('Stage.prototype.applyMode=function', '\n'), /K\.night=lk==="night";K\.dark=!!DARK\[lk\];K\.look=lk;/);
+  assert.match(source('Stage.prototype.applyMode=function', '\n'), /K=this\.K,prev=K\.look;K\.dark=!!DARK\[lk\];K\.look=lk;/);
   assert.match(bundle, /function Kit\(el\)\{[^\n]*this\.dark=false;/);
+  // no night flag: one keyed on the look name "night" would be false in Fluent Dark (x1.7 review)
+  assert.ok(!/K\.night\b|this\.night\b|prototype\.night\b/.test(bundle), 'no K.night, Kit night or Stage.night');
   const win = source('Parts.window=function', '};\n');
   assert.match(win, /else if\(lk==="fluent-dark"\)\{/, 'Fluent Dark paints its own dusk window, not the Day sky');
   assert.match(win, /emissiveIntensity:K\.dark\?\.95:\.7/);
