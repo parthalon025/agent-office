@@ -237,6 +237,7 @@ Each README has the full props table. Types: `components/index.d.ts`.
 | `floor-content` | `#7a52c7` | `#7a52c7` | `#2f5f86` | Floor 4 identity. Roster header fill; white text on it. |
 | `floor-hq` | `#8a5a12` | `#8a5a12` | `#7a5414` | Floor 5 (HQ) identity. Roster header fill; white text on it. |
 | `on-floor` | `#ffffff` | `#ffffff` | `#ffffff` | Text on any floor-* fill. 4.9:1 or more. |
+| `scrim` | `#0a1016` | `#0a1016` | `#0a1016` | Dark veil behind a dialog or the command palette. Mix it with transparent: color-mix(in srgb, var(--scrim) 45%, transparent). |
 | `type-team` | `#3a7ca5` | `#5f9fc8` | `#2f6b7a` | Office type: team floor. Type badge dot, room icon, the stripe on the room floor edge. |
 | `type-lab` | `#0f8b8d` | `#2fb3b5` | `#0f7f7c` | Office type: lab / server room. |
 | `type-studio` | `#c2477a` | `#e0709a` | `#b03f6e` | Office type: studio. |

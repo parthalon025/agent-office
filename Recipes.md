@@ -133,7 +133,7 @@ Use tokens only. Write a README with a props table and a "consumer provides" lin
 1. Screenshots: Day, Night, Sublevel; 1360, 1100 and 400 px; `quality: "low"`; reduced motion. Look at each one.
 2. Walk test: `office.applyEvent({ type: "status", bot, status: "resting" })` for each bot in a room, then `"working"`. Look while they walk. For a number, use `office.inspect().nav[floor].path(from, to)`.
 3. Adapter test: click Approve and check that the scene changes only after the adapter replies.
-4. Run `python3 kit/check.py <your files>`. A custom property that your own files define counts as a known token. That is `--name:` in a CSS file, in an HTML `<style>` block or in an HTML `style=""` attribute, and `setProperty('--name', ...)` in a script or an HTML file. A `var(--name)` that nothing defines is an error.
+4. Run `python3 kit/check.py <your files>`. A custom property that your own files define counts as a known token. That is `--name:` in a CSS file, in an HTML `<style>` block or in an HTML `style=""` attribute, and `setProperty('--name', ...)` in a script or an HTML file. A `var(--name)` that nothing defines is an error. A name that the code builds at run time, such as `"var(--status-" + s` or `"role-" + r`, is checked by its prefix: a name that ends in "-" must start some token or icon.
 
 ## Prompt templates
 

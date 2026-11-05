@@ -114,7 +114,7 @@
 [data-theme="sublevel"] .ao-chipbtn,[data-theme="sublevel"] .ao-badge{border-radius:2px;text-transform:uppercase;letter-spacing:.06em;font-size:10px}
 [data-theme="sublevel"] .ao-ph{letter-spacing:.14em}
 [data-theme="sublevel"] .ao-brand b,[data-theme="sublevel"] .ao-bot-n,[data-theme="sublevel"] .ao-fh-row span:first-child{font-family:var(--font-mono);font-weight:500;letter-spacing:.02em}
-[data-theme="sublevel"] .ao-fh{background-image:repeating-linear-gradient(0deg,rgba(255,255,255,.06) 0 1px,transparent 1px 3px)}
+[data-theme="sublevel"] .ao-fh{background-image:repeating-linear-gradient(0deg,color-mix(in srgb,var(--on-floor) 6%,transparent) 0 1px,transparent 1px 3px)}
 [data-theme="sublevel"] .ao-mark{border-radius:50%!important}
 [data-theme="sublevel"] .ao-avatar .ao-dot,[data-theme="sublevel"] .ao-dot{border-radius:1px}
 
@@ -200,8 +200,8 @@
 .ao-toast-info .ao-toast-i{color:var(--accent)}.ao-toast-success .ao-toast-i{color:var(--status-working)}.ao-toast-warning .ao-toast-i{color:var(--status-waiting)}.ao-toast-error .ao-toast-i{color:var(--status-error)}
 @keyframes ao-in{from{opacity:0;transform:translateY(6px)}}
 .ao-hud-toasts{position:absolute;top:68px;left:50%;transform:translateX(-50%);z-index:var(--z-toast)}
-.ao-overlay{position:fixed;inset:0;background:rgba(10,16,22,.45);display:grid;place-items:center;padding:16px;z-index:var(--z-dialog)}
-.ao-overlay.is-inline{position:relative;min-height:100%;background:rgba(10,16,22,.25)}
+.ao-overlay{position:fixed;inset:0;background:color-mix(in srgb,var(--scrim) 45%,transparent);display:grid;place-items:center;padding:16px;z-index:var(--z-dialog)}
+.ao-overlay.is-inline{position:relative;min-height:100%;background:color-mix(in srgb,var(--scrim) 25%,transparent)}
 .ao-dialog{width:420px;max-width:100%;animation:ao-in var(--duration-base) var(--ease-out)}
 .ao-dialog-h{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 4px}
 .ao-dialog-t{font:600 16px/22px var(--font-sans)}

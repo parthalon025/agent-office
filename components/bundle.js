@@ -5,7 +5,7 @@ function cx(){return Array.prototype.filter.call(arguments,Boolean).join(" ")}
 function Panel(p){return h("section",{className:cx("ao-panel",p.className),style:p.style},p.title!=null&&h("div",{className:"ao-ph"},h("span",null,p.title),p.count!=null&&h("span",{className:"ao-mono"},p.count)),h("div",{className:p.flush?null:"ao-body"},p.children))}
 function StatusDot(p){return h("i",{className:"ao-dot ao-s-"+(p.status||"working"),role:"img","aria-label":LBL[p.status||"working"]})}
 function Button(p){var v=p.variant||"quiet";return h("button",{type:"button",className:cx("ao-btn",v==="primary"&&"ao-btn-primary"),onClick:p.onClick,disabled:p.disabled},p.children)}
-function ModeToggle(p){var opts=p.options||[{id:"day",label:"☀ Day"},{id:"night",label:"☾ Night"},{id:"tour",label:"▶ Tour"}];
+function ModeToggle(p){var opts=p.options||[{id:"day",label:"Day"},{id:"night",label:"Night"},{id:"tour",label:"Tour"}];
  return h("div",{className:"ao-panel ao-seg",role:"group","aria-label":p.label||"View mode"},opts.map(function(o){return h("button",{key:o.id,type:"button","aria-pressed":String(o.id===p.value||(p.active||[]).indexOf(o.id)>-1),onClick:function(){p.onChange&&p.onChange(o.id)}},o.label)}))}
 function StatusCounts(p){var c=p.counts||{};return h("div",{className:"ao-panel ao-counts","aria-live":"polite"},["working","waiting","error","resting"].map(function(k){return h("span",{key:k},h(StatusDot,{status:k}),h("b",null,c[k]||0),k==="error"?"errors":k)}))}
 function FloorList(p){return h(Panel,{title:"Floors",count:(p.floors||[]).length,flush:true},h("div",{style:{paddingBottom:6}},(p.floors||[]).map(function(f){return h("button",{key:f.id,className:"ao-row","aria-current":String(f.id===p.current),onClick:function(){p.onSelect&&p.onSelect(f.id)}},
