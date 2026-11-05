@@ -7,6 +7,9 @@ import '../public/format.js';
 import '../public/security.js';
 import { enforcement } from '../security.mjs';
 import { AGENTS } from '../providers/acp.mjs';
+import { createFoundry } from '../providers/foundry.mjs';
+import { createCopilotStudio } from '../providers/copilot-studio.mjs';
+import { cloudConfig } from '../providers/cloud.mjs';
 
 const P = globalThis.OfficeSecurity.pure;
 const SET = '/api/security/set';
@@ -86,25 +89,25 @@ test('below 700 px of free view a screen in focus shows one agent kind, with Pre
   assert.equal(P.PAGED_BELOW, 700);
   const d = data(), v = view({ paged: true }), p = P.plan(v, d);
   assert.equal(p.hots.filter((h) => h.kind === 'cell').length, 3, 'one column');
-  assert.ok(texts(p).includes('Claude Code (1 of 6)'));
+  assert.ok(texts(p).includes('Claude Code (1 of 7)'));
   const next = P.step(v, hotOf(p, 'next'), d);
   assert.equal(next.view.page, 1);
-  assert.ok(texts(P.plan(next.view, d)).includes('Hermes (2 of 6)'));
+  assert.ok(texts(P.plan(next.view, d)).includes('Hermes (2 of 7)'));
   assert.ok(texts(P.plan(next.view, d)).includes('Not enforced for this agent'));
-  assert.equal(P.step(v, hotOf(p, 'prev'), d).view.page, 5, 'Previous from the first goes to the last');
+  assert.equal(P.step(v, hotOf(p, 'prev'), d).view.page, 6, 'Previous from the first goes to the last');
   // a looser change in the paged view: the row turns to the Confirm
   const r = P.step(v, cell(p, 'files-outside', 'claude-code'), d);
   const pp = P.plan(r.view, d);
   assert.ok(texts(pp).includes('Confirm: Allow'));
   assert.ok(hotOf(pp, 'confirm'));
   // not in focus: the whole grid (the paged view is for reading in focus)
-  assert.equal(P.plan(view({ paged: true, focused: false }), d).hots.filter((h) => h.kind === 'cell').length, 18);
+  assert.equal(P.plan(view({ paged: true, focused: false }), d).hots.filter((h) => h.kind === 'cell').length, 18, 'the Cloud agent has no file cells (#24)');
 });
 
 test('Agents: turning on an ungated agent needs the Confirm; a gated kind has no cell, it says why', () => {
   const d = data(), v = view({ screen: 'agents', h: 738 }), p = P.plan(v, d);
   assert.deepEqual(p.hots.filter((h) => h.kind === 'cell').map((h) => h.id).sort(),
-    ['cell:no-cost|dsh', 'cell:no-cost|hermes', 'cell:no-cost|openclaw', 'cell:supervise|claude-code', 'cell:ungated|hermes', 'cell:ungated|openclaw'], 'Hermes is ungated too (M1)');
+    ['cell:no-cost|cloud', 'cell:no-cost|dsh', 'cell:no-cost|hermes', 'cell:no-cost|openclaw', 'cell:supervise|claude-code', 'cell:ungated|cloud', 'cell:ungated|hermes', 'cell:ungated|openclaw'], 'Hermes is ungated too (M1), and the cloud kinds (#24)');
   assert.ok(texts(p).includes('Gated') && texts(p).includes('Reports cost') && texts(p).includes('Free'));
   const r = P.step(v, cell(p, 'ungated', 'openclaw'), d);
   assert.deepEqual(r.view.pending, { row: 'ungated', col: 'openclaw', to: 'on', office: null });
@@ -235,20 +238,32 @@ test('B1: a default Ask that Claude Code decides says Partly enforced; a click s
 // each). Node has no canvas to measure text, so the check is a safe estimate: 0.62 of the font size per character at 600.
 test('Spend: every cost word fits its column, in the full and the paged view', () => {
   const NONE = { reason: '', rows: {} };
-  const enf = { 'claude-code': NONE, hermes: NONE, dsh: NONE, openclaw: { reason: 'The office has no provider for this agent kind yet.', rows: {} }, local: NONE, 'agent-framework': NONE };
+  const enf = { 'claude-code': NONE, hermes: NONE, dsh: NONE, openclaw: { reason: 'The office has no provider for this agent kind yet.', rows: {} }, local: NONE, 'agent-framework': NONE, cloud: NONE };
   const d = { sec: { rules: { office: {}, buildings: {} }, enforce: enf, spend: { limit: 2, month: '2026-11', byColumn: { 'claude-code': 1234.5 } } }, building: B, buildingName: 'repo' };
   const words = /^(Not reported|Not set up|Free|\$[\d,.]+)$/;
   for (const v of [view({ screen: 'spend', h: 686 }), view({ screen: 'spend', h: 738 })]) {
     const items = P.plan(v, d).items.filter((i) => i.t === 'text' && words.test(i.text));
-    assert.deepEqual(items.map((i) => i.text).sort(), ['$2.00', '$1234.50', 'Free', 'Free', 'Not reported', 'Not reported', 'Not set up'].sort(), 'the limit and the six cost words: an Agent Framework team is free (#23)');
+    assert.deepEqual(items.map((i) => i.text).sort(), ['$2.00', '$1234.50', 'Free', 'Free', 'Not reported', 'Not reported', 'Not reported', 'Not set up'].sort(), 'the limit and the seven cost words: an Agent Framework team is free (#23)');
     for (const i of items) assert.ok(i.text.length * i.s * 0.62 <= i.maxW, `${i.text} at ${i.s} px needs about ${Math.round(i.text.length * i.s * 0.62)} px, has ${i.maxW}`);
-    const labels = P.plan(v, d).items.filter((i) => i.t === 'text' && /^(Claude Code|Hermes|dsh|OpenClaw|Local model|Agent Framework)$/.test(i.text));
-    assert.equal(labels.length, 6, 'every agent kind has its cost column');
+    // a head that does not fit one line takes two (Agent / Framework): every word of every kind is painted
+    const labels = P.plan(v, d).items.filter((i) => i.t === 'text' && /^(Claude|Code|Hermes|dsh|OpenClaw|Local|model|Agent|Framework|Cloud|Claude Code|Local model|Agent Framework|Cloud agent)$/.test(i.text));
+    const said = labels.map((i) => i.text).join(' ');
+    for (const c of globalThis.OfficeVocab.security.columns) for (const w of c.label.split(' ')) assert.ok(said.includes(w), `${w} of ${c.label} has its cost column head`);
     for (const i of labels) assert.ok(i.text.length * i.s * 0.62 <= i.maxW, `${i.text} fits`);
   }
-  for (let page = 0; page < 6; page++) {
+  for (let page = 0; page < 7; page++) {
     const t = P.plan(view({ screen: 'spend', h: 1100, paged: true, page }), d).items.find((i) => i.t === 'text' && /: /.test(i.text) && i.s === 44);
     assert.ok(t.text.length * t.s * 0.62 <= t.maxW, `${t.text} fits the paged view`);
+  }
+  // #24: a column whose agents all report cost (a cloud kind with its prices set) spent nothing yet: $0.00, not "Not reported".
+  const priced = { ...d, sec: { ...d.sec, enforce: { ...enf, cloud: { ...NONE, reports: true } } } };
+  const words2 = P.plan(view({ screen: 'spend', h: 738 }), priced).items.filter((i) => i.t === 'text' && words.test(i.text)).map((i) => i.text);
+  assert.equal(words2.filter((w) => w === '$0.00').length, 1, 'the Cloud agent column says $0.00');
+  // every word of a grid column fits its column at six columns, by the same estimate
+  for (const screen of ['files', 'agents', 'network']) {
+    for (const i of P.plan(view({ screen, h: 738 }), d).items.filter((x) => x.t === 'text' && x.align === 'center' && x.maxW < 300)) {
+      assert.ok(i.text.length * i.s * 0.6 <= i.maxW, `${screen}: "${i.text}" at ${i.s} px fits ${i.maxW}`);
+    }
   }
 });
 
@@ -284,12 +299,14 @@ test('M6: paged mode starts on a narrow or a short free view, from the width the
 // Review (re-review 4): a reason must show in full for every cell that is not fully enforced (CLAUDE.md). The plan wraps a reason
 // by a safe estimate of the width of a character (P.charW; the screenshots check it against the browser), so a line never
 // reaches the paint's ellipsis. The data is what the server sends with the real agent entries: Claude Code (default Ask cells
-// it decides), Hermes (Partly and Not enforced), OpenClaw (every call unsupervised, or its config does not carry a rule).
+// it decides), Hermes (Partly and Not enforced), OpenClaw (every call unsupervised, or its config does not carry a rule), and
+// the two cloud kinds with no settings (#24: no file cells, MCP partly, the rest not enforced).
 {
-  const real = (policies) => enforcement([
+  const cloud = [createFoundry({ events: {}, config: cloudConfig({}, 'OFFICE_FOUNDRY') }), createCopilotStudio({ events: {}, config: cloudConfig({}, 'OFFICE_COPILOTSTUDIO') })];
+  const real = (policies) => enforcement([...cloud,
     { kind: 'claude-code' }, { kind: 'ollama', gated: true },
-    { kind: 'hermes', gated: false, enforces: AGENTS.hermes.enforces, unenforced: AGENTS.hermes.unenforced, partly: AGENTS.hermes.partly },
-    { kind: 'dsh', gated: true }, { kind: 'openclaw', gated: false, enforces: ['shell'] }, { kind: 'agent-framework', gated: true }], policies);
+    { kind: 'hermes', gated: false, cost: 'unknown', enforces: AGENTS.hermes.enforces, unenforced: AGENTS.hermes.unenforced, partly: AGENTS.hermes.partly },
+    { kind: 'dsh', gated: true, cost: 'unknown' }, { kind: 'openclaw', gated: false, cost: 'unknown', enforces: ['shell'] }, { kind: 'agent-framework', gated: true }], policies);
   const gaps = { openclaw: { config: { settings: [
     { path: 'tools.fs.workspaceOnly', have: 'false', ok: false, fix: 'openclaw config set tools.fs.workspaceOnly true', rows: ['files-outside', 'read-inside', 'edit-inside'] },
     { path: 'tools.exec.ask', have: 'off', ok: false, fix: 'openclaw config set tools.exec.ask always', rows: ['shell', 'web'] }] } } };

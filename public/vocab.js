@@ -26,7 +26,13 @@
                          in the order of kinds, a kind it does not know last. '' when no session has a kind.
    Agent kinds as the Open dialog, a room's Add agent and the Agent kinds view show them. A kind k is a snapshot kind
    (providers/index.mjs describe) with its GET /api/providers answer: { checking, ready, models, needs, ... }.
-     kindState(k)     -> { key, word }: Checking (no answer yet), Ready or Not ready, with a DS status key
+     kindState(k)     -> { key, word }: Checking (no answer yet), Ready, Not ready or Not configured (a cloud kind the user has not
+                         set up), with a DS status key
+     notConfigured(k) -> true when the kind answered and is not set up (Open session waits)
+     needsTitle(k)    -> the title of the box that lists what a kind needs: 'X is not configured' or 'X is not ready'
+     modelLabel(k)    -> what the dialog calls the pick: 'Foundry agent' or 'Model'
+     modelNoun(k)     -> what the pick chooses, lower case: 'agent' or 'model' (for 'No agents', 'Looking for agents')
+     pickFact(k)      -> the Agent kinds fact for a kind that needs a pick ('You pick the Foundry agent'), else null
      modelChoices(k, fallback) -> the Model options. A kind with a default model starts with Default; a local model
                          offers only its models. No kind, or a default-model kind before its answer: fallback.
      firstModel(k)    -> the model a kind starts on: the first of a kind that needs one, else '' (Default)
@@ -34,8 +40,8 @@
      withKind(form, k, id) -> the form after a kind change: its first model, and only the options that kind takes
      kindNote(k, terminal) -> the line that says where a kind runs and what it costs
      security         -> the Security room grid (#70), shared by its wall screens and the server's rules (security.mjs):
-                         screens [{ id, title, rows }], rows { id: { label, options, def, office?, only? } }, columns
-                         [{ id, label, free? }] (agent kinds; free: it costs nothing), columnOf(providerKind), options(row), valueOf(rules, building, row,
+                         screens [{ id, title, rows }], rows { id: { label, options, def, office?, only?, not? } } (only:
+                         the kinds that have a cell in the row; not: the kinds that have none), columns [{ id, label, free? }] (agent kinds; free: it costs nothing), columnOf(providerKind), options(row), valueOf(rules, building, row,
                          col), sourceOf(...) ('building' | 'office' | 'default'), next(row, value), loosens(row, from, to),
                          applies(row, col), na(row, col), word(value), key(row, col), own(map, key) (an own key, never
                          an inherited one: rule maps come from requests and state.json).
@@ -43,7 +49,7 @@
 */
 (function (root) {
   'use strict';
-  var KIND = { Bash: 'terminal', PowerShell: 'terminal', WebFetch: 'browser', WebSearch: 'search', Grep: 'search', Glob: 'search', Read: 'code', Edit: 'code', Write: 'code', MultiEdit: 'code', NotebookEdit: 'code', Task: 'flow', Agent: 'flow', Skill: 'skill', TodoWrite: 'memory' };
+  var KIND = { code_interpreter: 'terminal', file_search: 'search', bing_grounding: 'search', Knowledge: 'search', Connector: 'mcp', Topic: 'flow', Bash: 'terminal', PowerShell: 'terminal', WebFetch: 'browser', WebSearch: 'search', Grep: 'search', Glob: 'search', Read: 'code', Edit: 'code', Write: 'code', MultiEdit: 'code', NotebookEdit: 'code', Task: 'flow', Agent: 'flow', Skill: 'skill', TodoWrite: 'memory' };
   var ARG = { Bash: 'command', PowerShell: 'command', Read: 'file', Edit: 'file', Write: 'file', MultiEdit: 'file', NotebookEdit: 'file', Grep: 'pattern', Glob: 'pattern', WebFetch: 'url', WebSearch: 'query', Task: 'task', Agent: 'task', Skill: 'skill' };
   var TODO = { pending: 'resting', in_progress: 'working', completed: 'finished' };
 
@@ -164,29 +170,34 @@
   // every other row can have a per-building override. A rule the row does not offer is never used.
   // free: the kind runs on a model of this machine and costs nothing (the Spend screen says Free).
   var SEC_COLUMNS = [{ id: 'claude-code', label: 'Claude Code' }, { id: 'hermes', label: 'Hermes' }, { id: 'dsh', label: 'dsh' },
-    { id: 'openclaw', label: 'OpenClaw' }, { id: 'local', label: 'Local model', free: true }, { id: 'agent-framework', label: 'Agent Framework', free: true }];
+    { id: 'openclaw', label: 'OpenClaw' }, { id: 'local', label: 'Local model', free: true }, { id: 'agent-framework', label: 'Agent Framework', free: true }, { id: 'cloud', label: 'Cloud agent' }];
   // The tables are looked up by names that come from requests and saved files, so they have no prototype: '__proto__' or
   // 'constructor' is no row, agent kind or word. Rule maps (rules.office, rules.buildings) are read by own keys only (own).
   function bare(o) { return Object.assign(Object.create(null), o); }
   function own(o, k) { return !!o && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k); }
-  var SEC_KIND = bare({ 'claude-code': 'claude-code', ollama: 'local', lmstudio: 'local', hermes: 'hermes', dsh: 'dsh', openclaw: 'openclaw', 'agent-framework': 'agent-framework' });
+  // The two Microsoft cloud kinds (#24) share one column, like the two local servers: the same rules hold for both.
+  var SEC_KIND = bare({ 'claude-code': 'claude-code', ollama: 'local', lmstudio: 'local', hermes: 'hermes', dsh: 'dsh', openclaw: 'openclaw', 'agent-framework': 'agent-framework', foundry: 'cloud', 'copilot-studio': 'cloud' });
+  // not: the kinds a row has no cell for. A cloud agent runs in the owner's cloud account and cannot reach the files on this
+  // machine, so the file rows have no cell for it (no rule there could mean anything).
+  var NO_FILES = { not: ['cloud'], na: { cloud: 'No files' } };
   var RULE = ['ask', 'allow', 'deny'], ASK_DENY = ['ask', 'deny'], TOGGLE = ['off', 'on'];
   var SEC_ROWS = bare({
-    'read-inside': { label: 'Read inside the worktree', options: RULE, def: 'ask', defs: { local: 'allow' } },
-    'edit-inside': { label: 'Edit inside the worktree', options: RULE, def: 'ask', defs: { local: 'allow' } },
-    'files-outside': { label: 'Read or edit outside it', options: RULE, def: 'ask' },
+    'read-inside': Object.assign({ label: 'Read inside the worktree', options: RULE, def: 'ask', defs: { local: 'allow' } }, NO_FILES),
+    'edit-inside': Object.assign({ label: 'Edit inside the worktree', options: RULE, def: 'ask', defs: { local: 'allow' } }, NO_FILES),
+    'files-outside': Object.assign({ label: 'Read or edit outside it', options: RULE, def: 'ask' }, NO_FILES),
     shell: { label: 'Shell commands', options: RULE, def: 'ask' },
     web: { label: 'Web and network', options: RULE, def: 'ask' },
     mcp: { label: 'MCP tools', options: RULE, def: 'ask' },
-    settings: { label: 'Settings files that run code', options: ASK_DENY, def: 'ask' },
-    secrets: { label: 'Secret files', options: ASK_DENY, def: 'ask' },
+    settings: Object.assign({ label: 'Settings files that run code', options: ASK_DENY, def: 'ask' }, NO_FILES),
+    secrets: Object.assign({ label: 'Secret files', options: ASK_DENY, def: 'ask' }, NO_FILES),
     // Agents screen. Ungated agents run tool calls without asking the office (ADR 0001): off until the user turns them on.
-    // only: the kinds whose provider is gated: false (providers/acp.mjs AGENTS); the others ask the office, so "Gated".
-    ungated: { label: 'Turn on ungated agents', options: TOGGLE, def: 'off', office: true, only: ['hermes', 'openclaw'], na: 'Gated' },
+    // only: the kinds whose provider is gated: false (providers/acp.mjs AGENTS, the cloud kinds); the others ask the office, so "Gated".
+    ungated: { label: 'Turn on ungated agents', options: TOGGLE, def: 'off', office: true, only: ['hermes', 'openclaw', 'cloud'], na: 'Gated' },
     // Paperclip's Claude Code runs go through the office hooks (#76).
     supervise: { label: 'Paperclip: Supervise in office', options: TOGGLE, def: 'off', office: true, only: ['claude-code'], na: 'Not used' },
     // An agent that reports no cost: Ask (the office asks once per session), Allow (it runs without asking), Deny (it never runs).
-    'no-cost': { label: 'Run without cost reports', options: RULE, def: 'ask', office: true, only: ['hermes', 'dsh', 'openclaw'], na: { 'claude-code': 'Reports cost', local: 'Free', 'agent-framework': 'Free' } }
+    // A cloud kind reports cost only from the prices the owner set (providers/cloud.mjs); without them it is such an agent.
+    'no-cost': { label: 'Run without cost reports', options: RULE, def: 'ask', office: true, only: ['hermes', 'dsh', 'openclaw', 'cloud'], na: { 'claude-code': 'Reports cost', local: 'Free', 'agent-framework': 'Free' } }
   });
   var SEC_SCREENS = [
     { id: 'files', title: 'Files', rows: ['read-inside', 'edit-inside', 'files-outside'] },
@@ -198,7 +209,7 @@
   ];
   var SEC_WORD = bare({ ask: 'Ask', allow: 'Allow', deny: 'Deny', off: 'Off', on: 'On' });
   function secKey(row, col) { return row + '|' + col; }
-  function secApplies(row, col) { var r = SEC_ROWS[row]; return !!r && (!r.only || r.only.indexOf(col) >= 0); }
+  function secApplies(row, col) { var r = SEC_ROWS[row]; return !!r && (!r.only || r.only.indexOf(col) >= 0) && !(r.not && r.not.indexOf(col) >= 0); }
   // The default of a cell: the row's, unless the row names another for that agent kind.
   function secDef(row, col) { var r = SEC_ROWS[row]; return r.defs && own(r.defs, col) ? r.defs[col] : r.def; }
   function secOk(row, v) { return SEC_ROWS[row].options.indexOf(v) >= 0; }
@@ -246,14 +257,21 @@
 
   function kindState(k) {
     if (!k || k.checking) return { key: 'resting', word: 'Checking' };
-    return k.ready ? { key: 'finished', word: 'Ready' } : { key: 'waiting', word: 'Not ready' };
+    if (k.ready) return { key: 'finished', word: 'Ready' };
+    return k.configured === false ? { key: 'resting', word: 'Not configured' } : { key: 'waiting', word: 'Not ready' };
   }
+  function notConfigured(k) { return !!(k && !k.checking && !k.ready && k.configured === false); }
+  function needsTitle(k) { return k.label + (k.configured === false ? ' is not configured' : ' is not ready'); }
+  function modelLabel(k) { return (k && k.modelLabel) || 'Model'; }
+  // The thing the pick chooses, in lower case: 'agent' for 'Foundry agent', 'model' for the rest.
+  function modelNoun(k) { return modelLabel(k).split(' ').pop().toLowerCase(); }
+  function pickFact(k) { return k && k.needsModel ? 'You pick the ' + (k.modelLabel || 'model') : null; }
   function modelChoices(k, fallback) {
     var ms = (k && k.models) || [];
     if (!k || (!ms.length && !k.needsModel)) return fallback || [{ value: '', label: 'Default' }];
     var opts = ms.map(function (m) { return { value: m.id, label: m.label || m.id }; });
     if (!k.needsModel) return [{ value: '', label: 'Default' }].concat(opts);
-    return opts.length ? opts : [{ value: '', label: k.checking ? 'Looking for models' : 'No models' }];
+    return opts.length ? opts : [{ value: '', label: (k.checking ? 'Looking for ' : 'No ') + modelNoun(k) + 's' }];
   }
   function firstModel(k) { return k && k.needsModel && k.models && k.models.length ? k.models[0].id : ''; }
   function noModelFor(k) { return !!(k && k.needsModel && !(k.models || []).length); }
@@ -268,16 +286,21 @@
     if (terminal) return 'Starts ' + label + ' in a new terminal window with the office hooks attached.';
     if (k && k.team) return 'Runs a team of ' + label + ' agents on a model on this machine, inside the office. The team comes from agent-team.json in the folder, '
       + 'or it is a lead, a coder and a reviewer. A member shows as a helper bot while it has the work. Each tool call comes to you for approval, until you set a rule in the Security room. It costs nothing.';
+    if (k && k.cloud) return 'Runs ' + label + ' in your Microsoft cloud account. You talk to it in the chat. Its tools run in the cloud with no approval here: you see them, but the office does not hold them. Only a request the service sends for approval comes to you. Each message can cost money. It cannot read the folder: the folder only sets its desk. The office never signs in for you.';
     if (k && !k.paid) return 'Runs a model from ' + label + ' on this machine, inside the office. It reads and changes files in the folder and runs commands. Risky steps come to you for approval. It costs nothing.';
     return 'Runs ' + label + ' inside the office. You talk to it in the chat and approve its steps here. It has no terminal window.';
   }
 
   // The spend limit field of the Open dialog: a paid kind that reports cost (#33, Q22). A kind with cost 'unknown' has no
   // limit (providers/index.mjs spendLimitFor gives null: nothing could stop it), so its form says why instead (review M2).
+  // A cloud kind (#24) reports cost only when the owner set its prices (providers/cloud.mjs): without them it is 'unknown'.
   function limitShown(k) { return !k || (k.paid !== false && k.cost !== 'unknown'); }
   function costNote(k) {
-    return k && k.paid !== false && k.cost === 'unknown' ? (k.label || 'This agent') + ' does not report cost, so the office shows it as unknown and no spend limit can stop it. Check the spend in its own account.' : '';
+    if (!(k && k.paid !== false && k.cost === 'unknown')) return '';
+    var label = k.label || 'This agent';
+    if (k.cloud) return label + ' reports no dollars, and no prices are set, so the office shows its cost as unknown and no spend limit can stop it. Set the prices to count it (see the README), or check the spend in your Azure account.';
+    return label + ' does not report cost, so the office shows it as unknown and no spend limit can stop it. Check the spend in its own account.';
   }
 
-  root.OfficeVocab = { limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, modelChoices: modelChoices, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform };
+  root.OfficeVocab = { limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

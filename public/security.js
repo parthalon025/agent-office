@@ -109,6 +109,9 @@
   // about 0.48 em at 400 and 0.52 at 600). The share is higher than that on purpose, so a line the plan makes fits in the
   // browser and the paint's ellipsis (clipW) never cuts a reason. One rule for the plan and for the test.
   function charW(size, wt) { return size * (wt >= 600 ? 0.6 : 0.56); }
+  // The size a one-line word in a column takes: s, or smaller so that it fits maxW by the same estimate (six agent kinds make
+  // the columns narrower, #24), with 5 % more room than charW, so the paint's ellipsis never cuts it. Never under 14 px.
+  function fit(str, s, maxW, wt) { var n = String(str).length; return n ? Math.max(14, Math.min(s, Math.floor(maxW / (n * charW(1, wt) * 1.08)))) : s; }
   function wrap(str, size, maxW, wt) {
     var cap = Math.max(1, Math.floor(maxW / charW(size, wt))), lines = [], cur = '';
     String(str).split(/\s+/).filter(Boolean).forEach(function (w) {
@@ -125,12 +128,13 @@
   }
   // A value chip: words always, a status tone for Allow and Deny (DS: pair every status color with a word).
   function chip(p, x, y, w, h, v, s, hovered, pending) {
-    if (pending) { fill(p, x, y, w, h, 'pending', h / 2); text(p, x + w / 2, y + h / 2 + s * 0.36, s, 'onPending', 'Confirm?', { wt: 600, align: 'center', maxW: w - 16 }); return; }
+    if (pending) { var cs = fit('Confirm?', s, w - 16, 600); fill(p, x, y, w, h, 'pending', h / 2); text(p, x + w / 2, y + h / 2 + cs * 0.36, cs, 'onPending', 'Confirm?', { wt: 600, align: 'center', maxW: w - 16 }); return; }
     var tn = tone(v);
     if (tn === 'ask') stroke(p, x + 1.5, y + 1.5, w - 3, h - 3, 'line', 3, h / 2);
     else fill(p, x, y, w, h, tn + 'Fill', h / 2);
     if (hovered) stroke(p, x - 5, y - 5, w + 10, h + 10, 'focus', 4, h / 2 + 5);
-    text(p, x + w / 2, y + h / 2 + s * 0.36, s, 'ink', S().word(v), { wt: 600, align: 'center', maxW: w - 16 });
+    var ws = fit(S().word(v), s, w - 16, 600);
+    text(p, x + w / 2, y + h / 2 + ws * 0.36, ws, 'ink', S().word(v), { wt: 600, align: 'center', maxW: w - 16 });
   }
   // A button with a label, or with a DS icon (label { icon: name }: the icon set, never a text glyph).
   function button(p, x, y, w, h, label, s, h0, hovered, kind) {
@@ -191,6 +195,8 @@
   function heads(p, cols, gx, colW, s, yOne, yTwo) {
     var max = colW - 8;
     var two = cols.some(function (c) { return c.label.length * charW(s, 600) > max; }), size = two ? s - 2 : s;
+    // seven kinds (#22, #23): the longest word of a head must fit too, so the type goes down to 18 px, never cut
+    if (two) cols.forEach(function (c) { c.label.split(' ').forEach(function (w) { while (size > 18 && w.length * charW(size, 600) > max) size--; }); });
     cols.forEach(function (c, i) {
       var lines = two ? wrap(c.label, size, max, 600).slice(0, 2) : [c.label];
       lines.forEach(function (l, k) {
@@ -211,18 +217,18 @@
       text(p, x0, y + rowH / 2 + 10, 28, 'ink', r.label, { maxW: labelW - 16 });
       cols.forEach(function (c, i) {
         var cx = gx + i * colW, cw = colW - 16, ch = L.ch, cy = y + L.cy;
-        if (!S().applies(row, c.id)) { text(p, cx + colW / 2, cy + ch / 2 + 9, 22, 'muted', S().na(row, c.id), { align: 'center', maxW: colW - 8 }); return; }
+        if (!S().applies(row, c.id)) { text(p, cx + colW / 2, cy + ch / 2 + 9, fit(S().na(row, c.id), 22, colW - 8, 400), 'muted', S().na(row, c.id), { align: 'center', maxW: colW - 8 }); return; }
         var id = 'cell:' + row + '|' + c.id, pend = view.pending && view.pending.row === row && view.pending.col === c.id;
         chip(p, cx + 8, cy, cw, ch, shown(data, view.scope, row, c.id), 24, isHover(view, id), pend);
         if (overridden(data, row, c.id) && !pend) p.items.push({ t: 'mark', x: cx + 8 + cw - 4, y: cy + 4, s: 18, c: 'accent' });
         hot(p, { kind: 'cell', id: id, row: row, col: c.id, x: cx + 4, y: cy - 4, w: cw + 8, h: ch + 8 });
         var nt = noteOf(data, view.scope, row, c.id);
-        if (nt) text(p, cx + colW / 2, cy + ch + L.ng, 18, 'muted', nt.word, { align: 'center', maxW: colW - 8 });
+        if (nt) text(p, cx + colW / 2, cy + ch + L.ng, fit(nt.word, 18, colW - 8, 400), 'muted', nt.word, { align: 'center', maxW: colW - 8 });
         // Back to the office rule (a building override), or to the default (an office-wide rule the user set).
         var back = view.scope === 'building' ? overridden(data, row, c.id) && 'Use office rule' : officeSet(data, row, c.id) && 'Use default';
         if (back && !pend && view.focused) {
           var cid = 'clear:' + row + '|' + c.id;
-          text(p, cx + colW / 2, cy + ch + L.ng + (nt ? L.bk : 0), 18, isHover(view, cid) ? 'ink' : 'muted', back, { align: 'center', maxW: colW - 8 });
+          text(p, cx + colW / 2, cy + ch + L.ng + (nt ? L.bk : 0), fit(back, 18, colW - 8, 400), isHover(view, cid) ? 'ink' : 'muted', back, { align: 'center', maxW: colW - 8 });
           hot(p, { kind: 'clear', id: cid, row: row, col: c.id, x: cx + 4, y: cy + ch + 8, w: cw + 8, h: 26 });
         }
       });
@@ -352,7 +358,8 @@
       if (c.free) return 'Free';   // a model on this machine: the local model and Agent Framework teams (vocab.js columns)
       if (c.id === 'claude-code') return money(+by2[c.id] || 0);
       var e = data.sec && data.sec.enforce && data.sec.enforce[c.id];
-      return e && e.reason ? 'Not set up' : (by2[c.id] ? money(by2[c.id]) : 'Not reported');
+      // reports: every agent of the column reports cost (a cloud kind with its prices set, #24), so no spend is $0.00.
+      return e && e.reason ? 'Not set up' : (by2[c.id] ? money(by2[c.id]) : e && e.reports ? money(0) : 'Not reported');
     }
     if (big) {
       var n = cols.length, page = ((view.page || 0) % n + n) % n, col = cols[page];
@@ -367,9 +374,12 @@
       // takes 24 px.
       var gx = 48, colW = Math.floor((W - 48 - gx) / cols.length), gy = y + 66;
       heads(p, cols, gx, colW, 22, gy + 30, gy + 30);
+      // One size for the row, up to 28 px, so that the longest word fits its column by the plan's estimate (seven kinds: 161 px).
+      var longest = Math.max.apply(null, cols.map(function (c) { return costWord(c).length; }));
+      var cs = Math.max(18, Math.min(28, Math.floor((colW - 8) / (longest * 0.62))));
       cols.forEach(function (c, i) {
-        var w = costWord(c), ws = w.length * charW(28, 600) <= colW - 8 ? 28 : 24;
-        text(p, gx + i * colW + colW / 2, gy + 68, ws, 'ink', w, { wt: 600, align: 'center', maxW: colW - 8, mono: c.id === 'claude-code' });
+        var w = costWord(c);
+        text(p, gx + i * colW + colW / 2, gy + 68, cs, 'ink', w, { wt: 600, align: 'center', maxW: colW - 8, mono: c.id === 'claude-code' });
       });
       y = gy + 92;
     }

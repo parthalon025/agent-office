@@ -123,7 +123,10 @@ before(async () => {
   fs.writeFileSync(path.join(base, 'hermes-home', 'skills', 'deploy', 'SKILL.md'), '---\nname: Deploy\ndescription: Ship it.\n---\nRun the script.\n');
   // LM Studio points at a free port with nothing on it, so a real LM Studio on this machine is never asked.
   const noServer = `http://127.0.0.1:${await freePort()}/v1`;
-  const env = { ...process.env, PATH: bin + path.delimiter + (process.env.PATH || process.env.Path || ''), OFFICE_HOOKS: 'command', OFFICE_OLLAMA_URL: fake.url, OFFICE_LMSTUDIO_URL: noServer, FAKE_ACP_FORK: '1', OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
+  const env = { ...process.env, PATH: bin + path.delimiter + (process.env.PATH || process.env.Path || ''), OFFICE_HOOKS: 'command', OFFICE_OLLAMA_URL: fake.url, OFFICE_LMSTUDIO_URL: noServer, FAKE_ACP_FORK: '1',
+    // The cloud kinds (#24) stay off: no endpoint and no token, whatever the machine that runs the test has set.
+    OFFICE_FOUNDRY_ENDPOINT: '', OFFICE_FOUNDRY_TOKEN: '', OFFICE_FOUNDRY_TOKEN_FILE: '', OFFICE_COPILOTSTUDIO_ENDPOINT: '', OFFICE_COPILOTSTUDIO_TOKEN: '', OFFICE_COPILOTSTUDIO_TOKEN_FILE: '',
+    OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
     OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local'), USERPROFILE: path.join(base, 'home'), HERMES_HOME: path.join(base, 'hermes-home'), OFFICE_OPENCLAW_PORT: String(gatewayPort),
     // OpenClaw is off until the Security room's Agents screen turns it on (the OpenClaw test does that). The old switch is set
     // here on purpose: it turns nothing on. OpenClaw needs a version that relays shell approvals: the fake agent says so. The
@@ -176,7 +179,7 @@ test('the local providers are registered, and an unknown agent kind is refused',
   assert.match(noModel.json.error, /Pick a model/);
   const info = await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
   const kinds = info.providers.map((p) => p.kind);
-  assert.deepEqual(kinds.sort(), ['agent-framework', 'claude-code', 'dsh', 'hermes', 'lmstudio', 'ollama', 'openclaw']);
+  assert.deepEqual(kinds.sort(), ['agent-framework', 'claude-code', 'copilot-studio', 'dsh', 'foundry', 'hermes', 'lmstudio', 'ollama', 'openclaw']);
   const dsh = info.providers.find((p) => p.kind === 'dsh');
   assert.deepEqual([dsh.ready, dsh.cost, dsh.gated, dsh.paid], [false, 'unknown', true, true]);
   // Not on the PATH, or only an npm install (dsh.cmd), which the office cannot start without a shell: not ready either way.
@@ -196,6 +199,18 @@ test('the local providers are registered, and an unknown agent kind is refused',
   const lm = info.providers.find((p) => p.kind === 'lmstudio');
   assert.equal(lm.ready, false);
   assert.match(lm.needs[0], /LM Studio local server/);
+  // The cloud kinds (#24) are off until configured: Not configured with the steps, and no session opens.
+  for (const [kind, name] of [['foundry', 'OFFICE_FOUNDRY_ENDPOINT'], ['copilot-studio', 'OFFICE_COPILOTSTUDIO_ENDPOINT']]) {
+    const cloud = info.providers.find((p) => p.kind === kind);
+    assert.deepEqual([cloud.ready, cloud.configured, cloud.cloud, cloud.paid], [false, false, true, true], kind);
+    // Spec #67: its tools run in the cloud without the office (ungated, with its label), and with no prices set its cost is unknown.
+    assert.deepEqual([cloud.gated, cloud.cost], [false, 'unknown'], kind);
+    assert.match(cloud.supervision, /supervised/i, kind);
+    assert.match(cloud.needs.join(' '), new RegExp(name), kind);
+    const refused = await call('/api/open', { cwd: work, provider: kind, model: 'asst_1', where: 'office' });
+    assert.equal(refused.status, 409, kind);
+    assert.match(refused.json.error, /not configured/i, kind);
+  }
   // A local agent does not open in a terminal window.
   const win = await call('/api/open', { cwd: work, provider: 'ollama', model: 'fake-model', where: 'terminal' });
   assert.equal(win.status, 400);
@@ -474,7 +489,7 @@ test('Hermes is off until the Security room turns it on: the open is refused bef
   const before = (await snapshot()).sessions.length;
   const off = await call('/api/open', { cwd: acpRepo, name: 'hermes-off', provider: 'hermes', where: 'office', isolation: 'worktree', confirmCost: true });
   assert.equal(off.status, 409);
-  assert.match(off.json.error, /^Hermes Agent runs tool calls without asking the office\. Turn on Hermes Agent on the Agents screen/);
+  assert.match(off.json.error, /^Hermes Agent runs tool calls without asking the office\. Turn on Hermes on the Agents screen/);
   assert.equal((await snapshot()).sessions.length, before);
   const on = { scope: 'office', row: 'ungated', col: 'hermes', value: 'on' };
   assert.equal((await call('/api/security/set', on)).status, 409, 'turning it on loosens: the wall asks for the Confirm');

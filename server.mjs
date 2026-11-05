@@ -5,6 +5,9 @@
 // own environment at each spawn; children inherit it). The imports load first, but none starts a process.
 // Every spawn also uses an absolute path from git.resolveExe.
 process.env.NoDefaultCurrentDirectoryInExePath = '1';
+// Second: the cloud kinds read their settings, and cloudConfig takes the token settings out of process.env, so no process the
+// office starts (a Claude Code session, a local agent's command) inherits them and no agent can print the token into the chat.
+const CLOUD = { foundry: cloudConfig(process.env, 'OFFICE_FOUNDRY'), studio: cloudConfig(process.env, 'OFFICE_COPILOTSTUDIO') };
 import http from 'node:http';
 import net from 'node:net';
 import fs from 'node:fs';
@@ -20,6 +23,9 @@ import { createRegistry, providerEvents, isPaid, isGated, supervisionOf, costOf,
 import { createLocal } from './providers/local.mjs';
 import { createAcp, AGENTS as ACP_AGENTS } from './providers/acp.mjs';
 import { createAgentFramework } from './providers/agent-framework.mjs';
+import { cloudConfig } from './providers/cloud.mjs';
+import { createFoundry } from './providers/foundry.mjs';
+import { createCopilotStudio } from './providers/copilot-studio.mjs';
 import { createClaudeCode, claudeVersion, MODEL_RE, MODES } from './providers/claude-code.mjs';
 import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, cleanRecent, recentChoices, securityRoomIdOf } from './place.mjs';
 import * as startup from './startup.mjs';
@@ -338,7 +344,8 @@ async function refreshEnforce(fresh = false) {
 }
 
 // ---------- providers: the agent tools behind the sessions (providers/) ----------
-// Every provider reports through the same events into the tracker: Claude Code, Ollama, LM Studio, Agent Framework and the ACP agents. Claude
+// Every provider reports through the same events into the tracker: Claude Code, Ollama, LM Studio, Agent Framework, the ACP agents and the
+// Microsoft cloud kinds (Azure AI Foundry, Copilot Studio). Claude
 // Code's hooks come in over the hook routes below, and a permission decision goes back as the hook's answer (claude.answer
 // gives the body). The other providers raise their requests through events.permission; events.drop frees one their agent no
 // longer waits for (releaseHold with no decision); events.fresh says a reopen could not continue the conversation (freshReopen).
@@ -363,7 +370,11 @@ const providers = createRegistry([claude, ollama, lmstudio, agentFramework,
   // turned on, a no-cost Deny); cells: its call cells, for an agent whose own config carries them (OpenClaw). One rule source.
   ...Object.keys(ACP_AGENTS).map((kind) => createAcp({ events, kind,
     blocked: () => openRefusal(persisted.security, providers.get(kind)),
-    cells: (s) => cellsOf(persisted.security, s ? buildingOfSession(s) : null, V.security.columnOf(kind)) }))]);
+    cells: (s) => cellsOf(persisted.security, s ? buildingOfSession(s) : null, V.security.columnOf(kind)) })),
+  // The Microsoft cloud kinds are off until the owner sets them up in the environment (README). Nothing here calls the network
+  // or signs in. Like the ungated ACP agents, the Agents screen of the Security room keeps them off until it turns them on.
+  ...[['foundry', createFoundry, CLOUD.foundry], ['copilot-studio', createCopilotStudio, CLOUD.studio]].map(([kind, create, config]) => create({ events, config,
+    blocked: () => openRefusal(persisted.security, providers.get(kind)) }))]);
 const providerOf = (s) => providers.of(s);
 ENFORCE = enforcement(providers.list());
 // The agent kinds as the page offers and shows them (providers/index.mjs describe). Fixed while the server runs.
