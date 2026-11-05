@@ -1,5 +1,11 @@
 import type { ReactNode } from "react";
 export type Status = "working" | "waiting" | "error" | "resting" | "finished";
+/** A theme: the data-theme value. */
+export type ThemeId = "light" | "dark" | "sublevel" | "fluent" | "fluent-dark";
+/** A look: the scene light and effects of a theme (day = light, night = dark). */
+export type Look = "day" | "night" | "sublevel" | "fluent" | "fluent-dark";
+/** One entry of AgentOffice.MODES, the one list of themes. dark: a dark scene (lit windows, screen glow, desk light); the engine sets stage.K.dark from it. */
+export interface ModeDef { id: Look; theme: ThemeId; label: string; icon: string; dark?: boolean }
 export type FloorKey = "ops" | "sales" | "research" | "content";
 export interface PanelProps { title?: string; count?: ReactNode; flush?: boolean; className?: string; children?: ReactNode }
 export interface StatusDotProps { status: Status }
@@ -10,7 +16,7 @@ export interface ApprovalItemProps { name: string; floor?: number; ask: string; 
 export interface ActivityLogProps { entries: { time: string; name: string; text: string }[] }
 export interface UsageMeterProps { percent?: number; cost?: number; costLimit?: number; reset?: string; title?: string; rows?: { name: string; color: string; percent?: number; cost?: number }[] }
 export interface StatusBubbleProps { status: Status; frame?: number }
-export interface BotLineupProps { bots?: { shape: "blob" | "cone" | "octa" | "capsule"; color: string; status: Status }[]; spin?: number; height?: number; mode?: "auto" | "day" | "night" }
+export interface BotLineupProps { bots?: { shape: "blob" | "cone" | "octa" | "capsule"; color: string; status: Status }[]; spin?: number; height?: number; mode?: "auto" | Look }
 export type Role = "research" | "writer" | "coder" | "analyst" | "designer" | "ops" | "sales" | "planner" | "media" | "ae" | "specialist" | "partner" | "se" | "csa" | "csam" | "fde";
 export type OfficeType = "team" | "lab" | "studio" | "hq" | "security";
 /** Render quality. "auto" picks "high" on desktop and "medium" on touch devices and narrow views. "low" turns off post effects and the extra motion. */
@@ -21,9 +27,9 @@ export interface BotDef { name?: string; sessions?: "agent" | "session"; orchest
 export interface RoomDef { id?: string; type: OfficeType; name?: string; bots: BotDef[]; screens?: string[] }
 export interface FloorDef { id?: number; key?: FloorKey | "hq"; name?: string; rooms: RoomDef[] }
 export interface BuildingDef { name?: string; sessions?: "agent" | "session"; floors: FloorDef[] }
-export interface BuildingViewProps { building?: BuildingDef; quality?: Quality; simulate?: boolean; controls?: boolean; height?: number; mode?: "auto" | "day" | "night" }
-export interface RoomSceneProps { type?: OfficeType; quality?: Quality; name?: string; bots?: BotDef[]; rooms?: RoomDef[]; floorKey?: FloorKey | "hq"; simulate?: boolean; height?: number; mode?: "auto" | "day" | "night" }
-export interface WorkstationsProps { roles?: Role[]; cols?: number; cycle?: boolean; height?: number; mode?: "auto" | "day" | "night" }
+export interface BuildingViewProps { building?: BuildingDef; quality?: Quality; simulate?: boolean; controls?: boolean; height?: number; mode?: "auto" | Look }
+export interface RoomSceneProps { type?: OfficeType; quality?: Quality; name?: string; bots?: BotDef[]; rooms?: RoomDef[]; floorKey?: FloorKey | "hq"; simulate?: boolean; height?: number; mode?: "auto" | Look }
+export interface WorkstationsProps { roles?: Role[]; cols?: number; cycle?: boolean; height?: number; mode?: "auto" | Look }
 export interface RoomListProps { rooms: { id: string; name: string; type: OfficeType; bots: number; working: number }[]; current?: string | null; onSelect?: (id: string) => void; onAddBot?: (roomId: string) => void; onAddRoom?: (type: OfficeType) => void }
 export interface BotAvatarProps { shape: Shape; color: string; status?: Status; size?: number }
 export interface OfficeTypeBadgeProps { type: OfficeType; label?: string }
@@ -96,6 +102,8 @@ export interface AgentSchema { version: string; events: Record<string, { desc: s
 export interface AgentOfficeGlobals {
   /** The 10 bot body colors, in the order the scene gives them to new bots. A page that sets bot.color reads them from here, so a bot looks the same in every list. */
   BODY_COLORS: readonly string[];
+  /** The themes: Day, Night, Sublevel, Fluent, Fluent Dark. The engine, ModeToggle, the OfficeScene HUD and the command palette read this list. Read it; do not change it. */
+  MODES: readonly ModeDef[];
   /** One portrait color for each bot shape (4 colors). The portraits use it when a bot has no color. For a bot color, use BODY_COLORS. */
   BOT_COLORS: Readonly<Record<Shape, string>>;
   /** Checks one event (or, with kind "commands", one command) against the schema. Reports missing fields, wrong types and unknown fields. */
@@ -139,7 +147,10 @@ export interface ToolKindBadgeProps { kind: ToolCallData["kind"] }
 export interface AgentPanelTab { id: string; label: string; icon?: string; count?: number | null; after?: string; render: (bot: AgentPanelProps["bot"]) => ReactNode }
 export interface AgentPanelProps extends AgentChatProps { tab?: "chat" | "trace" | "sessions" | "agent"; activeTab?: string; extraTabs?: AgentPanelTab[]; hideTabs?: ("chat" | "trace" | "sessions" | "agent")[]; onTabChange?: (id: string) => void; steps?: TraceStep[]; plan?: { goal?: string; steps: PlanCardProps["steps"] } | null; cost?: CostMeterProps; agent?: AgentCardProps["agent"]; onRollback?: (cp: unknown) => void }
 /** Orchestration events (x0.8): plan, plan.step, delegate { bot, to?, spawn?, task }, subagent.done { bot, result }, tool.call { bot, id, tool, kind, args }, tool.result { bot, id, ok, ms, summary, tokens, cost }, knowledge, skill.load, checkpoint, rollback, trigger.run { job }, model { bot, model, fallback }. Commands: delegate, rollback, cron.pause, cron.resume. */
-export interface OfficeSceneProps { agentTab?: string; inbox?: boolean; onInbox?: (open: boolean) => void; notifier?: boolean; waitingCount?: number; extraTabs?: AgentPanelTab[]; hideTabs?: ("chat" | "trace" | "sessions" | "agent")[]; onTabChange?: (id: string) => void; onNotify?: (n: { kind: "request" | "error"; bot: string; text: string; risk?: "low" | "medium" | "high" | null }) => void; frameInset?: { left: number; right: number } | null; ambient?: boolean; onAmbientOpen?: () => void; sinceYouLeft?: boolean; onSinceYouLeft?: (open: boolean) => void; building?: BuildingDef; solution?: "hq" | "microsoft" | "hermes" | "copilot"; adapter?: AgentAdapter | null; theme?: "light" | "dark" | "sublevel"; floor?: number; view?: "floor" | "building"; mode?: "auto" | "day" | "night" | "sublevel"; simulate?: boolean; editable?: boolean; hud?: boolean; toasts?: boolean; height?: number; reset?: string; quality?: Quality; intro?: boolean; sound?: boolean; onReady?: (office: OfficeApi) => void; onSelect?: (botName: string | null) => void }
+export interface OfficeSceneProps { agentTab?: string; inbox?: boolean; onInbox?: (open: boolean) => void; notifier?: boolean; waitingCount?: number; extraTabs?: AgentPanelTab[]; hideTabs?: ("chat" | "trace" | "sessions" | "agent")[]; onTabChange?: (id: string) => void; onNotify?: (n: { kind: "request" | "error"; bot: string; text: string; risk?: "low" | "medium" | "high" | null }) => void; frameInset?: { left: number; right: number } | null; ambient?: boolean; onAmbientOpen?: () => void; sinceYouLeft?: boolean; onSinceYouLeft?: (open: boolean) => void; building?: BuildingDef; solution?: "hq" | "microsoft" | "hermes" | "copilot"; adapter?: AgentAdapter | null; theme?: ThemeId; floor?: number; view?: "floor" | "building"; mode?: "auto" | Look; simulate?: boolean; editable?: boolean; hud?: boolean; toasts?: boolean; height?: number; reset?: string; quality?: Quality; intro?: boolean; sound?: boolean; onReady?: (office: OfficeApi) => void; onSelect?: (botName: string | null) => void }
+/** SublevelOffice and FluentOffice are OfficeScene with the theme set ("sublevel", "fluent"). Pass theme "fluent-dark" to FluentOffice for Fluent Dark. SublevelOffice also defaults to the "microsoft" solution. */
+export type SublevelOfficeProps = OfficeSceneProps;
+export type FluentOfficeProps = OfficeSceneProps;
 export interface FloorListProps { floors: { id: number; name: string; statuses: Status[]; rooms?: number }[]; current: number | null; onSelect?: (id: number) => void; onAdd?: () => void }
 export interface BotRowProps { name: string; color: string; shape?: Shape; role?: Role; status: Status; task: string; selected?: boolean; onClick?: () => void }
 export interface SinceYouLeftProps { summary: { since: number; finished: number; waiting: number; errors: number; toolCalls: number; tokens: number; cost: number; sessions: number; messages: number; byBot?: Record<string, { finished: number; errors: number; tokens: number; cost: number }>; top?: string[] }; now?: number; onReplay?: () => void; onDecisions?: () => void; onClose?: () => void }

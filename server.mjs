@@ -61,7 +61,13 @@ async function portIsOwn(port) {
 const BRANCH_PORT = process.env.OFFICE_PORT === 'branch'
   ? await (async () => {
     let name;
-    try { name = git.checkoutName(await git.locate(ROOT)); } catch (e) { return stopAtStart(`Agent Office cannot pick a port for this folder: ${e.message}`); }
+    try {
+      // A passing git failure (a time limit while the computer is busy) is not "outside git": locateOrKeep tries 3 times,
+      // then answers KEEP, and the message says so. Null (not in git, git missing, a folder git refuses) is checkoutName's error.
+      const loc = await git.locateOrKeep(ROOT);
+      if (loc === git.KEEP) throw new Error('git did not give the branch of this folder (it timed out, or the repository has no commit yet). Start the office again.');
+      name = git.checkoutName(loc);
+    } catch (e) { return stopAtStart(`Agent Office cannot pick a port for this folder: ${e.message}`); }
     const r = await git.pickBranchPort(name, { isFree: portIsFree, isOwn: portIsOwn });
     if (r.own) return stopAtStart(`Agent Office is already open on port ${r.own} for branch "${name}", from this folder. Nothing was changed.\nOpen that office, or stop it by the process id that owns its port (netstat -ano | findstr :${r.own}), never by image name.`);
     if (!r.port) return stopAtStart(`Agent Office stopped: no port is free for branch "${name}".\nThese ports are busy: ${r.busy.join(', ')}. Nothing was changed, and no other port was tried.\nFind a process id with: netstat -ano | findstr :<port>. Stop that process by its id, never by image name.`);
@@ -446,9 +452,26 @@ async function floorActionRaw(action, body) {
   await refreshRepo(repoKey(r.path));
   return out;
 }
-setInterval(() => { for (const k of repos.keys()) void refreshRepo(k); }, 30000).unref();
-// Recent folders that are in git are buildings too, so they can get floors before any session runs.
-for (const d of persisted.recent) git.locate(d).then((g) => { if (g) addRepo(g.repo); });
+// Recent folders that are in git are buildings too, so they can get floors before any session runs. git.locateOrKeep
+// tries a passing failure 3 times; a folder that still got KEEP (git kept passing its time limit while the computer was
+// busy, as at sign-in) is asked again every 30 s. A folder that is gone, not in git or refused by git is not asked again.
+// A lookup that still runs is not started a second time.
+const unplacedRecent = new Set(persisted.recent);
+const placingRecent = new Set();
+const placeRecent = () => {
+  for (const d of unplacedRecent) {
+    if (placingRecent.has(d)) continue;
+    placingRecent.add(d);
+    git.locateOrKeep(d).then((g) => {
+      placingRecent.delete(d);
+      if (g === git.KEEP) return;
+      unplacedRecent.delete(d);
+      if (g) addRepo(g.repo);
+    });
+  }
+};
+placeRecent();
+setInterval(() => { for (const k of repos.keys()) void refreshRepo(k); placeRecent(); }, 30000).unref();
 
 // Finds the claude process above a hook's parent, so the office can close sessions it did not launch.
 // The hook's parent shell dies right after the hook returns, so the walk has to happen while the hook
@@ -740,10 +763,10 @@ function roomContents(pl) {
     '- A desk with monitors for each bot. A session gets a coder desk. A subagent gets a desk for its type (research, planner, analyst, writer or coder). The monitors show the terminal of that session.',
     '- A beacon light on the back wall. It blinks when a bot in the room waits for the user or has an error.',
     '- On the floor: an elevator lobby on the left side with the elevator and a railing, and a meter near the front right corner.',
-    'The page adds to every lab room: a blackboard on the back wall with what the agents do (plan, browser steps, last steps, the repository and a pinned note), a chalk ledge with two pieces of chalk, a whiteboard with the user notes and a marker tray, a stats display on the left wall (sessions, tool calls, tokens and cost), a door with an Agents sign on the left wall (under the word Agents it shows the supervision label, for example Partly supervised: commands ask, file edits do not, when an agent in the room runs tool calls without asking), a warm lamp that is lit at night, and two plants.',
-    'The window of the first room is a picture: by day a blue sky with clouds over a low skyline, at night a dark sky with a moon over a skyline with lit windows, in Sublevel a lit corridor. It does not show the street.',
+    'The page adds to every lab room: a blackboard on the back wall with what the agents do (plan, browser steps, last steps, the repository and a pinned note), a chalk ledge with two pieces of chalk, a whiteboard with the user notes and a marker tray, a stats display on the left wall (sessions, tool calls, tokens and cost), a door with an Agents sign on the left wall (under the word Agents it shows the supervision label, for example Partly supervised: commands ask, file edits do not, when an agent in the room runs tool calls without asking), a warm lamp that is lit at night (in Night and Fluent Dark), and two plants.',
+    'The window of the first room is a picture: by day a blue sky with clouds over a low skyline, at night a dark sky with a moon over a skyline with lit windows, in Sublevel a lit corridor, in Fluent a pale sky with soft clouds over a light skyline, in Fluent Dark a dusk sky with a crescent moon over a dark skyline with a few lit windows. It does not show the street.',
     'The ground floor of every building also has the Security room, left of the lab rooms. No agent works in it. Its six wall screens (Files, Commands, Network, Secrets, Agents, Spend) are where the user sets the permission rules: Ask, Allow or Deny for each kind of tool call and agent kind. The office applies them before it asks the user.',
-    'In the building view (outside the floors) the office draws a road with lane marks along the front and the right side of the building, sidewalks with trees, two street lights that glow at night, and a flock of birds that circles over the tower.',
+    'In the building view (outside the floors) the office draws a road with lane marks along the front and the right side of the building, sidewalks with trees, two street lights that glow at night (in Night and Fluent Dark), and a flock of birds that circles over the tower.',
     'You can change only the notes board and the blackboard pin (office_room_update). You cannot move furniture, desks, boards, the door or bots. The office places them.',
   ];
 }

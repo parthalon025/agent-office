@@ -3,7 +3,7 @@
    tool calls with their outcome, and the reply as it streams, with a blinking cursor. A desk with two
    monitors (the coder desk) shows the terminal on the left and the session's stats on the right
    (agent kind, model, context, spend, time, to-do list). A desk with one monitor shows a stats line at the bottom.
-   At night a soft pool of screen light falls on the desk; it turns amber when the bot needs you and
+   In a dark theme (Night, Fluent Dark: stage.K.dark) a soft pool of screen light falls on the desk; it turns amber when the bot needs you and
    red after an error. A monitor takes two clicks (the scene host runs the steps): the first click flies
    the camera to it so the user can read the screen, a second click calls onOpen(uid, name), so the page
    opens the terminal.
@@ -544,7 +544,7 @@
         head: sub ? '400 ' + (px + 3) + 'px ' + fam : '600 21px ' + (f.sans || 'sans-serif'),
         small: sub ? '400 21px ' + fam : '600 15px ' + (f.sans || 'sans-serif'),
         rowH: Math.round(px * (sub ? 1.05 : 1.3)),
-        glow: K.look === 'night' ? 7 : sub ? 5 : 0
+        glow: K.dark ? 7 : sub ? 5 : 0
       };
       e.ctx.font = P.mono;
       P.cw = e.ctx.measureText('0').width || px * 0.6;
@@ -579,7 +579,7 @@
       e.cursor.material.color.set(K.tok[info.key === 'waiting' ? 'status-waiting' : info.key === 'error' ? 'status-error' : 'status-working']);
       e.curOn = true;
     }
-    // Screen light on the desk at night: one soft pool per desk, laid on the desk top under the screens.
+    // Screen light on the desk in a dark theme: one soft pool per desk, laid on the desk top under the screens.
     function glowTexture() {
       if (glowTex) return glowTex;
       var c = document.createElement('canvas'); c.width = c.height = 128;
@@ -685,13 +685,13 @@
     }
     function paint(e, force) {
       if (!e.P) measure(e);
-      var s = sessionFor(e), info = status(s), p = palette(K), night = K.look === 'night', sub = K.look === 'sublevel';
+      var s = sessionFor(e), info = status(s), p = palette(K), dark = !!K.dark, sub = K.look === 'sublevel';
       e.uid = s && !s.pseudo && s.uid && s.status !== 'ended' ? s.uid : null;   // a closed session has no terminal to open
       if (e.hover && !e.uid) { e.hover = ''; if (hover === e) { hover = null; host.rehover(); } }
       var closed = info.word === 'Closed', calm = info.key === 'resting' || info.key === 'finished';
-      e.emI = (night ? 1 : 0.95) * (closed ? 0.5 : calm ? 0.8 : 1);
+      e.emI = (dark ? 1 : 0.95) * (closed ? 0.5 : calm ? 0.8 : 1);
       if (e.glow) {
-        e.glowA = (night ? 0.5 : sub ? 0.16 : 0) * (closed ? 0 : calm ? 0.55 : 1);
+        e.glowA = (dark ? 0.5 : sub ? 0.16 : 0) * (closed ? 0 : calm ? 0.55 : 1);
         e.glow.visible = e.glowA > 0;
         e.glow.material.color.set(info.key === 'waiting' ? p.wait : info.key === 'error' ? p.err : p.fg);
       }

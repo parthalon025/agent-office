@@ -7,6 +7,7 @@ Versions keep the `x` prefix.
 
 ### Added
 
+- Fluent and Fluent Dark themes. The theme control of the office and of the City has two more themes. Fluent is a bright, quiet office in soft daylight, with neutral greys, a blue accent, small round corners and the system faces. Fluent Dark is the same office at night: charcoal surfaces, a lighter blue accent, soft room lamps, glowing screens, light on the desks and a dusk window. The control reads the theme list from the design system (`AgentOffice.MODES`), so the page keeps no copy of it. In the City panel and on a phone, the theme control shows icons and the name of the current theme only.
 - Provider seam. Claude Code is now one provider behind a contract, and the office can host other agent kinds.
 - Local model agents. Ollama and LM Studio agents work at a desk with read, search, edit, write and run tools inside their worktree. Each risky call asks you first. They can use the office tools, so they can ask you a question too.
 - Two-step room screens. The first click on a desk monitor, the blackboard, the notes board or the stats display brings it into view. The second click opens it.

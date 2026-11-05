@@ -45,6 +45,7 @@
 
 /* 3D office */
 .ao-scene{position:relative;width:100%;background:var(--bg);overflow:hidden;border-radius:var(--radius-lg)}
+:root,.ao-office{scrollbar-color:color-mix(in srgb,var(--muted) 55%,transparent) transparent}
 .ao-office{position:relative;width:100%;overflow:hidden;background:var(--bg);container-type:inline-size;font-family:var(--font-sans);color:var(--ink)}
 .ao-scene-fill{position:absolute;inset:0;height:100%!important;border-radius:0}
 .ao-hud{position:absolute;inset:0;pointer-events:none}
@@ -274,9 +275,10 @@ details.panel summary .cnt.hot,.ao-ph .hot{color:var(--emphasis)}
 .ao-ratio{display:flex;height:56px;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--line)}
 .ao-ratio>div{display:flex;align-items:flex-end;padding:6px 8px;font:500 10px var(--font-mono);letter-spacing:.04em}
 .ao-ratio-60{flex:60;background:var(--bg);color:var(--ink)}
-.ao-ratio-30{flex:30;background:var(--scene-floor);color:var(--on-floor)}
+.ao-ratio-30{flex:30;background:var(--floor-ops);color:var(--on-floor)}
 .ao-ratio-10{flex:10;background:var(--emphasis);color:var(--on-emphasis)}
-[data-theme="light"] .ao-ratio-30,[data-theme="dark"] .ao-ratio-30{background:var(--floor-ops)}
+/* the structure swatch is the first floor band in every theme; Sublevel shows its green carpet (a new theme needs no entry here) */
+[data-theme="sublevel"] .ao-ratio-30{background:var(--scene-floor)}
 
 /* x0.8 orchestration */
 .ao-agentpanel{display:flex;flex-direction:column;min-height:0;height:100%;width:100%}
@@ -521,7 +523,10 @@ details.panel summary .cnt.hot,.ao-ph .hot{color:var(--emphasis)}
 .ao-hud-chat~.ao-hud-zoom>:nth-child(n+3){border-top:1px solid var(--line)}
 .ao-hud-chat~.ao-hud-zoom>:nth-child(even){border-left:1px solid var(--line)}
 .ao-hud-chat~.ao-hud-cast{right:376px}
-[data-theme="dark"] .ao-dec-x,[data-theme="dark"] .ao-inbox-all input{color-scheme:dark}
+/* the browser's own parts (scrollbars, check boxes) follow the theme: dark in a dark theme (dark: true in AO.MODES). color-scheme is inherited, so a light theme inside a dark one sets it back; with no theme, OS dark mode gives the Night tokens (tokens.css) and the dark scheme */
+[data-theme]{color-scheme:light}
+[data-theme="dark"],[data-theme="fluent-dark"]{color-scheme:dark}
+@media (prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark}}
 /* scrubber shares the lane of the broadcast bar, so it clears the zoom and usage panels */
 .ao-hud-scrub{left:362px;right:340px;transform:none;width:auto;max-width:640px;margin:0 auto}
 .ao-office:has(.ao-hud-chat) .ao-hud-scrub{right:376px}
@@ -661,3 +666,33 @@ details.panel summary .cnt.hot,.ao-ph .hot{color:var(--emphasis)}
 [data-theme="sublevel"] .ao-rt-code-h,[data-theme="sublevel"] .ao-rt-copy,[data-theme="sublevel"] .ao-rt-dl{text-transform:uppercase;letter-spacing:.06em;font-size:10px}
 [data-theme="sublevel"] .ao-lb{font-family:var(--font-sublevel-sans)}
 .ao-rt-copy{display:inline-flex;align-items:center;gap:4px}
+/* x1.7 Fluent and Fluent Dark: a soft look after the open Fluent 2 design tokens. System faces (no font file), 4 px controls and 8 px surfaces
+   (radius-fluent-*), the two-layer elevation shadow in shadow-panel, sentence-case heads, and an accent pill on the current row and the pressed segment.
+   [data-theme|="fluent"] is the Fluent family: "fluent" and every "fluent-<variant>" (fluent-dark). The colors come from the tokens of each theme. */
+[data-theme|="fluent"]{--font-sans:var(--font-fluent-sans);--font-mono:var(--font-fluent-mono);--radius-sm:var(--radius-fluent-sm);--radius-md:var(--radius-fluent-md);--radius-lg:var(--radius-fluent-lg)}
+[data-theme|="fluent"] .ao-ph,[data-theme|="fluent"] .ao-inbox-h,[data-theme|="fluent"] .ao-cmdk-gh{text-transform:none;letter-spacing:0;font-size:12px;font-weight:600;color:var(--ink)}
+[data-theme|="fluent"] .ao-tbl th{font-family:var(--font-sans);text-transform:none;letter-spacing:0;font-size:11px;font-weight:600}
+[data-theme|="fluent"] .ao-btn{font-weight:600}
+[data-theme|="fluent"] .ao-input{border-bottom-color:var(--muted)}
+[data-theme|="fluent"] .ao-row,[data-theme|="fluent"] .ao-bot,[data-theme|="fluent"] .ao-seg button{position:relative}
+[data-theme|="fluent"] .ao-row[aria-current="true"]::before,[data-theme|="fluent"] .ao-bot[aria-selected="true"]::before{content:"";position:absolute;left:0;top:50%;width:3px;height:16px;margin-top:-8px;border-radius:var(--radius-full);background:var(--accent)}
+[data-theme|="fluent"] .ao-row[aria-current="true"] .ao-fnum{background:var(--accent);color:var(--on-accent)}
+[data-theme|="fluent"] .ao-seg button[aria-pressed="true"]::after{content:"";position:absolute;left:50%;bottom:1px;width:16px;height:3px;margin-left:-8px;border-radius:var(--radius-full);background:var(--accent)}
+/* x1.7 five themes and Tour: in a container under 520 px (the office, or a page box with container-type) a mode segment with an icon shows the icon only,
+   and the pressed one keeps its label. The label stays for screen readers and as the tooltip. */
+@container (max-width:520px){.ao-seg button:not([aria-pressed="true"]) .ao-seg-l{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.ao-seg button:not([aria-pressed="true"]):has(.ao-seg-l){padding:6px 9px}}
+/* x1.7 the office top bar. The side columns start below one row of the bar above 820 px (.ao-hud-left and .ao-hud-right at 68 px), two rows to 521 px (108 px)
+   and three rows below (154 px). So the brand, the mode toggle and the view toggle keep to those rows:
+   1. In the bar the mode toggle shows icons only (the pressed mode keeps its label) where the labels do not fit in one row: to 999 px, and to 1199 px in
+      Sublevel (wide capitals). Above that width it shows every label.
+   2. The status counts go to a second row between the columns when the first row is full. Below 960 px they would touch the right column, so they hide.
+   3. Sublevel from 821 to 899 px (wide capitals), or a long building or agent name, still pushes the view toggle to a lower row. Then the columns start
+      below the last toggle of the bar (anchor positioning), never above their own top, so no toggle is under a column. A browser without anchor
+      positioning keeps the fixed top. */
+@container (max-width:999px){.ao-hud-top .ao-seg button:not([aria-pressed="true"]) .ao-seg-l{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.ao-hud-top .ao-seg button:not([aria-pressed="true"]):has(.ao-seg-l){padding:6px 9px}}
+@container (max-width:1199px){[data-theme="sublevel"] .ao-hud-top .ao-seg button:not([aria-pressed="true"]) .ao-seg-l{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}[data-theme="sublevel"] .ao-hud-top .ao-seg button:not([aria-pressed="true"]):has(.ao-seg-l){padding:6px 9px}}
+@container (max-width:959px){.ao-hud-counts{display:none}}
+.ao-hud-top>.ao-seg{anchor-name:--ao-hud-seg}
+.ao-hud-left,.ao-hud-right{top:max(68px,calc(anchor(--ao-hud-seg bottom,0px) + 16px))}
+@container (max-width:820px){.ao-hud-left{top:max(108px,calc(anchor(--ao-hud-seg bottom,0px) + 10px))}.ao-hud-right{top:auto}}
+@container (max-width:520px){.ao-hud-left{top:max(154px,calc(anchor(--ao-hud-seg bottom,0px) + 10px))}}
