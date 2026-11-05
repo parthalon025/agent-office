@@ -402,7 +402,7 @@ export async function removeWorktree({ root, repo, branch }, force = false) {
     .catch((e) => { throw new Error(/contains modified or untracked files|uncommitted/i.test(e.message) ? 'The worktree has uncommitted changes. Remove it anyway to discard them.' : e.message); });
   let branchKept = false;
   // A branch delete rewrites the repository config (its branch section): one config writer at a time (perRepo, M5).
-  try { await perRepo(repo, () => git(['branch', force ? '-D' : '-d', branch], repo)); } catch { branchKept = true; }
+  try { await perRepo(await queueKey(repo), () => git(['branch', force ? '-D' : '-d', branch], repo)); } catch { branchKept = true; }
   return { removed: true, branchKept };
 }
 
@@ -534,34 +534,63 @@ export function roomNameOf(name) {
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(cut)) throw new Error('Windows reserves that name. Pick another room name.');
   return cut;
 }
+/** Claims a new room folder under the shared worktree folder with a plain mkdir, which fails when the folder exists, so two
+ *  repositories (each has its own perRepo queue) never take one name. The caller lets git fill the empty folder and gives it
+ *  back (`addAt`) when git fails. */
 function roomFolder(repo, branch, name = '') {
   fs.mkdirSync(WORKTREE_ROOT, { recursive: true });
   const n = roomNameOf(name);
-  if (!n) return path.join(WORKTREE_ROOT, `${path.basename(repo)}-${slugOf(branch)}-${crypto.randomBytes(2).toString('hex')}`);
+  const claim = (dir) => {
+    try { fs.mkdirSync(dir); return true; }
+    catch (e) { if (e.code === 'EEXIST') return false; throw new Error(`The office cannot make the folder ${dir} (${e.code || e.message}).`); }
+  };
+  if (!n) {
+    for (let i = 0; i < 5; i++) {
+      const dir = path.join(WORKTREE_ROOT, `${path.basename(repo)}-${slugOf(branch)}-${crypto.randomBytes(2).toString('hex')}`);
+      if (claim(dir)) return dir;
+    }
+    throw new Error('The office could not find a free folder for the room. Try again.');
+  }
   for (let i = 1; i < 100; i++) {
     const dir = path.join(WORKTREE_ROOT, i === 1 ? n : `${n}-${i}`);
-    if (!fs.existsSync(dir)) return dir;
+    if (claim(dir)) return dir;
   }
   throw new Error('Too many rooms with that name. Pick another name.');
 }
+/** `git worktree add` into a folder `roomFolder` claimed; on a git failure the claimed folder goes, so its name is free again. */
+async function addAt(repo, root, args) {
+  try { await git(['worktree', 'add', ...args(root)], repo, 120000); }
+  catch (e) { fs.rmSync(root, { recursive: true, force: true }); throw e; }
+}
 
-/** New floor: a new branch from `from` (default HEAD), checked out in a new worktree (its first room). */
+/** The queue key of a repository: its main folder, as for createWorktree, so a worktree path and the repository share one turn. */
+export const queueKey = async (repo) => (await locate(repo))?.repo || repo;
+
+/** New floor: a new branch from `from` (default HEAD), checked out in a new worktree (its first room).
+ *  It takes its turn in perRepo (#119): the folder is picked, and git writes the config, one task at a time. */
 export async function createFloor(repo, branch, from = '', roomName = '') {
   if (!BRANCH_RE.test(branch)) throw new Error('Use letters, digits, dots, dashes and slashes for the branch name.');
+  return perRepo(await queueKey(repo), () => addFloor(repo, branch, from, roomName));
+}
+async function addFloor(repo, branch, from, roomName) {
   try { await git(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], repo); throw new Error(`The branch ${branch} exists. Add a room to its floor instead.`); }
   catch (e) { if (/exists/.test(e.message)) throw e; }
   const root = roomFolder(repo, branch, roomName);
-  await git(['worktree', 'add', '-b', branch, root, from || 'HEAD'], repo, 120000);
+  await addAt(repo, root, (r) => ['-b', branch, r, from || 'HEAD']);
   return { root, branch };
 }
 
 /** New room on a floor: one more worktree with the branch checked out. Git refuses a second
- *  worktree for a branch unless --force, so a floor that has rooms gets one with --force. */
+ *  worktree for a branch unless --force, so a floor that has rooms gets one with --force. It takes its turn in
+ *  perRepo (#119), so the "has rooms" check and the folder name are not stale when git runs. */
 export async function createRoom(repo, branch, roomName = '') {
   if (!BRANCH_RE.test(branch)) throw new Error('Use letters, digits, dots, dashes and slashes for the branch name.');
+  return perRepo(await queueKey(repo), () => addRoom(repo, branch, roomName));
+}
+async function addRoom(repo, branch, roomName) {
   const taken = (await layout(repo)).some((w) => w.branch === branch);
   const root = roomFolder(repo, branch, roomName);
-  await git(['worktree', 'add', ...(taken ? ['--force'] : []), root, branch], repo, 120000);
+  await addAt(repo, root, (r) => [...(taken ? ['--force'] : []), r, branch]);
   return { root, branch, shared: taken };
 }
 
@@ -588,7 +617,7 @@ export async function deleteFloor(repo, branch, force = false) {
   const agents = wts.filter((w) => w.base === branch && w.branch !== branch);
   if (agents.length) throw new Error(`${agents.length === 1 ? 'An agent room sits' : agents.length + ' agent rooms sit'} on the floor ${branch}. Remove ${agents.length === 1 ? 'it' : 'them'} first.`);
   for (const w of wts.filter((x) => x.branch === branch)) await removeRoom(repo, w.root, force);
-  await perRepo(repo, () => git(['branch', force ? '-D' : '-d', branch], repo))
+  await perRepo(await queueKey(repo), () => git(['branch', force ? '-D' : '-d', branch], repo))
     .catch((e) => { throw new Error(/not fully merged/i.test(e.message) ? `The branch ${branch} has commits that are not merged. Delete it anyway to lose them.` : e.message); });
   return { deleted: true };
 }
