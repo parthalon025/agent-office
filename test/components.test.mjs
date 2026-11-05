@@ -163,6 +163,23 @@ test('office.js: pinned screens replace the terminal and changes panels, and eve
   assert.doesNotMatch(fn('DeskScreen') + fn('ChangesScreen') + fn('Bezel'), /style:/, 'no style prop on a pinned layer');
 });
 
+// Review 89, B2: at 400 px an open request pushed Approve and Decline below the desk screen (the bar sat under the tabs, capped
+// at 40%, and the head took two rows). The requests come first, under the head; on a small screen the head is one row, and while
+// a request is open the bar takes the screen under the head with no cap and the tabs wait. The browser check measures it.
+test('office.js and office.css: on the desk screen the requests come first, and on a small screen they take the screen (review 89)', () => {
+  const js = readFileSync(join(pub, 'office.js'), 'utf8'), css = readFileSync(join(pub, 'office.css'), 'utf8');
+  const at = js.indexOf('function DeskScreen('), desk = js.slice(at, js.indexOf('\n  }\n', at));
+  const head = desk.indexOf("h('div', { className: 'pin-head' }"), bar = desk.indexOf('h(RequestBar, { session: s'), tabs = desk.indexOf('h(A.Tabs, {');
+  assert.ok(head >= 0 && bar > head && tabs > bar, 'head, then the requests, then the tabs (DOM order is the reading and focus order)');
+  assert.match(desk, /className: 'pin pin-desk' \+ \(small \? ' is-small' : ''\) \+ \(asks \? ' has-asks' : ''\)/, 'small and has-asks are React state');
+  assert.doesNotMatch(js, /classList\.toggle\('is-small'/, 'no class set by hand: a render that changes className would drop it');
+  assert.match(css, /\.pin-desk\.is-small \.pin-head \{ flex-wrap: nowrap; \}/, 'the small head is one row');
+  assert.match(css, /\.pin-desk\.is-small \.pin-head > \* \{ flex: none; \}/, 'its buttons keep their size; the name gives way');
+  assert.match(css, /\.pin-desk\.is-small\.has-asks \.asks \{ flex: 1 1 auto; min-height: 0; max-height: none; border-bottom: 0; \}/, 'no cap on a small screen');
+  assert.match(css, /\.pin-desk\.is-small\.has-asks \.ao-tabs \{ display: none; \}/, 'the tabs wait while a request is open');
+  assert.match(js, /\.term-input, \.term-note, \.bezel, \.board-b > \.inline-actions,/, 'the toast stack keeps off the terminal note, the bezel and the room panel actions');
+});
+
 // Review M6: at 400 px the Security wall was a 172 px strip between the floor list and the room card. While a Security screen
 // is in focus at 820 px and below, the page hides those two (as has-panel hides the right column; the Decisions inbox stays),
 // frames the screen again, and the look bar shows the open requests, so an approval never hides.

@@ -702,15 +702,18 @@ test('layerSame: half a pixel is the same layer; a new state, screen or count is
 
 // A pinned screen on the focus stage: a 1000 x 800 canvas, screen a (4 x 2.5, facing +z) seen inside the polar range.
 // framePose fills 0.88 of the limiting side, in the middle of the free part. With no covers the free part is the view.
+// opts.plain: a screen that is looked at but not pinned (a board, the notes); opts.engine(s, size): sets up the stage before the
+// host attaches (the host wraps what it finds then).
 function pinStage(opts = {}) {
   const s = focusStage({ a: 5 }), log = [];
-  let size = { w: 1000, h: 800 };
+  let size = { w: opts.w || 1000, h: opts.h || 800 };
   s.cv.getBoundingClientRect = () => ({ left: 0, top: 0, right: size.w, bottom: size.h, width: size.w, height: size.h });
   Object.defineProperty(s.cv, 'clientHeight', { get: () => size.h, configurable: true });
   s.ins.stage.cam.up = v3(0, 1, 0);
+  if (opts.engine) opts.engine(s, () => size);
   const host = globalThis.OfficeSceneHost.attach(s.office, { covers: () => opts.covers || [], waiting: () => (opts.waiting ? opts.waiting() : 0) });
   const sc = screens(s, log), look0 = sc.t.look;
-  sc.t.look = (it) => Object.assign(look0(it), { pin: true, kind: 'terminal' });
+  sc.t.look = (it) => Object.assign(look0(it), opts.plain ? {} : { pin: true, kind: 'terminal' });
   host.register(sc.t);
   const layers = [];
   host.onLayer((l) => layers.push(l));
@@ -770,6 +773,134 @@ test('pinned layer: after a resize it lies on the screen again within 2 px, with
   assert.equal(t.host.flying(), false);
   assert.equal(t.s.stage.cam.zoom, z);
   t.host.dispose();
+});
+
+// The engine's resize path (components/bundle.js), with its own frame, goal step and resize: the stage's ResizeObserver
+// sets the new frustum, and the office's onResize frames the floor at once (frameFloor(true): zoom 1) while the HUD has a
+// frame inset (wider than 820 px). The ResizeObserver runs after the animation frame, so the host's frame sees the new
+// canvas first, and the engine moves the camera after it: no goal the host could hold (review 89, B1).
+const RO_SRC = 's.ro=new ResizeObserver(function(){if(s.ext)s.D=s.fitD(s.ext);s.resize();if(s.onResize)s.onResize();});';
+const ON_RESIZE_SRC = 's.onResize=function(){if(inset&&!s.dead&&bldG&&floorG[st.floor]){if(st.view==="building")frameBuilding(true);else frameFloor(true);}};';
+function resizeEngine(s, size) {
+  const proto = {};
+  new Function('T', 'Stage', 'DUR', engineFn('Stage.prototype.frame=function') + engineFn('Stage.prototype.goalStep=function') + engineFn('Stage.prototype.resize=function'))({ Vector3: V3 }, { prototype: proto }, { camera: 600 });
+  const st = s.stage;
+  Object.assign(st, { rm: false, D: 11, sunOff: null, ext: null, comp: null, frame: proto.frame, goalStep: proto.goalStep, resize: proto.resize,
+    el: { get clientWidth() { return size().w; }, get clientHeight() { return size().h; } },
+    sun: { position: new V3(), target: { position: new V3() } }, shadowFit() {},
+    fitD(e) { return e[1] * 2 + size().h / 400; } });   // the fit depends on the canvas, like the real one
+  st.r.setSize = () => {};
+  st.ctl.target = new V3(0, 0, 0);
+  st.cam.position = new V3(30, 40, 60);
+  st.resize();   // the stage sizes its frustum when it mounts
+}
+function engineLoop(t) {
+  const st = t.s.stage;
+  return {
+    // one animation frame: the engine's goal step, then the page's frames (st.anim: the host's tick)
+    frame(dt = 0.016) { if (st.goal) st.goalStep(dt); t.s.anim.forEach((f) => f(dt, 0)); },
+    // the stage's ResizeObserver; inset: the HUD has a frame inset, so onResize frames the floor at once (fr: s.frame(c,0,1,now,ext))
+    observe(inset) { if (st.ext) st.D = st.fitD(st.ext); st.resize(); if (inset) st.frame([-5, 1.6, 0.8], 0, 1, true, [10, 2.6, 8.2]); }
+  };
+}
+
+test('engine stand-in: the bundle still resizes and frames the floor at once this way', () => {
+  assert.ok(bundleSrc.includes(RO_SRC), 'the stage ResizeObserver');
+  assert.ok(bundleSrc.includes(ON_RESIZE_SRC), 'the office onResize');
+  assert.ok(bundleSrc.includes('s.frame(c,0,1,now,ext);'), 'fr frames at zoom 1');
+});
+
+for (const plain of [false, true]) {
+  const what = plain ? 'a screen in focus (board, notes)' : 'pinned layer';
+  test(`${what}: a window resize makes the engine frame the floor at once; the screen is back in the next frame, with no flight (review 89)`, () => {
+    const t = pinStage({ w: 1100, h: 800, plain, engine: resizeEngine }), e = engineLoop(t);
+    click(t.s);
+    for (let i = 0; i < 3; i++) e.frame(1);
+    near2(t.host.layer().rect, expectBox(1100, 800), 'landed');
+    // 1100 -> 1040 x 760: the host's frame sees the canvas first, then the stage's ResizeObserver frames the floor
+    t.resize(1040, 760);
+    e.frame();
+    e.observe(true);
+    assert.deepEqual(t.s.stage.ext, [10, 2.6, 8.2], 'the engine framed the floor at once (frameFloor(true))');
+    assert.notEqual(t.s.stage.cam.zoom, 1, 'and the host undid the cut in the same call: zoom 1 is never drawn');
+    near2(t.host.rect(), expectBox(1040, 760), 'host.rect in the same call');
+    e.frame();
+    assert.equal(t.host.flying(), false, 'no flight');
+    assert.equal(t.host.layer().shown, true);
+    near2(t.host.layer().rect, expectBox(1040, 760), 'after the engine framed the floor');
+    assert.equal(t.s.stage.ctl.enabled, true, 'the camera is the user\'s again');
+    // the other order: the ResizeObserver before the host's frame
+    t.resize(1300, 820);
+    e.observe(true);
+    e.frame();
+    near2(t.host.layer().rect, expectBox(1300, 820), 'observer first');
+    // the page frames the screen again after a resize (office.js, [win]): it can run right after the ResizeObserver, before
+    // the host's next frame. The cut is undone at once, so that refit finds the camera on the screen and does not fly.
+    t.resize(1200, 780);
+    e.frame();
+    e.observe(true);
+    assert.notEqual(t.s.stage.cam.zoom, 1, 'the cut is undone in the same call');
+    near2(t.host.rect(), expectBox(1200, 780), 'host.rect at once, before the next frame');
+    t.host.refit();
+    assert.equal(t.host.flying(), false, 'the page\'s refit does not fly');
+    e.frame();
+    near2(t.host.layer().rect, expectBox(1200, 780), 'page refit');
+    // the page's refit when the canvas changed and the host has not framed it yet (React set the new scene height): at once
+    t.resize(1180, 760);
+    t.host.refit();
+    assert.equal(t.host.flying(), false, 'a new canvas size: framed at once, no flight');
+    e.observe(true);   // then the stage's ResizeObserver: the new frustum, and the engine's cut
+    assert.equal(t.host.flying(), false);
+    e.frame();
+    near2(t.host.layer().rect, expectBox(1180, 760), 'page refit on a new canvas');
+    // a still camera after that moves nothing, and a held goal stays held
+    const z = t.s.stage.cam.zoom;
+    e.frame(); e.frame();
+    assert.equal(t.s.stage.cam.zoom, z);
+    t.s.stage.frame([3, 1, 1], 0, 1, false, [10, 2.6, 8.2]);   // setFrameInset: a goal, held while a screen is in focus
+    e.frame();
+    assert.equal(t.s.stage.goal, null);
+    assert.equal(t.s.stage.cam.zoom, z);
+    // with no focus the engine frames as before
+    t.host.blur();
+    for (let i = 0; i < 3; i++) e.frame(1);
+    t.resize(1200, 800);
+    e.observe(true);
+    assert.equal(t.s.stage.cam.zoom, 1, 'no focus: the engine framed the floor');
+    e.frame();
+    assert.equal(t.s.stage.cam.zoom, 1, 'and the host leaves it there');
+    t.host.dispose();
+  });
+}
+
+test('pinned layer: at 400 px (no frame inset) the stage sets a new frustum after the host\'s frame; the screen is framed again', () => {
+  const t = pinStage({ w: 400, h: 800, engine: resizeEngine }), e = engineLoop(t);
+  click(t.s);
+  for (let i = 0; i < 3; i++) e.frame(1);
+  near2(t.host.layer().rect, expectBox(400, 800), 'landed');
+  t.resize(400, 640);   // a phone: the window gets lower, the portrait frustum changes with the aspect
+  e.frame();
+  e.observe(false);
+  e.frame();
+  assert.equal(t.host.flying(), false);
+  near2(t.host.layer().rect, expectBox(400, 640), 'after the new frustum');
+  t.host.dispose();
+});
+
+test('host: dispose gives the stage its own frame back', () => {
+  let engineFrame = null;
+  const t = pinStage({ engine: (s, size) => { resizeEngine(s, size); engineFrame = s.stage.frame; } });
+  assert.equal(typeof engineFrame, 'function');
+  t.host.dispose();
+  assert.equal(t.s.stage.frame, engineFrame, 'the engine frame, not a wrapper');
+  // a stage whose frame is on its prototype (the real Stage) keeps no own property after dispose
+  const s = focusStage({ a: 5 });
+  const proto = { frame() { return 'proto'; } };
+  Object.setPrototypeOf(s.stage, proto);
+  const host = globalThis.OfficeSceneHost.attach(s.office);
+  host.dispose();
+  assert.equal(Object.prototype.hasOwnProperty.call(s.stage, 'frame'), false);
+  assert.equal(s.stage.frame(), 'proto');
 });
 
 test('pinned layer: after a theme rebuild and a floor rebuild it lies on the screen again within 2 px', () => {

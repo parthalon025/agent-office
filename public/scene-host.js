@@ -63,14 +63,16 @@
    Two steps: an item whose look() gives a spec is a screen. The first click looks at it: the camera flies so the
    plane fills most of the free part of the screen. A second click on it calls open(). An item without a spec (the
    door) calls click() at once. A click on another screen looks at that one; a click on empty scene, Esc (the
-   page) or Back flies back. The camera flies here only, and the engine does not reframe while an item is in focus.
+   page) or Back flies back. The camera flies here only, and the engine does not reframe while an item is in focus: a
+   goal it sets is held back, and a frame it cuts at once (stage.frame with now: a window resize with a HUD inset, a
+   theme rebuild) is undone in the next frame, before the engine draws (the host wraps stage.frame).
    fill: the share of the free part the plane fills (default 0.88). clear: after the landing the camera stands this
    far in front of the plane, so what stands closer to the viewer (a bot, its bubble, a desk) is clipped away.
    pin: a pinned screen (#89). Its look is its use: once the camera lands, the page lays a real DOM layer (chat, terminal,
    diff) exactly over host.layer().rect, so text can be read, typed, selected and copied there. The layer follows the
-   screen every frame, hides during a flight, and refits at once (no flight) on a resize, a theme rebuild or a floor
-   rebuild. The page positions it with setProperty, never a style attribute (the CSP). Every focused screen, pinned or
-   not, has a bezel: the page shows layer().waiting on it. */
+   screen every frame, hides during a flight, and refits at once (no flight) on a resize (of the canvas or of the camera's
+   frustum), a theme rebuild, a floor rebuild or a frame the engine cut. The page positions it with setProperty, never a
+   style attribute (the CSP). Every focused screen, pinned or not, has a bezel: the page shows layer().waiting on it. */
 (function (root) {
   'use strict';
 
@@ -303,6 +305,21 @@
         set: function (v) { if (v && foc) { heldGoal = v; return; } goalVal = v; } });
       goalHooked = true;
     } catch (x) { goalHooked = false; }
+    // The engine also frames at once, with no goal (stage.frame with now: a window resize while the HUD has a frame inset,
+    // a theme rebuild, the same floor again): zoom 1 on the floor. A resize does it in the stage's ResizeObserver, after the
+    // page's frame, so the host would never see it (review 89, B1). The host wraps the stage's frame: a cut while an item is
+    // in focus puts the camera back on the item in the same call (undoCut), so nothing reads the cut camera: not the next
+    // draw, not the page's refit after the resize, which would fly from it. During a rebuild the item's mesh can be out of
+    // the scene; then the next frame does it, after follow() found the new mesh.
+    var frame0 = st.frame, frameOwn = Object.prototype.hasOwnProperty.call(st, 'frame'), frameHooked = false, cut = false;
+    if (typeof frame0 === 'function') {
+      st.frame = function (target, D, zoom, now) {
+        var r = frame0.apply(this, arguments);
+        if (now && foc) { cut = true; try { undoCut(); } catch (x) { /* the next frame tries again */ } }
+        return r;
+      };
+      frameHooked = true;
+    }
 
     function inspect() { try { return office.inspect(); } catch (x) { return null; } }
     function curShownFloor() { return shownFloor(scene, inspect()); }
@@ -528,6 +545,15 @@
       }
       flyTo(pose, cssNum('duration-camera', 600), null);
     }
+    // The engine cut the camera while an item is in focus (stage.frame with now): back on the item at once, with no flight.
+    // Not while the item's mesh is out of the scene (a rebuild): the next frame does it, on the new mesh.
+    function undoCut() {
+      if (!cut) return;
+      if (!foc) { cut = false; return; }
+      if (!inScene(scene, foc.mesh)) return;
+      cut = false;
+      refit(true, true);
+    }
     // The camera is already where the pose puts it (within a millionth of the view).
     function posed(pose) {
       var c = st.cam, t = ctlTarget(), p = pose.near || pose.pos, e = 1e-6 * (camNow().dist || 1);
@@ -558,10 +584,15 @@
       lastLayer = l;
       layerFns.slice().forEach(function (fn) { try { fn(l); } catch (x) { /* one listener must not stop the others */ } });
     }
-    // The canvas changed size (the window, the DS height prop): frame the item in focus again at once, so a pinned layer
-    // stays on its screen and does not hide for a flight.
+    // The canvas or the camera's frustum changed size (the window, the DS height prop): frame the item in focus again at once,
+    // so a pinned layer stays on its screen and does not hide for a flight. The page's frame can see the new canvas before the
+    // stage's ResizeObserver sets the new frustum (the view height in world units, which framePose reads), so both count.
+    function sizeSig() {
+      var r = cv.getBoundingClientRect(), c = st.cam;
+      return Math.round(r.width) + 'x' + Math.round(r.height) + ':' + [c.left, c.right, c.top, c.bottom].join(',');
+    }
     function sizeStep() {
-      var r = cv.getBoundingClientRect(), s = Math.round(r.width) + 'x' + Math.round(r.height);
+      var s = sizeSig();
       if (lastSize && s !== lastSize && foc) refit(true);
       lastSize = s;
     }
@@ -612,6 +643,10 @@
         if (why.length) follow(why);   // the adapters scanned: the item in focus has its new mesh, or it is gone
       } catch (x) { /* one bad frame must not stop the office */ }
       try {
+        // a cut the frame call could not undo (a rebuild): back on the item now, after follow found its new mesh
+        if (cut) { cut = false; if (foc) refit(true, true); }
+      } catch (x) { /* one bad frame must not stop the office */ }
+      try {
         if (foc && st.goal) st.goal = null;   // a goal set before the focus began: the engine must not reframe while an item is in focus
         sizeStep();
         stepFly(dt);
@@ -644,6 +679,7 @@
       restoreZoom();
       foc = null; saved = null; heldGoal = null;
       if (goalHooked) { delete st.goal; st.goal = goalVal; }   // the stage's own property again
+      if (frameHooked) { if (frameOwn) st.frame = frame0; else delete st.frame; }   // the stage's own frame again
       var hadLayer = !!lastLayer; lastLayer = null;
       if (hadLayer) layerFns.slice().forEach(function (fn) { try { fn(null); } catch (x) { /* gone */ } });   // the layer goes with the scene
       targets = []; frames = []; rebuildFns = []; focusFns = []; layerFns = []; hoverT = null;
@@ -678,8 +714,9 @@
       open: function () { if (foc && focusStep(focusS, { type: 'click', key: foc.key }).act === 'open') openFocus(null, null, null); },
       show: show,
       blur: function () { if (focusStep(focusS, { type: 'back' }).act === 'back') back(); },
-      // a pinned layer is on the screen: frame it again at once, so the layer follows and does not hide for a flight
-      refit: function () { refit(!!(foc && foc.spec.pin)); },
+      // a pinned layer is on the screen: frame it again at once, so the layer follows and does not hide for a flight. A new
+      // canvas or frustum the host has not framed yet (the page asks right after a window resize): at once too, as sizeStep.
+      refit: function () { refit(!!(foc && (foc.spec.pin || (lastSize && sizeSig() !== lastSize)))); },
       free: free,
       rect: rect,
       onFocus: function (fn) { return add(focusFns, fn); },

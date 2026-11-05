@@ -1395,16 +1395,19 @@
   function putBox(el, r) {
     el.style.setProperty('--pin-x', px(r.left)); el.style.setProperty('--pin-y', px(r.top));
     el.style.setProperty('--pin-w', px(r.width)); el.style.setProperty('--pin-h', px(r.height));
-    // a small screen (a phone, a desk monitor seen from afar) gets the compact layout
-    el.classList.toggle('is-small', r.width < 520 || r.height < 300);
   }
+  // A small screen (a phone, a desk monitor seen from afar) gets the compact layout. It is React state, not a class set
+  // by hand: a render that changes className would drop a class set from outside.
+  function smallBox(r) { return r.width < 520 || r.height < 300; }
   function usePinBox(host, ref, put) {
+    var sm = useState(false), small = sm[0], setSmall = sm[1];
     React.useLayoutEffect(function () {
       if (!host) return undefined;
-      function at(l) { var el = ref.current; if (el && l && l.rect) put(el, l.rect); }
+      function at(l) { var el = ref.current; if (el && l && l.rect) { put(el, l.rect); setSmall(smallBox(l.rect)); } }
       at(host.layer());
       return host.onLayer(at);
     }, [host]);
+    return small;
   }
   // The count of waiting requests on the bezel of the screen in focus. One tap goes to the oldest request (the page decides
   // where that is). inline: in the head of a pinned screen; else on the top right corner of the screen's frame.
@@ -1458,40 +1461,46 @@
 
   // The desk monitor of one session, pinned (#89): its chat, its terminal and the timeline of its tool calls, the open
   // requests (RequestBar, so an approval never hides behind the hidden HUD chat), Export, Stop turn and Back.
+  // The requests come first, right under the head (review 89): no approval can hide. On a small screen the head takes one
+  // row (Stop turn and Export show their icon only), and while a request is open the bar takes the whole screen under the
+  // head and the tabs wait (has-asks), so Approve and Decline are always on the screen.
   var DESK_TABS = [{ id: 'chat', label: 'Chat', icon: 'chat' }, { id: 'terminal', label: 'Terminal', icon: 'terminal' }, { id: 'timeline', label: 'Timeline', icon: 'trace' }];
   function DeskScreen(p) {
     var snap = useSnapshot();
     var s = snap ? snap.sessions.filter(function (x) { return x.uid === p.uid; })[0] : null;
     var ref = React.useRef(null);
-    usePinBox(p.host, ref, putBox);
+    var small = usePinBox(p.host, ref, putBox);
     usePinFocus(p.shown, function () { var el = ref.current; return el && (el.querySelector('#pin-chat-input, .term-field') || el.querySelector('.ao-tab[aria-selected="true"]')); });
     var working = s && (s.status === 'working' || s.status === 'waiting');
+    var asks = window.OfficeVocab.requests(s).length > 0;
     function stop() { api('/api/interrupt', { uid: s.uid }).catch(function (x) { p.toast({ tone: 'error', title: s.name, text: x.message }); }); }
     var tab = p.tab || 'chat';
-    return h('section', { ref: ref, className: 'pin pin-desk', hidden: !p.shown, 'aria-label': 'Desk screen of ' + p.name },
+    // small: the button shows its icon, and its name is its label (and its tooltip)
+    function act(icon, text, title, onClick) { return h(A.Button, { variant: 'quiet', icon: icon, label: small ? text : null, title: small ? (title || text) : title, onClick: onClick }, small ? null : text); }
+    return h('section', { ref: ref, className: 'pin pin-desk' + (small ? ' is-small' : '') + (asks ? ' has-asks' : ''), hidden: !p.shown, 'aria-label': 'Desk screen of ' + p.name },
       h('div', { className: 'pin-head' },
         h(A.StatusDot, { status: s ? statusOf(s) : 'resting' }),
         h('b', { className: 'pin-name' }, p.name),   // the scene's name of the bot (unique in the building), as on its desk
         h('span', { className: 'pin-sub mono' }, s ? window.officeAdapter.kindWord(s) + ' · ' + modelWord(s.model) : ''),
         h(Bezel, { inline: true, count: p.waiting, onGo: p.onGo }),
-        s && s.headless && working ? h(A.Button, { variant: 'quiet', icon: 'pause', onClick: stop }, 'Stop turn') : null,
-        s ? h(A.Button, { variant: 'quiet', icon: 'copy', title: 'Save this session as a Markdown file', onClick: function () { exportSession(s.uid, p.toast); } }, 'Export') : null,
+        s && s.headless && working ? act('pause', 'Stop turn', null, stop) : null,
+        s ? act('copy', 'Export', 'Save this session as a Markdown file', function () { exportSession(s.uid, p.toast); }) : null,
         h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onBack }, 'Back')),
+      h(RequestBar, { session: s, name: p.name, toast: p.toast }),
       h(A.Tabs, { label: 'Desk screen', tabs: DESK_TABS, value: tab, onChange: p.onTab, render: function (id) {
         if (id === 'chat') return h(ChatTab, { office: p.office, bot: p.bot, name: p.name });
         return h(TermTab, { s: s, name: p.name, toast: p.toast, timeline: id === 'timeline' });
-      } }),
-      h(RequestBar, { session: s, name: p.name, toast: p.toast }));
+      } }));
   }
 
   // The changes of a room on its wall screen, pinned (#89). Pull request and worktree removal keep their confirm dialog.
   function ChangesScreen(p) {
     var c = useChanges(p.uid, p.toast);
     var ref = React.useRef(null);
-    usePinBox(p.host, ref, putBox);
+    var small = usePinBox(p.host, ref, putBox);
     usePinFocus(p.shown, function () { var el = ref.current; return el && el.querySelector('.diff, .pin-body'); });
     return h(React.Fragment, null,
-      h('section', { ref: ref, className: 'pin pin-changes', hidden: !p.shown, 'aria-label': 'Changes in ' + (p.name || 'this session') },
+      h('section', { ref: ref, className: 'pin pin-changes' + (small ? ' is-small' : ''), hidden: !p.shown, 'aria-label': 'Changes in ' + (p.name || 'this session') },
         h('div', { className: 'pin-head' },
           h('b', { className: 'pin-name' }, 'Changes in ' + (p.name || 'this session')),
           h(Bezel, { inline: true, count: p.waiting, onGo: p.onGo }),
@@ -1750,7 +1759,7 @@
     // pinned screens, the board, stats and notes panels, the welcome card. A new box goes in one of the two lists.
     // It measures again when a box appears, goes or changes size (ResizeObserver), when a toast comes or goes, when
     // --strip-clear changes, on resize, and when a box scrolls. With no free band the stack waits out of sight (is-off) and its clocks wait.
-    var KEEP = '.ao-hud-top, .ao-hud-left, .ao-hud-zoom, .ao-hud-inbox, .ao-hud-cast, .strip, .strip-more, .asks, .pin-head, .pin .ao-tablist, .pin-input, .term-input, .bezel,.board-b > .inline-actions, .look-bar, .city-hud, .city-zoom, .ao-hud-chat .ao-chat-h, .ao-hud-chat .ao-tablist, .ao-hud-chat .ao-act, .ao-hud-chat .ao-chips, .ao-hud-chat .ao-composer';
+    var KEEP = '.ao-hud-top, .ao-hud-left, .ao-hud-zoom, .ao-hud-inbox, .ao-hud-cast, .strip, .strip-more, .asks, .pin-head, .pin .ao-tablist, .pin-input, .term-input, .term-note, .bezel, .board-b > .inline-actions, .look-bar, .city-hud, .city-zoom, .ao-hud-chat .ao-chat-h, .ao-hud-chat .ao-tablist, .ao-hud-chat .ao-act, .ao-hud-chat .ao-chips, .ao-hud-chat .ao-composer';
     var AVOID = '.ao-hud > *, .board-panel, .pin, .notes-edit, .welcome';
     var placeRef = React.useRef(null);
     useEffect(function () {
