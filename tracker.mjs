@@ -57,6 +57,10 @@ const defaultId = (kind) => (ID_PREFIX[kind] ?? '') + crypto.randomBytes(ID_BYTE
  * @param {(dir: string) => void} [deps.persist.recentDir] a folder a session started in.
  * @param {(list: {commands: string[], skills: string[]}) => void} [deps.persist.commands] last known slash commands.
  * @param {(s: object, git: object|null) => void} [deps.persist.placed] a session's place was looked up.
+ * @param {(s: object, dollars: number) => void} [deps.persist.spent] a turn result says the session spent more (the Spend screen).
+ * @param {(s: object, p: object, opts: {provider?: boolean}) => ({allow: boolean, line?: string, message?: string, quiet?: boolean}|null)} [deps.screen]
+ *   the check before a hold (the Security room rules, security.mjs decide): a decision answers the request at once,
+ *   null holds it. Default: hold every request.
  */
 export function createTracker(deps = {}) {
   const now = deps.now || Date.now;
@@ -66,6 +70,7 @@ export function createTracker(deps = {}) {
   const releaseHold = deps.releaseHold || (() => {});
   const setTimer = deps.setTimer || ((fn, ms) => setTimeout(fn, ms));
   const persist = deps.persist || {};
+  const screen = deps.screen || (() => null);
 
   /** @type {Map<string, any>} uid -> session */
   const sessions = new Map();
@@ -296,11 +301,20 @@ export function createTracker(deps = {}) {
 
   // A PermissionRequest hook. Records the prompt on the session and returns what the server needs to
   // hold the request: { s, id, suggestions }. Null when no session is known (the server answers {}).
-  function permissionRequest(p) {
+  // The check before a hold (screen, the Security room rules) comes first: when it decides, nothing waits, the request is
+  // not pending, and the result has auto: { allow, message? } for the server to answer at once. A feed line says so
+  // unless the decision is quiet. opts.provider: the request comes from a provider (providers/index.mjs), not a hook.
+  function permissionRequest(p, opts = {}) {
     onHook({ ...p, hook_event_name: 'PermissionRequest' });
     const s = findSession(p);
     if (!s) return null;
     const id = makeId('permission');
+    const d = screen(s, p, opts);
+    if (d) {
+      if (!d.quiet && d.line) addFeed(s, 'tool', d.line);
+      changed();
+      return { s, id, suggestions: [], auto: d.message ? { allow: d.allow === true, message: d.message } : { allow: d.allow === true } };
+    }
     const detail = describeTool(p.tool_name, p.tool_input);
     const suggestions = allowRules(p.permission_suggestions);
     s.pending.push({ id, key: callKey(p), agent: p.agent_id || null, tool: p.tool_name, detail, risk: riskOf(p.tool_name, p.full_input || p.tool_input, rootOf(s)), preview: makePreview(p.tool_name, p.full_input || p.tool_input), always: ruleLabel(suggestions), t: now() });
@@ -308,6 +322,14 @@ export function createTracker(deps = {}) {
     addFeed(s, 'wait', `asks to use ${s.note}`);
     changed();
     return { s, id, suggestions };
+  }
+
+  // The office refused a call before it ran (Claude Code's PreToolUse, a Deny rule): the call ends as failed with the reason.
+  function refuseCall(s, p, why, line) {
+    closeCall(s, p.tool_use_id, false, 0, why);
+    if (!p.agent_id && s.tool && s.tool.name === p.tool_name) s.tool = null;
+    if (line) addFeed(s, 'tool', line);
+    changed();
   }
 
   // An office_ask question from the agent. Returns its id.
@@ -391,7 +413,11 @@ export function createTracker(deps = {}) {
       for (const b of m.message?.content || []) if (b.type === 'text' && b.text && b.text.trim()) pushReply(s, b.text);
     } else if (m.type === 'result') {
       s.live = '';
-      if (typeof m.total_cost_usd === 'number') s.cost = (s.costBase || 0) + m.total_cost_usd;
+      if (typeof m.total_cost_usd === 'number') {
+        const before = s.cost || 0;
+        s.cost = (s.costBase || 0) + m.total_cost_usd;
+        if (s.cost > before) persist.spent?.(s, s.cost - before);
+      }
       const mu = m.modelUsage && Object.values(m.modelUsage)[0];
       if (mu?.contextWindow) s.ctxWindow = mu.contextWindow;
       // The turn is over: show the bot at rest even when the stop hook did not run (a stopped turn, a spending limit).
@@ -413,7 +439,7 @@ export function createTracker(deps = {}) {
 
   return {
     sessions, feed, addFeed, newSession, findSession, placeSession,
-    onHook, permissionRequest, askQuestion, settle, interrupt, userMessage, startTurn, dismissError, fail,
+    onHook, permissionRequest, refuseCall, rootOf, askQuestion, settle, interrupt, userMessage, startTurn, dismissError, fail,
     onStream, pushReply, endSession, dropPending, dropQuestions,
   };
 }

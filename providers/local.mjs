@@ -1,6 +1,6 @@
 // Local model provider: Ollama and LM Studio agents behind the provider seam (providers/index.mjs).
 // One factory, two kinds. It talks to an OpenAI-compatible chat server on this machine and runs the agent loop in the
-// office: the model asks for a tool, the office rates the call (risk.mjs), asks you when it is not low risk, runs it
+// office: the model asks for a tool, the office decides (the Security room rules, riskOf by default; it asks you when a rule says Ask), runs it
 // inside the worktree (providers/local-tools.mjs) and sends the result back, until the model answers in plain text.
 //
 // Everything the agent does is reported to the tracker in its own vocabulary (events.hook, events.stream): this file
@@ -10,7 +10,6 @@
 // Local servers are shared with other tools (LM Studio also serves embeddings). So this file only reads the model list and
 // sends chat requests. It never loads, unloads or downloads a model.
 import crypto from 'node:crypto';
-import { riskOf } from '../risk.mjs';
 import { providerError } from './index.mjs';
 import { createLocalTools } from './local-tools.mjs';
 
@@ -130,11 +129,13 @@ export function createLocal(deps) {
   // as context on the prompt and on a tool result, and as a block on Stop (go on, here is a new message).
   const noteOf = (back) => back?.hookSpecificOutput?.additionalContext || '';
 
-  // Ask the user and wait. The server holds the request and calls answer(); a close or an interrupt drops it as a decline.
+  // Ask the office and wait: { allow, message }. The office checks the Security room rules first (Allow and Deny answer at
+  // once, on a later tick), else it holds the request for the user and calls answer(). A close or an interrupt drops it as
+  // a decline. message: why the office refused, for the model.
   function ask(st, s, name, input) {
     return new Promise((resolve) => {
       const id = events.permission(s, { tool_name: name, tool_input: input, permission_suggestions: [] });
-      if (!id) return resolve(false);
+      if (!id) return resolve({ allow: false });
       st.waiting.set(id, resolve);
     });
   }
@@ -174,7 +175,9 @@ export function createLocal(deps) {
     finishTurn(s, st, last, failure);
   }
 
-  // One tool call: Pre hook, approval when the risk is not low, the tool, then Post or PostFailure. Returns the text for the model.
+  // One tool call: Pre hook, the office's decision, the tool, then Post or PostFailure. Returns the text for the model.
+  // The office decides every call (the Security room rules, then a hold): by default a low-risk call runs with no question,
+  // as riskOf rated it, and the user can tighten that on the wall. So this file keeps no approval rule of its own.
   async function callTool(s, st, c) {
     let input;
     try { input = c.args ? JSON.parse(c.args) : {}; } catch { input = null; }
@@ -185,8 +188,9 @@ export function createLocal(deps) {
     const failed = (error, interrupt = false) => { emit(st, () => events.hook(s, { hook_event_name: 'PostToolUseFailure', ...base, error, is_interrupt: interrupt, duration_ms: Date.now() - t0 })); return error; };
     if (input === null) return failed('The arguments are not valid JSON.');
     if (OFFICE_NAMES.has(c.name)) return officeCall(s, st, c, shown, base, t0, failed);
-    if (riskOf(c.name, shown, s.cwd) !== 'low' && !st.closed) {
-      if (!(await ask(st, s, c.name, shown))) return failed(st.interrupted || st.closed ? 'Stopped' : 'Declined from Agent Office.', st.interrupted);
+    if (!st.closed) {
+      const d = await ask(st, s, c.name, shown);
+      if (!d.allow) return failed(st.interrupted || st.closed ? 'Stopped' : d.message || 'Declined from Agent Office.', st.interrupted);
     }
     if (st.interrupted || st.closed) return failed('Stopped', true);
     const r = await st.tools.run(c.name, shown);
@@ -216,7 +220,7 @@ export function createLocal(deps) {
 
   function finishTurn(s, st, last, failure) {
     st.busy = false;
-    for (const resolve of st.waiting.values()) resolve(false);
+    for (const resolve of st.waiting.values()) resolve({ allow: false });
     st.waiting.clear();
     if (st.closed) return;
     if (st.interrupted) {
@@ -272,13 +276,14 @@ export function createLocal(deps) {
       else setImmediate(() => runTurn(s, st, prompt));
     },
 
-    // The user's decision on a request this provider raised. No decision ({}) declines.
+    // The decision on a request this provider raised: the user's, or the Security room's (with message, why it refused).
+    // No decision ({}) declines.
     answer(s, request, d = {}) {
       const st = agents.get(s.uid);
       const resolve = st && st.waiting.get(request?.id);
       if (!resolve) return;
       st.waiting.delete(request.id);
-      resolve(d.allow === true);
+      resolve({ allow: d.allow === true, message: typeof d.message === 'string' ? d.message : '' });
     },
 
     interrupt(s) {
@@ -288,7 +293,7 @@ export function createLocal(deps) {
       st.queue.length = 0;
       st.tools.stop();
       if (st.abort) st.abort.abort();
-      for (const resolve of st.waiting.values()) resolve(false);
+      for (const resolve of st.waiting.values()) resolve({ allow: false });
       st.waiting.clear();
     },
 
@@ -299,7 +304,7 @@ export function createLocal(deps) {
         st.closed = true;
         st.tools.stop();
         if (st.abort) st.abort.abort();
-        for (const resolve of st.waiting.values()) resolve(false);
+        for (const resolve of st.waiting.values()) resolve({ allow: false });
       }
       return Promise.resolve();
     },
