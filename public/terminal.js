@@ -132,6 +132,25 @@
     }
     return out;
   }
+  // The timeline of a session (#72): one line per tool call with its clock time, the time since the session began, how long it
+  // ran and how it ended. OfficeFormat.timeline owns the rows, so Export carries the same times. Newest last, like the terminal.
+  function timeline(s, cols) {
+    cols = Math.max(12, Math.floor(+cols) || 80);
+    if (!s) return [{ text: 'No session at this desk.', tone: 'muted' }];
+    var F = window.OfficeFormat, rows = F.timeline((s.calls || []).filter(function (c) { return c && !c.agent; }), { start: s.startedAt });
+    if (!rows.length) return [{ text: 'No tool calls yet.', tone: 'muted' }];
+    var out = [{ text: clipCols('Time      After    Took      Call', cols), tone: 'muted' }];
+    rows.forEach(function (r) {
+      var lead = r.time + '  ' + pad(r.after, 7) + '  ' + pad(r.duration, 8) + '  ';
+      var mark = r.state === 'failed' ? ' failed' : r.state === 'open' ? ' ...' : '';
+      var room = Math.max(4, cols - lead.length - mark.length);
+      var body = clipCols(oneLine(r.text), room);
+      out.push({ text: lead + body + spaces(room - body.length) + mark, tone: r.state === 'failed' ? 'err' : r.state === 'open' ? 'tool' : 'ok' });
+      if (r.state === 'failed' && r.err && !/^failed$/i.test(r.err)) wrapCols(oneLine(r.err), cols, '  ', '  ').slice(0, 2).forEach(function (t) { out.push({ text: t, tone: 'err' }); });
+    });
+    return out;
+  }
+  function pad(t, n) { t = String(t == null ? '' : t); return t + spaces(Math.max(0, n - t.length)); }
   function textLines(text, cols, full) {
     var out = [];
     md(text).forEach(function (p) {
@@ -175,6 +194,8 @@
     (s.pending || []).forEach(function (r) {
       wrapCols(oneLine('Allow ' + str(r.tool) + (r.detail ? ': ' + r.detail : '') + '?'), cols, '? ', '  ').slice(0, full ? 4 : 2)
         .forEach(function (t) { tail.push({ text: t, tone: 'prompt', ask: true }); });
+      // The reason the agent gives for the request (#72), under it.
+      if (r.reason) wrapCols(oneLine('Reason: ' + r.reason), cols, '  ', '  ').slice(0, full ? 3 : 1).forEach(function (t) { tail.push({ text: t, tone: 'prompt', ask: true }); });
     });
     (s.questions || []).forEach(function (q) {
       wrapCols(oneLine(q && q.text), cols, '? ', '  ').slice(0, full ? 6 : 2).forEach(function (t) { tail.push({ text: t, tone: 'prompt', ask: true }); });
@@ -775,5 +796,5 @@
     };
   }
 
-  window.OfficeTerminal = { attach: attach, lines: lines, status: status, toolName: toolName };
+  window.OfficeTerminal = { attach: attach, lines: lines, timeline: timeline, status: status, toolName: toolName };
 })();

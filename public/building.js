@@ -378,7 +378,7 @@
           (s.pending || []).forEach(function (r) {
             if (k.asked[r.id]) return;
             k.asked[r.id] = true;
-            pick(prev && prev.asked[r.id])(stamp({ type: 'request', bot: bot0, id: r.id, text: 'Allow ' + r.tool + (r.detail ? ': ' + clip(r.detail, 80) : '') + '?', risk: r.risk, tool: r.tool, preview: r.preview || r.detail }, r.t));
+            pick(prev && prev.asked[r.id])(stamp({ type: 'request', bot: bot0, id: r.id, text: 'Allow ' + r.tool + (r.detail ? ': ' + clip(r.detail, 80) : '') + '?' + (r.reason ? ' Reason: ' + clip(r.reason, 160) : ''), risk: r.risk, tool: r.tool, preview: r.preview || r.detail }, r.t));
           });
           // free-form questions from the session (office_ask): answer with Yes or No, or reply in the chat
           (s.questions || []).forEach(function (q) {
