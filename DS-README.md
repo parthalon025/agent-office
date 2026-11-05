@@ -1,4 +1,4 @@
-# Agent Office DS x1.6.4 (design system README)
+# Agent Office DS x1.6.5 (design system README)
 
 Agent Office is **the control room for any agent harness**. A harness (Claude Code, Hermes Agent, Copilot Studio, the Claude or OpenAI Agents SDK, a local model in LM Studio with an agent loop) runs the agents. Agent Office shows what they do and lets people steer them. Each agent is a bot. Bots sit in rooms, rooms sit on floors, floors stack into a building.
 
@@ -70,13 +70,13 @@ Start from `kit/page.html` and `kit/adapter.js`. The starter page runs the mock 
 - Change the scene only with adapter events. Never move bots with your own code; the engine walks them around objects.
 - Map risky steps (dangerous tools, spend, publishing) to `request` events.
 - Respect `prefers-reduced-motion`. Keep the HUD keyboard path complete.
-- Keep the x version prefix (x1.6.4) until the design is a SKU: in file names, titles, scene signs and the changelog.
+- Keep the x version prefix (x1.6.5) until the design is a SKU: in file names, titles, scene signs and the changelog.
 
 ## Definition of done
 
 Use visual inspection: take screenshots and look at them.
 
-- [ ] `python3 kit/check.py <your files>` passes (tokens, icons, version marks, event log). A custom property that a checked file defines counts as a known token: `--name:` in a CSS file, in an HTML `<style>` block or in an HTML `style=""` attribute, or `setProperty('--name', ...)` in a script or an HTML file.
+- [ ] `python3 kit/check.py <your files>` passes (tokens, icons, version marks, event log). A custom property that a checked file defines counts as a known token: `--name:` in a CSS file, in an HTML `<style>` block or in an HTML `style=""` attribute, or `setProperty('--name', ...)` in a script or an HTML file. A name that the code builds at run time, such as `"var(--status-" + s` or `"role-" + r`, is checked by its prefix: a name that ends in "-" must start some token or icon.
 - [ ] Screenshots in Day, Night and Sublevel, at 1360, 1100 and 400 px, with `quality: "low"` and with reduced motion.
 - [ ] Bots walk around objects: send `status: "resting"` to a room, then `"working"`, and look while they walk.
 - [ ] Approve, decline, chat and broadcast send commands; the scene changes only after the adapter replies.

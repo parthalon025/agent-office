@@ -1,5 +1,5 @@
 {
- "version": "x1.6.4",
+ "version": "x1.6.5",
  "events": {
   "status": {
    "desc": "A bot changes state. The bot walks to rest or back to its seat when needed.",
@@ -468,6 +468,7 @@
   "scene-wall-h",
   "scene-wall-side",
   "scene-wood",
+  "scrim",
   "shadow-panel",
   "space-1",
   "space-2",

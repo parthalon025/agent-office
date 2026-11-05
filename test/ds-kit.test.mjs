@@ -159,4 +159,54 @@ test('kit/check.py: a custom property that the checked page defines is a known t
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('kit/check.py: a name built at run time is checked by its prefix', { skip: !python }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-kit-'));
+  const f = (n, s) => { const p = path.join(dir, n); fs.writeFileSync(p, s); return p; };
+  const run = (p) => spawnSync(python, ['-I', fileUrl('kit/check.py'), p], { encoding: 'utf8' });
+  const ok = run(f('a.js', 'el.style.color = "var(--status-" + s + ")"; h(Icon, { name: "role-" + r });\n'));
+  assert.equal(ok.status, 0, ok.stdout);
+  const badTok = run(f('b.js', 'el.style.color = "var(--nothing-" + s + ")";\n'));
+  assert.equal(badTok.status, 1);
+  assert.match(badTok.stdout, /unknown token --nothing-/);
+  const badIcon = run(f('c.js', 'h(Icon, { name: "nothing-" + r });\n'));
+  assert.equal(badIcon.status, 1);
+  assert.match(badIcon.stdout, /unknown icon nothing-/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('the DS files pass kit/check.py (the same list as CI)', { skip: !python }, () => {
+  const files = ['components/bundle.css', 'components/bundle.js', 'kit/page.html'].map(fileUrl);
+  const r = spawnSync(python, ['-I', fileUrl('kit/check.py'), ...files], { encoding: 'utf8' });
+  assert.equal(r.status, 0, r.stdout);
+});
+
+test('CI checks the DS files with kit/check.py', () => {
+  const ci = read('.github/workflows/ci.yml');
+  const line = ci.split('\n').find((l) => l.includes('python kit/check.py'));
+  assert.ok(line, 'CI has a kit/check.py step');
+  for (const f of ['components/bundle.css', 'components/bundle.js', 'kit/page.html']) assert.ok(line.split(/\s+/).includes(f), `${f} is in the CI check list`);
+});
+
+test('the DS CSS uses tokens for the overlay and the Sublevel scan lines', () => {
+  const b = read('components/bundle.css');
+  assert.match(b, /\.ao-overlay\{[^}]*background:color-mix\(in srgb,var\(--scrim\) 45%,transparent\)/);
+  assert.match(b, /\.ao-overlay\.is-inline\{[^}]*background:color-mix\(in srgb,var\(--scrim\) 25%,transparent\)/);
+  assert.match(b, /\.ao-fh\{background-image:repeating-linear-gradient\(0deg,color-mix\(in srgb,var\(--on-floor\) 6%,transparent\)/);
+  assert.ok(tokens.some((t) => t.name === 'scrim'), 'scrim is in tokens.json');
+});
+
+test('the scrim usage text names the dialog and the command palette, and no doc says "welcome card"', () => {
+  const t = tokens.find((x) => x.name === 'scrim');
+  for (const [file, text] of [['tokens.json', t.usage], ['Reference.md', read('Reference.md')], ['Changelog.md', read('Changelog.md')]]) {
+    assert.ok(!/veil behind a dialog or (a|the) welcome card/i.test(text), `${file} does not claim a welcome card uses the scrim`);
+  }
+  assert.match(t.usage, /dialog or the command palette/);
+});
+
+test('the checker docs say that a name ending in "-" is checked by its prefix', () => {
+  for (const f of ['DS-README.md', 'Recipes.md']) {
+    assert.match(read(f), /checked by its prefix: a name that ends in "-"/, `${f} explains the prefix rule`);
+  }
+});
+
 function fileUrl(rel) { return new URL(rel, root).pathname.replace(/^\/([A-Za-z]:)/, '$1').replace(/%20/g, ' '); }

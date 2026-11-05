@@ -4,7 +4,7 @@
 
 A 3D office that shows your Claude Code sessions as bots at desks, and lets you run them without a terminal. Open a session, talk to it in a chat, approve its steps, see what it changed, and close it, all from one browser tab.
 
-It is built on the Agent Office design system (x1.6.4), which lives in this folder. The design system documents are in [DS-README.md](DS-README.md).
+It is built on the Agent Office design system (x1.6.5), which lives in this folder. The design system documents are in [DS-README.md](DS-README.md).
 
 ## What it does
 
@@ -216,7 +216,7 @@ The office knows three kinds of session. A session **in the office** runs `claud
 ```
 npm run probe   # HTTP hooks on this Claude Code version (one tiny call)
 npm run smoke   # opens real Haiku sessions in a throwaway repo (a few cents); the office must be running
-python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/wheel-gate.js public/vocab.js public/scene-host.js public/building.js public/format.js public/toasts.js
+python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/wheel-gate.js public/vocab.js public/scene-host.js public/building.js public/format.js public/toasts.js public/wire.js components/bundle.css components/bundle.js kit/page.html
 ```
 
 ## Limits
