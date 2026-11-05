@@ -129,6 +129,7 @@ Add a new file only for a distinct job. Extend the file that owns the concern fi
 - A headless session emits `init` (session id, commands, skills) only after its first message. The server keeps the last command list for new sessions.
 - Claude Code's default permission mode may be Auto, so no prompts appear. Tests that need a prompt must pass `permissionMode: 'default'`.
 - The hook's parent shell dies right after the hook returns, so the process walk must happen while the hook waits. A persistent PowerShell helper (`walkToClaude`) does it.
+- Every program the office starts names its `cwd`: the session folder for work in it, `git.helperCwd()` (%SystemRoot%) for a helper. On Windows a process keeps its current folder busy, so a helper that inherited the office folder (the walker, icacls, the ACL reader) made `rmSync` of a test's temp office fail with EBUSY after the server was killed (#78). `test/spawn-safety.test.mjs` checks the sources.
 - HTTP hook failures are non-blocking. Command hooks must stay silent on stdout unless they return real hook JSON.
 - "Always allow" uses `permission_suggestions` from the hook payload and returns them as `updatedPermissions`. Pass only `addRules` with `behavior: allow`. Edits get a mode suggestion, not a rule.
 - `result` with `error_during_execution` after an interrupt is not an error. Check `s.interrupted`.

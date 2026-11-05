@@ -39,6 +39,19 @@ export function resolveExe(name, env = process.env) {
   return exe;
 }
 
+/**
+ * The folder a helper starts in when it works on no folder of its own (the walkToClaude PowerShell, icacls, the ACL
+ * reader, taskkill, `claude --version`): %SystemRoot% on Windows, else the root of the file system. Never the office
+ * folder, which a helper would otherwise inherit: on Windows a running process keeps its current folder busy, so nobody
+ * can remove or rename the folder until the process ends (#78). Work in a session folder passes that folder instead.
+ */
+export function helperCwd(env = process.env) {
+  if (process.platform !== 'win32') return '/';
+  const root = String(envGet(env, 'SystemRoot') || envGet(env, 'windir') || '');
+  const isDir = (p) => { try { return fs.statSync(p).isDirectory(); } catch { return false; } };
+  return /^[A-Za-z]:[\\/]/.test(root) && isDir(root) ? root : path.parse(os.homedir()).root;
+}
+
 function findExe(name, env, win) {
   const p = win ? path.win32 : path.posix;
   // Drive or UNC paths only on Windows: '\dir' and 'C:dir' depend on the current drive or folder.

@@ -61,9 +61,9 @@ const launchCodes = auth.createLaunchCodes();
 function writeSecret(file, text) {
   const warning = auth.writeOwnerOnly(file, text, {
     fs,
-    icacls: (args) => execFileSync(git.resolveExe('icacls'), args, { windowsHide: true, stdio: 'pipe', timeout: 15000 }),
+    icacls: (args) => execFileSync(git.resolveExe('icacls'), args, { cwd: git.helperCwd(), windowsHide: true, stdio: 'pipe', timeout: 15000 }),
     readAcl: (f) => auth.parseAcl(execFileSync(git.resolveExe('powershell'), ['-NoProfile', '-NonInteractive', '-Command', auth.ACL_SCRIPT],
-      { windowsHide: true, encoding: 'utf8', stdio: 'pipe', timeout: 30000, env: { ...process.env, AO_ACL_FILE: f } })),
+      { cwd: git.helperCwd(), windowsHide: true, encoding: 'utf8', stdio: 'pipe', timeout: 30000, env: { ...process.env, AO_ACL_FILE: f } })),
   });
   if (warning) console.warn(`WARNING: ${warning}`);
 }
@@ -311,7 +311,7 @@ const WALK = [
 let walker = null;
 const walks = new Map();
 function startWalker() {
-  const child = spawn(git.resolveExe('powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', WALK], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
+  const child = spawn(git.resolveExe('powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', WALK], { cwd: git.helperCwd(), windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
   let buf = '';
   child.stdout.on('data', (d) => {
     buf += d;
@@ -1041,7 +1041,7 @@ setInterval(() => { for (const c of clients) c.write(': ping\n\n'); }, 20000).un
 const MIME = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
 const FONT_FILES = fs.readdirSync(path.join(PUBLIC, 'vendor', 'fonts')).filter((f) => /^[a-z0-9-]+\.woff2$/.test(f));
 const STATIC_FILES = new Map([
-  ['/office.js', 'public/office.js'], ['/scene-host.js', 'public/scene-host.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/vocab.js', 'public/vocab.js'], ['/wire.js', 'public/wire.js'],['/format.js', 'public/format.js'], ['/wheel-gate.js', 'public/wheel-gate.js'], ['/building.js', 'public/building.js'], ['/toasts.js', 'public/toasts.js'], ['/tokens.css', 'tokens.css'],
+  ['/office.js', 'public/office.js'], ['/scene-host.js', 'public/scene-host.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/vocab.js', 'public/vocab.js'], ['/wire.js', 'public/wire.js'], ['/format.js', 'public/format.js'], ['/wheel-gate.js', 'public/wheel-gate.js'], ['/building.js', 'public/building.js'], ['/toasts.js', 'public/toasts.js'], ['/tokens.css', 'tokens.css'],
   ['/components/bundle.css', 'components/bundle.css'], ['/components/bundle.js', 'components/bundle.js'],
   ['/components/lib/three.min.js', 'components/lib/three.min.js'],
   ['/components/lib/three-orbit-controls.js', 'components/lib/three-orbit-controls.js'],
@@ -1188,7 +1188,7 @@ function openBrowser(link) {
   if (process.platform !== 'win32' || process.env.OFFICE_OPEN === '0') return;
   if (!/^http:\/\/127\.0\.0\.1:\d+\/#n=[0-9a-f]+$/.test(link)) return; // nothing that cmd could read as a command
   try {
-    const c = spawn(git.resolveExe('cmd.exe'), ['/d', '/s', '/c', `start "" "${link}"`], { cwd: ROOT, windowsVerbatimArguments: true, windowsHide: true, stdio: 'ignore', detached: true });
+    const c = spawn(git.resolveExe('cmd.exe'), ['/d', '/s', '/c', `start "" "${link}"`], { cwd: git.helperCwd(), windowsVerbatimArguments: true, windowsHide: true, stdio: 'ignore', detached: true });
     c.on('error', () => {});
     c.unref();
   } catch { /* the printed link still works */ }
