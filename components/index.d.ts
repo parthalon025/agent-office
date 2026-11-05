@@ -8,7 +8,7 @@ export interface StatusCountsProps { counts: Partial<Record<"working" | "waiting
 export interface FloorHeaderProps { floor: FloorKey; name: string; number: number; bots: number; working: number }
 export interface ApprovalItemProps { name: string; floor?: number; ask: string; status?: "waiting" | "error"; onApprove?: () => void; onDecline?: () => void }
 export interface ActivityLogProps { entries: { time: string; name: string; text: string }[] }
-export interface UsageMeterProps { percent?: number; cost?: number; costLimit?: number; reset: string; rows?: { name: string; color: string; percent?: number; cost?: number }[] }
+export interface UsageMeterProps { percent?: number; cost?: number; costLimit?: number; reset?: string; title?: string; rows?: { name: string; color: string; percent?: number; cost?: number }[] }
 export interface StatusBubbleProps { status: Status; frame?: number }
 export interface BotLineupProps { bots?: { shape: "blob" | "cone" | "octa" | "capsule"; color: string; status: Status }[]; spin?: number; height?: number; mode?: "auto" | "day" | "night" }
 export type Role = "research" | "writer" | "coder" | "analyst" | "designer" | "ops" | "sales" | "planner" | "media" | "ae" | "specialist" | "partner" | "se" | "csa" | "csam" | "fde";
@@ -16,7 +16,7 @@ export type OfficeType = "team" | "lab" | "studio" | "hq";
 /** Render quality. "auto" picks "high" on desktop and "medium" on touch devices and narrow views. "low" turns off post effects and the extra motion. */
 export type Quality = "auto" | "high" | "medium" | "low";
 export type Shape = "blob" | "cone" | "octa" | "capsule";
-export interface BotDef { name: string; sessions?: "agent" | "session"; orchestrator?: boolean; ephemeral?: boolean; shape?: Shape; color?: string; role?: Role; tasks?: string[]; status?: Status; task?: string; platform?: string; identity?: string; owner?: string; model?: string; fallback?: string; tools?: string[]; knowledge?: string[]; skills?: string[]; channels?: string[]; triggers?: string[]; cost?: string; word?: string }
+export interface BotDef { name?: string; sessions?: "agent" | "session"; orchestrator?: boolean; ephemeral?: boolean; shape?: Shape; color?: string; role?: Role; tasks?: string[]; status?: Status; task?: string; usage?: number; parent?: string; session?: string; platform?: string; identity?: string; owner?: string; model?: string; fallback?: string; tools?: string[]; knowledge?: string[]; skills?: string[]; channels?: string[]; triggers?: string[]; cost?: string; word?: string }
 export interface RoomDef { id?: string; type: OfficeType; name?: string; bots: BotDef[] }
 export interface FloorDef { id?: number; key?: FloorKey | "hq"; name?: string; rooms: RoomDef[] }
 export interface BuildingDef { name?: string; sessions?: "agent" | "session"; floors: FloorDef[] }
@@ -56,7 +56,7 @@ export type AgentEvent =
   | { type: "model"; bot: string; model: string; fallback?: string }
   | { type: "floor.add"; floor: Record<string, unknown> }
   | { type: "room.add"; floorId: number; room: Record<string, unknown> }
-  | { type: "bot.add"; roomId: string; bot: Record<string, unknown> }
+  | { type: "bot.add"; roomId: string; bot: BotDef }
   | { type: "bot.remove"; bot: string };
 /** Commands the office sends to the adapter when the user acts. `bots` is filled in by the office. */
 export type AgentCommand = { bots?: string[] } & (
@@ -80,8 +80,26 @@ export interface SessionListProps { sessions: { id: string; title: string; statu
 export interface AgentChatProps { loading?: boolean; disabled?: boolean; bot: { name: string; shape: Shape; color: string; role?: Role; status: Status; task: string }; messages: ChatMessageData[]; connected?: boolean; attach?: boolean; onSend?: (text: string, attachments?: ChatAttachment[]) => void; onAction?: (type: "approve" | "decline" | "retry", request?: unknown) => void; onClose?: () => void }
 export interface BroadcastBarProps { disabled?: boolean; targets: { id: string; label: string; target: { room?: string; floor?: number; all?: boolean } }[]; value?: string | null; onChange?: (id: string) => void; onSend?: (target: unknown, text: string) => void }
 export interface SolutionCardProps { solution: { id: string; label: string; summary: string; building: BuildingDef }; onUse?: () => void }
-/** Globals the DS adds to AgentOffice (see Reference.md, Office API). BODY_COLORS: the 10 bot body colors, in the order the scene gives them to new bots. A page that sets bot.color reads them from here, so a bot looks the same in every list. */
-export interface AgentOfficeGlobals { BODY_COLORS: readonly string[] }
+/** The kit schema (kit/schema.json, also at AgentOffice.schema): one entry for each event and command, and the shared enums and types. A field type ends with ? when the field is optional. */
+export interface AgentSchema { version: string; events: Record<string, { desc: string; fields: Record<string, string> }>; commands: Record<string, { desc: string; fields: Record<string, string> }>; enums: Record<string, string[]>; types: Record<string, { desc: string; fields: Record<string, string> }> }
+/** The globals the DS adds to `AgentOffice` (see Reference.md, Office API). The components are also on it, by name. */
+export interface AgentOfficeGlobals {
+  /** The 10 bot body colors, in the order the scene gives them to new bots. A page that sets bot.color reads them from here, so a bot looks the same in every list. */
+  BODY_COLORS: readonly string[];
+  /** One portrait color for each bot shape (4 colors). The portraits use it when a bot has no color. For a bot color, use BODY_COLORS. */
+  BOT_COLORS: Readonly<Record<Shape, string>>;
+  /** Checks one event (or, with kind "commands", one command) against the schema. Reports missing fields, wrong types and unknown fields. */
+  validate(x: unknown, kind?: "events" | "commands"): { ok: boolean; errors: string[] };
+  schema: AgentSchema;
+  /** Set to true to warn in the console on each event that does not match the schema. */
+  strict?: boolean;
+  /** The one money format of the DS: "$0.26", "<$0.01" for a cost above zero and under one cent. A string passes through. */
+  money(n: number | string | null | undefined): string;
+  adapters: { mock(opts?: Record<string, unknown>): AgentAdapter; create(o: { name?: string; subscribe?(emit: (ev: AgentEvent) => void, ctx: AdapterContext): void; send?(cmd: AgentCommand, ctx: AdapterContext | null): Promise<unknown> | unknown; dispose?(): void }): AgentAdapter };
+  office: { mount(el: HTMLElement, opts?: Record<string, unknown>): OfficeApi; [name: string]: unknown };
+  [name: string]: unknown;
+}
+declare global { interface Window { AgentOffice: AgentOfficeGlobals } }
 /** AgentOffice.adapters.mock(opts) and AgentOffice.adapters.create({ name, subscribe(emit), send(cmd), dispose }) build adapters. AgentOffice.office.mount(el, opts) returns OfficeApi. */
 export interface TooltipProps { text: string; side?: "top" | "bottom"; open?: boolean; children: ReactNode }
 export interface ToastProps { tone?: "info" | "success" | "warning" | "error"; title?: string; text: string; action?: { label: string; onClick: () => void }; onClose?: () => void }

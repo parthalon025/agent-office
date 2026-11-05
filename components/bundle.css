@@ -219,7 +219,7 @@
 .ao-statesgrid.is-tall{padding-top:44px;padding-bottom:44px}
 .ao-label{font:500 12px var(--font-sans);color:var(--ink)}
 .ao-hint{font-size:11px;color:var(--muted)}
-.ao-err{font-size:11px;color:var(--status-error)}
+.ao-err{font-size:11px;color:var(--status-error-text)}
 .ao-field.has-error .ao-input,.ao-field.has-error select{border-color:var(--status-error)}
 .ao-input:disabled{opacity:.55;cursor:not-allowed}
 .ao-select{position:relative;display:inline-flex;align-items:center;min-width:0}
@@ -247,7 +247,7 @@
 .ao-dd-c{display:flex;flex-direction:column;gap:8px}
 .ao-dd-x{padding:14px;border-radius:var(--radius-lg);background:var(--panel);border:1px solid var(--line);min-height:84px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .ao-dd-v{font:600 11px var(--font-mono);letter-spacing:.06em;text-transform:uppercase;display:flex;align-items:center;gap:6px}
-.ao-dd-v.do{color:var(--status-working)}.ao-dd-v.dont{color:var(--status-error)}
+.ao-dd-v.do{color:var(--status-working-text)}.ao-dd-v.dont{color:var(--status-error-text)}
 .ao-dd-n{font-size:12px;color:var(--muted);line-height:1.45}
 .ao-tbl{width:100%;border-collapse:collapse;font-size:12px}
 .ao-tbl th,.ao-tbl td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:middle}

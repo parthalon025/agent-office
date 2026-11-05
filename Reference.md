@@ -60,7 +60,7 @@ The `bot` of `bot.add`. `kit/check.py --events` and `AgentOffice.validate` check
 | `name` | no | `string` | Unique name. The engine makes one when you leave it out. |
 | `role` | no | `string` | A role id from `AgentOffice.office.ROLES`. Sets the workstation. |
 | `shape` | no | `"blob" \| "cone" \| "octa" \| "capsule"` | Body shape. |
-| `color` | no | `string` | Body color, a CSS color. The engine picks one from `AgentOffice.BODY_COLORS` when you leave it out. |
+| `color` | no | `string` | Body color, a CSS color (not an index). The engine picks one from `AgentOffice.BODY_COLORS` when you leave it out. See "Bot colors" below. |
 | `status` | no | `Status` | First state. Default `working`. |
 | `task` | no | `string` | First task line. |
 | `tasks` | no | `string[]` | Task lines for the mock adapter. |
@@ -79,12 +79,28 @@ The `bot` of `bot.add`. `kit/check.py --events` and `AgentOffice.validate` check
 | `triggers` | no | `string[]` | Trigger names for the agent card. |
 | `cost` | no | `string` | Cost text for the agent card. |
 | `word` | no | `string` | Status word for the page. The DS keeps it and does not show it. |
+| `usage` | no | `number` | Engine field. Share of the weekly limit that this bot used, in percent. The `usage` event sets it. A page can send it to restore a bot. |
+| `parent` | no | `string` | Engine field. Name of the bot that made this helper. `delegate` and `session.start` set it. |
+| `session` | no | `string` | Engine field. Id of the session that this helper bot shows. |
 
 ## Office API
 
 `onReady(office)` in React, or the return value of `AgentOffice.office.mount(el, opts)`: `addBot`, `addFloor`, `addRoom`, `all`, `applyEvent`, `approve`, `approveMany`, `bots`, `broadcast`, `byBot`, `chatOf`, `connect`, `cost`, `decline`, `declineMany`, `dispose`, `errors`, `ev`, `events`, `finished`, `floor`, `focusRoom`, `getBuilding`, `history`, `inspect`, `message`, `messages`, `quality`, `removeBot`, `replay`, `retry`, `right`, `screenPos`, `select`, `send`, `sessions`, `setFloor`, `setFrameInset`, `setSound`, `setView`, `speed`, `stage`, `stopReplay`, `stopSession`, `summary`, `to`, `tokens`, `toolCalls`, `top`, `validate`, `visible`, `waiting`, `y`.
 
-Globals: `AgentOffice.BODY_COLORS` (the 10 bot body colors, a frozen array), `AgentOffice.validate(event)`, `AgentOffice.schema`, `AgentOffice.strict`, `AgentOffice.adapters.create`, `AgentOffice.adapters.mock`, `AgentOffice.solutions`, `AgentOffice.office.ROLES`, `.Work`, `.Parts`, `.helpers`, `.Nav`.
+Globals: `AgentOffice.BODY_COLORS` (the 10 bot body colors, a frozen array), `AgentOffice.BOT_COLORS` (one portrait color for each shape), `AgentOffice.money(n)` (the DS money format), `AgentOffice.validate(event)`, `AgentOffice.schema`, `AgentOffice.strict`, `AgentOffice.adapters.create`, `AgentOffice.adapters.mock`, `AgentOffice.solutions`, `AgentOffice.office.ROLES`, `.Work`, `.Parts`, `.helpers`, `.Nav`. `components/index.d.ts` types them: `AgentOfficeGlobals`, set on `window.AgentOffice`.
+
+### Bot colors
+
+| Global | What it is | Use it when |
+| --- | --- | --- |
+| `BODY_COLORS` | An array of 10 body colors. The scene gives them to new bots in this order (`BODY_COLORS[n % 10]`). | You set `bot.color`, or you draw a bot in a list. This is the bot color. |
+| `BOT_COLORS` | An object with one color for each shape: `blob`, `cone`, `octa`, `capsule`. These are the first 4 entries of `BODY_COLORS`. `PORTRAITS[shape]()` uses it when you pass no color. | You draw a portrait of a shape and have no bot. Do not use it for the color of a bot in the scene: 4 colors repeat too soon. |
+
+`bot.color` stays a CSS color. It is not an index, so `{ color: 3 }` is not valid. To use a palette slot, write `BODY_COLORS[n % BODY_COLORS.length]`. A page that kept `BOT_COLORS` for bot colors can switch to `BODY_COLORS`, and its bots then match the scene. Pick the slot from a stable key, such as a hash of the session id.
+
+### Money
+
+`AgentOffice.money(n)` is the one money format of the DS. UsageMeter, CostMeter and DecisionInbox use it: `$0.26`, `$12.00`, and `<$0.01` for a cost above zero and under one cent. A string passes through, so `cost: "about $1"` shows as written. `OfficeFormat.money` in a page can follow the same rules.
 
 ## Components
 
@@ -154,7 +170,7 @@ Globals: `AgentOffice.BODY_COLORS` (the 10 bot body colors, a frozen array), `Ag
 | `ToolCall` | Orchestration | One tool call: status, tool name, kind (MCP, connector, code, terminal, browser, computer use, agent flow, knowledge, skill, memory, API) and time. |
 | `ToolKindBadge` | Orchestration | The kind of a tool, with its icon. |
 | `Tooltip` | Foundations | A short label that shows on hover and on keyboard focus. |
-| `UsageMeter` | Feeds | The weekly usage limit: one figure, one bar, and the four bots that use the most. Optional spend and spend limit. |
+| `UsageMeter` | Feeds | The weekly usage limit: one figure, one bar, and the four bots that use the most. Optional spend and spend limit. Without `percent`, it shows spend only, titled "Spend". `title` sets another title. |
 | `ViewToggle` | Actions | Switches between the building view and the floor view. |
 | `Workstations` | 3D parts | The nine role workstations. |
 

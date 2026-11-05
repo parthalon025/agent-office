@@ -317,7 +317,7 @@
  },
  "types": {
   "BotDef": {
-   "desc": "A bot in bot.add. A field that is not listed here is reported as unknown. Fields that start with _ belong to the engine.",
+   "desc": "A bot in bot.add. A field that is not listed here is reported as unknown. Fields that start with _ belong to the engine. usage, parent and session are set by the engine (usage: share of the weekly limit the bot used, in percent; parent: name of the bot that made this helper; session: id of the session it shows). A page may send them to restore a bot.",
    "fields": {
     "name": "string?",
     "role": "string?",
@@ -340,7 +340,10 @@
     "channels": "string[]?",
     "triggers": "string[]?",
     "cost": "string?",
-    "word": "string?"
+    "word": "string?",
+    "usage": "number?",
+    "parent": "string?",
+    "session": "string?"
    }
   }
  },

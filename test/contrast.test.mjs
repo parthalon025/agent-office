@@ -39,7 +39,7 @@ test('status words: ink on the panel, the chip and the page', () => each((T, th,
 }));
 
 test('status dots next to the words read at 3:1 on the panel', () => each((T, th, panel) => {
-  for (const s of ['working', 'waiting', 'error', 'finished']) atLeast('dot ' + s, 3, T('status-' + s), panel, th);
+  for (const s of ['working', 'waiting', 'error', 'resting', 'finished']) atLeast('dot ' + s, 3, T('status-' + s), panel, th);
   atLeast('dot emphasis', 3, T('emphasis'), panel, th);
 }));
 
@@ -50,6 +50,11 @@ test('status text tokens: 4.5:1 on bg, panel (card) and chip; on-bubble tokens: 
     for (const bg of [['bg', T('bg')], ['card', panel], ['chip', T('chip')]]) atLeast(`status-${s}-text on ${bg[0]}`, 4.5, T(`status-${s}-text`), bg[1], th);
     atLeast(`status-${s}-on-bubble on bubble`, 4.5, T(`status-${s}-on-bubble`), T('bubble'), th);
   }
+}));
+
+// Reference.md lists muted at 4.5:1 on bg, card and chip. Pin each of the three.
+test('muted text: 4.5:1 on bg, panel (card) and chip', () => each((T, th, panel) => {
+  for (const bg of [['bg', T('bg')], ['card', panel], ['chip', T('chip')]]) atLeast('muted on ' + bg[0], 4.5, T('muted'), bg[1], th);
 }));
 
 test('diff: ink on the chip, and on the added and removed lines', () => each((T, th) => {

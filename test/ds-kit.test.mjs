@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import vm from 'node:vm';
 import { spawnSync } from 'node:child_process';
 
 const root = new URL('../', import.meta.url);
@@ -51,6 +52,68 @@ test('the bot type lists the fields a page sends, and bot.add uses it', () => {
 
 test('the usage event can carry spend', () => {
   assert.deepEqual(schema.events.usage.fields, { percent: 'number?', bots: 'object?', cost: 'number?', costLimit: 'number?', costs: 'object?' });
+});
+
+test('the bot type lists the fields the engine reads and sets, and the .d.ts agrees with it', () => {
+  const f = schema.types.BotDef.fields;
+  for (const k of ['usage', 'parent', 'session']) assert.ok(k in f, k);
+  assert.equal(f.name, 'string?');
+  const dts = read('components/index.d.ts');
+  const def = dts.match(/export interface BotDef \{([^\n]*)\}\n/)[1];
+  assert.match(def, /\bname\?: string/);
+  for (const k of Object.keys(f)) assert.match(def, new RegExp(`\\b${k}\\?: `), `BotDef.${k} in index.d.ts`);
+  assert.match(dts, /type: "bot\.add"; roomId: string; bot: BotDef \}/);
+});
+
+// The first IIFE of the bundle holds the small components. Run it against a stand-in React that returns plain nodes.
+function loadSmallComponents() {
+  const b = read('components/bundle.js');
+  const src = b.slice(b.indexOf('(function(){'), b.indexOf('})();') + 5);
+  const h = (type, props, ...kids) => {
+    const k = kids.flat(Infinity).filter((x) => x != null && x !== false);
+    return typeof type === 'function' ? type({ ...(props || {}), children: k }) : { type, props: props || {}, kids: k };
+  };
+  const win = { React: { createElement: h } };
+  vm.runInNewContext(src, { window: win });
+  return win.AgentOffice;
+}
+const text = (n) => (n == null ? '' : typeof n !== 'object' ? String(n) : n.kids.map(text).join(''));
+const find = (n, fn, out = []) => { if (n && typeof n === 'object') { if (fn(n)) out.push(n); n.kids.forEach((k) => find(k, fn, out)); } return out; };
+
+test('UsageMeter: the title says what it shows (weekly limit, or spend when only spend is given)', () => {
+  const A = loadSmallComponents();
+  const title = (p) => text(find(A.UsageMeter(p), (n) => n.props.className === 'ao-ph')[0].kids[0]);
+  assert.equal(title({ percent: 31, reset: 'x' }), 'Weekly limit');
+  assert.equal(title({ reset: 'x' }), 'Weekly limit');
+  assert.equal(title({ percent: 31, cost: 1, costLimit: 2 }), 'Weekly limit');
+  assert.equal(title({ cost: 0.42 }), 'Spend');
+  assert.equal(title({ cost: 0.42, costLimit: 2 }), 'Spend');
+  assert.equal(title({ cost: 0.42, title: 'This run' }), 'This run');
+  const meters = find(A.UsageMeter({ percent: 31, cost: 1, costLimit: 2 }), (n) => n.props.role === 'meter').map((n) => n.props['aria-label']);
+  assert.deepEqual(meters, ['Weekly limit used', 'Spend limit used']);
+});
+
+test('money: UsageMeter and the shared formatter write < $0.01 and two decimals the same way', () => {
+  const A = loadSmallComponents();
+  assert.deepEqual([0, 0.004, 0.01, 0.256, 12].map(A.money), ['$0.00', '<$0.01', '$0.01', '$0.26', '$12.00']);
+  assert.equal(A.money('about $1'), 'about $1');
+  assert.equal(A.money(null), '$0.00');
+  const spend = find(A.UsageMeter({ cost: 0.004, costLimit: 2 }), (n) => n.props.className === 'ao-spend')[0];
+  assert.equal(text(spend), 'Used<$0.01 of $2.00');
+  const b = read('components/bundle.js');
+  assert.ok(!/"\$"\+\(p\.cost\|\|0\)\.toFixed\(2\)/.test(b), 'CostMeter has its own money format');
+  assert.ok(!/return "\$"\+\(n\|\|0\)\.toFixed\(2\)/.test(b), 'DecisionInbox has its own money format');
+  assert.match(b, /h\("b",\{className:"ao-mono"\},AO\.money\(p\.cost\)\)/);
+});
+
+test('status text in the DS CSS and StatusBubble uses the -text and -on-bubble tokens, not the raw status colors', () => {
+  const css = read('components/bundle.css'), b = read('components/bundle.js');
+  assert.match(css, /\.ao-err\{[^}]*color:var\(--status-error-text\)/);
+  assert.match(css, /\.ao-dd-v\.do\{color:var\(--status-working-text\)\}\.ao-dd-v\.dont\{color:var\(--status-error-text\)\}/);
+  assert.match(b, /function StatusBubble\(p\)\{var s=p\.status\|\|"working",col="var\(--status-"\+s\+"-on-bubble\)"/);
+  const A = loadSmallComponents();
+  const bub = A.StatusBubble({ status: 'waiting' });
+  assert.equal(bub.props.style.color, 'var(--status-waiting-on-bubble)');
 });
 
 test('kit/check.py: events are checked against the bot type and the usage fields', { skip: !python }, () => {
