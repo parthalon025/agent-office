@@ -6,6 +6,7 @@
 //   { tool: { toolCallId, ... } }        a tool_call update        { update: { toolCallId, ... } }  a tool_call_update
 //   { plan: [entries] }                  a plan update
 //   { ask: { toolCall, options } }       session/request_permission, then says "asked: <outcome> <optionId>"
+//   { ask: {...}, while: [steps] }       the same, and runs those steps while the request waits (before its answer)
 //   { giveUp: { toolCall, options, ms } } asks, then after ms stops waiting: a failed tool_call_update, "gave up"
 //   { read: { path, line, limit } }      fs/read_text_file, then says "read: <content>" or "read error: <message>"
 //   { write: { path, content } }         fs/write_text_file, then says "write: ok" or "write error: <message>"
@@ -45,7 +46,9 @@ async function runStep(sid, step) {
   else if (step.update) update(sid, { sessionUpdate: 'tool_call_update', ...step.update });
   else if (step.plan) update(sid, { sessionUpdate: 'plan', entries: step.plan });
   else if (step.ask) {
-    const r = await request('session/request_permission', { sessionId: sid, ...step.ask });
+    const answer = request('session/request_permission', { sessionId: sid, ...step.ask });
+    for (const w of step.while || []) await runStep(sid, w); // while the request waits: an agent that changes the call
+    const r = await answer;
     const o = r.result?.outcome || {};
     say(sid, `asked: ${o.outcome} ${o.optionId || ''}`.trim());
   } else if (step.giveUp) {

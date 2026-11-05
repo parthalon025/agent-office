@@ -12,7 +12,8 @@ import { spawn as realSpawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createTracker } from '../tracker.mjs';
 import { providerEvents, createRegistry, checkProvider, spendLimitFor, isPaid } from '../providers/index.mjs';
-import { createAcp, AGENTS } from '../providers/acp.mjs';
+import { createAcp, AGENTS, commandLine } from '../providers/acp.mjs';
+import { createLocalTools } from '../providers/local-tools.mjs';
 
 const FAKE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-acp.mjs');
 
@@ -47,7 +48,13 @@ function rig({ kind = 'hermes', fake = {}, ...over } = {}) {
     tracker: r.tracker,
     hold: (q) => r.holds.set(q.id, { uid: q.s.uid, reply: (d) => r.p.answer(q.s, { id: q.id, suggestions: q.suggestions }, d) }),
     release: (id) => r.release(id, {}),
+    fresh: (s) => r.freshened.push(s.uid),
   });
+  // What each held card showed the user: the tool and its input at the moment of the hold.
+  r.shown = [];
+  r.freshened = [];
+  const permission = r.events.permission;
+  r.events.permission = (s, p) => { r.shown.push({ tool: p.tool_name, input: { ...p.tool_input } }); return permission(s, p); };
   r.p = createAcp({
     events: r.events, kind,
     exe: (name) => `C:/bin/${name}.exe`,
@@ -293,7 +300,7 @@ test('terminal: args and variables are part of the line the user sees; a folder 
   const s = await started(r, r.session());
   try {
     r.steps(s, [
-      { term: { command: 'node', args: ['-e', 'console.log(process.env.GREETING + " there")'], env: [{ name: 'GREETING', value: 'hi' }] } },
+      { term: { command: 'node', args: ['-e', "console.log(process.env.GREETING + ' there')"], env: [{ name: 'GREETING', value: 'hi' }] } },
       { term: { command: PRINT('1'), cwd: r.outside } },
       { term: { command: PRINT('1'), env: [{ name: 'BAD NAME', value: 'x' }] } },
     ]);
@@ -311,6 +318,28 @@ test('terminal: args and variables are part of the line the user sees; a folder 
   } finally { await r.done(s); }
 });
 
+test('commandLine: an argument the shell would read as more than text is refused, so the approved line is the line that runs', async () => {
+  const payload = { command: 'echo', args: ['x" & echo INJECTED & "'] }; // review of #71: cmd.exe ignores \" when it tracks quotes
+  if (process.platform === 'win32') {
+    assert.throws(() => commandLine(payload), (e) => e.code === -32602 && /cannot pass/.test(e.message));
+    // %NAME% and !NAME! expand inside quotes too, and a line break ends the command.
+    for (const a of ['100%', '%PATH%', 'wow!', 'a\nb', 'a\rb']) assert.throws(() => commandLine({ command: 'echo', args: [a] }), /cannot pass/, JSON.stringify(a));
+    assert.throws(() => commandLine({ command: 'echo', env: [{ name: 'A', value: '%PATH%' }] }), /variable A/);
+  } else {
+    assert.equal(commandLine(payload), `echo 'x" & echo INJECTED & "'`);
+  }
+  // The args that can be quoted arrive as one argument each, through the shell the office really runs.
+  const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-acp-q-')));
+  try {
+    const args = ['a b', 'x&y|z', '(c)', 'C:\\dir\\', 'it\'s'];
+    const line = commandLine({ command: 'node', args: ['-e', 'console.log(JSON.stringify(process.argv.slice(1)))', ...args] });
+    const h = createLocalTools(base).start(line, { timeoutMs: 20_000 });
+    const r = await h.done;
+    assert.equal(r.exitCode, 0, h.output());
+    assert.deepEqual(JSON.parse(h.output().trim()), args);
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
 test('terminal: a command the user approved in a request runs once without a second question', async () => {
   const r = rig();
   const s = await started(r, r.session());
@@ -326,6 +355,96 @@ test('terminal: a command the user approved in a request runs once without a sec
     assert.deepEqual(r.replies(s), ['asked: selected once', 'term: exit 0: 7']);
     assert.deepEqual(s.calls.map((c) => [c.id, c.ok]), [['tx', true]]);
     assert.ok(!r.tracker.feed.some((f) => /without asking/.test(f.text)), 'it asked');
+  } finally { await r.done(s); }
+});
+
+// ---------- an agent that changes a call after the user saw it ----------
+// The answer is for what the card showed. An agent that changes the call while it waits gets reject once, the hold goes,
+// and nothing the user approved moves to the new input.
+
+test('a command the agent changes while its request waits is declined at once; the new line still asks', async () => {
+  const r = rig();
+  const s = await started(r, r.session());
+  try {
+    const call = { toolCallId: 'sw', title: 'Run a command', kind: 'execute', rawInput: { command: 'echo SAFE' } };
+    r.steps(s, [{ ask: { toolCall: call, options: OPTIONS }, while: [{ update: { toolCallId: 'sw', rawInput: { command: 'echo SWAPPED' } } }] },
+      { term: { command: 'echo SWAPPED' } }]);
+    await until(() => r.replies(s).length === 1, 'the request to be declined');
+    assert.deepEqual(r.shown[0], { tool: 'Bash', input: { command: 'echo SAFE' } }, 'the card showed the first command');
+    assert.equal(r.replies(s)[0], 'asked: selected no');
+    assert.ok(r.tracker.feed.some((f) => f.text === 'Hermes Agent changed the call while it waited for your answer, so the office declined it: echo SWAPPED'),
+      r.tracker.feed.map((f) => f.text).join('\n'));
+    await until(() => s.pending.length === 1, 'the swapped command to wait');
+    assert.deepEqual([s.pending[0].tool, s.pending[0].detail], ['Bash', 'echo SWAPPED'], 'no approval moved to the new line');
+    r.release(s.pending[0].id, { allow: false });
+    await r.idle(s);
+    assert.match(r.replies(s)[1], /^term error: Declined from Agent Office/);
+  } finally { await r.done(s); }
+});
+
+test('an edit whose file the agent changes while its request waits is declined; the new file still asks', async () => {
+  const r = rig();
+  const s = await started(r, r.session());
+  const settings = path.join(r.root, '.claude', 'settings.json');
+  try {
+    r.steps(s, [{ ask: { toolCall: EDIT_CALL(r.root), options: OPTIONS }, while: [{ update: { toolCallId: 'tc1', locations: [{ path: settings }] } }] },
+      { write: { path: settings, content: '{"hooks":1}' } }]);
+    await until(() => r.replies(s).length === 1, 'the request to be declined');
+    assert.deepEqual(r.shown[0], { tool: 'Edit', input: { file_path: path.join(r.root, 'a.txt') } });
+    assert.equal(r.replies(s)[0], 'asked: selected no');
+    await until(() => s.pending.length === 1, 'the write to the new file to wait');
+    assert.deepEqual([s.pending[0].tool, s.pending[0].risk], ['Write', 'high']);
+    r.release(s.pending[0].id, { allow: false });
+    await r.idle(s);
+    assert.equal(fs.readFileSync(settings, 'utf8'), '{}');
+  } finally { await r.done(s); }
+});
+
+test('a call the agent changes after the user approved it: the grant stays with what the user saw, and the feed says so', async () => {
+  const r = rig();
+  const s = await started(r, r.session());
+  try {
+    const call = { toolCallId: 'ap', title: 'Run a command', kind: 'execute', rawInput: { command: 'echo SAFE' } };
+    r.steps(s, [{ ask: { toolCall: call, options: OPTIONS } }, { update: { toolCallId: 'ap', rawInput: { command: 'echo SWAPPED' } } },
+      { term: { command: 'echo SWAPPED' } }]);
+    await until(() => s.pending.length === 1, 'the request');
+    r.release(s.pending[0].id, { allow: true });
+    await until(() => s.pending.length === 1 && r.replies(s).length === 1, 'the swapped command to wait');
+    assert.equal(s.pending[0].detail, 'echo SWAPPED');
+    r.release(s.pending[0].id, { allow: false });
+    await r.idle(s);
+    assert.ok(r.tracker.feed.some((f) => f.text === 'Hermes Agent changed the call after you approved it: echo SWAPPED'), r.tracker.feed.map((f) => f.text).join('\n'));
+  } finally { await r.done(s); }
+});
+
+test('an approval ends with its call: a command the agent ran with its own tool asks again when it comes back as a terminal', async () => {
+  const r = rig();
+  const s = await started(r, r.session());
+  try {
+    const cmd = PRINT('console.log(8)');
+    const call = { toolCallId: 'own', title: 'Run a command', kind: 'execute', rawInput: { command: cmd } };
+    r.steps(s, [{ ask: { toolCall: call, options: OPTIONS } }, { update: { toolCallId: 'own', status: 'completed' } }, { term: { command: cmd } }]);
+    await until(() => s.pending.length === 1, 'the request');
+    r.release(s.pending[0].id, { allow: true });
+    await until(() => s.pending.length === 1 && r.replies(s).length === 1, 'the second run to wait');
+    assert.deepEqual([s.pending[0].tool, s.pending[0].detail], ['Bash', cmd]);
+    r.release(s.pending[0].id, { allow: false });
+    await r.idle(s);
+    assert.match(r.replies(s)[1], /^term error: Declined from Agent Office/);
+  } finally { await r.done(s); }
+});
+
+test('Hermes #31682 through the agent\'s own tools: the office cannot stop them, so the feed says when a declined file changed', async () => {
+  const r = rig();
+  const s = await started(r, r.session());
+  try {
+    r.steps(s, [{ ask: { toolCall: EDIT_CALL(r.root), options: OPTIONS } }, { tool: EDIT_CALL(r.root, 'a.txt', 'again') }, { update: { toolCallId: 'again', status: 'completed' } }]);
+    await until(() => s.pending.length === 1, 'the edit request');
+    r.release(s.pending[0].id, { allow: false });
+    await r.idle(s);
+    const lines = r.tracker.feed.map((f) => f.text);
+    assert.ok(lines.includes('Hermes Agent changed a.txt after you declined that edit.'), lines.join('\n'));
+    assert.ok(!lines.some((l) => /without asking/.test(l)), 'one line, not two');
   } finally { await r.done(s); }
 });
 
@@ -386,19 +505,27 @@ test('the agent gave up first: a tool result for a request that still waits free
   } finally { await r.done(s); }
 });
 
-test('Hermes stops waiting after 60 s: the office frees the hold then, says so, and answers cancelled', async () => {
+test('Hermes stops waiting for an edit after 60 s: the office frees the hold then, says so, answers reject once, and that file asks first', async () => {
   const r = rig();
   const s = await started(r, r.session());
   try {
-    r.steps(s, [{ ask: { toolCall: EDIT_CALL(r.root), options: OPTIONS } }]);
-    await until(() => s.pending.length === 1, 'the request');
+    const cmd = { toolCallId: 'c60', title: 'rm -rf build', kind: 'execute', rawInput: { command: 'rm -rf build' } };
+    r.steps(s, [{ ask: { toolCall: cmd, options: OPTIONS } }, { ask: { toolCall: EDIT_CALL(r.root), options: OPTIONS } },
+      { write: { path: path.join(r.root, 'a.txt'), content: 'after the time ran out' } }]);
+    await until(() => s.pending.length === 1, 'the command request');
+    assert.equal(r.timers.filter((x) => x.ms === 60_000).length, 0, 'a command approval follows Hermes\'s own setting: no fixed limit');
+    r.release(s.pending[0].id, { allow: false });
+    await until(() => s.pending.length === 1 && r.replies(s).length === 1, 'the edit request');
     const t = r.timers.find((x) => x.ms === 60_000);
-    assert.ok(t, 'a timer for the agent\'s own limit');
+    assert.ok(t, 'a timer for the agent\'s own limit on edits');
     t.fn();
+    await until(() => s.pending.length === 1 && r.replies(s).length === 2, 'the write of that file to wait, though it is low risk');
+    assert.deepEqual([s.pending[0].tool, s.pending[0].risk], ['Write', 'low']);
+    assert.ok(r.tracker.feed.some((f) => f.text === 'Hermes Agent waits 60 s for an answer to an edit. It moved on without yours.'), r.tracker.feed.map((f) => f.text).join('\n'));
+    assert.equal(r.replies(s)[1], 'asked: selected no', 'reject once: cancelled would say the turn was cancelled');
+    r.release(s.pending[0].id, { allow: false });
     await r.idle(s);
-    assert.deepEqual([s.pending.length, r.holds.size], [0, 0]);
-    assert.ok(r.tracker.feed.some((f) => f.text === 'Hermes Agent waits 60 s for an answer. It moved on without yours.'));
-    assert.deepEqual(r.replies(s), ['asked: cancelled']);
+    assert.equal(fs.readFileSync(path.join(r.root, 'a.txt'), 'utf8'), 'one\ntwo\n');
   } finally { await r.done(s); }
 });
 

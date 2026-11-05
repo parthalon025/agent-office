@@ -88,23 +88,35 @@ export function fileKey(root, p) {
   return WIN ? abs.toLowerCase() : abs;
 }
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,100}$/;
-// One argument as the shell reads it: cmd.exe on Windows (local-tools runs cmd /d /s /c), sh elsewhere.
+// cmd.exe has no way to keep these as plain text inside quotes: it ignores \" when it tracks quotes (so a quote in an
+// argument ends the quoted part, and & | < > after it run as commands), it expands %NAME% and !NAME! inside quotes, and a
+// line break ends the command. sh in single quotes keeps everything but NUL.
+const CMD_UNQUOTABLE = /["%!\r\n\0]/;
+// One argument as the shell reads it: cmd.exe on Windows (local-tools runs cmd /d /s /c), sh elsewhere. An argument the
+// shell would read as more than text is refused: the agent can put that text in the command, where the user reads it as is.
 function quoteArg(a) {
   const s = String(a);
-  if (WIN) return s && !/[\s"&|<>^()%!,;=]/.test(s) ? s : '"' + s.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1') + '"';
+  if (WIN ? CMD_UNQUOTABLE.test(s) : s.includes('\0')) {
+    throw rpcError(-32602, `The office cannot pass the argument ${clip(JSON.stringify(s), 60)} as plain text to the shell. Put that text in the command.`);
+  }
+  // Trailing backslashes are doubled so they do not escape the closing quote for the program (C runtime rules).
+  if (WIN) return s && !/[\s&|<>^()%!,;=]/.test(s) ? s : '"' + s.replace(/(\\+)$/, '$1$1') + '"';
   return s && /^[\w@%+=:,./-]+$/.test(s) ? s : "'" + s.replace(/'/g, "'\\''") + "'";
 }
 /**
  * The one command line of an ACP terminal/create: command, then its args quoted, after the variables it sets. The user
  * approves this text and the office runs this text, so no variable hides from the approval. A variable name that is not a
- * plain name, or a value with a quote or a line break, is refused.
+ * plain name, a value with a quote or a line break (on Windows also % or !), or an argument the shell cannot take as plain
+ * text (quoteArg) is refused.
  */
 export function commandLine({ command, args = [], env = [] } = {}) {
   const cmd = String(command ?? '').trim();
   if (!cmd) throw rpcError(-32602, 'command is empty.');
   const sets = (Array.isArray(env) ? env : []).map((e) => {
     const name = String(e?.name ?? ''), value = String(e?.value ?? '');
-    if (!ENV_NAME.test(name) || /[\r\n"]/.test(value)) throw rpcError(-32602, `The office does not set the variable ${clip(name, 40)} that way. Use a plain name and a value without quotes.`);
+    if (!ENV_NAME.test(name) || (WIN ? CMD_UNQUOTABLE : /[\r\n"\0]/).test(value)) {
+      throw rpcError(-32602, `The office does not set the variable ${clip(name, 40)} that way. Use a plain name and a value without quotes${WIN ? ', % or !' : ''}.`);
+    }
     return WIN ? `set "${name}=${value}" && ` : `${name}=${quoteArg(value)} `;
   });
   return sets.join('') + [cmd, ...(Array.isArray(args) ? args : []).map(quoteArg)].join(' ');
@@ -123,7 +135,11 @@ function channel(child, { onRequest, onNotify }) {
     try { m = JSON.parse(line); } catch { return; }
     if (!m || typeof m !== 'object') return;
     if (typeof m.method === 'string' && m.id !== undefined && m.id !== null) {
-      Promise.resolve().then(() => onRequest(m.method, m.params || {}, m.id)).then(
+      // At once, not on a later tick: a notification on the next line (a change to the call this request asks about) must
+      // find the request already held. Messages are handled in the order the agent sent them.
+      let r;
+      try { r = onRequest(m.method, m.params || {}, m.id); } catch (e) { r = Promise.reject(e); }
+      Promise.resolve(r).then(
         (result) => write({ id: m.id, result: result ?? null }),
         (e) => write({ id: m.id, error: { code: Number.isInteger(e.code) ? e.code : -32603, message: textOf(e) } }));
     } else if (typeof m.method === 'string') onNotify(m.method, m.params || {});
@@ -276,7 +292,8 @@ export function createAcp(deps) {
   function track(st, tc = {}) {
     const id = typeof tc.toolCallId === 'string' && tc.toolCallId ? tc.toolCallId : null;
     if (!id) return null;
-    const c = st.calls.get(id) || { id, kind: 'other', title: '', path: null, raw: {}, opened: false, done: false, asked: false, served: false, held: new Set() };
+    // held: request id -> what its card showed (frozen). approved: what the card showed when the user approved it.
+    const c = st.calls.get(id) || { id, kind: 'other', title: '', path: null, raw: {}, opened: false, done: false, asked: false, served: false, held: new Map(), approved: null };
     if (typeof tc.kind === 'string') c.kind = tc.kind;
     if (typeof tc.title === 'string' && tc.title) c.title = clip(tc.title, 300);
     if (tc.rawInput && typeof tc.rawInput === 'object' && !Array.isArray(tc.rawInput)) c.raw = tc.rawInput;
@@ -296,6 +313,24 @@ export function createAcp(deps) {
     st.calls.set(id, c);
     return c;
   }
+  // What the user sees of a call: its tool and input. A request is answered for this, never for what the call says later.
+  const sigOf = (c) => JSON.stringify([c.tool_name, c.tool_input]);
+  const what = (c) => clip(String(c.tool_input.command || (c.tool_input.file_path && path.basename(String(c.tool_input.file_path))) || c.tool_input.url || c.tool_input.pattern || c.title || c.tool_name), 100);
+  // The agent changed a call after the user saw it. While a request for it waits, that request is declined at once (the
+  // user cannot approve what the card no longer shows), and the files of both forms ask first for the rest of the turn.
+  // After an approval, the feed says so: the agent runs its own tool with the new input, which the office cannot stop.
+  function recheck(s, st, c) {
+    const sig = sigOf(c);
+    for (const [id, shown] of [...c.held]) {
+      if (shown.sig === sig) continue;
+      if (c.tool_input.file_path && EDIT_KINDS.has(c.kind)) st.askFirst.add(norm(st, c.tool_input.file_path));
+      withdraw(s, st, id, `${label} changed the call while it waited for your answer, so the office declined it: ${what(c)}`);
+    }
+    if (c.approved && !c.approved.told && c.approved.sig !== sig) {
+      c.approved.told = true;
+      emit(st, () => events.feed(s, 'wait', `${label} changed the call after you approved it: ${what(c)}`));
+    }
+  }
   function openCall(s, st, c) {
     if (c.opened) return;
     c.opened = true;
@@ -305,10 +340,17 @@ export function createAcp(deps) {
     if (c.done) return;
     c.done = true;
     // The agent finished a call the user has not answered yet: it did not wait (Hermes stops after its own time).
-    for (const id of [...c.held]) giveUp(s, st, id, `${label} moved on without your answer.`);
-    if (u.status === 'completed' && !c.asked && !c.served) {
+    for (const id of [...c.held.keys()]) withdraw(s, st, id, `${label} moved on without your answer.`);
+    // What the user approved for this call is used up: a later command or write with the same text asks again.
+    for (const [key, callId] of [...st.grants]) if (callId === c.id) st.grants.delete(key);
+    const file = c.tool_input.file_path ? norm(st, c.tool_input.file_path) : null;
+    // Hermes #31682: an edit the user declined can come back through another of the agent's own tools. The office cannot
+    // stop the agent's own tools, so it says so when one reports that file changed.
+    if (u.status === 'completed' && EDIT_KINDS.has(c.kind) && file && st.denied.has(file)) {
+      emit(st, () => events.feed(s, 'wait', `${label} changed ${path.basename(String(c.tool_input.file_path))} after you declined that edit.`));
+    } else if (u.status === 'completed' && !c.asked && !c.served) {
       if (c.kind === 'execute') emit(st, () => events.feed(s, 'wait', `${label} ran a command without asking the office: ${clip(c.tool_input.command || c.title, 100)}`));
-      else if (EDIT_KINDS.has(c.kind) && !(c.tool_input.file_path && st.wrote.has(norm(st, c.tool_input.file_path)))) {
+      else if (EDIT_KINDS.has(c.kind) && !(file && st.wrote.has(file))) {
         emit(st, () => events.feed(s, 'wait', `${label} changed ${path.basename(String(c.tool_input.file_path || c.title))} without asking the office.`));
       }
     }
@@ -322,15 +364,17 @@ export function createAcp(deps) {
   const CANCELLED = { outcome: { outcome: 'cancelled' } };
   const pick = (o) => ({ outcome: { outcome: 'selected', optionId: o.optionId } });
   const norm = (st, p) => fileKey(st.root, p);
-  // The agent no longer waits for request id: the office frees the hold (answer then gets {}), and the feed says why.
-  function giveUp(s, st, id, why) {
+  // The office answers request id itself, without the user: the agent stopped waiting for it, or changed the call it asks
+  // about. A request of the agent gets reject once (verdict 'withdraw'), never cancelled: in ACP that means the turn was
+  // cancelled. The hold goes (events.drop: the server frees it, and provider.answer then finds nothing), and the feed says why.
+  function withdraw(s, st, id, why) {
     const ask = st.asks.get(id);
     if (!ask) return;
     ask.gaveUp = true;
+    ask.done('withdraw');
     emit(st, () => events.drop(s, id, why));
-    if (st.asks.get(id) === ask) ask.done('cancel'); // a hold the office had already let go
   }
-  // Hold a request until the user answers. done(verdict) gets 'allow', 'deny' or 'cancel'.
+  // Hold a request until the user answers. done(verdict) gets 'allow', 'deny', 'cancel' or 'withdraw'.
   function hold(s, st, toolName, input, done) {
     const id = emit(st, () => events.permission(s, { tool_name: toolName, tool_input: input, permission_suggestions: [] }));
     if (!id) { done('deny'); return null; }
@@ -341,9 +385,11 @@ export function createAcp(deps) {
   function cancelAsks(st) { for (const ask of [...st.asks.values()]) { ask.gaveUp = true; ask.done('cancel'); } }
 
   // session/request_permission: held like any request. The answer is allow once or reject once, never an always option.
+  // It is the answer to what the card showed: a frozen copy of the call (shown) gives the grant and the declined file.
   function onPermission(s, st, params) {
     const c = track(st, params.toolCall);
     if (!c) throw rpcError(-32602, 'The request names no tool call.');
+    recheck(s, st, c); // a second request for a call that changed: the first one goes
     openCall(s, st, c);
     c.asked = true;
     const options = (Array.isArray(params.options) ? params.options : []).filter((o) => o && typeof o.optionId === 'string');
@@ -352,38 +398,53 @@ export function createAcp(deps) {
       emit(st, () => events.feed(s, 'wait', `${label} offers only Always allow for ${c.tool_name} ${c.title}. The office never gives a lasting allow, so Approve declines.`.replace(/\s+\./, '.')));
     }
     if (st.closed || st.interrupted) return CANCELLED;
+    const shown = { kind: c.kind, tool_name: c.tool_name, tool_input: { ...c.tool_input }, sig: sigOf(c), told: false };
+    shown.file = EDIT_KINDS.has(c.kind) && shown.tool_input.file_path ? norm(st, shown.tool_input.file_path) : null;
     return new Promise((resolve) => {
-      const id = hold(s, st, c.tool_name, c.tool_input, (v) => {
-        c.held.delete(id);
-        if (v === 'allow' && once) { grant(st, c); resolve(pick(once)); } else if (v === 'cancel' || !no) resolve(CANCELLED);
+      let id = null;
+      id = hold(s, st, shown.tool_name, shown.tool_input, (v) => {
+        if (id) c.held.delete(id);
+        if (v === 'allow' && once) { grant(st, shown, c.id); c.approved = shown; resolve(pick(once)); }
+        else if (v === 'cancel') resolve(CANCELLED);
+        else if (v === 'withdraw' || v === 'allow') {
+          // Not the user's no (the agent moved on or changed the call, or offered only Always allow): no refusal, but a
+          // write of that file through the office asks first for the rest of the turn.
+          if (shown.file) st.askFirst.add(shown.file);
+          resolve(no ? pick(no) : CANCELLED);
+        } else if (!no) resolve(CANCELLED);
         else {
           // A declined edit: that file is refused for the rest of the turn. One that names no file makes every write ask.
-          if (EDIT_KINDS.has(c.kind) && c.tool_input.file_path) st.denied.add(norm(st, c.tool_input.file_path));
-          else if (EDIT_KINDS.has(c.kind)) st.deniedVague = true;
+          if (shown.file) st.denied.add(shown.file);
+          else if (EDIT_KINDS.has(shown.kind)) st.deniedVague = true;
           resolve(pick(no));
         }
       });
       if (!id) return;
-      c.held.add(id);
-      if (spec.askTimeoutMs) {
+      c.held.set(id, shown);
+      // Hermes issue #63302: its edit approval stops after a fixed time (a command approval follows its own setting). When
+      // the agent reports the call as failed first, endCall frees the hold the same way.
+      if (spec.askTimeoutMs && EDIT_KINDS.has(c.kind)) {
         const ask = st.asks.get(id);
-        ask.timer = setTimer(() => giveUp(s, st, id, `${label} waits ${Math.round(spec.askTimeoutMs / 1000)} s for an answer. It moved on without yours.`), spec.askTimeoutMs);
+        ask.timer = setTimer(() => withdraw(s, st, id, `${label} waits ${Math.round(spec.askTimeoutMs / 1000)} s for an answer to an edit. It moved on without yours.`), spec.askTimeoutMs);
       }
     });
   }
-  // An approved call lets the office serve that same command or that same file's write once, without a second prompt.
-  function grant(st, c) {
-    if (c.tool_name === 'Bash' && c.tool_input.command) st.grants.add('Bash\n' + c.tool_input.command);
-    if (EDIT_KINDS.has(c.kind) && c.tool_input.file_path) st.grants.add('Write\n' + norm(st, c.tool_input.file_path));
+  // An approved call lets the office serve that same command or that same file's write once, without a second prompt, until
+  // that call ends (endCall). The keys come from what the card showed.
+  function grant(st, shown, callId) {
+    if (shown.tool_name === 'Bash' && shown.tool_input.command) st.grants.set('Bash\n' + shown.tool_input.command, callId);
+    if (shown.file) st.grants.set('Write\n' + shown.file, callId);
   }
 
   // ----- what the office serves: files and terminals (local-tools.mjs, limited to the root) -----
   // A call the office runs for the agent is refused when its path is outside the root (before anyone is asked), runs at once
   // when riskOf rates it low or the user just approved that same call, and is held otherwise.
   function allowed(s, st, toolName, input) {
-    const strict = toolName === 'Write' && st.deniedVague; // the user declined an edit of a file the office could not name
+    const file = toolName === 'Write' ? norm(st, input.file_path) : null;
+    // The user declined an edit of a file the office could not name, or a request for this file went unanswered.
+    const strict = toolName === 'Write' && (st.deniedVague || st.askFirst.has(file));
     if (!strict && riskOf(toolName, input, st.root) === 'low') return Promise.resolve(true);
-    const key = toolName === 'Bash' ? 'Bash\n' + input.command : 'Write\n' + norm(st, input.file_path);
+    const key = toolName === 'Bash' ? 'Bash\n' + input.command : 'Write\n' + file;
     if ((toolName === 'Bash' || toolName === 'Write') && st.grants.delete(key)) return Promise.resolve(true);
     if (st.closed || st.interrupted) return Promise.resolve(false);
     return new Promise((resolve) => { hold(s, st, toolName, input, (v) => resolve(v === 'allow')); });
@@ -459,6 +520,7 @@ export function createAcp(deps) {
         if (u.sessionUpdate === 'tool_call') flushText(s, st);
         const c = track(st, u);
         if (!c) break;
+        recheck(s, st, c);
         openCall(s, st, c);
         if (u.status === 'completed' || u.status === 'failed') endCall(s, st, c, u);
         break;
@@ -506,7 +568,7 @@ export function createAcp(deps) {
     st.busy = false;
     st.endCancel = null;
     cancelAsks(st); // an agent that ended its turn waits for nothing
-    st.grants.clear(); st.denied.clear(); st.wrote.clear(); st.deniedVague = false;
+    st.grants.clear(); st.denied.clear(); st.askFirst.clear(); st.wrote.clear(); st.deniedVague = false;
     st.carry.push(...st.notes.splice(0)); // the inbox gave them up already: they go with the next prompt
     if (st.closed) return;
     if (st.interrupted) events.stream(s, { type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Stopped' });
@@ -635,8 +697,9 @@ export function createAcp(deps) {
         loading: false, queue: [], notes: [], carry: [], text: '', last: '', msgId: null, cancelled: null, endCancel: null, err: '',
         calls: new Map(),        // toolCallId -> what the office knows of the call
         asks: new Map(),         // request id -> a held request: the agent's own, or a file or command the office serves
-        grants: new Set(),       // this turn: a command or a file write the user approved, served once without a second prompt
+        grants: new Map(),       // this turn: 'Bash\n<line>' or 'Write\n<fileKey>' the user approved -> its toolCallId; served once
         denied: new Set(),       // this turn: files whose edit the user declined (fileKey); a write to them is refused at once
+        askFirst: new Set(),     // this turn: files whose edit request went unanswered or changed; a write to them asks first
         deniedVague: false,      // this turn: the user declined an edit that named no file, so every write asks first
         wrote: new Set(),        // this turn: files the office wrote for the agent
         terminals: new Map(),    // terminalId -> a running or finished command (local-tools start())
