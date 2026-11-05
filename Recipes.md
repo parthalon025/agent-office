@@ -137,7 +137,7 @@ Use tokens only. Write a README with a props table and a "consumer provides" lin
 
 ## Prompt templates
 
-**Build a page:** "Build <page> x0.1 with Agent Office DS x1.6.5. Read README, Recipes and Reference. Start from kit/page.html. Use tokens and the icon set only. Write copy in Simplified Technical English. Run kit/check.py and take the screenshots in the definition of done. Report what you checked."
+**Build a page:** "Build <page> x0.1 with Agent Office DS x1.6.6. Read README, Recipes and Reference. Start from kit/page.html. Use tokens and the icon set only. Write copy in Simplified Technical English. Run kit/check.py and take the screenshots in the definition of done. Report what you checked."
 
 **Connect a platform:** "Write an Agent Office adapter x0.1 for <platform>. Read Recipes (Connect a platform) and the events and commands in Reference. Copy kit/adapter.js. Fill the mapping tables first, then the code. Set AgentOffice.strict = true and play a recorded log. Report each event type you saw."
 

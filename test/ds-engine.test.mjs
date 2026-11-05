@@ -532,3 +532,101 @@ test('OfficeScene reports Since you left: true when the card shows, false when i
   assert.ok(bundle.includes('R.useEffect(function(){if(!D.syl)return;var cb=sylCb.current;if(cb)cb(true);return function(){var c=sylCb.current;if(c)c(false);};},[!!D.syl]);'));
   assert.ok(bundle.includes('sylCb=R.useRef(null);sylCb.current=p.onSinceYouLeft;'));
 });
+
+// ---- retire: a temporary subagent sits at its desk before it leaves by the elevator ----
+function retireRig({ rm = false, view = 'floor', shown = true, exitMs = 0 } = {}) {
+  let now = 0, id = 0;
+  const timers = new Map(), left = [], removed = [];
+  const s = { rm, dead: false }, st = { view, floor: 1 };
+  const b = { name: 'sub', floor: shown ? 1 : 2, path: [new V(1, 0, 1)], pos: { x: 0, z: 0 } };
+  const env = {
+    s, st, DUR: { dwell: 1400 }, Date: { now: () => now },
+    byName: (n) => (removed.includes(n) ? null : b),
+    removeBot: (n) => removed.push(n),
+    leaveByElevator: (bot, done) => { left.push(now); if (exitMs === 0) done(); else if (exitMs !== Infinity) env.setTimeout(done, exitMs); },
+    setTimeout: (f, ms) => { timers.set(++id, { f, at: now + ms }); return id; },
+  };
+  const retire = new Function(...Object.keys(env), source('function retire(b)') + 'return retire;')(...Object.values(env));
+  const advance = (ms) => { // run due timers in time order, 10 ms at a time
+    for (const end = now + ms; now < end;) { now += 10; for (const [k, t] of [...timers]) if (t.at <= now) { timers.delete(k); t.f(); } }
+  };
+  const walk = (ms) => { for (let i = 0; i < ms / 1000; i++) { b.pos = { x: b.pos.x + 1, z: b.pos.z }; advance(1000); } }; // a bot that moves 1 unit a second
+  return { b, st, retire, advance, walk, left, removed };
+}
+
+test('retire: a bot that still walks in is not sent out; it leaves after the dwell once it sits', () => {
+  const r = retireRig();
+  r.retire(r.b);
+  r.advance(3000); // the old fixed timer (1400 ms) would have sent it out by now
+  assert.equal(r.left.length, 0, 'still walking: no exit');
+  r.b.path = []; // arrived at the seat
+  r.advance(1300);
+  assert.equal(r.left.length, 0, 'sits first');
+  r.advance(300);
+  assert.equal(r.left.length, 1, 'then leaves');
+  assert.ok(r.left[0] - 3000 >= 1400, 'a full dwell after it arrived');
+  assert.deepEqual(r.removed, ['sub']);
+});
+
+test('retire: a long walk in and a long walk out are never cut by a timer while the bot moves', () => {
+  const r = retireRig({ exitMs: Infinity }); // far room: 40 s in, 40 s out
+  r.retire(r.b);
+  r.walk(40000);
+  assert.equal(r.left.length, 0, 'still walking in after 40 s');
+  r.b.path = [];
+  r.advance(1500);
+  assert.equal(r.left.length, 1, 'it starts the exit walk after the dwell');
+  r.walk(40000);
+  assert.equal(r.removed.length, 0, 'still walking to the elevator after 40 s');
+});
+
+test('retire: a bot that stops moving for 15 s is removed, on the way in or out', () => {
+  const inn = retireRig({ exitMs: Infinity });
+  inn.retire(inn.b);
+  inn.walk(5000);
+  inn.advance(13800); // the last move was seen about 1 s before the walk call ended
+  assert.equal(inn.removed.length, 0);
+  inn.advance(1500);
+  assert.deepEqual(inn.removed, ['sub'], 'stuck on the way in');
+  const out = retireRig({ exitMs: Infinity });
+  out.retire(out.b);
+  out.b.path = [];
+  out.advance(1600);
+  assert.equal(out.left.length, 1);
+  out.advance(15200);
+  assert.deepEqual(out.removed, ['sub'], 'stuck on the way out');
+});
+
+test('retire: a hard cap of 120 s removes a bot that keeps moving but never finishes', () => {
+  const r = retireRig({ exitMs: Infinity });
+  r.retire(r.b);
+  r.walk(119000);
+  assert.equal(r.removed.length, 0);
+  r.walk(2000);
+  assert.deepEqual(r.removed, ['sub']);
+});
+
+test('retire: a bot that is walking out is removed at once when its floor goes off screen', () => {
+  for (const off of [(st) => { st.view = 'building'; }, (st) => { st.floor = 2; }]) {
+    const r = retireRig({ exitMs: Infinity });
+    r.retire(r.b);
+    r.b.path = [];
+    r.advance(1600);
+    assert.equal(r.left.length, 1, 'on the exit walk');
+    r.walk(2000);
+    assert.equal(r.removed.length, 0, 'still shown: it keeps walking');
+    off(r.st);
+    r.advance(200); // not the 15 s stall
+    assert.deepEqual(r.removed, ['sub']);
+  }
+});
+
+test('retire: reduced motion and a floor that is not on screen do not wait for the walk', () => {
+  for (const opt of [{ rm: true }, { shown: false }, { view: 'building' }]) {
+    const r = retireRig(opt);
+    r.retire(r.b); // path is still set: nothing walks it here
+    r.advance(1500);
+    assert.equal(r.left.length, 1, JSON.stringify(opt));
+    assert.deepEqual(r.removed, ['sub']);
+  }
+});
