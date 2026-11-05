@@ -261,9 +261,14 @@ test('M5: agent rooms opened at once in one repository all get their room and th
 test('M5: perRepo runs the tasks of one repository one after the other, also after a failure; other repositories do not wait', async () => {
   const log = [];
   const step = (name, ms, fail) => () => new Promise((res, rej) => { log.push(name + '+'); setTimeout(() => { log.push(name + '-'); fail ? rej(new Error(name)) : res(name); }, ms); });
-  const a = git.perRepo('C:\Repo', step('a', 40, true));
-  const b = git.perRepo('c:/repo/', step('b', 5));          // the same repository in another spelling
-  const c = git.perRepo('C:\Other', step('c', 5));
+  // Platform paths under a temp root: a hand-written 'C:\Repo' is drive-relative in a JS string and means another thing on Linux.
+  const root = os.tmpdir();
+  const repoA = path.join(root, 'ao-perrepo', 'Repo');
+  const same = path.join(root, 'ao-perrepo', '.', 'Repo') + path.sep;    // the same repository in another spelling
+  const repoB = path.join(root, 'ao-perrepo', 'Other');
+  const a = git.perRepo(repoA, step('a', 40, true));
+  const b = git.perRepo(same, step('b', 5));
+  const c = git.perRepo(repoB, step('c', 5));
   await assert.rejects(a, /a/);
   assert.equal(await b, 'b');
   assert.equal(await c, 'c');
