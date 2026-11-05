@@ -18,9 +18,10 @@ The office HUD has these by default (set `hud: false` to hide all HUD parts):
 ## Add a tab to the agent panel
 
 1. Pass `extraTabs` to `OfficeScene` (or `AgentPanel`): `[{ id: "terminal", label: "Terminal", icon: "terminal", after: "chat", render: function (bot) { return h(MyTerminal, { bot: bot.name }); } }]`.
-2. Give each tab a unique `id`. Do not use `chat`, `trace`, `sessions` or `agent`.
+2. Give each tab a unique `id` of letters, digits and dashes only. Do not use `chat`, `trace`, `sessions` or `agent`. The panel ignores an extra tab with any other id.
 3. To remove a built-in tab, pass `hideTabs: ["trace"]`.
 4. To learn which tab is open, use `onTabChange(id)`.
+5. To open a tab from the page, for example from a click on a desk monitor, pass `agentTab: "terminal"` to `OfficeScene` (`activeTab` on `AgentPanel`), select the bot, and keep `agentTab` in step with `onTabChange`.
 
 The DS draws the tab, the focus and the keys. Your `render` draws only the content.
 

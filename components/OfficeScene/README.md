@@ -12,7 +12,7 @@ The 3D office itself and the main component of the system. It holds a building o
 - **Cinematic.** `quality` sets the post effects (auto, high, medium, low). `intro` flies in from the tower. `sound` starts with sound on; the sound button in the zoom panel turns it on and off. Bots path around every object, ride the elevator and carry tool calls as packets (see Concepts, The scene).
 - **Decisions inbox.** The inbox state is open or closed. Pass `inbox` (boolean) and `onInbox(open)` to control it from the page: the page can then close it, and read its state, with no class names. Without `inbox`, the scene keeps the state itself. `onInbox` runs in both cases when the person opens or closes the inbox.
 - **Alerts and tab title.** The scene mounts a `Notifier` that counts the open decisions of the building on screen. Pass `waitingCount` (number) to use your own total, for example the open decisions of all buildings. Pass `notifier: false` to not mount it, and mount your own `Notifier` instead (see `Notifier`, `title`).
-- **Agent panel tabs.** `extraTabs`, `hideTabs` and `onTabChange` go to the agent panel (see `AgentPanel`).
+- **Agent panel tabs.** `extraTabs`, `hideTabs` and `onTabChange` go to the agent panel (see `AgentPanel`). To switch the open tab from the page, for example after a click on a desk monitor or from Ctrl+K, pass `agentTab` (a tab id) and keep it in step with `onTabChange`. Without `agentTab`, the panel keeps its own tab. The panel shows only while a bot is selected, so set `agentTab` and select the bot (`office.select(name)`) together.
 - Without React: `AgentOffice.office.mount(el, opts)`.
 
 ## Props
@@ -48,4 +48,5 @@ The 3D office itself and the main component of the system. It holds a building o
 | `waitingCount` | no | `number` |
 | `extraTabs` | no | `AgentPanelTab[]` |
 | `hideTabs` | no | `("chat" \| "trace" \| "sessions" \| "agent")[]` |
+| `agentTab` | no | `string` |
 | `onTabChange` | no | `(id: string) => void` |

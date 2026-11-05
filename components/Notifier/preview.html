@@ -1,16 +1,18 @@
-<!-- @dsCard group="Daily" height=170 -->
+<!-- @dsCard group="Daily" height=210 -->
 <!doctype html>
 <html><head><meta charset="utf-8"><title>Notifier</title></head><body style="margin:0;background:var(--bg);font-family:var(--font-sans)">
 <div id="root" style="padding:16px"></div>
 <script>
 var A=window.AgentOffice,h=React.createElement,R=React,n=3;
-function Demo(){var e=R.useState(false),on=e[0],setOn=e[1],l=R.useState([{id:"q1",kind:"request",bot:"Scout",text:"Approve sending 10 intro emails?",risk:"medium"},{id:"q2",kind:"request",bot:"Ledger",text:"Approve posting 42 journal entries?",risk:"high"}]),list=l[0],setList=l[1],t=R.useState(""),title=t[0],setTitle=t[1];
- R.useEffect(function(){var id=setTimeout(function(){setTitle(document.title);},0);return function(){clearTimeout(id);};},[list.length]);
- return h("div",{className:"ao-panel",style:{width:520,padding:12,display:"flex",flexDirection:"column",gap:10}},h(A.Notifier,{notifications:list,enabled:on}),
+function Demo(){var e=R.useState(false),on=e[0],setOn=e[1],ti=R.useState(true),useTitle=ti[0],setUseTitle=ti[1],l=R.useState([{id:"q1",kind:"request",bot:"Scout",text:"Approve sending 10 intro emails?",risk:"medium"},{id:"q2",kind:"request",bot:"Ledger",text:"Approve posting 42 journal entries?",risk:"high"}]),list=l[0],setList=l[1],t=R.useState(""),title=t[0],setTitle=t[1];
+ R.useEffect(function(){var id=setTimeout(function(){setTitle(document.title);},0);return function(){clearTimeout(id);};},[list.length,useTitle]);
+ return h("div",{className:"ao-panel",style:{width:520,padding:12,display:"flex",flexDirection:"column",gap:10}},h(A.Notifier,{notifications:list,enabled:on,title:useTitle}),
   h("div",{style:{display:"flex",gap:8,alignItems:"flex-start",flexWrap:"wrap"}},h(A.NotifyToggle,{enabled:on,onChange:setOn}),
    h(A.Button,{icon:"add",onClick:function(){n++;setList(list.concat([{id:"q"+n,kind:"request",bot:"Pixel",text:"Approve publishing 3 banners?",risk:"low"}]));}},"Add a request"),
-   h(A.Button,{icon:"approve",disabled:!list.length,onClick:function(){setList(list.slice(1));}},"Answer one")),
-  h("div",{className:"ao-muted",style:{fontSize:12}},"Page title: ",h("span",{className:"ao-mono",style:{color:"var(--ink)"}},title)));}
+   h(A.Button,{icon:"approve",disabled:!list.length,onClick:function(){setList(list.slice(1));}},"Answer one"),
+   h(A.Button,{onClick:function(){setUseTitle(!useTitle);}},useTitle?"Title: on":"Title: off")),
+  h("div",{className:"ao-muted",style:{fontSize:12}},"Page title: ",h("span",{className:"ao-mono",style:{color:"var(--ink)"}},title)),
+  h("div",{className:"ao-muted",style:{fontSize:12}},"Title off puts the page title back at once."));}
 document.title="Agent Office";
 ReactDOM.createRoot(document.getElementById("root")).render(h(Demo));
 </script>
