@@ -32,6 +32,56 @@ test('tokens.css has every color token of tokens.json, with the same value, in e
   }
 });
 
+// The non-color groups of tokens.json. Each custom property is named after the token; type styles and families
+// have a name of their own (--type-<style>-size|line|weight|tracking, --font-<family>). Only `shadow` changes per theme.
+function nonColorProps() {
+  const j = JSON.parse(read('tokens.json'));
+  const flat = [];
+  for (const g of ['spacing', 'radius', 'blur', 'opacity', 'zIndex', 'duration', 'easing', 'breakpoint', 'scene', 'light', 'fx']) {
+    assert.ok(Array.isArray(j[g]?.tokens), `tokens.json has no ${g}.tokens`);
+    for (const t of j[g].tokens) flat.push([t.name, t.value]);
+  }
+  for (const [name, value] of Object.entries(j.type.families)) flat.push([`font-${name}`, value]);
+  for (const group of j.type.groups) {
+    for (const s of group.styles) {
+      flat.push([`type-${s.name}-size`, s.fontSize], [`type-${s.name}-line`, s.lineHeight], [`type-${s.name}-weight`, String(s.fontWeight)]);
+      if (s.letterSpacing) flat.push([`type-${s.name}-tracking`, s.letterSpacing]);
+    }
+  }
+  const perTheme = j.shadow.tokens.map((t) => [t.name, t.value]);
+  return { flat, perTheme };
+}
+const cssBlock = (text, open) => { const at = text.indexOf(open); return text.slice(at, text.indexOf('\n}', at)); };
+const cssProp = (text, name) => text.match(new RegExp(`\\n\\s*--${name}: ([^;]+);`))?.[1];
+
+test('tokens.css has every non-color token of tokens.json, with the same value', () => {
+  const { flat } = nonColorProps();
+  assert.ok(flat.length > 100, `only ${flat.length} non-color tokens found`);
+  const root = cssBlock(css, ':root, [data-theme="light"] {');
+  for (const [name, value] of flat) {
+    const got = cssProp(root, name);
+    assert.ok(got !== undefined, `--${name} missing in tokens.css`);
+    assert.equal(got, String(value), `--${name}`);
+  }
+});
+
+test('tokens.css has every per-theme shadow token, with the same value, in each theme and in the system dark block', () => {
+  const { perTheme } = nonColorProps();
+  // every theme of tokens.json (Fluent too), plus the system dark block, which takes the Night value
+  const ids = JSON.parse(read('tokens.json')).color.themes.map((t) => t.id);
+  assert.ok(ids.includes('fluent'), 'tokens.json lists the fluent theme');
+  const blocks = Object.fromEntries(ids.map((id) => [id, cssBlock(css, id === 'light' ? ':root, [data-theme="light"] {' : `\n[data-theme="${id}"] {`)]));
+  blocks.system = cssBlock(css, ':root:not([data-theme]) {');
+  for (const [name, value] of perTheme) {
+    assert.deepEqual(Object.keys(value), ids, `${name} has a value for every theme, in order`);
+    for (const [th, text] of Object.entries(blocks)) {
+      const got = cssProp(text, name);
+      assert.ok(got !== undefined, `--${name} missing in ${th}`);
+      assert.equal(got, value[th === 'system' ? 'dark' : th], `--${name} in ${th}`);
+    }
+  }
+});
+
 test('the schema lists every color token', () => {
   for (const t of tokens) assert.ok(schema.tokens.includes(t.name), `${t.name} not in kit/schema.json tokens`);
 });
@@ -209,6 +259,41 @@ test('the scrim usage text names the dialog and the command palette, and no doc 
 test('the checker docs say that a name ending in "-" is checked by its prefix', () => {
   for (const f of ['DS-README.md', 'Recipes.md']) {
     assert.match(read(f), /checked by its prefix: a name that ends in "-"/, `${f} explains the prefix rule`);
+  }
+});
+
+test('the DS files say they are edited by hand: no header or doc claims a generator that is not in the repo (#87)', () => {
+  const stamp = JSON.parse(read('tokens.json')).name.match(/x\d+(\.\d+)*$/)[0].replace(/\./g, '\\.');
+  const top = read('tokens.css').split('\n')[0];
+  assert.match(top, new RegExp(`^/\\* Agent Office DS ${stamp}: tokens\\.css\\. Edited by hand`), 'tokens.css header');
+  assert.match(top, /tokens\.json/, 'tokens.css header names tokens.json');
+  const assets = read('components/bundle.js').split('\n').find((l) => l.includes('asset strings'));
+  assert.ok(assets, 'the asset block has a header');
+  assert.match(assets, new RegExp(`Agent Office DS ${stamp} - asset strings\\. Edited by hand`), 'asset block header');
+  for (const f of ['tokens.css', 'components/bundle.js', 'DS-README.md', 'Reference.md', 'Recipes.md', 'Concepts.md']) {
+    assert.ok(!/gen_assets\.py|build\.py|Do not edit/.test(read(f)), `${f} names no generator and does not say "Do not edit"`);
+  }
+  assert.ok(!/Reference \(generated\)/.test(read('DS-README.md')), 'DS-README does not call Reference generated');
+  assert.ok(!/`tokens\.css` \(generated/.test(read('DS-README.md')), 'DS-README does not call tokens.css generated');
+});
+
+test('bundle.js defines ModeToggle once, with an icon on every mode; the types and docs list the same modes (#87)', () => {
+  const b = read('components/bundle.js');
+  assert.equal(b.match(/function ModeToggle\(/g).length, 1, 'one ModeToggle definition');
+  assert.ok(!/NS=\{[^}]*ModeToggle/.test(b), 'the first IIFE does not export a ModeToggle');
+  const at = b.indexOf('function ModeToggle(');
+  const def = b.slice(at, b.indexOf('\n', at));
+  // the default options are the themes of AO.MODES (one per theme of tokens.json, Fluent too), then Tour
+  assert.match(def, /var opts=p\.options\|\|AO\.MODES\.concat\(\[\{id:"tour",label:"Tour",icon:"tour"\}\]\)/, 'default options: AO.MODES, then Tour');
+  const ma = b.indexOf('AO.MODES=[');
+  const modes = b.slice(ma, b.indexOf('];', ma));
+  const themes = JSON.parse(read('tokens.json')).color.themes;
+  for (const t of themes) assert.match(modes, new RegExp(`theme:"${t.id}",label:"${t.name}",icon:"[a-z]+"`), `AO.MODES has ${t.name} with an icon`);
+  assert.match(read('components/index.d.ts'), /interface ModeToggleProps \{[^}]*options\?: \{ id: string; label: string; icon\?: string \}\[\]/, 'index.d.ts: options take an icon');
+  assert.match(read('components/ModeToggle/README.md'), /\| `options` \| no \| `\{ id: string; label: string; icon\?: string \}\[\]` \|/, 'component README: options take an icon');
+  const list = new RegExp(`${themes.map((t) => t.name).join(', ')}\\)? and Tour`);
+  for (const f of ['Reference.md', 'components/ModeToggle/README.md']) {
+    assert.match(read(f), list, `${f} lists ${themes.map((t) => t.name).join(', ')} and Tour`);
   }
 });
 
