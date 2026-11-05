@@ -414,7 +414,8 @@
     var nr = useState(null), newRoom = nr[0], setNewRoom = nr[1];    // naming a room: { branch, name }
     var cl = useState(null), clean = cl[0], setClean = cl[1];         // clean up: null, or { floors: [{ branch, rooms }] }
     var DONE = {
-      '/api/floor/cleanup': function (b, j) { return F.cleanupNote(j); }, '/api/floor/create': ['success', 'Floor added', function (b) { return 'Branch ' + b.branch + ' with its first room.'; }],
+      '/api/floor/cleanup': function (b, j) { return F.cleanupNote(j); },
+      '/api/floor/create': ['success', 'Floor added', function (b) { return 'Branch ' + b.branch + ' with its first room.'; }],
       '/api/floor/delete': ['info', 'Floor deleted', function (b) { return 'Branch ' + b.branch + ' and its rooms are gone.'; }],
       '/api/room/create': ['success', 'Room added', function (b) { return 'A new worktree on ' + b.branch + '.'; }],
       '/api/room/delete': ['info', 'Room removed', function (b) { return 'The folder ' + String(b.root).split(/[\\/]/).pop() + ' is gone. Its branch stays.'; }] };
@@ -441,9 +442,13 @@
         fl.length ? h(A.Button, { key: 'r', variant: 'danger', icon: 'remove', loading: busy === 'cleanup', onClick: function () { run('cleanup', '/api/floor/cleanup', { branches: fl.map(function (f) { return f.branch; }) }, function () { setClean(null); }); } }, 'Delete ' + fl.length + (fl.length === 1 ? ' floor' : ' floors')) : null] },
         h('div', { className: 'form' },
           fl.length
-            ? h('p', { className: 'note' }, 'These floors are merged into ' + (main ? main.branch : 'the main branch') + ', have no changes and no session. Deleting them removes their rooms and branches. No commit is lost.')
+            ? h('p', { className: 'note' }, 'These floors are merged into ' + (main ? main.branch : 'the main branch') + ', have no changes, no session and are over an hour old. Press Keep this floor to leave one out. Deleting removes the rest with their rooms and branches. No commit is lost.')
             : h(A.EmptyState, { icon: 'floor', title: 'Nothing to clean up', text: 'Every floor has unmerged work, changes or a session.' }),
-          h('ul', { className: 'past' }, fl.map(function (f) { return h('li', { key: f.branch, className: 'past-row' }, h('div', { className: 'past-title' }, h(A.Icon, { name: 'floor', size: 16 }), h('b', null, f.branch), h(Tag, null, f.rooms + (f.rooms === 1 ? ' room' : ' rooms')))); })),
+          h('ul', { className: 'past' }, fl.map(function (f) {
+            return h('li', { key: f.branch, className: 'past-row' },
+              h('div', { className: 'past-title' }, h(A.Icon, { name: 'floor', size: 16 }), h('b', null, f.branch), h(Tag, null, f.rooms + (f.rooms === 1 ? ' room' : ' rooms'))),
+              h('div', { className: 'past-actions' }, h(A.Button, { variant: 'quiet', onClick: function () { setClean({ floors: fl.filter(function (x) { return x.branch !== f.branch; }) }); } }, 'Keep this floor')));
+          })),
           err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
     }
     if (confirm) {
@@ -489,13 +494,13 @@
                   h(A.OfficeTypeBadge, { type: 'lab', label: w.root.split(/[\\/]/).pop() }), h('span', { className: 'past-sub mono', title: w.root }, F.shortPath(w.root)),
                   here.map(function (s) { return h('span', { key: s.uid, className: 'room-bot', title: s.name }, h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: colorOf(s.uid), status: statusOf(s), size: 20 }), s.name); }),
                   w.main ? null : h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setConfirm({ kind: 'room', branch: b, root: w.root }); } }, 'Remove room'));
-              })),
-            h('div', { className: 'past-actions' },
+              }),
               newRoom && newRoom.branch === b ? h('div', { className: 'inline-actions' },
                 h(A.TextInput, { id: 'r-name', label: 'Room name (optional)', value: newRoom.name, placeholder: 'review', onChange: function (v) { setNewRoom({ branch: b, name: v }); } }),
                 h(A.Button, { variant: 'primary', icon: 'add', loading: busy === 'room:' + b, onClick: function () { run('room:' + b, '/api/room/create', { branch: b, name: newRoom.name.trim() }, function () { setNewRoom(null); }); } }, 'Add room'),
-                h(A.Button, { variant: 'quiet', onClick: function () { setNewRoom(null); } }, 'Cancel'))
-              : h(A.Button, { variant: 'quiet', icon: 'add', onClick: function () { setErr(''); setNewRoom({ branch: b, name: '' }); } }, 'Add room'),
+                h(A.Button, { variant: 'quiet', onClick: function () { setNewRoom(null); } }, 'Cancel')) : null),
+            h('div', { className: 'past-actions' },
+              newRoom && newRoom.branch === b ? null : h(A.Button, { variant: 'quiet', icon: 'add', onClick: function () { setErr(''); setNewRoom({ branch: b, name: '' }); } }, 'Add room'),
               hasMain ? null : h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setConfirm({ kind: 'floor', branch: b }); } }, 'Delete floor')));
         })),
         form ? null : h('div', { className: 'inline-actions' },

@@ -301,9 +301,14 @@ export async function defaultBranch(repo) {
   return '';
 }
 
-/** Floors nobody needs: not the main folder's branch, merged into it, and every room clean. Deleting
- *  them loses nothing. Returns [{ branch, rooms }] (rooms = how many worktrees the floor has). */
-export async function staleFloors(repo) {
+/** A floor younger than this is not "unused" yet: its room may wait for its first session. One hour;
+ *  OFFICE_FLOOR_MIN_AGE_MS changes it (the route tests set 0). */
+const AGE_ENV = process.env.OFFICE_FLOOR_MIN_AGE_MS;
+const FLOOR_MIN_AGE_MS = AGE_ENV && Number.isFinite(Number(AGE_ENV)) ? Number(AGE_ENV) : 3600000;
+
+/** Floors nobody needs: not the default branch or the main folder's branch, merged into it, every room clean
+ *  and older than minAgeMs. Deleting them loses nothing. Returns [{ branch, rooms }] (rooms = worktrees). */
+export async function staleFloors(repo, { minAgeMs = FLOOR_MIN_AGE_MS } = {}) {
   const wts = await layout(repo);
   const main = wts.find((w) => w.main);
   if (!main || main.branch === 'detached') return [];
@@ -314,6 +319,8 @@ export async function staleFloors(repo) {
     if (b === main.branch || b === keep || b === 'detached' || !merged.has(b)) continue;
     const rooms = wts.filter((w) => w.branch === b);
     if (rooms.some((w) => w.main)) continue;
+    const young = rooms.some((w) => { try { return Date.now() - fs.statSync(w.root).birthtimeMs < minAgeMs; } catch { return true; } });
+    if (young) continue;
     let clean = true;
     for (const w of rooms) if ((await git(['status', '--porcelain'], w.root, 15000).catch(() => 'x')).trim()) { clean = false; break; }
     if (clean) out.push({ branch: b, rooms: rooms.length });

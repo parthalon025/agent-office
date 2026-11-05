@@ -53,7 +53,7 @@ test('staleFloors lists merged clean floors only', async () => {
     const ahead = await git.createFloor(dir, 'ahead', '', tag + 'c');
     fs.writeFileSync(path.join(ahead.root, 'b.txt'), 'b');
     plain(ahead.root, 'add', '-A'); plain(ahead.root, 'commit', '-m', 'two'); // not merged
-    assert.deepEqual(await git.staleFloors(dir), [{ branch: 'done', rooms: 1 }]);
+    assert.deepEqual(await git.staleFloors(dir, { minAgeMs: 0 }), [{ branch: 'done', rooms: 1 }]);
   } finally {
     for (const b of ['done', 'dirty', 'ahead']) await git.deleteFloor(dir, b, true).catch(() => {});
     fs.rmSync(dir, { recursive: true, force: true });
@@ -74,7 +74,7 @@ test('staleFloors never offers the default branch, even when the main folder is 
   try {
     plain(dir, 'checkout', '-b', 'feat/work');
     await git.createRoom(dir, 'main', tag);                    // main is open in a room, merged and clean
-    assert.deepEqual(await git.staleFloors(dir), []);
+    assert.deepEqual(await git.staleFloors(dir, { minAgeMs: 0 }), []);
   } finally {
     plain(dir, 'worktree', 'prune');
     await git.deleteFloor(dir, 'main', true).catch(() => {});
@@ -88,14 +88,27 @@ test('staleFloors: a floor with two rooms is not stale when one room is dirty; a
   try {
     await git.createFloor(dir, 'two', '', tag + 'a');
     const second = await git.createRoom(dir, 'two', tag + 'b');
-    assert.deepEqual(await git.staleFloors(dir), [{ branch: 'two', rooms: 2 }]);
+    assert.deepEqual(await git.staleFloors(dir, { minAgeMs: 0 }), [{ branch: 'two', rooms: 2 }]);
     fs.writeFileSync(path.join(second.root, 'x.txt'), 'x');
-    assert.deepEqual(await git.staleFloors(dir), []);
+    assert.deepEqual(await git.staleFloors(dir, { minAgeMs: 0 }), []);
     fs.rmSync(path.join(second.root, 'x.txt'));
     plain(dir, 'checkout', '--detach');
-    assert.deepEqual(await git.staleFloors(dir), []);
+    assert.deepEqual(await git.staleFloors(dir, { minAgeMs: 0 }), []);
   } finally {
     await git.deleteFloor(dir, 'two', true).catch(() => {});
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('staleFloors leaves out a floor whose room is younger than the minimum age', async () => {
+  const dir = repo();
+  const tag = 'aotest' + crypto.randomBytes(3).toString('hex');
+  try {
+    await git.createFloor(dir, 'fresh', '', tag);
+    assert.deepEqual(await git.staleFloors(dir), []);                                    // default: one hour
+    assert.deepEqual(await git.staleFloors(dir, { minAgeMs: 0 }), [{ branch: 'fresh', rooms: 1 }]);
+  } finally {
+    await git.deleteFloor(dir, 'fresh', true).catch(() => {});
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });

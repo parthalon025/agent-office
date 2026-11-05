@@ -68,7 +68,7 @@ before(async () => {
   fake = await startFakeOpenAI({ script: [{ text: 'ok' }], models: ['fake-model'] });
   port = await freePort();
   const env = { ...process.env, OFFICE_PORT: String(port), OFFICE_HOOKS: 'command', OFFICE_OLLAMA_URL: fake.url, OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
-    OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local') };
+    OFFICE_FLOOR_MIN_AGE_MS: '0', OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local') };
   child = spawn(process.execPath, ['server.mjs'], { cwd: copy, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env });
   child.stdout.on('data', (d) => { log += d; });
   child.stderr.on('data', (d) => { log += d; });
