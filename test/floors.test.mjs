@@ -7,6 +7,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import http from 'node:http';
 import { execFileSync } from 'node:child_process';
 import * as git from '../git.mjs';
 
@@ -300,6 +301,58 @@ test('discardNew removes only a worktree createWorktree made in this call; a cop
   }
 });
 
+// On Windows a folder cannot be deleted while a process has it as its current folder, and git makes the work tree its current
+// folder. `git worktree remove` tries again for about 70 ms, then fails. A room removed right after its session closed failed
+// now and then with "failed to delete '<room>': Permission denied": the session's place lookups (git.locate, three git calls in
+// the room, started by its last hooks) still ran there, and one could start while git deleted the folder. Now a removal waits
+// for the office's git calls in the folder, and a git call that starts there meanwhile waits for the removal.
+// The git call in the room here is a pull request push to a remote that holds the request: the push runs in the room for as
+// long as the test wants (the lookups of a session are short, so they would show the fault only now and then).
+async function holdingRemote() {
+  const held = [];
+  const server = http.createServer((req, res) => held.push(res));
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const release = () => { for (const res of held.splice(0)) { res.statusCode = 404; res.end(); } };
+  return {
+    url: `http://127.0.0.1:${server.address().port}/r.git`,
+    asked: () => held.length > 0,
+    release,
+    close: () => { release(); return new Promise((resolve) => server.close(resolve)); },
+  };
+}
+// A removal runs its own git in the repository. Were the folder to remove the main folder, those calls would wait for the removal.
+test('a removal of the main folder is refused at once, and nothing waits', async () => {
+  const dir = repo();
+  await assert.rejects(git.removeWorktree({ root: dir, repo: dir, branch: 'main' }, true), /The main folder of the repository cannot be removed/);
+  await assert.rejects(git.removeRoom(dir, dir, true), /The main folder of the repository cannot be removed/);
+  assert.ok(await git.locate(dir), 'git calls in the main folder still run');
+  assert.ok(fs.existsSync(path.join(dir, 'a.txt')));
+});
+for (const how of ['removeWorktree', 'removeRoom']) {
+  test(`${how} waits for a git call that runs in the room, and a lookup that starts meanwhile runs after it`, async () => {
+    const dir = repo();
+    const remote = await holdingRemote();
+    plain(dir, 'remote', 'add', 'origin', remote.url);
+    const room = how === 'removeWorktree' ? await git.createWorktree(dir, 'held') : await git.createFloor(dir, 'aoheld-' + crypto.randomBytes(3).toString('hex'));
+    try {
+      const push = git.createPr(room.root, room.branch, 'held').then(() => 'pushed', (e) => e.message);
+      for (let i = 0; !remote.asked(); i++) { assert.ok(i < 300, 'the push reached the remote'); await new Promise((r) => setTimeout(r, 50)); }
+      const removal = how === 'removeWorktree' ? git.removeWorktree(room, true) : git.removeRoom(dir, room.root, true);
+      const late = git.locate(room.root).then((g) => ({ place: g, roomThere: fs.existsSync(room.root) }));
+      await new Promise((r) => setTimeout(r, 300)); // longer than git tries a busy folder
+      remote.release();
+      assert.notEqual(await push, 'pushed');
+      assert.deepEqual(await removal, how === 'removeWorktree' ? { removed: true, branchKept: false } : { removed: true });
+      assert.equal(fs.existsSync(room.root), false, 'the room is gone');
+      assert.deepEqual(await late, { place: null, roomThere: false }, 'the lookup ran after the removal and found the room gone');
+    } finally {
+      await remote.close();
+      await git.removeRoom(dir, room.root, true).catch(() => {});
+      fs.rmSync(room.root, { recursive: true, force: true });
+    }
+  });
+}
+
 // Review minor: layout read the base branches, then the branch list. When the list failed after the bases had been read,
 // live stayed null and live.has threw, so the whole layout failed. Now a room keeps the base its config names.
 test('layout: when the branch list cannot be read after the bases, the rooms still come back with the base their config names', async () => {
@@ -359,6 +412,14 @@ test('locate does not try again for a folder that is not a repository, or is gon
   const exec = seq(new Error('timed out'));
   assert.equal(await git.locate('/nope', { exec, ...retry, exists: () => false }), null);
   assert.equal(exec.calls.length, 1, 'a folder that is gone is an answer');
+});
+
+// A lookup in a room that waited for the room's removal (git.mjs removeFolder) reads the base branch in a folder that is gone.
+// That is no place, as when the folder was gone at the first call: not a place on a floor of its own.
+test('locate gives null when the folder is gone before the base branch is read (its room was removed)', async () => {
+  const gone = path.join(os.tmpdir(), 'ao-gone-' + crypto.randomBytes(3).toString('hex'));
+  const exec = seq([gone, 'agent/x-1234', path.join(gone, '.git')].join('\n'));
+  assert.equal(await git.locate(gone, { exec, wait: async () => {}, exists: () => false }), null);
 });
 
 // ---------- locateOrKeep: at the office start, a passing git failure is not "outside git" ----------
