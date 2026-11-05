@@ -295,6 +295,31 @@ test('a past local session reopens as a fresh local session in the same folder',
   assert.ok(feed.some((f) => /cannot resume a past session/.test(f.text || '')), 'the feed says why it is a new session');
 });
 
+// #105: an open session is recorded in history (a crash must leave a resumable record) but it is not past. Past sessions
+// and search show it once, live, and Reopen refuses it; when it ends it is past.
+test('an open session is not in Past sessions, is found once by search as live, and cannot be reopened; after it ends it is past', { skip: SKIP }, async () => {
+  fake.reset([{ text: 'zq105 reply' }]);
+  const uid = await open('zq105-open');
+  await call('/api/message', { uid, text: 'hi' });
+  await until(async () => (await sessionOf(uid)).status === 'idle', 'the turn to end');
+  const hits = async () => (await call('/api/search', { q: 'zq105' })).json.results.filter((x) => x.uid === uid);
+  assert.ok(!(await pastUids()).includes(uid), 'an open session is not in Past sessions');
+  const live = await hits();
+  assert.equal(live.length, 1, 'search finds the open session once');
+  assert.equal(live[0].where, 'live');
+  const before = (await snapshot()).sessions.length;
+  const re = await call('/api/reopen', { uid });
+  assert.equal(re.status, 409, JSON.stringify(re.json));
+  assert.match(re.json.error, /open again/);
+  assert.equal((await snapshot()).sessions.length, before, 'no second session started');
+  assert.equal((await call('/api/close', { uid })).status, 200);
+  const rec = await until(async () => ((await call('/api/history', {})).json.sessions || []).find((x) => x.uid === uid), 'the past record');
+  assert.ok(rec.endedAt, 'an ended session has an end time');
+  const past = await hits();
+  assert.equal(past.length, 1, 'search finds the ended session once');
+  assert.equal(past[0].where, 'past');
+});
+
 // ---------- default spend limit (#33). No paid session opens here: a paid one would start claude. ----------
 const info = () => fetch(`http://127.0.0.1:${port}/api/info`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
 
@@ -395,10 +420,14 @@ test('a live reopen swaps the past record for its own as soon as it has a sid', 
     body: JSON.stringify({ hook_event_name: 'SessionStart', session_id: 'resumed-sid-1', cwd: work, source: 'resume' }),
   });
   assert.equal(hook.status, 200);
+  // The swap is done when the old record is gone: Reopen says 404 (before it, 409: the reopen is live).
+  await until(async () => (await call('/api/reopen', { uid: PAST_UID })).status === 404, 'the old record to go');
+  // The session is open, so it is not past yet (#105): neither uid is listed. It is listed once, under its new uid, when it ends.
+  assert.deepEqual((await pastUids()).filter((u) => u === PAST_UID || u === re.json.uid), [], 'an open session is not in Past sessions');
+  assert.equal((await call('/api/reopen', { uid: re.json.uid })).status, 409, 'an open session cannot be reopened');
+  await call('/api/close', { uid: re.json.uid });
   const h = await until(async () => { const l = await pastUids(); return l.includes(re.json.uid) ? l : null; }, 'the reopened session in Past sessions');
   assert.ok(!h.includes(PAST_UID), 'the old record is gone: the session is listed once, under its new uid');
-  assert.equal((await call('/api/reopen', { uid: PAST_UID })).status, 404, 'there is no old record to reopen');
-  await call('/api/close', { uid: re.json.uid });
 });
 
 // ---------- agent rooms (#69): POST /api/open makes a room for each agent ----------

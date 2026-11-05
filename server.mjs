@@ -204,9 +204,12 @@ function saveHistory() {
 // A reopened session replaces its past record when it has a sid, which is when it records itself (the tracker saves a
 // session at once when its sid first arrives). Until then the past record stays: a reopen that fails before init must
 // not lose the session (#54). While the reopened session is live, its past record is hidden and cannot be reopened again.
+// A session that is open now is recorded too (a crash must leave a resumable record), but it is not past: Past sessions,
+// search and Reopen all treat it as in use until it ends (#105).
 const reopening = new Map(); // uid of the reopened session -> uid of the past record
 function pastInUse() {
   const used = new Set();
+  for (const [uid, s] of sessions) if (s.status !== 'ended') used.add(uid);
   for (const [id, past] of reopening) { const s = sessions.get(id); if (s && s.status !== 'ended') used.add(past); }
   return used;
 }
@@ -1312,8 +1315,9 @@ function search(q) {
       return;
     }
   };
-  for (const h of pastShown()) scan(h, 'past');
-  for (const s of sessions.values()) if (s.headless) scan(s, 'live');
+  const shown = pastShown(), asPast = new Set(shown.map((h) => h.uid));
+  for (const h of shown) scan(h, 'past');
+  for (const s of sessions.values()) if (s.headless && !asPast.has(s.uid)) scan(s, 'live'); // a session shows once: past when it has ended, live while it is open
   return out.slice(0, 30);
 }
 // A session's folder, whether it is running or in the past list.
