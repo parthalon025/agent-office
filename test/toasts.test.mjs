@@ -1,6 +1,7 @@
 // Toast list rules: what stays, what closes, what is pushed out. No browser, no timers. Run: npm test
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import '../public/toasts.js';
 
 const T = globalThis.OfficeToasts;
@@ -47,4 +48,37 @@ test('remove and hasTimed', () => {
   assert.equal(T.hasTimed(l), true);
   assert.equal(T.hasTimed(T.remove(l, 1)), false);
   assert.deepEqual(T.remove(l, 2).map((t) => t.id), [1]);
+});
+
+// #79: on a narrow screen the stack sits above every box that is anchored to the dock (the DS room card, the chat, the
+// terminal, board and stats panels, the Since you left card), so it never covers one. T.lift gives the distance from the
+// bottom of the view to the bottom of the stack.
+test('lift: with no box above the dock, the stack stops at the dock (--strip-clear)', () => {
+  assert.equal(T.lift(800, 170, []), 170);
+  assert.equal(T.lift(800, 170, [{ top: 300, bottom: 400 }]), 170, 'a box that is not on the dock does not count');
+  assert.equal(T.lift(800, 170, [{ top: 0, bottom: 0 }]), 170, 'an empty box does not count');
+});
+
+test('lift: the stack sits above the highest box that is anchored to the dock, with a gap', () => {
+  const room = { top: 310, bottom: 630 };   // 800 - 170 = 630: it ends at the dock
+  assert.equal(T.lift(800, 170, [room]), 800 - 310 + T.GAP);
+  const chat = { top: 200, bottom: 630 };
+  assert.equal(T.lift(800, 170, [room, chat]), 800 - 200 + T.GAP, 'the highest box wins');
+  assert.equal(T.lift(800, 170, [{ top: 310, bottom: 629 }]), 800 - 310 + T.GAP, 'one pixel of rounding still counts');
+});
+
+test('lift: the stack never rises above the room it needs below the top of the view', () => {
+  const tall = { top: 70, bottom: 630 };
+  assert.equal(T.lift(800, 170, [tall]), 800 - T.TOP - T.ROOM);
+  assert.equal(T.lift(300, 170, [{ top: 10, bottom: 130 }]), 170, 'a short window keeps the dock edge');
+});
+
+test('the narrow stack stands at --toast-lift, which office.js sets; no rule puts it at the top over the DS header', () => {
+  const css = fs.readFileSync(new URL('../public/office.css', import.meta.url), 'utf8').replaceAll('\r\n', '\n');
+  const narrow = css.slice(css.indexOf('@media (max-width: 820px) {\n  .page-toasts'));
+  const block = narrow.slice(0, narrow.indexOf('\n}\n'));
+  assert.match(block, /\.page-toasts \{[^}]*bottom: var\(--toast-lift\)/);
+  assert.doesNotMatch(css, /\.page-toasts[^{]*\{[^}]*top:/, 'a top rule would cover the DS header');
+  assert.match(css, /\.page-toasts \{ --toast-lift: var\(--strip-clear/, 'the default is the dock edge');
+  assert.match(fs.readFileSync(new URL('../public/office.js', import.meta.url), 'utf8'), /OfficeToasts\.lift\(/);
 });

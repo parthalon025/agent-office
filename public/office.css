@@ -107,15 +107,15 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .past-actions { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-1); flex: none; }
 
 /* page toasts hold every toast: results of page actions, requests and errors from the scene (the DS HUD stack is off, toasts: false) */
-.page-toasts { position: fixed; z-index: calc(var(--z-dialog) + 1); right: auto; left: 362px; bottom: var(--strip-clear, 180px); width: min(360px, calc(100vw - 2 * var(--space-4))); }
+.page-toasts { --toast-lift: var(--strip-clear, 200px); position: fixed; z-index: calc(var(--z-dialog) + 1); right: auto; left: 362px; bottom: var(--strip-clear, 180px); width: min(360px, calc(100vw - 2 * var(--space-4))); }
 /* toasts keep out of the right column, where the chat and its message box sit */
 @media (max-width: 1100px) { .page-toasts { left: var(--space-4); } }
 @media (max-width: 820px) {
-  .page-toasts { left: var(--space-4); right: var(--space-4); bottom: var(--strip-clear, 200px); }
-  /* sticky request and error toasts stay until answered, so the stack is capped (about one toast, then it scrolls) and
-     sits at the top whenever a chat or a panel (terminal, board, stats) uses the bottom edge */
+  .page-toasts { left: var(--space-4); right: var(--space-4); bottom: var(--toast-lift); }
+  /* sticky request and error toasts stay until answered, so the stack is capped (about one toast, then it scrolls).
+     office.js sets --toast-lift (toasts.js lift) so the stack stands above the dock and above every box on it: the room card,
+     the chat, the terminal, board and stats panels (#79). */
   .page-toasts { max-height: calc(var(--space-6) * 3); overflow: auto; }
-  #office:has(.ao-hud-chat) .page-toasts, #office.has-panel .page-toasts { top: 64px; bottom: auto; }
 }
 
 /* welcome card */

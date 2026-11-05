@@ -1421,6 +1421,32 @@
       }, 250);
       return function () { clearInterval(iv); };
     }, [timed]);
+    // On a narrow screen (office.css, 820 px) the stack stands above the dock and above every box on it, so it never covers the room card, the chat or a panel (#79).
+    useEffect(function () {
+      var wait = 0, trail = 0;
+      function place() {
+        wait = 0;
+        var el = toastBox.current;
+        if (!el) return;
+        if (window.innerWidth > 820) { el.style.removeProperty('--toast-lift'); return; }
+        var strip = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--strip-clear')) || 200;
+        var boxes = [];
+        document.querySelectorAll('.ao-hud-right, .ao-hud-syl, .ao-hud-scrub, .board-panel, .terminal-panel').forEach(function (b) {
+          if (getComputedStyle(b).display !== 'none') { var r = b.getBoundingClientRect(); boxes.push({ top: r.top, bottom: r.bottom }); }
+        });
+        var v = window.OfficeToasts.lift(window.innerHeight, strip, boxes) + 'px';
+        if (el.style.getPropertyValue('--toast-lift') !== v) el.style.setProperty('--toast-lift', v);   // the same value writes nothing: no loop with the observer
+      }
+      function soon() {   // at most every 120 ms, and once more after the panel animation has ended
+        if (!wait) wait = setTimeout(place, 120);
+        clearTimeout(trail); trail = setTimeout(place, 500);
+      }
+      var mo = new MutationObserver(soon);
+      mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style'] });
+      window.addEventListener('resize', soon);
+      soon();
+      return function () { mo.disconnect(); window.removeEventListener('resize', soon); clearTimeout(wait); clearTimeout(trail); };
+    }, []);
     function refresh() { return getInfo(shownPath).then(function (i) { setInfo(i); return i; }, function () { return info; }); }
     function show(name) { refresh().then(function () { setDlg({ name: name }); }); }
     function changes(uid, name) {
