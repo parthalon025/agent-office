@@ -1,6 +1,7 @@
 // ACP provider: agents that speak the Agent Client Protocol (agentclientprotocol.com, protocol version 1) behind the provider
 // seam (providers/index.mjs). One factory for many agents: each agent is an entry in AGENTS, not a new file. The agents are
-// Hermes Agent (`hermes acp`), DeepSeek Harness (`dsh --profile acp`) and OpenClaw (`openclaw acp`, behind a Gateway).
+// Hermes Agent (`hermes acp`), DeepSeek Harness (`dsh --profile acp`), OpenClaw (`openclaw acp`, behind a Gateway) and
+// GitHub Copilot CLI (`copilot --acp`, its extras in providers/copilot.mjs).
 //
 // The office is the ACP client. It starts the agent by its absolute path (git.mjs resolveExe), speaks newline-delimited
 // JSON-RPC 2.0 on its stdin and stdout, and reports everything in the tracker's vocabulary (events.hook, events.stream):
@@ -22,15 +23,17 @@
 // ACP reports no cost in the stable protocol, so the provider is paid with cost 'unknown' (owner decision Q22). The process
 // calls and the timers are injected, so tests drive a fake agent (test/fixtures/fake-acp.mjs). Nothing starts on import.
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn as realSpawn, execFile as realExecFile } from 'node:child_process';
 import { resolveExe } from '../git.mjs';
-import { fileKey } from '../risk.mjs';
+import { fileKey, riskOf } from '../risk.mjs';
 import { clip } from '../tracker.mjs';
 import { providerError } from './index.mjs';
 import { createLocalTools, killTree } from './local-tools.mjs';
 import { GATEWAY_HOST, DEFAULT_GATEWAY_PORT, MIN_VERSION, DEFAULT_CELLS, gatewayPort, probeGateway, versionAtLeast, wantedConfig, checkConfig, configReader } from './openclaw.mjs';
+import * as COPILOT from './copilot.mjs';
 
 export const PROTOCOL_VERSION = 1;
 // One entry per agent. program: the name resolveExe finds on PATH. args: what starts its ACP mode on stdio.
@@ -42,6 +45,7 @@ export const PROTOCOL_VERSION = 1;
 // some calls ask is ungated, with its supervision label. None of the agents has been run against the office yet (pin: null).
 const HERMES_EDITS = 'Edit requests come to the office and the rule applies. Reads, and writes to its own skills and memory, run without asking.';
 const HERMES_SHELL = 'Only the commands Hermes rates dangerous come to the office.';   // one line on the wall
+const HERMES_READS = 'This agent reads files without asking the office.';   // Hermes and Copilot CLI: one line on the wall
 export const AGENTS = {
   hermes: {
     label: 'Hermes Agent', program: 'hermes', args: ['acp'],
@@ -57,7 +61,7 @@ export const AGENTS = {
     // settings file asks too, but Hermes writes its own skills and memory (under .hermes) with no request: partly enforced.
     // So is a command: only the ones Hermes rates dangerous come to the office.
     enforces: ['edit-inside'],
-    unenforced: { 'read-inside': 'This agent reads files without asking the office.', secrets: 'This agent reads files without asking the office.' },
+    unenforced: { 'read-inside': HERMES_READS, secrets: HERMES_READS },
     partly: { 'files-outside': HERMES_EDITS, settings: HERMES_EDITS, shell: HERMES_SHELL },
     askTimeoutMs: 60_000, // Hermes issue #63302: a fixed 60 s timeout on edit approval (command approval has its own setting)
     features: ['skills', 'memory'], skillsHome: { env: 'HERMES_HOME', dir: '.hermes' }, pin: null,
@@ -86,12 +90,45 @@ export const AGENTS = {
     features: [], pin: null, // not run against a real Gateway yet: native Windows is untested upstream
     needs: ['Install OpenClaw so that openclaw.exe is on the PATH, then start its Gateway.'], // a .cmd shim from npm is not accepted (resolveExe)
   },
+  // GitHub Copilot CLI (#22, ADR 0001). From 1.0.105 (copilot help config, permissions, environment; the signed-out handshake in
+  // test/fixtures/copilot-acp.json). Its default permission mode ("manual") asks before writes and commands and approves
+  // read-only requests by itself: it reads files in its folder, and runs a command it rates read-only, without asking. Hooks in
+  // its own settings or in the repository (.github/hooks) run commands without asking, and the URLs its settings allow
+  // (allowedUrls) open without asking. So it is ungated, off until the user turns it on on the Agents screen.
+  // The extras ACP does not carry (providers/copilot.mjs): probeArgs and logDirArg (the readiness check writes its log to a
+  // temp folder of its own, removed after the check); envDrop (the switches that approve calls by themselves, any case);
+  // probeSession (a signed-out Copilot answers initialize, so the check opens and closes one session: session/new answers
+  // -32000 "Authentication required", ACP auth_required, and gives the models); probeMs (a cold start can take more than
+  // 10 s); modelArg (the model the Open dialog picks, from the models session/new listed); callOf (its permission requests
+  // carry its own request body, not the tool's arguments); signIn (the step for a sign-in error).
+  copilot: {
+    label: 'Copilot CLI', program: 'copilot', args: COPILOT.SESSION_ARGS,
+    probeArgs: COPILOT.PROBE_ARGS, logDirArg: COPILOT.LOG_DIR_ARG, envDrop: COPILOT.SELF_APPROVE,
+    probeSession: true, probeMs: 60_000, readyTtlMs: 10 * 60_000, notReadyTtlMs: 10_000, modelArg: '--model', modelRe: COPILOT.MODEL_RE,
+    callOf: COPILOT.requestCall, signIn: COPILOT.SIGN_IN,
+    gated: false, supervision: 'Partly supervised: edits and most commands ask, reads do not',
+    // The Security room cells (security.mjs enforcement). A write asks (session/request_permission), also of a settings file.
+    // Reads in its folder do not ask, a secret file there too: Not enforced, with Hermes's words, so the wall says it once for
+    // both. (It asks before a read outside its folder, but a Deny on Secret files cannot hold the ones inside.)
+    enforces: ['edit-inside', 'settings'],
+    unenforced: { 'read-inside': HERMES_READS, secrets: HERMES_READS },
+    partly: {
+      'files-outside': 'It asks, except in folders its own settings trust (trustedFolders).',
+      shell: 'It asks, except for a command it rates read-only. Hooks in its settings or the repository run commands without asking.',
+      web: 'It asks, except for the URLs its own settings allow (allowedUrls).',
+      mcp: 'It asks, except for an MCP tool it rates read-only.',
+    },
+    askTimeoutMs: null, features: [], pin: null, // only the signed-out handshake of 1.0.105 was recorded: no signed-in run yet
+    needs: [COPILOT.INSTALL], // the native copilot.exe: an npm copilot.cmd is not accepted (resolveExe)
+  },
 };
 
 const INIT_MS = 20_000;          // the handshake and the first session
 const PROBE_MS = 10_000;         // readiness: one handshake
 const POLICY_MS = 20_000;        // OpenClaw: reading its config before a session starts
 const PROBE_TTL_MS = 60_000;     // what a probe learned is good for this long
+const READY_WAIT_MS = 12_000;    // one readiness answer waits this long (under the 15 s of registry.status); a probe that runs
+                                 // on (spec.probeMs) is "still starting", and the next answer waits for the same probe
 const CANCEL_MS = 10_000;        // after session/cancel, the turn ends here even when the agent never answers
 const TERMINAL_MS = 10 * 60_000; // the longest an agent's terminal runs
 const MAX_LINE = 8_000_000;      // characters of one JSON-RPC line; more is dropped
@@ -106,6 +143,9 @@ const KIND_TOOL = { read: 'Read', edit: 'Edit', delete: 'Delete', move: 'Move', 
 const EDIT_KINDS = new Set(['edit', 'delete', 'move']);
 
 const textOf = (e) => String((e && e.message) || e || 'unknown error');
+// ACP auth_required: -32000 "Authentication required" (recorded from Copilot CLI 1.0.105). -32000 alone is JSON-RPC's generic
+// server error (a rate limit, a quota), so the text decides.
+const isAuth = (e) => /\bauthentication required\b/i.test(textOf(e));
 function rpcError(code, message) { const e = new Error(message); e.code = code; return e; }
 const REFUSED = -32000; // the office said no (a path outside the root, a declined call)
 
@@ -211,6 +251,8 @@ function within(p, ms, why, setTimer, clearTimer) {
  * @param {Function} [deps.setTimer] setTimeout.  @param {Function} [deps.clearTimer] clearTimeout.
  * @param {() => number} [deps.now] the clock.  @param {() => string} [deps.makeId] ids for messages and terminals.
  * @param {string} [deps.probeDir] the folder readiness starts the agent in (the temp folder).
+ * @param {number} [deps.probeMs] the longest one readiness probe runs (spec.probeMs, else PROBE_MS).
+ * @param {number} [deps.readyWaitMs] how long one readiness answer waits for a probe that runs on (READY_WAIT_MS).
  * OpenClaw only (spec.gateway): @param {(port: number) => Promise<boolean>} [deps.gatewayUp] is a Gateway listening (probeGateway);
  * @param {(path: string) => Promise<object>} [deps.readConfig] reads one OpenClaw config key (configReader);
  * @param {() => object} [deps.cells] the Security room cells of the OpenClaw column, row -> ask | allow | deny.
@@ -241,10 +283,23 @@ export function createAcp(deps) {
   // security.mjs openRefusal, so the provider keeps no switch of its own.
   const blocked = deps.blocked || (() => null);
   const args = spec.gateway && port !== DEFAULT_GATEWAY_PORT ? [...spec.args, '--url', `ws://${GATEWAY_HOST}:${port}`] : spec.args;
+  const probeMs = deps.probeMs || spec.probeMs || PROBE_MS;
+  const readyWaitMs = deps.readyWaitMs || READY_WAIT_MS;
+  // The agent's environment: the caller's, without the switches that let the agent approve its own calls (spec.envDrop; Windows
+  // names are not case-sensitive, so neither is the match).
+  const dropped = new Set((spec.envDrop || []).map((k) => k.toUpperCase()));
+  const envOf = (extra = {}) => Object.fromEntries(Object.entries({ ...env, ...extra }).filter(([k]) => !dropped.has(k.toUpperCase())));
+  // The models the agent listed in its last session/new (spec.modelArg only): [{ id, label }].
+  let models = [];
+  function learnModels(r) {
+    const list = spec.modelArg && r && r.models && Array.isArray(r.models.availableModels) ? r.models.availableModels : null;
+    if (list) models = list.filter((m) => m && typeof m.modelId === 'string' && spec.modelRe.test(m.modelId)).slice(0, 60).map((m) => ({ id: m.modelId, label: clip(String(m.name || m.modelId), 60) }));
+  }
   /** @type {Map<string, object>} uid -> the agent state of an open session */
   const agents = new Map();
   // What the agent said at its last handshake (a probe or a session): its capabilities and version.
-  let learned = { caps: null, version: null, at: 0, ok: false, why: '' };
+  // auth: the agent answered, but it is not signed in (spec.probeSession: session/new said auth_required).
+  let learned = { caps: null, version: null, at: 0, ok: false, why: '', auth: false };
 
   // The absolute path of the program, or a status error the user can act on (409).
   function program() {
@@ -255,18 +310,43 @@ export function createAcp(deps) {
   }
   function remember(init) {
     const caps = init && typeof init.agentCapabilities === 'object' && init.agentCapabilities ? init.agentCapabilities : {};
-    learned = { caps, version: String(init?.agentInfo?.version || '') || null, at: now(), ok: true, why: '' };
+    learned = { caps, version: String(init?.agentInfo?.version || '') || null, at: now(), ok: true, why: '', auth: false };
+  }
+  // The probe's handshake. With spec.probeSession it also opens one session in the probe folder and closes it: an agent that is
+  // not signed in answers initialize, and only session/new says so. No prompt goes out.
+  async function probeTalk(rpc) {
+    const init = await handshake(rpc);
+    if (!spec.probeSession) return init;
+    remember(init);
+    let r;
+    try { r = await rpc.request('session/new', { cwd: probeDir, mcpServers: [] }); } catch (e) {
+      if (isAuth(e)) { const err = new Error(spec.signIn || textOf(e)); err.auth = true; throw err; }
+      throw new Error(`it did not open a session: ${clip(textOf(e), 200)}`);
+    }
+    learnModels(r);
+    if (r && typeof r.sessionId === 'string' && init?.agentCapabilities?.sessionCapabilities?.close) {
+      await within(rpc.request('session/close', { sessionId: r.sessionId }), 3000, 'close', setTimer, clearTimer).catch(() => {});
+    }
+    return init;
   }
   // readiness and learn(): one handshake with the agent in a temp folder, then it stops. A failure is kept like an answer.
   let probing = null;
   async function probe() {
     let file;
-    try { file = program(); } catch (e) { learned = { caps: null, version: null, at: now(), ok: false, why: e.message }; return; }
+    try { file = program(); } catch (e) { learned = { caps: null, version: null, at: now(), ok: false, why: e.message, auth: false }; return; }
+    // spec.logDirArg: the probe's log goes to a temp folder of its own, removed when the probe's agent has stopped.
+    let logDir = null;
+    if (spec.logDirArg) { try { logDir = fs.mkdtempSync(path.join(probeDir, `agent-office-${kind}-check-`)); } catch { logDir = null; } }
+    const dropLog = () => { if (logDir) { try { fs.rmSync(logDir, { recursive: true, force: true }); } catch { /* the agent still holds it */ } } };
     let child;
-    try { child = spawn(file, args, { cwd: probeDir, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...env } }); } catch (e) {
-      learned = { caps: null, version: null, at: now(), ok: false, why: textOf(e) };
+    try {
+      child = spawn(file, [...(spec.probeArgs || args), ...(logDir ? [spec.logDirArg, logDir] : [])], { cwd: probeDir, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: envOf() });
+    } catch (e) {
+      dropLog();
+      learned = { caps: null, version: null, at: now(), ok: false, why: textOf(e), auth: false };
       return;
     }
+    child.once?.('exit', dropLog);
     let err = '';
     child.stderr?.setEncoding?.('utf8');
     child.stderr?.on('data', (d) => { err = (err + d).slice(-600); });
@@ -276,9 +356,10 @@ export function createAcp(deps) {
       child.on('exit', (code) => reject(new Error(clip(err.trim(), 300) || `it stopped with exit code ${code}`)));
     });
     try {
-      remember(await within(Promise.race([handshake(rpc), gone]), PROBE_MS, 'no answer in time', setTimer, clearTimer));
+      remember(await within(Promise.race([probeTalk(rpc), gone]), probeMs, 'no answer in time', setTimer, clearTimer));
     } catch (e) {
-      learned = { caps: null, version: null, at: now(), ok: false, why: textOf(e) };
+      // A sign-in error keeps what the handshake said (the version); any other failure keeps nothing.
+      learned = e.auth ? { ...learned, at: now(), ok: false, why: textOf(e), auth: true } : { caps: null, version: null, at: now(), ok: false, why: textOf(e), auth: false };
     } finally {
       gone.catch(() => {});
       rpc.fail('probe over');
@@ -412,6 +493,17 @@ export function createAcp(deps) {
       : KIND_TOOL[c.kind] && c.kind !== 'think' && c.kind !== 'switch_mode' ? { file_path: file }
       : { description: c.title };
     c.tool_input = Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined));
+    // An agent whose requests carry its own request body (spec.callOf: Copilot CLI) is rated and shown by that body. Once a call
+    // had one, the body names it: a later update with the tool's own arguments keeps the card the user saw.
+    const req = spec.callOf && tc.rawInput ? spec.callOf(tc.rawInput) : null;
+    if (req) c.req = req;
+    if (c.req) {
+      c.kind = c.req.kind;
+      c.tool_name = c.req.tool_name;
+      c.tool_input = { ...c.req.tool_input };
+      if (c.tool_input.command === '') c.tool_input.command = c.title;
+      if (c.tool_input.file_path === '') c.tool_input.file_path = c.path || '';
+    }
     st.calls.set(id, c);
     return c;
   }
@@ -454,6 +546,10 @@ export function createAcp(deps) {
       if (c.kind === 'execute') emit(st, () => events.feed(s, 'wait', `${label} ran a command without asking the office: ${clip(c.tool_input.command || c.title, 100)}`));
       else if (EDIT_KINDS.has(c.kind) && !(file && st.wrote.has(file))) {
         emit(st, () => events.feed(s, 'wait', `${label} changed ${path.basename(String(c.tool_input.file_path || c.title))} without asking the office.`));
+      } else if (c.kind === 'read' || c.kind === 'search') {
+        // A read the office cannot stop: the feed names it when it is not low risk (a secret, a settings file, outside the root).
+        const risk = riskOf(c.tool_name, c.tool_input, st.root);
+        if (risk !== 'low') emit(st, () => events.feed(s, 'wait', `${label} read ${clip(String((c.tool_input.file_path && path.basename(String(c.tool_input.file_path))) || c.tool_input.pattern || c.title), 100)} without asking the office (risk ${risk}).`));
       }
     }
     const said = (Array.isArray(u.content) ? u.content : []).map((x) => (x?.type === 'content' && x.content?.type === 'text' ? x.content.text : '')).find(Boolean);
@@ -696,7 +792,10 @@ export function createAcp(deps) {
       }
     } catch (e) {
       flushText(s, st);
-      if (!st.interrupted && !st.closed) failure = `${label}: ${textOf(e)}`;
+      if (!st.interrupted && !st.closed) {
+        if (isAuth(e)) learned.at = 0; // readiness asks again
+        failure = isAuth(e) ? `${label} is not signed in. ${spec.signIn || 'Sign in, then send the message again.'}` : `${label}: ${textOf(e)}`;
+      }
     }
     finishTurn(s, st, failure);
   }
@@ -783,8 +882,9 @@ export function createAcp(deps) {
     }
     if (typeof sid !== 'string' || !sid) throw new Error('it gave no session id');
     st.sid = sid;
+    learnModels(r);
     // The session id first (the tracker saves the session when its sid arrives), then the bot sits down at rest.
-    emit(st, () => events.stream(s, { type: 'system', subtype: 'init', session_id: sid, model: r.models?.currentModelId || null, permissionMode: 'default' }));
+    emit(st, () => events.stream(s, { type: 'system', subtype: 'init', session_id: sid, model: r.models?.currentModelId || (spec.modelArg && o.model && spec.modelRe.test(String(o.model)) ? String(o.model) : null) || null, permissionMode: 'default' }));
     if (gate) announce(s, st, gate);
     // With a first prompt waiting, the turn starts at once instead (no flicker from at rest to working).
     if (!st.queue.length) hook(s, st, { hook_event_name: 'SessionStart', source: o.resume ? 'resume' : 'startup' });
@@ -856,7 +956,10 @@ export function createAcp(deps) {
       try { program(); } catch (e) { return { ready: false, version: null, needs: [e.message, ...spec.needs] }; }
       const down = await notReady(); // before the bridge starts: off, or without a Gateway it has nothing to talk to
       if (down) return { ready: false, version: null, needs: [down] };
-      await this.learn();
+      // A probe that runs longer than one answer may wait (a cold start) goes on; the next answer waits for that same probe.
+      const done = await within(this.learn().then(() => true), readyWaitMs, 'still starting', setTimer, clearTimer).catch(() => false);
+      if (!done) return { ready: false, version: null, needs: [`${label} is still starting. A first start can take more than 10 s. Click Check again in a few seconds.`] };
+      if (learned.auth) return { ready: false, version: learned.version || null, needs: [learned.why] };
       if (!learned.ok) return { ready: false, version: null, needs: [`${label} did not answer the ACP handshake: ${learned.why}`, ...spec.needs] };
       const needs = spec.pin && learned.version !== spec.pin ? [`The office was tested with ${label} ${spec.pin}. This is ${learned.version || 'an unknown version'}.`] : [];
       let ready = true;
@@ -878,17 +981,21 @@ export function createAcp(deps) {
     // One handshake with the agent in a temp folder, then it stops. What it says is kept for a minute, and calls that
     // overlap share one probe.
     learn() {
-      if (learned.at && now() - learned.at < PROBE_TTL_MS) return Promise.resolve();
+      const ttl = learned.ok ? spec.readyTtlMs || PROBE_TTL_MS : spec.notReadyTtlMs || PROBE_TTL_MS;
+      if (learned.at && now() - learned.at < ttl) return Promise.resolve();
       if (!probing) probing = probe().finally(() => { probing = null; });
       return probing;
     },
 
-    async models() { return []; }, // the agent picks its model in its own settings
+    // The agent picks its model in its own settings, unless it takes one on its command line (spec.modelArg): then the models
+    // its last session/new listed (a readiness probe opens one). None yet: Default only.
+    async models() { return models.map((m) => ({ ...m })); },
 
     // Before the office makes a worktree or a session. check({}) checks only that a session can start (Reopen).
     check(o = {}) {
       program();
-      if (o.model) throw providerError(400, `${label} picks its model in its own settings. Leave the model empty.`);
+      if (o.model && !spec.modelArg) throw providerError(400, `${label} picks its model in its own settings. Leave the model empty.`);
+      if (o.model && !spec.modelRe.test(String(o.model))) throw providerError(400, 'Unknown model.');
       if (o.permissionMode && o.permissionMode !== 'default') throw providerError(400, `${label} runs with the office's approvals only. Leave the permission mode empty.`);
     },
     open(s, o = {}) {
@@ -896,7 +1003,9 @@ export function createAcp(deps) {
       // A missing program or a spawn that throws: the session says why and ends, on a later tick (seam timing rule 1).
       try {
         file = program();
-        child = spawn(file, args, { cwd: s.cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...env, OFFICE_ID: s.officeId } });
+        // Only a model id goes on the command line (a Reopen's model is not behind check()): never a value that reads as a switch.
+        const sessionArgs = o.model && spec.modelArg && spec.modelRe.test(String(o.model)) ? [...args, spec.modelArg, String(o.model)] : args;
+        child = spawn(file, sessionArgs, { cwd: s.cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: envOf({ OFFICE_ID: s.officeId }) });
       } catch (e) {
         setImmediate(() => { events.reply(s, `Could not start ${label}: ${textOf(e)}`); events.end(s, 'could not start'); });
         return;
@@ -940,7 +1049,8 @@ export function createAcp(deps) {
       start(s, st, o).catch((e) => {
         if (st.closed || st.dead) return;
         st.failed = true;
-        events.reply(s, `${label} could not start a session: ${textOf(e)}`);
+        if (isAuth(e)) learned.at = 0; // readiness asks again
+        events.reply(s, `${label} could not start a session: ${isAuth(e) ? `it is not signed in. ${spec.signIn || 'Sign in, then open the session again.'}` : textOf(e)}`);
         killTree(child.pid, execFile); // the exit ends the session
       });
     },

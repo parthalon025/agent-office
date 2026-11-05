@@ -1,0 +1,52 @@
+{
+  "about": "GitHub Copilot CLI 1.0.105 in ACP mode (copilot --acp --no-auto-update), recorded on Windows 11, 2026-11-05, not signed in. Only the handshake: no prompt was sent (no paid call) and no sign-in. The office sent initialize (protocolVersion 1, no fs and no terminal capability), then session/new. The command path in authMethods is shortened. The prompt, tool call and permission shapes the fake agent sends are from the ACP spec and the SDK schema that ships with this version (copilot-sdk/generated/session-events.d.ts PermissionRequest*): they wait for a recording from a signed-in run.",
+  "note": "Since the rework onto providers/acp.mjs the office offers fs and terminal in initialize, like to every ACP agent. The answer here is what Copilot said to a client without them; a run with them is not recorded yet.",
+  "initialize": {
+    "protocolVersion": 1,
+    "agentCapabilities": {
+      "auth": {
+        "logout": {}
+      },
+      "loadSession": true,
+      "mcpCapabilities": {
+        "http": true,
+        "sse": true
+      },
+      "promptCapabilities": {
+        "image": true,
+        "audio": false,
+        "embeddedContext": true
+      },
+      "sessionCapabilities": {
+        "close": {},
+        "list": {}
+      }
+    },
+    "agentInfo": {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.105"
+    },
+    "authMethods": [
+      {
+        "id": "copilot-login",
+        "name": "Log in with Copilot CLI",
+        "description": "Run `copilot login` in the terminal",
+        "_meta": {
+          "terminal-auth": {
+            "command": "copilot.exe",
+            "args": [
+              "login"
+            ],
+            "label": "Copilot Login"
+          }
+        }
+      }
+    ]
+  },
+  "sessionNewSignedOut": {
+    "code": -32000,
+    "message": "Authentication required"
+  },
+  "version": "GitHub Copilot CLI 1.0.105.\nRun 'copilot update' to check for updates.\n"
+}

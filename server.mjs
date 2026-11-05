@@ -365,7 +365,7 @@ const lmstudio = createLocal({ events, kind: 'lmstudio', baseUrl: process.env.OF
 // An Agent Framework team runs on one of the local servers (#23): LM Studio first, the order of its models list.
 const agentFramework = createAgentFramework({ events, servers: [lmstudio, ollama], officeTools });
 const providers = createRegistry([claude, ollama, lmstudio, agentFramework,
-  // ACP agents (providers/acp.mjs): Hermes Agent, DeepSeek Harness and OpenClaw, one entry each in its AGENTS list.
+  // ACP agents (providers/acp.mjs): Hermes Agent, DeepSeek Harness, OpenClaw and Copilot CLI, one entry each in its AGENTS list.
   // blocked: the Security room's answer to whether this kind may run now (its Agents screen: an ungated kind is off until
   // turned on, a no-cost Deny); cells: its call cells, for an agent whose own config carries them (OpenClaw). One rule source.
   ...Object.keys(ACP_AGENTS).map((kind) => createAcp({ events, kind,

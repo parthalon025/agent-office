@@ -142,7 +142,7 @@ test('security: six screens on three walls, each with its rows; six agent kinds 
   assert.deepEqual(S.screens.map((x) => x.title), ['Files', 'Commands', 'Network', 'Secrets', 'Agents', 'Spend']);
   assert.deepEqual(S.screens.find((x) => x.id === 'files').rows, ['read-inside', 'edit-inside', 'files-outside']);
   assert.deepEqual(S.screens.find((x) => x.id === 'secrets').rows, ['settings', 'secrets']);
-  assert.deepEqual(S.columns.map((c) => c.label), ['Claude Code', 'Hermes', 'dsh', 'OpenClaw', 'Local model', 'Agent Framework', 'Cloud agent']);
+  assert.deepEqual(S.columns.map((c) => c.label), ['Claude Code', 'Hermes', 'dsh', 'OpenClaw', 'Copilot', 'Local model', 'Agent Framework', 'Cloud agent']);
   // A kind that runs on a model of this machine costs nothing: the Spend screen says Free, never Not reported (#23).
   assert.deepEqual(S.columns.filter((c) => c.free).map((c) => c.id), ['local', 'agent-framework']);
   assert.equal(S.rows.shell.label, 'Shell commands');
@@ -155,13 +155,14 @@ test('security: an agent kind is the column of its provider; the two local provi
   assert.equal(S.columnOf('lmstudio'), 'local');
   assert.equal(S.columnOf('hermes'), 'hermes');
   assert.equal(S.columnOf('agent-framework'), 'agent-framework', 'an Agent Framework team has a column of its own (#23)');
+  assert.equal(S.columnOf('copilot'), 'copilot');
   assert.equal(S.columnOf(undefined), 'claude-code', 'a session first seen in a hook is Claude Code');
   assert.equal(S.columnOf('something-new'), null);
 });
 
 test('security: every call row is Ask by default for every agent kind, also reads and edits inside the worktree (owner decision pending, Claude Code asks today)', () => {
   const none = RULES();
-  for (const col of ['claude-code', 'hermes', 'dsh', 'openclaw', 'agent-framework']) {
+  for (const col of ['claude-code', 'hermes', 'dsh', 'openclaw', 'copilot', 'agent-framework']) {
     for (const row of ['read-inside', 'edit-inside', 'files-outside', 'shell', 'web', 'mcp', 'settings', 'secrets']) {
       if (S.applies(row, col)) assert.equal(S.valueOf(none, '', row, col), 'ask', row + ' ' + col);
     }
@@ -173,6 +174,9 @@ test('security: every call row is Ask by default for every agent kind, also read
   assert.deepEqual([S.applies('ungated', 'agent-framework'), S.na('ungated', 'agent-framework')], [false, 'Gated']);
   assert.deepEqual([S.applies('no-cost', 'agent-framework'), S.na('no-cost', 'agent-framework')], [false, 'Free']);
   assert.deepEqual([S.applies('supervise', 'agent-framework'), S.na('supervise', 'agent-framework')], [false, 'Not used']);
+  // Copilot CLI (#22) reads in its folder and runs the commands it rates read-only without asking: ungated, so off too.
+  assert.equal(S.valueOf(none, '', 'ungated', 'copilot'), 'off');
+  assert.equal(S.valueOf(none, '', 'no-cost', 'copilot'), 'ask', 'it reports no cost: the office asks once per session');
 });
 
 test('security: the local model keeps what it did before the Security room: its reads and edits inside the worktree run without a question', () => {

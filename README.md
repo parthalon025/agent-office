@@ -183,6 +183,19 @@ When the hour ends, save a new token in the same file. The office reads the file
 - **Threads.** Foundry keeps one thread for each session in your project. The office does not delete it. Delete old threads in the portal. Stop turn cancels the run.
 - **Not available.** No terminal window, no permission mode, no model switch, no Extensions, no office tools (inbox, ask, room), no skills or fork, text only (no attachments), and schedules start Claude Code only. Reopen starts a new session in the same worktree and cannot resume. Export and Search work as for every kind.
 
+### Copilot CLI
+
+**Copilot CLI** (`copilot`, the office starts `copilot --acp`) is GitHub Copilot CLI as an ACP agent. It uses your Copilot plan. The parts of the ACP agents above apply (install, the cost question, Approve and Decline, the files and commands the office serves, Reopen). These parts differ:
+
+- **Before you start.** Install the native program: run `winget install GitHub.Copilot` in a terminal, so that `copilot.exe` is on the PATH. An npm install (`copilot.cmd`) is refused. Then run `copilot login` and sign in. The office never signs in for you.
+- **Turn it on.** Copilot CLI is off until you turn it on on the **Agents** screen of the Security room (click the cell, then the Confirm on the wall). While it is off, it is not ready and the office does not start it, also not for a check. Then **More**, then **Agent kinds**, shows Ready, or the next step: "Sign in to GitHub Copilot" when it is signed out.
+- **Start one.** Pick Copilot CLI in the Open dialog (or send `POST /api/open` with `provider: "copilot"`). Keep **Use this folder** off: it opens only in a new git worktree. The model list shows the models Copilot listed at the last check; Default lets Copilot pick. There is no permission mode.
+- **Partly supervised: edits and most commands ask, reads do not.** Copilot asks before file writes, commands, URLs and paths outside its folder. The card shows the command or the file from Copilot's own request. It approves read-only requests by itself: it reads files in its folder, and runs a command or an MCP tool it rates read-only, without asking. Hooks in its own settings or in the repository (`.github/hooks`) run commands without asking, and so do the URLs its settings allow (`allowedUrls`). The Copilot column of the Security room marks those cells "Not enforced" or "Partly enforced", with the reason. The activity feed says when Copilot read a file that is not low risk (for example `.env`), ran a command or changed a file without asking the office.
+- **Nothing approves itself.** The office never passes `--allow-all`, `--allow-tool`, `--yolo` or `--autopilot`, and it takes `COPILOT_ALLOW_ALL` and `COPILOT_ASSISTED_APPROVAL` out of Copilot's environment. Copilot's own `ask_user` tool is off (`--no-ask-user`), and it gets no automatic access to the temp folder (`--disallow-temp-dir`). An edit of Copilot's settings (`~/.copilot`, `COPILOT_HOME`, `.github/hooks`, `.github/copilot`, `.github/agents`, `.github/skills`, `.github/mcp.json`, `.agents`) is high risk.
+- **Cost.** Copilot reports no cost. The office shows "unknown", asks once per session (the **Run without cost reports** cell), and has no spend limit for it. Copilot counts AI credits on your plan: check them in your GitHub account.
+- **The check.** Each readiness check starts Copilot once in a temp folder, opens one session and closes it: no prompt, no update, none of its built-in MCP servers, and its log goes to a temp folder that the office removes after the check. A first start can take more than 10 s: the check then says "still starting" and goes on for up to 60 s.
+- **Not tested signed in.** The office was checked against the signed-out handshake of Copilot CLI 1.0.105 only. The shapes of its requests come from its SDK schema, not from a real turn.
+
 ## How it works
 
 ```
@@ -319,6 +332,15 @@ The office knows six kinds of session. A session **in the office** runs `claude 
 - **A turn fails with "The agent asks for a sign-in".** A Copilot Studio connector needs your own connection. Set it up in Copilot Studio. The office does not sign in.
 - **The office asks "This agent does not report cost" and shows the cost as unknown.** No prices are set (Foundry needs both). Set the price variables (see **Settings**) and start the office again, or set **Run without cost reports** to Allow for **Cloud agent** on the Agents screen.
 - **Open session says "Turn on Cloud agent on the Agents screen of the Security room first".** Agent kinds then shows Not ready with the same words, and the office makes no call. Turn on **Cloud agent** there (see **Turn them on**).
+
+### Copilot CLI
+
+- **Not ready: "Copilot CLI runs tool calls without asking the office".** Turn it on on the Agents screen of the Security room.
+- **Not ready: "The office cannot find Copilot CLI".** Run `winget install GitHub.Copilot`, open a new terminal and run `copilot --version`. Restart the office so that it reads the new PATH.
+- **Not ready: "The office needs copilot.exe. It found only ... copilot.cmd".** That is the npm install. Install the native program with winget.
+- **Not ready: "Sign in to GitHub Copilot".** Run `copilot login` in a terminal and finish the sign-in. Click **Check again** after 10 seconds.
+- **Not ready: "Copilot CLI is still starting".** A first start after a restart of the PC can take more than 10 seconds. Click **Check again** after a few seconds. A check with no answer in 60 seconds says "did not answer the ACP handshake": then run `copilot` in a terminal and check that it starts.
+- **The feed says "Copilot CLI read ... without asking the office" or "ran a command without asking the office".** Copilot did a call it approves by itself (a read in its folder, a read-only command, a hook or an allowed URL). Check the call in the terminal panel. Remove the rule or the hook in Copilot's settings if you want it to ask.
 
 ### Terminal sessions
 

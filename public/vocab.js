@@ -170,13 +170,13 @@
   // every other row can have a per-building override. A rule the row does not offer is never used.
   // free: the kind runs on a model of this machine and costs nothing (the Spend screen says Free).
   var SEC_COLUMNS = [{ id: 'claude-code', label: 'Claude Code' }, { id: 'hermes', label: 'Hermes' }, { id: 'dsh', label: 'dsh' },
-    { id: 'openclaw', label: 'OpenClaw' }, { id: 'local', label: 'Local model', free: true }, { id: 'agent-framework', label: 'Agent Framework', free: true }, { id: 'cloud', label: 'Cloud agent' }];
+    { id: 'openclaw', label: 'OpenClaw' }, { id: 'copilot', label: 'Copilot' }, { id: 'local', label: 'Local model', free: true }, { id: 'agent-framework', label: 'Agent Framework', free: true }, { id: 'cloud', label: 'Cloud agent' }];
   // The tables are looked up by names that come from requests and saved files, so they have no prototype: '__proto__' or
   // 'constructor' is no row, agent kind or word. Rule maps (rules.office, rules.buildings) are read by own keys only (own).
   function bare(o) { return Object.assign(Object.create(null), o); }
   function own(o, k) { return !!o && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k); }
   // The two Microsoft cloud kinds (#24) share one column, like the two local servers: the same rules hold for both.
-  var SEC_KIND = bare({ 'claude-code': 'claude-code', ollama: 'local', lmstudio: 'local', hermes: 'hermes', dsh: 'dsh', openclaw: 'openclaw', 'agent-framework': 'agent-framework', foundry: 'cloud', 'copilot-studio': 'cloud' });
+  var SEC_KIND = bare({ 'claude-code': 'claude-code', ollama: 'local', lmstudio: 'local', hermes: 'hermes', dsh: 'dsh', openclaw: 'openclaw', 'agent-framework': 'agent-framework', copilot: 'copilot', foundry: 'cloud', 'copilot-studio': 'cloud' });
   // not: the kinds a row has no cell for. A cloud agent runs in the owner's cloud account and cannot reach the files on this
   // machine, so the file rows have no cell for it (no rule there could mean anything).
   var NO_FILES = { not: ['cloud'], na: { cloud: 'No files' } };
@@ -192,12 +192,12 @@
     secrets: Object.assign({ label: 'Secret files', options: ASK_DENY, def: 'ask' }, NO_FILES),
     // Agents screen. Ungated agents run tool calls without asking the office (ADR 0001): off until the user turns them on.
     // only: the kinds whose provider is gated: false (providers/acp.mjs AGENTS, the cloud kinds); the others ask the office, so "Gated".
-    ungated: { label: 'Turn on ungated agents', options: TOGGLE, def: 'off', office: true, only: ['hermes', 'openclaw', 'cloud'], na: 'Gated' },
+    ungated: { label: 'Turn on ungated agents', options: TOGGLE, def: 'off', office: true, only: ['hermes', 'openclaw', 'copilot', 'cloud'], na: 'Gated' },
     // Paperclip's Claude Code runs go through the office hooks (#76).
     supervise: { label: 'Paperclip: Supervise in office', options: TOGGLE, def: 'off', office: true, only: ['claude-code'], na: 'Not used' },
     // An agent that reports no cost: Ask (the office asks once per session), Allow (it runs without asking), Deny (it never runs).
     // A cloud kind reports cost only from the prices the owner set (providers/cloud.mjs); without them it is such an agent.
-    'no-cost': { label: 'Run without cost reports', options: RULE, def: 'ask', office: true, only: ['hermes', 'dsh', 'openclaw', 'cloud'], na: { 'claude-code': 'Reports cost', local: 'Free', 'agent-framework': 'Free' } }
+    'no-cost': { label: 'Run without cost reports', options: RULE, def: 'ask', office: true, only: ['hermes', 'dsh', 'openclaw', 'copilot', 'cloud'], na: { 'claude-code': 'Reports cost', local: 'Free', 'agent-framework': 'Free' } }
   });
   var SEC_SCREENS = [
     { id: 'files', title: 'Files', rows: ['read-inside', 'edit-inside', 'files-outside'] },

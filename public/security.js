@@ -167,15 +167,17 @@
     } else text(p, W - 48, big ? 80 : 74, big ? 40 : 28, 'muted', 'Office-wide', { align: 'right' });
   }
 
-  // Two layouts of a rules screen (levels). The first is the roomy one. A screen with many reasons (Files, with five agent
+  // Three layouts of a rules screen (levels). The first is the roomy one. A screen with many reasons (Files, with six agent
   // kinds) takes the second: smaller type (18 px is the smallest on the wall), a tighter grid and the subtitle under the
-  // title, so that every reason fits in full, wrapped, between the grid and the hint. fs/lh: reason type and line height;
+  // title, so that every reason fits in full, wrapped, between the grid and the hint. The third keeps that type and makes the
+  // grid and the gap above the hint tighter still: Files when an agent's own config also has gaps (OpenClaw). fs/lh: reason type and line height;
   // y0: the top of the grid; sub/subS: the subtitle baseline and size; rowH: a row of a screen with 3 rows (2 rows or fewer
   // take 120); cy/ch: chip top in the row and chip height; ng: the note under the chip; bk: the Use default line under it;
   // hint/hintY: the hint size and its baseline from the bottom; gap: hint baseline to the last reason baseline.
   var LEVELS = [
     { fs: 21, lh: 29, y0: 168, sub: 132, subS: 24, rowH: 104, cy: 16, ch: 52, ng: 26, bk: 22, hint: 24, hintY: 34, gap: 36 },
-    { fs: 18, lh: 23, y0: 128, sub: 110, subS: 22, rowH: 96, cy: 8, ch: 44, ng: 20, bk: 19, hint: 22, hintY: 30, gap: 30 }
+    { fs: 18, lh: 23, y0: 128, sub: 110, subS: 22, rowH: 96, cy: 8, ch: 44, ng: 20, bk: 19, hint: 22, hintY: 30, gap: 30 },
+    { fs: 18, lh: 23, y0: 128, sub: 110, subS: 22, rowH: 86, cy: 6, ch: 42, ng: 19, bk: 18, hint: 22, hintY: 30, gap: 24 }
   ];
   function rowHOf(L, rows) { return rows > 2 ? L.rowH : 120; }
 

@@ -1,0 +1,49 @@
+// What the Copilot CLI entry of providers/acp.mjs needs that ACP does not carry (#22). A distinct job, so its own file, like
+// openclaw.mjs; there is no second ACP client. GitHub Copilot CLI speaks ACP as `copilot --acp`; acp.mjs runs it.
+//   SESSION_ARGS, PROBE_ARGS   the switches of a session and of the readiness check
+//   SELF_APPROVE               the environment switches that approve tool calls by themselves: taken out of its environment
+//   requestCall(raw)           Copilot's own permission request body (rawInput.kind shell, write, read, url, mcp...) as the
+//                              tool name and input the office rates; null for anything else (a tool's own arguments)
+//   MODEL_RE                   a model id the office passes as --model
+// From Copilot CLI 1.0.105 (copilot help config, copilot help permissions, copilot help environment; the handshake in
+// test/fixtures/copilot-acp.json, signed out). Its request bodies come from the SDK schema of that version
+// (copilot-sdk/generated/session-events.d.ts PermissionRequest*), not from a signed-in run: no prompt was sent yet.
+// Pure: no I/O.
+
+// Every session: ACP on stdio, the installed version (no download), no ask_user tool (the office cannot show its questions
+// over ACP), and no automatic file access to the system temp folder (only the session folder).
+export const SESSION_ARGS = ['--acp', '--no-auto-update', '--no-ask-user', '--disallow-temp-dir'];
+// The readiness check: no update, and none of the built-in MCP servers (the GitHub one signs in and calls out). acp.mjs adds
+// --log-dir with a temp folder of its own, so the check writes no log in ~/.copilot/logs.
+export const PROBE_ARGS = ['--acp', '--no-auto-update', '--disable-builtin-mcps'];
+export const LOG_DIR_ARG = '--log-dir';
+// COPILOT_ALLOW_ALL approves every tool call (and "true" also trusts the folder, which loads its hooks); COPILOT_ASSISTED_APPROVAL
+// lets a model approve calls in older versions. The office never passes --allow-all, --allow-tool, --yolo or --autopilot.
+// Windows names are not case-sensitive, so acp.mjs matches them in any case.
+export const SELF_APPROVE = ['COPILOT_ALLOW_ALL', 'COPILOT_ASSISTED_APPROVAL'];
+export const MODEL_RE = /^[A-Za-z0-9][\w.:-]{0,79}$/;
+export const SIGN_IN = 'Sign in to GitHub Copilot: run copilot login in a terminal, then check again.';
+export const INSTALL = 'Install GitHub Copilot CLI so that copilot.exe is on the PATH (winget install GitHub.Copilot), then run copilot login in a terminal.';
+
+const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
+const safeName = (v) => str(v).replace(/[^\w.-]/g, '_').slice(0, 60) || 'tool';
+const KINDS = new Set(['shell', 'write', 'read', 'url', 'mcp', 'memory', 'custom-tool', 'hook', 'extension-management', 'workflow', 'extension-permission-access', 'extension-env-access']);
+
+/**
+ * A Copilot permission request body as { kind, tool_name, tool_input }: kind is the ACP tool kind the provider's rules use
+ * (an edit's declined file, a command's grant), tool_name and tool_input what the card shows and risk.mjs rates. An edit
+ * carries only its file, like every ACP edit, so a later update of the same call keeps the same card. null: not a request
+ * body (the tool's own arguments of a tool_call), so the provider reads the call as it reads any ACP call.
+ */
+export function requestCall(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw) || !KINDS.has(raw.kind)) return null;
+  switch (raw.kind) {
+    case 'shell': return { kind: 'execute', tool_name: 'Bash', tool_input: { command: str(raw.fullCommandText) } };
+    case 'write': return { kind: 'edit', tool_name: 'Edit', tool_input: { file_path: str(raw.fileName) } };
+    case 'read': return { kind: 'read', tool_name: 'Read', tool_input: { file_path: str(raw.path) } };
+    case 'url': return { kind: 'fetch', tool_name: 'WebFetch', tool_input: { url: str(raw.url) } };
+    case 'mcp': return { kind: 'other', tool_name: `mcp__${safeName(raw.serverName)}__${safeName(raw.toolName)}`, tool_input: raw.args && typeof raw.args === 'object' && !Array.isArray(raw.args) ? { ...raw.args } : {} };
+    // memory, custom tools, hooks, extensions, workflows: a name risk.mjs does not know, so it is medium and the user reads it.
+    default: return { kind: 'other', tool_name: 'Copilot ' + raw.kind, tool_input: { description: str(raw.intention || raw.toolName || raw.kind).slice(0, 300) } };
+  }
+}
