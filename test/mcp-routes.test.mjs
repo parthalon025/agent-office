@@ -262,6 +262,9 @@ test('a Claude Code reopen that fails before init keeps the past session in hist
   assert.match(s.replies.at(-1).text, /stopped before it started/, 'the reply says why');
   const again = await call('/api/reopen', { uid: PAST_UID });
   assert.equal(again.status, 200, 'the user can try again');
+  // Wait for this second try to end too: on a slow machine (the CI runner) it is still starting when the next test
+  // reopens the same past session, and that test then gets 409 open again.
+  await until(async () => { const x = await sessionOf(again.json.uid); return x && x.status === 'ended' ? x : null; }, 'the second try to end');
 });
 
 // A claude.exe that stays alive: cmd.exe under that name ignores the headless flags and waits on stdin, like a Claude Code
