@@ -18,7 +18,7 @@ import { createTracker, clip } from './tracker.mjs';
 import { createRegistry, providerEvents, isPaid, spendLimitFor, DEFAULT_SPEND_LIMIT } from './providers/index.mjs';
 import { createLocal } from './providers/local.mjs';
 import { createClaudeCode, claudeVersion, MODEL_RE, MODES } from './providers/claude-code.mjs';
-import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, cleanRecent, recentChoices } from './place.mjs';
+import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, cleanRecent, recentChoices, securityRoomIdOf } from './place.mjs';
 import * as startup from './startup.mjs';
 import { createNotes, cleanPin, PIN_MAX } from './notes.mjs';
 import { cleanRules, setRule, decide, preToolDecision, permissionModeFor, openRefusal, enforcement, addCost, costThisMonth } from './security.mjs';
@@ -1078,7 +1078,7 @@ const snapshot = () => ({
   figures: allFigures(),    // noteKey -> room figures (sessions, working, waiting, toolCalls, tokens, cost, todosDone, todosTotal, lastEvent)
   notes: persisted.notes,   // noteKey -> { text, at, v, by? }: each room's notes board (v: version counter; a cleared board stays with text '' and at 0; by: the agent session that last wrote it)
   pins: persisted.pins,     // noteKey -> { text, by, at }: a short message an agent pinned on the room's blackboard
-  repos: [...repos.entries()].map(([key, r]) => ({ key, ...r, worktrees: r.worktrees.map((w) => ({ ...w, place: placeOfWorktree(r.path, w) })) })),
+  repos: [...repos.entries()].map(([key, r]) => ({ key, ...r, securityRoomId: securityRoomIdOf(key), worktrees: r.worktrees.map((w) => ({ ...w, place: placeOfWorktree(r.path, w) })) })),
   // The Security room (#70): the rules (office-wide and per building), why a cell is not enforced for an agent kind
   // (security.mjs enforcement), and the Spend screen (the default spend limit, cost per agent kind this month).
   security: { rules: persisted.security, enforce: ENFORCE, spend: { limit: defaultSpend(), ...costThisMonth(persisted.costs, Date.now()) } },

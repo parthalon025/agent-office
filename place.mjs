@@ -57,7 +57,7 @@ export function roomIdOf(rootKey) {
 }
 // The Security room (#70): one per building, on its ground floor, where the user sets the permission rules. It is never a
 // worktree: its id starts with 's-' and a worktree's with 'w-', so no folder can ever be taken for it. It has no notes key.
-export const SECURITY_ROOM_NAME = 'Security';
+// Its name is a word of the shared vocabulary (public/vocab.js security.roomName).
 /** The Security room id of a building (buildingKey: '' for Other folders). */
 export function securityRoomIdOf(buildingKey) { return 's-' + roomIdOf(String(buildingKey || '')).slice(2); }
 /** True for a Security room id. */

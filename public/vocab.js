@@ -155,7 +155,7 @@
     return { value: r.def, source: 'default' };
   }
   var security = {
-    screens: SEC_SCREENS, rows: SEC_ROWS, columns: SEC_COLUMNS, key: secKey, applies: secApplies,
+    roomName: 'Security', screens: SEC_SCREENS, rows: SEC_ROWS, columns: SEC_COLUMNS, key: secKey, applies: secApplies,
     columnOf: function (kind) { return SEC_KIND[kind || 'claude-code'] || null; },
     options: function (row) { return SEC_ROWS[row] ? SEC_ROWS[row].options.slice() : []; },
     valueOf: function (rules, building, row, col) { var x = secLook(rules, building, row, col); return x ? x.value : null; },

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { placeOfSession, placeOfWorktree, legacyNoteKey, legacyRoomId, roomIdOf, normPath, adoptLegacy, addRecent, cleanRecent, recentChoices, OTHER_NAME, OTHER_FLOOR, securityRoomIdOf, isSecurityRoom, SECURITY_ROOM_NAME } from '../place.mjs';
+import { placeOfSession, placeOfWorktree, legacyNoteKey, legacyRoomId, roomIdOf, normPath, adoptLegacy, addRecent, cleanRecent, recentChoices, OTHER_NAME, OTHER_FLOOR, securityRoomIdOf, isSecurityRoom } from '../place.mjs';
 import * as git from '../git.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -220,7 +220,6 @@ test('every place carries its building\'s Security room id; it is never a worktr
 test('the Other folders building has a Security room too', () => {
   const p = placeOfSession(null, path.resolve('/work/Scratch'));
   assert.equal(p.securityRoomId, securityRoomIdOf(''));
-  assert.equal(SECURITY_ROOM_NAME, 'Security');
 });
 
 test('Security room id format is pinned', () => {
