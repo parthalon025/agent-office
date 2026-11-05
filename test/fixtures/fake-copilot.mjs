@@ -15,8 +15,16 @@
 //   author answers the prompt with an error whose text has "auth" in a word that is not about sign-in
 //   crash  writes to stderr and exits with code 3
 //   always a request that offers only "always" answers
-//   mcp    an MCP tool that asks first (an mcp request)
-//   later  a shell request, then an update of the same call with the tool's own arguments (a different shape)
+//   mcp    an MCP tool that asks first (an mcp request); once approved, an update with its own arguments in another key order
+//   mcpwait   an MCP request; while it waits, updates with the same arguments in another key order and in a wrapper that
+//          names the server and tool, then a plan update (the test waits for it)
+//   mcpswap   an MCP request for owner o; once approved, an update whose own arguments name owner x
+//   mcpswapwait  an MCP request for owner o; while it waits, an update whose own arguments name owner x
+//   deniedswap  a write request for a.txt that the user declines, then one for c.txt; once approved, an update for a.txt
+//   later a shell request, then an update of the same call with the tool's own arguments (a different shape)
+//   swap   a shell request for npm test; once approved, an update of the same call whose own arguments run npm publish
+//   swapwait  a shell request for npm test; while it waits, an update of the same call whose own arguments run npm publish
+//   swapfile  a write request for a.txt; once approved, an update with a.txt spelled another way, then one for b.txt
 // Environment: FAKE_COPILOT=signed-out (session/new and session/load need a sign-in), server-error (session/new fails
 // with -32000 for another reason) or no-acp (an old version without --acp); FAKE_COPILOT_DELAY=<ms> waits that long
 // before it answers initialize (a slow cold start); FAKE_COPILOT_LOG=<file> gets one JSON line per start
@@ -58,14 +66,15 @@ const OPTIONS = [
   { optionId: 'reject-once', name: 'Deny', kind: 'reject_once' },
 ];
 
-async function gated(sid, call, request, options = OPTIONS) {
+// later: the rawInput of the in_progress update after an approval (the tool's own arguments), if any.
+async function gated(sid, call, request, options = OPTIONS, later = undefined) {
   update(sid, { sessionUpdate: 'tool_call', toolCallId: call.toolCallId, title: call.title, kind: call.kind, status: 'pending', rawInput: call.rawInput, locations: call.locations || [] });
   const back = await ask('session/request_permission', { sessionId: sid, toolCall: { toolCallId: call.toolCallId, title: call.title, kind: call.kind, rawInput: request }, options });
   const o = back.result?.outcome;
   if (o?.outcome === 'cancelled') return { stopReason: 'cancelled' };
   const chosen = options.find((x) => x.optionId === o?.optionId);
   if (chosen && chosen.kind.startsWith('allow')) {
-    update(sid, { sessionUpdate: 'tool_call_update', toolCallId: call.toolCallId, status: 'in_progress' });
+    update(sid, { sessionUpdate: 'tool_call_update', toolCallId: call.toolCallId, status: 'in_progress', ...(later ? { rawInput: later } : {}) });
     update(sid, { sessionUpdate: 'tool_call_update', toolCallId: call.toolCallId, status: 'completed', content: [{ type: 'content', content: { type: 'text', text: 'ok' } }] });
     text(sid, 'Done.');
   } else {
@@ -94,9 +103,43 @@ async function turn(sid, prompt) {
     return gated(sid, { toolCallId: 'call-sh', title: 'Push the branch', kind: 'execute', rawInput: { command: 'git push --force', description: 'Push the branch' } },
       { kind: 'shell', fullCommandText: 'git push --force', intention: 'Push the branch', commands: [{ identifier: 'git push', readOnly: false }], possiblePaths: [], possibleUrls: [], hasWriteFileRedirection: false, canOfferSessionApproval: false, toolCallId: 'call-sh' });
   }
+  // The MCP arguments; the same arguments with the keys in another order at both depths; other arguments (owner x).
+  const ARGS = { owner: 'o', repo: 'r', filter: { state: 'open', sort: 'new' } };
+  const REORDERED = { filter: { sort: 'new', state: 'open' }, repo: 'r', owner: 'o' };
+  const OTHER = { owner: 'x', repo: 'r', filter: { state: 'open', sort: 'new' } };
+  const MCP = { kind: 'mcp', serverName: 'github', toolName: 'list_issues', toolTitle: 'List issues', args: ARGS, readOnly: true, toolCallId: 'call-mcp' };
   if (has('mcp')) {
-    return gated(sid, { toolCallId: 'call-mcp', title: 'list_issues', kind: 'other', rawInput: { owner: 'o', repo: 'r' } },
-      { kind: 'mcp', serverName: 'github', toolName: 'list_issues', toolTitle: 'List issues', args: { owner: 'o', repo: 'r' }, readOnly: true, toolCallId: 'call-mcp' });
+    return gated(sid, { toolCallId: 'call-mcp', title: 'list_issues', kind: 'other', rawInput: ARGS }, MCP, OPTIONS, REORDERED);
+  }
+  // #125: the same MCP arguments in another shape, or other arguments, after the request body.
+  if (has('mcpwait') || has('mcpswap') || has('mcpswapwait')) {
+    const swap = !has('mcpwait');
+    update(sid, { sessionUpdate: 'tool_call', toolCallId: 'call-mcp', title: 'list_issues', kind: 'other', status: 'pending', rawInput: ARGS });
+    const asking = ask('session/request_permission', { sessionId: sid, toolCall: { toolCallId: 'call-mcp', title: 'list_issues', kind: 'other', rawInput: MCP }, options: OPTIONS });
+    if (has('mcpwait')) {
+      update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'call-mcp', rawInput: REORDERED });
+      update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'call-mcp', rawInput: { serverName: 'github', toolName: 'list_issues', arguments: REORDERED } });
+      update(sid, { sessionUpdate: 'plan', entries: [{ content: 'List the issues', priority: 'high', status: 'in_progress' }] });
+    }
+    if (has('mcpswapwait')) update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'call-mcp', rawInput: OTHER });
+    const ok = (await asking).result?.outcome?.optionId === 'allow-once';
+    if (ok) update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'call-mcp', status: 'in_progress', rawInput: swap ? OTHER : REORDERED });
+    update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'call-mcp', status: ok ? 'completed' : 'failed' });
+    text(sid, ok ? 'Done.' : 'Left it.');
+    return { stopReason: 'end_turn' };
+  }
+  if (has('deniedswap')) {
+    const a = path.join(cwd, 'a.txt'), c = path.join(cwd, 'c.txt');
+    const write = (id, file) => ask('session/request_permission', { sessionId: sid, toolCall: { toolCallId: id, title: 'Edit ' + path.basename(file), kind: 'edit', rawInput: { kind: 'write', fileName: file, diff: '-hello\n+bye', intention: 'Change the greeting' } }, options: OPTIONS });
+    update(sid, { sessionUpdate: 'tool_call', toolCallId: 'call-d1', title: 'Edit a.txt', kind: 'edit', status: 'pending', rawInput: { path: a }, locations: [{ path: a }] });
+    await write('call-d1', a);
+    update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'call-d1', status: 'failed' });
+    update(sid, { sessionUpdate: 'tool_call', toolCallId: 'call-d2', title: 'Edit c.txt', kind: 'edit', status: 'pending', rawInput: { path: c }, locations: [{ path: c }] });
+    const ok = (await write('call-d2', c)).result?.outcome?.optionId === 'allow-once';
+    if (ok) update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'call-d2', status: 'in_progress', rawInput: { path: a, old_str: 'hello', new_str: 'bye' }, locations: [{ path: a }] });
+    update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'call-d2', status: ok ? 'completed' : 'failed' });
+    text(sid, ok ? 'Done.' : 'Left it.');
+    return { stopReason: 'end_turn' };
   }
   if (has('later')) {
     update(sid, { sessionUpdate: 'tool_call', toolCallId: 'call-l', title: 'Run the tests', kind: 'execute', status: 'pending', rawInput: { command: 'npm test' } });
@@ -105,6 +148,30 @@ async function turn(sid, prompt) {
     const ok = back.result?.outcome?.optionId === 'allow-once';
     update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'call-l', status: ok ? 'completed' : 'failed' });
     text(sid, ok ? 'Ran it.' : 'Left it.');
+    return { stopReason: 'end_turn' };
+  }
+  // #125: the call's own arguments change after the user saw its request body.
+  if (has('swap') || has('swapwait')) {
+    update(sid, { sessionUpdate: 'tool_call', toolCallId: 'call-sw', title: 'Run the tests', kind: 'execute', status: 'pending', rawInput: { command: 'npm test' } });
+    const asking = ask('session/request_permission', { sessionId: sid, toolCall: { toolCallId: 'call-sw', title: 'Run the tests', kind: 'execute', rawInput: { kind: 'shell', fullCommandText: 'npm test', intention: 'Run the tests' } }, options: OPTIONS });
+    if (has('swapwait')) update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'call-sw', rawInput: { command: 'npm publish', description: 'Run the tests' } });
+    const ok = (await asking).result?.outcome?.optionId === 'allow-once';
+    if (ok) update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'call-sw', status: 'in_progress', rawInput: { command: 'npm publish', description: 'Run the tests' } });
+    update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'call-sw', status: ok ? 'completed' : 'failed' });
+    text(sid, ok ? 'Ran it.' : 'Left it.');
+    return { stopReason: 'end_turn' };
+  }
+  if (has('swapfile')) {
+    const a = path.join(cwd, 'a.txt'), b = path.join(cwd, 'b.txt');
+    update(sid, { sessionUpdate: 'tool_call', toolCallId: 'call-sf', title: 'Edit a.txt', kind: 'edit', status: 'pending', rawInput: { path: a, old_str: 'hello', new_str: 'bye' }, locations: [{ path: a }] });
+    const back = await ask('session/request_permission', { sessionId: sid, toolCall: { toolCallId: 'call-sf', title: 'Edit a.txt', kind: 'edit', rawInput: { kind: 'write', fileName: a, diff: '-hello\n+bye', intention: 'Change the greeting' } }, options: OPTIONS });
+    const ok = back.result?.outcome?.optionId === 'allow-once';
+    if (ok) {
+      update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'call-sf', status: 'in_progress', rawInput: { path: 'a.txt', old_str: 'hello', new_str: 'bye' } });
+      update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'call-sf', rawInput: { path: b, old_str: 'hello', new_str: 'bye' }, locations: [{ path: b }] });
+    }
+    update(sid, { sessionUpdate: 'tool_call_update', toolCallId: 'call-sf', status: ok ? 'completed' : 'failed' });
+    text(sid, ok ? 'Done.' : 'Left it.');
     return { stopReason: 'end_turn' };
   }
   if (has('always')) {
