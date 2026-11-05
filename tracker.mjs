@@ -82,7 +82,8 @@ export function createTracker(deps = {}) {
       uid: makeId('session'),
       // provider: the agent kind (providers/). A session first seen in a hook is a Claude Code session.
       sid: null, officeId: null, provider: 'claude-code', name: '', cwd: '', model: null, status: 'idle',
-      tool: null, prompt: '', note: '', pending: [], questions: [], inbox: [], replies: [], replySeq: 0, headless: false, commands: [], skills: [], cost: null, costBase: 0, live: '', mode: null,
+      // cost: dollars the agent reported, or null. costUnknown: the agent reports no cost (an ACP agent): show "unknown".
+      tool: null, prompt: '', note: '', pending: [], questions: [], inbox: [], replies: [], replySeq: 0, headless: false, commands: [], skills: [], cost: null, costUnknown: false, costBase: 0, live: '', mode: null,
       ctxTokens: null, ctxWindow: null, worktree: null, budget: null, scheduleId: null, interrupted: false, turns: 0,
       // calls: tool calls, newest last. agents: subagents (Task or Agent tool). todos: the TodoWrite plan.
       calls: [], agents: [], todos: [], usage: { tokens: 0, cached: 0, input: 0 }, error: null, errorSeq: 0,

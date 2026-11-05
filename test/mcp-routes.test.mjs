@@ -86,6 +86,11 @@ before(async () => {
   const bin = path.join(base, 'bin');
   fs.mkdirSync(bin);
   try { fs.linkSync(process.execPath, path.join(bin, 'claude.exe')); } catch { fs.copyFileSync(process.execPath, path.join(bin, 'claude.exe')); }
+  // A hermes.exe that is node.exe too: `hermes acp` in the session folder runs the file acp there, which loads the fake ACP
+  // agent (test/fixtures/fake-acp.mjs). No Hermes, no model.
+  try { fs.linkSync(process.execPath, path.join(bin, 'hermes.exe')); } catch { fs.copyFileSync(process.execPath, path.join(bin, 'hermes.exe')); }
+  const fakeAcp = path.join(SRC, 'test', 'fixtures', 'fake-acp.mjs');
+  fs.writeFileSync(path.join(work, 'acp'), `import(require('node:url').pathToFileURL(${JSON.stringify(fakeAcp)}).href);\n`);
   // A past Claude Code session the server loads at start (history.json is read once, at start).
   fs.writeFileSync(path.join(copy, 'history.json'), JSON.stringify([{ uid: PAST_UID, sid: 'past-sid-1', provider: 'claude-code', name: 'past-claude', cwd: work, model: 'sonnet',
     cost: 0.5, turns: 2, startedAt: 1000, endedAt: 2000, worktree: null, replies: [{ id: 1, text: 'earlier answer' }], prompt: 'earlier ask', budget: null }]));
@@ -135,7 +140,11 @@ test('the local providers are registered, and an unknown agent kind is refused',
   assert.match(noModel.json.error, /Pick a model/);
   const info = await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
   const kinds = info.providers.map((p) => p.kind);
-  assert.deepEqual(kinds.sort(), ['claude-code', 'lmstudio', 'ollama']);
+  assert.deepEqual(kinds.sort(), ['claude-code', 'dsh', 'hermes', 'lmstudio', 'ollama']);
+  const dsh = info.providers.find((p) => p.kind === 'dsh');
+  assert.deepEqual([dsh.ready, dsh.cost, dsh.gated, dsh.paid], [false, 'unknown', true, true]);
+  // Not on the PATH, or only an npm install (dsh.cmd), which the office cannot start without a shell: not ready either way.
+  assert.match(dsh.needs[0], /dsh\.exe is not on the PATH|needs dsh\.exe\. It found only .*dsh\.cmd/);
   const ollama = info.providers.find((p) => p.kind === 'ollama');
   assert.equal(ollama.ready, true);
   assert.deepEqual(ollama.models.map((m) => m.id), ['fake-model']);
@@ -313,4 +322,45 @@ test('a live reopen swaps the past record for its own as soon as it has a sid', 
   assert.ok(!h.includes(PAST_UID), 'the old record is gone: the session is listed once, under its new uid');
   assert.equal((await call('/api/reopen', { uid: PAST_UID })).status, 404, 'there is no old record to reopen');
   await call('/api/close', { uid: re.json.uid });
+});
+
+// ---------- an ACP agent (#71): the stand-in hermes.exe runs the fake ACP agent ----------
+
+test('an ACP agent asks once before it runs: no cost report, so the open is refused until the user says yes', { skip: SKIP }, async () => {
+  const before = (await snapshot()).sessions.length;
+  const no = await call('/api/open', { cwd: work, name: 'hermes-ask', provider: 'hermes', where: 'office' });
+  assert.equal(no.status, 409);
+  assert.deepEqual(no.json, { error: 'This agent does not report cost. Run it?', confirm: 'cost' });
+  assert.equal((await snapshot()).sessions.length, before, 'no session, no worktree before the yes');
+  const model = await call('/api/open', { cwd: work, name: 'hermes-model', provider: 'hermes', model: 'opus', confirmCost: true });
+  assert.equal(model.status, 400, 'the agent picks its own model');
+});
+
+test('an ACP session: cost unknown and no spend limit, a held request answered from the office, and Reopen asks again', { skip: SKIP }, async () => {
+  const r = await call('/api/open', { cwd: work, name: 'hermes-1', provider: 'hermes', where: 'office', confirmCost: true, maxBudget: 5 });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  const uid = r.json.uid;
+  const s = await until(async () => { const x = await sessionOf(uid); return x && x.sid === 'fake-sess-1' ? x : null; }, 'the ACP session to start');
+  assert.deepEqual([s.provider, s.costUnknown, s.cost, s.budget, s.status], ['hermes', true, null, null, 'idle']);
+  const feed = (await snapshot()).feed.filter((f) => f.uid === uid).map((f) => f.text);
+  assert.ok(feed.includes('Hermes Agent does not report cost. The office shows it as unknown, and no spend limit can stop it.'), feed.join('\n'));
+  // A request the agent raises waits in the office until the user answers there.
+  const steps = [{ ask: { toolCall: { toolCallId: 't1', title: 'Edit a', kind: 'edit', locations: [{ path: path.join(work, 'a.txt') }] },
+    options: [{ optionId: 'always', name: 'Always', kind: 'allow_always' }, { optionId: 'once', name: 'Allow', kind: 'allow_once' }, { optionId: 'no', name: 'Reject', kind: 'reject_once' }] } }];
+  assert.equal((await call('/api/message', { uid, text: JSON.stringify(steps) })).status, 200);
+  const waiting = await until(async () => { const x = await sessionOf(uid); return x.pending.length ? x : null; }, 'the request to wait');
+  assert.equal((await call('/api/answer', { id: waiting.pending[0].id, allow: true, always: true })).status, 200);
+  const done = await until(async () => { const x = await sessionOf(uid); return x.status === 'idle' && x.replies.length ? x : null; }, 'the turn to end');
+  assert.deepEqual(done.replies.map((x) => x.text), ['asked: selected once'], 'allow once, never always');
+  assert.equal(done.cost, null, 'never $0.00');
+  // Past sessions keep the cost unknown, and Reopen asks again before it runs.
+  assert.equal((await call('/api/close', { uid })).status, 200);
+  const past = await until(async () => (await call('/api/history', {})).json.sessions.find((x) => x.uid === uid), 'the past record');
+  assert.deepEqual([past.costUnknown, past.cost], [true, null]);
+  const again = await call('/api/reopen', { uid });
+  assert.deepEqual([again.status, again.json.confirm], [409, 'cost']);
+  const yes = await call('/api/reopen', { uid, confirmCost: true });
+  assert.equal(yes.status, 200, JSON.stringify(yes.json));
+  await until(async () => { const x = await sessionOf(yes.json.uid); return x && x.sid ? x : null; }, 'the reopened session to start');
+  await call('/api/close', { uid: yes.json.uid });
 });

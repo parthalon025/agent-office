@@ -15,8 +15,9 @@ import { fileURLToPath } from 'node:url';
 import * as git from './git.mjs';
 import { slimPayload } from './payload.mjs';
 import { createTracker, clip } from './tracker.mjs';
-import { createRegistry, providerEvents, isPaid, spendLimitFor, DEFAULT_SPEND_LIMIT } from './providers/index.mjs';
+import { createRegistry, providerEvents, isPaid, costOf, spendLimitFor, DEFAULT_SPEND_LIMIT } from './providers/index.mjs';
 import { createLocal } from './providers/local.mjs';
+import { createAcp, AGENTS as ACP_AGENTS } from './providers/acp.mjs';
 import { createClaudeCode, claudeVersion, MODEL_RE, MODES } from './providers/claude-code.mjs';
 import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, cleanRecent, recentChoices } from './place.mjs';
 import * as startup from './startup.mjs';
@@ -152,6 +153,7 @@ function recordHistory(s) {
   const rec = {
     uid: s.uid, sid: s.sid, provider: s.provider, name: s.name, cwd: s.cwd, model: s.model, mode: s.mode, cost: s.cost, turns: s.turns,
     startedAt: s.startedAt, endedAt: s.endedAt, worktree: s.worktree, replies: s.replies.slice(-40), prompt: s.prompt, budget: s.budget,
+    ...(s.costUnknown ? { costUnknown: true } : {}),
   };
   const past = reopening.get(s.uid);
   if (past) { reopening.delete(s.uid); history = history.filter((h) => h.uid !== past); }
@@ -185,9 +187,10 @@ const tracker = createTracker({
 const { sessions, feed, addFeed, newSession, placeSession, findSession, onHook, endSession } = tracker;
 
 // ---------- providers: the agent tools behind the sessions (providers/) ----------
-// Every provider reports through the same events into the tracker. Claude Code is the only one now. Its hooks come in over
-// the hook routes below, and a permission decision goes back as the hook's answer (claude.answer gives the body).
-const events = providerEvents({ tracker, onChange: () => broadcast(), hold: (r) => { holdRequest(r); broadcast(); } });
+// Every provider reports through the same events into the tracker. Claude Code's hooks come in over the hook routes below,
+// and a permission decision goes back as the hook's answer (claude.answer gives the body). The other providers raise their
+// requests through events.permission; events.drop frees one their agent no longer waits for (releaseHold with no decision).
+const events = providerEvents({ tracker, onChange: () => broadcast(), hold: (r) => { holdRequest(r); broadcast(); }, release: (id) => releaseHold(id, {}) });
 const claude = createClaudeCode({ events, files: () => ({ settings: activeHooksFile(), mcp: MCP_FILE, launcher: path.join(ROOT, 'launch.ps1') }) });
 // The four office tools for agents the office runs itself (no MCP process): the same handlers the /mcp/* routes call.
 // They answer text or throw httpError. Function declarations are hoisted, so they are ready when a local agent calls one.
@@ -197,7 +200,9 @@ const officeTools = {
   room: async (s) => describeRoom(await roomOf(s)),
   roomUpdate: async (s, args) => updateRoom(await roomOf(s), args),
 };
-const providers = createRegistry([claude, createLocal({ events, kind: 'ollama', baseUrl: process.env.OFFICE_OLLAMA_URL, officeTools }), createLocal({ events, kind: 'lmstudio', baseUrl: process.env.OFFICE_LMSTUDIO_URL, officeTools })]);
+const providers = createRegistry([claude, createLocal({ events, kind: 'ollama', baseUrl: process.env.OFFICE_OLLAMA_URL, officeTools }), createLocal({ events, kind: 'lmstudio', baseUrl: process.env.OFFICE_LMSTUDIO_URL, officeTools }),
+  // ACP agents (providers/acp.mjs): Hermes Agent and DeepSeek Harness, one entry each in its AGENTS list.
+  ...Object.keys(ACP_AGENTS).map((kind) => createAcp({ events, kind }))]);
 const providerOf = (s) => providers.of(s);
 
 const basename = (p) => (p ? p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : '');
@@ -738,13 +743,16 @@ function openHeadless(provider, { cwd, name, prompt, worktree = null, budget = n
   // The last slash-command list came from a Claude Code init, so only a Claude Code session starts with it.
   const known = provider === claude ? persisted.commands : null;
   // startDir: the launch folder (the worktree when there is one). Requests are rated against it, never against a later cd.
+  // costUnknown: the agent reports no cost (ACP), so every surface shows "unknown", never $0.00.
+  const costUnknown = costOf(provider) === 'unknown';
   const s = newSession({ uid: officeId, officeId, provider: provider.kind, name, cwd, startDir: cwd, launched: true, headless: true, status: 'starting', worktree, budget, scheduleId, model,
-    commands: known?.commands || [], skills: known?.skills || [] });
+    commands: known?.commands || [], skills: known?.skills || [], costUnknown });
   placeSession(s, true);
   if (prior) { s.replies = prior.replies || []; s.replySeq = s.replies.reduce((n, r) => Math.max(n, r.id || 0), 0); s.costBase = prior.cost || 0; s.cost = prior.cost || null; s.turns = prior.turns || 0; s.prompt = prior.prompt || ''; }
   provider.open(s, { model, permissionMode, budget, resume });
   if (!worktree) rememberDir(cwd); // a worktree folder is an implementation detail, not a place to start from
   addFeed(s, 'start', resume ? 'reopened in the office' : worktree ? `started in the office on branch ${worktree.branch}` : 'started in the office');
+  if (costUnknown) addFeed(s, 'start', `${provider.label} does not report cost. The office shows it as unknown, and no spend limit can stop it.`);
   if (prompt) { s.prompt = prompt; writeUser(s, prompt); addFeed(s, 'prompt', clip(prompt, 100)); }
   broadcast();
   return s.uid;
@@ -761,6 +769,7 @@ async function openSession(opts) {
 
   const provider = providers.get(opts.provider);
   provider.check?.(opts); // unknown model or mode: refused before a worktree is made
+  confirmCost(provider, opts.confirmCost);
   const model = opts.model || null, permissionMode = opts.permissionMode || null;
   const prompt = String(opts.prompt || '').slice(0, 8000);
 
@@ -772,8 +781,9 @@ async function openSession(opts) {
       workdir = wt.path; worktree = { root: wt.root, branch: wt.branch, repo: wt.repo };
     }
     if (worktree) rememberDir(cwd);
-    // A paid provider gets the default spend limit unless the caller sets one (0 clears it). A local provider has none (#33).
-    const budget = spendLimitFor({ paid: isPaid(provider), requested: opts.maxBudget, fallback: defaultSpend() });
+    // A paid provider gets the default spend limit unless the caller sets one (0 clears it). A local provider has none (#33),
+    // and neither has one whose cost is unknown: nothing could stop it at a limit.
+    const budget = spendLimitFor({ paid: isPaid(provider), cost: costOf(provider), requested: opts.maxBudget, fallback: defaultSpend() });
     return openHeadless(provider, { cwd: workdir, name, prompt, worktree, budget, scheduleId: opts.scheduleId || null, model, permissionMode });
   }
   if (typeof provider.openWindow !== 'function') throw httpError(400, `${provider.label} does not open in a terminal window.`);
@@ -787,14 +797,26 @@ async function openSession(opts) {
   return s.uid;
 }
 
+// An agent that reports no cost (cost 'unknown') runs only after the user said yes for this session (owner decision Q22).
+// The answer is 409 with confirm: 'cost'; the caller asks the user and sends the same request again with confirmCost: true.
+function confirmCost(provider, confirmed) {
+  if (costOf(provider) !== 'unknown' || confirmed === true) return;
+  const e = httpError(409, 'This agent does not report cost. Run it?');
+  e.confirm = 'cost';
+  throw e;
+}
+
 // A past session opens again with its own provider (providers.reopenPlan). A provider that can resume continues the
 // conversation (Claude Code --resume); another one starts a fresh session in the same folder, and the record stays.
-// The permission mode starts as the default.
-async function reopenSession(uid) {
+// A provider that learns at a handshake whether it can resume (ACP) learns it first. The permission mode starts as the default.
+async function reopenSession(uid, { confirmed = false } = {}) {
   const rec = history.find((h) => h.uid === uid);
   if (!rec) throw httpError(404, 'That past session is gone.');
   if (pastInUse().has(uid)) throw httpError(409, 'That session is open again. Close it first, or wait until it has started.');
   if (!fs.existsSync(rec.cwd)) throw httpError(409, `Its folder is gone: ${rec.cwd}. It may have been a removed worktree.`);
+  const provider = providers.get(rec.provider);
+  confirmCost(provider, confirmed);
+  if (provider.learn) await provider.learn();
   const plan = providers.reopenPlan(rec);
   const id = openHeadless(plan.provider, plan.opts);
   if (plan.note) { const s = sessions.get(id); if (s) { addFeed(s, 'start', plan.note); broadcast(); } }
@@ -907,7 +929,7 @@ setInterval(() => { const now = Date.now(); for (const sch of persisted.schedule
 // ---------- past sessions: list and search ----------
 function pastSummary(h) {
   const last = h.replies?.length ? h.replies[h.replies.length - 1].text : '';
-  return { uid: h.uid, name: h.name, cwd: h.cwd, model: h.model, cost: h.cost, turns: h.turns, startedAt: h.startedAt, endedAt: h.endedAt,
+  return { uid: h.uid, name: h.name, cwd: h.cwd, model: h.model, cost: h.cost, costUnknown: h.costUnknown === true, turns: h.turns, startedAt: h.startedAt, endedAt: h.endedAt,
     branch: h.worktree?.branch || null, worktreeRoot: h.worktree?.root || null, last: clip(String(last).replace(/\s+/g, ' '), 140), firstAsk: clip(h.prompt || '', 140) };
 }
 function search(q) {
@@ -1117,7 +1139,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/message') return send(res, 200, { ok: true, ...sendMessage(String(body.uid), body.text, Array.isArray(body.attachments) ? body.attachments : []) });
     if (url.pathname === '/api/answer') { answer(String(body.id), body.allow === true, body.always === true); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/open') return send(res, 200, { uid: await openSession(body) });
-    if (url.pathname === '/api/reopen') return send(res, 200, { uid: await reopenSession(String(body.uid)) });
+    if (url.pathname === '/api/reopen') return send(res, 200, { uid: await reopenSession(String(body.uid), { confirmed: body.confirmCost === true }) });
     if (url.pathname === '/api/dismiss') { dismissError(String(body.uid)); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/interrupt') { doControl(String(body.uid), 'interrupt'); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/ext/list') return send(res, 200, await extList(extSession(body.uid)));
@@ -1148,7 +1170,8 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/close') { await closeSession(String(body.uid)); return send(res, 200, { ok: true }); }
     return send(res, 404, { error: 'Not found' });
   } catch (e) {
-    send(res, e.status || 500, { error: e.message });
+    // confirm: the request needs the user's yes first (confirmCost); the page asks and sends it again.
+    send(res, e.status || 500, { error: e.message, ...(e.confirm ? { confirm: e.confirm } : {}) });
   }
 });
 
