@@ -342,11 +342,17 @@
       { id: 'schedule', name: 'Schedules', route: 'Open an office session on time', today: live.filter(function (s) { return s.scheduleId; }).length },
       { id: 'terminal', name: 'Terminal sessions', route: (i.hooksMode || 'command') + ' hooks', today: live.filter(function (s) { return !s.headless; }).length }];
     // Copy needs a secure page. The office runs on localhost, which counts as one; if the browser still refuses, say so.
-    function copy(text, what) {
+    function copy(text, what, byHand) {
       var ok = function () { if (p.toast) p.toast({ tone: 'success', title: 'Copied', text: what + ' is on your clipboard.' }); };
-      var no = function () { if (p.toast) p.toast({ tone: 'error', title: 'Not copied', text: 'The browser blocked the copy. Select the text and copy it by hand.' }); };
+      var no = function () { if (p.toast) p.toast({ tone: 'error', title: 'Not copied', text: 'The browser blocked the copy. ' + (byHand || 'Select the text and copy it by hand.') }); };
       try { navigator.clipboard.writeText(text).then(ok, no); } catch (x) { no(); }
     }
+    // The agent token stays hidden until the user clicks Show, so a screen share or a screenshot does not leak it (#60).
+    // It shows in the HTTP hooks (the snippet), so the token field and the mask apply only when the snippet holds it.
+    var tk = useState(false), tokenShown = tk[0], setTokenShown = tk[1];
+    var token = i.agentToken || '';
+    var tokenUsed = !!token && String(i.settingsSnippet || '').indexOf(token) >= 0;
+    var snippetText = tokenUsed && !tokenShown ? F.maskSecret(i.settingsSnippet, token) : (i.settingsSnippet || '');
     var su = useState(i.startup || null), startup = su[0], setStartup = su[1];
     var sb = useState(false), startBusy = sb[0], setStartBusy = sb[1];
     function toggleStartup() {
@@ -386,8 +392,15 @@
           h(A.Button, { variant: 'quiet', icon: 'copy', disabled: !i.launchCommand, onClick: function () { copy(i.launchCommand, 'The launch command'); } }, 'Copy command')),
         h('p', { className: 'note' }, 'Hooks: ' + (i.hooksMode || '') + ' on Claude Code ' + (i.claudeVersion || '') + '. Or merge these hooks into ~/.claude/settings.json to seat every session on this machine.'),
         h('div', { className: 'copy-row' },
-          h('pre', { className: 'code', tabIndex: 0, style: { maxHeight: 200 } }, i.settingsSnippet || ''),
-          h(A.Button, { variant: 'quiet', icon: 'copy', disabled: !i.settingsSnippet, onClick: function () { copy(i.settingsSnippet, 'The hooks'); } }, 'Copy hooks'))));
+          h('pre', { className: 'code', tabIndex: 0, style: { maxHeight: 200 } }, snippetText),
+          h(A.Button, { variant: 'quiet', icon: 'copy', disabled: !i.settingsSnippet, onClick: function () { copy(i.settingsSnippet, 'The hooks', tokenUsed ? 'Click Show, then select the text and copy it by hand.' : undefined); } }, 'Copy hooks')),
+        tokenUsed ? h('h3', { className: 'ext-h' }, 'Agent token') : null,
+        tokenUsed ? h('p', { className: 'note' }, 'The HTTP hooks use this token to reach the office. Keep it private. It stays hidden until you click Show token.') : null,
+        tokenUsed ? h('div', { className: 'copy-row' },
+          h(A.TextInput, { id: 'h-token', label: 'Agent token', type: tokenShown ? 'text' : 'password', value: token, onChange: function () { /* read only */ } }),
+          h('div', { className: 'btn-row' },
+            h(A.Button, { variant: 'quiet', onClick: function () { setTokenShown(!tokenShown); } }, tokenShown ? 'Hide token' : 'Show token'),
+            h(A.Button, { variant: 'quiet', icon: 'copy', onClick: function () { copy(token, 'The agent token', 'Click Show token, then select the token and copy it by hand.'); } }, 'Copy token'))) : null));
   }
 
   // ---------- floors (branches) and rooms (worktrees) ----------
