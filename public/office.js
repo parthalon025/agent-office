@@ -156,12 +156,16 @@
     var st = useState(null), status = st[0], setStatus = st[1];   // kind -> its /api/providers entry, or null before the first answer
     var bz = useState(false), busy = bz[0], setBusy = bz[1];
     var rd = useState(0), round = rd[0], setRound = rd[1];
+    // The server keeps its answer for 30 s. Only Check again asks it to look again (fresh=1); opening a dialog or a room's
+    // list does not. The flag is used once, so a later ask of the same hook (the list shows again) reads the kept answer.
+    var wantFresh = React.useRef(false);
     var ask = on !== false;
     useEffect(function () {
       var live = true;
       if (!ask) { setStatus(null); setBusy(false); return undefined; }
       setBusy(true);
-      call('/api/providers').then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); }).then(function (j) {
+      var fresh = wantFresh.current; wantFresh.current = false;
+      call(fresh ? '/api/providers?fresh=1' : '/api/providers').then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); }).then(function (j) {
         if (!live) return;
         var by = {};
         (j.providers || []).forEach(function (x) { by[x.kind] = x; });
@@ -174,7 +178,7 @@
       var r = status[k.kind] || { ready: false, version: null, models: [], needs: ['The office could not check ' + k.label + '. Check again.'] };
       return Object.assign({}, k, { checking: false, ready: r.ready === true, configured: r.configured !== false, version: r.version || null, needs: r.needs || [], models: r.models || [] });
     });
-    return { list: list, checking: busy || !status, recheck: function () { setRound(round + 1); } };
+    return { list: list, checking: busy || !status, recheck: function () { wantFresh.current = true; setRound(round + 1); } };
   }
   // Why a kind is not ready, and what to do. p: { kind, onRecheck, checking (a Check again is out) }
   function KindNeeds(p) {

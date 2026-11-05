@@ -706,7 +706,8 @@ test('notes: an agent write that reads as an instruction, or is too long, is ref
 test('OpenClaw (#77): gated through the office plugin; a file edit the plugin sends is held in the office until the user answers', { skip: SKIP }, async () => {
   // A good install: workspace-only, and the plugin enabled with this office's token file.
   fs.writeFileSync(clawConfig, JSON.stringify(clawOk()));
-  const info = await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
+  // fresh=1: the config just changed, and the server keeps a provider answer for 30 s (#104).
+  const info = await fetch(`http://127.0.0.1:${port}/api/providers?fresh=1`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
   const row = info.providers.find((p) => p.kind === 'openclaw');
   assert.ok(row, 'OpenClaw is registered');
   assert.deepEqual([row.gated, row.supervision, row.cost], [true, null, 'unknown']);
@@ -772,7 +773,7 @@ test('OpenClaw (#77): a config that is off is refused before the cost question a
 test('OpenClaw (#73): no Gateway on the port is "Not ready: start the OpenClaw Gateway", and the office starts nothing', { skip: SKIP }, async () => {
   await new Promise((r) => gateway.close(r));
   gateway = null;
-  const info = await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
+  const info = await fetch(`http://127.0.0.1:${port}/api/providers?fresh=1`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
   const row = info.providers.find((p) => p.kind === 'openclaw');
   assert.equal(row.ready, false);
   assert.match(row.needs[0], /^Not ready: start the OpenClaw Gateway\. It should listen on 127\.0\.0\.1:\d+\. The office never starts or stops it\.$/);
