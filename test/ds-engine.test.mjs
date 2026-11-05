@@ -27,9 +27,13 @@ class V {
   clone() { return new V(this.x, this.y, this.z); }
   add(v) { this.x += v.x; this.y += v.y; this.z += v.z; return this; }
   sub(v) { this.x -= v.x; this.y -= v.y; this.z -= v.z; return this; }
+  lerp(v, a) { this.x += (v.x - this.x) * a; this.y += (v.y - this.y) * a; this.z += (v.z - this.z) * a; return this; }
+  distanceTo(v) { return Math.hypot(this.x - v.x, this.y - v.y, this.z - v.z); }
 }
 function Stage() {}
-new Function('T', 'Stage', source('Stage.prototype.frame=function', '};\n') + source('Stage.prototype.zoom=function', '};\n'))({ Vector3: V }, Stage);
+new Function('T', 'Stage', 'DUR',
+  source('Stage.prototype.frame=function', '};\n') + source('Stage.prototype.goalStep=function', '};\n') + source('Stage.prototype.zoom=function', '};\n')
+)({ Vector3: V }, Stage, { camera: 600 });
 
 function stage(rm) {
   const s = Object.create(Stage.prototype);
@@ -42,30 +46,67 @@ function stage(rm) {
   });
   return s;
 }
+const xyz = (v) => [v.x, v.y, v.z].map((n) => Math.round(n * 1e6) / 1e6);
 
-test('frame glides without reduced motion: a goal, the target does not move yet (#36)', () => {
+test('frame glides without reduced motion: a goal, and each goal step moves part of the way (#36)', () => {
   const s = stage(false);
   s.frame([1, 2, 3], 9, 1.5);
   assert.ok(s.goal, 'a camera goal');
-  assert.deepEqual([s.ctl.target.x, s.ctl.target.y, s.ctl.target.z], [0, 0, 0]);
+  assert.deepEqual(xyz(s.ctl.target), [0, 0, 0]);
   assert.equal(s.D, 11);
+  s.goalStep(0.016);
+  assert.ok(s.goal, 'one frame does not finish the glide');
+  assert.ok(s.ctl.target.x > 0 && s.ctl.target.x < 1);
+  assert.ok(s.D < 11 && s.D > 9);
 });
 
-test('frame cuts under reduced motion: no goal, target, D and zoom set at once (#36)', () => {
+test('frame under reduced motion: the move is still a goal, and the first goal step cuts to it (#36)', () => {
   const s = stage(true);
   s.frame([1, 2, 3], 9, 1.5);
-  assert.equal(s.goal, null);
-  assert.deepEqual([s.ctl.target.x, s.ctl.target.y, s.ctl.target.z], [1, 2, 3]);
-  assert.deepEqual([s.cam.position.x, s.cam.position.y, s.cam.position.z], [11, 12, 13], 'the camera moves with the target');
+  assert.ok(s.goal, 'a goal, so a page can hold the move back');
+  assert.deepEqual(xyz(s.ctl.target), [0, 0, 0], 'nothing moves before the next frame');
+  s.goalStep(0.016);
+  assert.equal(s.goal, null, 'one frame ends the goal');
+  assert.deepEqual(xyz(s.ctl.target), [1, 2, 3]);
+  assert.deepEqual(xyz(s.cam.position), [11, 12, 13], 'the camera moves with the target');
   assert.equal(s.D, 9);
   assert.equal(s.cam.zoom, 1.5);
   s.frame([0, 0, 0], 0, 1, false, [4, 4, 4]);
-  assert.equal(s.goal, null, 'an explicit now=false also cuts');
+  s.goalStep(0.016);
+  assert.equal(s.goal, null);
   assert.equal(s.D, 7, 'ext fits D');
+  s.frame([5, 5, 5], 9, 1, true);
+  assert.equal(s.goal, null, 'now still cuts at once');
+  assert.deepEqual(xyz(s.ctl.target), [5, 5, 5]);
 });
 
-test('the floor-change slide ends at once under reduced motion (#36)', () => {
-  assert.match(bundle, /if\(fx\)\{fx\.t=s\.rm\?1:Math\.min\(1,/);
+test('reduced motion: a goal held back while it is set (the page keeps an item in focus) moves nothing (#36)', () => {
+  const s = stage(true);
+  let held = null, val = null, focus = true;
+  Object.defineProperty(s, 'goal', { configurable: true, get: () => val, set: (v) => { if (v && focus) { held = v; return; } val = v; } });
+  s.frame([4, 0, 0], 9, 2);   // a bot joins or the HUD inset changes: frameFloor()
+  assert.equal(s.goal, null, 'held');
+  if (s.goal) s.goalStep(0.016);   // the stage loop runs the goal step only for a goal
+  assert.deepEqual(xyz(s.ctl.target), [0, 0, 0], 'the camera stays on the item in focus');
+  assert.equal(s.D, 11);
+  assert.equal(s.cam.zoom, 1);
+  focus = false; s.goal = held;   // the focus lets go because the floor changed: the held goal runs
+  s.goalStep(0.016);
+  assert.deepEqual(xyz(s.ctl.target), [4, 0, 0]);
+  assert.equal(s.cam.zoom, 2);
+  assert.equal(s.goal, null);
+});
+
+test('the stage loop runs camera goals through goalStep; frame never forces a cut (#36)', () => {
+  assert.match(source('var loop=function(){', 'requestAnimationFrame(loop);};loop();}\n'), /if\(s\.goal\)s\.goalStep\(dt\);/);
+  assert.doesNotMatch(source('Stage.prototype.frame=function', '};\n'), /this\.rm/);
+});
+
+test('no floor slide starts under reduced motion, so the slide step has no reduced-motion branch (#36)', () => {
+  assert.equal((bundle.match(/fx=\{/g) || []).length, 3, 'three places start a slide');
+  assert.match(source(' function setFloor('), /if\(changed&&!s\.rm\)\{if\(pv==="floor"&&pf!==id&&floorG\[pf\]\)\{[^}]*fx=\{[^}]*\};[^}]*\}else fx=\{g:floorG\[id\],t:0\};\}/);
+  assert.match(source(' function setView('), /if\(!s\.rm\)fx=\{/);
+  assert.match(bundle, /if\(fx\)\{fx\.t=Math\.min\(1,/);
 });
 
 test('zoom: + never zooms out when a framed view is past maxZoom (#56)', () => {
@@ -128,6 +169,21 @@ test('a seeded event with at after the last visit is news: recorded once, in tim
   assert.equal(r.st.history.length, 4);
 });
 
+test('seeded events without an id for one bot at one time are each recorded; only an exact copy is skipped (#35)', () => {
+  const r = historyRules(1000);
+  assert.equal(r.recordSeeded(ev('message', { text: 'Tests pass.', seeded: true, at: 2000 })), true);
+  assert.equal(r.recordSeeded(ev('message', { text: 'Opened a pull request.', seeded: true, at: 2000 })), true, 'another message');
+  assert.equal(r.recordSeeded(ev('status', { status: 'working', task: 'Run tests', seeded: true, at: 2000 })), true);
+  assert.equal(r.recordSeeded(ev('status', { status: 'waiting', task: 'Run tests', seeded: true, at: 2000 })), true, 'another status');
+  assert.equal(r.recordSeeded(ev('status', { status: 'waiting', task: 'Push', seeded: true, at: 2000 })), true, 'another task');
+  assert.equal(r.recordSeeded(ev('message', { text: 'Tests pass.', seeded: true, at: 2000 })), false, 'the same message again');
+  assert.equal(r.st.history.length, 5);
+  const f = historyRules(1000), far = Date.now() + 3600e3;
+  assert.equal(f.recordSeeded(ev('status', { status: 'done', seeded: true, at: far })), true);
+  assert.equal(f.recordSeeded(ev('status', { status: 'done', seeded: true, at: far })), false, 'a copy from the future is skipped too, though both are recorded at now');
+  assert.equal(f.st.history.length, 1);
+});
+
 test('a seeded event from the future is recorded at now, and history keeps HMAX entries (#35)', () => {
   const r = historyRules(0);
   const before = Date.now();
@@ -159,10 +215,24 @@ test('sound, notify and every toast check the seeding flag (#35)', () => {
   assert.equal((bundle.match(/&&!rp&&!seeding&&o\.onToast\)/g) || []).length, 3);
 });
 
-test('dispose marks the building as seen and saves (#35)', () => {
-  const at = bundle.indexOf('dispose:function(){if(adapter&&adapter.dispose)adapter.dispose();document.removeEventListener("visibilitychange",onVis)');
-  assert.ok(at >= 0);
-  assert.match(bundle.slice(at, bundle.indexOf('\n', at)), /st\.lastSeen=seenNow\(\);hsave\(\);/);
+test('dispose marks the building as seen and saves; while the page is hidden it keeps the time the page was hidden (#35)', () => {
+  const src = source('dispose:function(){if(adapter&&adapter.dispose)adapter.dispose();', 's.dispose();}');
+  const run = (visibilityState) => {
+    const log = [], st = { lastSeen: 100 };
+    const doc = { visibilityState, removeEventListener: () => log.push('off') };
+    const o = new Function('adapter', 'document', 'window', 'onVis', 'onHide', 'st', 'seenNow', 'hsave', 's',
+      'var rp={};return {' + src + '};'
+    )({ dispose: () => log.push('adapter') }, doc, { removeEventListener: () => log.push('off') }, null, null, st,
+      () => 5000, () => log.push('save:' + st.lastSeen), { dispose: () => log.push('stage') });
+    o.dispose();
+    return { st, log };
+  };
+  const shown = run('visible');
+  assert.equal(shown.st.lastSeen, 5000, 'a shown page: the building is seen now');
+  assert.deepEqual(shown.log, ['adapter', 'off', 'off', 'save:5000', 'stage']);
+  const hidden = run('hidden');
+  assert.equal(hidden.st.lastSeen, 100, 'a hidden page: events that came while it was hidden stay news');
+  assert.deepEqual(hidden.log, ['adapter', 'off', 'off', 'save:100', 'stage']);
 });
 
 test('seen time is after every recorded event, also one in the same ms (#35)', () => {

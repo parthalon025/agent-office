@@ -1255,7 +1255,7 @@ function Stage(el,o){o=o||{};var s=this;s.el=el;s.root=o.root||null;s.K=new Kit(
   if(s.intro){var ii=s.intro;ii.t=Math.min(1,ii.t+dt*1000/ii.ms);var ie=ii.t<.5?4*ii.t*ii.t*ii.t:1-Math.pow(-2*ii.t+2,3)/2,ia=ii.a*(1-ie),itg=s.ctl?s.ctl.target:s.target;s.cam.position.sub(itg).applyAxisAngle(new T.Vector3(0,1,0),ia-ii.cur).add(itg);ii.cur=ia;s.cam.zoom=ii.z0+(1-ii.z0)*ie;s.cam.updateProjectionMatrix();if(ii.t>=1){s.intro=null;if(ii.cb)ii.cb();}}
   s.sunT=(s.sunT||0)+dt;if(s.sunT>60){s.sunT=0;if(s.K.look==="day"&&s.sunClock)s.clockSun();}
   if(s.K.look==="sublevel"&&!s.rm&&s.q!=="low"){s.flT=(s.flT==null?3:s.flT)-dt;if(s.flT<0){s.flk=.4;s.flT=6+Math.random()*10;}if(s.flk>0){s.flk-=dt;s.hemi.intensity=s.hiBase*(Math.random()<.5?.7:1);if(s.flk<=0)s.hemi.intensity=s.hiBase;}}
-  if(s.goal){var gk=1-Math.pow(.002,dt*600/(s.goal.dur||DUR.camera)),tg=s.ctl?s.ctl.target:s.target,prev=tg.clone();tg.lerp(s.goal.t,gk);s.cam.position.add(tg.clone().sub(prev));s.D+=(s.goal.D-s.D)*gk;if(s.goal.z!=null)s.cam.zoom+=(s.goal.z-s.cam.zoom)*gk;s.resize();if(tg.distanceTo(s.goal.t)<.01&&Math.abs(s.D-s.goal.D)<.01)s.goal=null;}
+  if(s.goal)s.goalStep(dt);
   for(var i=0;i<s.anim.length;i++)s.anim[i](dt,t);if(s.tick)s.tick(dt,t);if(s.ctl)s.ctl.update();else s.cam.lookAt(s.target);s.draw();s.raf=requestAnimationFrame(loop);};loop();}
 var GRADE={uniforms:{tDiffuse:{value:null},exposure:{value:1},vig:{value:.16},knee:{value:.82}},vertexShader:"varying vec2 vUv;void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}",
  fragmentShader:"uniform sampler2D tDiffuse;uniform float exposure;uniform float vig;uniform float knee;varying vec2 vUv;vec3 roll(vec3 c){vec3 o=max(c-vec3(knee),0.0);return min(c,vec3(knee))+(1.0-knee)*(1.0-exp(-o/(1.0-knee)));}vec3 srgb(vec3 c){c=clamp(c,0.0,1.0);return mix(c*12.92,1.055*pow(c,vec3(1.0/2.4))-0.055,step(vec3(0.0031308),c));}void main(){vec4 c=texture2D(tDiffuse,vUv);vec3 col=roll(c.rgb*exposure);float d=distance(vUv,vec2(0.5));col*=1.0-vig*smoothstep(0.35,0.85,d);gl_FragColor=vec4(srgb(col),1.0);}"};
@@ -1277,9 +1277,12 @@ Stage.prototype.resize=function(){var w=this.el.clientWidth||1,hh=this.el.client
  this.cam.left=-d*a;this.cam.right=d*a;this.cam.top=d;this.cam.bottom=-d;this.cam.updateProjectionMatrix();};
 Stage.prototype.fitD=function(e){this.cam.updateMatrixWorld();var r=new T.Vector3().setFromMatrixColumn(this.cam.matrixWorld,0),u=new T.Vector3().setFromMatrixColumn(this.cam.matrixWorld,1),cw=this.el.clientWidth||1,ins=this.inset,a=(ins?Math.max(cw*.35,cw-ins.left-ins.right):cw)/(this.el.clientHeight||1);
  var ex=Math.abs(r.x)*e[0]+Math.abs(r.y)*e[1]+Math.abs(r.z)*e[2],ey=Math.abs(u.x)*e[0]+Math.abs(u.y)*e[1]+Math.abs(u.z)*e[2];return Math.max(ey,ex/a)*1.06;};
-/* reduced motion: every camera move cuts (setView, setFloor, focusRoom, a new frame inset) */
-Stage.prototype.frame=function(target,D,zoom,now,ext,dur){if(this.rm)now=true;var t=new T.Vector3(target[0],target[1],target[2]);if(ext){this.ext=ext;D=this.fitD(ext);}else this.ext=null;var so=this.sunOff||[12,22,8];this.sun.position.copy(t).add(new T.Vector3(so[0],so[1],so[2]));this.sun.target.position.copy(t);this.shadowFit(Math.max(16,D*1.6));
+/* frame: now cuts at once; otherwise the move is a goal that goalStep runs each frame. A page can hold a goal back (st.goal), so every move
+   goes through goal, also under reduced motion */
+Stage.prototype.frame=function(target,D,zoom,now,ext,dur){var t=new T.Vector3(target[0],target[1],target[2]);if(ext){this.ext=ext;D=this.fitD(ext);}else this.ext=null;var so=this.sunOff||[12,22,8];this.sun.position.copy(t).add(new T.Vector3(so[0],so[1],so[2]));this.sun.target.position.copy(t);this.shadowFit(Math.max(16,D*1.6));
  if(now){var tg=this.ctl?this.ctl.target:this.target,dv=t.clone().sub(tg);tg.copy(t);this.cam.position.add(dv);this.D=D;if(zoom!=null)this.cam.zoom=zoom;this.resize();this.goal=null;}else this.goal={t:t,D:D,z:zoom,dur:dur};};
+/* one frame of the camera goal. Reduced motion: the first step ends the goal, so every camera move (setView, setFloor, focusRoom, a new frame inset) cuts */
+Stage.prototype.goalStep=function(dt){var g=this.goal;if(!g)return;var gk=this.rm?1:1-Math.pow(.002,dt*600/(g.dur||DUR.camera)),tg=this.ctl?this.ctl.target:this.target,prev=tg.clone();tg.lerp(g.t,gk);this.cam.position.add(tg.clone().sub(prev));this.D+=(g.D-this.D)*gk;if(g.z!=null)this.cam.zoom+=(g.z-this.cam.zoom)*gk;this.resize();if(tg.distanceTo(g.t)<.01&&Math.abs(this.D-g.D)<.01)this.goal=null;};
 /* zoom by a factor inside the controls' minZoom and maxZoom (.4 and 4 without controls). A step never goes the wrong way:
    when a framed view is past a limit, the limit is the current zoom, so + keeps the zoom and - steps out from there. Returns the new zoom. */
 Stage.prototype.zoom=function(f){var z=this.cam.zoom,c=this.ctl,lo=Math.min(c?c.minZoom:.4,z),hi=Math.max(c?c.maxZoom:4,z),n=Math.max(lo,Math.min(hi,z*f));this.cam.zoom=n;this.cam.updateProjectionMatrix();return n;};
@@ -1317,7 +1320,7 @@ function mountOffice(el,o){o=o||{};if(o.root&&o.theme)o.root.setAttribute("data-
  function hsave(){if(saveT)clearTimeout(saveT);saveT=null;lastSave=Date.now();var h=st.history;for(var i=0;i<4&&h.length;i++){try{window.localStorage.setItem(HKEY,JSON.stringify({v:1,lastSeen:st.lastSeen,history:h}));return;}catch(e){h=h.slice(Math.floor(h.length/2));}}}
  function hsoon(){if(saveT||s.dead)return;saveT=setTimeout(hsave,Math.max(0,5000-(Date.now()-lastSave)));}
  function record(ev){st.history.push({t:Date.now(),ev:ev});if(st.history.length>HMAX)st.history.splice(0,st.history.length-HMAX);hsoon();}
- function recordAt(ev,t){var k=t+"|"+ev.type+"|"+(ev.bot||ev.from||ev.job||"")+"|"+(ev.id||ev.session||"");if(seedKeys[k])return false;seedKeys[k]=1;var hl=st.history,i=hl.length;while(i>0&&hl[i-1].t>t)i--;hl.splice(i,0,{t:t,ev:ev});if(hl.length>HMAX)hl.splice(0,hl.length-HMAX);hsoon();return true;}
+ function recordAt(ev,t){var k=null;try{k=JSON.stringify(ev);}catch(e){}if(k!=null){if(seedKeys[k])return false;seedKeys[k]=1;}var hl=st.history,i=hl.length;while(i>0&&hl[i-1].t>t)i--;hl.splice(i,0,{t:t,ev:ev});if(hl.length>HMAX)hl.splice(0,hl.length-HMAX);hsoon();return true;}
  function recordSeeded(ev){var at=+ev.at;if(!(at>newsAfter))return false;return recordAt(ev,Math.min(at,Date.now()));}
  function seenNow(){var hl=st.history;return Math.max(Date.now(),hl.length?hl[hl.length-1].t+1:0);}/* after every recorded event, also in the same ms */
  function onVis(){if(document.visibilityState==="hidden"){st.lastSeen=seenNow();hsave();}else if(st.lastSeen&&st.lastSeen!==seen0){seen0=st.lastSeen;emit();}}
@@ -1387,7 +1390,7 @@ function mountOffice(el,o){o=o||{};if(o.root&&o.theme)o.root.setAttribute("data-
   if(changed&&!s.rm){if(pv==="floor"&&pf!==id&&floorG[pf]){var ia=bld.floors.indexOf(floorOf(pf)),ib=bld.floors.indexOf(floorOf(id));fx={g:floorG[id],from:floorG[pf],dir:ib>ia?1:-1,t:0,el:true};floorG[pf].visible=true;snd("ding");}else fx={g:floorG[id],t:0};}if(st.sel&&st.sel.floor!==id)st.sel=null;frameFloor(!changed);emit();}
  function setView(v){endFx();st.view=v==="building"?"building":"floor";show();if(st.view==="building")frameBuilding();else{if(!s.rm)fx={g:floorG[st.floor],t:0};frameFloor();}emit();}
  s.tick=function(dt,t){acc+=dt;if(acc>2.3){acc=0;bots.forEach(function(x){if(x.status==="working"){x.usage+=.04;st.usage=Math.min(99,st.usage+.004);}});}if(st.tour){tourT+=dt;if(tourT>8){tourT=0;var i=bld.floors.indexOf(floorOf(st.floor));setFloor(bld.floors[(i+1)%bld.floors.length].id);}}
-  if(fx){fx.t=s.rm?1:Math.min(1,fx.t+dt*1000/(fx.el?DUR.elevator:DUR.floor));var e;if(fx.el){e=fx.t<.5?4*fx.t*fx.t*fx.t:1-Math.pow(-2*fx.t+2,3)/2;fx.g.position.y=(1-e)*16*fx.dir;fx.from.position.y=-e*16*fx.dir;}else{e=1-Math.pow(1-fx.t,3);fx.g.position.y=(1-e)*-2.5;fx.g.scale.setScalar(.92+.08*e);}if(fx.t>=1)endFx();}
+  if(fx){fx.t=Math.min(1,fx.t+dt*1000/(fx.el?DUR.elevator:DUR.floor));var e;if(fx.el){e=fx.t<.5?4*fx.t*fx.t*fx.t:1-Math.pow(-2*fx.t+2,3)/2;fx.g.position.y=(1-e)*16*fx.dir;fx.from.position.y=-e*16*fx.dir;}else{e=1-Math.pow(1-fx.t,3);fx.g.position.y=(1-e)*-2.5;fx.g.scale.setScalar(.92+.08*e);}if(fx.t>=1)endFx();}
   if(st.view==="floor"){var E=elevOf(st.floor);if(E){E.hold=Math.max(0,E.hold-dt);E.want=E.hold>0||bots.some(function(b){return b.floor===st.floor&&b.path.length&&Math.hypot(b.pos.x-E.x,b.pos.z-E.z-1)<2.3;})?1:0;}
    var mt=floorG[st.floor].userData.meter;if(mt){meterV=meterV==null?st.usage:meterV+(st.usage-meterV)*Math.min(1,dt*2.5);mt.set(meterV);}}
   else bldAnim.forEach(function(f){f(dt,t);});
@@ -1538,7 +1541,7 @@ function mountOffice(el,o){o=o||{};if(o.root&&o.theme)o.root.setAttribute("data-
   approveMany:function(names){return Promise.all((names||[]).map(function(n){return cmdFor("approve",n);}));},
   declineMany:function(names){return Promise.all((names||[]).map(function(n){return cmdFor("decline",n);}));},
   setFrameInset:setFrameInset,
-  dispose:function(){if(adapter&&adapter.dispose)adapter.dispose();document.removeEventListener("visibilitychange",onVis);window.removeEventListener("pagehide",onHide);st.lastSeen=seenNow();hsave();rp=null;s.dispose();}};}
+  dispose:function(){if(adapter&&adapter.dispose)adapter.dispose();document.removeEventListener("visibilitychange",onVis);window.removeEventListener("pagehide",onHide);if(document.visibilityState!=="hidden")st.lastSeen=seenNow();hsave();rp=null;s.dispose();}};}
 
 /* ---------- kit scenes ---------- */
 function plinth(K,g,w,d,x,z){var p=mesh(box(w,.4,d),K.t("scene-slab"),x||0,-.2,z||0,g);p.castShadow=false;mesh(box(w-.2,.06,d-.2),K.t("scene-floor"),x||0,.03,z||0,g).castShadow=false;}
