@@ -23,6 +23,7 @@ function world(over = {}) {
     onChange: () => { w.changes += 1; },
     managerName: (b) => 'Manager ' + b,
     limits: over.limits,
+    defaultSpendLimit: over.defaultSpendLimit,
   });
   return w;
 }
@@ -225,4 +226,40 @@ test('every change calls onChange, and the snapshot is plain data', async () => 
   await w.m.submit('b1', 'g');
   assert.ok(w.changes >= 3);
   assert.doesNotThrow(() => JSON.stringify(w.m.snapshot()));
+});
+
+// ---------- default spend limit (#33) ----------
+
+test('a goal with paid agents gets the default $2 limit; the user can change or clear it', async () => {
+  const w = world();
+  await w.m.submit('b1', 'g');
+  await w.m.submit('b1', 'g', { spendLimit: 5 });
+  await w.m.submit('b1', 'g', { spendLimit: 0 });
+  assert.deepEqual(w.m.snapshot().map((g) => g.spendLimit), [2, 5, 0]);
+});
+
+test('a goal that only local agents can take has no limit, and the default can be set or cleared', async () => {
+  const w = world();
+  for (const a of w.agents) a.paid = false;
+  await w.m.submit('b1', 'g');
+  await w.m.submit('b1', 'g', { spendLimit: 9 });
+  assert.deepEqual(w.m.snapshot().map((g) => g.spendLimit), [0, 0], 'local agents cost $0, so no limit, even when one is asked for');
+  w.agents[0].paid = true; // one paid agent in the building: the goal can spend money
+  await w.m.submit('b1', 'g');
+  assert.equal(w.m.snapshot()[2].spendLimit, 2);
+  const w2 = world({ defaultSpendLimit: 7 });
+  await w2.m.submit('b1', 'g');
+  const w3 = world({ defaultSpendLimit: 0 });
+  await w3.m.submit('b1', 'g');
+  assert.deepEqual([w2.m.snapshot()[0].spendLimit, w3.m.snapshot()[0].spendLimit], [7, 0]);
+});
+
+test('the default limit stops a goal before the next dispatch', async () => {
+  const w = world();
+  const id = await w.m.submit('b1', 'g');
+  w.spend.a1 = 2.5;
+  await w.m.finish('a1', { ok: true });
+  free(w, 'a1');
+  assert.equal(w.m.get(id).status, 'stopped');
+  assert.equal(w.dispatched.length, 1);
 });

@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import * as git from './git.mjs';
 import { slimPayload } from './payload.mjs';
 import { createTracker, clip } from './tracker.mjs';
-import { createRegistry, providerEvents } from './providers/index.mjs';
+import { createRegistry, providerEvents, isPaid, spendLimitFor, DEFAULT_SPEND_LIMIT } from './providers/index.mjs';
 import { createLocal } from './providers/local.mjs';
 import { createClaudeCode, claudeVersion, MODEL_RE, MODES } from './providers/claude-code.mjs';
 import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, cleanRecent, recentChoices } from './place.mjs';
@@ -752,7 +752,8 @@ async function openSession(opts) {
       workdir = wt.path; worktree = { root: wt.root, branch: wt.branch, repo: wt.repo };
     }
     if (worktree) rememberDir(cwd);
-    const budget = Number(opts.maxBudget) > 0 ? Math.min(Number(opts.maxBudget), 1000) : null;
+    // A paid provider gets the default spend limit unless the caller sets one (0 clears it). A local provider has none (#33).
+    const budget = spendLimitFor({ paid: isPaid(provider), requested: opts.maxBudget, fallback: defaultSpend() });
     return openHeadless(provider, { cwd: workdir, name, prompt, worktree, budget, scheduleId: opts.scheduleId || null, model, permissionMode });
   }
   if (typeof provider.openWindow !== 'function') throw httpError(400, `${provider.label} does not open in a terminal window.`);
@@ -816,6 +817,16 @@ async function probeHttp() {
 // ---------- templates and schedules ----------
 persisted.templates = persisted.templates || [];
 persisted.schedules = persisted.schedules || [];
+// The default spend limit of new paid sessions, schedules and goals, in dollars (0 = none). The user changes it in the Attach
+// sessions dialog. Never saved means the built-in default.
+const defaultSpend = () => (Number.isFinite(persisted.spendLimit) && persisted.spendLimit >= 0 ? persisted.spendLimit : DEFAULT_SPEND_LIMIT);
+function saveSpendLimit(x) {
+  const n = x.limit === null || x.limit === '' ? 0 : Number(x.limit);
+  if (!Number.isFinite(n) || n < 0 || n > 1000) throw httpError(400, 'The spend limit is a number from 0 to 1000. 0 means no limit.');
+  persisted.spendLimit = n;
+  savePersisted();
+  return { spendLimit: n };
+}
 const newId = () => crypto.randomBytes(4).toString('hex');
 
 function saveTemplate(t) {
@@ -838,7 +849,8 @@ function saveSchedule(x) {
   const rec = {
     id: persisted.schedules.find((y) => y.id === x.id)?.id || newId(), name, prompt, cwd, kind, every, at,
     model: MODEL_RE.test(String(x.model || '')) ? x.model : '', permissionMode: MODES.has(x.permissionMode) ? x.permissionMode : '',
-    isolation: x.isolation === 'worktree' ? 'worktree' : 'same', maxBudget: Number(x.maxBudget) > 0 ? Number(x.maxBudget) : 0,
+    // A schedule runs Claude Code. A new one without a limit gets the default; 0 is "no limit" and stays 0.
+    isolation: x.isolation === 'worktree' ? 'worktree' : 'same', maxBudget: spendLimitFor({ paid: isPaid(claude), requested: x.maxBudget, fallback: defaultSpend() }) ?? 0,
     enabled: x.enabled !== false, lastRun: Date.now(),
   };
   const i = persisted.schedules.findIndex((y) => y.id === rec.id);
@@ -1034,7 +1046,7 @@ const server = http.createServer(async (req, res) => {
         settingsSnippet: JSON.stringify(hooksMode === 'http' ? httpSettings : commandSettings, null, 2),
         launchCommand: `claude --settings "${activeHooksFile()}" --mcp-config "${MCP_FILE}"`,
         startup: startup.state(STARTUP_DIR),
-        hooksMode, claudeVersion: CLAUDE_VERSION, templates: persisted.templates, schedules: persisted.schedules,
+        hooksMode, claudeVersion: CLAUDE_VERSION, templates: persisted.templates, schedules: persisted.schedules, spendLimit: defaultSpend(),
       });
     }
     if (req.method !== 'POST') return send(res, 404, { error: 'Not found' });
@@ -1104,6 +1116,7 @@ const server = http.createServer(async (req, res) => {
       if (!r.worktree) throw httpError(409, 'Pull requests need a worktree session, so the changes stay off your main branch.');
       return send(res, 200, await git.createPr(r.cwd, r.worktree.branch, r.name));
     }
+    if (url.pathname === '/api/settings/spend') return send(res, 200, saveSpendLimit(body));
     if (url.pathname === '/api/template/save') return send(res, 200, saveTemplate(body));
     if (url.pathname === '/api/template/delete') { persisted.templates = persisted.templates.filter((t) => t.id !== String(body.id)); savePersisted(); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/schedule/save') return send(res, 200, saveSchedule(body));

@@ -15,6 +15,16 @@
   var MODES = [{ value: '', label: 'Default' }, { value: 'plan', label: 'Plan only' }, { value: 'acceptEdits', label: 'Accept edits' }];
   var WHERE = [{ value: 'office', label: 'In the office (no terminal)' }, { value: 'terminal', label: 'In a terminal window' }];
   var ISOLATION = [{ value: 'same', label: 'Same folder' }, { value: 'worktree', label: 'New git worktree' }];
+  // The spend limit field (#33). The server owns the default (info.spendLimit, in dollars, 0 = none). The field starts with it.
+  // An empty field is "no limit" and is sent as 0, but only once the default is known: before that, send nothing so the server decides.
+  function limitText(def) { return def > 0 ? String(def) : ''; }
+  function limitSent(text, known) {
+    var t = String(text == null ? '' : text).trim();
+    if (t === '') return known ? 0 : undefined;
+    var n = Number(t);
+    return isFinite(n) ? n : t;
+  }
+  var LIMIT_HINT = 'Claude Code stops at this limit. Clear the field for no limit.';
   var KIND = [{ value: 'every', label: 'Every N minutes' }, { value: 'daily', label: 'Every day at' }];
 
   // ---------- helpers ----------
@@ -87,7 +97,7 @@
 
   // ---------- open a session ----------
   function OpenDialog(p) {
-    var f = useState({ cwd: p.shownPath || p.recent[0] || '', name: '', where: 'office', isolation: 'same', model: '', permissionMode: '', maxBudget: '', prompt: '', template: '' }), form = f[0], setForm = f[1];
+    var f = useState({ cwd: p.shownPath || p.recent[0] || '', name: '', where: 'office', isolation: 'same', model: '', permissionMode: '', maxBudget: limitText(p.spendLimit), prompt: '', template: '' }), form = f[0], setForm = f[1];
     var b = useState(false), busy = b[0], setBusy = b[1];
     var e = useState(''), err = e[0], setErr = e[1];
     var sv = useState(null), saving = sv[0], setSaving = sv[1];
@@ -98,7 +108,7 @@
     }
     function submit() {
       setBusy(true); setErr('');
-      api('/api/open', Object.assign({}, form, { maxBudget: Number(form.maxBudget) || 0 })).then(function () { setBusy(false); p.onClose(); }, function (x) { setBusy(false); setErr(x.message); });
+      api('/api/open', Object.assign({}, form, { maxBudget: limitSent(form.maxBudget, p.spendLimit !== undefined) })).then(function () { setBusy(false); p.onClose(); }, function (x) { setBusy(false); setErr(x.message); });
     }
     function saveTemplate() {
       api('/api/template/save', { name: saving, text: form.prompt }).then(function (t) { setSaving(null); p.onTemplates(); setForm(Object.assign({}, form, { template: t.id })); }, function (x) { setErr(x.message); });
@@ -128,7 +138,7 @@
         h(A.Select, { id: 'f-where', label: 'Runs', options: WHERE, value: form.where, onChange: set('where') })),
       Pair(
         h(A.Select, { id: 'f-isolation', label: 'Work in', options: ISOLATION, value: terminal ? 'same' : form.isolation, disabled: terminal, onChange: set('isolation'), hint: form.isolation === 'worktree' && !terminal ? 'A new branch in its own folder. Your main branch stays untouched.' : undefined }),
-        h(A.TextInput, { id: 'f-budget', label: 'Spend limit in USD (optional)', value: form.maxBudget, placeholder: 'No limit', disabled: terminal, onChange: set('maxBudget') })),
+        h(A.TextInput, { id: 'f-budget', label: 'Spend limit in USD', value: form.maxBudget, placeholder: 'No limit', disabled: terminal, onChange: set('maxBudget'), hint: terminal ? undefined : LIMIT_HINT })),
       Pair(
         h(A.Select, { id: 'f-model', label: 'Model', options: MODELS, value: form.model, onChange: set('model') }),
         h(A.Select, { id: 'f-mode', label: 'Permissions', options: MODES, value: form.permissionMode, onChange: set('permissionMode') })),
@@ -202,7 +212,7 @@
     useEffect(load, []);
     function set(k) { return function (v) { var n = Object.assign({}, edit); n[k] = v; setEdit(n); }; }
     function save() {
-      api('/api/schedule/save', Object.assign({}, edit, { every: Number(edit.every) || 60, maxBudget: Number(edit.maxBudget) || 0 })).then(function () { if (p.toast) p.toast({ tone: 'success', title: edit.id ? 'Schedule saved' : 'Schedule added', text: edit.name || cadence(edit) }); setEdit(null); setErr(''); load(); }, function (x) { setErr(x.message); });
+      api('/api/schedule/save', Object.assign({}, edit, { every: Number(edit.every) || 60, maxBudget: limitSent(edit.maxBudget, p.spendLimit !== undefined) })).then(function () { if (p.toast) p.toast({ tone: 'success', title: edit.id ? 'Schedule saved' : 'Schedule added', text: edit.name || cadence(edit) }); setEdit(null); setErr(''); load(); }, function (x) { setErr(x.message); });
     }
     var dl = useState(null), ask = dl[0], setAsk = dl[1];   // the schedule the user is about to delete
     function run(s) { api('/api/schedule/run', { id: s.id }).then(function () { setErr(''); if (p.toast) p.toast({ tone: 'success', title: s.name || 'Schedule', text: 'A session is starting now.' }); }, function (x) { setErr(x.message); }); }
@@ -231,7 +241,7 @@
           Pair(
             h(A.Select, { id: 's-model', label: 'Model', options: MODELS, value: edit.model, onChange: set('model') }),
             h(A.Select, { id: 's-iso', label: 'Work in', options: ISOLATION, value: edit.isolation, onChange: set('isolation') })),
-          h(A.TextInput, { id: 's-budget', label: 'Spend limit per run in USD (optional)', value: String(edit.maxBudget || ''), placeholder: 'No limit', onChange: set('maxBudget') }),
+          h(A.TextInput, { id: 's-budget', label: 'Spend limit per run in USD', value: String(edit.maxBudget || ''), placeholder: 'No limit', onChange: set('maxBudget'), hint: LIMIT_HINT }),
           h(Area, { id: 's-prompt', label: 'Instruction', value: edit.prompt, rows: 4, onChange: set('prompt') })));
     }
     return h(A.Dialog, { open: true, title: 'Schedules', onClose: p.onClose, actions: [
@@ -240,7 +250,7 @@
         err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
         h(Busy, { on: list === null }),
         list && !list.length ? h(A.EmptyState, { icon: 'schedule', title: 'No schedules yet', text: 'A schedule opens a session on its own and runs one instruction.' }) : null,
-        list ? h(A.AddButton, { label: 'Add a schedule', onClick: function () { setEdit(Object.assign({}, BLANK, { cwd: (p.recent || [])[0] || '' })); } }) : null,
+        list ? h(A.AddButton, { label: 'Add a schedule', onClick: function () { setEdit(Object.assign({}, BLANK, { cwd: (p.recent || [])[0] || '', maxBudget: limitText(p.spendLimit) })); } }) : null,
         h('ul', { className: 'past' }, (list || []).map(function (s) {
           return h('li', { key: s.id, className: 'past-row' },
             h('div', { className: 'past-main' },
@@ -348,11 +358,28 @@
         if (p.toast) p.toast({ tone: 'info', title: r.enabled ? 'Start with Windows is on' : 'Start with Windows is off', text: r.enabled ? 'The office starts when you sign in.' : 'The office no longer starts when you sign in.' });
       }, function (x) { setStartBusy(false); if (p.toast) p.toast({ tone: 'error', title: 'Not changed', text: x.message }); });
     }
+    // The default spend limit (#33): new Claude Code sessions, schedules and goals start with it. A local model has no limit.
+    var sl = useState(limitText(i.spendLimit)), limit = sl[0], setLimit = sl[1];
+    var sg = useState(false), limitBusy = sg[0], setLimitBusy = sg[1];
+    var le = useState(''), limitErr = le[0], setLimitErr = le[1];
+    function saveLimit() {
+      setLimitBusy(true); setLimitErr('');
+      api('/api/settings/spend', { limit: limitSent(limit, true) }).then(function (r) {
+        setLimitBusy(false);
+        if (p.onSaved) p.onSaved();
+        if (p.toast) p.toast({ tone: 'info', title: r.spendLimit > 0 ? 'Default spend limit saved' : 'Default spend limit cleared', text: r.spendLimit > 0 ? 'New Claude Code sessions stop at $' + r.spendLimit + '.' : 'New Claude Code sessions have no limit.' });
+      }, function (x) { setLimitBusy(false); setLimitErr(x.message); });
+    }
     return h(A.Dialog, { open: true, title: 'Attach sessions', onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
       h('div', { className: 'form' },
         startup && startup.available ? h('h3', { className: 'ext-h' }, 'Start with Windows') : null,
         startup && startup.available ? h('p', { className: 'note' }, startup.enabled ? 'The office starts when you sign in. It adds one file to your Startup folder. It needs no admin rights.' : 'Start the office when you sign in to Windows. It adds one file to your Startup folder. It needs no admin rights.') : null,
         startup && startup.available ? h(A.Button, { variant: 'quiet', disabled: startBusy, onClick: toggleStartup }, startup.enabled ? 'Turn off start with Windows' : 'Turn on start with Windows') : null,
+        h('h3', { className: 'ext-h' }, 'Default spend limit'),
+        h('p', { className: 'note' }, 'New Claude Code sessions, schedules and goals stop at this limit. Local models cost nothing and have no limit. You can change the limit for one session when you open it.'),
+        h('div', { className: 'copy-row' },
+          h(A.TextInput, { id: 'h-limit', label: 'Spend limit in USD', value: limit, placeholder: 'No limit', onChange: setLimit, error: limitErr || undefined, hint: 'Clear the field for no default limit.' }),
+          h(A.Button, { variant: 'quiet', disabled: limitBusy, onClick: saveLimit }, 'Save limit')),
         h('h3', { className: 'ext-h' }, 'Where sessions come from'),
         h(A.ChannelList, { channels: channels }),
         h('p', { className: 'note' }, 'Sessions opened here are wired up for you. To seat a session you start yourself, launch it with the office settings file.'),
@@ -1582,11 +1609,11 @@
       h('div', { className: 'view' + (fading ? ' is-fading' : '') }, scene),
       ambient ? null : h(Controls, { sel: cur2.view === 'office' ? sel : null, buildings: list, shown: shown, shownName: (list.filter(function (b) { return b.key === shown; })[0] || def || {}).name, toast: toast, needs: needs.length, onNeeds: function () { setDlg({ name: 'needs' }); }, onBuilding: function (k) { pick(k); if (view === 'city') go('office'); }, onCity: function () { go('city'); }, onOffice: function () { introNext.current = true; go('office'); }, view: cur2.view, onSessions: function () { setDlg({ name: 'sessions' }); }, onCompact: function () { setAmbient(true); },
         onFloors: function () { setDlg({ name: 'floors' }); }, onExtensions: extensions, onTerminal: openTerminal, onOpen: function () { show('open'); }, onPast: function () { show('past'); }, onSchedules: function () { show('schedules'); }, onHooks: function () { show('hooks'); }, onChanges: changes }),
-      d === 'open' ? h(OpenDialog, { shownPath: shownPath, recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
+      d === 'open' ? h(OpenDialog, { shownPath: shownPath, spendLimit: info.spendLimit, recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
       d === 'past' ? h(PastDialog, { onClose: close, onChanges: changes, toast: toast }) : null,
-      d === 'schedules' ? h(SchedulesDialog, { recent: info.recent, onInfo: setInfo, toast: toast, onClose: close }) : null,
+      d === 'schedules' ? h(SchedulesDialog, { recent: info.recent, spendLimit: info.spendLimit, onInfo: setInfo, toast: toast, onClose: close }) : null,
       d === 'changes' ? h(ChangesDialog, { uid: dlg.uid, name: dlg.label, ended: dlg.ended, toast: toast, onClose: close }) : null,
-      d === 'hooks' ? h(HooksDialog, { info: info, snap: snap, toast: toast, onClose: close }) : null,
+      d === 'hooks' ? h(HooksDialog, { info: info, snap: snap, onSaved: refresh, toast: toast, onClose: close }) : null,
       d === 'floors' ? h(FloorsDialog, { repo: shown, toast: toast, onClose: close }) : null,
       d === 'room' && mount ? h(RoomDialog, { mount: mount, roomId: dlg.roomId, toast: toast, onClose: close }) : null,
       d === 'ext' ? h(ExtensionsDialog, { uid: dlg.uid, name: dlg.label, toast: toast, onClose: close }) : null,

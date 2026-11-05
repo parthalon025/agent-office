@@ -137,6 +137,7 @@ export function createClaudeCode(deps) {
   return {
     kind: 'claude-code',
     label: 'Claude Code',
+    paid: true, // runs on the user's account: new sessions get the default spend limit
     canResume: true, // claude --resume continues a past conversation
 
     async readiness() {
