@@ -136,7 +136,7 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 | File | Purpose |
 | --- | --- |
 | `server.mjs` | The server: state, hooks, sessions, REST, SSE, schedules, history. |
-| `auth.mjs` | Access rules: the agent token and the page token, the launch code, the request checks, owner-only files. |
+| `auth.mjs` | Access rules: the agent token and the page token, the launch code, the request checks, files that only you, SYSTEM and Administrators can read. |
 | `git.mjs` | Worktrees, the changes view, remove worktree, pull request. |
 | `tracker.mjs` | The session rules: hook payloads and stream lines in, sessions out. No I/O of its own, so tests run offline. |
 | `place.mjs` | Where a session or worktree sits: building, floor, room id and notes key. The snapshot carries it. |
@@ -159,7 +159,7 @@ Generated at run time and ignored by git: `.office-token`, `office-hooks.json`, 
 - The server listens on 127.0.0.1 only and rejects other host names.
 - Two tokens keep agents and you apart. The **agent token** opens only the routes that hooks and the MCP server use (`/hook`, `/mcp/...`). It is kept in `.office-token` and in the HTTP hooks file, and reused across restarts, so running sessions keep working. The **page token** opens only the page's routes (`/events`, `/api/...`): answers, sessions, extensions, schedules. Neither token opens the other routes.
 - The page token is new at each start and is never in this folder, so an agent that reads files here cannot approve its own requests. The page itself holds no token: the launch link carries a one-time code, and the page trades it for a cookie that page scripts cannot read. Your own tools (`npm run probe`, `npm run smoke`, a second `npm start`) read the page token from `%LOCALAPPDATA%\AgentOffice\office-page-<port>.json`.
-- The files with a token, and the settings files whose commands sessions run, are readable by your Windows user only. If the office cannot set that, it prints a warning when it starts. The office folder itself keeps the permissions of its drive; on a shared computer, keep it in your user folder.
+- Only your Windows user, SYSTEM and the Administrators group can read the files with a token and the settings files whose commands sessions run. Other users, and groups such as Users, Authenticated Users and Everyone, cannot. SYSTEM and Administrators keep access because they can take ownership of any file anyway, and backup and antivirus need it. If the office cannot set that, it prints a warning when it starts. The office folder itself keeps the permissions of its drive; on a shared computer, keep it in your user folder.
 - Requests from another site or another port of this computer are refused, and every change must be sent as JSON. No page can show the office in a frame.
 - The office sends hook data to your own machine only. Hooks forward short fields: the tool name, a path or command, and the prompt. A permission prompt also carries the full input so the card can show the change.
 - "Always allow" writes the rule Claude suggests to that project's `.claude/settings.local.json`, and only when you click it.
@@ -179,7 +179,7 @@ The office knows three kinds of session. A session **in the office** runs `claud
 - **A call answers 401 Unauthorized.** The token did not match. For the page, open a new launch link (see above). For hooks: if you deleted `.office-token`, the office made a new agent token. Sessions that started before that keep the old token in their settings, so start them again.
 - **A call answers 403 Forbidden.** The server accepts only `127.0.0.1:<port>` and `localhost:<port>` as host name, and refuses requests that a page on another site or port sends. Open the office with its launch link.
 - **A call answers 415.** The office takes changes as JSON only (`content-type: application/json`).
-- **"Could not limit ... to your Windows user."** `icacls` failed, for example on a drive without permissions (FAT32, exFAT). The office still runs. Other users of this computer may read that file.
+- **"Could not limit ... to your Windows user."** `icacls` failed, for example on a drive without permissions (FAT32, exFAT), or other entries stayed on the file. The text in brackets gives the reason. The office still runs. Other users of this computer may read that file. Run `icacls <file>` to see who can.
 - **No Approve cards.** Your Claude Code default mode may be Auto, which rarely asks. Choose Default or Plan under Permissions when you open the session.
 - **The scene stays empty or black.** The scene is 3D and needs WebGL. Turn on hardware acceleration in the browser. The page also loads React from jsDelivr and fonts from Google, so check the network.
 - **Remove worktree is refused.** Close the session first: the button stays off until it ends. If the room has uncommitted changes, the dialog says so and offers Remove and discard changes. In the Floors dialog, git refuses uncommitted changes and commits that are not merged in the same way, and the dialog offers to go ahead anyway. The main folder cannot be removed.

@@ -182,10 +182,27 @@ test('pageFile is outside the office folder: LOCALAPPDATA, else the home folder'
   assert.equal(path.basename(auth.pageFile({}, '4317x', '/h')), 'office-page-0.json', 'a port is a number');
 });
 
-test('ownerOnlyArgs: no inherited entries, the user alone with full control', () => {
-  assert.deepEqual(auth.ownerOnlyArgs('C:\\x\\f.json', { USERNAME: 'ann', USERDOMAIN: 'PC1' }), ['C:\\x\\f.json', '/inheritance:r', '/grant:r', 'PC1\\ann:F']);
-  assert.deepEqual(auth.ownerOnlyArgs('f', { USERNAME: 'ann' }), ['f', '/inheritance:r', '/grant:r', 'ann:F']);
+// Well-known SIDs: the same in every Windows language.
+const SYSTEM = 'S-1-5-18', ADMINS = 'S-1-5-32-544', USERS = 'S-1-5-32-545', AUTH_USERS = 'S-1-5-11', EVERYONE = 'S-1-1-0', ANONYMOUS = 'S-1-5-7';
+
+test('ownerOnlyArgs: no inherited entries; full control for the user, SYSTEM and Administrators, by SID', () => {
+  assert.deepEqual(auth.KEEP_SIDS, [SYSTEM, ADMINS]);
+  assert.deepEqual(auth.ownerOnlyArgs('C:\\x\\f.json', { USERNAME: 'ann', USERDOMAIN: 'PC1' }), ['C:\\x\\f.json', '/inheritance:r', '/grant:r', 'PC1\\ann:F', '*S-1-5-18:F', '*S-1-5-32-544:F']);
+  assert.deepEqual(auth.ownerOnlyArgs('f', { USERNAME: 'ann' }), ['f', '/inheritance:r', '/grant:r', 'ann:F', '*S-1-5-18:F', '*S-1-5-32-544:F']);
   assert.throws(() => auth.ownerOnlyArgs('f', {}), /USERNAME/);
+});
+
+/** What `icacls <file>` prints: the path and the first entry, the other entries under it, a blank line, a summary. */
+const listing = (file, entries) => [`${file} ${entries[0]}`, ...entries.slice(1).map((e) => ' '.repeat(file.length + 1) + e), '', 'Successfully processed 1 files; Failed processing 0 files', ''].join('\r\n');
+
+test('aclEntries: one entry per line up to the blank line; the summary is not an entry', () => {
+  const f = 'C:\\T\\ao x\\new.txt'; // a space in the path
+  // Entries from a real list: a new file in a folder with nothing to inherit, made with a normal user's token.
+  const out = listing(f, ['DESKTOP-1\\ann:(F)', 'NT AUTHORITY\\SYSTEM:(F)', 'NT AUTHORITY\\LogonSessionId_0_2442608:(RX)']);
+  assert.deepEqual(auth.aclEntries(out), [`${f} DESKTOP-1\\ann:(F)`, 'NT AUTHORITY\\SYSTEM:(F)', 'NT AUTHORITY\\LogonSessionId_0_2442608:(RX)']);
+  assert.equal(auth.aclEntries(Buffer.from(listing(f, ['BUILTIN\\Administrators:(F)']))).length, 1, 'a Buffer, as execFileSync gives it');
+  assert.equal(auth.aclEntries('\r\n' + listing(f, ['a:(F)', 'b:(F)'])).length, 2, 'a leading blank line');
+  for (const nothing of ['', undefined, null, 4]) assert.ok(auth.aclEntries(nothing).length <= 1, String(nothing));
 });
 
 function fakeFs() {
@@ -199,12 +216,42 @@ function fakeFs() {
   };
 }
 
-test('writeOwnerOnly on Windows: make the file empty, limit it, then write the text; a failed limit warns', () => {
+/** A fake icacls: logs each call; `icacls <file>` answers with the next entry list of `lists` (the last one repeats). */
+function fakeIcacls(log, lists) {
+  let n = 0;
+  return (a) => {
+    log.push(['icacls', a.join(' ')]);
+    if (a.length === 1) return Buffer.from(listing(a[0], lists[Math.min(n++, lists.length - 1)]));
+    return Buffer.from('processed file: ' + a[0]);
+  };
+}
+
+test('writeOwnerOnly on Windows: limit, check the list, then write; an entry left over is removed on an emptied file', () => {
   const env = { USERNAME: 'ann', USERDOMAIN: 'PC1' };
+  const LIMIT = 'C:\\o\\.office-token /inheritance:r /grant:r PC1\\ann:F *S-1-5-18:F *S-1-5-32-544:F';
+  const three = ['PC1\\ann:(F)', 'NT AUTHORITY\\SYSTEM:(F)', 'BUILTIN\\Administrators:(F)'];
+  // The usual path (a new file with inherited entries only, or a file that is already limited): the text stays in
+  // place, the file is never emptied and never reset.
   const f1 = fakeFs();
-  const w1 = auth.writeOwnerOnly('C:\\o\\.office-token', 'SECRET', { fs: f1, icacls: (a) => f1.log.push(['icacls', a.join(' ')]), platform: 'win32', env });
+  const w1 = auth.writeOwnerOnly('C:\\o\\.office-token', 'SECRET', { fs: f1, icacls: fakeIcacls(f1.log, [three]), platform: 'win32', env });
   assert.equal(w1, null);
-  assert.deepEqual(f1.log, [['open', 'a'], ['close'], ['icacls', 'C:\\o\\.office-token /inheritance:r /grant:r PC1\\ann:F'], ['write', 'SECRET', undefined]]);
+  assert.deepEqual(f1.log, [['open', 'a'], ['close'], ['icacls', LIMIT], ['icacls', 'C:\\o\\.office-token'], ['write', 'SECRET', undefined]]);
+  // An explicit entry the limit does not touch (the token's default DACL: the logon session; or a grant set by hand):
+  // empty the file, /reset, limit again, check again, then write.
+  const f5 = fakeFs();
+  const w5 = auth.writeOwnerOnly('C:\\o\\.office-token', 'SECRET', { fs: f5, icacls: fakeIcacls(f5.log, [[...three, 'NT AUTHORITY\\LogonSessionId_0_1:(RX)'], three]), platform: 'win32', env });
+  assert.equal(w5, null);
+  assert.deepEqual(f5.log, [['open', 'a'], ['close'], ['icacls', LIMIT], ['icacls', 'C:\\o\\.office-token'],
+    ['open', 'w'], ['close'], ['icacls', 'C:\\o\\.office-token /reset'], ['icacls', LIMIT], ['icacls', 'C:\\o\\.office-token'], ['write', 'SECRET', undefined]]);
+  // Still other entries after /reset: a warning, and the file is written anyway (best effort).
+  const f6 = fakeFs();
+  const w6 = auth.writeOwnerOnly('C:\\o\\.office-token', 'SECRET', { fs: f6, icacls: fakeIcacls(f6.log, [[...three, 'BUILTIN\\Users:(R)']]), platform: 'win32', env });
+  assert.match(w6, /Could not limit C:\\o\\\.office-token to your Windows user \(other entries are still on it after icacls \/reset\)\. Other users/);
+  assert.deepEqual(f6.log.at(-1), ['write', 'SECRET', undefined]);
+  // An empty or odd list is not taken as limited.
+  const f7 = fakeFs();
+  assert.match(auth.writeOwnerOnly('C:\\o\\.office-token', 'S', { fs: f7, icacls: (a) => { f7.log.push(a); }, platform: 'win32', env }), /other entries are still on it/);
+  assert.ok(f7.log.some((a) => a.includes('/reset')));
   const f2 = fakeFs();
   const w2 = auth.writeOwnerOnly('C:\\o\\x.json', 'T', { fs: f2, icacls: () => { const e = new Error('Command failed'); e.stderr = 'x: No mapping between account names\r\nmore'; throw e; }, platform: 'win32', env });
   assert.match(w2, /Could not limit C:\\o\\x\.json to your Windows user \(x: No mapping between account names\)\. Other users/);
@@ -218,6 +265,107 @@ test('writeOwnerOnly on Windows: make the file empty, limit it, then write the t
   // eslint-disable-next-line no-undef
   assert.throws(() => auth.writeOwnerOnly('C:\\o\\z', 'SECRET', { fs: f4, icacls: () => execFileSyncThatIsGone(), platform: 'win32', env }), ReferenceError);
   assert.ok(!f4.log.some((l) => l[0] === 'write'), 'nothing is written after a bug');
+});
+
+// ---------- real ACLs (Windows) ----------
+
+/** The icacls runner of server.mjs (writeSecret): icacls from System32, its output returned. */
+const runIcacls = (args) => execFileSync(resolveExe('icacls'), args, { windowsHide: true, stdio: 'pipe', timeout: 15000 });
+
+/**
+ * The DACL of each file by SID, read with .NET in Windows PowerShell: no account names (they change with the
+ * language of Windows) and no module cmdlets. Returns { me, files: [{ protected, owner, aces: [{ sid, type, rights,
+ * inherited }] }] }, where me is the SID of the user who runs the tests.
+ */
+function aclOf(files) {
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    '$S = [System.Security.Principal.SecurityIdentifier]',
+    "'me|' + [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value",
+    '$i = 0',
+    'foreach ($f in $env:AO_ACL_FILES.Split([char]10)) {',
+    '  $a = [System.IO.File]::GetAccessControl($f)',
+    "  'file|' + $i + '|' + $a.AreAccessRulesProtected + '|' + $a.GetOwner($S).Value",
+    "  foreach ($r in $a.GetAccessRules($true, $true, $S)) { 'ace|' + $i + '|' + $r.IdentityReference.Value + '|' + $r.AccessControlType + '|' + $r.FileSystemRights + '|' + $r.IsInherited }",
+    '  $i++',
+    '}',
+  ].join('\n');
+  const out = execFileSync(resolveExe('powershell'), ['-NoProfile', '-NonInteractive', '-Command', script],
+    { encoding: 'utf8', windowsHide: true, timeout: 60000, env: { ...process.env, AO_ACL_FILES: files.join('\n') } });
+  const res = { me: null, files: files.map(() => ({ protected: null, owner: null, aces: [] })) };
+  for (const line of out.split(/\r?\n/)) {
+    const p = line.trim().split('|');
+    if (p[0] === 'me') res.me = p[1];
+    else if (p[0] === 'file') Object.assign(res.files[Number(p[1])], { protected: p[2] === 'True', owner: p[3] });
+    else if (p[0] === 'ace') res.files[Number(p[1])].aces.push({ sid: p[2], type: p[3], rights: p[4], inherited: p[5] === 'True' });
+  }
+  assert.match(String(res.me), /^S-1-5-/, out);
+  return res;
+}
+
+/**
+ * A limited file: exactly three entries, for the user, SYSTEM and Administrators, each an explicit allow with full
+ * control; inheritance off; the owner one of the three. Anything else fails: Users, Authenticated Users, Everyone,
+ * the logon session, any other account, a deny, an inherited entry.
+ */
+function assertLimited(acl, me, label) {
+  const show = `${label}: ${JSON.stringify(acl)}`;
+  assert.equal(acl.protected, true, `inheritance is on. ${show}`);
+  assert.ok([me, SYSTEM, ADMINS].includes(acl.owner), `owner. ${show}`);
+  assert.deepEqual(acl.aces.map((a) => a.sid).sort(), [me, SYSTEM, ADMINS].sort(), show);
+  for (const a of acl.aces) assert.deepEqual([a.type, a.rights, a.inherited], ['Allow', 'FullControl', false], show);
+}
+
+/** A folder whose entries new files inherit: the user and SYSTEM, plus Users, Authenticated Users and Everyone. */
+function wideFolder(dir, me) {
+  runIcacls([dir, '/inheritance:r', '/grant:r', `*${me}:(OI)(CI)F`, `*${SYSTEM}:(OI)(CI)F`, `*${USERS}:(OI)(CI)RX`, `*${AUTH_USERS}:(OI)(CI)R`, `*${EVERYONE}:(OI)(CI)R`]);
+}
+
+test('writeOwnerOnly with the real icacls: only the user, SYSTEM and Administrators are left, from any start', { skip: !win, timeout: 90000 }, () => {
+  // The folders are set up here, so the result does not depend on where the temp folder or the repo is.
+  const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-acl-')));
+  try {
+    const me = aclOf([base]).me;
+    // wide: new files inherit Users, Authenticated Users and Everyone (like the root of a data drive).
+    // bare: nothing to inherit, so a new file gets the token's default DACL as explicit entries, which
+    // /inheritance:r does not remove. A normal user: the user, SYSTEM, the logon session. An elevated administrator
+    // (GitHub's runner): SYSTEM and Administrators.
+    const wide = path.join(base, 'wide'), bare = path.join(base, 'bare');
+    fs.mkdirSync(wide);
+    fs.mkdirSync(bare);
+    wideFolder(wide, me);
+    runIcacls([bare, '/inheritance:r', '/grant:r', `*${me}:F`]);
+    // The setup is real: a plain new file in wide inherits Users; in bare it has explicit entries for others than the user.
+    fs.writeFileSync(path.join(wide, 'plain'), 'x');
+    fs.writeFileSync(path.join(bare, 'plain'), 'x');
+    const plain = aclOf([path.join(wide, 'plain'), path.join(bare, 'plain')]).files;
+    assert.ok(plain[0].aces.some((a) => a.sid === USERS && a.inherited), JSON.stringify(plain[0]));
+    assert.ok(plain[1].aces.every((a) => !a.inherited) && plain[1].aces.some((a) => a.sid !== me), JSON.stringify(plain[1]));
+
+    const files = { wideNew: path.join(wide, 'new.json'), bareNew: path.join(bare, 'new.json'), wideOld: path.join(wide, 'old.json'), bareOld: path.join(bare, 'old.json') };
+    // Old files: an old secret and explicit entries set by hand: SYSTEM and Administrators as GitHub's runner
+    // shows them, Users, Authenticated Users, Everyone, and a deny.
+    for (const f of [files.wideOld, files.bareOld]) {
+      fs.writeFileSync(f, 'OLD');
+      runIcacls([f, '/grant', `*${SYSTEM}:F`, `*${ADMINS}:F`, `*${USERS}:R`, `*${AUTH_USERS}:R`, `*${EVERYONE}:R`]);
+      runIcacls([f, '/deny', `*${ANONYMOUS}:R`]);
+    }
+    for (const [k, f] of Object.entries(files)) assert.equal(auth.writeOwnerOnly(f, 'SECRET-' + k, { fs, icacls: runIcacls }), null, k);
+    const acl = aclOf(Object.values(files));
+    Object.entries(files).forEach(([k, f], i) => {
+      assertLimited(acl.files[i], me, k);
+      assert.equal(fs.readFileSync(f, 'utf8'), 'SECRET-' + k);
+    });
+    // A later plain write keeps the ACL, and so does a second writeOwnerOnly.
+    fs.writeFileSync(files.wideNew, 'MORE');
+    assert.equal(auth.writeOwnerOnly(files.bareNew, 'AGAIN', { fs, icacls: runIcacls }), null);
+    const again = aclOf([files.wideNew, files.bareNew]);
+    assertLimited(again.files[0], me, 'wideNew after a plain write');
+    assertLimited(again.files[1], me, 'bareNew written twice');
+    assert.equal(fs.readFileSync(files.bareNew, 'utf8'), 'AGAIN');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  }
 });
 
 // ---------- sources ----------
@@ -282,6 +430,7 @@ function startOffice(dir, env) {
 
 test('route matrix, launch code and owner-only files on a real server', { timeout: 90000 }, async () => {
   const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-auth-')));
+  if (win) wideFolder(tmp, aclOf([tmp]).me); // the same start on every machine, wherever the temp folder is
   const dir = path.join(tmp, 'office'), lad = path.join(tmp, 'local');
   fs.mkdirSync(dir);
   fs.mkdirSync(lad);
@@ -412,14 +561,12 @@ test('route matrix, launch code and owner-only files on a real server', { timeou
     assert.equal(JSON.parse(fs.readFileSync(pagePath, 'utf8')).token, page.token);
     assert.equal((await hit(port, 'POST', '/launch', { headers: { 'content-type': 'application/json' }, body: { code: code3 } })).status, 200);
 
-    // Owner-only: no inherited entries, and only the current user listed.
+    // Limited files: only the user, SYSTEM and Administrators, compared by SID, nothing inherited, although the
+    // folders hand Users, Authenticated Users and Everyone down (wideFolder above).
     if (win) {
-      const icacls = resolveExe('icacls');
-      for (const f of [path.join(dir, '.office-token'), path.join(dir, 'office-hooks-http.json'), path.join(dir, 'office-hooks.json'), path.join(dir, 'office-mcp.json'), pagePath]) {
-        const out = execFileSync(icacls, [f], { encoding: 'utf8', windowsHide: true });
-        const aces = out.split(/\r?\n/).map((l) => l.replace(f, '').trim()).filter((l) => l && !/^Successfully processed/.test(l));
-        assert.deepEqual(aces.map((a) => a.toLowerCase()), [`${process.env.USERDOMAIN ? process.env.USERDOMAIN + '\\' : ''}${process.env.USERNAME}:(f)`.toLowerCase()], `${path.basename(f)}: ${out}`);
-      }
+      const files = [path.join(dir, '.office-token'), path.join(dir, 'office-hooks-http.json'), path.join(dir, 'office-hooks.json'), path.join(dir, 'office-mcp.json'), pagePath];
+      const acl = aclOf(files);
+      files.forEach((f, i) => assertLimited(acl.files[i], acl.me, path.basename(f)));
     }
   } finally {
     office.child.kill();

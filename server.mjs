@@ -43,7 +43,8 @@ const AGENT_TOKEN = (() => {
 const PAGE_TOKEN = auth.newPageToken();
 const PAGE_FILE = auth.pageFile(process.env, PORT);
 const launchCodes = auth.createLaunchCodes();
-// Files with a token, and settings files whose commands sessions run, are readable by the user alone.
+// Files with a token, and settings files whose commands sessions run: only the user, SYSTEM and Administrators can
+// read them (auth.writeOwnerOnly; the icacls runner must return its output).
 function writeSecret(file, text) {
   const warning = auth.writeOwnerOnly(file, text, {
     fs, icacls: (args) => execFileSync(git.resolveExe('icacls'), args, { windowsHide: true, stdio: 'pipe', timeout: 15000 }),

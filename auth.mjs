@@ -2,8 +2,9 @@
 // - The agent token opens only the agent routes (/hook, /hook/*, /mcp/*). Sessions send it in x-office-token.
 //   It is kept in .office-token in the office folder (hook.mjs and mcp.mjs read it) and reused across restarts.
 // - The page token opens only the page routes (/events, /api/*). It is new at each server start, kept in server
-//   memory, and written to one owner-only file outside the office folder (pageFile) for the user's own command-line
-//   tools (probe.mjs, test/smoke.mjs, a second npm start). The browser gets it as an HttpOnly cookie, never as text.
+//   memory, and written to one file outside the office folder (pageFile) for the user's own command-line tools
+//   (probe.mjs, test/smoke.mjs, a second npm start). Only the user, SYSTEM and Administrators can read that file
+//   (writeOwnerOnly). The browser gets it as an HttpOnly cookie, never as text.
 // - A launch code is the one-time key in the link the server opens (#n=<code>). The page trades it for the cookie
 //   with POST /launch. A code works once, for LAUNCH_TTL_MS.
 // Neither token opens the other group. Tokens never come from the URL. Every compare is constant-time.
@@ -129,28 +130,71 @@ export function pageFile(env = process.env, port = 4317, home = os.homedir()) {
   return path.join(base, `office-page-${Number(port) | 0}.json`);
 }
 
-/** icacls arguments that remove inherited entries and leave the current user alone with full control. */
+/**
+ * The principals a limited file keeps next to the current user, as well-known SIDs (the same in every Windows
+ * language): SYSTEM and the Administrators group. They can take ownership of any file and read it anyway, so to
+ * deny them protects nothing, and it breaks backup and antivirus. Everyone else goes: Users, Authenticated Users,
+ * Everyone, other accounts, the logon session.
+ */
+export const KEEP_SIDS = ['S-1-5-18', 'S-1-5-32-544'];
+
+/**
+ * icacls arguments that remove inherited entries and give full control to the current user, SYSTEM and
+ * Administrators. /grant:r replaces only the grants of those three: other explicit entries stay (writeOwnerOnly
+ * checks for them).
+ */
 export function ownerOnlyArgs(file, env = process.env) {
   const user = String(env.USERNAME || '').trim();
   if (!user) throw new Error('USERNAME is not set.');
   const domain = String(env.USERDOMAIN || '').trim();
-  return [file, '/inheritance:r', '/grant:r', `${domain ? domain + '\\' : ''}${user}:F`];
+  return [file, '/inheritance:r', '/grant:r', `${domain ? domain + '\\' : ''}${user}:F`, ...KEEP_SIDS.map((s) => `*${s}:F`)];
 }
 
 /**
- * Writes a file that only the current user can read, and returns null, or a warning text when the limit could not
- * be set (the file is written anyway; best effort). On Windows the file is made empty first, then icacls limits
- * it, then the text goes in, so the text is never in a file other users can read. A later plain write keeps the
- * limit. Elsewhere: mode 0600. deps: { fs, icacls(args), platform, env }.
- * Only a failed or missing icacls (or no USERNAME) is best effort. A bug in the caller (a TypeError or ReferenceError,
- * for example an import that is gone) is thrown, never turned into a warning.
+ * The entries in icacls' list for one file (`icacls <file>`): one per line up to the first blank line, trimmed.
+ * The first line also holds the path. The summary line after the blank line (in the language of Windows) is not
+ * an entry.
+ */
+export function aclEntries(out) {
+  const lines = String(out ?? '').split(/\r?\n/);
+  let i = 0;
+  while (i < lines.length && !lines[i].trim()) i++;
+  const entries = [];
+  for (; i < lines.length && lines[i].trim(); i++) entries.push(lines[i].trim());
+  return entries;
+}
+
+/**
+ * Writes a file that only the current user, SYSTEM and Administrators can read, and returns null, or a warning text
+ * when the limit could not be set (the file is written anyway; best effort). Elsewhere: mode 0600.
+ * deps: { fs, icacls(args) -> its output, platform, env }. On Windows, before the text goes in:
+ * 1. Make the file if it is missing. A new file has the folder's inherited entries, or, in a folder with nothing to
+ *    inherit, explicit entries from the process token's default DACL (a normal user: the user, SYSTEM and the logon
+ *    session; an elevated administrator: SYSTEM and Administrators).
+ * 2. icacls /inheritance:r /grant:r for the three. It removes inherited entries only, so 3. lists the file: more or
+ *    fewer than three entries means an explicit entry is left (default DACL, an older office, set by hand).
+ * 4. Only then: empty the file, icacls /reset (drops every explicit entry), and the limit of 2. again. Between /reset
+ *    and the limit the file has the folder's inherited entries for a moment, so it must be empty. A file that was
+ *    already limited never takes this path, so it never opens up and its text stays in place.
+ * A later plain write keeps the ACL. Only a failed or missing icacls (or no USERNAME) is best effort. A bug in the
+ * caller (a TypeError or ReferenceError, for example an import that is gone) is thrown, never turned into a warning.
  */
 export function writeOwnerOnly(file, text, { fs, icacls, platform = process.platform, env = process.env }) {
   let warning = null;
   if (platform === 'win32') {
     fs.closeSync(fs.openSync(file, 'a')); // make it if missing; keep what is there until the limit is set
-    try { icacls(ownerOnlyArgs(file, env)); }
-    catch (e) {
+    try {
+      const limit = ownerOnlyArgs(file, env);
+      const kept = 1 + KEEP_SIDS.length;
+      const others = () => aclEntries(icacls([file])).length !== kept;
+      icacls(limit);
+      if (others()) {
+        fs.closeSync(fs.openSync(file, 'w'));
+        icacls([file, '/reset']);
+        icacls(limit);
+        if (others()) throw new Error('other entries are still on it after icacls /reset');
+      }
+    } catch (e) {
       if (e instanceof TypeError || e instanceof ReferenceError || e instanceof SyntaxError) throw e;
       warning = `Could not limit ${file} to your Windows user (${String(e.stderr || e.message).trim().split(/\r?\n/)[0]}). Other users of this computer may read it.`;
     }
