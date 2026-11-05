@@ -59,3 +59,43 @@ test('staleFloors lists merged clean floors only', async () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('roomNameOf refuses Windows reserved names and never ends in a dot or dash after the cut', () => {
+  for (const n of ['con', 'NUL', 'aux', 'COM1', 'lpt9', 'con.txt']) assert.throws(() => git.roomNameOf(n), /reserves/i, n);
+  assert.equal(git.roomNameOf('console'), 'console');
+  const cut = git.roomNameOf('a'.repeat(39) + '.b');
+  assert.ok(!/[.-]$/.test(cut), cut);
+  assert.ok(cut.length <= 40);
+});
+
+test('staleFloors never offers the default branch, even when the main folder is on another branch', async () => {
+  const dir = repo();
+  const tag = 'aotest' + crypto.randomBytes(3).toString('hex');
+  try {
+    plain(dir, 'checkout', '-b', 'feat/work');
+    await git.createRoom(dir, 'main', tag);                    // main is open in a room, merged and clean
+    assert.deepEqual(await git.staleFloors(dir), []);
+  } finally {
+    plain(dir, 'worktree', 'prune');
+    await git.deleteFloor(dir, 'main', true).catch(() => {});
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('staleFloors: a floor with two rooms is not stale when one room is dirty; a detached main folder lists nothing', async () => {
+  const dir = repo();
+  const tag = 'aotest' + crypto.randomBytes(3).toString('hex');
+  try {
+    await git.createFloor(dir, 'two', '', tag + 'a');
+    const second = await git.createRoom(dir, 'two', tag + 'b');
+    assert.deepEqual(await git.staleFloors(dir), [{ branch: 'two', rooms: 2 }]);
+    fs.writeFileSync(path.join(second.root, 'x.txt'), 'x');
+    assert.deepEqual(await git.staleFloors(dir), []);
+    fs.rmSync(path.join(second.root, 'x.txt'));
+    plain(dir, 'checkout', '--detach');
+    assert.deepEqual(await git.staleFloors(dir), []);
+  } finally {
+    await git.deleteFloor(dir, 'two', true).catch(() => {});
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

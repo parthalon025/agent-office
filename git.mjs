@@ -238,7 +238,9 @@ const slugOf = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replac
 export function roomNameOf(name) {
   const n = String(name || '').trim().replace(/[^A-Za-z0-9._]+/g, '-').replace(/^[-.]+|[-.]+$/g, '');
   if (String(name || '').trim() && !n) throw new Error('Use letters or digits in the room name.');
-  return n.slice(0, 40);
+  const cut = n.slice(0, 40).replace(/[-.]+$/, ''); // Windows drops a trailing dot from a folder name
+  if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(cut)) throw new Error('Windows reserves that name. Pick another room name.');
+  return cut;
 }
 function roomFolder(repo, branch, name = '') {
   fs.mkdirSync(WORKTREE_ROOT, { recursive: true });
@@ -291,6 +293,14 @@ export async function deleteFloor(repo, branch, force = false) {
   return { deleted: true };
 }
 
+/** The default branch: origin/HEAD when there is one, else main or master when it exists. */
+export async function defaultBranch(repo) {
+  const head = (await git(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], repo, 15000).catch(() => '')).trim().replace(/^origin\//, '');
+  if (head) return head;
+  for (const b of ['main', 'master']) if (await git(['rev-parse', '--verify', '--quiet', `refs/heads/${b}`], repo, 15000).then(() => true, () => false)) return b;
+  return '';
+}
+
 /** Floors nobody needs: not the main folder's branch, merged into it, and every room clean. Deleting
  *  them loses nothing. Returns [{ branch, rooms }] (rooms = how many worktrees the floor has). */
 export async function staleFloors(repo) {
@@ -298,9 +308,10 @@ export async function staleFloors(repo) {
   const main = wts.find((w) => w.main);
   if (!main || main.branch === 'detached') return [];
   const merged = new Set((await git(['branch', '--merged', main.branch, '--format=%(refname:short)'], repo, 15000)).split(/\r?\n/).filter(Boolean));
+  const keep = await defaultBranch(repo);
   const out = [];
   for (const b of new Set(wts.map((w) => w.branch))) {
-    if (b === main.branch || b === 'detached' || !merged.has(b)) continue;
+    if (b === main.branch || b === keep || b === 'detached' || !merged.has(b)) continue;
     const rooms = wts.filter((w) => w.branch === b);
     if (rooms.some((w) => w.main)) continue;
     let clean = true;

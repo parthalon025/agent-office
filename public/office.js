@@ -414,15 +414,16 @@
     var nr = useState(null), newRoom = nr[0], setNewRoom = nr[1];    // naming a room: { branch, name }
     var cl = useState(null), clean = cl[0], setClean = cl[1];         // clean up: null, or { floors: [{ branch, rooms }] }
     var DONE = {
-      '/api/floor/cleanup': ['info', 'Floors cleaned up', function (b) { return 'The unused floors and their rooms are gone.'; }], '/api/floor/create': ['success', 'Floor added', function (b) { return 'Branch ' + b.branch + ' with its first room.'; }],
+      '/api/floor/cleanup': function (b, j) { return F.cleanupNote(j); }, '/api/floor/create': ['success', 'Floor added', function (b) { return 'Branch ' + b.branch + ' with its first room.'; }],
       '/api/floor/delete': ['info', 'Floor deleted', function (b) { return 'Branch ' + b.branch + ' and its rooms are gone.'; }],
       '/api/room/create': ['success', 'Room added', function (b) { return 'A new worktree on ' + b.branch + '.'; }],
       '/api/room/delete': ['info', 'Room removed', function (b) { return 'The folder ' + String(b.root).split(/[\\/]/).pop() + ' is gone. Its branch stays.'; }] };
     function run(key, path, body, after) {
       setBusy(key); setErr('');
-      api(path, Object.assign({ repo: p.repo }, body)).then(function () {
+      api(path, Object.assign({ repo: p.repo }, body)).then(function (j) {
         setBusy(''); if (after) after();
-        var t = DONE[path]; if (t && p.toast) p.toast({ tone: t[0], title: t[1], text: t[2](body) });
+        var t = DONE[path]; if (typeof t === 'function') t = t(body, j) ; else if (t) t = [t[0], t[1], t[2](body)];
+        if (t && p.toast) p.toast({ tone: t[0], title: t[1], text: t[2] });
       }, function (x) { setBusy(''); setErr(x.message); });
     }
     if (!repo) {
