@@ -12,7 +12,7 @@ This repo copy is the DS source. Reference.md is kept by hand in step with `kit/
 | `request` | `bot`, `id?`, `text`, `actions?`, `quiet?`, `risk?`, `cost?`, `preview?`, `tool?` | A bot needs a decision. Shows in Waiting on me, the chat and a toast. Optional risk ("low", "medium" or "high"), cost, preview and tool help the user decide. |
 | `error` | `bot`, `text` | A bot stopped on an error. |
 | `usage` | `percent?`, `bots?`, `cost?`, `costLimit?`, `costs?` | Usage of the plan or limit, in percent. Spend is optional, in dollars: cost is the total for the goal or plan, costLimit is its limit, costs is the spend of each bot by name. The usage meter shows it. |
-| `session.start` | `bot`, `session`, `title?`, `isolated?` | A session (one run or conversation) starts. With sessions: "agent" it shows as a count badge and a row in the Sessions tab; with sessions: "session" or isolated: true it gets its own grey blob from the elevator. |
+| `session.start` | `bot`, `session`, `title?`, `isolated?` | A session (one run or conversation) starts. With sessions: "agent" it shows as a count badge and a row in the Sessions tab; with sessions: "session" or isolated: true it gets its own grey blob from the elevator. The blob is a temporary bot, so it walks at the helper speed (`scene-walk-speed-ephemeral`). |
 | `session.end` | `bot`, `session`, `result?`, `ok?` | A session ends. Its blob, if any, first walks to its desk and sits for a short time (1.4 s), then walks back to the elevator. |
 | `plan` | `bot`, `goal`, `steps` | An orchestrator makes a plan. steps: [{id, text, status?, owner?}]. A new plan replaces the plan of that bot. To restore a plan that is in progress, send `plan` again with the current status of each step (see Scene mount). |
 | `plan.step` | `bot`, `id`, `status`, `owner?` | A plan step changes state. |
@@ -85,7 +85,7 @@ The `bot` of `bot.add`. `kit/check.py --events` and `AgentOffice.validate` check
 | `tasks` | no | `string[]` | Task lines for the mock adapter. |
 | `sessions` | no | `"agent" \| "session"` | How sessions of this bot show: a badge or their own blob. |
 | `orchestrator` | no | `boolean` | True for a Manager. |
-| `ephemeral` | no | `boolean` | True for a temporary bot, such as a subagent. It leaves by the elevator. |
+| `ephemeral` | no | `boolean` | True for a temporary bot, such as a subagent. It leaves by the elevator and walks at `scene-walk-speed-ephemeral`. A session blob is ephemeral too. |
 | `platform` | no | `string` | Platform name for the agent card, for example `Claude Code`. |
 | `identity` | no | `string` | Identity for the agent card, for example a folder. |
 | `owner` | no | `string` | Owner for the agent card. |
@@ -382,6 +382,8 @@ Layout breakpoints for the office HUD (container width).
 | `scene-bot-h` | `1.1` | Bot height. Desk top 0.95, seat 0.6. |
 | `scene-nav-pad` | `0.45` | Clearance between a walking bot and any object. The nav grid grows every obstacle by this value. |
 | `scene-nav-cell` | `0.25` | Cell size of the nav grid that bots path on. |
+| `scene-walk-speed` | `2.6` | Walk speed of a bot, in scene units a second. A walk of 15 to 80 units takes about 6 to 31 s. |
+| `scene-walk-speed-ephemeral` | `5.2` | Walk speed of a temporary helper (an ephemeral bot), in and out. About twice the bot speed. A walk of 15 to 80 units (a short to a four-room floor) takes about 3 to 15 s, in place of 6 to 31 s. |
 
 ### light
 

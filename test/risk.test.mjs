@@ -165,6 +165,27 @@ test('the office files of every port: token files are secrets, hook and MCP sett
   for (const name of ['office-hooks-x.json', 'office-mcp-.json', '.office-token-x', 'my-office-mcp-4392.json']) assert.equal(isProtectedPart(name), false, name);
 });
 
+// state*.json keeps schedules (a prompt, a folder and a permission mode) that run after a restart, and history*.json the
+// saved sessions: an agent edit of either is high on every port (#109). A read stays as for any file in the root.
+test('the office state and history files of every port: an edit is high, a look-alike is an ordinary file', () => {
+  for (const port of [4317, 4330, 4392, 5000]) {
+    const f = officeFiles(cwd, port);
+    for (const later of [f.state, f.history]) {
+      const name = path.basename(later);
+      for (const tool of ['Edit', 'Write', 'MultiEdit']) assert.equal(riskOf(tool, { file_path: later }, cwd), 'high', tool + ' ' + name);
+      assert.equal(riskOf('NotebookEdit', { notebook_path: later }, cwd), 'high', 'NotebookEdit ' + name);
+      assert.equal(riskOf('Edit', { file_path: name }, cwd), 'high', 'relative ' + name);
+      assert.equal(riskOf('Edit', { file_path: path.join(outDir, name) }, cwd), 'high', 'outside the root ' + name);
+      assert.equal(riskOf('Edit', { file_path: name.toUpperCase() }, cwd), 'high', 'upper case ' + name);
+      assert.equal(riskOf('Read', { file_path: later }, cwd), 'low', 'a read of ' + name);
+      assert.equal(isProtectedPart(name), false, 'a search still reads ' + name);
+    }
+  }
+  for (const name of ['state-x.json', 'state-.json', 'mystate.json', 'state.json.bak', 'history-4392.js', 'old-history.json', 'statement.json']) {
+    assert.equal(riskOf('Edit', { file_path: name }, cwd), 'low', name);
+  }
+});
+
 test('Windows path forms that point inside stay outside (the safe direction)', { skip: !WIN && 'Windows only' }, () => {
   for (const f of ['\\\\?\\C:\\work\\repo\\src\\a.js', '\\\\localhost\\C$\\work\\repo\\src\\a.js', 'C:\\work\\repo.\\src\\a.js', '\\\\.\\C:\\work\\repo\\src\\a.js']) {
     assert.equal(inside(cwd, f), false, f);
@@ -364,7 +385,9 @@ test('the office\'s own state.json and history.json are settings: the Security r
     assert.equal(actionOf('Write', { file_path: path.join(office, f) }, office), 'settings', f);
     assert.equal(riskOf('Write', { file_path: path.join(office, f) }, office), 'high', f);
   }
-  assert.equal(actionOf('Write', { file_path: at('state.json') }, cwd), 'edit-inside', 'a state.json of another project is a plain file');
+  // By name, an edit of a state.json anywhere is high (#109: it is a common name, but an edit there is rare and a miss is costly); a read stays plain.
+  assert.equal(riskOf('Write', { file_path: at('state.json') }, cwd), 'high', 'a state.json of another project: an edit is high (#109)');
+  assert.equal(riskOf('Read', { file_path: at('state.json') }, cwd), 'low', 'and a read of it is plain');
 });
 
 // Review M3: the agents' own config homes (~/.claude, ~/.hermes, or where CLAUDE_CONFIG_DIR and HERMES_HOME move them) hold

@@ -28,7 +28,8 @@ const rule = (sel) => {
 };
 
 test('office.css: the palette overlay is above the dialog layer (#48)', () => {
-  assert.match(rule('.ao-cmdk-o'), /z-index:\s*calc\(var\(--z-dialog\)\s*\+\s*1\)/);
+  // + 2 since #79: the toast stack is the dialog layer + 1, and the palette stands above it too (test/toasts.test.mjs)
+  assert.match(rule('.ao-cmdk-o'), /z-index:\s*calc\(var\(--z-dialog\)\s*\+\s*[1-9]\d*\)/);
 });
 
 // #55 (after #53): office.js owns the scene height. It renders the scene again when the window changes; no page CSS

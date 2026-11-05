@@ -12,8 +12,8 @@ import { cleanRules, setRule, decide } from '../security.mjs';
 import { startFakeOpenAI } from './fixtures/fake-openai.mjs';
 
 const SLEEP = 'node -e "setTimeout(()=>{},60000)"';
-
-async function until(fn, what, ms = 4000) {
+// A limit that only fails a stuck test: a loaded machine needs more than 4 s, and a fast run returns at once (#98).
+async function until(fn, what, ms = 30000) {
   const t0 = Date.now();
   while (!fn()) {
     if (Date.now() - t0 > ms) assert.fail('timed out waiting for ' + what);
@@ -281,7 +281,7 @@ test('a model that never stops asking for tools is cut at the round cap', async 
     const s = o.session();
     o.provider.open(s, { model: 'm' });
     o.say(s, 'go');
-    await until(() => s.error, 'the cap', 8000);
+    await until(() => s.error, 'the cap');
     assert.match(s.error.text, new RegExp(`all ${MAX_ROUNDS} steps`));
     assert.equal(o.fake.requests.length, MAX_ROUNDS);
   } finally { await o.done(); }

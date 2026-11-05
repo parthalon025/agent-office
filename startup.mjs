@@ -3,8 +3,12 @@
 // and removing the entry is deleting one file we own. A Run registry key would need reg.exe and hide the entry.
 // The path functions are pure; enable/disable/state take the folder as a parameter so tests never touch the real one.
 // The entry never stops a process, by image name or any other way.
+// The entry is one file for the whole user, so one office owns it (#108): the one on the default port, in the main
+// folder. An office on another port, or in a git worktree, shows the entry read-only with a reason, and enable and
+// disable refuse (status 403). Otherwise a second office could turn the owner's entry off, or point sign-in at a worktree.
 import fs from 'node:fs';
 import path from 'node:path';
+import { DEFAULT_PORT } from './files.mjs';
 
 export const ENTRY_NAME = 'Agent Office.cmd';
 
@@ -33,13 +37,60 @@ export function state(dir) {
   const p = entryPath(dir);
   return { available: true, enabled: fs.existsSync(p), path: p };
 }
-export function enable(dir, root, node) {
+
+// A linked git worktree has a .git file that points to <repo>/.git/worktrees/<name>, and that folder holds a commondir file.
+// A main checkout has a .git folder. A download has no .git. A .git file is not enough: a clone made with
+// --separate-git-dir and a submodule also have one, and each is a main folder. A relative gitdir (newer git) is read
+// against the folder.
+function inWorktree(root) {
+  if (!root) return false;
+  try {
+    const dot = path.join(root, '.git');
+    if (!fs.statSync(dot).isFile()) return false;
+    const m = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(dot, 'utf8'));
+    if (!m) return false;
+    const gitdir = path.resolve(root, m[1]);
+    return fs.existsSync(path.join(gitdir, 'commondir')) || path.basename(path.dirname(gitdir)) === 'worktrees';
+  } catch { return false; }
+}
+
+/**
+ * { canChange, reason }: whether the office in folder root on port may add or remove the entry. reason says why not,
+ * and is '' when it may. No port means the default port.
+ */
+export function access(root, port = DEFAULT_PORT) {
+  if (Number(port) !== DEFAULT_PORT) return { canChange: false, reason: `Only the office on port ${DEFAULT_PORT} can change this. This office runs on port ${Number(port)}.` };
+  if (inWorktree(root)) return { canChange: false, reason: 'Only the office in the main folder can change this. This office runs in a worktree.' };
+  return { canChange: true, reason: '' };
+}
+function guard(root, port) {
+  const a = access(root, port);
+  if (!a.canChange) throw Object.assign(new Error(a.reason), { status: 403 });
+}
+
+/** state(dir) with access(root, port): what the Attach dialog shows. */
+export function status(dir, root, port = DEFAULT_PORT) { return { ...state(dir), ...access(root, port) }; }
+
+/** Adds the entry. Throws (status 403) when the office in folder root on port does not own it. */
+export function enable(dir, root, node, port = DEFAULT_PORT) {
+  guard(root, port);
   if (!dir) throw new Error('This computer has no Startup folder.');
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(entryPath(dir), entryContent(root, node));
   return state(dir);
 }
-export function disable(dir) {
+/** Removes the entry. Throws (status 403) when the office in folder root on port does not own it. */
+export function disable(dir, root = '', port = DEFAULT_PORT) {
+  guard(root, port);
   if (dir) fs.rmSync(entryPath(dir), { force: true });
   return state(dir);
+}
+
+/**
+ * One turn-on or turn-off from the page: enable (enabled === true) or disable, then the reply the page shows:
+ * the entry state with access. Throws (status 403) when this office does not own the entry.
+ */
+export function change(dir, root, node, port, enabled) {
+  const r = enabled === true ? enable(dir, root, node, port) : disable(dir, root, port);
+  return { ...r, ...access(root, port) };
 }

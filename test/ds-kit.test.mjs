@@ -15,6 +15,13 @@ const schema = JSON.parse(read('kit/schema.json'));
 const css = read('tokens.css');
 
 const python = ['python3', 'python'].find((p) => spawnSync(p, ['--version']).status === 0);
+// kit/check.py with the given arguments. A run with no exit code (the system killed Python, or could not start it, as a machine under
+// load can) says nothing about the checker: it is run again, twice at most. A real answer, pass or fail, is never run again (#98).
+const py = (args) => {
+  let r;
+  for (let i = 0; i < 3; i++) { r = spawnSync(python, ['-I', fileUrl('kit/check.py'), ...args], { encoding: 'utf8' }); if (r.status !== null) break; }
+  return r;
+};
 
 test('tokens.css has every color token of tokens.json, with the same value, in each theme', () => {
   const block = (open) => { const at = css.indexOf(open); return css.slice(at, css.indexOf('\n}', at)); };
@@ -177,7 +184,7 @@ test('kit/check.py: events are checked against the bot type and the usage fields
   const log = path.join(dir, 'events.jsonl');
   const run = (events) => {
     fs.writeFileSync(log, events.map((e) => JSON.stringify(e)).join('\n'));
-    const r = spawnSync(python, ['-I', fileUrl('kit/check.py'), '--events', log], { encoding: 'utf8' });
+    const r = py(['--events', log]);
     return { code: r.status, out: r.stdout };
   };
   const good = run([
@@ -200,10 +207,10 @@ test('kit/check.py: a custom property that the checked page defines is a known t
   const css1 = f('a.css', ':root { --page-gap: 4px; }\n.x { margin: var(--page-gap); padding: var(--space-2); }\n');
   const js1 = f('a.js', "el.style.setProperty('--page-live', '1');\nconst s = 'var(--page-live)';\n");
   const html = f('a.html', '<title>Page x0.1</title><style>:root { --page-pad: 1px; } p { margin: var(--page-pad); }</style>');
-  const ok = spawnSync(python, ['-I', fileUrl('kit/check.py'), css1, js1, html], { encoding: 'utf8' });
+  const ok = py([css1, js1, html]);
   assert.equal(ok.status, 0, ok.stdout);
   const miss = f('b.css', '.x { margin: var(--page-nothing); }\n');
-  const no = spawnSync(python, ['-I', fileUrl('kit/check.py'), miss], { encoding: 'utf8' });
+  const no = py([miss]);
   assert.equal(no.status, 1);
   assert.match(no.stdout, /unknown token --page-nothing/);
   fs.rmSync(dir, { recursive: true, force: true });
@@ -212,7 +219,7 @@ test('kit/check.py: a custom property that the checked page defines is a known t
 test('kit/check.py: a name built at run time is checked by its prefix', { skip: !python }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-kit-'));
   const f = (n, s) => { const p = path.join(dir, n); fs.writeFileSync(p, s); return p; };
-  const run = (p) => spawnSync(python, ['-I', fileUrl('kit/check.py'), p], { encoding: 'utf8' });
+  const run = (p) => py([p]);
   const ok = run(f('a.js', 'el.style.color = "var(--status-" + s + ")"; h(Icon, { name: "role-" + r });\n'));
   assert.equal(ok.status, 0, ok.stdout);
   const badTok = run(f('b.js', 'el.style.color = "var(--nothing-" + s + ")";\n'));
@@ -226,7 +233,7 @@ test('kit/check.py: a name built at run time is checked by its prefix', { skip: 
 
 test('the DS files pass kit/check.py (the same list as CI)', { skip: !python }, () => {
   const files = ['components/bundle.css', 'components/bundle.js', 'kit/page.html'].map(fileUrl);
-  const r = spawnSync(python, ['-I', fileUrl('kit/check.py'), ...files], { encoding: 'utf8' });
+  const r = py([...files]);
   assert.equal(r.status, 0, r.stdout);
 });
 

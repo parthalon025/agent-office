@@ -43,6 +43,11 @@ const RUNS = new Set(['.git', '.claude', '.hermes', '.vscode', '.idea', '.ssh', 
 // File names that run code: the office's hook and MCP files (any port), PowerShell profiles (profile.ps1,
 // Microsoft.PowerShell_profile.ps1, Microsoft.VSCode_profile.ps1) and sh, bash, zsh, csh and ksh profiles.
 const RUNS_FILE = /^(office-(hooks|hooks-http|mcp)(-\d+)?\.json|(microsoft\.[\w.]+_)?profile\.ps1|\.(bashrc|bash_profile|bash_login|bash_logout|profile|zshrc|zprofile|zshenv|zlogin|cshrc|tcshrc|kshrc))$/;
+// The office's saved state (schedules: a prompt, a folder and a permission mode that run after a restart) and past
+// sessions, with or without a port in the name (files.mjs). An edit is high (#109). Unlike RUNS, a read and a search
+// treat them as ordinary files, because state.json and history.json are common names in other projects. (The office's
+// own copies in its own folder are also RUNS: see ownState.)
+const LATER_FILE = /^(state|history)(-\d+)?\.json$/;
 // Credential folders and secret-looking file names. A read outside the root is high, inside it is medium.
 // .office-token[-<port>] and office-hooks-http[-<port>].json hold an office's agent token (files.mjs);
 // office-page-<port>.json holds the office's page token for the user's own tools (auth.mjs pageFile).
@@ -61,14 +66,15 @@ const forms = (part) => {
   const w = winPart(n);
   return w && w !== n ? [n, w] : [n];
 };
-// What a list of path parts names: a secret, or settings that run code.
+// What a list of path parts names: a secret, settings that run code, or saved state that runs schedules later (edits only).
 function kinds(list) {
-  let secret = false, runs = false;
+  let secret = false, runs = false, later = false;
   for (const part of list) for (const n of forms(part)) {
     if (SECRET_DIRS.has(n) || SECRET_FILE.test(n)) secret = true;
     if (RUNS.has(n) || RUNS_FILE.test(n)) runs = true;
+    if (LATER_FILE.test(n)) later = true;
   }
-  return { secret, runs };
+  return { secret, runs, later };
 }
 
 /**
@@ -201,7 +207,7 @@ export function realInside(root, target) {
  */
 function place(root, p, opts) {
   let s = String(p ?? '');
-  if (!s || s.includes('\0')) return { inside: false, secret: false, runs: false };
+  if (!s || s.includes('\0')) return { inside: false, secret: false, runs: false, later: false };
   if (/^~(?=[\\/]|$)/.test(s)) s = path.join(os.homedir(), s.slice(1));
   if (!path.isAbsolute(s) && !root) return { inside: false, ...kinds(parts(s)) };
   const abs = path.resolve(root || '', s);
@@ -267,11 +273,11 @@ function readRisk(name, a, root, opts) {
   return R(secret || runs ? 'medium' : 'low', action);
 }
 
-// Edit, Write, MultiEdit, NotebookEdit: settings that run code are high anywhere; low only inside the root.
+// Edit, Write, MultiEdit, NotebookEdit: settings that run code and saved state are high anywhere; low only inside the root.
 function editRisk(file, root, opts) {
   if (!file) return R('medium', 'files-outside');
-  const w = place(root, file, opts), action = fileAction(w.secret, w.runs, w.inside, 'edit-inside');
-  if (w.runs) return R('high', action);
+  const w = place(root, file, opts), action = fileAction(w.secret, w.runs || w.later, w.inside, 'edit-inside');
+  if (w.runs || w.later) return R('high', action);
   return R(w.inside && !w.secret ? 'low' : 'medium', action);
 }
 

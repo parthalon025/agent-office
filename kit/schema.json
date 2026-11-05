@@ -1,5 +1,5 @@
 {
- "version": "x1.6.9",
+ "version": "x1.6.10",
  "events": {
   "status": {
    "desc": "A bot changes state. The bot walks to rest or back to its seat when needed.",
@@ -464,6 +464,8 @@
   "scene-slab",
   "scene-sofa",
   "scene-subagent",
+  "scene-walk-speed",
+  "scene-walk-speed-ephemeral",
   "scene-wall",
   "scene-wall-h",
   "scene-wall-side",

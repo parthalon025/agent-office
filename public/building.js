@@ -249,7 +249,7 @@
       function seeWorktrees(snap) { var rp = repoOf(snap, repo); if (rp) rp.worktrees.forEach(function (w) { wtSeen[w.place.floor + '|' + w.place.rootKey] = true; }); }
       seeWorktrees(latest);
       var known = {};   // uid -> mirror of what the scene was told
-      var taken = {};   // bot name -> true
+      var taken = {};   // bot name -> true. A helper name stays here for the life of the mount (#94).
       var emitRef = null, lastUsage = { percent: null, t: 0 };
       var primed = false, seedSnap = null;   // the first pass ran; the snapshot it restores (the store's at attach)
       var m = { repo: repo, id: ++mountSeq, def: d.def };
@@ -294,9 +294,20 @@
           }
           if (hn && a.done && !k.helpersDone[a.call]) {
             k.helpersDone[a.call] = true;
+            // The name stays taken: the bot walks out for a while, and a helper that got the same name would
+            // be sent back in with it (#94).
             emit({ type: 'subagent.done', bot: hn, remove: true, result: a.ok ? 'Returned its result' : 'Stopped before it finished' });
-            delete taken[hn];
           }
+        });
+      }
+      // The session leaves the scene (it moved, or the server forgot it): its helpers get no finish event from the
+      // tracker, so send them away here. A helper that already finished is not told twice (#95). why is the result text:
+      // a moved session keeps working, so its helpers are not "stopped"; they go on in the new room.
+      function dismissHelpers(k, emit, why) {
+        Object.keys(k.helpers).forEach(function (call) {
+          if (k.helpersDone[call]) return;
+          k.helpersDone[call] = true;
+          emit({ type: 'subagent.done', bot: k.helpers[call], remove: true, result: why });
         });
       }
       // seat: for a bot seated again, { prev, out }: the mirror of its old seat and the live emitter. A call (or a
@@ -358,6 +369,7 @@
           // the session checked out another branch, or moved to another folder: seat it again. So does a changed supervision
           // label (an agent whose config turned out not to ask): the DS sets the card's platform line only when the bot is added.
           if (k && !k.ended && (k.place !== placeKey(pl) || k.sup !== V.supervision(s))) {
+            dismissHelpers(k, emit, 'Moved with its session');
             emit({ type: 'bot.remove', bot: k.name }); delete taken[k.name]; delete known[s.uid];
             prev = k; k = null;
             emit = restore;   // the scene showed this bot and what its old seat lists (prev) already
@@ -451,7 +463,7 @@
         Object.keys(known).forEach(function (uid) {
           if (seen[uid]) return;
           var k = known[uid];
-          if (!k.ended) { base({ type: 'bot.remove', bot: k.name }); delete taken[k.name]; }
+          if (!k.ended) { dismissHelpers(k, base, 'Stopped before it finished'); base({ type: 'bot.remove', bot: k.name }); delete taken[k.name]; }
           delete known[uid];
         });
       }

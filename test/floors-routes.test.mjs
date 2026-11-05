@@ -7,12 +7,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import net from 'node:net';
 import crypto from 'node:crypto';
-import { spawn, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startFakeOpenAI } from './fixtures/fake-openai.mjs';
 import { pageFile } from '../auth.mjs';
+import { startOnFreePort, until as untilTrue } from './fixtures/office-server.mjs';
 import { officeFiles } from '../files.mjs';
 import * as git from '../git.mjs';
 
@@ -23,23 +23,10 @@ const IDENT = ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsig
 const plain = (cwd, ...a) => execFileSync(GIT, [...IDENT, ...a], { cwd, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
 const tag = 'aotest' + crypto.randomBytes(3).toString('hex');
 const FLOORS = ['done', 'dirty', 'ahead', 'busy'];
-let base, repo, child, port, pageToken, fake, log = '', rooms = {};
+let base, repo, child, port, pageToken, fake, rooms = {};
 
-const freePort = () => new Promise((resolve, reject) => {
-  const s = net.createServer();
-  s.listen(0, '127.0.0.1', () => { const { port: p } = s.address(); s.close(() => resolve(p)); });
-  s.on('error', reject);
-});
-// A server that starts while other suites run can need more than 15 s; a fast start still returns at once.
-const until = async (fn, what, ms = 45000) => {
-  const t0 = Date.now();
-  for (;;) {
-    const v = await fn();
-    if (v) return v;
-    if (Date.now() - t0 > ms) assert.fail(`timed out waiting for ${what}\n${log.slice(-800)}`);
-    await new Promise((r) => setTimeout(r, 50));
-  }
-};
+// The state file of an office on a free port has the port in its name, so it is made for each try. Polls use the log in their failure.
+const until = (fn, what) => untilTrue(fn, what, { log: () => child?.out() });
 const call = (route, body) => fetch(`http://127.0.0.1:${port}${route}`, {
   method: 'POST', headers: { 'content-type': 'application/json', 'x-office-token': pageToken }, body: JSON.stringify(body || {}),
 }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => ({})) }));
@@ -67,20 +54,19 @@ before(async () => {
   }
   for (const d of ['providers', 'public']) fs.cpSync(path.join(SRC, d), path.join(copy, d), { recursive: true });
   fake = await startFakeOpenAI({ script: [{ text: 'ok' }], models: ['fake-model'] });
-  port = await freePort();
-  // The repo is a building before any session. The state file of an office on a free port has the port in its name.
-  fs.writeFileSync(officeFiles(copy, port).state, JSON.stringify({ recent: [repo] }));
-  const env = { ...process.env, OFFICE_PORT: String(port), OFFICE_HOOKS: 'command', OFFICE_OLLAMA_URL: fake.url, OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
+  // The repo is a building before any session (a recent folder). The state file of an office on a free port has the port in its name.
+  const env = { ...process.env, OFFICE_HOOKS: 'command', OFFICE_OLLAMA_URL: fake.url, OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
     OFFICE_FLOOR_MIN_AGE_MS: '0', OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local') };
-  child = spawn(process.execPath, ['server.mjs'], { cwd: copy, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env });
-  child.stdout.on('data', (d) => { log += d; });
-  child.stderr.on('data', (d) => { log += d; });
-  pageToken = await until(() => { try { return JSON.parse(fs.readFileSync(pageFile(env, port), 'utf8')).token; } catch { return null; } }, 'the page token file');
+  // Ready is the server's own "is open" line; a port taken before the bind starts the server again on a new port.
+  const started = await startOnFreePort(copy, env, { prepare: (p) => fs.writeFileSync(officeFiles(copy, p).state, JSON.stringify({ recent: [repo] })) });
+  child = started.office;
+  port = started.port;
+  pageToken = JSON.parse(fs.readFileSync(pageFile(started.env, port), 'utf8')).token;
   await until(async () => (await call('/api/branches', { repo })).status === 200, 'the repository to be known');
   await openIn(rooms.busy, 'busy-bot');
 });
 after(async () => {
-  if (child) child.kill();
+  if (child) await child.stop();
   if (fake) await fake.close();
   for (const b of [...FLOORS, 'late', 'fresh']) await git.deleteFloor(repo, b, true).catch(() => {});
   await new Promise((r) => setTimeout(r, 300)); // let Windows release the folder
