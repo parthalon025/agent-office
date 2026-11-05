@@ -182,7 +182,7 @@ The `id` names the look: the engine reads `light-<id>-*` and `fx-*-<id>`. An unk
 | `Notifier` | Daily | Alerts for a person who works in another tab. |
 | `OfficeScene` | 3D office | The 3D office itself and the main component of the system. |
 | `OfficeTypeBadge` | Office types | A chip that names an office type with its icon and type color. |
-| `OfficeTypeCard` | Office types | A flat picture and badge for one office type. |
+| `OfficeTypeCard` | Office types | A flat picture and badge for one office type. The picture comes from `THUMBS_BY_THEME[theme]`; Fluent has no set yet and shows the Day set (`THUMBS`), with the Day type colors in the picture (agent-office #112). |
 | `Panel` | Surfaces | The glass surface for every HUD block over the 3D scene. |
 | `PlanCard` | Orchestration | The orchestrator's plan: the goal, each step with its status and owner, and steps done over total. |
 | `RichText` | Conversation | Safe Markdown for one chat message. |
@@ -249,7 +249,7 @@ Each README has the full props table. Types: `components/index.d.ts`.
 | `status-finished-on-bubble` | `#3771df` | `#1565f1` | `#2f6bc8` | `#0f6cbd` | Text color for the finished status on bubble (a light face in every theme). 4.5:1 or more. |
 | `floor-ops` | `#4a6278` | `#587089` | `#3f5d70` | `#4d5f6b` | Floor 1 identity. Roster header fill, building-view floor band; white text on it. |
 | `floor-sales` | `#b5523b` | `#b5523b` | `#5d4a7a` | `#b6480e` | Floor 2 identity. Roster header fill; white text on it. |
-| `floor-research` | `#2f7f44` | `#2f7f44` | `#2c6b57` | `#427505` | Floor 3 identity. Roster header fill; white text on it. |
+| `floor-research` | `#2f7f44` | `#2f7f44` | `#2c6b57` | `#1c7d3b` | Floor 3 identity. Roster header fill; white text on it. |
 | `floor-content` | `#7a52c7` | `#7a52c7` | `#2f5f86` | `#6656d1` | Floor 4 identity. Roster header fill; white text on it. |
 | `floor-hq` | `#8a5a12` | `#8a5a12` | `#7a5414` | `#8e562e` | Floor 5 (HQ) identity. Roster header fill; white text on it. |
 | `on-floor` | `#ffffff` | `#ffffff` | `#ffffff` | `#ffffff` | Text on any floor-* fill. 4.9:1 or more. |
@@ -264,7 +264,7 @@ Each README has the full props table. Types: `components/index.d.ts`.
 | `scene-chair` | `#2f5d4a` | `#24493b` | `#1c2326` | `#3a4048` | 3D chairs and sofas. |
 | `scene-rug` | `#c0563f` | `#a8483a` | `#2a5560` | `#5a8fd0` | 3D lounge rug. Marks the resting zone. |
 | `scene-wall-side` | `#d9dde2` | `#1e242d` | `#e2e7e2` | `#dedede` | 3D left wall. One step darker than scene-wall so the corner reads. |
-| `scene-slab` | `#c9ced4` | `#1b2028` | `#b9c4bf` | `#c7c7c7` | 3D floor slab edge and kit plinths. |
+| `scene-slab` | `#c9ced4` | `#1b2028` | `#b9c4bf` | `#b3b3b3` | 3D floor slab edge and kit plinths; the City ground. |
 | `scene-rail` | `#ffffff` | `#59616c` | `#f4f6f2` | `#ffffff` | 3D front railing slats. |
 | `scene-sofa` | `#2f5f52` | `#24493b` | `#2c5b6b` | `#4a5560` | 3D lounge sofas. |
 | `scene-metal` | `#9aa2ab` | `#6f7884` | `#b8c0bf` | `#a8a8a8` | 3D desk pedestals and bases. |
@@ -282,7 +282,11 @@ Each README has the full props table. Types: `components/index.d.ts`.
 | `muted` | `bg`, card, `chip` | 4.5:1 | Secondary text. |
 | `status-*-text` | `bg`, card, `chip` | 4.5:1 | A status word on a theme surface. |
 | `status-*-on-bubble` | `bubble` | 4.5:1 | A status word on a bubble or a whiteboard face. |
+| `on-accent` | `accent` | 4.5:1 | Label of a primary button. |
+| `on-floor` | every `floor-*` | 4.9:1 | Floor header text. |
 | `status-*` | card | 3:1 | Status dot, next to a word. |
+| `type-*` | `chip` | 3:1 | Type dot, room icon and room floor stripe. |
+| `accent` | `bg` | 3:1 | Focus ring and the accent pill of a pressed control. |
 | `status-*` | any | not checked at 4.5:1 | Do not use it as text color. It is a fill and a dot. Use `status-*-text` or `status-*-on-bubble`. |
 
 ### spacing
@@ -307,6 +311,8 @@ Each README has the full props table. Types: `components/index.d.ts`.
 | `radius-fluent-sm` | `4px` | Buttons and controls in Fluent. The theme sets radius-sm to it. |
 | `radius-fluent-md` | `4px` | Rows and segments in Fluent. The theme sets radius-md to it. |
 | `radius-fluent-lg` | `8px` | Panels, cards and dialogs in Fluent. The theme sets radius-lg to it. |
+
+`tokens.css` only defines the `radius-fluent-*` and `font-fluent-*` tokens. `components/bundle.css` maps them under `[data-theme="fluent"]` (`radius-sm`, `radius-md`, `radius-lg`, `font-sans`, `font-mono`), as it maps `font-sublevel-*` for Sublevel. So load `bundle.css` with `tokens.css`: with `tokens.css` alone, Fluent keeps the Day corners and faces.
 
 ### shadow
 

@@ -1,5 +1,5 @@
 // Readable in every theme: the text and ink pairs that the page and the 3D scripts draw, from tokens.json.
-// Each pair needs 4.5:1 (text) or 3:1 (a status dot) in every theme of tokens.json (Day, Night, Sublevel, Fluent). The CSS checks pin the rules
+// Each pair needs 4.5:1 (text) or 3:1 (a dot or another mark) in every theme of tokens.json (Day, Night, Sublevel, Fluent). The CSS checks pin the rules
 // that use those pairs, so a later edit cannot put a status color back on text.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -45,6 +45,18 @@ test('status words: ink on the panel, the chip and the page', () => each((T, th,
 test('status dots next to the words read at 3:1 on the panel', () => each((T, th, panel) => {
   for (const s of ['working', 'waiting', 'error', 'resting', 'finished']) atLeast('dot ' + s, 3, T('status-' + s), panel, th);
   atLeast('dot emphasis', 3, T('emphasis'), panel, th);
+}));
+
+// The other pairs of the ContrastCheck card (components/ContrastCheck/preview.html): the label of a primary button, the
+// text of a floor header (Reference.md promises 4.9:1 for on-floor), and the type and accent marks.
+test('on-accent on accent: 4.5:1; on-floor on every floor-* fill: 4.9:1', () => each((T, th) => {
+  atLeast('on-accent on accent', 4.5, T('on-accent'), T('accent'), th);
+  for (const f of ['ops', 'sales', 'research', 'content', 'hq']) atLeast(`on-floor on floor-${f}`, 4.9, T('on-floor'), T('floor-' + f), th);
+}));
+
+test('type colors on chip and accent on bg: 3:1', () => each((T, th) => {
+  for (const t of ['team', 'lab', 'studio', 'hq']) atLeast(`type-${t} on chip`, 3, T('type-' + t), T('chip'), th);
+  atLeast('accent on bg', 3, T('accent'), T('bg'), th);
 }));
 
 // The DS contrast pairs for status text (Reference.md, "Contrast pairs the DS checks"). The raw status-* colors fail

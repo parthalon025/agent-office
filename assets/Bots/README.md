@@ -15,3 +15,6 @@ To use a different body colour, call `AgentOffice.PORTRAITS[shape](color)` from 
 `<shape>-sublevel.svg` for `blob`, `cone`, `octa`, `capsule`. Flat: one body tone and one shade (body darkened 24%), no highlight, no soft shadow. A 1.5 px outline in `#102a33` (inner facet edges of the octa: 1 px), square eyes in `#102a33`, and a thin floor line at y = 80. Same default body colours as above. Use them only in the Sublevel theme.
 
 To recolour, call `AgentOffice.PORTRAITS_SUBLEVEL[shape](color)`.
+
+## Other themes
+Day, Night and Fluent use the portraits above. A portrait has only the body colour of the bot and fixed eye and shadow tones, so it reads the same on each of these themes. `BotAvatar` picks the Sublevel portraits in Sublevel and these in every other theme.
