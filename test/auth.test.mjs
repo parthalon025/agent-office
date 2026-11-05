@@ -14,6 +14,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as auth from '../auth.mjs';
 import { resolveExe } from '../git.mjs';
+import { officeFiles } from '../files.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const win = process.platform === 'win32';
@@ -575,7 +576,8 @@ test('route matrix, launch code and owner-only files on a real server', { timeou
   try {
     await office.done;
     const code = office.out().match(/#n=([0-9a-f]{32})/)[1];
-    const agent = JSON.parse(fs.readFileSync(path.join(dir, '.office-token'), 'utf8'));
+    const own = officeFiles(dir, port); // a free port is not the default one, so the names carry the port (files.mjs)
+    const agent = JSON.parse(fs.readFileSync(own.token, 'utf8'));
     const pagePath = auth.pageFile(env, port);
     assert.ok(pagePath.startsWith(lad), pagePath);
     const page = JSON.parse(fs.readFileSync(pagePath, 'utf8'));
@@ -584,10 +586,10 @@ test('route matrix, launch code and owner-only files on a real server', { timeou
     assert.match(agent.token, auth.AGENT_TOKEN_RE);
     assert.match(page.token, /^[0-9a-f]{64}$/);
     assert.notEqual(agent.token, page.token);
-    // No file in the office folder holds the page token; only .office-token and the HTTP hooks file hold the agent token.
+    // No file in the office folder holds the page token; only the token file and the HTTP hooks file hold the agent token.
     const inFolder = fs.readdirSync(dir).filter((f) => fs.statSync(path.join(dir, f)).isFile());
     for (const f of inFolder) assert.ok(!fs.readFileSync(path.join(dir, f), 'utf8').includes(page.token), `${f} holds the page token`);
-    assert.ok(fs.readFileSync(path.join(dir, 'office-hooks-http.json'), 'utf8').includes(agent.token));
+    assert.deepEqual(inFolder.filter((f) => fs.readFileSync(path.join(dir, f), 'utf8').includes(agent.token)).sort(), [own.token, own.hooksHttp].map((f) => path.basename(f)).sort());
 
     const A = { 'content-type': 'application/json', 'x-office-token': agent.token };
     const P = { 'content-type': 'application/json', 'x-office-token': page.token };
@@ -684,14 +686,14 @@ test('route matrix, launch code and owner-only files on a real server', { timeou
     assert.equal(second.child.exitCode, 0, second.out());
     assert.match(second.out(), /already running/);
     const code3 = second.out().match(/#n=([0-9a-f]{32})/)[1];
-    assert.equal(JSON.parse(fs.readFileSync(path.join(dir, '.office-token'), 'utf8')).token, agent.token);
+    assert.equal(JSON.parse(fs.readFileSync(own.token, 'utf8')).token, agent.token);
     assert.equal(JSON.parse(fs.readFileSync(pagePath, 'utf8')).token, page.token);
     assert.equal((await hit(port, 'POST', '/launch', { headers: { 'content-type': 'application/json' }, body: { code: code3 } })).status, 200);
 
     // Limited files: only the user, SYSTEM and Administrators, compared by SID, nothing inherited, although the
     // folders hand Users, Authenticated Users and Everyone down (wideFolder above).
-    // state.json and history.json (L10) are limited once at start; the plain writes after a change keep it.
-    const statePath = path.join(dir, 'state.json'), historyPath = path.join(dir, 'history.json');
+    // The state and the past sessions (L10) are limited once at start; the plain writes after a change keep it.
+    const statePath = own.state, historyPath = own.history;
     const historyBefore = fs.statSync(historyPath).mtimeMs;
     assert.equal((await hit(port, 'POST', '/api/notes/save', { headers: P, body: { key: 'l10-board', text: 'L10 NOTE', base: 0 } })).status, 200);
     assert.equal((await hit(port, 'POST', '/api/history/forget', { headers: P, body: { uid: 'nobody' } })).status, 200);
@@ -699,7 +701,7 @@ test('route matrix, launch code and owner-only files on a real server', { timeou
     assert.match(fs.readFileSync(statePath, 'utf8'), /L10 NOTE/, 'savePersisted wrote state.json');
     assert.ok(fs.statSync(historyPath).mtimeMs > historyBefore, 'saveHistory wrote history.json');
     if (win) {
-      const files = [path.join(dir, '.office-token'), path.join(dir, 'office-hooks-http.json'), path.join(dir, 'office-hooks.json'), path.join(dir, 'office-mcp.json'), pagePath, statePath, historyPath];
+      const files = [own.token, own.hooksHttp, own.hooksCmd, own.mcp, pagePath, statePath, historyPath];
       const acl = aclOf(files);
       files.forEach((f, i) => assertLimited(acl.files[i], acl.me, path.basename(f)));
     } else {

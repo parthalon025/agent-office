@@ -19,7 +19,7 @@ It is built on the Agent Office design system (x1.7), which lives in this folder
 - **Toasts.** A toast with an action, and every error, stays until you close it. The others close after 8 seconds, and wait while the pointer or the focus is on them.
 - **Since you left.** When you open a building, the card counts what happened there since you last saw it. A building you come back to shows only the news. Requests that were open before do not show a toast again; they stay in Needs you and in Decisions.
 - **Repos as buildings.** A git repository is a building, a branch is a floor and a worktree is a room. Pick the building in the control strip; one **Needs you** button shows how many requests wait in every building. Folders outside git share the "Other folders" building.
-- **Floors and rooms.** The Floors dialog creates a floor (a new branch with its first worktree), adds a room (one more worktree on a branch, also on a branch that has one), removes a room and deletes a floor (its worktrees and the branch). You can name a room when you add it: the name is the worktree folder name (letters, digits, dots and dashes; Windows reserved names are refused). **Clean up unused floors** lists the floors that are merged into the main branch, have clean rooms, no session and are over an hour old (never the default branch). Press Keep this floor to leave one out, then confirm to delete the rest. It never forces. Git refusals (uncommitted changes, commits that are not merged) show with a button to go ahead anyway. The main folder and a room with an open session cannot be removed.
+- **Floors and rooms.** The Floors dialog creates a floor (a new branch with its first worktree), adds a room (one more worktree on a branch, also on a branch that has one), removes a room and deletes a floor (its worktrees and the branch). You can name a room when you add it: the name is the worktree folder name (letters, digits, dots and dashes; Windows reserved names are refused). **Clean up unused floors** lists the floors that are merged into the main branch, have clean rooms, no session and are over an hour old (never the default branch). Press Keep this floor to leave one out, then confirm to delete the rest. It never forces. Removing a room also deletes the files git ignores in it, such as a local `.env`; the confirm dialogs say so. Git refusals (uncommitted changes, commits that are not merged) show with a button to go ahead anyway. The main folder and a room with an open session cannot be removed.
 - **Extensions.** The Extensions button (More > Actions for the selected bot, or Ctrl+K) lists the session's connectors (MCP servers) and plugins. Turn a connector off or on for this session, reconnect it, add one (a URL or a command) or remove one. Turn a plugin off or on for this folder, install or remove one. Saved changes go to the local or project scope of the folder, never to your user settings.
 - **Sessions as bots.** Each session sits at a desk in the room of its worktree. Typing means working, an amber badge means it needs you, and a red badge means the turn failed (Retry or Dismiss).
 - **Subagents as helpers.** A Task or Agent call brings a grey helper by the elevator. The helper does its own tool calls and leaves when it returns its result.
@@ -92,11 +92,12 @@ Each job names the control to use. Ctrl+K finds all of them.
 
 Two more agent kinds are built: **Ollama** and **LM Studio**. They run a model on this PC at a desk, in a worktree or a folder. Most jobs above work for them. These parts differ:
 
-- **Start one with the API.** The **Open session** dialog and schedules start Claude Code only. For a local agent, send `POST /api/open` with the header `x-office-token` and a JSON body with `cwd`, `provider` (`ollama` or `lmstudio`), `model` and an optional first `prompt`. `model` is required. The value for the header is the page token, not the value in `.office-token` (that is the agent token, and `/api/*` answers 401 to it). Read the page token from the `token` field of `%LOCALAPPDATA%\AgentOffice\office-page-<port>.json` (`<port>` is 4317 by default). The office writes a new token at each start. To send a later prompt, use `POST /api/message` with `{ "uid": ..., "text": ... }`; `/api/open` returns the `uid`. `GET /api/providers` lists each agent kind, whether it is ready, what it still needs and its models. Opening a session works on Windows only.
+- **Start one.** In **Open session** (or a room's **Add an agent**), set **Agent** to Ollama or LM Studio and pick a model from the list the server gives. A local agent runs in the office only and has no spend limit or permission mode, so the dialog does not show those fields. A kind that is not ready says what it needs, and **Check again** asks once more. **More**, then **Agent kinds**, lists every kind, whether it is ready, what it needs and its models. Each bot, the Sessions list, Past sessions, the room's agent list and the terminal name the kind. Schedules start Claude Code only.
+- **Start one with the API.** Send `POST /api/open` with the header `x-office-token` and a JSON body with `cwd`, `provider` (`ollama` or `lmstudio`), `model` and an optional first `prompt`. `model` is required. The value for the header is the page token, not the value in `.office-token` (that is the agent token, and `/api/*` answers 401 to it). Read the page token from the `token` field of `%LOCALAPPDATA%\AgentOffice\office-page-<port>.json` (`<port>` is 4317 by default). The office writes a new token at each start. To send a later prompt, use `POST /api/message` with `{ "uid": ..., "text": ... }`; `/api/open` returns the `uid`. `GET /api/providers` lists each agent kind, whether it is ready, what it still needs and its models. Opening a session works on Windows only.
 - **Tools.** The agent reads, lists, searches, edits, writes and runs commands, all inside its folder. It can also use the office tools (inbox, ask, room, room notes). One turn stops after 25 model calls.
 - **Approve a request (job 3).** The cards are the same, with the same risk rule. A local agent never offers Always allow.
 - **Cost.** The cost is always $0. The office counts tokens.
-- **Not available.** Model and permission switches and Extensions are refused for a local agent, and it takes text only (no attachments). Schedules start Claude Code.
+- **Not available.** A local agent has no model or permission switch and no Extensions (the dock does not show them, and the API refuses them), and it takes text only (no attachments). Schedules start Claude Code.
 - **Reopen (job 9).** It starts a new session and cannot resume.
 
 The office only lists models and sends chat requests to the server. It never loads, unloads or downloads a model. See **Settings** for the server addresses.
@@ -123,7 +124,7 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `OFFICE_PORT` | `4317` | Port on 127.0.0.1. `branch` takes a fixed port from the current branch name (4330-4399), so each worktree has its own; `npm run start:branch` sets it. If that port is busy, the office stops and does not try another. |
+| `OFFICE_PORT` | `4317` | Port on 127.0.0.1. `branch` takes a fixed port from the current branch name (4330-4399), so each worktree has its own; `npm run start:branch` sets it. If that port is busy, the office stops and does not try another. An office on a port other than 4317 has its own files, with the port in the name (see Files), so it never takes over the hooks, notes or schedules of the office on 4317 in the same folder. |
 | `OFFICE_OPEN` | on | `0` stops the server from opening the launch link in your browser. It still prints the link. |
 | `OFFICE_HOOKS` | auto | `command` or `http` forces a hook mode. |
 | `OFFICE_ASK_TIMEOUT_S` | `60` | How long a terminal session's permission prompt waits for the office before the terminal dialog decides. Sessions in the office wait 15 minutes. |
@@ -136,6 +137,7 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 | --- | --- |
 | `server.mjs` | The server: state, hooks, sessions, REST, SSE, schedules, history. |
 | `auth.mjs` | Access rules: the agent token and the page token, the launch code, the request checks, files that only you, SYSTEM and Administrators can read. |
+| `files.mjs` | The names of the files an office keeps in this folder, per port. |
 | `git.mjs` | Worktrees, the changes view, remove worktree, pull request. |
 | `tracker.mjs` | The session rules: hook payloads and stream lines in, sessions out. No I/O of its own, so tests run offline. |
 | `place.mjs` | Where a session or worktree sits: building, floor, room id and notes key. The snapshot carries it. |
@@ -152,6 +154,8 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 | `DS-README.md`, `Recipes.md`, `Reference.md`, `Concepts.md`, `kit/`, `components/`, `tokens.css` | The Agent Office design system. |
 
 Generated at run time and ignored by git: `.office-token`, `office-hooks.json`, `office-hooks-http.json`, `office-mcp.json`, `state.json`, `history.json`. Outside this folder: `%LOCALAPPDATA%\AgentOffice\office-page-<port>.json`.
+
+An office on a port other than 4317 (`OFFICE_PORT`, `npm run start:branch`) writes the same files with its port in the name, for example `.office-token-4392`, `office-hooks-4392.json`, `office-hooks-http-4392.json`, `office-mcp-4392.json`, `state-4392.json` and `history-4392.json`. Its settings files call `hook.mjs` and `mcp.mjs` with the port, so a session attached to it talks to it, and a session attached to the office on 4317 keeps talking to 4317. That office starts with its own empty notes, schedules and past sessions. An office on another port that ran here before this change keeps its agent token, so settings files it made still work. Its old notes and schedules stay in `state.json`. To probe the HTTP hooks of that office, run `npm run probe -- <port>`.
 
 ## Safety
 
@@ -175,7 +179,7 @@ The office knows three kinds of session. A session **in the office** runs `claud
 
 ### Any session
 
-- **"Already running on port 4317."** A second `npm start` is harmless: it changes nothing, and it opens a new launch link for the office that runs. To restart, stop the first copy by the process id that owns the port. Never stop it by image name: that would stop your other Claude Code sessions. Run `netstat -ano | findstr :4317`, then `taskkill /PID <pid> /F`. Or start the office on another port with `OFFICE_PORT`.
+- **"Already running on port 4317."** A second `npm start` is harmless: it changes nothing, and it opens a new launch link for the office that runs. To restart, stop the first copy by the process id that owns the port. Never stop it by image name: that would stop your other Claude Code sessions. Run `netstat -ano | findstr :4317`, then `taskkill /PID <pid> /F`. Or start a second office on another port with `OFFICE_PORT`. It has its own files and sessions (see Files), and it leaves the first office as it is.
 - **The page says "No access to the office".** The page has no working cookie: you opened it without a launch link, the link was used or older than 5 minutes, or the office restarted (each start makes a new page token). Run `npm start` to get a new link. Other office tabs in the same browser get access again within 5 seconds.
 - **A call answers 401 Unauthorized.** The token did not match. For the page, open a new launch link (see above). For hooks: if you deleted `.office-token`, the office made a new agent token. Sessions that started before that keep the old token in their settings, so start them again.
 - **A call answers 403 Forbidden.** The server accepts only `127.0.0.1:<port>` and `localhost:<port>` as host name, and refuses requests that a page on another site or port sends. Open the office with its launch link.
@@ -206,7 +210,7 @@ The office knows three kinds of session. A session **in the office** runs `claud
 ### Terminal sessions
 
 - **A session does not appear.** Start Claude Code with the `--settings` and `--mcp-config` flags shown above. The Attach sessions dialog shows the exact command for the hook mode in use.
-- **Hooks do not arrive.** Check that the office runs and that the settings file matches the hook mode (`office-hooks-http.json` or `office-hooks.json`). Run `npm run probe` after a Claude Code update to test HTTP hooks again. A stopped office never blocks Claude, and it shows no error in the terminal.
+- **Hooks do not arrive.** Check that the office runs and that the settings file matches the hook mode (`office-hooks-http.json` or `office-hooks.json`). An office on a port other than 4317 has its own settings files with the port in the name (`office-hooks-http-<port>.json`); the Attach sessions dialog shows the right one. Run `npm run probe` after a Claude Code update to test HTTP hooks again. A stopped office never blocks Claude, and it shows no error in the terminal.
 - **A message sits queued.** A terminal session at an idle prompt reads it when it next runs.
 - **A request disappears from the office after 60 seconds.** This is the wait limit for terminal sessions. Change it with `OFFICE_ASK_TIMEOUT_S`, or answer in the terminal.
 - **Stop turn, mode and model switches and attachments do nothing.** They work only in sessions in the office.
@@ -215,7 +219,7 @@ The office knows three kinds of session. A session **in the office** runs `claud
 
 ```
 npm run probe   # HTTP hooks on this Claude Code version (one tiny call)
-npm run smoke   # opens real Haiku sessions in a throwaway repo (a few cents); the office must be running
+npm run smoke   # opens real Haiku sessions in a throwaway repo (a few cents); the office must be running; npm run smoke -- <port> for an office on another port
 python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/wheel-gate.js public/vocab.js public/scene-host.js public/building.js public/format.js public/toasts.js public/wire.js components/bundle.css components/bundle.js kit/page.html
 ```
 

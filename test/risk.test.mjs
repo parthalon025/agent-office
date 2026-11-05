@@ -4,7 +4,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { riskOf, inside, realInside } from '../risk.mjs';
+import { riskOf, inside, realInside, isProtectedPart } from '../risk.mjs';
+import { officeFiles } from '../files.mjs';
 import '../public/vocab.js';
 
 const V = globalThis.OfficeVocab;
@@ -141,6 +142,25 @@ for (const f of RUNS) {
     assert.equal(riskOf('Edit', { file_path: at(f) }, cwd), 'high', 'absolute path');
   });
 }
+
+// The office's own files on every port (files.mjs, #100): an office on another port has the same files with the port in
+// the name, and they get the same rating as the plain ones.
+test('the office files of every port: token files are secrets, hook and MCP settings run code', () => {
+  for (const port of [4317, 4330, 4392, 5000]) {
+    const f = officeFiles(cwd, port);
+    for (const secret of [f.token, f.hooksHttp]) {
+      assert.equal(riskOf('Read', { file_path: secret }, cwd), 'medium', path.basename(secret));
+      assert.equal(riskOf('Read', { file_path: secret }, outDir), 'high', path.basename(secret) + ' outside the root');
+    }
+    for (const runs of [f.hooksCmd, f.hooksHttp, f.mcp]) {
+      assert.equal(riskOf('Edit', { file_path: runs }, cwd), 'high', path.basename(runs));
+      assert.equal(riskOf('Read', { file_path: runs }, cwd), 'medium', path.basename(runs));
+    }
+    for (const p of [f.token, f.hooksCmd, f.hooksHttp, f.mcp]) assert.equal(isProtectedPart(path.basename(p)), true, path.basename(p));
+  }
+  // Look-alikes stay ordinary files.
+  for (const name of ['office-hooks-x.json', 'office-mcp-.json', '.office-token-x', 'my-office-mcp-4392.json']) assert.equal(isProtectedPart(name), false, name);
+});
 
 test('Windows path forms that point inside stay outside (the safe direction)', { skip: !WIN && 'Windows only' }, () => {
   for (const f of ['\\\\?\\C:\\work\\repo\\src\\a.js', '\\\\localhost\\C$\\work\\repo\\src\\a.js', 'C:\\work\\repo.\\src\\a.js', '\\\\.\\C:\\work\\repo\\src\\a.js']) {

@@ -81,9 +81,9 @@ function findExe(name, env, win) {
   throw new Error(`${name} was not found on PATH.`);
 }
 
-function run(cmd, args, cwd, timeout = 30000) {
+function run(cmd, args, cwd, timeout = 30000, env) {
   return new Promise((resolve, reject) => {
-    execFile(resolveExe(cmd), args, { cwd, windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout }, (err, out, stderr) => {
+    execFile(resolveExe(cmd), args, { cwd, windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout, ...(env ? { env: { ...process.env, ...env } } : {}) }, (err, out, stderr) => {
       if (err) return reject(new Error((String(stderr || '').trim() || err.message).split('\n').slice(-3).join(' ')));
       resolve(String(out));
     });
@@ -98,7 +98,9 @@ export const GIT_HARDENING = ['-c', 'core.fsmonitor=false', '-c', `core.hooksPat
 const READ_ONLY = new Set(['status', 'diff', 'log', 'ls-files']);
 /** The full argument list for a git call: hardening, then --no-optional-locks for read-only commands, then the command. */
 export const gitArgs = (args) => [...GIT_HARDENING, ...(READ_ONLY.has(args[0]) ? ['--no-optional-locks'] : []), ...args];
-const git = (args, cwd, timeout) => run('git', gitArgs(args), cwd, timeout);
+const git = (args, cwd, timeout, env) => run('git', gitArgs(args), cwd, timeout, env);
+// Git words its errors in the user's language where it ships translations. Code that reads an error message asks for English.
+const ENGLISH = { LC_ALL: 'C', LANGUAGE: 'C' };
 
 export async function repoTop(cwd) {
   try { return (await git(['rev-parse', '--show-toplevel'], cwd)).trim(); } catch { throw new Error('That folder is not in a git repository, so it cannot get a worktree.'); }
@@ -223,7 +225,7 @@ export async function createPr(cwd, branch, title) {
 
 /** The worktrees of a repository: each one's folder, branch, and whether it is the main folder. */
 export async function layout(repo) {
-  const out = await git(['worktree', 'list', '--porcelain'], repo, 15000);
+  const out = await git(['worktree', 'list', '--porcelain'], repo, 15000, ENGLISH); // relayout reads the error text
   const list = [];
   let cur = null;
   for (const line of out.split(/\r?\n/)) {
@@ -233,6 +235,45 @@ export async function layout(repo) {
     else if (cur && line === 'bare') cur.bare = true;
   }
   return list.filter((w) => !w.bare && !w.prunable);
+}
+
+/** What `relayout` answers when git failed for a passing reason: change nothing. */
+export const KEEP = Symbol('keep');
+
+/**
+ * The worktrees of a known repository, read again. When git fails for a passing reason (a timeout, a lock,
+ * a busy disk) the answer is `KEEP`: the caller leaves what it has. Returns `null` only when the repository is
+ * really gone: its folder is missing, or git says the folder is not a repository. `deps` (`list`, `exists`) are for tests.
+ */
+export async function relayout(repo, { list = layout, exists = fs.existsSync } = {}) {
+  try { return await list(repo); } catch (e) {
+    if (!exists(repo) || /not a git repository/i.test(String(e && e.message))) return null;
+    return KEEP;
+  }
+}
+
+// Refreshes of one repository overlap: the 30 s timer, `addRepo` and every room or floor action each start one.
+// The order they START in is the order of their facts, so a slower older read must not undo a newer one.
+const refreshSeq = new WeakMap(); // entry -> { started, applied }
+
+/**
+ * Reads the worktrees of a repository entry (`{ path, worktrees }`) again and sets `entry.worktrees`.
+ * Answers `'changed'`, `'same'`, `'gone'` (the repository is gone: the caller drops the entry), or `'stale'`
+ * (a refresh that started later already settled: nothing is written). A failed read changes nothing: it carries
+ * no fact, so it neither writes nor blocks an older read that is still running. `deps` are `relayout`'s.
+ */
+export async function refreshEntry(entry, deps) {
+  const seq = refreshSeq.get(entry) || { started: 0, applied: 0 };
+  refreshSeq.set(entry, seq);
+  const mine = ++seq.started;
+  const res = await relayout(entry.path, deps);
+  if (res === KEEP) return 'same';
+  if (mine < seq.applied) return 'stale';
+  seq.applied = mine;
+  if (res === null) return 'gone';
+  if (JSON.stringify(res) === JSON.stringify(entry.worktrees)) return 'same';
+  entry.worktrees = res;
+  return 'changed';
 }
 
 /** The files git tracks in a folder (relative, forward slashes), at most 20000. */
@@ -246,10 +287,13 @@ export async function branches(repo) {
 }
 
 const BRANCH_RE = /^(?!-)(?!.*\.\.)(?!.*\/\/)(?!.*@\{)[A-Za-z0-9._\/-]{1,100}(?<![./])$/;
-const slugOf = (t) => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'branch';
+/** Letters with accents become their plain letter (Ünïcode -> Unicode); a few that do not decompose get a spelled form. */
+const FOLD = { 'ß': 'ss', 'æ': 'ae', 'Æ': 'AE', 'œ': 'oe', 'Œ': 'OE', 'ø': 'o', 'Ø': 'O', 'đ': 'd', 'Đ': 'D', 'ð': 'd', 'Ð': 'D', 'ł': 'l', 'Ł': 'L', 'þ': 'th', 'Þ': 'Th', 'ı': 'i' };
+const fold = (t) => String(t).normalize('NFKD').replace(/\p{M}+/gu, '').replace(/[ßæÆœŒøØđĐðÐłŁþÞı]/g, (c) => FOLD[c]);
+const slugOf = (t) => fold(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'branch';
 /** A room name as a folder name: letters, digits, dots and dashes. The folder name is the room name in the office. */
 export function roomNameOf(name) {
-  const n = String(name || '').trim().replace(/[^A-Za-z0-9._]+/g, '-').replace(/^[-.]+|[-.]+$/g, '');
+  const n = fold(String(name || '').trim()).replace(/[^A-Za-z0-9._]+/g, '-').replace(/^[-.]+|[-.]+$/g, '');
   if (String(name || '').trim() && !n) throw new Error('Use letters or digits in the room name.');
   const cut = n.slice(0, 40).replace(/[-.]+$/, ''); // Windows drops a trailing dot from a folder name
   if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(cut)) throw new Error('Windows reserves that name. Pick another room name.');

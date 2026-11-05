@@ -32,13 +32,15 @@ const DANGER = [
 
 // Path parts (folders or files) whose content a program runs without asking: git config, hooks and the
 // worktree link file; Claude Code settings, hooks, commands and skills; MCP server lists; editor tasks and
-// run settings; ssh config; the office's own hook and MCP files. An edit to one of them is high.
-const RUNS = new Set(['.git', '.claude', '.vscode', '.idea', '.ssh', '.mcp.json', '.claude.json', '.gitconfig',
-  'office-hooks.json', 'office-hooks-http.json', 'office-mcp.json']);
+// run settings; ssh config; the office's own hook and MCP files, with or without a port in the name (files.mjs). An
+// edit to one of them is high.
+const RUNS = new Set(['.git', '.claude', '.vscode', '.idea', '.ssh', '.mcp.json', '.claude.json', '.gitconfig']);
+const RUNS_FILE = /^office-(hooks|hooks-http|mcp)(-\d+)?\.json$/;
 // Credential folders and secret-looking file names. A read outside the root is high, inside it is medium.
+// .office-token[-<port>] and office-hooks-http[-<port>].json hold an office's agent token (files.mjs);
 // office-page-<port>.json holds the office's page token for the user's own tools (auth.mjs pageFile).
 const SECRET_DIRS = new Set(['.ssh', '.gnupg', '.aws', '.azure', '.kube']);
-const SECRET_FILE = /^(\.env.*|.*\.(pem|key|pfx|p12)|id_(rsa|dsa|ecdsa|ed25519).*|\.credentials\.json|\.office-token|office-hooks-http\.json|office-page-\d+\.json|\.npmrc|\.netrc|_netrc|\.git-credentials|\.pypirc)$/;
+const SECRET_FILE = /^(\.env.*|.*\.(pem|key|pfx|p12)|id_(rsa|dsa|ecdsa|ed25519).*|\.credentials\.json|\.office-token(-\d+)?|office-hooks-http(-\d+)?\.json|office-page-\d+\.json|\.npmrc|\.netrc|_netrc|\.git-credentials|\.pypirc)$/;
 
 const WIN = process.platform === 'win32';
 const norm = (p) => { const r = path.resolve(String(p)); return WIN ? r.toLowerCase() : r; };
@@ -54,7 +56,7 @@ function kinds(list) {
   let secret = false, runs = false;
   for (const part of list) for (const n of forms(part)) {
     if (SECRET_DIRS.has(n) || SECRET_FILE.test(n)) secret = true;
-    if (RUNS.has(n)) runs = true;
+    if (RUNS.has(n) || RUNS_FILE.test(n)) runs = true;
   }
   return { secret, runs };
 }

@@ -12,6 +12,7 @@
                         length of the secret does not show). The secret is text, not a pattern. Used by the Attach
                         sessions dialog to hide the agent token until the user clicks Show.
      cleanupNote(result) -> [tone, title, text] for the toast after a floor clean-up ({ deleted, skipped } from the server).
+     cleanupEmpty(kept) -> the empty text of the clean-up dialog: the true reason (the user kept every floor, or none was ready).
      hintPill(textW, keyW) -> where the parts of a scene hint pill sit, in pill pixels: { w, textX, keyX, keyW }.
                         The pill grows with its label. keyW 0 gives a label only (keyX is null).
 */
@@ -30,8 +31,14 @@
     var gone = d.length === 1 ? '1 floor and its rooms are gone.' : d.length + ' floors and their rooms are gone.';
     if (!d.length && !k.length) return ['info', 'Nothing to clean up', 'No floor was deleted.'];
     if (!k.length) return ['info', 'Floors cleaned up', gone];
-    if (!d.length) return ['error', 'No floor deleted', 'Kept: ' + k.join(', ') + '. ' + (k.length === 1 ? 'It changed' : 'They changed') + ' or a session works there.'];
-    return ['error', 'Some floors stayed', plural(d.length, 'floor') + ' deleted. Kept: ' + k.join(', ') + '. They changed or a session works there.'];
+    var why = (k.length === 1 ? 'It changed' : 'They changed') + ' or a session works there.';
+    if (!d.length) return ['error', 'No floor deleted', 'Kept: ' + k.join(', ') + '. ' + why];
+    return ['error', 'Some floors stayed', plural(d.length, 'floor') + ' deleted. Kept: ' + k.join(', ') + '. ' + why];
+  }
+  /** The empty text of the clean-up dialog. kept = how many floors the user left out with Keep this floor. */
+  function cleanupEmpty(kept) {
+    if (kept > 0) return (kept === 1 ? 'You kept the floor.' : 'You kept all ' + kept + ' floors.') + ' No floor is deleted.';
+    return 'No floor is ready. A floor must be merged, have no changes and no session, and be over an hour old.';
   }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
   function trimmed(p) { var s = String(p == null ? '' : p); return s.length > 1 ? s.replace(/[\\/]+$/, '') : s; }
@@ -57,5 +64,5 @@
     var t = String(text == null ? '' : text), k = String(secret == null ? '' : secret);
     return k ? t.split(k).join(SECRET_MASK) : t;
   }
-  root.OfficeFormat = { money: money, plural: plural, folderName: folderName, shortPath: shortPath, hintPill: hintPill, cleanupNote: cleanupNote, maskSecret: maskSecret, SECRET_MASK: SECRET_MASK };
+  root.OfficeFormat = { money: money, plural: plural, folderName: folderName, shortPath: shortPath, hintPill: hintPill, cleanupNote: cleanupNote, cleanupEmpty: cleanupEmpty, maskSecret: maskSecret, SECRET_MASK: SECRET_MASK };
 })(typeof globalThis !== 'undefined' ? globalThis : window);
