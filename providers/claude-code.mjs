@@ -9,7 +9,7 @@
 // fake runner. Nothing starts on import.
 import crypto from 'node:crypto';
 import { spawn as realSpawn, execFile as realExecFile, execFileSync as realExecFileSync } from 'node:child_process';
-import { resolveExe } from '../git.mjs';
+import { resolveExe, helperCwd } from '../git.mjs';
 import { clip } from '../tracker.mjs';
 import { providerError } from './index.mjs';
 
@@ -39,7 +39,7 @@ export function programPath(name, exe = resolveExe) {
 
 /** The Claude Code version (`claude --version`), or 'unknown'. Synchronous: the server needs it at start for the hooks mode. */
 export function claudeVersion(run = realExecFileSync, exe = resolveExe) {
-  try { return String(run(exe('claude'), ['--version'], { encoding: 'utf8', timeout: 8000, windowsHide: true })).trim(); } catch { return 'unknown'; }
+  try { return String(run(exe('claude'), ['--version'], { cwd: helperCwd(), encoding: 'utf8', timeout: 8000, windowsHide: true })).trim(); } catch { return 'unknown'; }
 }
 
 // Images go in as image blocks and text files inline. Anything else is refused, never silently dropped.
@@ -104,7 +104,7 @@ export function createClaudeCode(deps) {
   }
   function run(name, args, ms) {
     return new Promise((resolve, reject) => {
-      execFile(program(name), args, { windowsHide: true, timeout: ms }, (err, out) => (err ? reject(err) : resolve(String(out))));
+      execFile(program(name), args, { cwd: helperCwd(), windowsHide: true, timeout: ms }, (err, out) => (err ? reject(err) : resolve(String(out))));
     });
   }
   // The process is gone: no control response can come now, so every waiting request fails at once.
@@ -253,7 +253,7 @@ export function createClaudeCode(deps) {
       const taskkill = program('taskkill');
       closing.add(s.uid);
       return new Promise((resolve, reject) => {
-        execFile(taskkill, ['/PID', String(s.pid), '/T', '/F'], { windowsHide: true }, (err, _o, stderr) => {
+        execFile(taskkill, ['/PID', String(s.pid), '/T', '/F'], { cwd: helperCwd(), windowsHide: true }, (err, _o, stderr) => {
           if (err && !/not found|no running instance/i.test(String(stderr))) {
             closing.delete(s.uid); // it still runs: a later exit is the session's end again
             return reject(providerError(500, `Could not close it: ${String(stderr || err.message).trim()}`));

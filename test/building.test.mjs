@@ -9,9 +9,10 @@ import { createTracker } from '../tracker.mjs';
 import { slimPayload } from '../payload.mjs';
 import { placeOfSession, placeOfWorktree, normPath } from '../place.mjs';
 import '../public/vocab.js';
+import '../public/wire.js';
 import '../public/building.js';
 
-const V = globalThis.OfficeVocab, B = globalThis.OfficeBuilding;
+const V = globalThis.OfficeVocab, B = globalThis.OfficeBuilding, W = globalThis.OfficeWire;
 const load = (f) => JSON.parse(fs.readFileSync(new URL('./fixtures/' + f, import.meta.url), 'utf8'));
 const HOOKS = load('hooks.json'), STREAM = load('stream.json');
 const SCHEMA = JSON.parse(fs.readFileSync(new URL('../kit/schema.json', import.meta.url), 'utf8'));
@@ -62,7 +63,18 @@ function rig(over = {}) {
       repos: r.repos.map((p) => ({ key: normPath(p.path), path: p.path, name: p.path.split('\\').pop(), worktrees: p.worktrees.map((w) => ({ ...w, place: placeOfWorktree(p.path, w) })) })),
     };
   };
-  r.push = () => r.store.set(JSON.parse(JSON.stringify(r.snap())));   // as over SSE
+  // as over SSE. wire: the server's way (wire.js): the lean snapshot, whole once, then patches; r.reconnect() starts again.
+  const tx = W.sender();
+  let fresh = true;
+  r.reconnect = () => { tx.reset(); fresh = true; };
+  r.push = over.wire
+    ? () => {
+      const p = tx.next(W.lean(r.snap()));
+      const msg = fresh ? tx.full() : p;
+      fresh = false;
+      if (msg) assert.equal(r.store.receive(JSON.parse(JSON.stringify(msg))), true, 'the message fits');
+    }
+    : () => r.store.set(JSON.parse(JSON.stringify(r.snap())));
   r.hook = async (raw) => { r.tracker.onHook(slimPayload(raw, null)); await new Promise((res) => setImmediate(res)); r.push(); };
   r.play = async (list) => { for (const p of list) await r.hook(p); };
   // Mount a building the way the page does, and collect its events (each checked against the schema).
@@ -750,4 +762,63 @@ test('a reopened session carries its old replies: restored in a live pass, no bu
   r.t += 5; r.tracker.pushReply(fresh, 'Third.'); r.push();
   const nw = of(m.ev, 'message').filter((e) => e.bot === botB).at(-1);
   assert.deepEqual([nw.text, nw.seeded, nw.say], ['Third.', undefined, undefined]);
+});
+
+// ---------- the wire (wire.js): lean snapshots and patches give the scene the same events ----------
+// One story told twice: once as whole server snapshots (r.store.set), once as the server sends it now (the lean
+// snapshot whole, then patches, and a reconnect in the middle). The scene must get the same events, seeded flags and
+// times included, and the store must answer the same.
+async function story(r) {
+  const queued = [];
+  await r.play(fromHooks('turnWithEdit', REPO_A, 'a').slice(0, 3));
+  r.tracker.permissionRequest(slimPayload({ ...HOOKS.permission, session_id: 'a', cwd: REPO_A }, null));
+  const sa = [...r.tracker.sessions.values()][0];
+  r.tracker.pushReply(sa, 'Earlier answer.'); r.push();
+  r.deferNext = (fn) => queued.push(fn);
+  const m = r.store.mount(KEY_A), ev = [];
+  m.attach((e) => ev.push(e));
+  r.t += 10;
+  await r.play(fromHooks('turnWithEdit', REPO_A, 'b').slice(0, 2));   // lands before the deferred first pass
+  queued.forEach((f) => f());
+  r.t += 10;
+  await r.play(fromHooks('subagent', REPO_A, 'a'));
+  await r.hook({ ...HOOKS.todoWrite, session_id: 'a', cwd: REPO_A });
+  r.reconnect();   // the stream drops and comes back: a whole snapshot, then patches again
+  r.t += 10;
+  await r.hook({ ...HOOKS.failedTool, session_id: 'b', cwd: REPO_A });
+  r.tracker.askQuestion(sa, 'Use the old schema?'); r.push();
+  r.tracker.pushReply(sa, 'New answer.'); r.push();
+  const sb = [...r.tracker.sessions.values()][1];
+  sb.error = { id: 1, text: 'Out of budget.', at: r.t }; r.push();
+  sa.git = { ...sa.git, branch: 'feat/y' }; r.push();   // a re-seat on another floor
+  r.t += 10;
+  r.tracker.endSession(sb, 'closed'); r.push();
+  return { ev, requests: r.store.requests(), alerts: r.store.alerts(), buildings: r.store.buildings(), stale: m.stale(), names: [sa.uid, sb.uid].map(m.botName) };
+}
+
+test('the scene gets the same events from lean snapshots and patches as from whole snapshots, across a reconnect', async () => {
+  const full = rig({ defer: (fn) => full.deferNext(fn) }), lean = rig({ wire: true, defer: (fn) => lean.deferNext(fn) });
+  const a = await story(full), b = await story(lean);
+  assert.ok(a.ev.length > 20, `${a.ev.length} events`);
+  assert.ok(a.ev.some((e) => e.seeded) && a.ev.some((e) => !e.seeded), 'the story has a restore and live news');
+  assert.deepEqual(b.ev, a.ev);
+  assert.deepEqual(b.requests, a.requests);
+  assert.deepEqual(b.alerts, a.alerts);
+  assert.deepEqual(b.buildings, a.buildings);
+  assert.deepEqual([b.stale, b.names], [a.stale, a.names]);
+});
+
+test('receive: a patch that does not start from the latest snapshot changes nothing and asks for a reconnect', async () => {
+  const r = rig({ wire: true });
+  await r.play(fromHooks('turnWithEdit', REPO_A, 'a').slice(0, 3));
+  const before = r.store.latest();
+  const seen = [];
+  r.store.onSnapshot((s) => seen.push(s));
+  assert.equal(r.store.receive({ patch: 1, base: before.seq + 5, seq: before.seq + 6, set: { plan: { week: null } } }), false);
+  assert.equal(r.store.latest(), before, 'the snapshot is the same');
+  assert.equal(seen.length, 1, 'no listener hears of it');
+  assert.equal(r.store.receive({ patch: 1, base: before.seq, seq: before.seq + 1, set: { plan: { week: { percent: 5 } } } }), true);
+  assert.equal(r.store.latest().plan.week.percent, 5);
+  assert.equal(r.store.latest().sessions, before.sessions, 'what did not change is shared');
+  assert.equal(B.createStore().receive({ patch: 1, base: 1, seq: 2 }), false, 'a patch before any snapshot does not fit');
 });

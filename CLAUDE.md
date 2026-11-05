@@ -1,6 +1,6 @@
 # CLAUDE.md: Agent Office for Claude Code
 
-A browser office for Claude Code sessions: bots at desks, a chat per bot, approvals, diffs, schedules. Node ES modules, no dependencies, Windows first. User docs are in `README.md`. The UI is the Agent Office design system (DS x1.6.3), documented in `DS-README.md`, `Recipes.md`, `Reference.md`, `Concepts.md`.
+A browser office for Claude Code sessions: bots at desks, a chat per bot, approvals, diffs, schedules. Node ES modules, no dependencies, Windows first. User docs are in `README.md`. The UI is the Agent Office design system (DS x1.6.4), documented in `DS-README.md`, `Recipes.md`, `Reference.md`, `Concepts.md`.
 
 ## UI rules (the DS is law for anything visual)
 
@@ -8,10 +8,10 @@ Read `DS-README.md`, `Recipes.md` and `Reference.md` before you change the UI, a
 
 - Use DS tokens for every color, size and duration. No literal colors. Use the DS icon set and DS components (`Button`, `Dialog`, `Select`, `TextInput`, `EmptyState`, ...). No emoji.
 - Write copy in Simplified Technical English: short sentences, active voice, buttons say the result. No "Oops", "Sorry", exclamation marks, "please".
-- Keep the `x` version prefix (page `x0.1`, DS `x1.6.3`) in titles.
+- Keep the `x` version prefix (page `x0.1`, DS `x1.6.4`) in titles.
 - The DS lives in this repo and its owner may change it. DS changes go in `components/`, `kit/`, the tokens and the DS docs, with a Changelog row and the DS Definition of done (`DS-README.md`). Page code still uses only DS APIs: no DOM patching of DS internals.
 - Never move bots yourself. The scene changes only from adapter events.
-- Before you finish a UI change: `python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/wheel-gate.js public/vocab.js public/scene-host.js public/building.js public/format.js public/toasts.js`, then look at screenshots in Day, Night and Sublevel at 1360, 1100 and 400 px.
+- Before you finish a UI change: `python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/wheel-gate.js public/vocab.js public/scene-host.js public/building.js public/format.js public/toasts.js public/wire.js`, then look at screenshots in Day, Night and Sublevel at 1360, 1100 and 400 px.
 - The page's own styles go in `public/office.css`. The DS sets its theme on `.ao-office`, and `chat-extras.js` mirrors it to `<html data-theme>`, so page UI must read tokens only.
 
 ## Commands
@@ -55,6 +55,7 @@ Owner rules for final tests and clean-up:
 | `mcp.mjs` | stdio MCP server: `office_inbox`, `office_ask`, `office_room`, `office_room_update`. |
 | `public/vocab.js` | Session vocabulary, shared by the page, the server and the tests (`globalThis.OfficeVocab`). Status key and word (error included), task line, tool kind and short name, to-do status, room figures. Plain script, no I/O, no timers. |
 | `public/wheel-gate.js` | Wheel gate (`OfficeWheelGate`, tested in `test/wheel-gate.test.mjs`). Decides when scrolling out leaves a level: one gesture, one level; 600 ms pause after a change; 2 pushes at the floor, 3 at the building. Plain script, the caller passes the time. |
+| `public/wire.js` | The `/events` wire format, shared by the server and the page (`globalThis.OfficeWire`, tested in `test/wire.test.mjs`). `lean()`: per session only the fields the page reads (`SESSION_FIELDS`), calls up to the tracker cap, replies up to 32,000 characters, newest first. `diff()` and `apply()`: the patch from one broadcast to the next (keyed lists for sessions, calls and replies; maps for figures, notes and pins). `sender()`: the numbered patches of the server. |
 | `public/building.js` | Snapshot store and building adapter, no DOM (`globalThis.OfficeBuilding`, tested in `test/building.test.mjs`). `createStore()` owns the latest snapshot; `store.mount(repo)` makes one building adapter per mounted scene: snapshot to DS events (repo = building, branch = floor, worktree = room; tool calls, helpers, plan, errors, triggers, usage), `stale()`, `roomInfo / figures / noteKey / session / lookup / uidsOf`. `store.requests()` is the Needs you list: every open request and question of every building, oldest first. `store.alerts()` is that list plus each failed turn, for the page's one `Notifier`. The first pass after `attach` restores the snapshot the store had at attach: `seeded: true` on every event, and `at` where the snapshot has the time. It runs once, from the deferred call or from the first snapshot that comes before it; that snapshot is then applied live on top. A bot seated again on another floor restores what its old seat showed with `seeded: true` and no `at`; its new items are live. |
 | `public/adapter.js` | The browser side of it: the launch code trade (`#n=` to `POST /launch`, then the page cookie), the SSE stream into the store, DS commands to REST calls, and `window.officeAdapter` (the store plus `mount(repo)`, which adds the DS adapter as `.adapter`; `ready` and `onAuth(fn)` for access). |
 | `public/city.js` | The city: all repositories as buildings on one DS stage (`AgentOffice.office.Stage`), with rise and sink effects, zoom to mouse, bounded pan, click or zoom in to enter. `OfficeCity.cameraFeel(stage)` also gives the office scene zoom to mouse. |
@@ -78,7 +79,7 @@ Add a new file only for a distinct job. Extend the file that owns the concern fi
 - A held request ends with one decision: `{ allow, always }`, `{ text }` for a question, or `{}` for none. The hold's `reply` takes it to the agent. On a hook, the session's provider gives the answer body (`claude.answer`: `hookSpecificOutput`). `POST /api/open` takes `provider` (default `claude-code`). `GET /api/providers` gives each kind's readiness, needs and models. A hold that times out says "question timed out, <provider label> moved on".
 - A provider delivers `events.hook()`'s return value (queued office messages: `additionalContext`, or `decision: block` on Stop) to its agent.
 - Past sessions record `provider` and `model`. Reopen follows `providers.reopenPlan(rec)`: a provider with `canResume` continues the conversation and the record leaves the past list; any other provider opens a fresh session in the same folder with the same model, the feed says "A new session started. This agent kind cannot resume a past session.", and the record stays. A record with no `provider` is Claude Code's.
-- Every state change calls `broadcast()`. The browser gets full snapshots over `/events`.
+- Every state change calls `broadcast()`. Changes within 100 ms go out as one message. A page gets the lean snapshot whole when it connects, then one patch per broadcast (`public/wire.js`); `store.receive` applies it, and a patch that does not fit makes the page connect again. When the page starts to read a new session field, add it to `SESSION_FIELDS`, or the page never gets it. Full data of one session (sid, budget, every reply, its feed lines) is `GET /api/session?uid=`; tests and scripts read that, not `/events`.
 - Sessions are keyed by `uid`. `sid` is the agent's session id (Claude's for Claude Code). `officeId` links hooks to a session the office opened (env `OFFICE_ID`).
 
 - Access (owner decision on #27 H1, rules in `auth.mjs`). Two tokens, each for one route group, neither opens the other:
@@ -128,6 +129,7 @@ Add a new file only for a distinct job. Extend the file that owns the concern fi
 - A headless session emits `init` (session id, commands, skills) only after its first message. The server keeps the last command list for new sessions.
 - Claude Code's default permission mode may be Auto, so no prompts appear. Tests that need a prompt must pass `permissionMode: 'default'`.
 - The hook's parent shell dies right after the hook returns, so the process walk must happen while the hook waits. A persistent PowerShell helper (`walkToClaude`) does it.
+- Every program the office starts names its `cwd`: the session folder for work in it, `git.helperCwd()` (%SystemRoot%) for a helper. On Windows a process keeps its current folder busy, so a helper that inherited the office folder (the walker, icacls, the ACL reader) made `rmSync` of a test's temp office fail with EBUSY after the server was killed (#78). `test/spawn-safety.test.mjs` checks the sources.
 - HTTP hook failures are non-blocking. Command hooks must stay silent on stdout unless they return real hook JSON.
 - "Always allow" uses `permission_suggestions` from the hook payload and returns them as `updatedPermissions`. Pass only `addRules` with `behavior: allow`. Edits get a mode suggestion, not a rule.
 - `result` with `error_during_execution` after an interrupt is not an error. Check `s.interrupted`.

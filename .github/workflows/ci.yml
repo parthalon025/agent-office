@@ -21,7 +21,7 @@ jobs:
       - name: Tests
         run: npm test
       - name: Design system check
-        run: python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/wheel-gate.js public/vocab.js public/scene-host.js public/building.js public/format.js public/toasts.js
+        run: python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/wheel-gate.js public/vocab.js public/scene-host.js public/building.js public/format.js public/toasts.js public/wire.js
   # The office is Windows first. Some tests run only there (the /mcp routes with a real server, local tools, spawn safety).
   windows:
     runs-on: windows-latest

@@ -50,23 +50,9 @@ async function open(name) {
   assert.equal(r.status, 200, JSON.stringify(r.json));
   return r.json.uid;
 }
-// The sessions the server shows: the first snapshot of the event stream.
-async function snapshot() {
-  const ctl = new AbortController();
-  try {
-    const r = await fetch(`http://127.0.0.1:${port}/events`, { headers: { 'x-office-token': pageToken }, signal: ctl.signal });
-    const reader = r.body.getReader();
-    let buf = '';
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) return null;
-      buf += Buffer.from(value).toString('utf8');
-      const m = /data: (.*)\n\n/.exec(buf);
-      if (m) return JSON.parse(m[1]);
-    }
-  } finally { ctl.abort(); }
-}
-const sessionOf = async (uid) => (await snapshot()).sessions.find((s) => s.uid === uid);
+// One session with all its data (provider, budget, ...) and its feed lines: the snapshot carries only what the page reads.
+const fullOf = async (uid) => { const r = await fetch(`http://127.0.0.1:${port}/api/session?uid=${encodeURIComponent(uid)}`, { headers: { 'x-office-token': pageToken } }); return r.ok ? r.json() : null; };
+const sessionOf = async (uid) => (await fullOf(uid))?.session;
 
 before(async () => {
   if (SKIP) return;
@@ -209,8 +195,8 @@ test('a past local session reopens as a fresh local session in the same folder',
   assert.equal(s.provider, 'ollama');
   assert.equal(s.model, 'fake-model', 'the same model as the past session');
   assert.equal(s.cwd.toLowerCase(), work.toLowerCase());
-  const snap = await snapshot();
-  assert.ok(snap.feed.some((f) => /cannot resume a past session/.test(f.text || '')), 'the feed says why it is a new session');
+  const { feed } = await fullOf(re.json.uid);
+  assert.ok(feed.some((f) => /cannot resume a past session/.test(f.text || '')), 'the feed says why it is a new session');
 });
 
 // ---------- default spend limit (#33). No paid session opens here: a paid one would start claude. ----------

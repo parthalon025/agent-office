@@ -4,7 +4,9 @@
 
    Snapshot store (createStore): owns the latest snapshot, the people who listen to it, and the building
    adapters that are on screen.
-     set(snap)             the SSE feed calls this for each snapshot
+     set(snap)             a whole snapshot
+     receive(msg)          the SSE feed calls this for each message: a whole snapshot or a patch (wire.js);
+                           false when a patch does not fit the latest snapshot (then connect again)
      latest()              the newest snapshot, or null
      onSnapshot(fn)        fn(snap) now (when there is one) and on each snapshot; returns an unsubscribe function
      buildings(snap?)      the buildings, busiest first
@@ -189,6 +191,14 @@
       latest = snap;
       attached.slice().forEach(function (m) { m._follow(snap); });
       listeners.slice().forEach(function (fn) { try { fn(snap); } catch (x) { /* a bad listener must not stop the office */ } });
+    };
+    // One /events message (wire.js): a whole snapshot, or a patch on top of the latest one. False when a patch does
+    // not start from the latest snapshot (nothing changes then): the caller connects again for a whole snapshot.
+    store.receive = function (msg) {
+      if (!msg || !msg.patch) { store.set(msg); return true; }
+      if (!root.OfficeWire.fits(latest, msg)) return false;
+      store.set(root.OfficeWire.apply(latest, msg));
+      return true;
     };
     store.onSnapshot = function (fn) {
       listeners.push(fn);

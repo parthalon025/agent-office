@@ -44,7 +44,12 @@
     }, check);
   function connect() {
     var src = es = new EventSource('/events');
-    src.onmessage = function (e) { store.set(JSON.parse(e.data)); };
+    // The first message is the whole snapshot, the next ones are patches (wire.js). A patch that does not fit the
+    // snapshot the page has: connect again, and the server sends it whole.
+    src.onmessage = function (e) {
+      if (store.receive(JSON.parse(e.data)) || es !== src) return;
+      src.close(); es = null; connect();
+    };
     src.onopen = function () { setAuth({ ok: true }); };
     // CLOSED means the server refused the stream (no access, for example after a restart). On a lost connection the
     // browser tries again by itself, and the state stays CONNECTING.

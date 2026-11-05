@@ -569,6 +569,9 @@ test('route matrix, launch code and owner-only files on a real server', { timeou
     OFFICE_RATE_FILE: path.join(tmp, 'no-rate.json'),
   });
   const office = startOffice(dir, env);
+  // The finally stops the second copy too. A copy that is still starting when the test fails keeps the folder busy, and
+  // once the first office is gone it takes the port and runs on with no test to stop it (#78).
+  let second = null;
   try {
     await office.done;
     const code = office.out().match(/#n=([0-9a-f]{32})/)[1];
@@ -675,7 +678,7 @@ test('route matrix, launch code and owner-only files on a real server', { timeou
     assert.equal((await hit(port, 'POST', '/launch', { headers: { 'content-type': 'application/json' }, body: { code: code2 } })).status, 401);
 
     // A second copy on the same port changes no token and prints a fresh launch link from the running office.
-    const second = startOffice(dir, env);
+    second = startOffice(dir, env);
     await second.done;
     await new Promise((r) => (second.child.exitCode !== null ? r() : second.child.once('exit', r)));
     assert.equal(second.child.exitCode, 0, second.out());
@@ -703,9 +706,12 @@ test('route matrix, launch code and owner-only files on a real server', { timeou
       for (const f of [statePath, historyPath]) assert.equal(fs.statSync(f).mode & 0o777, 0o600, path.basename(f));
     }
   } finally {
-    office.child.kill();
-    await new Promise((r) => (office.child.exitCode !== null ? r() : office.child.once('exit', r)));
-    // The server's PowerShell helper ends when its input closes; until then its folder may be in use.
+    for (const o of [office, second]) {
+      if (!o) continue;
+      o.child.kill();
+      await new Promise((r) => (o.child.exitCode !== null ? r() : o.child.once('exit', r)));
+    }
+    // The server's helpers start in %SystemRoot% (git.helperCwd), so once both copies are gone nothing is in the folder.
     fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   }
 });
