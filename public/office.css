@@ -5,8 +5,7 @@
 :root { --strip-clear: 200px; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: var(--font-sans); }
 #office { height: 100vh; }
-/* important: the DS scene sets an inline pixel height when it mounts and the page does not render again on resize. Without this the HUD keeps the old height, and the roster at the bottom edge sits under the dock after a window gets shorter. */
-#office .ao-office { height: 100vh !important; }
+/* The DS scene sets its height inline from the height prop. office.js renders it again when the window changes (#55). */
 
 .mono { font-family: var(--font-mono); font-size: var(--type-data-size); line-height: var(--type-data-line); font-variant-numeric: tabular-nums; }
 
@@ -32,7 +31,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .welcome {
   position: fixed; z-index: var(--z-hud); top: 40%; translate: -50% -50%;
   background: var(--panel); backdrop-filter: blur(var(--blur-panel)); border: 1px solid var(--line);
-  border-radius: var(--radius-lg); box-shadow: var(--shadow-panel); padding: var(--space-3);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-panel); padding: var(--space-3); box-sizing: border-box;   /* max-width includes the padding */
   --rail-clear: 302px;   /* the DS right rail: 270px wide, 16px from the edge, and a gap */
   left: calc((100vw - var(--rail-clear)) / 2); width: max-content; max-width: calc(100vw - var(--rail-clear) - var(--space-4));
 }
@@ -74,6 +73,8 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
   .ao-office:has(.ao-hud-chat) .ao-hud-syl { top: 64px; bottom: auto; }
   /* with no live session the welcome card is shown and the room card only repeats it (No sessions, 0 working), so the card gives way; the Decisions inbox stays */
   #office:has(.welcome) .ao-hud-right:not(.ao-hud-inbox) { display: none; }
+  /* the Since you left card and the room card both sit on the dock, so the room card waits until the card closes (#66) */
+  #office:has(.ao-hud-syl) .ao-hud-right:not(.ao-hud-inbox):not(.ao-hud-chat) { display: none; }
 }
 /* One panel at a time: the terminal, board and stats panels take the right column. */
 /* hide the column but keep its box: the DS camera reads its left edge to frame the scene */
@@ -118,6 +119,10 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 
 /* welcome card */
 .welcome-logo { display: flex; justify-content: center; padding-top: var(--space-2); }
+/* the wordmark shrinks to the card: the Sublevel one is wider than the card on a phone */
+.welcome-logo .ao-lockup { min-width: 0; max-width: 100%; }
+.welcome-logo .ao-lockup .ao-mark { flex: none; }
+.welcome-logo .ao-lockup svg { min-width: 0; max-width: 100%; height: auto; }
 /* Short windows (#52 follow-up): the card keeps its copy and gives up logo size, padding and gaps, so it fits between the top tools and the dock. */
 @media (max-height: 760px) {
   .welcome { padding: var(--space-2); }

@@ -31,9 +31,32 @@ test('office.css: the palette overlay is above the dialog layer (#48)', () => {
   assert.match(rule('.ao-cmdk-o'), /z-index:\s*calc\(var\(--z-dialog\)\s*\+\s*1\)/);
 });
 
-test('office.css: the scene height follows the window, not the height at mount (#53)', () => {
-  assert.match(css, /#office \.ao-office \{ height: 100vh !important; \}/);
+// #55 (after #53): office.js owns the scene height. It renders the scene again when the window changes; no page CSS
+// overrides the inline height the DS sets.
+const office = readFileSync(join(pub, 'office.js'), 'utf8').replace(/\r\n/g, '\n');
+test('office.js: the scene height follows the window, and no CSS overrides the DS height (#55)', () => {
+  assert.doesNotMatch(css, /\.ao-office[^{]*\{[^}]*height[^}]*!important/, 'no !important height on the DS scene');
   assert.match(rule('#office'), /height:\s*100vh/);
+  const scene = office.match(/h\(A\.OfficeScene, \{[^\n]*\bheight: ([\w.]+)/);
+  assert.ok(scene, 'the scene gets a height');
+  assert.notEqual(scene[1], 'window.innerHeight', 'not the height at the first render only');
+  assert.equal(scene[1], 'win.h');
+  assert.match(office, /var ws = useState\(winSize\), win = ws\[0\], setWin = ws\[1\];/);
+  // a resize sets the new size (once per frame), and the screen in focus is framed again after the scene has it
+  const fx = office.match(/\(#55\)\.\n( +)useEffect\(function \(\) \{\n[\s\S]*?\n\1\}, \[\]\);/);
+  assert.ok(fx, 'the resize effect');
+  assert.match(fx[0], /window\.addEventListener\('resize', onResize\)/);
+  assert.match(fx[0], /setWin\(winSize\(\)\)/);
+  assert.match(fx[0], /window\.removeEventListener\('resize', onResize\)/);
+  assert.match(office, /useEffect\(function \(\) \{ if \(hostRef\.current\) hostRef\.current\.refit\(\); \}, \[win\]\);/);
+});
+
+test('office.js: the welcome card waits while the Since you left card shows, and the dock holds the primary button then (#66)', () => {
+  assert.match(office, /h\(A\.OfficeScene, \{[^\n]*\n(?:[^\n]*\n){0,12}?[^\n]*onSinceYouLeft: setSyl/, 'the scene reports the card');
+  assert.match(office, /var welcome = !!snap && !live\.length && !p\.syl;/);
+  assert.match(office, /welcome \? h\('div', \{ className: 'welcome' \}/);
+  assert.match(office, /h\(A\.Button, \{ variant: welcome \? 'quiet' : 'primary', icon: 'add'/);
+  assert.match(office, /h\(Controls, \{[^\n]*\bsyl: syl && cur2\.view === 'office'/);
 });
 
 test('office.css: at 820 px and below the empty room card gives way to the welcome card, not the inbox (#53)', () => {
@@ -56,6 +79,17 @@ test('office.css: the welcome card centres with translate (not transform), only 
   assert.match(r, /translate:\s*-50%\s+-50%/);
   assert.doesNotMatch(r, /transform:/);
   assert.match(css, /\n\.welcome \{ animation: page-fade /);
+});
+
+test('office.css: the welcome card max-width includes its padding, and the wordmark shrinks to the card (Sublevel at 400 px)', () => {
+  assert.match(rule('.welcome'), /box-sizing:\s*border-box/);
+  assert.match(css, /\n\.welcome-logo \.ao-lockup \{ min-width: 0; max-width: 100%; \}/);
+  assert.match(css, /\n\.welcome-logo \.ao-lockup svg \{ min-width: 0; max-width: 100%; height: auto; \}/);
+});
+
+test('office.css: at 820 px and below the Since you left card and the room card do not share the dock edge (#66)', () => {
+  const m = css.match(/@media \(max-width: 820px\) \{[^@]*?#office:has\(\.ao-hud-syl\) \.ao-hud-right:not\(\.ao-hud-inbox\):not\(\.ao-hud-chat\) \{ display: none; \}/);
+  assert.ok(m, 'the rule sits in the 820 px block');
 });
 
 test('office.css: at 820 px and below the welcome card centres in the screen, between the top tools and the dock (#52)', () => {

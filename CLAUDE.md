@@ -1,6 +1,6 @@
 # CLAUDE.md: Agent Office for Claude Code
 
-A browser office for Claude Code sessions: bots at desks, a chat per bot, approvals, diffs, schedules. Node ES modules, no dependencies, Windows first. User docs are in `README.md`. The UI is the Agent Office design system (DS x1.6.1), documented in `DS-README.md`, `Recipes.md`, `Reference.md`, `Concepts.md`.
+A browser office for Claude Code sessions: bots at desks, a chat per bot, approvals, diffs, schedules. Node ES modules, no dependencies, Windows first. User docs are in `README.md`. The UI is the Agent Office design system (DS x1.6.2), documented in `DS-README.md`, `Recipes.md`, `Reference.md`, `Concepts.md`.
 
 ## UI rules (the DS is law for anything visual)
 
@@ -8,7 +8,7 @@ Read `DS-README.md`, `Recipes.md` and `Reference.md` before you change the UI, a
 
 - Use DS tokens for every color, size and duration. No literal colors. Use the DS icon set and DS components (`Button`, `Dialog`, `Select`, `TextInput`, `EmptyState`, ...). No emoji.
 - Write copy in Simplified Technical English: short sentences, active voice, buttons say the result. No "Oops", "Sorry", exclamation marks, "please".
-- Keep the `x` version prefix (page `x0.1`, DS `x1.6.1`) in titles.
+- Keep the `x` version prefix (page `x0.1`, DS `x1.6.2`) in titles.
 - The DS lives in this repo and its owner may change it. DS changes go in `components/`, `kit/`, the tokens and the DS docs, with a Changelog row and the DS Definition of done (`DS-README.md`). Page code still uses only DS APIs: no DOM patching of DS internals.
 - Never move bots yourself. The scene changes only from adapter events.
 - Before you finish a UI change: `python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/wheel-gate.js public/vocab.js public/scene-host.js public/building.js public/format.js public/toasts.js`, then look at screenshots in Day, Night and Sublevel at 1360, 1100 and 400 px.
@@ -101,6 +101,8 @@ Add a new file only for a distinct job. Extend the file that owns the concern fi
 - The local provider sends only `model`, `messages`, `tools`, `stream` and `stream_options`, by POST to `/chat/completions`. LM Studio can run its own MCP servers (for example run-command) when a request names them. Never add a field or call another endpoint: a tool call could then skip `riskOf` and the approval check. `test/local-provider.test.mjs` fails on any other key or path.
 - A test that starts `server.mjs` copies the code to a temp folder first (`test/mcp-routes.test.mjs`, `test/auth.test.mjs`, `test/static.test.mjs`, which also copies `components/` and `tokens.css`): the server writes `state.json`, the hook files and `.office-token` into its own folder, and a second copy in the repo would overwrite the token of the running office. It also sets its own `OFFICE_PORT`, `LOCALAPPDATA` (the page file goes there; the test reads the page token from `auth.pageFile(env, port)`) and `OFFICE_OPEN=0` (no browser).
 - The dock (`.strip`) is measured by `office.js`, which sets `--strip-clear` on `<html>` (its height plus a gap). The DS chat, roster, Since you left card and the page panels use it as their bottom edge. Do not hard-code a bottom offset for them. `kit/check.py` counts custom properties that the page defines in its own CSS as known tokens, so `--strip-clear` has a default in `office.css`.
+- The scene height is `office.js` state (`win.h`): a resize renders the page again, and the DS sets the new inline height. Do not override the `.ao-office` height in CSS (#55).
+- One card in the middle: the welcome card waits while the DS Since you left card shows (`onSinceYouLeft` sets `syl`), and the dock's Open session is the primary button then. At 820 px and below the room card waits too, because both sit on the dock (#66).
 - `backdrop-filter` on `.strip` makes it the containing block of its fixed children, so the More popover is `position: absolute`, not fixed.
 - One panel at a time: `office.js` adds `has-panel` to `#office` while the terminal, board or stats panel is open, and `office.css` hides `.ao-hud-right` (the DS chat and roster) then. Every such panel must show `RequestBar`, or an approval could hide behind the hidden chat.
 - "Always allow" and the risk of a request come from `OfficeVocab.alwaysOffer / requests`. A question has no risk and no rule. A high-risk request never offers Always allow.

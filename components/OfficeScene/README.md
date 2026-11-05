@@ -26,6 +26,7 @@ The 3D office itself and the main component of the system. It holds a building o
 | `ambient` | no | `boolean` |
 | `onAmbientOpen` | no | `() => void` |
 | `sinceYouLeft` | no | `boolean` |
+| `onSinceYouLeft` | no | `(open: boolean) => void` |
 | `building` | no | `BuildingDef` |
 | `solution` | no | `"hq" \| "microsoft" \| "hermes" \| "copilot"` |
 | `adapter` | no | `AgentAdapter \| null` |

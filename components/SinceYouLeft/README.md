@@ -11,6 +11,7 @@ A summary card for the person who comes back. It tells what happened while they 
 - "Replay" calls `onReplay`. Use it to start the TimeScrubber at `summary.since`.
 - "Open decisions" calls `onDecisions`. It is the emphasis button when a bot needs the person. It is off when no bot needs the person.
 - The close button calls `onClose`.
+- In `OfficeScene`, `onSinceYouLeft(open)` tells the page when the card shows (true) and when it goes (false: close, Replay, Open decisions, or the scene is disposed). Use it to keep page cards out of its place.
 - Empty state: "Nothing happened" when no bot finished, failed, called a tool or asked.
 - At 340 px and less, the figures go into 2 columns.
 
