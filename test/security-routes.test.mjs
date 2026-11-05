@@ -15,9 +15,12 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { pageFile } from '../auth.mjs';
 import { officeFiles } from '../files.mjs';
+import { shortOf } from './fixtures/short-name.mjs';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-let base, copy, work, home, repo, child, port, agentToken, pageToken, log = '';
+// shortRepo: the 8.3 short spelling of repo, or null when the volume keeps none (base is not made real on purpose: on
+// GitHub's Windows runner os.tmpdir() is C:\Users\RUNNER~1\..., and git answers the long path).
+let base, copy, work, home, repo, shortRepo, child, port, agentToken, pageToken, log = '';
 
 const freePort = () => new Promise((resolve, reject) => {
   const s = net.createServer();
@@ -84,6 +87,8 @@ before(async () => {
   const { execFileSync } = await import('node:child_process');
   const g = (...a) => execFileSync(resolveExe('git'), ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8', windowsHide: true });
   g('init', '-q', '-b', 'main'); fs.writeFileSync(path.join(repo, 'a.txt'), 'a\n'); g('add', '-A'); g('commit', '-q', '-m', 'init');
+  fs.mkdirSync(path.join(repo, 'src')); fs.writeFileSync(path.join(repo, 'src', 'b.txt'), 'b\n');
+  shortRepo = shortOf(fs.realpathSync.native(repo));
   for (const f of fs.readdirSync(SRC)) {
     if (/\.(mjs|json|ps1)$/.test(f) && !/^(state|history)(-\d+)?\.json$/.test(f) && !f.startsWith('office-')) fs.copyFileSync(path.join(SRC, f), path.join(copy, f));
   }
@@ -100,10 +105,12 @@ before(async () => {
   // A terminal Claude Code session in a folder outside git (building key ''), seated once its place is known.
   assert.equal((await hook(ev('SessionStart', { source: 'startup' }))).status, 200);
   await until(async () => (await sessionIn(work))?.place, 'the session to be placed');
-  // and one in a git repository, and one in the (server's) home folder
+  // and one in a git repository, and one in the (server's) home folder. The one in the repository waits until git placed
+  // it there (the lean git is { branch }, null outside git): placed outside git (git did not answer in time), its edits are
+  // not Edit inside, and a test would wait 60 s.
   for (const [sid, cwd] of [['sid-sec-git', repo], ['sid-sec-home', home]]) {
     assert.equal((await hook({ hook_event_name: 'SessionStart', session_id: sid, cwd, source: 'startup' })).status, 200);
-    await until(async () => (await sessionIn(cwd))?.place, `the session in ${path.basename(cwd)} to be placed`);
+    await until(async () => { const x = await sessionIn(cwd); return x?.place && (cwd !== repo || x.git); }, `the session in ${path.basename(cwd)} to be placed`);
   }
 });
 after(async () => {
@@ -155,15 +162,37 @@ test('with the default cells a low-risk Claude Code edit in a worktree is held o
   assert.ok(!(await feedOf(repo)).some((t) => /by Security/.test(t)), 'no Security line');
 });
 
-test('Allow set by the user answers at once, with a feed line', async () => {
-  const edit = { file_path: path.join(repo, 'a.txt'), old_string: 'a', new_string: 'b' };
+// The rule goes back to its default also when the test fails, so a failure here does not fail the tests after it.
+const allowEditsUntilDone = async (t) => {
+  t.after(() => set({ scope: 'office', row: 'edit-inside', col: 'claude-code', value: null }));
   assert.equal((await set({ scope: 'office', row: 'edit-inside', col: 'claude-code', value: 'allow', confirmed: true })).status, 200);
+};
+const allowed = { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } };
+
+test('Allow set by the user answers at once, with a feed line', async (t) => {
+  const edit = { file_path: path.join(repo, 'a.txt'), old_string: 'a', new_string: 'b' };
+  await allowEditsUntilDone(t);
   const r = await hook(permission('Edit', edit, { session_id: 'sid-sec-git', cwd: repo }));
   assert.equal(r.status, 200);
-  assert.deepEqual(r.json, { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } });
+  assert.deepEqual(r.json, allowed);
   assert.ok(await feedHas('allowed by Security: Edit inside the worktree', repo));
   assert.equal((await set({ scope: 'office', row: 'edit-inside', col: 'claude-code', value: null })).status, 200); // Use default
   assert.deepEqual((await snapshot()).security.rules, { office: {}, buildings: {} });
+});
+
+// git gives the long path of the worktree; the session's folder and its tool paths can be the 8.3 short name (TEMP on
+// GitHub's Windows runner). The session is in its worktree, and the user's Edit inside rule applies, in either spelling.
+test('a session that started in the 8.3 short name of its worktree gets the Edit inside rule, for a path in either spelling', async (t) => {
+  if (!shortRepo) { t.skip('no 8.3 short name for the temp folder here (8.3 names are off on this volume); test/risk.test.mjs checks the rule'); return; }
+  const cwd = path.join(shortRepo, 'src'), sid = 'sid-sec-short';
+  assert.equal((await hook({ hook_event_name: 'SessionStart', session_id: sid, cwd, source: 'startup' })).status, 200);
+  await until(async () => (await sessionIn(cwd))?.git, 'the session in the short folder to be placed in git');
+  await allowEditsUntilDone(t);
+  for (const file of [path.join(cwd, 'b.txt'), path.join(fs.realpathSync.native(repo), 'src', 'b.txt')]) {
+    const r = await hook(permission('Edit', { file_path: file, old_string: 'b', new_string: 'c' }, { session_id: sid, cwd }));
+    assert.deepEqual(r.json, allowed, file);
+  }
+  assert.ok(await feedHas('allowed by Security: Edit inside the worktree', cwd));
 });
 
 // #70 review (blocker): the default Allow of the inside rows is for a git worktree only. A terminal session in a folder
