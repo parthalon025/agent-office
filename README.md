@@ -38,12 +38,11 @@ It is built on the Agent Office design system (x1.6), which lives in this folder
 ## Requirements
 
 - Windows 11. Opening and closing sessions is written for Windows.
-- Node.js 20 or newer.
+- Node.js 22 or newer. `npm test` passes a quoted glob to `node --test`, which Node reads only from version 21 on.
 - Claude Code 2.1.295 or newer, already signed in. The office uses your existing login. It was tested on 2.1.317.
 - Git for worktrees and the Changes view. The GitHub CLI (`gh`) for pull requests.
-- Internet access: the page loads React from jsDelivr and fonts from Google.
 
-There is nothing to install. The server has no dependencies.
+There is nothing to install. The server has no dependencies. The page needs no internet access: React and the fonts come with the office (`public/vendor`, with their versions and licenses in `public/vendor/README.md`).
 
 ## Start it
 
@@ -93,7 +92,7 @@ Each job names the control to use. Ctrl+K finds all of them.
 
 Two more agent kinds are built: **Ollama** and **LM Studio**. They run a model on this PC at a desk, in a worktree or a folder. Most jobs above work for them. These parts differ:
 
-- **Start one with the API.** The **Open session** dialog and schedules start Claude Code only. For a local agent, send `POST /api/open` with the header `x-office-token` and a JSON body with `cwd`, `provider` (`ollama` or `lmstudio`), `model` and an optional first `prompt`. `model` is required. The value for the header is the page token, not the value in `.office-token` (that is the agent token, and `/api/*` answers 401 to it). Read the page token from the `token` field of `%LOCALAPPDATA%AgentOfficeoffice-page-<port>.json` (`<port>` is 4317 by default). The office writes a new token at each start. To send a later prompt, use `POST /api/message` with `{ "uid": ..., "text": ... }`; `/api/open` returns the `uid`. `GET /api/providers` lists each agent kind, whether it is ready, what it still needs and its models. Opening a session works on Windows only.
+- **Start one with the API.** The **Open session** dialog and schedules start Claude Code only. For a local agent, send `POST /api/open` with the header `x-office-token` and a JSON body with `cwd`, `provider` (`ollama` or `lmstudio`), `model` and an optional first `prompt`. `model` is required. The value for the header is the page token, not the value in `.office-token` (that is the agent token, and `/api/*` answers 401 to it). Read the page token from the `token` field of `%LOCALAPPDATA%\AgentOffice\office-page-<port>.json` (`<port>` is 4317 by default). The office writes a new token at each start. To send a later prompt, use `POST /api/message` with `{ "uid": ..., "text": ... }`; `/api/open` returns the `uid`. `GET /api/providers` lists each agent kind, whether it is ready, what it still needs and its models. Opening a session works on Windows only.
 - **Tools.** The agent reads, lists, searches, edits, writes and runs commands, all inside its folder. It can also use the office tools (inbox, ask, room, room notes). One turn stops after 25 model calls.
 - **Approve a request (job 3).** The cards are the same, with the same risk rule. A local agent never offers Always allow.
 - **Cost.** The cost is always $0. The office counts tokens.
@@ -146,8 +145,8 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 | `launch.ps1` | Starts a session in a terminal window. |
 | `startup.mjs` | Adds or removes the Start with Windows entry (a .cmd in your Startup folder). At sign-in the office starts and opens its launch link. |
 | `probe.mjs` | Tests HTTP hooks on this Claude Code version. |
-| `public/` | The page: `vocab.js` (shared status words, tool names and room figures), `wheel-gate.js` (one scroll-out gesture leaves one level), `scene-host.js` (the one reader of the 3D stage: floor, view, rooms, pick, cursor), `building.js` (snapshot store and building adapter), `toasts.js` (toast rules), `adapter.js`, `office.js`, `office.css`, `chat-extras.js`, `index.html`. |
-| `test/*.test.mjs` | Offline unit tests (`npm test`): access rules (with a real server on a free port), place rules, risk classifier, session vocabulary, hook payload, session tracker, scene host, notes merge, snapshot store and building adapter, contrast pairs, wheel gate, toast rules. |
+| `public/` | The page: `vocab.js` (shared status words, tool names and room figures), `wheel-gate.js` (one scroll-out gesture leaves one level), `scene-host.js` (the one reader of the 3D stage: floor, view, rooms, pick, cursor), `building.js` (snapshot store and building adapter), `toasts.js` (toast rules), `adapter.js`, `office.js`, `office.css`, `chat-extras.js`, `index.html`. `vendor/` holds React 18.3.1 and the fonts, byte for byte as published (`vendor/README.md`: sources, SHA-256, how to update). |
+| `test/*.test.mjs` | Offline unit tests (`npm test`): access rules (with a real server on a free port), vendored files and the static file list (also on a real server), click-to-load chat images in the design system, place rules, risk classifier, session vocabulary, hook payload, session tracker, scene host, notes merge, snapshot store and building adapter, contrast pairs, wheel gate, toast rules. |
 | `test/tracker.test.mjs` | Session tracker tests from recorded-shape hook payloads and stream lines in `test/fixtures/`. |
 | `test/smoke.mjs` | End-to-end test against real Claude Code. |
 | `DS-README.md`, `Recipes.md`, `Reference.md`, `Concepts.md`, `kit/`, `components/`, `tokens.css` | The Agent Office design system. |
@@ -161,11 +160,13 @@ Generated at run time and ignored by git: `.office-token`, `office-hooks.json`, 
 - The page token is new at each start and is never in this folder, so an agent that reads files here cannot approve its own requests. The page itself holds no token: the launch link carries a one-time code, and the page trades it for a cookie that page scripts cannot read. Your own tools (`npm run probe`, `npm run smoke`, a second `npm start`) read the page token from `%LOCALAPPDATA%\AgentOffice\office-page-<port>.json`.
 - Only your Windows user, SYSTEM and the Administrators group can read the files with a token and the settings files whose commands sessions run. Other users, and groups such as Users, Authenticated Users and Everyone, cannot. SYSTEM and Administrators keep access because they can take ownership of any file anyway, and backup and antivirus need it. If the office cannot set that, it prints a warning when it starts. The office folder itself keeps the permissions of its drive; on a shared computer, keep it in your user folder.
 - Requests from another site or another port of this computer are refused, and every change must be sent as JSON. No page can show the office in a frame.
+- The page loads its scripts, style sheets and fonts from the office only. Nothing comes from a CDN or a font service. Its content security policy refuses scripts, style sheets and fonts from any other place, and inline scripts.
+- An image from another site in an agent's reply shows as a card with a **Load image from** button and the site name. Nothing goes to that site until you click; point at the button to see the full address first. The click loads that one image until you reload the page, and the request does not send the office address. Images that are part of the message itself (`data:`) show at once.
 - The office sends hook data to your own machine only. Hooks forward short fields: the tool name, a path or command, and the prompt. A permission prompt also carries the full input so the card can show the change.
 - "Always allow" writes the rule Claude suggests to that project's `.claude/settings.local.json`, and only when you click it.
 - Creating a pull request runs `git push` and `gh pr create`. The office asks you to confirm and lists the steps first.
 - The office never edits `~/.claude/settings.json` or your credentials.
-- Saved sessions (`history.json`) contain Claude's replies. They stay on this machine.
+- Saved sessions (`history.json`) contain Claude's replies, and `state.json` keeps schedule prompts and room notes. They stay on this machine, and only your Windows user, SYSTEM and Administrators can read them (set when the office starts).
 - Remote access is not supported. Reaching an agent that can run commands needs real login and encryption. If you want it from a phone, put the office behind Tailscale.
 
 ## Troubleshooting
@@ -181,7 +182,7 @@ The office knows three kinds of session. A session **in the office** runs `claud
 - **A call answers 415.** The office takes changes as JSON only (`content-type: application/json`).
 - **"WARNING: Could not limit ... to your Windows user."** The office could not set or check who can read that file. The text in brackets gives the reason: `icacls` failed (for example on a drive without permissions, such as FAT32 or exFAT), Windows PowerShell could not read the permissions back, or an entry is still on the file (for example "inheritance is on" or "Allow entry for S-1-5-32-545", which is the Users group). The office still runs. Other users of this computer may read that file. Run `icacls <file>` to see who can.
 - **No Approve cards.** Your Claude Code default mode may be Auto, which rarely asks. Choose Default or Plan under Permissions when you open the session.
-- **The scene stays empty or black.** The scene is 3D and needs WebGL. Turn on hardware acceleration in the browser. The page also loads React from jsDelivr and fonts from Google, so check the network.
+- **The scene stays empty or black.** The scene is 3D and needs WebGL. Turn on hardware acceleration in the browser. The page loads every file from the office. If the browser console shows a 404 for a `/vendor/` file, the `public/vendor` folder is not complete: get it again from git.
 - **Remove worktree is refused.** Close the session first: the button stays off until it ends. If the room has uncommitted changes, the dialog says so and offers Remove and discard changes. In the Floors dialog, git refuses uncommitted changes and commits that are not merged in the same way, and the dialog offers to go ahead anyway. The main folder cannot be removed.
 
 ### Sessions in the office

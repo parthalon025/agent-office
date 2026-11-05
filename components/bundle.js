@@ -269,6 +269,11 @@ function safeUrl(u,kind,allowBlob){var t=clean(u);if(!t)return null;
  if(kind==="img"){var d=t.replace(/\s+/g,"");return DATA_IMG.test(d)?d:null;}
  return null;}
 function host(u){var t=clean(u),m=/^[a-z][a-z0-9+.-]*:\/\/(?:[^@\/?#]*@)?([^\/?#:]+)/i.exec(t);if(m)return m[1].toLowerCase();m=/^mailto:([^?]+)/i.exec(t);return m?m[1]:null;}
+/* Remote images (http, https) load only after a click. A request tells the host that the message was read, and the URL can carry data out of the page.
+   A click counts for that exact URL until the page reloads. data: and blob: images show at once. remoteHost gives the host the browser would ask (punycode), or null. */
+var shownImg=Object.create(null);
+function remoteHost(u){var t=clean(u);if(!/^https?:\/\//i.test(t))return null;try{return new URL(t).hostname||host(t);}catch(e){return host(t);}}
+function imgShown(u){return !remoteHost(u)||shownImg[u]===true;}
 function size(n){n=+n;if(!isFinite(n)||n<0)return null;if(n<1024)return n+" B";if(n<1048576)return (n<10240?(n/1024).toFixed(1):Math.round(n/1024))+" KB";if(n<1073741824)return (n/1048576).toFixed(1)+" MB";return (n/1073741824).toFixed(1)+" GB";}
 
 /* ---------- inline tokens ---------- */
@@ -381,7 +386,13 @@ function galleryOf(md,att){var g=md?info(md).images:[];(att||[]).forEach(functio
 /* ---------- image viewer ---------- */
 var GalCtx=R.createContext(null);
 function dataToBlobUrl(u){var m=/^data:([^;,]+);base64,(.*)$/i.exec(u);if(!m||!window.Blob||!window.URL)return null;var b=atob(m[2]),a=new Uint8Array(b.length);for(var i=0;i<b.length;i++)a[i]=b.charCodeAt(i);return URL.createObjectURL(new Blob([a],{type:m[1]}));}
-function Lightbox(p){var items=p.items,it=items[p.index]||{},ref=R.useRef(null),pr=R.useRef(p),bs=R.useState(null),blobUrl=bs[0],setBlob=bs[1];pr.current=p;
+/* A remote image before its click: the card says where the image comes from, and the button loads it. Inside a link it is text only: a button cannot sit in a link. */
+function LoadCard(p){var nm=p.name||"Image",hs=remoteHost(p.src)||"another site";
+ if(p.plain)return h("span",{className:"ao-rt-imgoff",title:"Image from "+hs},nm);
+ return h("span",{className:cx("ao-rt-file ao-rt-remote",p.className)},h("span",{className:"ao-rt-file-i"},h(AO.Icon,{name:"browser",size:16})),
+  h("span",{className:"ao-rt-file-b"},h("span",{className:"ao-rt-file-n",title:nm},nm),
+   h(AO.Button,{className:"ao-rt-load",title:p.src,onClick:p.onLoad},h("span",{className:"ao-rt-load-t"},"Load image from "+hs))));}
+function Lightbox(p){var items=p.items,it=items[p.index]||{},ref=R.useRef(null),pr=R.useRef(p),bs=R.useState(null),blobUrl=bs[0],setBlob=bs[1],ls=R.useState(0),bump=ls[1];pr.current=p;
  R.useEffect(function(){var u=null;if(/^data:/i.test(it.src||"")){try{u=dataToBlobUrl(it.src);}catch(e){u=null;}}setBlob(u);return function(){if(u)URL.revokeObjectURL(u);};},[it.src]);
  R.useEffect(function(){var el=ref.current,ret=p.returnFocus,x=el&&el.querySelector(".ao-lb-x");if(x)x.focus();
   function key(e){var q=pr.current;if(e.key==="Escape"){e.preventDefault();e.stopPropagation();q.onClose();return;}
@@ -400,7 +411,8 @@ function Lightbox(p){var items=p.items,it=items[p.index]||{},ref=R.useRef(null),
    h("button",{type:"button",className:"ao-iconbtn ao-lb-x","aria-label":"Close image viewer",onClick:p.onClose},h(AO.Icon,{name:"close",size:16}))),
   h("div",{className:"ao-lb-stage",onMouseDown:bg},
    many&&h("button",{type:"button",className:"ao-lb-nav is-prev","aria-label":"Previous image",onClick:function(){p.onMove(-1);}},h(AO.Icon,{name:"chevron-right",size:18})),
-   h("img",{className:"ao-lb-img",src:it.src,alt:it.alt||""}),
+   imgShown(it.src)?h("img",{className:"ao-lb-img",src:it.src,alt:it.alt||"",referrerPolicy:"no-referrer"})
+    :h("div",{className:"ao-lb-wait"},h(LoadCard,{src:it.src,name:name,onLoad:function(){shownImg[it.src]=true;bump(function(n){return n+1;});}})),
    many&&h("button",{type:"button",className:"ao-lb-nav is-next","aria-label":"Next image",onClick:function(){p.onMove(1);}},h(AO.Icon,{name:"chevron-right",size:18}))));
  var RD=window.ReactDOM;return RD&&RD.createPortal&&typeof document!=="undefined"?RD.createPortal(node,document.body):node;}
 function Gallery(p){var s=R.useState(-1),idx=s[0],setIdx=s[1],trig=R.useRef(null),th=R.useRef(null),items=p.images||[];
@@ -419,11 +431,14 @@ function FileCard(p){var a=p.a||{},bad=!!p.broken,url=bad?null:safeUrl(a.url,"fi
  return h("span",{className:cx("ao-rt-file",bad&&"is-broken",p.className)},h("span",{className:"ao-rt-file-i"},h(AO.Icon,{name:bad?"info":iconFor(a),size:16})),
   h("span",{className:"ao-rt-file-b"},h("span",{className:"ao-rt-file-n",title:nm},nm),h("span",{className:"ao-rt-file-m"},meta,!bad&&!url?" · Not available":null)),
   url&&h("a",{className:"ao-rt-dl",href:url,download:nm.replace(/[\\\/:*?"<>|]+/g,"-"),rel:"noopener noreferrer",target:/^https?:/i.test(url)?"_blank":undefined,"aria-label":"Download "+nm},"Download"));}
-function Img(p){var g=R.useContext(GalCtx),s=R.useState(false),bad=s[0],setBad=s[1];
+function Img(p){var g=R.useContext(GalCtx),s=R.useState(false),bad=s[0],setBad=s[1],ls=R.useState(0),clicked=ls[0]>0,setClicked=ls[1];
  if(!p.src||bad)return h(FileCard,{broken:true,a:{name:p.name||p.alt||"Image"},className:p.className});
- var img=h("img",{className:"ao-rt-img",src:p.src,alt:p.alt||"",width:p.width||undefined,height:p.height||undefined,loading:"lazy",decoding:"async",onError:function(){setBad(true);}});
+ if(!imgShown(p.src))return h(LoadCard,{src:p.src,name:p.alt||p.name,plain:p.plain,className:p.className,onLoad:function(){shownImg[p.src]=true;setClicked(function(n){return n+1;});}});
+ /* no-referrer: a clicked remote image does not tell its host the page address either */
+ var img=h("img",{className:"ao-rt-img",src:p.src,alt:p.alt||"",width:p.width||undefined,height:p.height||undefined,loading:"lazy",decoding:"async",referrerPolicy:"no-referrer",onError:function(){setBad(true);}});
  if(!g||p.plain)return h("span",{className:cx("ao-rt-imgw",p.className)},img);
- return h("button",{type:"button",className:cx("ao-rt-imgbtn",p.className),"aria-label":"Open image"+(p.alt||p.name?": "+(p.alt||p.name):""),onClick:function(e){g.open(p.src,e.currentTarget);}},img);}
+ /* autoFocus only right after the load click: the focus stays on the image the user asked for */
+ return h("button",{type:"button",className:cx("ao-rt-imgbtn",p.className),autoFocus:clicked||undefined,"aria-label":"Open image"+(p.alt||p.name?": "+(p.alt||p.name):""),onClick:function(e){g.open(p.src,e.currentTarget);}},img);}
 function LinkCard(p){var a=p.a||{},url=safeUrl(a.url,"card"),th=a.thumb?safeUrl(a.thumb,"img",true):null,site=a.site||host(url||a.url)||"Link",title=a.title||a.name||a.url;
  var kids=[th&&h("img",{key:"i",className:"ao-rt-link-img",src:th,alt:"",loading:"lazy",width:56,height:56,onError:function(e){e.currentTarget.style.display="none";}}),
   h("span",{key:"b",className:"ao-rt-link-b"},h("span",{className:"ao-rt-link-s"},site),h("span",{className:"ao-rt-link-t"},title),a.description&&h("span",{className:"ao-rt-link-d"},a.description))];
@@ -491,7 +506,8 @@ function RichText(p){var g=R.useContext(GalCtx),fmt=p.format==="plain"?"plain":"
  return g?out:h(Gallery,{images:galleryOf(fmt==="plain"?"":text,null)},out);}
 
 AO.rich={parse:parse,tokens:tokens,inline:inline,info:info,images:function(md){return info(md).images;},galleryOf:galleryOf,kind:kindOf,iconFor:iconFor,safeUrl:safeUrl,host:host,size:size,typeLabel:typeLabel,
- Gallery:Gallery,Lightbox:Lightbox,Attachments:Attachments,FileCard:FileCard,LinkCard:LinkCard,Image:Img,CodeBlock:CodeBlock,IMAGE_DATA_MAX:5*1024*1024};
+ remoteHost:remoteHost,imageShown:imgShown,
+ Gallery:Gallery,Lightbox:Lightbox,Attachments:Attachments,FileCard:FileCard,LinkCard:LinkCard,LoadCard:LoadCard,Image:Img,CodeBlock:CodeBlock,IMAGE_DATA_MAX:5*1024*1024};
 AO.RichText=RichText;
 })();
 

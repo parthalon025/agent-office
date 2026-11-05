@@ -171,7 +171,15 @@ test('cookies: the page cookie is HttpOnly, SameSite=Strict, for the whole site;
   assert.deepEqual(auth.cookieValues(undefined, 'a'), []);
   assert.deepEqual(Object.keys(auth.SECURITY_HEADERS).sort(), ['content-security-policy', 'x-frame-options']);
   assert.equal(auth.SECURITY_HEADERS['x-frame-options'], 'DENY');
-  assert.equal(auth.SECURITY_HEADERS['content-security-policy'], "frame-ancestors 'none'");
+  assert.equal(auth.SECURITY_HEADERS['content-security-policy'], auth.CSP);
+});
+
+test('CSP (M2, M3): no frames, scripts, style sheets and fonts from this server only, no plugins, no <base>; never unsafe-*', () => {
+  const dirs = Object.fromEntries(auth.CSP.split(';').map((d) => d.trim().split(/\s+/)).map(([k, ...v]) => [k, v.join(' ')]));
+  assert.deepEqual(dirs, {
+    'frame-ancestors': "'none'", 'script-src': "'self'", 'style-src': "'self'", 'font-src': "'self'", 'object-src': "'none'", 'base-uri': "'self'",
+  });
+  assert.doesNotMatch(auth.CSP, /unsafe|\*|https?:|data:|nonce-|sha\d+-/, 'no loophole: the page needs no inline code, eval or other site');
 });
 
 // ---------- files ----------
@@ -582,7 +590,7 @@ test('route matrix, launch code and owner-only files on a real server', { timeou
     const P = { 'content-type': 'application/json', 'x-office-token': page.token };
     const frame = (r, what) => {
       assert.equal(r.headers['x-frame-options'], 'DENY', what);
-      assert.equal(r.headers['content-security-policy'], "frame-ancestors 'none'", what);
+      assert.equal(r.headers['content-security-policy'], auth.CSP, what);
     };
 
     // GET / holds no token.
@@ -679,10 +687,20 @@ test('route matrix, launch code and owner-only files on a real server', { timeou
 
     // Limited files: only the user, SYSTEM and Administrators, compared by SID, nothing inherited, although the
     // folders hand Users, Authenticated Users and Everyone down (wideFolder above).
+    // state.json and history.json (L10) are limited once at start; the plain writes after a change keep it.
+    const statePath = path.join(dir, 'state.json'), historyPath = path.join(dir, 'history.json');
+    const historyBefore = fs.statSync(historyPath).mtimeMs;
+    assert.equal((await hit(port, 'POST', '/api/notes/save', { headers: P, body: { key: 'l10-board', text: 'L10 NOTE', base: 0 } })).status, 200);
+    assert.equal((await hit(port, 'POST', '/api/history/forget', { headers: P, body: { uid: 'nobody' } })).status, 200);
+    await new Promise((r) => setTimeout(r, 1500)); // saveHistory waits 800 ms
+    assert.match(fs.readFileSync(statePath, 'utf8'), /L10 NOTE/, 'savePersisted wrote state.json');
+    assert.ok(fs.statSync(historyPath).mtimeMs > historyBefore, 'saveHistory wrote history.json');
     if (win) {
-      const files = [path.join(dir, '.office-token'), path.join(dir, 'office-hooks-http.json'), path.join(dir, 'office-hooks.json'), path.join(dir, 'office-mcp.json'), pagePath];
+      const files = [path.join(dir, '.office-token'), path.join(dir, 'office-hooks-http.json'), path.join(dir, 'office-hooks.json'), path.join(dir, 'office-mcp.json'), pagePath, statePath, historyPath];
       const acl = aclOf(files);
       files.forEach((f, i) => assertLimited(acl.files[i], acl.me, path.basename(f)));
+    } else {
+      for (const f of [statePath, historyPath]) assert.equal(fs.statSync(f).mode & 0o777, 0o600, path.basename(f));
     }
   } finally {
     office.child.kill();
