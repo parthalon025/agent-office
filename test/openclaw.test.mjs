@@ -1,9 +1,11 @@
-// OpenClaw helpers (providers/openclaw.mjs): the Gateway liveness probe, the version check, and the OpenClaw config the
-// Security room rules need. Pure apart from a loopback TCP connect and an injected config reader. No OpenClaw, no model.
+// OpenClaw helpers (providers/openclaw.mjs): the Gateway liveness probe, the version check, the tool names, and the OpenClaw
+// config an office session needs (#77). Pure apart from a loopback TCP connect and an injected config reader. No OpenClaw, no model.
 // Run: node --test test/openclaw.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
 import { gatewayPort, probeGateway, versionAtLeast, wantedConfig, checkConfig, configReader, toolCall, PLUGIN_DIR } from '../providers/openclaw.mjs';
 
 const listen = (srv) => new Promise((resolve) => srv.listen(0, '127.0.0.1', () => resolve(srv.address().port)));
@@ -43,9 +45,12 @@ test('versionAtLeast: numeric, from any text that holds a version; unknown text 
 });
 
 // ---------- the config an office session needs (#77): workspace-only, and the office plugin loaded and pointed at this office ----------
-const TOKEN = 'E:\\agent-office\\.office-token';
+// The office token file. On Windows the plugin setting may spell it with other case and slashes; elsewhere a path is exact.
+const TOKEN = path.join(os.tmpdir(), 'ao-office', '.office-token');
+const UNIX = TOKEN.replace(/\\/g, '/');
+const SPELLED = process.platform === 'win32' ? UNIX.toLowerCase() : TOKEN;
 const have = (o) => async (p) => (p in o ? { state: 'set', value: o[p] } : { state: 'unset' });
-const GOOD = { 'tools.fs.workspaceOnly': true, 'plugins.entries.agent-office.enabled': true, 'plugins.entries.agent-office.config.tokenFile': 'e:/agent-office/.office-token' };
+const GOOD = { 'tools.fs.workspaceOnly': true, 'plugins.entries.agent-office.enabled': true, 'plugins.entries.agent-office.config.tokenFile': SPELLED };
 const CALLS = ['read-inside', 'edit-inside', 'files-outside', 'shell', 'web', 'mcp', 'settings', 'secrets'];
 const DIR = PLUGIN_DIR.replace(/\\/g, '/').replace(/\/$/, '');
 
@@ -70,7 +75,7 @@ test('checkConfig: a good config passes; each setting that is off names the comm
   assert.deepEqual(bad.fix, [
     'openclaw config set tools.fs.workspaceOnly true',
     'openclaw plugins install --link "' + DIR + '" --force',
-    'openclaw config set plugins.entries.agent-office.config.tokenFile "E:/agent-office/.office-token"',
+    'openclaw config set plugins.entries.agent-office.config.tokenFile "' + UNIX + '"',
   ]);
   const off = await checkConfig(w, have({ ...GOOD, 'plugins.enabled': false, 'plugins.allow': ['x'], 'plugins.deny': ['Agent-Office'], 'plugins.entries.agent-office.enabled': false, 'plugins.entries.agent-office.config.tokenFile': 'E:/other/.office-token-4392' }));
   assert.deepEqual(off.fix, [
@@ -78,7 +83,7 @@ test('checkConfig: a good config passes; each setting that is off names the comm
     'openclaw config set plugins.allow "[\'x\', \'agent-office\']" --strict-json',
     'openclaw config set plugins.deny "[]" --strict-json',
     'openclaw plugins enable agent-office',
-    'openclaw config set plugins.entries.agent-office.config.tokenFile "E:/agent-office/.office-token"',
+    'openclaw config set plugins.entries.agent-office.config.tokenFile "' + UNIX + '"',
   ]);
 });
 
