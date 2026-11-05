@@ -110,7 +110,7 @@ test('Security room: off until the user turns it on, asks about cost once per se
   const r = rig();
   try {
     const none = cleanRules(null);
-    assert.match(openRefusal(none, r.p), /Copilot CLI runs tool calls without asking the office\. Turn on Copilot CLI on the Agents screen/);
+    assert.match(openRefusal(none, r.p), /Copilot CLI runs tool calls without asking the office\. Turn on Copilot on the Agents screen/);
     const on = cleanRules({ office: { 'ungated|copilot': 'on' } });
     assert.equal(openRefusal(on, r.p), null);
     assert.equal(costAsk(on, r.p), true, 'the no-cost cell is Ask by default');
