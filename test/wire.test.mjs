@@ -11,6 +11,7 @@ import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as auth from '../auth.mjs';
+import { officeFiles } from '../files.mjs';
 import { createTracker, MAX_CALLS } from '../tracker.mjs';
 import { slimPayload } from '../payload.mjs';
 import { placeOfSession } from '../place.mjs';
@@ -242,7 +243,7 @@ test('the server: a whole snapshot on connect, then patches that add up to it; p
       child.stdout.on('data', onData); child.stderr.on('data', onData);
       child.on('exit', (code) => { clearTimeout(t); reject(new Error(`the office stopped (${code}):\n${out}`)); });
     });
-    const agent = JSON.parse(fs.readFileSync(path.join(dir, '.office-token'), 'utf8')).token;
+    const agent = JSON.parse(fs.readFileSync(officeFiles(dir, port).token, 'utf8')).token;
     const page = JSON.parse(fs.readFileSync(auth.pageFile(env, port), 'utf8')).token;
     const hook = (body) => new Promise((res, rej) => {
       const q = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/hook', headers: { host: `127.0.0.1:${port}`, 'content-type': 'application/json', 'x-office-token': agent } }, (x) => { x.resume(); x.on('end', res); });

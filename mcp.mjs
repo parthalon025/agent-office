@@ -12,7 +12,8 @@
 // the room only with office_room_update, and only its own room: the server finds the room from the calling
 // session (server.mjs callerRoom, keys from place.mjs), never from the arguments. Notes and pins
 // live in the office's state.json and show on the room's boards at once.
-// It identifies its session by OFFICE_ID (sessions the office opened) or by its parent pid.
+// It identifies its session by OFFICE_ID (sessions the office opened) or by its parent pid. It finds its office from
+// the token file of the port in its first argument (none: the default port; files.mjs has the names).
 // Zero dependencies; speaks newline-delimited JSON-RPC 2.0.
 // First statement: Windows never looks for a program in the current folder (git.mjs resolveExe has the reason).
 process.env.NoDefaultCurrentDirectoryInExePath = '1';
@@ -20,8 +21,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
+import { officeFiles, portArg } from './files.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const PORT = portArg(process.argv[2]);
 const PIN_MAX = 140; // the server checks it too (server.mjs PIN_MAX)
 const INSTRUCTIONS =
   'The user may be watching this session in Agent Office. Call office_inbox when they say they sent you a message there, ' +
@@ -71,7 +74,12 @@ const TOOLS = [
 const ROOM_FIELDS = ['notes_append', 'notes_replace', 'pin'];
 
 function config() {
-  try { return JSON.parse(fs.readFileSync(path.join(here, '.office-token'), 'utf8')); } catch { return null; }
+  if (!PORT) return null;
+  let cfg;
+  try { cfg = JSON.parse(fs.readFileSync(officeFiles(here, PORT).token, 'utf8')); } catch { return null; }
+  // With a port argument, the token file must name that port.
+  if (process.argv[2] !== undefined && process.argv[2] !== '' && cfg.port !== PORT) throw new Error(`The token file of port ${PORT} names port ${cfg.port}. Start the office on port ${PORT} again.`);
+  return cfg;
 }
 
 async function office(route, body, ms) {

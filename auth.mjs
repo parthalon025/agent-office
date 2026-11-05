@@ -1,6 +1,7 @@
 // Access rules of the office server (audit #27 H1, L4, M3). Two tokens and a launch code:
 // - The agent token opens only the agent routes (/hook, /hook/*, /mcp/*). Sessions send it in x-office-token.
-//   It is kept in .office-token in the office folder (hook.mjs and mcp.mjs read it) and reused across restarts.
+//   It is kept in the token file of the office's port in the office folder (.office-token on 4317, files.mjs has the
+//   names; hook.mjs and mcp.mjs read it) and reused across restarts.
 // - The page token opens only the page routes (/events, /api/*). It is new at each server start, kept in server
 //   memory, and written to one file outside the office folder (pageFile) for the user's own command-line tools
 //   (probe.mjs, test/smoke.mjs, a second npm start). Only the user, SYSTEM and Administrators can read that file
