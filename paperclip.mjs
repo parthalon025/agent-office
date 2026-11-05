@@ -47,68 +47,176 @@ const strings = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string'
 // The CLI arguments Paperclip adds to a claude_local run: extraArgs, else the older args (execute.ts reads them in that order).
 export const argsOf = (cfg) => { const e = strings(obj(cfg).extraArgs); return e.length ? e : strings(obj(cfg).args); };
 const samePath = (a, b) => !!a && !!b && path.win32.normalize(String(a)).toLowerCase() === path.win32.normalize(String(b)).toLowerCase();
-// The values of a flag, in order: `--flag value` and `--flag=value`. Claude Code takes the last one of a repeated flag
-// (commander keeps the last value of an option that takes one: --permission-mode, --settings).
-function valuesOf(args, flag) {
-  const out = [];
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === flag) { if (i + 1 < args.length) out.push(args[i + 1]); i++; } else if (args[i].startsWith(flag + '=')) out.push(args[i].slice(flag.length + 1));
+
+// ---------- Claude Code's arguments, read the way Claude Code reads them ----------
+// The flags of the claude main command in Claude Code 2.1.318, read from its binary (`claude --help` shows most; the rest
+// are hidden), with what each takes after it: 0 nothing (a switch), 1 the next argument whatever it is, ? the next argument
+// when it is not a flag, + the next argument and then each next one up to a flag. That is how its parser (commander) reads
+// them. The spellings of one flag share an entry. A flag that is not here is not guessed at: the agent is Partly supervised.
+const CLAUDE_FLAGS = '-d --debug ?|-d2e --debug-to-stderr 0|--debug-file 1|--verbose 0|-p --print 0|--bare 0|--safe-mode 0|--init 0|' +
+  '--init-only 0|--maintenance 0|--output-format 1|--json-schema 1|--include-hook-events 0|--include-partial-messages 0|' +
+  '--forward-subagent-text 0|--session-mirror 0|--await-claim 0|--input-format 1|--await-initialize 0|--dangerously-skip-permissions 0|' +
+  '--allow-dangerously-skip-permissions 0|--thinking 1|--thinking-display 1|--max-thinking-tokens 1|--max-turns 1|--max-budget-usd 1|' +
+  '--task-budget 1|--replay-user-messages 0|--prompt-suggestions ?|--enable-auth-status 0|--allowedTools --allowed-tools +|--tools +|' +
+  '--restricted 0|--disallowedTools --disallowed-tools +|--mcp-config +|--permission-prompt-tool 1|--permission-prompts 1|' +
+  '--system-prompt 1|--system-prompt-file 1|--append-system-prompt 1|--append-system-prompt-file 1|--system-prompt-snapshot 1|' +
+  '--append-subagent-system-prompt 1|--append-subagent-system-prompt-file 1|--plan-mode-instructions 1|' +
+  '--exclude-dynamic-system-prompt-sections 0|--permission-mode 1|--inherit-permission-mode 1|-c --continue 0|-r --resume ?|' +
+  '--fork-session 0|--watch-artifact 1|--watch-artifact-no-autoreact 1|--prefill 1|--deep-link-origin 0|--deep-link-repo 1|' +
+  '--deep-link-last-fetch 1|--prefill-b64 1|--deep-link-cwd-b64 1|--from-pr ?|--no-session-persistence 0|--resume-session-at 1|' +
+  '--resume-drops-turn 1|--reply-on-resume 0|--rewind-files 1|--model 1|--include-unsupported-models 0|--effort 1|--fast-mode 1|' +
+  '--agent 1|--betas +|--fallback-model 1|--workload 1|--settings 1|--client-data-url 1|--allow-other-models 0|--managed-settings 1|' +
+  '--host-auth-is-org-sign-in 0|--add-dir +|--project-config-root 1|--ide 0|--desktop 0|--strict-mcp-config 0|--session-id 1|' +
+  '-n --name 1|--agents 1|--setting-sources 1|--plugin-dir 1|--plugin-dir-no-mcp 1|--plugin-url 1|--disable-slash-commands 0|' +
+  '--chrome 0|--no-chrome 0|--file +|-w --worktree ?|--tmux 0|--advisor 1|--autocompact 1|--enable-auto-mode 0|--proactivity 1|' +
+  '--agents-view-if-allowed 0|--bg --background 0|--messaging-socket-path 1|--brief 0|--ax-screen-reader 0|--channels +|' +
+  '--dangerously-load-development-channels +|--agent-id 1|--agent-name 1|--team-name 1|--agent-color 1|--plan-mode-required 0|' +
+  '--parent-session-id 1|--teammate-mode 1|--agent-type 1|--sdk-url 1|--runner-declares 1|--session-began-as-copy 1|--teleport ?|' +
+  '--cloud ?|--forward-home-settings 1|--remote ?|--attach-serve 1|--environment 1|--pool 1|--correlation-id 1|--ref 1|--on-branch 1|' +
+  '--remote-control ?|--rc ?|--remote-control-session-name-prefix 1|-h --help 0|-v --version 0';
+const CLAUDE_VERSION = '2.1.318';
+// What a flag does to the office's view of a run (the rest change nothing for it).
+// self: the run approves its own calls, or the hooks are off, so a call skips the hold. Unsupervised; Supervise takes it out
+//   with its values. --allowedTools is what Paperclip passes on a sandbox target in place of --dangerously-skip-permissions
+//   (claude-local permissions.ts).
+// cloud: the session runs in the cloud, so its calls never reach the office hooks. Unsupervised; Supervise keeps it (taking
+//   it out would move the work), so Supervise is not offered.
+// load: it loads plugins, agents or settings the office cannot read, or lets something other than the office answer a call.
+//   Partly supervised; Supervise keeps it, because taking it out changes what the agent does and the office cannot tell if
+//   that is safe.
+const FLAG_KINDS = [
+  ['self', ['--dangerously-skip-permissions'], () => 'It skips permissions (--dangerously-skip-permissions).'],
+  ['self', ['--allow-dangerously-skip-permissions'], () => 'It can turn on skip permissions (--allow-dangerously-skip-permissions).'],
+  ['self', ['--permission-prompt-tool'], () => 'Its own tool answers permission prompts (--permission-prompt-tool).'],
+  ['self', ['--allowedTools'], (f) => `It allows tools without asking (${f}).`],
+  ['self', ['--managed-settings'], () => 'It passes policy settings (--managed-settings), which can allow calls or turn off the office hooks.'],
+  ['self', ['--bare'], () => 'It runs in bare mode (--bare), which skips the hooks of settings files, so the office hooks do not run.'],
+  ['self', ['--safe-mode'], () => 'It runs in safe mode (--safe-mode), which turns off hooks, so the office hooks do not run.'],
+  ['cloud', ['--cloud', '--remote', '--environment', '--pool', '--attach-serve'], (f) => `It runs its session in the cloud (${f}), so its calls never reach the office hooks.`],
+  ['load', ['--plugin-dir', '--plugin-dir-no-mcp', '--plugin-url', '--await-initialize'], (f) => `It loads plugins (${f}), and a plugin hook can allow a call without the office.`],
+  ['load', ['--agents', '--agent', '--agent-type'], (f) => `It loads agents (${f}), and an agent can set its own permission mode and hooks.`],
+  ['load', ['--setting-sources', '--project-config-root', '--client-data-url'], (f) => `It changes which settings load (${f}), and the office cannot read them.`],
+  ['load', ['--sdk-url', '--await-claim'], (f) => `It connects to an SDK host (${f}), which can answer permission prompts.`],
+  ['load', ['--remote-control', '--rc'], (f) => `It turns on Remote Control (${f}), where a remote client can answer permission prompts.`],
+  ['load', ['--channels', '--dangerously-load-development-channels'], (f) => `It registers channel servers (${f}), which the office cannot check.`],
+  ['load', ['--teleport'], (f) => `It resumes a cloud session here (${f}), which the office cannot check.`],
+  ['load', ['--chrome'], (f) => `It turns on Claude in Chrome (${f}), whose browser actions the office cannot check.`],
+];
+const FLAGS = new Map();   // spelling -> { names, takes, kind, why }
+for (const entry of CLAUDE_FLAGS.split('|')) {
+  const names = entry.split(' '), t = names.pop();
+  const e = { names, takes: t === '0' ? 0 : t === '1' ? 1 : t, kind: '', why: null };
+  for (const n of names) FLAGS.set(n, e);
+}
+for (const [kind, names, why] of FLAG_KINDS) {
+  for (const n of names) {
+    const e = FLAGS.get(n);
+    if (!e) throw new Error(`paperclip.mjs: ${n} is not in CLAUDE_FLAGS`);
+    Object.assign(e, { kind, why });
   }
-  return out;
 }
 // An argument Claude Code's parser reads as a flag: a dash and at least one more character.
 const isFlag = (a) => typeof a === 'string' && a.length > 1 && a[0] === '-';
-// Flags that let a run approve its own calls, or turn off the hooks so the office never sees a call, from `claude --help` and
-// the hidden options of Claude Code 2.1.318. Never in a supervised run, and Supervise takes them out with their values.
-// takes: 0 (a switch), 1 (one value) or 'list' (the next argument whatever it is, then each next one up to a flag, as Claude
-// Code reads a list). --allowedTools is what Paperclip passes on a sandbox target in place of --dangerously-skip-permissions
-// (claude-local permissions.ts). Not here, because the office cannot read what they load: --plugin-dir and --plugin-url (a
-// plugin hook can allow a call) and --agents (a subagent can set its own permission mode); see CLAUDE.md.
-const SELF_APPROVE = [
-  { flags: ['--dangerously-skip-permissions'], takes: 0, why: () => 'It skips permissions (--dangerously-skip-permissions).' },
-  { flags: ['--allow-dangerously-skip-permissions'], takes: 0, why: () => 'It can turn on skip permissions (--allow-dangerously-skip-permissions).' },
-  { flags: ['--permission-prompt-tool'], takes: 1, why: () => 'Its own tool answers permission prompts (--permission-prompt-tool).' },
-  { flags: ['--allowedTools', '--allowed-tools'], takes: 'list', why: (f) => `It allows tools without asking (${f}).` },
-  { flags: ['--managed-settings'], takes: 1, why: () => 'It passes policy settings (--managed-settings), which can allow calls or turn off the office hooks.' },
-  { flags: ['--bare'], takes: 0, why: () => 'It runs in bare mode (--bare), which skips the hooks of settings files, so the office hooks do not run.' },
-  { flags: ['--safe-mode'], takes: 0, why: () => 'It runs in safe mode (--safe-mode), which turns off hooks, so the office hooks do not run.' },
-];
-// The SELF_APPROVE entry of one argument: { e, flag, joined } (joined: the --flag=value spelling, which holds its value), or null.
-function selfApprove(arg) {
-  for (const e of SELF_APPROVE) {
-    for (const flag of e.flags) {
-      if (arg === flag) return { e, flag, joined: false };
-      if (arg.startsWith(flag + '=')) return { e, flag, joined: true };
+
+/**
+ * A claude argument list as Claude Code's parser reads it: { flags, unknown, end }. flags: [{ e, as, values, first, last }]
+ * (as: the spelling used; first..last: the arguments it takes up). unknown: [{ i, as }], flags that are not Claude Code
+ * 2.1.318's. end: the index of a '--' (after it every argument is text, not a flag), else the length. Short flags may sit
+ * together (-pc), a short flag that takes a value takes the rest of its argument (-nName), and --flag=value holds its value.
+ */
+export function readArgs(args) {
+  const a = strings(args), flags = [], unknown = [];
+  const queue = a.map((v, i) => ({ v, i }));
+  let list = null, end = a.length;
+  while (queue.length) {
+    const { v: x, i } = queue.shift();
+    if (x === '--') { end = i; break; }
+    if (list && !isFlag(x)) { list.values.push(x); list.last = i; continue; }
+    list = null;
+    if (!isFlag(x)) continue;   // text: the prompt, or - (read the prompt from stdin)
+    let e = FLAGS.get(x);
+    if (e) {
+      const f = { e, as: x, values: [], first: i, last: i }, next = queue[0];
+      if (next && (e.takes === 1 || e.takes === '+' || (e.takes === '?' && !isFlag(next.v)))) { queue.shift(); f.values.push(next.v); f.last = next.i; }
+      if (e.takes === '+') list = f;
+      flags.push(f);
+      continue;
     }
+    if (x.length > 2 && x[1] !== '-' && (e = FLAGS.get('-' + x[1]))) {
+      flags.push({ e, as: '-' + x[1], values: e.takes ? [x.slice(2)] : [], first: i, last: i, part: true });
+      if (!e.takes) queue.unshift({ v: '-' + x.slice(2), i });   // the rest of -pc is read again: -c
+      continue;
+    }
+    const eq = x.indexOf('=');
+    if (x.startsWith('--') && eq > 2 && (e = FLAGS.get(x.slice(0, eq))) && e.takes) { flags.push({ e, as: x.slice(0, eq), values: [x.slice(eq + 1)], first: i, last: i }); continue; }
+    unknown.push({ i, as: x });
   }
-  return null;
+  return { flags, unknown, end };
 }
-// How many arguments after args[i] are values of the SELF_APPROVE flag there.
-function valuesAfter(args, i, m) {
-  if (m.joined || !m.e.takes || i + 1 >= args.length) return 0;
-  let n = 1;
-  if (m.e.takes === 'list') while (i + 1 + n < args.length && !isFlag(args[i + 1 + n])) n++;
-  return n;
+const named = (f, name) => f.e.names.includes(name);
+const settingsOf = (r) => r.flags.filter((f) => named(f, '--settings')).map((f) => f.values[0]);
+
+/**
+ * What a claude argument list says about the office: { why, stuck, partly, kind }. why: why the run's calls skip the hold
+ * ('' = they do not); stuck: Supervise in office does not change that. partly: why the office cannot check all of them
+ * (kind 'load' or 'unknown'), when why is ''.
+ */
+function argsRead(args, hooksFile) {
+  const r = readArgs(args);
+  const first = (kind) => r.flags.find((f) => f.e.kind === kind);
+  const none = { why: '', stuck: false, partly: '', kind: '' };
+  let f = first('cloud');
+  if (f) return { ...none, why: f.e.why(f.as), stuck: true };
+  if ((f = first('self'))) return { ...none, why: f.e.why(f.as) };
+  // manual is the name Claude Code 2.1 shows for the default mode; it reads manual as default
+  const mode = r.flags.filter((x) => named(x, '--permission-mode')).map((x) => x.values[0]).pop();
+  if (mode !== 'default' && mode !== 'manual') return { ...none, why: mode ? `It runs in the ${mode} permission mode, so Claude Code runs calls without asking.` : 'It does not set --permission-mode default, so the machine default (Auto) runs calls without asking.' };
+  const settings = settingsOf(r);
+  if (!settings.some((x) => samePath(x, hooksFile))) return { ...none, why: 'It does not load the office hooks file.' };
+  if (!samePath(settings.at(-1), hooksFile)) return { ...none, why: 'Claude Code loads only the last --settings, and that is not the office hooks file.' };
+  if ((f = first('load'))) return { ...none, partly: f.e.why(f.as), kind: 'load' };
+  if (r.unknown.length) return { ...none, partly: `It passes ${text(r.unknown[0].as, 80)}, which is not a flag of Claude Code ${CLAUDE_VERSION}, so the office cannot tell which arguments are its values.`, kind: 'unknown' };
+  return none;
+}
+/** Why a claude CLI argument list does not hold calls in this office ('' = it does): the run as Paperclip starts it. */
+export function argsWhy(args, hooksFile) { return argsRead(args, hooksFile).why; }
+
+// ---------- the env of a run: key names only ----------
+// Env keys of Claude Code 2.1.318 (its binary) that turn off hooks or permissions, and keys that load what the office cannot
+// read. The office reads the names in adapterConfig.env (and in the env of a run's command line), never a value, so a key
+// counts whatever its value is, and it never writes env. Paperclip's own process env is passed to the run too, and the office
+// cannot see it.
+const ENV_OFF = {
+  CLAUDE_CODE_SIMPLE: 'turns off the hooks of settings files (bare mode)',
+  CLAUDE_CODE_SAFE_MODE: 'turns off hooks (safe mode)',
+  CLAUDE_CODE_PERSONAL_HOOKS_OFF: 'can turn off your own hooks',
+  CLAUDE_CODE_RESTRICT_PERSONAL_CONFIG: 'can stop your own hooks',
+  CLAUDE_CODE_MANAGED_SETTINGS_PATH: 'loads policy settings that can allow calls or turn off the office hooks',
+  CLAUDE_BG_SESSION_PERMISSION_RULES: 'adds permission rules that can allow calls',
+  CLAUDE_CODE_REMOTE_TOOLS_HOST_ALLOWS_UNATTENDED: 'lets tools run with no one to ask',
+  CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS: 'skips more permission checks',
+};
+const ENV_LOAD = {
+  CLAUDE_CODE_PLUGIN_DIRS: 'loads plugins, and a plugin hook can allow a call without the office',
+  CLAUDE_CODE_REMOTE_SETTINGS_PATH: 'loads other settings, which the office cannot read',
+  CLAUDE_CHROME_PERMISSION_MODE: 'sets how Claude in Chrome asks, which the office cannot check',
+  CLAUDE_CODE_DISABLE_HOOK_FORWARDING: 'changes how hooks are passed on, which the office cannot check',
+};
+// The key names of an env object (Object.keys reads no value). Windows env names do not care about case.
+const envKeys = (env) => Object.keys(obj(env));
+function envRead(keys) {
+  const names = strings(keys).map((k) => k.toUpperCase());
+  for (const k of names) if (Object.hasOwn(ENV_OFF, k)) return { why: `Its env has ${k}, which ${ENV_OFF[k]}.`, partly: '' };
+  for (const k of names) if (Object.hasOwn(ENV_LOAD, k)) return { why: '', partly: `Its env has ${k}, which ${ENV_LOAD[k]}.` };
+  return { why: '', partly: '' };
 }
 
-/** Why a claude CLI argument list does not hold calls in this office ('' = it does): the run as Paperclip starts it. */
-export function argsWhy(args, hooksFile) {
-  const a = strings(args);
-  for (const x of a) { const m = selfApprove(x); if (m) return m.e.why(m.flag); }
-  // manual is the name Claude Code 2.1 shows for the default mode; it reads manual as default
-  const mode = valuesOf(a, '--permission-mode').pop();
-  if (mode !== 'default' && mode !== 'manual') return mode ? `It runs in the ${mode} permission mode, so Claude Code runs calls without asking.` : 'It does not set --permission-mode default, so the machine default (Auto) runs calls without asking.';
-  const settings = valuesOf(a, '--settings');
-  if (!settings.some((f) => samePath(f, hooksFile))) return 'It does not load the office hooks file.';
-  if (!samePath(settings.at(-1), hooksFile)) return 'Claude Code loads only the last --settings, and that is not the office hooks file.';
-  return '';
-}
 /** Why an adapter config does not hold its runs' calls in this office ('' = it does). */
 export function configWhy(cfg, hooksFile) {
   const c = obj(cfg);
   if (c.engine !== 'cli') return c.engine ? `It runs on the ${c.engine} engine, which ignores the office hooks.` : 'It runs on the ACP engine (the default), which approves every call and ignores the office hooks.';
   if (c.dangerouslySkipPermissions !== false) return 'Skip permissions is on (dangerouslySkipPermissions is not false).';
-  return argsWhy(argsOf(c), hooksFile);
+  return envRead(envKeys(c.env)).why || argsWhy(argsOf(c), hooksFile);
 }
 /**
  * Why the program a run starts may not be Claude Code ('' = it is claude): adapterConfig.command, which Paperclip uses when it
@@ -127,23 +235,47 @@ function remoteWhy(command) {
   const m = typeof command === 'string' ? /^(ssh|sandbox):\/\//i.exec(command.trim()) : null;
   return m ? `It runs on another computer (${m[1].toLowerCase()}), so its calls never reach the office hooks.` : '';
 }
-// What one run's command line says (adapter.invoke): { ok, why, partly } (partly: the arguments are right, the program is
-// another one, so the office cannot tell).
-export function runCheck(command, args, hooksFile) {
-  const why = remoteWhy(command) || argsWhy(args, hooksFile);
-  if (why) return { ok: false, why, partly: false };
-  const cmd = commandWhy(command);
-  return { ok: !cmd, why: cmd, partly: !!cmd };
+// The Partly supervised words of each reason: [for the agent, for its last run].
+const PARTLY = {
+  program: ['it starts another program', 'its last run started another program'],
+  load: ['it loads what the office cannot check', 'its last run loaded what the office cannot check'],
+  unknown: ['it passes a flag the office does not know', 'its last run passed a flag the office does not know'],
+  env: ['its env loads what the office cannot check', 'the env of its last run loads what the office cannot check'],
+};
+// Why the office cannot check all calls of a config whose settings are right: { why, kind } or null. Supervise in office
+// leaves all of these as they are.
+function partlyOf(cfg, hooksFile) {
+  const c = obj(cfg);
+  const program = commandWhy(c.command);
+  if (program) return { why: program, kind: 'program' };
+  const r = argsRead(argsOf(c), hooksFile);
+  if (r.partly) return { why: r.partly, kind: r.kind };
+  const env = envRead(envKeys(c.env));
+  return env.partly ? { why: env.partly, kind: 'env' } : null;
+}
+/**
+ * What one run's command line says (adapter.invoke: its program, arguments and the key names of its env): { ok, why, partly,
+ * kind }. partly: the run's calls reach the office, but the office cannot check all of them (kind: a PARTLY key).
+ */
+export function runCheck(command, args, hooksFile, keys = []) {
+  const env = envRead(keys), r = argsRead(args, hooksFile);
+  const why = remoteWhy(command) || env.why || r.why;
+  if (why) return { ok: false, why, partly: false, kind: '' };
+  const program = commandWhy(command);
+  const p = program ? { why: program, kind: 'program' } : r.partly ? { why: r.partly, kind: r.kind } : env.partly ? { why: env.partly, kind: 'env' } : null;
+  return p ? { ok: false, why: p.why, partly: true, kind: p.kind } : { ok: true, why: '', partly: false, kind: '' };
 }
 
 /**
  * The supervision of one Paperclip agent: { state, label, why, can }.
- * state: 'supervised' (its runs hold every call Claude Code asks about in the office), 'partly' (it starts another program
- * than claude, or a model profile or an open issue of the agent changes the run config), 'unsupervised', or 'unknown'
- * (Paperclip did not show the config).
+ * state: 'supervised' (its runs hold every call Claude Code asks about in the office), 'partly' (the office cannot check all
+ * of its calls: another program than claude, a flag or env key that loads what the office cannot read, a flag it does not
+ * know, or a model profile or an open issue that changes the run config), 'unsupervised', or 'unknown' (Paperclip did not
+ * show the config).
  * label: '' for a supervised agent, else the words a bot card and the HQ list show (ADR 0001). can: "Supervise in office" can
- * set it up (a claude_local agent that is not supervised yet). issues: the agent's open issues (their adapter overrides).
- * lastRun: { ok, why, partly } from the command line of its last run (adapter.invoke, runCheck), the last word on what ran.
+ * set it up (a claude_local agent that is not supervised yet, and nothing Supervise does not change stands in the way).
+ * issues: the agent's open issues (their adapter overrides). lastRun: { ok, why, partly, kind } from the command line of its
+ * last run (adapter.invoke, runCheck), the last word on what ran.
  */
 export function supervisionOf(agent, hooksFile, { issues = [], lastRun = null } = {}) {
   const a = obj(agent);
@@ -152,20 +284,24 @@ export function supervisionOf(agent, hooksFile, { issues = [], lastRun = null } 
     return { state: 'unsupervised', label: 'Unsupervised: runs without the office hooks', why, can: false };
   }
   if (!a.adapterConfig || typeof a.adapterConfig !== 'object') return { state: 'unknown', label: 'Unsupervised: config not shown', why: 'Paperclip did not show its adapter config to the office, so the office cannot tell.', can: false };
-  const base = configWhy(a.adapterConfig, hooksFile);
+  const cfg = a.adapterConfig;
+  // What Supervise in office does not change (the env, a cloud session): it is not offered, and the wall says why.
+  const env = envRead(envKeys(cfg.env)).why, args = argsRead(argsOf(cfg), hooksFile);
+  if (env) return { state: 'unsupervised', label: 'Unsupervised: its env turns off the office', why: `${env} Supervise in office does not change env: change it in Paperclip.`, can: false };
+  if (args.stuck) return { state: 'unsupervised', label: 'Unsupervised', why: `${args.why} Supervise in office does not change that: change it in Paperclip.`, can: false };
+  const base = configWhy(cfg, hooksFile);
   if (base) return { state: 'unsupervised', label: 'Unsupervised', why: base, can: true };
   // The config is right, but the last run Paperclip started was not (an issue or model profile override, or a run that
   // started before the change): the PATCH would change nothing, so it is not offered. The next run that is held clears it.
   if (lastRun && lastRun.ok === false) {
     return lastRun.partly
-      ? { state: 'partly', label: 'Partly supervised: its last run started another program', why: `Its last run: ${lastRun.why}`, can: false }
+      ? { state: 'partly', label: `Partly supervised: ${(PARTLY[lastRun.kind] || PARTLY.program)[1]}`, why: `Its last run: ${lastRun.why}`, can: false }
       : { state: 'unsupervised', label: 'Unsupervised: its last run skipped the office', why: `Its last run: ${lastRun.why}`, can: false };
   }
-  // Supervise in office does not change the program: a wrapper is the user's own choice, made in Paperclip.
-  const program = commandWhy(a.adapterConfig.command);
-  if (program) return { state: 'partly', label: 'Partly supervised: it starts another program', why: program, can: false };
+  const partly = partlyOf(cfg, hooksFile);
+  if (partly) return { state: 'partly', label: `Partly supervised: ${PARTLY[partly.kind][0]}`, why: partly.why, can: false };
   // A model profile or an issue's adapter overrides are merged over the config for some runs (heartbeat.ts).
-  const merged = (o) => { const m = { ...a.adapterConfig, ...obj(o) }; return configWhy(m, hooksFile) || commandWhy(m.command); };
+  const merged = (o) => { const m = { ...cfg, ...obj(o) }; return configWhy(m, hooksFile) || (partlyOf(m, hooksFile) || {}).why || ''; };
   for (const [key, p] of Object.entries(obj(obj(a.runtimeConfig).modelProfiles))) {
     if (obj(p).enabled === false || !obj(p).adapterConfig) continue;
     const why = merged(p.adapterConfig);
@@ -182,23 +318,22 @@ export function supervisionOf(agent, hooksFile, { issues = [], lastRun = null } 
 
 /**
  * The one PATCH body of "Supervise in office": the CLI engine, skip permissions off, and the run's arguments with the
- * default permission mode and the office hooks file at the end. The agent's other arguments stay; a SELF_APPROVE flag with
- * its values, an earlier permission mode and an earlier copy of the office hooks file go. An earlier --settings of the agent
- * stays in the list, but Claude Code then loads only the office's (the last one): supervise() says so in the feed.
+ * default permission mode and the office hooks file at the end (before a --, after which Claude Code reads only text). The
+ * agent's other arguments stay as Claude Code reads them; a self flag with its values, an earlier permission mode and an
+ * earlier copy of the office hooks file go. An earlier --settings of the agent stays in the list, but Claude Code then loads
+ * only the office's (the last one): supervise() says so in the feed. The env and the program are never in the patch.
  */
 export function supervisePatch(agent, hooksFile) {
-  const args = argsOf(obj(agent).adapterConfig), kept = [];
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    const m = selfApprove(a);
-    if (m) { i += valuesAfter(args, i, m); continue; }
-    if (a === '--permission-mode') { i++; continue; }
-    if (a.startsWith('--permission-mode=')) continue;
-    if (a === '--settings' && samePath(args[i + 1], hooksFile)) { i++; continue; }
-    if (a.startsWith('--settings=') && samePath(a.slice(11), hooksFile)) continue;
-    kept.push(a);
+  const args = argsOf(obj(agent).adapterConfig), r = readArgs(args), drop = new Set();
+  for (const f of r.flags) {
+    if (f.part) continue;   // a short flag inside another argument: none of the ones below has a short spelling
+    if (f.e.kind === 'self' || named(f, '--permission-mode') || (named(f, '--settings') && samePath(f.values[0], hooksFile))) {
+      for (let k = f.first; k <= f.last; k++) drop.add(k);
+    }
   }
-  return { adapterConfig: { engine: 'cli', dangerouslySkipPermissions: false, extraArgs: [...kept, '--permission-mode', 'default', '--settings', hooksFile] } };
+  const kept = args.filter((_, k) => !drop.has(k));
+  const cut = r.end < args.length ? r.end - drop.size : kept.length;
+  return { adapterConfig: { engine: 'cli', dangerouslySkipPermissions: false, extraArgs: [...kept.slice(0, cut), '--permission-mode', 'default', '--settings', hooksFile, ...kept.slice(cut)] } };
 }
 
 // The ids a run carries (runIds, cleanIds) live in payload.mjs: hook.mjs reads them from the environment Paperclip gives
@@ -289,10 +424,11 @@ export function createHq(deps = {}) {
         if (p.eventType !== 'adapter.invoke') return;
         const a = d.agents.get(p.agentId), inv = obj(p.payload), args = inv.commandArgs;
         if (!a || a.adapterType !== 'claude_local' || !Array.isArray(args)) return;
-        const r = runCheck(inv.command, args, hooksFile());
+        // the env of the run as Paperclip logs it (its adapter env and its own ids): key names only, as for adapterConfig.env
+        const r = runCheck(inv.command, args, hooksFile(), envKeys(inv.env));
         const was = d.last.get(a.id), name = text(a.name, 60) || 'an agent';
         d.last.set(a.id, { run: p.runId, ...r });
-        if (r.partly) feed(`Paperclip started a run of ${name} with another program: ${r.why}`, 'wait');
+        if (r.partly) feed(r.kind === 'program' ? `Paperclip started a run of ${name} with another program: ${r.why}` : `Paperclip started a run of ${name} that the office cannot check: ${r.why}`, 'wait');
         else if (!r.ok) feed(`Paperclip started a run of ${name} without the office: ${r.why} Its tool calls are not held.`, 'wait');
         if (!was || was.ok !== r.ok || was.why !== r.why) changed();
         return;
@@ -443,16 +579,25 @@ export function createHq(deps = {}) {
       const patch = supervisePatch(a, file);
       const out = await call(conn, route, { method: 'PATCH', body: JSON.stringify(patch) });
       if (c !== conn || !d) return { ok: false };
-      // Paperclip answers with the agent as saved: its supervision is read from that, not from what the office sent
-      if (out && out.id === id) d.agents.set(id, out);
+      // Paperclip's PATCH has no version check, so a change saved in Paperclip at the same time can replace the office's.
+      // The agent is read once more, and its supervision comes from what Paperclip keeps, not from what the office sent.
+      const saved = await call(conn, route);
+      if (c !== conn || !d) return { ok: false };
+      const now = saved && saved.id === id ? saved : out && out.id === id ? out : null;
+      if (now) d.agents.set(id, now);
       d.last.delete(id);
-      const after = supOf(d.agents.get(id));
+      const after = supOf(d.agents.get(id)), name = text(a.name, 60);
+      const sent = patch.adapterConfig.extraArgs, got = strings(obj(obj(now).adapterConfig).extraArgs);
+      if (now && (got.length !== sent.length || got.some((x, k) => x !== sent[k]))) {
+        feed(`Supervise in office: Paperclip saved other arguments for ${name} than the office sent (a change made in Paperclip at the same time). The office shows the saved config${after.why ? `: ${after.why}` : ', which holds its calls here.'}`, 'wait');
+        return { ok: after.state === 'supervised', supervision: after };
+      }
       // the agent's own --settings stay in its arguments, but only the last one loads, and that is the office's now
-      const own = valuesOf(patch.adapterConfig.extraArgs, '--settings').filter((f) => !samePath(f, file)).map((f) => text(f, 80));
+      const own = settingsOf(readArgs(sent)).filter((f) => !samePath(f, file)).map((f) => text(f, 80));
       const lost = after.state === 'supervised' && own.length ? ` Its own --settings ${own.join(', ')} no longer ${own.length > 1 ? 'load' : 'loads'}: Claude Code loads only the last --settings.` : '';
       feed(after.state === 'supervised'
-        ? `Supervise in office: ${text(a.name, 60)} now runs Claude Code with the office hooks. Its next run asks here.${lost}`
-        : `Supervise in office: Paperclip took the change for ${text(a.name, 60)}, but ${after.why.charAt(0).toLowerCase()}${after.why.slice(1)}`);
+        ? `Supervise in office: ${name} now runs Claude Code with the office hooks. Its next run asks here.${lost}`
+        : `Supervise in office: Paperclip took the change for ${name}, but ${after.why.charAt(0).toLowerCase()}${after.why.slice(1)}`);
       return { ok: after.state === 'supervised', supervision: after };
     } finally { conn.busy.delete(id); changed(); }
   }

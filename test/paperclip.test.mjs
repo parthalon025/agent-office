@@ -3,7 +3,7 @@
 // call, no real Paperclip. Run: node --test test/paperclip.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { checkUrl, supervisionOf, supervisePatch, argsWhy, configWhy, runIds, cleanIds, createHq, roleLabel, DEFAULT_URL } from '../paperclip.mjs';
+import { checkUrl, supervisionOf, supervisePatch, argsWhy, configWhy, runCheck, runIds, cleanIds, createHq, roleLabel, DEFAULT_URL } from '../paperclip.mjs';
 import { startFakePaperclip, DEMO } from './fixtures/fake-paperclip.mjs';
 import { until } from './fixtures/office-server.mjs';
 
@@ -146,6 +146,119 @@ test('the program a run starts: unset or claude is supervised, any other program
   assert.equal('command' in supervisePatch(agent({ command: 'C:/w.cmd' }), HOOKS).adapterConfig, false);
 });
 
+// Review 76, round 2, hole 1: flags of Claude Code 2.1.318 (its binary) that load plugins, agents or settings, or let
+// something else than the office answer a call. The office cannot read what they load, and taking them out would change
+// what the agent does, so Supervise leaves them and the agent is Partly supervised.
+test('a flag that loads plugins, agents or settings, or lets something else answer, is Partly supervised, and Supervise leaves it', () => {
+  const ok = SUPERVISED.extraArgs;
+  const cases = [
+    [['--plugin-dir', 'C:/p'], /^It loads plugins \(--plugin-dir\), and a plugin hook can allow a call without the office\.$/],
+    [['--plugin-dir-no-mcp', 'C:/p'], /\(--plugin-dir-no-mcp\)/],
+    [['--plugin-url=https://example.com/p.zip'], /\(--plugin-url\)/],
+    [['--await-initialize'], /^It loads plugins \(--await-initialize\)/],
+    [['--agents', '{"r":{"description":"d","prompt":"p","permissionMode":"bypassPermissions"}}'], /^It loads agents \(--agents\), and an agent can set its own permission mode and hooks\.$/],
+    [['--agent', 'reviewer'], /\(--agent\)/],
+    [['--agent-type', 'helper'], /\(--agent-type\)/],
+    [['--setting-sources', 'user'], /^It changes which settings load \(--setting-sources\)/],
+    [['--project-config-root', 'C:/other'], /\(--project-config-root\)/],
+    [['--client-data-url', 'https://example.com/d'], /\(--client-data-url\)/],
+    [['--sdk-url', 'ws://127.0.0.1:9'], /^It connects to an SDK host \(--sdk-url\), which can answer permission prompts\.$/],
+    [['--await-claim'], /\(--await-claim\)/],
+    [['--remote-control'], /^It turns on Remote Control \(--remote-control\)/],
+    [['--rc', 'me'], /\(--rc\)/],
+    [['--channels', 'a', 'b'], /^It registers channel servers \(--channels\)/],
+    [['--dangerously-load-development-channels', 'a'], /\(--dangerously-load-development-channels\)/],
+    [['--teleport'], /\(--teleport\)/],
+    [['--chrome'], /^It turns on Claude in Chrome \(--chrome\)/],
+  ];
+  for (const [extra, why] of cases) {
+    for (const args of [[...ok, ...extra], [...extra, ...ok]]) {
+      const s = supervisionOf(agent({ ...SUPERVISED, extraArgs: args }), HOOKS);
+      assert.deepEqual([s.state, s.label, s.can], ['partly', 'Partly supervised: it loads what the office cannot check', false], args.join(' '));
+      assert.match(s.why, why, args.join(' '));
+      const run = runCheck('claude', ['--print', '-', '--add-dir', 'C:/b', ...args], HOOKS);
+      assert.deepEqual([run.ok, run.partly], [false, true], `the run line too: ${args.join(' ')}`);
+      assert.match(run.why, why);
+    }
+    // Supervise leaves it: an agent that also lacks the settings is set up, and then shows Partly supervised
+    const before = agent({ cwd: 'C:/x', extraArgs: extra });
+    assert.deepEqual([supervisionOf(before, HOOKS).state, supervisionOf(before, HOOKS).can], ['unsupervised', true]);
+    const p = supervisePatch(before, HOOKS).adapterConfig;
+    assert.deepEqual(p.extraArgs, [...extra, '--permission-mode', 'default', '--settings', HOOKS]);
+    assert.equal(supervisionOf(agent({ cwd: 'C:/x', ...p }), HOOKS).state, 'partly');
+  }
+  // a cloud session runs its calls in the cloud: Unsupervised, and Supervise does not move it here
+  for (const extra of [['--cloud'], ['--cloud', 'fix the bug'], ['--remote', 'x'], ['--environment', 'ccpool_1'], ['--pool', 'p'], ['--attach-serve', 's1']]) {
+    const s = supervisionOf(agent({ ...SUPERVISED, extraArgs: [...ok, ...extra] }), HOOKS);
+    assert.deepEqual([s.state, s.can], ['unsupervised', false], extra.join(' '));
+    assert.match(s.why, new RegExp(`^It runs its session in the cloud \\(${extra[0]}\\), so its calls never reach the office hooks\\. Supervise in office does not change that: change it in Paperclip\\.$`));
+    assert.equal(supervisionOf(agent({ cwd: 'C:/x', extraArgs: extra }), HOOKS).can, false, 'not offered: it would not help');
+    assert.match(runCheck('claude', [...ok, ...extra], HOOKS).why, /in the cloud/);
+  }
+});
+
+// Review 76, round 2, hole 2: the env of the run. The office reads the key names, never a value, and never writes env.
+test('the env of an agent: by key name only, a key that turns off hooks or permissions is Unsupervised and Supervise is not offered', () => {
+  const OFF = ['CLAUDE_CODE_SIMPLE', 'CLAUDE_CODE_SAFE_MODE', 'CLAUDE_CODE_PERSONAL_HOOKS_OFF', 'CLAUDE_CODE_RESTRICT_PERSONAL_CONFIG', 'CLAUDE_CODE_MANAGED_SETTINGS_PATH',
+    'CLAUDE_BG_SESSION_PERMISSION_RULES', 'CLAUDE_CODE_REMOTE_TOOLS_HOST_ALLOWS_UNATTENDED', 'CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS'];
+  for (const key of [...OFF, 'claude_code_simple']) {
+    // values are never read: every value throws when it is read
+    const env = new Proxy({ [key]: '0', PATH: 'x' }, { get(t, k) { if (typeof k === 'string' && Object.hasOwn(t, k)) throw new Error(`the office read the value of ${k}`); return undefined; } });
+    const s = supervisionOf(agent({ ...SUPERVISED, env }), HOOKS);
+    assert.deepEqual([s.state, s.label, s.can], ['unsupervised', 'Unsupervised: its env turns off the office', false], key);
+    assert.match(s.why, new RegExp(`^Its env has ${key.toUpperCase()}, which [^.]+\\. Supervise in office does not change env: change it in Paperclip\\.$`));
+    assert.equal(supervisionOf(agent({ cwd: 'C:/x', env }), HOOKS).can, false, `${key}: Supervise would not help`);
+    assert.equal('env' in supervisePatch(agent({ cwd: 'C:/x', env }), HOOKS).adapterConfig, false, 'the patch never carries env');
+    assert.match(runCheck('claude', ok(), HOOKS, [key, 'PATH']).why, new RegExp(`^Its env has ${key.toUpperCase()}`), 'the env of the run line too');
+  }
+  // a key that loads plugins or other settings: Partly supervised
+  for (const key of ['CLAUDE_CODE_PLUGIN_DIRS', 'CLAUDE_CODE_REMOTE_SETTINGS_PATH', 'CLAUDE_CHROME_PERMISSION_MODE', 'CLAUDE_CODE_DISABLE_HOOK_FORWARDING']) {
+    const s = supervisionOf(agent({ ...SUPERVISED, env: { [key]: 'x' } }), HOOKS);
+    assert.deepEqual([s.state, s.label, s.can], ['partly', 'Partly supervised: its env loads what the office cannot check', false], key);
+    assert.match(s.why, new RegExp(`^Its env has ${key}, which `));
+    assert.deepEqual([runCheck('claude', ok(), HOOKS, [key]).ok, runCheck('claude', ok(), HOOKS, [key]).partly], [false, true]);
+  }
+  // other keys change nothing; the env of an issue override counts like the rest of the override
+  assert.equal(supervisionOf(agent({ ...SUPERVISED, env: { ANTHROPIC_API_KEY: 'x', CLAUDE_CONFIG_DIR: 'C:/c', PAPERCLIP_API_KEY: 'y' } }), HOOKS).state, 'supervised');
+  const iss = supervisionOf(agent(SUPERVISED), HOOKS, { issues: [{ id: 'i', identifier: 'ACM-3', assigneeAgentId: 'a1', assigneeAdapterOverrides: { adapterConfig: { env: { CLAUDE_CODE_SIMPLE: '1' } } } }] });
+  assert.deepEqual([iss.state, iss.can], ['partly', false]);
+  assert.match(iss.why, /^For ACM-3: Its env has CLAUDE_CODE_SIMPLE/);
+  function ok() { return ['--print', '-', ...SUPERVISED.extraArgs]; }
+});
+
+// Review 76, round 2, hole 3: the arguments are read the way Claude Code's parser (commander) reads them, with the value
+// count of each of its flags (from the 2.1.318 binary). A flag the office does not know is not guessed at.
+test('the arguments are read with the value count of each Claude Code flag: a flag inside a value is text, an unknown flag is Partly supervised', () => {
+  const ok = SUPERVISED.extraArgs;
+  // a flag that takes a value takes the next argument, whatever it looks like
+  assert.match(argsWhy(['--append-system-prompt', '--permission-mode', 'default', '--settings', HOOKS], HOOKS), /does not set --permission-mode default/);
+  assert.match(argsWhy(['--permission-mode', 'default', '--system-prompt', '--settings', HOOKS], HOOKS), /does not load the office hooks file/);
+  assert.equal(argsWhy([...ok, '--append-system-prompt', '--dangerously-skip-permissions'], HOOKS), '', 'a value that looks like a flag is text');
+  assert.equal(supervisionOf(agent({ ...SUPERVISED, extraArgs: [...ok, '--model', '--bare'] }), HOOKS).state, 'supervised');
+  // a list takes each next argument up to a flag; an optional value only when the next argument is no flag
+  assert.equal(argsWhy(['--add-dir', 'C:/a', 'C:/b', ...ok], HOOKS), '');
+  assert.equal(argsWhy(['--resume', ...ok], HOOKS), '');
+  assert.equal(argsWhy(['-r', 'abc', ...ok, '-w'], HOOKS), '');
+  // short flags together (-pc), and a short flag with its value in the same argument (-nName)
+  assert.equal(argsWhy(['-pc', '-nName', '-d2e', ...ok], HOOKS), '');
+  // after -- every argument is text
+  assert.match(argsWhy(['--', ...ok], HOOKS), /does not set --permission-mode default/);
+  // a flag the office does not know: it cannot tell which arguments are its values
+  for (const x of [['--made-up', 'x'], ['--made-up=x'], ['-x'], ['-px'], ['--verbose=1'], ['--tmux=classic']]) {
+    const s = supervisionOf(agent({ ...SUPERVISED, extraArgs: [...ok, ...x] }), HOOKS);
+    assert.deepEqual([s.state, s.label, s.can], ['partly', 'Partly supervised: it passes a flag the office does not know', false], x.join(' '));
+    assert.match(s.why, /^It passes -[^ ]*, which is not a flag of Claude Code 2\.1\.318, so the office cannot tell which arguments are its values\.$/, x.join(' '));
+    assert.deepEqual(supervisePatch(agent({ extraArgs: x }), HOOKS).adapterConfig.extraArgs, [...x, '--permission-mode', 'default', '--settings', HOOKS], 'the patch keeps it');
+  }
+  // Paperclip's own run line has only flags the office knows
+  assert.deepEqual(runCheck('C:/Users/a/.local/bin/claude.exe', ['--print', '-', '--output-format', 'stream-json', '--verbose', '--resume', 's1', '--model', 'haiku', '--effort', 'high', '--max-turns', '8',
+    '--append-system-prompt-file', 'C:/i.md', '--add-dir', 'C:/b', ...ok], HOOKS), { ok: true, why: '', partly: false, kind: '' });
+  // Supervise puts the office settings before a --, where Claude Code still reads them as flags
+  const p = supervisePatch(agent({ extraArgs: ['--verbose', '--', 'some text'] }), HOOKS).adapterConfig;
+  assert.deepEqual(p.extraArgs, ['--verbose', '--permission-mode', 'default', '--settings', HOOKS, '--', 'some text']);
+  assert.equal(configWhy(p, HOOKS), '');
+});
+
 test('the ids of a Paperclip run come from its environment and are plain ids only', () => {
   assert.deepEqual(runIds({ PAPERCLIP_AGENT_ID: 'a-1', PAPERCLIP_COMPANY_ID: 'c-1', PAPERCLIP_RUN_ID: 'r_1', PAPERCLIP_TASK_ID: 't1', PATH: 'x' }), { agent: 'a-1', company: 'c-1', run: 'r_1', task: 't1' });
   assert.equal(runIds({ PATH: 'x' }), null, 'not a Paperclip run');
@@ -277,6 +390,33 @@ test('Supervise in office reads the agent again just before its PATCH, so a chan
     pc.state.agents[1].adapterType = 'codex_local';
     await assert.rejects(hq.supervise(ada.id), (e) => e.status === 409 && /codex_local, not Claude Code/.test(e.message));
     assert.equal(pc.requests.filter((q) => q.method === 'PATCH').length, 1, 'one PATCH in all');
+  } finally { hq.disconnect(); await pc.close(); }
+});
+
+// Review 76, round 2, hole 4: Paperclip's PATCH has no version check, so a change saved in Paperclip at the same moment can
+// replace what the office sent. The office reads the agent once more after its PATCH and shows what that read says.
+test('after its PATCH, Supervise reads the agent again: other saved arguments than it sent are named in the feed, and the agent shows the read', async () => {
+  const pc = await startFakePaperclip();
+  const feed = [];
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS, onFeed: (t) => feed.push(t) });
+  try {
+    await hq.connect({ url: pc.url });
+    const ada = hq.view().agents.find((a) => a.name === 'Ada');
+    pc.afterPatch = (a) => { a.adapterConfig = { ...a.adapterConfig, extraArgs: ['--max-turns', '8', '--allowedTools', 'Bash'] }; };
+    const n = pc.requests.length;
+    const r = await hq.supervise(ada.id);
+    const route = `/api/agents/${ada.id}`;
+    assert.deepEqual(pc.requests.slice(n).filter((q) => q.path === route).map((q) => q.method), ['GET', 'PATCH', 'GET'], 'read, change, read again');
+    assert.deepEqual([r.ok, r.supervision.state], [false, 'unsupervised']);
+    assert.equal(feed.at(-1), 'Supervise in office: Paperclip saved other arguments for Ada than the office sent (a change made in Paperclip at the same time). The office shows the saved config: It allows tools without asking (--allowedTools).');
+    assert.equal(hq.view().agents.find((a) => a.name === 'Ada').supervision.state, 'unsupervised');
+    // the same arguments saved: no such line
+    pc.afterPatch = null;
+    pc.state.agents[1].adapterConfig = { cwd: 'C:/work/acme', model: 'haiku', engine: 'cli', extraArgs: ['--max-turns', '8'] };
+    const again = await hq.supervise(ada.id);
+    assert.deepEqual([again.ok, again.supervision.state], [true, 'supervised']);
+    assert.match(feed.at(-1), /^Supervise in office: Ada now runs Claude Code with the office hooks\./);
+    assert.equal(feed.filter((t) => /saved other arguments/.test(t)).length, 1);
   } finally { hq.disconnect(); await pc.close(); }
 });
 

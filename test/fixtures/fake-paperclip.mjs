@@ -7,7 +7,8 @@
 // GET /api/companies/:id/agents answers 400 to any query parameter, as Paperclip does.
 //
 // In a test: const pc = await startFakePaperclip({ companies, agents, ... }); pc.url, pc.requests (every request: method,
-// path, body), pc.emit(type, payload), pc.drop() (close the event sockets: the office should come back), pc.close().
+// path, body), pc.emit(type, payload), pc.drop() (close the event sockets: the office should come back), pc.close(), and
+// pc.afterPatch = (agent) => { ... } (runs right after a PATCH is answered: a change saved in Paperclip at the same time).
 // By hand (the browser check): node test/fixtures/fake-paperclip.mjs [port] [--hooks <office hooks file>] starts the demo
 // company on 127.0.0.1 and prints its address; Ctrl+C stops it. With --hooks, Ada is already supervised with that file.
 import http from 'node:http';
@@ -72,6 +73,7 @@ export const DEMO = (hooksFile = null) => {
 export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
   const st = { companies: structuredClone(seed.companies || []), agents: structuredClone(seed.agents || []), issues: structuredClone(seed.issues || []), routines: structuredClone(seed.routines || []), liveRuns: structuredClone(seed.liveRuns || []) };
   const requests = [], sockets = new Set();
+  const api = { afterPatch: null };   // set by a test: runs right after a PATCH is answered (a change made in Paperclip at the same time)
   let seq = 0;
   const send = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
   function emit(type, payload, companyId = st.companies[0]?.id) {
@@ -111,7 +113,9 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
         if (parsed && parsed.adapterConfig) a.adapterConfig = parsed.replaceAdapterConfig ? parsed.adapterConfig : { ...a.adapterConfig, ...parsed.adapterConfig };
         a.updatedAt = new Date().toISOString();
         emit('activity.logged', { actorType: 'user', actorId: 'board', action: 'agent.updated', entityType: 'agent', entityId: a.id, agentId: null, runId: null, details: {} }, a.companyId);
-        return send(res, 200, a);
+        send(res, 200, a);
+        if (typeof api.afterPatch === 'function') api.afterPatch(a);   // a change made in Paperclip just after the office's
+        return;
       }
       return send(res, 404, { error: 'Not found' });
     });
@@ -131,13 +135,13 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
   });
   return new Promise((resolve) => server.listen(port, '127.0.0.1', () => {
     const p = server.address().port;
-    resolve({
+    resolve(Object.assign(api, {
       url: `http://127.0.0.1:${p}`, port: p, requests, state: st, emit,
       sockets: () => sockets.size,
       /** Close every event socket (the stream drops; the office should connect again). */
       drop() { for (const s of sockets) s.destroy(); sockets.clear(); },
       close: () => new Promise((r) => { for (const s of sockets) s.destroy(); server.close(() => r()); server.closeAllConnections?.(); }),
-    });
+    }));
   }));
 }
 
