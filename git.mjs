@@ -107,13 +107,22 @@ export async function repoTop(cwd) {
 }
 
 /** Where a folder sits in git: the main repository, this worktree's top folder and its branch. Null outside git. */
-export async function locate(cwd) {
-  try {
-    const [top, branch, common] = (await git(['rev-parse', '--show-toplevel', '--abbrev-ref', 'HEAD', '--path-format=absolute', '--git-common-dir'], cwd, 8000)).trim().split(/\r?\n/);
+/**
+ * Where a folder sits in git: { repo, root, branch }, or null when it is not in a repository or the folder is gone.
+ * A failure that is only passing (git passed its time limit on a loaded machine, a lock) is tried again, `attempts` times
+ * in all, because null is an answer the office acts on: a recent folder that gets null is never a building until the next
+ * start (#98). `deps` (`exec`, `exists`, `wait`) are for tests.
+ */
+export async function locate(cwd, { exec = git, exists = fs.existsSync, wait = (ms) => new Promise((r) => setTimeout(r, ms)), attempts = 3 } = {}) {
+  for (let i = 1; ; i++) try {
+    const [top, branch, common] = (await exec(['rev-parse', '--show-toplevel', '--abbrev-ref', 'HEAD', '--path-format=absolute', '--git-common-dir'], cwd, 8000)).trim().split(/\r?\n/);
     const dir = path.resolve(cwd, common);
     const repo = path.basename(dir).toLowerCase() === '.git' ? path.dirname(dir) : dir;
     return { repo: path.normalize(repo), root: path.normalize(top), branch: branch === 'HEAD' ? 'detached' : branch };
-  } catch { return null; }
+  } catch (e) {
+    if (i >= attempts || !exists(cwd) || /not a git repository/i.test(String(e && e.message))) return null;
+    await wait(250 * i);
+  }
 }
 
 // ---------- ports ----------

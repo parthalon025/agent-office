@@ -8,13 +8,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import net from 'node:net';
 import crypto from 'node:crypto';
-import { spawn, execFileSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as auth from '../auth.mjs';
 import { resolveExe } from '../git.mjs';
 import { officeFiles } from '../files.mjs';
+import { startOffice, startOnFreePort } from './fixtures/office-server.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const win = process.platform === 'win32';
@@ -355,14 +355,15 @@ test('writeOwnerOnly: what is still wrong is named in the warning; failures are 
 
 // ---------- real ACLs (Windows) ----------
 
+// The limits only stop a stuck program: Windows PowerShell can need over a minute to start on a loaded machine (#98).
 /** The runners of server.mjs (writeSecret): icacls from System32, the ACL reader through Windows PowerShell. */
-const runIcacls = (args) => execFileSync(resolveExe('icacls'), args, { windowsHide: true, stdio: 'pipe', timeout: 15000 });
+const runIcacls = (args) => execFileSync(resolveExe('icacls'), args, { windowsHide: true, stdio: 'pipe', timeout: 180000 });
 const runReadAcl = (f) => auth.parseAcl(execFileSync(resolveExe('powershell'), ['-NoProfile', '-NonInteractive', '-Command', auth.ACL_SCRIPT],
-  { windowsHide: true, encoding: 'utf8', stdio: 'pipe', timeout: 30000, env: { ...process.env, AO_ACL_FILE: f } }));
+  { windowsHide: true, encoding: 'utf8', stdio: 'pipe', timeout: 180000, env: { ...process.env, AO_ACL_FILE: f } }));
 const REAL = { fs, icacls: runIcacls, readAcl: runReadAcl };
 
 const runPs = (script, env) => execFileSync(resolveExe('powershell'), ['-NoProfile', '-NonInteractive', '-Command', script],
-  { encoding: 'utf8', windowsHide: true, timeout: 60000, env: { ...process.env, ...env } });
+  { encoding: 'utf8', windowsHide: true, timeout: 180000, env: { ...process.env, ...env } });
 
 /**
  * The DACL of each file or folder by SID, read with .NET in Windows PowerShell: no account names (they change with
@@ -437,7 +438,7 @@ function assertLimited(acl, me, label) {
   for (const a of acl.aces) assert.deepEqual([a.type, a.rights, a.inherited], ['Allow', 'FullControl', false], show);
 }
 
-test('writeOwnerOnly with the real icacls: only the user, SYSTEM and Administrators are left, from any start', { skip: !win, timeout: 120000 }, () => {
+test('writeOwnerOnly with the real icacls: only the user, SYSTEM and Administrators are left, from any start', { skip: !win, timeout: 900000 }, () => {
   // The folders are set up here, so the result does not depend on where the temp folder or the repo is.
   const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-acl-')));
   try {
@@ -511,14 +512,6 @@ test('no token in the page source, no token from the URL, no plain token compare
 
 // ---------- the real server ----------
 
-function freePort() {
-  return new Promise((resolve, reject) => {
-    const s = net.createServer();
-    s.once('error', reject);
-    s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); });
-  });
-}
-
 /** One HTTP request with full control of the headers (fetch drops Host, Origin, Cookie and Sec-*). */
 function hit(port, method, p, { headers = {}, body, host = `127.0.0.1:${port}` } = {}) {
   return new Promise((resolve, reject) => {
@@ -537,23 +530,7 @@ function hit(port, method, p, { headers = {}, body, host = `127.0.0.1:${port}` }
   });
 }
 
-function startOffice(dir, env) {
-  const child = spawn(process.execPath, [path.join(dir, 'server.mjs')], { cwd: dir, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-  let out = '';
-  const done = new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error('the office did not start in time:\n' + out)), 30000);
-    const onData = (d) => {
-      out += d;
-      if (/already running|is open: /.test(out) && /#n=[0-9a-f]{32}/.test(out)) { clearTimeout(t); resolve(); }
-    };
-    child.stdout.on('data', onData);
-    child.stderr.on('data', onData);
-    child.on('exit', (code) => { clearTimeout(t); if (!/#n=[0-9a-f]{32}/.test(out)) reject(new Error(`the office stopped (${code}):\n${out}`)); });
-  });
-  return { child, done, out: () => out };
-}
-
-test('route matrix, launch code and owner-only files on a real server', { timeout: 90000 }, async () => {
+test('route matrix, launch code and owner-only files on a real server', { timeout: 900000 }, async () => {
   const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-auth-')));
   if (win) wideFolder(tmp, aclOf([tmp]).me); // the same start on every machine, wherever the temp folder is
   const dir = path.join(tmp, 'office'), lad = path.join(tmp, 'local');
@@ -561,20 +538,22 @@ test('route matrix, launch code and owner-only files on a real server', { timeou
   fs.mkdirSync(lad);
   for (const f of fs.readdirSync(ROOT)) if (f.endsWith('.mjs') || f === 'package.json') fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
   for (const d of ['providers', 'public']) fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true });
-  const port = await freePort();
-  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toLowerCase() !== 'path'));
-  Object.assign(env, {
+  const baseEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toLowerCase() !== 'path'));
+  Object.assign(baseEnv, {
     // No claude on PATH: no paid call and a fast start. Programs from System32 come by absolute path anyway.
     PATH: [path.dirname(process.execPath), ...(win ? [path.join(process.env.SystemRoot || 'C:\\Windows', 'System32')] : [])].join(path.delimiter),
-    OFFICE_PORT: String(port), OFFICE_OPEN: '0', OFFICE_HOOKS: 'command', LOCALAPPDATA: lad, APPDATA: path.join(tmp, 'roaming'),
+    OFFICE_OPEN: '0', OFFICE_HOOKS: 'command', LOCALAPPDATA: lad, APPDATA: path.join(tmp, 'roaming'),
     OFFICE_RATE_FILE: path.join(tmp, 'no-rate.json'),
   });
-  const office = startOffice(dir, env);
+  // The free port can be taken before the server binds it; the helper then starts again on a new port (test/fixtures/office-server.mjs).
+  let office = null;
   // The finally stops the second copy too. A copy that is still starting when the test fails keeps the folder busy, and
   // once the first office is gone it takes the port and runs on with no test to stop it (#78).
   let second = null;
   try {
-    await office.done;
+    const started = await startOnFreePort(dir, baseEnv);
+    office = started.office;
+    const { port, env } = started;
     const code = office.out().match(/#n=([0-9a-f]{32})/)[1];
     const own = officeFiles(dir, port); // a free port is not the default one, so the names carry the port (files.mjs)
     const agent = JSON.parse(fs.readFileSync(own.token, 'utf8'));

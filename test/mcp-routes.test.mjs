@@ -12,33 +12,18 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import net from 'node:net';
-import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startFakeOpenAI } from './fixtures/fake-openai.mjs';
 import { pageFile, routeOf } from '../auth.mjs';
 import { officeFiles } from '../files.mjs';
+import { startOnFreePort, freePort, until as untilTrue } from './fixtures/office-server.mjs';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SKIP = process.platform !== 'win32' ? 'opening sessions is only implemented for Windows' : false;
 const PAST_UID = 'past-claude-1';
-let base, work, child, port, agentToken, pageToken, fake, log = '';
+let base, work, child, port, agentToken, pageToken, fake;
 
-const freePort = () => new Promise((resolve, reject) => {
-  const s = net.createServer();
-  s.listen(0, '127.0.0.1', () => { const { port: p } = s.address(); s.close(() => resolve(p)); });
-  s.on('error', reject);
-});
-// A server that starts while other suites run can need more than 15 s; a fast start still returns at once.
-const until = async (fn, what, ms = 45000) => {
-  const t0 = Date.now();
-  for (;;) {
-    const v = await fn();
-    if (v) return v;
-    if (Date.now() - t0 > ms) assert.fail(`timed out waiting for ${what}\n${log.slice(-800)}`);
-    await new Promise((r) => setTimeout(r, 50));
-  }
-};
+const until = (fn, what) => untilTrue(fn, what, { log: () => child?.out() });
 // auth: true sends the token of the route's group, false sends none, a string sends that token.
 const tokenFor = (route) => (routeOf('POST', route) === 'agent' ? agentToken : pageToken);
 const call = (route, body, { auth = true } = {}) => {
@@ -69,31 +54,30 @@ before(async () => {
   }
   for (const d of ['providers', 'public']) fs.cpSync(path.join(SRC, d), path.join(copy, d), { recursive: true });
   fake = await startFakeOpenAI({ script: [{ text: 'ok' }], models: ['fake-model'] });
-  port = await freePort();
-  const own = officeFiles(copy, port);
   // A claude.exe that fails before init: node.exe under that name. It answers the headless flags with "bad option" and exits
   // at once, so Reopen of a Claude Code record starts a process that never reaches init. No Claude Code, no paid call.
   const bin = path.join(base, 'bin');
   fs.mkdirSync(bin);
   try { fs.linkSync(process.execPath, path.join(bin, 'claude.exe')); } catch { fs.copyFileSync(process.execPath, path.join(bin, 'claude.exe')); }
   // A past Claude Code session the server loads at start (the past sessions file is read once, at start).
-  fs.writeFileSync(own.history, JSON.stringify([{ uid: PAST_UID, sid: 'past-sid-1', provider: 'claude-code', name: 'past-claude', cwd: work, model: 'sonnet',
-    cost: 0.5, turns: 2, startedAt: 1000, endedAt: 2000, worktree: null, replies: [{ id: 1, text: 'earlier answer' }], prompt: 'earlier ask', budget: null }]));
+  const pastRecords = JSON.stringify([{ uid: PAST_UID, sid: 'past-sid-1', provider: 'claude-code', name: 'past-claude', cwd: work, model: 'sonnet',
+    cost: 0.5, turns: 2, startedAt: 1000, endedAt: 2000, worktree: null, replies: [{ id: 1, text: 'earlier answer' }], prompt: 'earlier ask', budget: null }]);
   // LM Studio points at a free port with nothing on it, so a real LM Studio on this machine is never asked.
   const noServer = `http://127.0.0.1:${await freePort()}/v1`;
-  const env = { ...process.env, PATH: bin + path.delimiter + (process.env.PATH || process.env.Path || ''), OFFICE_PORT: String(port), OFFICE_HOOKS: 'command', OFFICE_OLLAMA_URL: fake.url, OFFICE_LMSTUDIO_URL: noServer, OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
+  const env = { ...process.env, PATH: bin + path.delimiter + (process.env.PATH || process.env.Path || ''), OFFICE_HOOKS: 'command', OFFICE_OLLAMA_URL: fake.url, OFFICE_LMSTUDIO_URL: noServer, OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
     OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local') };
-  child = spawn(process.execPath, ['server.mjs'], { cwd: copy, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env });
-  child.stdout.on('data', (d) => { log += d; });
-  child.stderr.on('data', (d) => { log += d; });
-  const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')).token; } catch { return null; } };
-  // The server writes its token file, then the page file, once it listens.
-  agentToken = await until(() => read(own.token), 'the server to listen');
-  pageToken = await until(() => read(pageFile(env, port)), 'the page token file');
+  // Ready is the server's own "is open" line, printed after it wrote its files. The files have the port in their names, so the past
+  // sessions are written for each try; a port taken before the bind starts the server again on a new port.
+  const started = await startOnFreePort(copy, env, { prepare: (p) => fs.writeFileSync(officeFiles(copy, p).history, pastRecords) });
+  child = started.office;
+  port = started.port;
+  const read = (f) => JSON.parse(fs.readFileSync(f, 'utf8')).token;
+  agentToken = read(officeFiles(copy, port).token);
+  pageToken = read(pageFile(started.env, port));
   assert.notEqual(agentToken, pageToken);
 });
 after(async () => {
-  if (child) child.kill();
+  if (child) await child.stop();
   if (fake) await fake.close();
   await new Promise((r) => setTimeout(r, 300)); // let Windows release the folder
   if (base) try { fs.rmSync(base, { recursive: true, force: true }); } catch { /* a temp folder may stay */ }
