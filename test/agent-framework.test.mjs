@@ -16,6 +16,7 @@ import { createAgentFramework, readTeam, teamOf, runnerEnv, DEFAULT_TEAM, TEAM_F
 import { TOOL_DEFINITIONS } from '../providers/local-tools.mjs';
 import { createLocal } from '../providers/local.mjs';
 import { resolveExe } from '../git.mjs';
+import { cleanRules, setRule, decide } from '../security.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const RECORDED = fs.readFileSync(path.join(HERE, 'fixtures', 'agent-framework.jsonl'), 'utf8').split('\n').filter((l) => l.trim());
@@ -43,15 +44,24 @@ function fakeChild(pid = 5151) {
 const LMSTUDIO = { kind: 'lmstudio', label: 'LM Studio', baseUrl: 'http://127.0.0.1:1234/v1', models: async () => [{ id: 'qwen/qwen3-8b', label: 'qwen/qwen3-8b' }] };
 const OLLAMA_DOWN = { kind: 'ollama', label: 'Ollama', baseUrl: 'http://127.0.0.1:11434/v1', models: async () => { throw new Error('ECONNREFUSED'); } };
 
+// Security room rules (security.mjs) for the team's column. The defaults ask about every call, a low read inside the worktree
+// included (#23 is a new kind: nothing it did before needs keeping). INSIDE: a user who set Allow on reads and edits inside.
+const allowCell = (row, r = cleanRules(null)) => setRule(r, { scope: 'office', row, col: 'agent-framework', value: 'allow', confirmed: true }).rules;
+const INSIDE = allowCell('edit-inside', allowCell('read-inside'));
+
 // The office side: a tracker, the events, the holds without sockets (as server.mjs holds them), and the provider.
-function rig({ env = {}, servers = [LMSTUDIO, OLLAMA_DOWN], execFile, exe, officeTools, tools } = {}) {
+// rules: the Security room rules; the tracker checks them before a hold, as the server's tracker does, and a decision is
+// answered on a later tick (the server's holdRequest). The session works in its own git worktree, as an office session does.
+function rig({ env = {}, servers = [LMSTUDIO, OLLAMA_DOWN], execFile, exe, officeTools, tools, rules = cleanRules(null) } = {}) {
   const o = { holds: new Map(), ids: {}, spawned: [], killed: [], ran: [] };
   o.cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-af-'));
   o.tracker = createTracker({
     now: Date.now, makeId: (k) => `${k[0]}${(o.ids[k] = (o.ids[k] || 0) + 1)}`, locate: async () => null,
     setTimer: () => 0, releaseHold: (id, d) => o.release(id, d),
+    screen: (s, p, opts) => decide(rules, { building: null, kind: s.provider, tool: p.tool_name, input: p.full_input || p.tool_input, root: o.tracker.rootOf(s), worktree: !!(s.worktree && s.worktree.root), provider: opts.provider }),
   });
-  o.events = providerEvents({ tracker: o.tracker, hold: (r) => o.holds.set(r.id, { s: r.s, suggestions: r.suggestions }) });
+  o.events = providerEvents({ tracker: o.tracker,
+    hold: (r) => (r.auto ? setImmediate(() => o.provider.answer(r.s, { id: r.id, suggestions: [] }, r.auto)) : o.holds.set(r.id, { s: r.s, suggestions: r.suggestions })) });
   o.release = (id, d) => {
     const h = o.holds.get(id);
     if (!h) return false;
@@ -67,7 +77,7 @@ function rig({ env = {}, servers = [LMSTUDIO, OLLAMA_DOWN], execFile, exe, offic
     kill: (pid) => o.killed.push(pid),
     makeTools: tools || (() => ({ run: async (name, input) => { o.ran.push({ name, input }); return { ok: true, text: `ran ${name}` }; }, stop: () => {} })),
   });
-  o.session = () => o.tracker.newSession({ uid: 'o1', officeId: 'o1', name: 'team', cwd: o.cwd, headless: true, status: 'starting', provider: 'agent-framework' });
+  o.session = () => o.tracker.newSession({ uid: 'o1', officeId: 'o1', name: 'team', cwd: o.cwd, headless: true, status: 'starting', provider: 'agent-framework', worktree: { root: o.cwd, branch: 'agent/team-1', repo: o.cwd } });
   o.say = (s, text) => { o.provider.message(s, { text }); o.tracker.startTurn(s, text); };
   o.child = () => o.spawned[o.spawned.length - 1].child;
   o.done = () => fs.rmSync(o.cwd, { recursive: true, force: true });
@@ -84,12 +94,16 @@ async function play(child, lines) {
   }
 }
 
-test('the provider has the seam shape: free, a model to pick, no resume, a team', () => {
+test('the provider has the seam shape: free, gated, a model to pick, no resume, a team', () => {
   const o = rig();
   const p = checkProvider(o.provider);
   assert.equal(p.kind, 'agent-framework');
   assert.equal(p.label, 'Agent Framework');
-  assert.deepEqual(describeKind(p), { kind: 'agent-framework', label: 'Agent Framework', paid: false, terminal: false, modes: [], needsModel: true, control: false, team: true });
+  // gated: every member call goes to the office first (the Security room rules); cost reported: it is 0, never unknown.
+  assert.deepEqual(describeKind(p), { kind: 'agent-framework', label: 'Agent Framework', paid: false, terminal: false, modes: [], needsModel: true, control: false,
+    gated: true, supervision: null, cost: 'reported', team: true });
+  assert.deepEqual(p.features, ['teams'], 'the Agent teams feature word (#72)');
+  assert.equal(globalThis.OfficeVocab.security.columnOf(p.kind), 'agent-framework', 'its own Security room column');
   assert.equal(p.canResume, false);
   assert.throws(() => checkProvider({ ...p, team: 'yes' }), /team \(optional, but then true or false\)/);
   assert.equal(createRegistry([p]).get('agent-framework'), p);
@@ -201,7 +215,7 @@ test('open: Python runs the runner outside the worktree with a scrubbed environm
 });
 
 test('a recorded team turn: the lead is the bot, members are helpers by hand-off, tool calls go through the office gate', async () => {
-  const o = rig();
+  const o = rig({ rules: INSIDE });
   const s = o.session();
   o.provider.open(s, { model: 'lmstudio:qwen/qwen3-8b' });
   const child = o.child();
@@ -242,7 +256,7 @@ test('a recorded team turn: the lead is the bot, members are helpers by hand-off
 });
 
 test('a sequential team: each member is a helper from its first word until its executor completes', async () => {
-  const o = rig();
+  const o = rig({ rules: INSIDE });
   fs.writeFileSync(path.join(o.cwd, TEAM_FILE), JSON.stringify({ pattern: 'sequential', agents: [
     { name: 'writer', instructions: 'Write.' }, { name: 'editor', instructions: 'Edit.' }, { name: 'checker', instructions: 'Check.' }] }));
   const s = o.session();
@@ -264,7 +278,7 @@ test('a sequential team: each member is a helper from its first word until its e
 });
 
 test('a tool call that throws in the office goes back to the team as a failed call; the office does not crash', async () => {
-  const o = rig({ tools: () => ({ run: async () => { throw new Error('disk gone'); }, stop: () => {} }) });
+  const o = rig({ rules: INSIDE, tools: () => ({ run: async () => { throw new Error('disk gone'); }, stop: () => {} }) });
   const s = o.session();
   o.provider.open(s, { model: 'lmstudio:qwen/qwen3-8b' });
   const child = o.child();
@@ -313,7 +327,7 @@ test('a member calls only its own tools: a tool not in its list, or an agent not
 });
 
 test(`a team turn has at most ${MAX_STEPS} steps (tool calls and hand-offs); then the office stops the run and says why`, async () => {
-  const o = rig();
+  const o = rig({ rules: INSIDE });
   const s = o.session();
   o.provider.open(s, { model: 'lmstudio:qwen/qwen3-8b' });
   const child = o.child();
@@ -365,6 +379,51 @@ test('a declined call goes back to the team as declined; the turn goes on', asyn
   await until(() => s.status === 'idle', 'the end of the turn');
   assert.equal(s.error, null);
   o.done();
+});
+
+// The Security room rules (security.mjs) decide every member call before a hold, from the team's own column (#23).
+test('the Security room decides every member call: a default Ask holds even a low read, Deny refuses at once, a user-set Allow runs it', async () => {
+  const turn = async (rules, call) => {
+    const o = rig({ rules });
+    const s = o.session();
+    o.provider.open(s, { model: 'lmstudio:qwen/qwen3-8b' });
+    const child = o.child();
+    o.say(s, 'go');
+    await until(() => child.lines().some((m) => m.type === 'message'), 'the message');
+    child.say({ type: 'event', event: 'handoff_sent', source: 'lead', target: 'coder' });
+    child.say({ type: 'tool', id: 't1', agent: 'coder', ...call });
+    return { o, s, child, answer: () => until(() => child.lines().some((m) => m.type === 'tool_result'), 'the answer').then(() => child.lines().find((m) => m.type === 'tool_result').text) };
+  };
+  const READ = { name: 'Read', input: { file_path: 'a.txt' } }, BASH = { name: 'Bash', input: { command: 'echo hi' } };
+  // The defaults: a low read inside the worktree waits for the user, on the coder's helper.
+  let r = await turn(cleanRules(null), READ);
+  await until(() => r.s.pending.length === 1, 'the read to wait');
+  assert.equal(r.s.pending[0].tool, 'Read');
+  assert.equal(r.s.pending[0].agent, r.s.agents[0].id, 'the request is on the coder');
+  assert.deepEqual(r.o.ran, [], 'nothing runs before the answer');
+  r.o.release(r.s.pending[0].id, { allow: true });
+  assert.equal(await r.answer(), 'ran Read');
+  r.o.done();
+  // A Deny the user set: refused at once with the reason for the team, one feed line, no hold.
+  const deny = setRule(cleanRules(null), { scope: 'office', row: 'shell', col: 'agent-framework', value: 'deny' }).rules;
+  r = await turn(deny, BASH);
+  assert.equal(await r.answer(), 'Denied by the Security room: Shell commands.');
+  assert.equal(r.o.holds.size, 0, 'nothing waited for the user');
+  assert.deepEqual(r.o.ran, []);
+  assert.deepEqual(((c) => [c.ok, c.agent])(r.s.calls.find((c) => c.name === 'Bash')), [false, r.s.agents[0].id]);
+  assert.ok(r.o.tracker.feed.some((f) => f.text === 'denied by Security: Shell commands'));
+  r.o.done();
+  // The local model's column is not the team's: its Deny holds the team's command for the user.
+  const localDeny = setRule(cleanRules(null), { scope: 'office', row: 'shell', col: 'local', value: 'deny' }).rules;
+  r = await turn(localDeny, BASH);
+  await until(() => r.s.pending.length === 1, 'the command to wait');
+  r.o.done();
+  // An Allow the user set on reads inside: the read runs with no question and no feed line (a low call, quiet).
+  r = await turn(INSIDE, READ);
+  assert.equal(await r.answer(), 'ran Read');
+  assert.equal(r.o.holds.size, 0);
+  assert.ok(!r.o.tracker.feed.some((f) => /allowed by Security/.test(f.text)), 'a quiet answer writes no line');
+  r.o.done();
 });
 
 test('an office tool needs no approval; a member reaches office_ask through the office tools', async () => {
@@ -540,9 +599,10 @@ test('the real runner: --check without the framework says what is missing', { sk
 });
 
 // The provider as the server builds it, with real Python and the real runner; only the framework is a stand-in.
-async function realRig(t) {
+// rules: a user who allowed reads and edits inside the worktree, unless the test gives others.
+async function realRig(t, rules = INSIDE) {
   const fake = path.join(HERE, 'fixtures', 'fake-af');
-  const o = rig();
+  const o = rig({ rules });
   const real = await import('node:child_process');
   o.provider = createAgentFramework({
     events: o.events, servers: [LMSTUDIO],

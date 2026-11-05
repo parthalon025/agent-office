@@ -35,7 +35,7 @@
      kindNote(k, terminal) -> the line that says where a kind runs and what it costs
      security         -> the Security room grid (#70), shared by its wall screens and the server's rules (security.mjs):
                          screens [{ id, title, rows }], rows { id: { label, options, def, office?, only? } }, columns
-                         [{ id, label }] (agent kinds), columnOf(providerKind), options(row), valueOf(rules, building, row,
+                         [{ id, label, free? }] (agent kinds; free: it costs nothing), columnOf(providerKind), options(row), valueOf(rules, building, row,
                          col), sourceOf(...) ('building' | 'office' | 'default'), next(row, value), loosens(row, from, to),
                          applies(row, col), na(row, col), word(value), key(row, col), own(map, key) (an own key, never
                          an inherited one: rule maps come from requests and state.json).
@@ -162,13 +162,14 @@
   // keeps what it did before the Security room, its reads and edits inside the worktree run with no question (they never were
   // requests, providers/local.mjs). The two Secrets rows never offer Allow. The Agents rows are office-wide;
   // every other row can have a per-building override. A rule the row does not offer is never used.
+  // free: the kind runs on a model of this machine and costs nothing (the Spend screen says Free).
   var SEC_COLUMNS = [{ id: 'claude-code', label: 'Claude Code' }, { id: 'hermes', label: 'Hermes' }, { id: 'dsh', label: 'dsh' },
-    { id: 'openclaw', label: 'OpenClaw' }, { id: 'local', label: 'Local model' }];
+    { id: 'openclaw', label: 'OpenClaw' }, { id: 'local', label: 'Local model', free: true }, { id: 'agent-framework', label: 'Agent Framework', free: true }];
   // The tables are looked up by names that come from requests and saved files, so they have no prototype: '__proto__' or
   // 'constructor' is no row, agent kind or word. Rule maps (rules.office, rules.buildings) are read by own keys only (own).
   function bare(o) { return Object.assign(Object.create(null), o); }
   function own(o, k) { return !!o && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k); }
-  var SEC_KIND = bare({ 'claude-code': 'claude-code', ollama: 'local', lmstudio: 'local', hermes: 'hermes', dsh: 'dsh', openclaw: 'openclaw' });
+  var SEC_KIND = bare({ 'claude-code': 'claude-code', ollama: 'local', lmstudio: 'local', hermes: 'hermes', dsh: 'dsh', openclaw: 'openclaw', 'agent-framework': 'agent-framework' });
   var RULE = ['ask', 'allow', 'deny'], ASK_DENY = ['ask', 'deny'], TOGGLE = ['off', 'on'];
   var SEC_ROWS = bare({
     'read-inside': { label: 'Read inside the worktree', options: RULE, def: 'ask', defs: { local: 'allow' } },
@@ -185,7 +186,7 @@
     // Paperclip's Claude Code runs go through the office hooks (#76).
     supervise: { label: 'Paperclip: Supervise in office', options: TOGGLE, def: 'off', office: true, only: ['claude-code'], na: 'Not used' },
     // An agent that reports no cost: Ask (the office asks once per session), Allow (it runs without asking), Deny (it never runs).
-    'no-cost': { label: 'Run without cost reports', options: RULE, def: 'ask', office: true, only: ['hermes', 'dsh', 'openclaw'], na: { 'claude-code': 'Reports cost', local: 'Free' } }
+    'no-cost': { label: 'Run without cost reports', options: RULE, def: 'ask', office: true, only: ['hermes', 'dsh', 'openclaw'], na: { 'claude-code': 'Reports cost', local: 'Free', 'agent-framework': 'Free' } }
   });
   var SEC_SCREENS = [
     { id: 'files', title: 'Files', rows: ['read-inside', 'edit-inside', 'files-outside'] },
@@ -266,7 +267,7 @@
     var label = (k && k.label) || 'Claude Code';
     if (terminal) return 'Starts ' + label + ' in a new terminal window with the office hooks attached.';
     if (k && k.team) return 'Runs a team of ' + label + ' agents on a model on this machine, inside the office. The team comes from agent-team.json in the folder, '
-      + 'or it is a lead, a coder and a reviewer. A member shows as a helper bot while it has the work. Risky steps come to you for approval. It costs nothing.';
+      + 'or it is a lead, a coder and a reviewer. A member shows as a helper bot while it has the work. Each tool call comes to you for approval, until you set a rule in the Security room. It costs nothing.';
     if (k && !k.paid) return 'Runs a model from ' + label + ' on this machine, inside the office. It reads and changes files in the folder and runs commands. Risky steps come to you for approval. It costs nothing.';
     return 'Runs ' + label + ' inside the office. You talk to it in the chat and approve its steps here. It has no terminal window.';
   }

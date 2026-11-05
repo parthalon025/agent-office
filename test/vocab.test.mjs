@@ -138,11 +138,13 @@ test('always allow is offered for low and medium risk, never for high risk or a 
 const S = V.security;
 const RULES = (office = {}, buildings = {}) => ({ office, buildings });
 
-test('security: six screens on three walls, each with its rows; five agent kinds as columns', () => {
+test('security: six screens on three walls, each with its rows; six agent kinds as columns', () => {
   assert.deepEqual(S.screens.map((x) => x.title), ['Files', 'Commands', 'Network', 'Secrets', 'Agents', 'Spend']);
   assert.deepEqual(S.screens.find((x) => x.id === 'files').rows, ['read-inside', 'edit-inside', 'files-outside']);
   assert.deepEqual(S.screens.find((x) => x.id === 'secrets').rows, ['settings', 'secrets']);
-  assert.deepEqual(S.columns.map((c) => c.label), ['Claude Code', 'Hermes', 'dsh', 'OpenClaw', 'Local model']);
+  assert.deepEqual(S.columns.map((c) => c.label), ['Claude Code', 'Hermes', 'dsh', 'OpenClaw', 'Local model', 'Agent Framework']);
+  // A kind that runs on a model of this machine costs nothing: the Spend screen says Free, never Not reported (#23).
+  assert.deepEqual(S.columns.filter((c) => c.free).map((c) => c.id), ['local', 'agent-framework']);
   assert.equal(S.rows.shell.label, 'Shell commands');
   assert.equal(S.rows['files-outside'].label, 'Read or edit outside it');
 });
@@ -152,18 +154,25 @@ test('security: an agent kind is the column of its provider; the two local provi
   assert.equal(S.columnOf('ollama'), 'local');
   assert.equal(S.columnOf('lmstudio'), 'local');
   assert.equal(S.columnOf('hermes'), 'hermes');
+  assert.equal(S.columnOf('agent-framework'), 'agent-framework', 'an Agent Framework team has a column of its own (#23)');
   assert.equal(S.columnOf(undefined), 'claude-code', 'a session first seen in a hook is Claude Code');
   assert.equal(S.columnOf('something-new'), null);
 });
 
 test('security: every call row is Ask by default for every agent kind, also reads and edits inside the worktree (owner decision pending, Claude Code asks today)', () => {
   const none = RULES();
-  for (const col of ['claude-code', 'hermes', 'dsh', 'openclaw']) {
+  for (const col of ['claude-code', 'hermes', 'dsh', 'openclaw', 'agent-framework']) {
     for (const row of ['read-inside', 'edit-inside', 'files-outside', 'shell', 'web', 'mcp', 'settings', 'secrets']) {
       if (S.applies(row, col)) assert.equal(S.valueOf(none, '', row, col), 'ask', row + ' ' + col);
     }
   }
   assert.equal(S.valueOf(none, '', 'ungated', 'openclaw'), 'off', 'an ungated agent is off until the user turns it on');
+  // Agent Framework (#23) is new, so it has no past behavior to keep: its reads and edits inside ask too, unlike the local model.
+  assert.equal(S.sourceOf(none, '', 'read-inside', 'agent-framework'), 'default');
+  // It is gated and free: no Turn on cell, no cost cell, and each says why.
+  assert.deepEqual([S.applies('ungated', 'agent-framework'), S.na('ungated', 'agent-framework')], [false, 'Gated']);
+  assert.deepEqual([S.applies('no-cost', 'agent-framework'), S.na('no-cost', 'agent-framework')], [false, 'Free']);
+  assert.deepEqual([S.applies('supervise', 'agent-framework'), S.na('supervise', 'agent-framework')], [false, 'Not used']);
 });
 
 test('security: the local model keeps what it did before the Security room: its reads and edits inside the worktree run without a question', () => {
@@ -285,8 +294,9 @@ test('the note of a kind says where it runs and what it costs', () => {
   assert.match(V.kindNote(OL, true), /^Starts Ollama in a new terminal window/);
   // A team (Agent Framework): where its team comes from, how its members show, and that it costs nothing
   const AF = { kind: 'agent-framework', label: 'Agent Framework', paid: false, team: true };
+  // Its column of the Security room asks about every call by default, a read inside the worktree too (#23): the note says so.
   assert.equal(V.kindNote(AF, false), 'Runs a team of Agent Framework agents on a model on this machine, inside the office. The team comes from agent-team.json in the folder, '
-    + 'or it is a lead, a coder and a reviewer. A member shows as a helper bot while it has the work. Risky steps come to you for approval. It costs nothing.');
+    + 'or it is a lead, a coder and a reviewer. A member shows as a helper bot while it has the work. Each tool call comes to you for approval, until you set a rule in the Security room. It costs nothing.');
 });
 
 test('the agents of a building as one word: the kinds of its sessions, in the order of the kinds, each once', () => {

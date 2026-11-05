@@ -368,3 +368,26 @@ test('M1: Hermes is ungated, so it is off until the user turns it on; the Agents
   assert.equal(openRefusal(on, hermes), null);
   assert.equal(openRefusal(on, { kind: 'dsh', label: 'DeepSeek Harness', gated: true, cost: 'unknown' }), null, 'a gated kind needs no switch');
 });
+
+// Agent Framework teams (#23): a gated kind with a column of its own. Every member tool call reaches the office, so its
+// cells are enforced; it is new, so its reads and edits inside ask by default (only the local model keeps its old Allow).
+test('Agent Framework: its own column decides its calls; a default Ask holds a low read, a cell the user set answers', () => {
+  const team = (tool, input, extra) => call(tool, input, { kind: 'agent-framework', provider: true, ...extra });
+  assert.equal(decide(none(), team('Read', { file_path: inside })), null, 'a default Ask holds the read');
+  assert.equal(decide(none(), team('Read', { file_path: inside }, { worktree: false })), null, 'outside git: held as outside');
+  const allowRead = setRule(none(), { scope: 'office', row: 'read-inside', col: 'agent-framework', value: 'allow', confirmed: true }).rules;
+  assert.deepEqual(decide(allowRead, team('Read', { file_path: inside })), { allow: true, line: 'allowed by Security: Read inside the worktree', quiet: true });
+  assert.equal(decide(allowRead, team('Read', { file_path: inside }, { worktree: false })), null, 'its inside rows need a worktree, unlike the local model (M4)');
+  assert.equal(decide(allowRead, call('Read', { file_path: inside }, { kind: 'ollama', provider: true, building: B })).quiet, true, 'the local column is its own');
+  const denyShell = setRule(none(), { scope: 'office', row: 'shell', col: 'agent-framework', value: 'deny' }).rules;
+  assert.deepEqual(decide(denyShell, team('Bash', { command: 'echo hi' })),
+    { allow: false, line: 'denied by Security: Shell commands', message: 'Denied by the Security room: Shell commands.', quiet: false });
+  assert.equal(decide(denyShell, call('Bash', { command: 'echo hi' }, { kind: 'ollama', provider: true })), null, 'a Deny for the team is not a Deny for the local model');
+  // Free and gated: no question before it runs, nothing refuses it, and every cell is enforced once its provider is there.
+  const af = { kind: 'agent-framework', label: 'Agent Framework', paid: false };
+  assert.equal(openRefusal(none(), af), null);
+  assert.equal(costAsk(none(), af), false);
+  const e = enforcement([{ kind: 'claude-code', label: 'Claude Code' }, af]);
+  assert.deepEqual(e['agent-framework'], { reason: '', rows: {}, asks: {}, unset: {}, partly: {} });
+  assert.match(enforcement([{ kind: 'claude-code', label: 'Claude Code' }])['agent-framework'].reason, /no provider for this agent kind/);
+});

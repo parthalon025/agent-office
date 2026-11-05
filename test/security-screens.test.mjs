@@ -11,7 +11,7 @@ import { AGENTS } from '../providers/acp.mjs';
 const P = globalThis.OfficeSecurity.pure;
 const SET = '/api/security/set';
 const NOT_SET_UP = { reason: 'The office has no provider for this agent kind yet. The rule applies when it has one.', rows: {} };
-const enforce = { 'claude-code': { reason: '', rows: { supervise: 'Paperclip is not connected to this office.' } }, hermes: NOT_SET_UP, dsh: NOT_SET_UP, openclaw: NOT_SET_UP, local: { reason: '', rows: {} } };
+const enforce = { 'claude-code': { reason: '', rows: { supervise: 'Paperclip is not connected to this office.' } }, hermes: NOT_SET_UP, dsh: NOT_SET_UP, openclaw: NOT_SET_UP, local: { reason: '', rows: {} }, 'agent-framework': { reason: '', rows: {} } };
 const B = 'c:/work/repo';
 const data = (rules = { office: {}, buildings: {} }, spend = { limit: 2, month: '2026-11', byColumn: { 'claude-code': 1.5 } }) => ({ sec: { rules, enforce, spend }, building: B, buildingName: 'repo' });
 const view = (o = {}) => ({ screen: 'files', w: 1280, h: 686, focused: true, paged: false, page: 0, scope: 'office', pending: null, edit: null, hover: null, busy: false, note: null, ...o });
@@ -24,7 +24,7 @@ const said = (p) => texts(p).join(' ').replace(/\s+/g, ' ');
 
 test('full screen: one cell per row and agent kind, found again from the point the host gives', () => {
   const v = view(), p = P.plan(v, data());
-  assert.equal(p.hots.filter((h) => h.kind === 'cell').length, 15, '3 rows x 5 agent kinds');
+  assert.equal(p.hots.filter((h) => h.kind === 'cell').length, 18, '3 rows x 6 agent kinds');
   for (const [row, col] of [['read-inside', 'claude-code'], ['files-outside', 'local'], ['edit-inside', 'openclaw']]) {
     assert.equal(P.hotAt(p, uvOf(cell(p, row, col), v), v.w, v.h), cell(p, row, col), `${row} ${col}`);
   }
@@ -86,19 +86,19 @@ test('below 700 px of free view a screen in focus shows one agent kind, with Pre
   assert.equal(P.PAGED_BELOW, 700);
   const d = data(), v = view({ paged: true }), p = P.plan(v, d);
   assert.equal(p.hots.filter((h) => h.kind === 'cell').length, 3, 'one column');
-  assert.ok(texts(p).includes('Claude Code (1 of 5)'));
+  assert.ok(texts(p).includes('Claude Code (1 of 6)'));
   const next = P.step(v, hotOf(p, 'next'), d);
   assert.equal(next.view.page, 1);
-  assert.ok(texts(P.plan(next.view, d)).includes('Hermes (2 of 5)'));
+  assert.ok(texts(P.plan(next.view, d)).includes('Hermes (2 of 6)'));
   assert.ok(texts(P.plan(next.view, d)).includes('Not enforced for this agent'));
-  assert.equal(P.step(v, hotOf(p, 'prev'), d).view.page, 4, 'Previous from the first goes to the last');
+  assert.equal(P.step(v, hotOf(p, 'prev'), d).view.page, 5, 'Previous from the first goes to the last');
   // a looser change in the paged view: the row turns to the Confirm
   const r = P.step(v, cell(p, 'files-outside', 'claude-code'), d);
   const pp = P.plan(r.view, d);
   assert.ok(texts(pp).includes('Confirm: Allow'));
   assert.ok(hotOf(pp, 'confirm'));
   // not in focus: the whole grid (the paged view is for reading in focus)
-  assert.equal(P.plan(view({ paged: true, focused: false }), d).hots.filter((h) => h.kind === 'cell').length, 15);
+  assert.equal(P.plan(view({ paged: true, focused: false }), d).hots.filter((h) => h.kind === 'cell').length, 18);
 });
 
 test('Agents: turning on an ungated agent needs the Confirm; a gated kind has no cell, it says why', () => {
@@ -235,17 +235,18 @@ test('B1: a default Ask that Claude Code decides says Partly enforced; a click s
 // each). Node has no canvas to measure text, so the check is a safe estimate: 0.62 of the font size per character at 600.
 test('Spend: every cost word fits its column, in the full and the paged view', () => {
   const NONE = { reason: '', rows: {} };
-  const enf = { 'claude-code': NONE, hermes: NONE, dsh: NONE, openclaw: { reason: 'The office has no provider for this agent kind yet.', rows: {} }, local: NONE };
+  const enf = { 'claude-code': NONE, hermes: NONE, dsh: NONE, openclaw: { reason: 'The office has no provider for this agent kind yet.', rows: {} }, local: NONE, 'agent-framework': NONE };
   const d = { sec: { rules: { office: {}, buildings: {} }, enforce: enf, spend: { limit: 2, month: '2026-11', byColumn: { 'claude-code': 1234.5 } } }, building: B, buildingName: 'repo' };
   const words = /^(Not reported|Not set up|Free|\$[\d,.]+)$/;
   for (const v of [view({ screen: 'spend', h: 686 }), view({ screen: 'spend', h: 738 })]) {
     const items = P.plan(v, d).items.filter((i) => i.t === 'text' && words.test(i.text));
-    assert.deepEqual(items.map((i) => i.text).sort(), ['$2.00', '$1234.50', 'Free', 'Not reported', 'Not reported', 'Not set up'].sort(), 'the limit and the five cost words');
+    assert.deepEqual(items.map((i) => i.text).sort(), ['$2.00', '$1234.50', 'Free', 'Free', 'Not reported', 'Not reported', 'Not set up'].sort(), 'the limit and the six cost words: an Agent Framework team is free (#23)');
     for (const i of items) assert.ok(i.text.length * i.s * 0.62 <= i.maxW, `${i.text} at ${i.s} px needs about ${Math.round(i.text.length * i.s * 0.62)} px, has ${i.maxW}`);
-    const labels = P.plan(v, d).items.filter((i) => i.t === 'text' && /^(Claude Code|Hermes|dsh|OpenClaw|Local model)$/.test(i.text));
+    const labels = P.plan(v, d).items.filter((i) => i.t === 'text' && /^(Claude Code|Hermes|dsh|OpenClaw|Local model|Agent Framework)$/.test(i.text));
+    assert.equal(labels.length, 6, 'every agent kind has its cost column');
     for (const i of labels) assert.ok(i.text.length * i.s * 0.62 <= i.maxW, `${i.text} fits`);
   }
-  for (let page = 0; page < 5; page++) {
+  for (let page = 0; page < 6; page++) {
     const t = P.plan(view({ screen: 'spend', h: 1100, paged: true, page }), d).items.find((i) => i.t === 'text' && /: /.test(i.text) && i.s === 44);
     assert.ok(t.text.length * t.s * 0.62 <= t.maxW, `${t.text} fits the paged view`);
   }
@@ -288,7 +289,7 @@ test('M6: paged mode starts on a narrow or a short free view, from the width the
   const real = (policies) => enforcement([
     { kind: 'claude-code' }, { kind: 'ollama', gated: true },
     { kind: 'hermes', gated: false, enforces: AGENTS.hermes.enforces, unenforced: AGENTS.hermes.unenforced, partly: AGENTS.hermes.partly },
-    { kind: 'dsh', gated: true }, { kind: 'openclaw', gated: false, enforces: ['shell'] }], policies);
+    { kind: 'dsh', gated: true }, { kind: 'openclaw', gated: false, enforces: ['shell'] }, { kind: 'agent-framework', gated: true }], policies);
   const gaps = { openclaw: { config: { settings: [
     { path: 'tools.fs.workspaceOnly', have: 'false', ok: false, fix: 'openclaw config set tools.fs.workspaceOnly true', rows: ['files-outside', 'read-inside', 'edit-inside'] },
     { path: 'tools.exec.ask', have: 'off', ok: false, fix: 'openclaw config set tools.exec.ask always', rows: ['shell', 'web'] }] } } };
@@ -383,4 +384,23 @@ test('Allow on Shell commands paints a Confirm that names high risk commands, in
   // other rows keep the short Confirm
   const files = view({ screen: 'files' }), d = data(), fr = P.step(files, cell(P.plan(files, d), 'files-outside', 'claude-code'), d);
   assert.ok(texts(P.plan(fr.view, d)).includes('Confirm: Allow'));
+});
+
+// #23: a sixth agent kind (Agent Framework) makes the grid columns narrower. A column head that does not fit on one line takes
+// two, never the paint's ellipsis, and stays between the subtitle and the first row line, in both layouts.
+test('every column head of a rules screen is painted in full: a long one takes two lines above the grid', () => {
+  const heads = (p) => p.items.filter((i) => i.t === 'text' && i.c === 'muted' && i.wt === 600 && i.align === 'center' && i.s <= 24);
+  for (const [screen, h] of [['files', 686], ['commands', 686], ['network', 738], ['secrets', 738], ['agents', 738]]) {
+    for (const scope of ['office', 'building']) {
+      const v = view({ screen, h, scope }), d = data(), p = P.plan(v, d), L = P.levelFor(v, d).L;
+      const said_ = heads(p).map((i) => i.text).join(' ');
+      for (const c of globalThis.OfficeVocab.security.columns) assert.ok(said_.includes(c.label.split(' ')[0]), `${screen}: ${c.label} has its head`);
+      assert.match(said_, /Agent Framework/);
+      for (const i of heads(p)) {
+        assert.ok(i.text.length * P.charW(i.s, i.wt) <= i.maxW + 0.5, `${screen}: "${i.text}" at ${i.s} px needs ${Math.round(i.text.length * P.charW(i.s, i.wt))} px, has ${i.maxW}`);
+        assert.ok(i.y - i.s * 0.8 > L.sub + 6, `${screen}: "${i.text}" sits under the subtitle`);
+        assert.ok(i.y + i.s * 0.25 < L.y0 + 52, `${screen}: "${i.text}" sits above the first row line`);
+      }
+    }
+  }
 });

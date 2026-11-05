@@ -12,8 +12,10 @@
 //   - A member calls only the tools of its own list in the team file; the office refuses any other name.
 //   - A team turn has at most MAX_STEPS steps (tool calls and hand-offs). Then the office stops the run and the turn fails.
 //   - Tool calls are tool calls. Every tool of a team member is a proxy: the runner sends the call here, and the office runs it
-//     through the same gate as a local model (providers/local.mjs createToolGate): risk.mjs rates it, a risky call comes to
-//     you, and the tool runs inside the worktree (providers/local-tools.mjs). The runner never runs a tool itself.
+//     through the same gate as a local model (providers/local.mjs createToolGate): the Security room rules decide it first
+//     (the team's own column, agent-framework; risk.mjs names the row), else it comes to you, and the tool runs inside the
+//     worktree (providers/local-tools.mjs). The runner never runs a tool itself. Every cell of the column is Ask by default,
+//     a low read inside the worktree included: a new kind keeps no older behavior (only the local model does).
 //   - The model client is the local OpenAI-compatible server (LM Studio or Ollama, deps.servers). It costs nothing. The runner
 //     gets a scrubbed environment, so no cloud key (OPENAI_*, AZURE_*) can send the team to a paid service.
 //
@@ -283,7 +285,7 @@ export function createAgentFramework(deps) {
     if (!st.failure) {
       st.failure = `The team used all ${MAX_STEPS} steps of one turn.`;
       st.tools.stop();
-      for (const resolve of st.waiting.values()) resolve(false);
+      for (const resolve of st.waiting.values()) resolve({ allow: false });
       st.waiting.clear();
       send(st, { type: 'stop' });
     }
@@ -329,7 +331,7 @@ export function createAgentFramework(deps) {
   }
   function onTurnEnd(s, st, m) {
     flush(s, st);
-    for (const resolve of st.waiting.values()) resolve(false);
+    for (const resolve of st.waiting.values()) resolve({ allow: false });
     st.waiting.clear();
     if (st.closed) return;
     // The step limit stops the run like Stop does, but the turn failed: that reason comes first.
@@ -371,7 +373,7 @@ export function createAgentFramework(deps) {
     teams.delete(s.uid);
     st.closed = true; // nothing more from this runner
     st.tools.stop();
-    for (const resolve of st.waiting.values()) resolve(false);
+    for (const resolve of st.waiting.values()) resolve({ allow: false });
     if (st.busy) events.stream(s, { type: 'result', subtype: 'success', is_error: true, result: `Agent Framework stopped: ${clip(why, 300)}`, total_cost_usd: 0 });
     else events.reply(s, `Agent Framework stopped: ${clip(why, 400)}`);
     events.end(s, 'the team stopped');
@@ -384,6 +386,8 @@ export function createAgentFramework(deps) {
     canResume: false, // the team's conversation lives in the runner: Reopen starts a fresh team in the same folder
     needsModel: true, // the user picks a model of the local server
     team: true, // a team: its members show as helper bots
+    features: ['teams'], // the adapter feature word (#72): Agent teams
+    gated: true, // every member tool call goes to the office first (the Security room rules, then a hold): the runner runs none itself
 
     async readiness() {
       let file;
@@ -453,13 +457,14 @@ export function createAgentFramework(deps) {
       else { st.busy = true; setImmediate(() => { if (!st.closed) startRun(s, st, prompt); }); }
     },
 
-    // The user's decision on a tool call the gate asked about. No decision ({}) declines.
+    // The decision on a tool call the gate asked about: the user's, or the Security room's (with message, why it refused).
+    // No decision ({}) declines.
     answer(s, request, d = {}) {
       const st = teams.get(s.uid);
       const resolve = st && st.waiting.get(request?.id);
       if (!resolve) return;
       st.waiting.delete(request.id);
-      resolve(d.allow === true);
+      resolve({ allow: d.allow === true, message: typeof d.message === 'string' ? d.message : '' });
     },
 
     // The runner stops the run and answers with turn_end { stopped }; the result line follows from that.
@@ -469,7 +474,7 @@ export function createAgentFramework(deps) {
       st.interrupted = true;
       st.queue.length = 0;
       st.tools.stop();
-      for (const resolve of st.waiting.values()) resolve(false);
+      for (const resolve of st.waiting.values()) resolve({ allow: false });
       st.waiting.clear();
       send(st, { type: 'stop' });
     },
@@ -481,7 +486,7 @@ export function createAgentFramework(deps) {
       send(st, { type: 'close' });
       st.closed = true;
       st.tools.stop();
-      for (const resolve of st.waiting.values()) resolve(false);
+      for (const resolve of st.waiting.values()) resolve({ allow: false });
       st.waiting.clear();
       try { st.child.stdin.end(); } catch { /* gone */ }
       // The runner ends on close. One that does not is killed, process tree and all.

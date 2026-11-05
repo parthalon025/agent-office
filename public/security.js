@@ -185,11 +185,25 @@
     para(p, 48, L.sub, L.subS, L.subS + 6, 'muted', wrap(t, L.subS, view.w - 96, 400), { maxW: view.w - 96 });
   }
 
+  // The heads of the agent kind columns, centred over each column. Six kinds (#23) make a column narrow: when a head does
+  // not fit on one line at size s, every head takes size s - 2 and wraps to at most two lines, and the heads end on one
+  // baseline (yTwo); else they sit on yOne. So no head reaches the paint's ellipsis.
+  function heads(p, cols, gx, colW, s, yOne, yTwo) {
+    var max = colW - 8;
+    var two = cols.some(function (c) { return c.label.length * charW(s, 600) > max; }), size = two ? s - 2 : s;
+    cols.forEach(function (c, i) {
+      var lines = two ? wrap(c.label, size, max, 600).slice(0, 2) : [c.label];
+      lines.forEach(function (l, k) {
+        text(p, gx + i * colW + colW / 2, (two ? yTwo : yOne) - (lines.length - 1 - k) * (size + 2), size, 'muted', l, { wt: 600, align: 'center', maxW: max });
+      });
+    });
+  }
+
   // The rows of a rules or Agents screen as a grid: one column per agent kind.
   function grid(p, view, data, L) {
     var sc = screenOf(view.screen), W = view.w, x0 = 48, labelW = 380, gx = x0 + labelW, cols = S().columns;
     var colW = Math.floor((W - 48 - gx) / cols.length), y0 = L.y0, rowH = rowHOf(L, sc.rows.length);
-    cols.forEach(function (c, i) { text(p, gx + i * colW + colW / 2, y0 + 30, 24, 'muted', c.label, { wt: 600, align: 'center', maxW: colW - 8 }); });
+    heads(p, cols, gx, colW, 24, y0 + 30, y0 + 42);
     var y = y0 + 52;
     sc.rows.forEach(function (row) {
       var r = S().rows[row];
@@ -335,7 +349,7 @@
     text(p, 48, y + (big ? 56 : 46), s, 'ink', 'Cost, ' + monthName(sp.month), { maxW: W - 96 });
     var cols = S().columns, by2 = (sp.byColumn || {});
     function costWord(c) {
-      if (c.id === 'local') return 'Free';
+      if (c.free) return 'Free';   // a model on this machine: the local model and Agent Framework teams (vocab.js columns)
       if (c.id === 'claude-code') return money(+by2[c.id] || 0);
       var e = data.sec && data.sec.enforce && data.sec.enforce[c.id];
       return e && e.reason ? 'Not set up' : (by2[c.id] ? money(by2[c.id]) : 'Not reported');
@@ -348,12 +362,14 @@
       text(p, W / 2, ny + 54, 44, 'ink', col.label + ': ' + costWord(col), { wt: 600, align: 'center', maxW: W - 520 });
       y = ny + 110;
     } else {
-      // the five columns take the full width under the "Cost, month" line: right of the 480 px label column they were 142 px
-      // each, and "Not reported" did not fit (review minor)
+      // the columns take the full width under the "Cost, month" line: right of the 480 px label column they were 142 px
+      // each, and "Not reported" did not fit (review minor). With six kinds (#23) a cost word that does not fit at 28 px
+      // takes 24 px.
       var gx = 48, colW = Math.floor((W - 48 - gx) / cols.length), gy = y + 66;
+      heads(p, cols, gx, colW, 22, gy + 30, gy + 30);
       cols.forEach(function (c, i) {
-        text(p, gx + i * colW + colW / 2, gy + 30, 22, 'muted', c.label, { wt: 600, align: 'center', maxW: colW - 8 });
-        text(p, gx + i * colW + colW / 2, gy + 68, 28, 'ink', costWord(c), { wt: 600, align: 'center', maxW: colW - 8, mono: c.id === 'claude-code' });
+        var w = costWord(c), ws = w.length * charW(28, 600) <= colW - 8 ? 28 : 24;
+        text(p, gx + i * colW + colW / 2, gy + 68, ws, 'ink', w, { wt: 600, align: 'center', maxW: colW - 8, mono: c.id === 'claude-code' });
       });
       y = gy + 92;
     }
