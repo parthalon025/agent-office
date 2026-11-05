@@ -242,7 +242,7 @@ function ViewToggle(p){var opts=[{id:"building",label:"Building",icon:"building"
 /* The narrow floor strip scrolls sideways: the scrollLeft that centers the current row (sw scrollWidth, cw clientWidth, off and w the row's left and width inside the strip). Null when every floor fits. */
 function floorScroll(sw,cw,off,w){if(!(sw>cw))return null;return Math.max(0,Math.min(sw-cw,Math.round(off+w/2-cw/2)));}
 function FloorList(p){var fl=p.floors||[],box=R.useRef(null);
- R.useEffect(function(){function fit(){var el=box.current,row=el&&el.querySelector('[aria-current="true"]');if(!row)return;var x=floorScroll(el.scrollWidth,el.clientWidth,row.getBoundingClientRect().left-el.getBoundingClientRect().left+el.scrollLeft,row.offsetWidth);if(x!=null)el.scrollLeft=x;}
+ R.useEffect(function(){function fit(){var el=box.current,row=el&&el.querySelector('[aria-current="true"]');if(!row)return;var x=floorScroll(el.scrollWidth,el.clientWidth,row.getBoundingClientRect().left-el.getBoundingClientRect().left+el.scrollLeft,row.offsetWidth);if(x!=null)el.scrollLeft=x;if(el.scrollHeight>el.clientHeight+1)el.scrollTop=Math.max(0,row.getBoundingClientRect().top-el.getBoundingClientRect().top+el.scrollTop-(el.clientHeight-row.offsetHeight)/2);}
   fit();window.addEventListener("resize",fit);return function(){window.removeEventListener("resize",fit);};},[p.current,fl.length]);
  return h(AO.Panel,{title:"Floors",count:fl.length,flush:true},h("div",{className:"ao-floors",ref:box},fl.map(function(f){var w=(f.statuses||[]).filter(function(s){return s==="working";}).length;
   return h("button",{key:f.id,type:"button",className:"ao-row","aria-current":String(f.id===p.current),onClick:function(){p.onSelect&&p.onSelect(f.id);}},

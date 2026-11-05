@@ -408,3 +408,7 @@ test('tool calls of the cloud agents get a DS tool kind', () => {
   assert.equal(V.toolKind('Topic'), 'flow');
   assert.equal(V.toolKind('Whatever'), 'api');
 });
+
+test('todoStatus shows a failed manager step as error', () => {
+  assert.equal(V.todoStatus('error'), 'error');
+});

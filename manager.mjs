@@ -1,7 +1,7 @@
 // Manager: the rules that turn one goal into steps handed to agents. A pure core, like tracker.mjs: everything outside
 // the rules is injected, so importing this module starts nothing and a test needs no server, model or timer.
 //
-//   createManager({ planner, agents, dispatch, interrupt?, deliver?, spendOf?, clock?, makeId?, onChange?, managerName?, limits? })
+//   createManager({ planner, agents, dispatch, interrupt?, deliver?, spendOf?, board?, defaultSpendLimit?, clock?, makeId?, onChange?, managerName?, limits? })
 //
 //   planner(goal, agents)        -> Promise<[{ text, role?, room?, bot? }]>   any provider can plan (a local model, a paid one, a fake)
 //   agents(building)             -> [{ id, name, role, room, free, paid? }]    who could take a step right now. paid is false for a local model.
@@ -9,6 +9,10 @@
 //   interrupt(agentId)           -> void                                       optional: stop a step on cancel
 //   deliver(to, from, text, hops)-> void                                       optional: put an allowed mail into the receiver's inbox
 //   spendOf(agentId)             -> number                                     optional: dollars the agent has spent so far
+//   board(report)                -> void                                       optional: the user's view. Called with { goalId, building, goal, status, text, todos } after
+//                                                                              every change, only when the status, the to-dos or the text changed. Not wired to the server yet.
+//                                                                              Owner decision (e1, default): when it is wired, `text` goes to its own section of the room
+//                                                                              board, never over the user's notes. The report has no room or notes key yet; the wiring adds it.
 //   defaultSpendLimit            number                                        optional: dollars for a goal that asks for none of its own (default 2; 0 = none)
 //
 // A goal that can reach a paid agent gets the default spend limit (providers/index.mjs spendLimitFor) unless submit() says otherwise: a
@@ -18,9 +22,14 @@
 // plan again on every scene mount (the design system does not restore a plan itself).
 import crypto from 'node:crypto';
 import { DEFAULT_SPEND_LIMIT, spendLimitFor } from './providers/index.mjs';
+import { NOTES_MAX } from './notes.mjs';
 
-export const DEFAULT_LIMITS = { maxSteps: 12, maxHops: 4, maxMessages: 30, maxAttempts: 3 };
+export const DEFAULT_LIMITS = { maxSteps: 12, maxHops: 4, maxMessages: 30, maxAttempts: 3, boardMax: NOTES_MAX - 100 }; // boardMax: the board text must fit a notes board
 const STATUS_TO_DS = { pending: 'resting', working: 'working', finished: 'finished', error: 'error' };
+const MARK = { pending: '[ ]', working: '[~]', finished: '[x]', error: '[!]' };
+const WORD = { planning: 'Planning', 'awaiting-approval': 'Waiting for your approval', running: 'Running', finished: 'Done', blocked: 'Blocked', stopped: 'Stopped', failed: 'Failed', cancelled: 'Cancelled' };
+const GOAL_MAX = 2000; // a goal is stored up to this; the board shows 300
+const BOARD_GOAL = 300, BOARD_STEP = 240; // 12 steps of 240 and a goal of 300 leave room for status, reason and spend
 const clip = (s, n) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 
 export function createManager(deps = {}) {
@@ -37,7 +46,41 @@ export function createManager(deps = {}) {
   const goals = new Map();
   const reserved = new Set(); // agents given a step here, whether or not the server shows them busy yet
 
-  const touch = (g) => { g.updatedAt = now(); onChange(g.id); };
+  /** The plan as a to-do list (TodoWrite shape, read by OfficeVocab.todoStatus): the step that works is in_progress, a failed step is error (not a TodoWrite status; the vocab shows it as error). */
+  const todosOf = (g) => g.steps.map((s) => ({ content: s.text, activeForm: s.owner ? `${s.owner}: ${s.text}` : s.text, status: s.status === 'finished' ? 'completed' : s.status === 'working' ? 'in_progress' : s.status === 'error' ? 'error' : 'pending' }));
+
+  /** The board text: goal and status first, one line per step, then what the user must know (reason, waiting, spend). */
+  function boardText(g) {
+    const done = g.steps.filter((s) => s.status === 'finished').length;
+    const head = [`Goal: ${clip(g.goal, BOARD_GOAL)}`, `${WORD[g.status] || g.status}${g.steps.length ? `. ${done} of ${g.steps.length} steps done.` : '.'}`];
+    const tail = [];
+    if (g.reason) tail.push(clip(g.reason, BOARD_STEP));
+    if (g.waitingFor) tail.push('The next step waits for a free agent.');
+    if (g.spendLimit > 0) tail.push(`Spent $${spent(g).toFixed(2)} of $${g.spendLimit.toFixed(2)}.`);
+    // The head and the tail (status, reason, wait, spend) are what the user must see, so they are never clipped. The step lines
+    // shrink together (240, 180, 120, ... characters of text) until everything fits; every line keeps its mark at the start.
+    const build = (n) => head.concat(g.steps.map((s) => {
+      let line = `${MARK[s.status] || '[ ]'} ${clip(s.text, n)}`;
+      if (s.owner) line += ` (${s.owner})`;
+      if (s.status === 'error' && s.result) line += `: ${clip(s.result, n)}`;
+      return line;
+    }), tail).join('\n');
+    let text = build(BOARD_STEP);
+    for (let n = BOARD_STEP - 60; text.length > limits.boardMax && n >= 20; n -= 60) text = build(n);
+    return text.length > limits.boardMax ? clip(text, limits.boardMax) : text; // only with a goal of 300 and 12 steps that no shrinking saves: not reachable with the caps above
+  }
+
+  /** Keep the board current: every change reports once, a repeat of the same text reports nothing. The text always carries the status word and the mark of
+   *  every step (boardText never clips them), so a change of status or of one to-do is always a change of text. A bad board never stops a goal. */
+  function report(g) {
+    if (typeof deps.board !== 'function') return;
+    const text = boardText(g), todos = todosOf(g);
+    if (text === g.lastBoard) return;
+    g.lastBoard = text;
+    try { deps.board({ goalId: g.id, building: g.building, goal: g.goal, status: g.status, text, todos }); } catch { /* the board is a view only */ }
+  }
+
+  const touch = (g) => { g.updatedAt = now(); report(g); onChange(g.id); };
   const spent = (g) => {
     let total = 0;
     for (const [id, base] of g.baseline) total += Math.max(0, (Number(spendOf(id)) || 0) - base);
@@ -98,12 +141,12 @@ export function createManager(deps = {}) {
   return {
     /** A goal in. Plans it, then runs it, or waits for approve() when approveFirst is set. Resolves to the goal id. */
     async submit(building, goal, opts = {}) {
-      const text = String(goal || '').trim();
+      const text = clip(String(goal || '').trim(), GOAL_MAX);
       if (!text) throw new Error('A goal is required.');
       const g = {
         id: 'g' + makeId(), building: String(building || ''), goal: text, status: 'planning', reason: '', steps: [],
         approveFirst: opts.approveFirst === true, spendLimit: limitOf(building, opts.spendLimit), messages: 0,
-        baseline: new Map(), waitingFor: '', pumping: false, createdAt: now(), updatedAt: now(),
+        baseline: new Map(), lastBoard: '', waitingFor: '', pumping: false, createdAt: now(), updatedAt: now(),
       };
       goals.set(g.id, g);
       touch(g);
@@ -184,6 +227,9 @@ export function createManager(deps = {}) {
     },
 
     get(goalId) { return goals.get(goalId) || null; },
+
+    /** The goal's plan as a to-do list, or [] for an unknown goal. */
+    todos(goalId) { const g = goals.get(goalId); return g ? todosOf(g) : []; },
 
     /** Plain data for every goal (no Maps), safe to send in the sessions snapshot. */
     snapshot() {

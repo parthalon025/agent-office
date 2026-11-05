@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createManager, DEFAULT_LIMITS } from '../manager.mjs';
+import { NOTES_MAX } from '../notes.mjs';
 
 // A world of two agents. dispatched lists what the Manager handed out; spend is per agent, in dollars.
 function world(over = {}) {
@@ -22,6 +23,7 @@ function world(over = {}) {
     makeId: () => String(++n),
     onChange: () => { w.changes += 1; },
     managerName: (b) => 'Manager ' + b,
+    board: over.board === false ? undefined : (r) => { if (over.boardError) throw new Error('x'); (w.boards ||= []).push(r); },
     limits: over.limits,
     defaultSpendLimit: over.defaultSpendLimit,
   });
@@ -262,4 +264,134 @@ test('the default limit stops a goal before the next dispatch', async () => {
   free(w, 'a1');
   assert.equal(w.m.get(id).status, 'stopped');
   assert.equal(w.dispatched.length, 1);
+});
+
+test('the board shows the goal at once and follows every step, one report per change', async () => {
+  const w = world();
+  const id = await w.m.submit('b1', 'Fix the login bug');
+  const first = w.boards.at(-1);
+  assert.equal(first.goalId, id);
+  assert.match(first.text, /Goal: Fix the login bug/);
+  assert.match(first.text, /Running\. 0 of 2 steps done\./);
+  assert.match(first.text, /\[~\] Find the bug \(Scout\)/);
+  assert.match(first.text, /\[ \] Fix the bug/);
+  assert.deepEqual(first.todos.map((t) => t.status), ['in_progress', 'pending']);
+  const before = w.boards.length;
+  await w.m.agentFreed(); // nothing changed
+  assert.equal(w.boards.length, before);
+  await w.m.finish('a1', { ok: true });
+  free(w, 'a1');
+  await w.m.agentFreed();
+  await w.m.finish('a2', { ok: true });
+  assert.match(w.boards.at(-1).text, /Done\. 2 of 2 steps done\./);
+  assert.deepEqual(w.m.todos(id).map((t) => t.status), ['completed', 'completed']);
+});
+
+test('the board names a failed step and a wait, and a bad board does not stop the goal', async () => {
+  const w = world({ boardError: true });
+  const id = await w.m.submit('b1', 'g');
+  assert.equal(w.m.get(id).status, 'running');
+  const v = world();
+  v.agents.forEach((a) => { a.free = false; });
+  await v.m.submit('b1', 'g');
+  assert.match(v.boards.at(-1).text, /waits for a free agent/);
+  const u = world();
+  await u.m.submit('b1', 'g');
+  await u.m.finish('a1', { ok: false, text: 'no access' });
+  assert.match(u.boards.at(-1).text, /Blocked/);
+  assert.match(u.boards.at(-1).text, /\[!\] Find the bug \(Scout\): no access/);
+});
+
+test('a long goal still gets every later report (the goal line is clipped, the dedupe covers status and to-dos)', async () => {
+  const w = world();
+  const id = await w.m.submit('b1', 'x'.repeat(4000));
+  assert.ok(w.m.get(id).goal.length <= 2000);
+  const lines = w.boards.at(-1).text.split('\n');
+  assert.ok(lines[0].length <= 'Goal: '.length + 300);
+  const n = w.boards.length;
+  await w.m.finish('a1', { ok: true }); free(w, 'a1');
+  await w.m.agentFreed();
+  assert.ok(w.boards.length > n);
+  await w.m.finish('a2', { ok: true });
+  assert.equal(w.boards.at(-1).status, 'finished');
+});
+
+test('twelve long steps fit the board, and the last step change still reports', async () => {
+  const plan = Array.from({ length: 12 }, (_, i) => ({ text: `${i} ` + 'y'.repeat(400), role: 'analyst' }));
+  const w = world({ plan, limits: { maxSteps: 12 } });
+  await w.m.submit('b1', 'g');
+  assert.ok(w.boards.at(-1).text.length <= NOTES_MAX);
+  assert.match(w.boards.at(-1).text, /\[ \] 11 /);
+});
+
+test('a report that changes nothing is not sent: every agent busy, agentFreed twice', async () => {
+  const w = world();
+  w.agents.forEach((a) => { a.free = false; });
+  await w.m.submit('b1', 'g');
+  const n = w.boards.length;
+  await w.m.agentFreed(); await w.m.agentFreed();
+  assert.equal(w.boards.length, n);
+});
+
+test('the board and to-dos say: waiting for approval, spend, a failed step, a retry, a cancel', async () => {
+  const a = world({ plan: [{ text: 'one', role: 'analyst' }] });
+  a.m.submit('b1', 'g', { approveFirst: true }); await Promise.resolve(); await new Promise((r) => setTimeout(r, 0));
+  assert.match(a.boards.at(-1).text, /Waiting for your approval/);
+  assert.deepEqual(a.boards.at(-1).todos.map((t) => t.status), ['pending']);
+
+  const b = world({ plan: [{ text: 'one', role: 'analyst' }] });
+  const id = await b.m.submit('b1', 'g', { spendLimit: 5 });
+  b.spend.a1 = 1.5;
+  await b.m.finish('a1', { ok: false, text: 'no access' });
+  assert.match(b.boards.at(-1).text, /Spent \$1\.50 of \$5\.00\./);
+  assert.deepEqual(b.m.todos(id).map((t) => t.status), ['error']);
+  free(b, 'a1');
+  await b.m.retry(id, `${id}-1`);
+  assert.match(b.boards.at(-1).text, /\[~\] one \(Scout\)/);
+  b.m.cancel(id);
+  assert.match(b.boards.at(-1).text, /Cancelled/);
+  assert.match(b.boards.at(-1).text, /Stopped by the user/);
+});
+
+test('the board spends its limit on the head and tail: twelve long steps and a failed one keep the status and the spend line', async () => {
+  const plan = Array.from({ length: 12 }, (_, i) => ({ text: `${i} ` + 'y'.repeat(500), role: 'analyst' }));
+  const w = world({ plan, limits: { maxSteps: 12, boardMax: 1500 } });
+  const id = await w.m.submit('b1', 'g'.repeat(1000), { spendLimit: 5 });
+  w.spend.a1 = 1.25;
+  await w.m.finish('a1', { ok: false, text: 'z'.repeat(500) });
+  const text = w.boards.at(-1).text;
+  assert.ok(text.length <= 1500, `the board text is ${text.length} characters`);
+  assert.ok(text.length > 1000, 'the steps shrink to fit, they are not dropped');
+  assert.match(text, /Blocked\. 0 of 12 steps done\./);
+  assert.match(text, /Spent \$1\.25 of \$5\.00\.$/);
+  assert.match(text, /Step failed: /);
+  assert.equal((text.match(/^\[[ ~x!]\] /gm) || []).length, 12);
+  assert.match(text, /^\[!\] 0 /m);
+  assert.equal(w.m.get(id).status, 'blocked');
+});
+
+test('a change of status alone, or of one to-do alone, is a new report', async () => {
+  // status alone: a held plan is approved (the steps do not change)
+  const a = world({ plan: [{ text: 'one', role: 'analyst' }] });
+  a.agents.forEach((x) => { x.free = false; });
+  const p = a.m.submit('b1', 'g', { approveFirst: true }); await p;
+  const held = a.boards.length;
+  await a.m.approve(a.boards.at(-1).goalId);
+  assert.ok(a.boards.length > held);
+  assert.notEqual(a.boards.at(-1).text, a.boards.at(-2).text);
+  assert.equal(a.boards.at(-2).todos[0].status, a.boards.at(-1).todos[0].status);
+  // one to-do alone: the first of two steps finishes while the goal stays running and nobody is free for the second
+  const b = world();
+  await b.m.submit('b1', 'g');
+  b.agents.forEach((x) => { x.free = false; });
+  const before = b.boards.at(-1);
+  await b.m.finish('a1', { ok: true });
+  const after = b.boards.at(-1);
+  assert.equal(before.status, after.status);
+  assert.notDeepEqual(before.todos.map((x) => x.status), after.todos.map((x) => x.status));
+  assert.notEqual(before.text, after.text);
+});
+
+test('the default board limit fits a notes board', () => {
+  assert.equal(DEFAULT_LIMITS.boardMax, NOTES_MAX - 100);
 });
