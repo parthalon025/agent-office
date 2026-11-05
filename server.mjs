@@ -799,15 +799,23 @@ async function openSession(opts) {
 
   const name = String(opts.name || '').trim().slice(0, 40) || basename(cwd) || 'session';
   if (opts.where !== 'terminal') {
-    let workdir = cwd, worktree = null;
-    if (opts.isolation === 'worktree') {
-      const wt = await git.createWorktree(cwd, name);
-      workdir = wt.path; worktree = { root: wt.root, branch: wt.branch, repo: wt.repo };
+    // Each agent gets its own room: a new worktree, unless the caller says isolation: 'same' ("Use this folder").
+    // A folder outside git cannot get one; that session works in the folder, and its feed says so.
+    let workdir = cwd, worktree = null, noRoom = false;
+    if (opts.isolation !== 'same') {
+      if (await git.locate(cwd)) {
+        const wt = await git.createWorktree(cwd, name);
+        workdir = wt.path; worktree = { root: wt.root, branch: wt.branch, repo: wt.repo, base: wt.base || null };
+        // The building knows the new room before the bot sits in it (the room board reads its files at once).
+        addRepo(wt.repo); await refreshRepo(repoKey(wt.repo));
+      } else noRoom = true;
     }
     if (worktree) rememberDir(cwd);
     // A paid provider gets the default spend limit unless the caller sets one (0 clears it). A local provider has none (#33).
     const budget = spendLimitFor({ paid: isPaid(provider), requested: opts.maxBudget, fallback: defaultSpend() });
-    return openHeadless(provider, { cwd: workdir, name, prompt, worktree, budget, scheduleId: opts.scheduleId || null, model, permissionMode });
+    const uid = openHeadless(provider, { cwd: workdir, name, prompt, worktree, budget, scheduleId: opts.scheduleId || null, model, permissionMode });
+    if (noRoom) { const s = sessions.get(uid); if (s) { addFeed(s, 'start', 'This folder is not in git, so the agent has no room of its own.'); broadcast(); } }
+    return uid;
   }
   if (typeof provider.openWindow !== 'function') throw httpError(400, `${provider.label} does not open in a terminal window.`);
   const officeId = 'o' + crypto.randomBytes(4).toString('hex');
@@ -1157,7 +1165,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true, version: r.version, text: r.text, merged: r.merged });
     }
     if (url.pathname === '/api/tree') return send(res, 200, await repoTree(String(body.root || '')));
-    if (url.pathname === '/api/branches') return send(res, 200, { branches: await git.branches(knownRepo(body.repo).path) });
+    if (url.pathname === '/api/branches') return send(res, 200, { branches: await git.floorCandidates(knownRepo(body.repo).path) });
     if (url.pathname === '/api/floor/create') return send(res, 200, await floorAction('create-floor', body));
     if (url.pathname === '/api/floor/stale') {
       const r = knownRepo(body.repo);

@@ -1,8 +1,9 @@
 // Place: where a session or a worktree sits in the office. One home for the rule, computed on the server and
 // carried in the snapshot (session.place, worktree.place). The page reads these values and keeps no copy.
 //   building  a repository (key: its normalized path), or "Other folders" outside git (key: '')
-//   floor     a branch ('No branch' outside git)
-//   room      a worktree folder, or the folder itself outside git
+//   floor     a branch ('No branch' outside git). A worktree the office made for an agent (branch agent/<name>-<id>)
+//             sits on the floor of its base branch (baseBranch), not on a floor of its own
+//   room      a worktree folder, or the folder itself outside git. An agent worktree shows its branch name
 // Pure functions, no I/O, no timers: safe to import in tests.
 import { win32 as path } from 'node:path'; // Windows-first: folder keys follow Windows rules on every host (non-Windows launch is not built)
 import crypto from 'node:crypto';
@@ -57,25 +58,27 @@ export function roomIdOf(rootKey) {
 /** The room id before the hash was added (it is lossy). Used only to carry old notes over. */
 export function legacyRoomId(rootKey) { return 'w-' + slug(rootKey).slice(-48); }
 
-function make(buildingKey, building, repoPath, floor, root) {
+/** branch: what the folder has checked out. base: the branch an agent worktree was made from ('' or undefined: none). */
+function make(buildingKey, building, repoPath, branch, root, base) {
   const rootKey = normPath(root);
   const roomId = roomIdOf(rootKey);
+  const baseBranch = base && base !== branch ? String(base) : '';
   return {
-    buildingKey, building, repoPath, floor,
-    room: baseName(root) || 'Folder', root: String(root || ''), rootKey, roomId,
+    buildingKey, building, repoPath, floor: baseBranch || branch, branch, baseBranch,
+    room: (baseBranch && branch) || baseName(root) || 'Folder', root: String(root || ''), rootKey, roomId,
     noteKey: (buildingKey || OTHER_NOTE_PREFIX) + '|' + roomId,
   };
 }
 
-/** Where a session sits. g is git.locate()'s result ({ repo, root, branch }) or null outside git. */
+/** Where a session sits. g is git.locate()'s result ({ repo, root, branch, base? }) or null outside git. */
 export function placeOfSession(g, cwd) {
-  if (!g) return make('', OTHER_NAME, '', OTHER_FLOOR, cwd);
-  return make(normPath(g.repo), baseName(g.repo), g.repo, g.branch, g.root);
+  if (!g) return make('', OTHER_NAME, '', OTHER_FLOOR, cwd, '');
+  return make(normPath(g.repo), baseName(g.repo), g.repo, g.branch, g.root, g.base);
 }
 
-/** Where a worktree of a repository sits (a room that may have no session in it). */
+/** Where a worktree of a repository sits (a room that may have no session in it). wt is a git.layout() entry. */
 export function placeOfWorktree(repoPath, wt) {
-  return make(normPath(repoPath), baseName(repoPath), repoPath, wt.branch, wt.root);
+  return make(normPath(repoPath), baseName(repoPath), repoPath, wt.branch, wt.root, wt.base);
 }
 
 /** Moves a note or pin from the legacy key to the current key. Never overwrites a current entry. Returns true if anything moved. */

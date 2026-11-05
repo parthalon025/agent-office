@@ -168,8 +168,16 @@
   }
 
   // ---------- open a session ----------
+  // "Use this folder": the opt-out of a room of its own. The DS has no Checkbox, so this is a native checkbox on DS tokens (.check in office.css).
+  function UseFolder(p) {
+    return h('div', { className: 'ao-field' },
+      h('label', { className: 'check', htmlFor: 'f-usefolder' },
+        h('input', { id: 'f-usefolder', type: 'checkbox', checked: !!p.checked, disabled: !!p.disabled, 'aria-describedby': 'f-usefolder-hint', onChange: function (e) { p.onChange(e.target.checked); } }),
+        h('span', null, 'Use this folder')),
+      h('span', { id: 'f-usefolder-hint', className: 'ao-hint' }, p.hint));
+  }
   function OpenDialog(p) {
-    var f = useState({ cwd: p.shownPath || p.recent[0] || '', name: '', provider: p.kind || DEFAULT_KIND, where: 'office', isolation: 'same', model: '', permissionMode: '', maxBudget: limitText(p.spendLimit), prompt: '', template: '' }), form = f[0], setForm = f[1];
+    var f = useState({ cwd: p.shownPath || p.recent[0] || '', name: '', provider: p.kind || DEFAULT_KIND, where: 'office', useFolder: false, model: '', permissionMode: '', maxBudget: limitText(p.spendLimit), prompt: '', template: '' }), form = f[0], setForm = f[1];
     var K = useKinds(), k = kindOf(K.list, form.provider);
     useFirstModel(k, form, setForm);
     // The options of the kind (providers/index.mjs describe). Without kinds yet, the dialog offers what Claude Code takes.
@@ -186,8 +194,11 @@
     }
     function submit() {
       setBusy(true); setErr('');
+      // Each agent gets its own room (a new worktree) unless the user keeps the folder. A terminal window always uses the folder.
       // Only the options the kind takes go to the server: a local model has no spend limit, window or permission mode.
-      var body = Object.assign({}, form, { where: canWindow ? form.where : 'office', permissionMode: hasModes ? form.permissionMode : '', maxBudget: paid ? limitSent(form.maxBudget, p.spendLimit !== undefined) : undefined });
+      var where = canWindow ? form.where : 'office';
+      var body = Object.assign({}, form, { where: where, isolation: form.useFolder || where === 'terminal' ? 'same' : 'worktree', permissionMode: hasModes ? form.permissionMode : '', maxBudget: paid ? limitSent(form.maxBudget, p.spendLimit !== undefined) : undefined });
+      delete body.useFolder;
       api('/api/open', body).then(function () { setBusy(false); p.onClose(); }, function (x) { setBusy(false); setErr(x.message); });
     }
     function saveTemplate() {
@@ -218,7 +229,8 @@
       Pairs([
         h(A.TextInput, { key: 'n', id: 'f-name', label: 'Bot name (optional)', value: form.name, placeholder: 'Defaults to the folder name', onChange: set('name') }),
         canWindow ? h(A.Select, { key: 'w', id: 'f-where', label: 'Runs', options: WHERE, value: form.where, onChange: set('where') }) : null,
-        h(A.Select, { key: 'i', id: 'f-isolation', label: 'Work in', options: ISOLATION, value: terminal ? 'same' : form.isolation, disabled: terminal, onChange: set('isolation'), hint: form.isolation === 'worktree' && !terminal ? 'A new branch in its own folder. Your main branch stays untouched.' : undefined }),
+        h(UseFolder, { key: 'i', checked: form.useFolder || terminal, disabled: terminal, onChange: set('useFolder'),
+          hint: terminal ? 'A terminal window works in the folder.' : form.useFolder ? 'The agent works in this folder. Other agents in it share its room.' : 'The agent gets its own room: a new branch in its own folder next to the repository. Your branch stays untouched.' }),
         paid ? h(A.TextInput, { key: 'b', id: 'f-budget', label: 'Spend limit in USD', value: form.maxBudget, placeholder: 'No limit', disabled: terminal, onChange: set('maxBudget'), hint: terminal ? undefined : limitHint(k ? k.label : 'Claude Code') }) : null,
         hasModes ? h(A.Select, { key: 'm', id: 'f-mode', label: 'Permissions', options: modes, value: form.permissionMode, onChange: set('permissionMode') }) : null]),
       p.templates.length ? h(A.Select, { id: 'f-template', label: 'Template', options: tpl, value: form.template, onChange: pickTemplate }) : null,
@@ -556,7 +568,8 @@
         h(A.EmptyState, { icon: 'floor', title: 'No repository here', text: 'Folders outside git have no branches. Open a session in a git repository to get floors.' }));
     }
     var floors = {}, order = [];
-    repo.worktrees.forEach(function (w) { if (!floors[w.branch]) { floors[w.branch] = []; order.push(w.branch); } floors[w.branch].push(w); });
+    // The floor of a room is the server's place rule: an agent room sits on the floor of its base branch.
+    repo.worktrees.forEach(function (w) { var fl = w.place.floor; if (!floors[fl]) { floors[fl] = []; order.push(fl); } floors[fl].push(w); });
     var main = repo.worktrees.filter(function (w) { return w.main; })[0];
 
     if (clean) {
@@ -588,7 +601,7 @@
         h('div', { className: 'form' },
           h('p', { className: 'note' }, isFloor
             ? 'Deletes the branch ' + confirm.branch + ' and removes its rooms (worktree folders). Git refuses when the branch has commits that are not merged. ' + IGNORED_NOTE
-            : 'Deletes the folder ' + confirm.root + '. The branch ' + confirm.branch + ' and its floor stay. ' + IGNORED_NOTE),
+            : 'Deletes the folder ' + confirm.root + '. The branch ' + confirm.branch + (confirm.floor && confirm.floor !== confirm.branch ? ' stays, and so does the floor ' + confirm.floor + '. ' : ' and its floor stay. ') + IGNORED_NOTE),
           err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
     }
 
@@ -615,9 +628,9 @@
               rooms.map(function (w) {
                 var here = (snap ? snap.sessions : []).filter(function (s) { return s.status !== 'ended' && s.place && s.place.rootKey === w.place.rootKey; });
                 return h('div', { key: w.root, className: 'room-row' },
-                  h(A.OfficeTypeBadge, { type: 'lab', label: w.root.split(/[\\/]/).pop() }), h('span', { className: 'past-sub mono', title: w.root }, F.shortPath(w.root)),
+                  h(A.OfficeTypeBadge, { type: 'lab', label: w.place.room }), h('span', { className: 'past-sub mono', title: w.root }, F.shortPath(w.root)),
                   here.map(function (s) { return h('span', { key: s.uid, className: 'room-bot', title: s.name }, h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: colorOf(s.uid), status: statusOf(s), size: 20 }), s.name); }),
-                  w.main ? null : h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setConfirm({ kind: 'room', branch: b, root: w.root }); } }, 'Remove room'));
+                  w.main ? null : h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setConfirm({ kind: 'room', branch: w.branch, floor: b, root: w.root }); } }, 'Remove room'));
               }),
               newRoom && newRoom.branch === b ? h('div', { className: 'inline-actions' },
                 h(A.TextInput, { id: 'r-name', label: 'Room name (optional)', value: newRoom.name, placeholder: 'review', onChange: function (v) { setNewRoom({ branch: b, name: v }); } }),
@@ -630,7 +643,7 @@
         form ? null : h('div', { className: 'inline-actions' },
           h(A.AddButton, { label: 'Add a floor', onClick: function () { setErr(''); setForm({ branch: '', from: main ? main.branch : '', name: '' }); } }),
           h(A.Button, { variant: 'quiet', icon: 'remove', loading: busy === 'stale', onClick: function () { setBusy('stale'); setErr(''); api('/api/floor/stale', { repo: p.repo }).then(function (j) { setBusy(''); setClean({ floors: j.floors }); }, function (x) { setBusy(''); setErr(x.message); }); } }, 'Clean up unused floors')),
-        h(FloorsWithoutRooms, { repo: p.repo, busy: busy, run: run, shown: order })));
+        h(FloorsWithoutRooms, { repo: p.repo, busy: busy, run: run, shown: repo.worktrees.map(function (w) { return w.branch; }) })));
   }
   // Branches with no worktree: a room brings the floor into the building.
   function FloorsWithoutRooms(p) {

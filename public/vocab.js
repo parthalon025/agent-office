@@ -13,6 +13,7 @@
      toolArg(name)    -> the argument name of the tool's detail text
      todoStatus(t)    -> a DS plan step status
      figures(list)    -> the numbers of a room, from its open sessions
+     agentsSign(n)    -> "N agents" for a room shared by 2 or more agents (top-level sessions; helpers do not count), else ''
      requests(s)      -> every open request of a session, oldest first: { id, kind, tool, text, detail, risk, always, t }
                          kind is 'permission' (Approve or Decline) or 'question' (Yes or No; no risk value)
      alwaysOffer(s)   -> the first permission request that may offer "Always allow", or null. Never a question,
@@ -94,6 +95,10 @@
     return o;
   }
 
+  // The text of a room sign that counts agents. An agent is a top-level session: the count comes from figures().sessions,
+  // which never includes helpers (subagents sit in the parent's room as guests). A room with one agent or none says nothing.
+  function agentsSign(n) { return n >= 2 ? n + ' agents' : ''; }
+
   function requests(s) {
     if (!s || s.status === 'ended') return [];
     var out = [];
@@ -153,5 +158,5 @@
     return 'Runs ' + label + ' inside the office. You talk to it in the chat and approve its steps here. It has no terminal window.';
   }
 
-  root.OfficeVocab = { kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, modelChoices: modelChoices, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures };
+  root.OfficeVocab = { kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, modelChoices: modelChoices, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

@@ -154,3 +154,50 @@ test('folder choices: the shown folder first, each folder once in any case or sl
   assert.equal(recentChoices(['E:\\a', 'E:\\b', 'E:\\c'], '', 2).length, 2);
   assert.deepEqual(recentChoices(undefined, ''), []);
 });
+
+// ---------- agent rooms (#69): a room of an agent worktree sits on the floor of its base branch ----------
+test('agent worktree: the room sits on the base branch floor and the sign shows the worktree branch', () => {
+  const p = placeOfSession({ repo: R, root: W, branch: 'agent/fix-login-ab12', base: 'main' }, W);
+  assert.equal(p.floor, 'main');
+  assert.equal(p.baseBranch, 'main');
+  assert.equal(p.branch, 'agent/fix-login-ab12');
+  assert.equal(p.room, 'agent/fix-login-ab12');
+  const own = placeOfSession({ repo: R, root: R, branch: 'main' }, R);
+  assert.equal(p.floor, own.floor, 'same floor as the main folder');
+  assert.notEqual(p.roomId, own.roomId, 'but another room');
+  assert.equal(p.buildingKey, own.buildingKey);
+});
+
+test('three agent worktrees are three rooms on one floor', () => {
+  const rooms = ['a', 'b', 'c'].map((n) => placeOfSession({ repo: R, root: path.resolve('/work/Repo.worktrees/' + n), branch: 'agent/' + n + '-1', base: 'dev' }, ''));
+  assert.deepEqual([...new Set(rooms.map((x) => x.floor))], ['dev']);
+  assert.equal(new Set(rooms.map((x) => x.roomId)).size, 3);
+});
+
+test('a worktree with no base branch keeps its own branch as the floor and the folder as the room', () => {
+  const p = placeOfSession({ repo: R, root: W, branch: 'feat' }, W);
+  assert.equal(p.floor, 'feat');
+  assert.equal(p.baseBranch, '');
+  assert.equal(p.branch, 'feat');
+  assert.equal(p.room, 'Repo-wt');
+});
+
+test('outside git there is no base branch', () => {
+  const p = placeOfSession(null, path.resolve('/work/Scratch'));
+  assert.equal(p.baseBranch, '');
+  assert.equal(p.floor, OTHER_FLOOR);
+});
+
+test('placeOfWorktree follows the same floor rule as a session in that worktree', () => {
+  const wt = { root: W, branch: 'agent/x-1', base: 'main' };
+  const a = placeOfWorktree(R, wt), b = placeOfSession({ repo: R, root: W, branch: 'agent/x-1', base: 'main' }, W);
+  assert.deepEqual(a, b);
+  assert.equal(a.floor, 'main');
+  assert.equal(placeOfWorktree(R, { root: W, branch: 'feat' }).floor, 'feat');
+});
+
+test('a base equal to the branch is no base', () => {
+  const p = placeOfSession({ repo: R, root: R, branch: 'main', base: 'main' }, R);
+  assert.equal(p.baseBranch, '');
+  assert.equal(p.room, 'Repo');
+});
