@@ -127,8 +127,9 @@ export function createTracker(deps = {}) {
     const fp = input.file_path || input.path;
     const top = s.git?.root || s.cwd;
     // A relative path (a local agent sends these) is read against the session folder, never the server's cwd.
-    const abs = fp && s.cwd ? path.resolve(s.cwd, String(fp)) : fp ? String(fp) : null;
-    const rel = abs && top ? path.relative(top, abs).replace(/\\/g, '/') : null;
+    // Session paths follow Windows rules on every host, like place.mjs (CI runs the tests on Linux).
+    const abs = fp && s.cwd ? path.win32.resolve(s.cwd, String(fp)) : fp ? String(fp) : null;
+    const rel = abs && top ? path.win32.relative(top, abs).replace(/\\/g, '/') : null;
     s.calls.push({ id: p.tool_use_id, name: p.tool_name, detail: describeTool(p.tool_name, input), file: rel && !rel.startsWith('..') ? rel : null, agent: p.agent_id, t: now(), ms: null, ok: null, err: null });
     if (isAgentTool(p.tool_name)) s.agents.push({ call: p.tool_use_id, id: null, type: input.subagent_type || 'general-purpose', task: describeTool(p.tool_name, input), done: false, ok: null });
     // Keep every open call; drop the oldest closed ones.
