@@ -73,7 +73,13 @@ test('OFFICE_PORT=branch: the office uses the port of its branch, says so, and s
   fs.mkdirSync(lad);
   for (const f of fs.readdirSync(ROOT)) if (f.endsWith('.mjs') || f === 'package.json') fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
   for (const d of ['providers', 'public']) fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true });
-  const branch = 'test/port-check';
+  // The port comes from the branch name, so a fixed name collides with another suite that runs at the same time. Take the first name whose port is free now.
+  let branch = '';
+  for (let i = 0; !branch; i++) {
+    if (i > 200) assert.fail('no free branch port to test with');
+    const name = 'test/port-check-' + i;
+    try { await holdPort(git.branchPort(name)).then((s) => new Promise((r) => s.close(r))); branch = name; } catch { /* in use: try the next name */ }
+  }
   sh(['init', '-b', branch], dir);
   sh(['commit', '--allow-empty', '-m', 'x'], dir);
   const want = git.branchPort(branch);
