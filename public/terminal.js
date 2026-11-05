@@ -244,8 +244,7 @@
     if (s.helper) return { left: 'Subagent', right: plural((s.calls || []).length, 'call', 'calls'), pct: null };
     var pct = ctxPct(s), right = [];
     if (pct != null) right.push('context ' + pct + '%');
-    if (s.costUnknown) right.push('cost unknown');
-    else if (typeof s.cost === 'number') right.push(money(s.cost));
+    if (s.costUnknown || typeof s.cost === 'number') right.push(window.OfficeFormat.costLabel(s.cost, s.costUnknown));
     return { left: s.git && s.git.branch ? s.git.branch : base(s.cwd), right: right.join(DOT), pct: pct };
   }
 

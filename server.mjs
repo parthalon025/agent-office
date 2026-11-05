@@ -491,7 +491,7 @@ function workOf(x) {
 function figuresText(f) {
   const out = [plural(f.sessions, 'open session', 'open sessions'), `${f.working} working`, `${f.waiting} waiting for the user`,
     plural(f.toolCalls, 'recent tool call', 'recent tool calls'), `${f.tokens.toLocaleString('en-US')} tokens`];
-  if (f.unknown) out.push(`spend ${globalThis.OfficeFormat.cost(f.cost, f.unknown)} (an agent here reports no cost)`);
+  if (f.unknown) out.push(`${globalThis.OfficeFormat.costLabel(f.cost, f.unknown)} (an agent here reports no cost)`);
   else if (f.priced) out.push(`${globalThis.OfficeFormat.money(f.cost)} spent`);
   if (f.todosTotal) out.push(`${f.todosDone} of ${f.todosTotal} plan steps done`);
   return out.join(', ') + '.';

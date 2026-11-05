@@ -30,8 +30,7 @@ const ENDED = { subtype: 'error', error: 'The session ended.' };
  */
 export function programPath(name, exe = resolveExe) {
   try { return exe(name); } catch (e) {
-    const shim = /installed as a script \((.+)\)\. The office/.exec(String(e.message));
-    if (name === 'claude' && shim) throw providerError(409, `The office needs claude.exe. It found only ${shim[1]} (an npm install). Install the native Claude Code, then try again.`);
+    if (name === 'claude' && e.code === 'SCRIPT_INSTALL') throw providerError(409, `The office needs claude.exe. It found only ${e.file} (an npm install). Install the native Claude Code, then try again.`);
     if (name === 'claude') throw providerError(409, 'The office cannot find Claude Code: claude.exe is not on the PATH. Install it, then try again.');
     throw providerError(409, e.message);
   }

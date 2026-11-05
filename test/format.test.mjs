@@ -33,6 +33,13 @@ test('cost says unknown for an agent that reports none, never $0.00; a known par
   assert.equal(F.cost(null), '–');
 });
 
+test('costLabel: the cost in a line of other facts, one wording for every surface', () => {
+  assert.equal(F.costLabel(null, true), 'cost unknown');
+  assert.equal(F.costLabel(0.26, 1), '$0.26 + cost unknown');
+  assert.equal(F.costLabel(0.26, false), '$0.26');
+  assert.equal(F.costLabel(undefined), '–', 'no figure: a dash, as money()');
+});
+
 test('plural counts with the right word', () => {
   assert.equal(F.plural(0, 'turn'), '0 turns');
   assert.equal(F.plural(1, 'turn'), '1 turn');

@@ -19,12 +19,11 @@
 // ACP reports no cost in the stable protocol, so the provider is paid with cost 'unknown' (owner decision Q22). The process
 // calls and the timers are injected, so tests drive a fake agent (test/fixtures/fake-acp.mjs). Nothing starts on import.
 import crypto from 'node:crypto';
-import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn as realSpawn, execFile as realExecFile } from 'node:child_process';
 import { resolveExe } from '../git.mjs';
-import { riskOf } from '../risk.mjs';
+import { riskOf, fileKey } from '../risk.mjs';
 import { clip } from '../tracker.mjs';
 import { providerError } from './index.mjs';
 import { createLocalTools, killTree } from './local-tools.mjs';
@@ -78,22 +77,6 @@ function rpcError(code, message) { const e = new Error(message); e.code = code; 
 const REFUSED = -32000; // the office said no (a path outside the root, a declined call)
 
 const WIN = process.platform === 'win32';
-/**
- * One key per file, whatever the spelling: the file Windows would open. a.txt, A.TXT, a.txt., a.txt::$DATA, sub\..\a.txt,
- * an 8.3 short name and a path through a junction all give one key. The declined files of a turn are kept by it, so a
- * declined edit cannot come back under another name.
- */
-export function fileKey(root, p) {
-  let abs = path.resolve(String(root || ''), String(p ?? ''));
-  if (WIN) {
-    const [head, ...rest] = abs.split(/[\\/]+/);
-    abs = [head, ...rest.map((part) => part.replace(/:.*$/, '').replace(/[. ]+$/, ''))].join('\\');
-  }
-  try { abs = fs.realpathSync.native(abs); } catch {
-    try { abs = path.join(fs.realpathSync.native(path.dirname(abs)), path.basename(abs)); } catch { /* a new folder: the text form */ }
-  }
-  return WIN ? abs.toLowerCase() : abs;
-}
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,100}$/;
 // cmd.exe has no way to keep these as plain text inside quotes: it ignores \" when it tracks quotes (so a quote in an
 // argument ends the quoted part, and & | < > after it run as commands), it expands %NAME% and !NAME! inside quotes, and a
@@ -219,8 +202,7 @@ export function createAcp(deps) {
   // The absolute path of the program, or a status error the user can act on (409).
   function program() {
     try { return exe(spec.program); } catch (e) {
-      const shim = /installed as a script \((.+)\)\. The office/.exec(String(e.message));
-      if (shim) throw providerError(409, `The office needs ${spec.program}.exe. It found only ${shim[1]} (a script install). The office starts programs without a shell.`);
+      if (e.code === 'SCRIPT_INSTALL') throw providerError(409, `The office needs ${spec.program}.exe. It found only ${e.file} (a script install). The office starts programs without a shell.`);
       throw providerError(409, `The office cannot find ${label}: ${spec.program}.exe is not on the PATH. Install it, then try again.`);
     }
   }

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { riskOf, inside, realInside } from '../risk.mjs';
+import { riskOf, inside, realInside, fileKey } from '../risk.mjs';
 import '../public/vocab.js';
 
 const V = globalThis.OfficeVocab;
@@ -162,6 +162,22 @@ function scratch() {
   fs.writeFileSync(path.join(out, 'k.txt'), 'k');
   return { base, root, out, done: () => fs.rmSync(base, { recursive: true, force: true }) };
 }
+
+test('fileKey: one key per file, whatever the spelling (the ACP provider keeps declined files by it)', (c) => {
+  const s = scratch();
+  try {
+    const key = fileKey(s.root, path.join('src', 'a.js'));
+    assert.equal(fileKey(s.root, path.join(s.root, 'src', '..', 'src', 'a.js')), key);
+    // Windows opens the same file for these: any case, trailing dots and spaces, the default data stream.
+    if (WIN) for (const p of ['SRC\\A.JS', 'src\\a.js.', 'src\\a.js. .', 'src\\a.js::$DATA', 'src.\\a.js']) assert.equal(fileKey(s.root, p), key, p);
+    else assert.notEqual(fileKey(s.root, 'SRC/A.JS'), key, 'other systems: case counts');
+    const fresh = fileKey(s.root, path.join('src', 'new.txt'));
+    assert.equal(fresh, fileKey(s.root, path.join('src', '..', 'src', 'new.txt')), 'a file that does not exist yet');
+    try { fs.symlinkSync(path.join(s.root, 'src'), path.join(s.root, 'link'), 'junction'); } catch { c.skip('links are not allowed here'); return; }
+    assert.equal(fileKey(s.root, path.join('link', 'a.js')), key, 'through a junction: the file it opens');
+    assert.equal(fileKey(s.root, path.join('link', 'new.txt')), fresh, 'a new file below a junction');
+  } finally { s.done(); }
+});
 
 test('a junction inside the folder that leads out is not inside', (c) => {
   const s = scratch();

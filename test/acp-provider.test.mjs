@@ -628,7 +628,8 @@ test('no program: check is 409 before any worktree, open says why and ends, read
     const ready = await r.p.readiness();
     assert.deepEqual([ready.ready, ready.needs.length], [false, 2]);
     assert.match(ready.needs[1], /hermes acp --check/);
-    const shim = rig({ kind: 'dsh', exe: () => { throw new Error('dsh is installed as a script (C:\\npm\\dsh.cmd). The office needs dsh.exe.'); } });
+    // resolveExe's code and file, whatever its message says (git.mjs).
+    const shim = rig({ kind: 'dsh', exe: () => { throw Object.assign(new Error('reworded'), { code: 'SCRIPT_INSTALL', file: 'C:\\npm\\dsh.cmd' }); } });
     assert.throws(() => shim.p.check({}), (e) => e.status === 409 && /needs dsh\.exe\. It found only C:\\npm\\dsh\.cmd/.test(e.message));
     await shim.done();
   } finally { await r.done(); }

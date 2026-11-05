@@ -6,6 +6,7 @@
      money(n)        -> '$0.00', '<$0.01' (a cost above zero but under one cent), '$0.26'; a dash when n is not a number
      cost(n, unknown) -> money(n), or 'unknown' when an agent reports no cost (session.costUnknown, or the count of such
                         sessions in a room), never '$0.00'. A known part above zero keeps its figure: '$0.26 + unknown'.
+     costLabel(n, unknown) -> the same in a line of other facts: money(n), 'cost unknown' or '$0.26 + cost unknown'
      plural(n, one, many?) -> '1 turn', '2 turns' (many defaults to one + 's')
      folderName(p)   -> the last folder of a path
      shortPath(p)    -> the last two folders with a leading cut mark when the path is deeper than a drive and two
@@ -29,6 +30,7 @@
     if (!unknown) return money(n);
     return typeof n === 'number' && isFinite(n) && n > 0 ? money(n) + ' + unknown' : 'unknown';
   }
+  function costLabel(n, unknown) { var c = cost(n, unknown); return unknown ? c.replace(/unknown$/, 'cost unknown') : c; }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
   function trimmed(p) { var s = String(p == null ? '' : p); return s.length > 1 ? s.replace(/[\\/]+$/, '') : s; }
   function folderName(p) { var a = trimmed(p).split(SEP); return a[a.length - 1] || ''; }
@@ -53,5 +55,5 @@
     var t = String(text == null ? '' : text), k = String(secret == null ? '' : secret);
     return k ? t.split(k).join(SECRET_MASK) : t;
   }
-  root.OfficeFormat = { money: money, cost: cost, plural: plural, folderName: folderName, shortPath: shortPath, hintPill: hintPill, maskSecret: maskSecret, SECRET_MASK: SECRET_MASK };
+  root.OfficeFormat = { money: money, cost: cost, costLabel: costLabel, plural: plural, folderName: folderName, shortPath: shortPath, hintPill: hintPill, maskSecret: maskSecret, SECRET_MASK: SECRET_MASK };
 })(typeof globalThis !== 'undefined' ? globalThis : window);
