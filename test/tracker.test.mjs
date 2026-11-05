@@ -696,6 +696,29 @@ test('fail: a session that ended before it started shows as an error until Dismi
   assert.equal(s.error, null);
 });
 
+test('failReopen: the error says the past session stays, whatever the last reply is (#124 review)', () => {
+  const r = rig();
+  const mk = (uid, reply) => {
+    const s = r.tracker.newSession({ uid, officeId: uid, name: 'bot', cwd: REPO, headless: true, status: 'starting' });
+    if (reply) s.replies.push({ text: reply });
+    r.tracker.endSession(s, 'exited (1)');
+    return s;
+  };
+  const stays = 'The past session stays in Past sessions.';
+  const none = mk('o1', '');
+  r.tracker.failReopen(none);
+  assert.equal(none.error.text, `Could not reopen. ${stays}`);
+  const short = mk('o2', 'Claude Code stopped before it started: bad option');
+  r.tracker.failReopen(short);
+  assert.equal(short.error.text, `Could not reopen. ${stays} Claude Code stopped before it started: bad option`);
+  // A long reply (a stderr with a long path) is cut; the hint is not.
+  const long = mk('o3', 'Claude Code stopped before it started: ' + '/some/long/folder/name/ao-mcp-abc123 '.repeat(20));
+  r.tracker.failReopen(long);
+  assert.ok(long.error.text.startsWith(`Could not reopen. ${stays} `), long.error.text);
+  assert.ok(long.error.text.length <= 200, 'the error text keeps its cap');
+  assert.ok(long.error.text.endsWith('…'), 'the cut shows');
+});
+
 test('a session records itself as soon as it has a sid, from the init line or the first hook, and only then', () => {
   const r = rig();
   const a = r.tracker.newSession({ uid: 'o1', officeId: 'o1', name: 'bot', cwd: REPO, headless: true, status: 'starting' });

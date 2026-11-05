@@ -27,3 +27,22 @@ test('temp guard: a folder removed in a finally block passes, also when the code
   assert.equal(thrown.status, 0, thrown.stderr);
   assert.equal(thrown.stderr, '');
 });
+
+// Every way to make a temp folder reaches the guard (review of #124: a named import and fs.promises slipped past it).
+const ways = {
+  'a named import of mkdtempSync': `const { mkdtempSync } = await import('node:fs'); return mkdtempSync(path.join(os.tmpdir(), 'ao-named-'))`,
+  'the callback fs.mkdtemp': `return await new Promise((ok, no) => fs.mkdtemp(path.join(os.tmpdir(), 'ao-cb-'), (e, d) => e ? no(e) : ok(d)))`,
+  'fs.promises.mkdtemp': `return await fs.promises.mkdtemp(path.join(os.tmpdir(), 'ao-prom-'))`,
+  'fs/promises mkdtemp': `const { mkdtemp } = await import('node:fs/promises'); return await mkdtemp(path.join(os.tmpdir(), 'ao-fsp-'))`,
+};
+for (const [name, make] of Object.entries(ways)) {
+  test(`temp guard: a folder made with ${name} that is left fails the process`, () => {
+    const r = run(`const d = await (async () => { ${make} })(); console.log(d);`);
+    const dir = r.stdout.trim();
+    try {
+      assert.equal(r.status, 1, r.stderr);
+      assert.match(r.stderr, /temp folder leak/);
+      assert.equal(fs.existsSync(dir), false, 'the guard removes it');
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+}

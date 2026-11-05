@@ -66,11 +66,20 @@ before(async () => {
   await openIn(rooms.busy, 'busy-bot');
 });
 after(async () => {
-  if (child) await child.stop();
-  if (fake) await fake.close();
-  for (const b of [...FLOORS, 'late', 'fresh']) await git.deleteFloor(repo, b, true).catch(() => {});
-  await new Promise((r) => setTimeout(r, 300)); // let Windows release the folder
-  if (base) try { fs.rmSync(base, { recursive: true, force: true }); } catch { /* a temp folder may stay */ }
+  try {
+    if (child) await child.stop();
+    if (fake) await fake.close();
+  } finally {
+    // The rooms stand under ~/.agent-office/worktrees, outside `base`, so they are removed by name, and always: deleteFloor
+    // refuses a floor that an agent room (one the office made for a session) still sits on, and a failed test or a failed
+    // refusal must not leave them there (#124). Every room git lists for the repository goes, not only the ones this file named.
+    await new Promise((r) => setTimeout(r, 300)); // let Windows release the folder
+    const roots = new Set(Object.values(rooms));
+    if (rooms.busy) for (const w of ['late', 'fresh']) roots.add(path.join(path.dirname(rooms.busy), tag + w));
+    try { for (const w of await git.layout(repo)) if (!w.main) roots.add(w.root); } catch { /* the folders named above still go */ }
+    for (const r of roots) try { fs.rmSync(r, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* a folder Windows still holds stays; the next run uses new names */ }
+    if (base) try { fs.rmSync(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* a temp folder may stay */ }
+  }
 });
 
 test('stale lists only merged, clean floors with no session', { skip: SKIP }, async () => {

@@ -253,8 +253,7 @@ function failedFork(s) {
 // The reopened session ended before init: the past record stays in Past sessions, and the session shows why.
 function failedReopen(s) {
   if (!reopening.delete(s.uid)) return;
-  const last = String(s.replies.at(-1)?.text || '').replace(/\s+/g, ' ').trim();
-  tracker.fail(s, `Could not reopen. ${last ? last + ' ' : ''}The past session stays in Past sessions.`);
+  tracker.failReopen(s);
 }
 
 // ---------- state ----------
