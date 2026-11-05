@@ -1121,7 +1121,7 @@ const server = http.createServer(async (req, res) => {
         settingsSnippet: JSON.stringify(hooksMode === 'http' ? httpSettings : commandSettings, null, 2),
         agentToken: AGENT_TOKEN, // the Attach sessions dialog hides it until the user clicks Show (#60)
         launchCommand: `claude --settings "${activeHooksFile()}" --mcp-config "${MCP_FILE}"`,
-        startup: startup.state(STARTUP_DIR),
+        startup: startup.status(STARTUP_DIR, ROOT, PORT),
         hooksMode, claudeVersion: CLAUDE_VERSION, templates: persisted.templates, schedules: persisted.schedules, spendLimit: defaultSpend(),
       });
     }
@@ -1143,7 +1143,11 @@ const server = http.createServer(async (req, res) => {
       const out = onHook(p);
       return send(res, 200, out ? JSON.stringify(out) : '');
     }
-    if (url.pathname === '/api/startup') return send(res, 200, body.enabled === true ? startup.enable(STARTUP_DIR, ROOT, process.execPath) : startup.disable(STARTUP_DIR));
+    if (url.pathname === '/api/startup') {
+      // Only the office on 4317 in the main folder owns the entry (#108); the others get 403 with the reason.
+      const r = body.enabled === true ? startup.enable(STARTUP_DIR, ROOT, process.execPath, PORT) : startup.disable(STARTUP_DIR, ROOT, PORT);
+      return send(res, 200, { ...r, ...startup.access(ROOT, PORT) });
+    }
     if (url.pathname === '/api/launch-link') return send(res, 200, { url: auth.launchUrl(PORT, launchCodes.mint()) }); // a second npm start asks for one
     if (url.pathname === '/api/probe-http') return send(res, 200, await probeHttp());
     if (url.pathname === '/api/notes/save') {

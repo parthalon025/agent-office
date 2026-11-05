@@ -458,8 +458,10 @@
     return h(A.Dialog, { open: true, title: 'Attach sessions', onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
       h('div', { className: 'form' },
         startup && startup.available ? h('h3', { className: 'ext-h' }, 'Start with Windows') : null,
-        startup && startup.available ? h('p', { className: 'note' }, startup.enabled ? 'The office starts when you sign in. It adds one file to your Startup folder. It needs no admin rights.' : 'Start the office when you sign in to Windows. It adds one file to your Startup folder. It needs no admin rights.') : null,
-        startup && startup.available ? h(A.Button, { variant: 'quiet', disabled: startBusy, onClick: toggleStartup }, startup.enabled ? 'Turn off start with Windows' : 'Turn on start with Windows') : null,
+        startup && startup.available && startup.canChange !== false ? h('p', { className: 'note' }, startup.enabled ? 'The office starts when you sign in. It adds one file to your Startup folder. It needs no admin rights.' : 'Start the office when you sign in to Windows. It adds one file to your Startup folder. It needs no admin rights.') : null,
+        // Another office owns the entry (#108): show the state and the reason, and no button.
+        startup && startup.available && startup.canChange === false ? h('p', { className: 'note' }, (startup.enabled ? 'Start with Windows is on.' : 'Start with Windows is off.') + ' ' + startup.reason) : null,
+        startup && startup.available && startup.canChange !== false ? h(A.Button, { variant: 'quiet', disabled: startBusy, onClick: toggleStartup }, startup.enabled ? 'Turn off start with Windows' : 'Turn on start with Windows') : null,
         h('h3', { className: 'ext-h' }, 'Default spend limit'),
         h('p', { className: 'note' }, 'New Claude Code sessions, schedules and goals stop at this limit. Local models cost nothing and have no limit. You can change the limit for one session when you open it.'),
         h('div', { className: 'copy-row' },
