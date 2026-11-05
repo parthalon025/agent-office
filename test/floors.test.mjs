@@ -360,6 +360,7 @@ test('removeRoom waits for the gh call of a pull request that runs in the room',
   const dir = repo();
   const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-bare-'));
   const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-gh-'));
+  made.push(bare, bin); // also removed at the end of the file, whatever fails before the finally block
   plain(bare, 'init', '--bare', '-b', 'main');
   plain(dir, 'remote', 'add', 'origin', bare);
   const exe = path.join(bin, process.platform === 'win32' ? 'gh.exe' : 'gh');

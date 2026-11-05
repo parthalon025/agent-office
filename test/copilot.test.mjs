@@ -3,7 +3,7 @@
 // 1.0.105 and the request bodies of its SDK schema). No Copilot, no sign-in, no model, no paid call. The office side is in
 // memory, as in test/acp-provider.test.mjs: a tracker, the shared provider events and holds without sockets.
 // Run: node --test test/copilot.test.mjs
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -32,9 +32,15 @@ async function until(fn, what, ms = 10_000) {
   }
 }
 
+// Every folder a rig makes is removed at the end of the file, so a test that fails before its finally block leaves nothing
+// in %TEMP% (#124). The test's own finally removes its folder first.
+const made = new Set();
+after(() => { for (const d of made) fs.rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+
 // One office with the Copilot provider and a fake Copilot. fake: its environment (FAKE_COPILOT*). env: the office's.
 function rig({ fake = {}, env = {}, rules = ASK_ALL, ...over } = {}) {
   const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-copilot-')));
+  made.add(base);
   const root = path.join(base, 'work'), probeDir = path.join(base, 'probe');
   fs.mkdirSync(root); fs.mkdirSync(probeDir);
   fs.writeFileSync(path.join(root, 'a.txt'), 'hello\n');

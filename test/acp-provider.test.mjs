@@ -3,7 +3,7 @@
 // spawn that runs the fixture instead, so no Hermes, no dsh, no model and no paid call. The office side is in memory: a
 // tracker, the shared provider events and holds without sockets, as server.mjs holds them.
 // Run: node --test test/acp-provider.test.mjs
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -41,11 +41,17 @@ const ALLOW_INSIDE = cleanRules({ office: Object.fromEntries(['hermes', 'dsh', '
 const ASK_ALL = cleanRules({ office: Object.fromEntries(SEC.columns.flatMap((c) => Object.keys(SEC.rows)
   .filter((row) => !SEC.rows[row].office && SEC.applies(row, c.id) && SEC.options(row).includes('ask')).map((row) => [SEC.key(row, c.id), 'ask']))) });
 
+// Every folder a rig makes is removed at the end of the file, so a test that fails before its finally block, or that
+// makes a second rig, leaves nothing in %TEMP% (#124). The test's own finally removes its folder first.
+const made = new Set();
+after(() => { for (const d of made) fs.rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+
 // One office with one ACP provider and a fake agent. fake: the fixture's environment (FAKE_ACP_*).
 // OpenClaw gets the opt-in switch on and a version that relays shell approvals, unless a test says otherwise.
 function rig({ kind = 'hermes', fake = {}, rules = ASK_ALL, ...over } = {}) {
   if (kind === 'openclaw') fake = { FAKE_ACP_VERSION: '2026.10.10', ...fake };
   const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-acp-')));
+  made.add(base);
   const root = path.join(base, 'work'), outside = path.join(base, 'outside');
   fs.mkdirSync(path.join(root, '.claude'), { recursive: true });
   fs.mkdirSync(outside);
@@ -687,6 +693,7 @@ test('an agent that stops before it starts: its stderr shows, and the session en
 test('no program: check is 409 before any worktree, open says why and ends, readiness says what to install; a script install is named', async () => {
   const r = rig({ exe: (name) => { throw new Error(`${name} was not found on PATH.`); } });
   const s = r.session();
+  let shim = null;
   try {
     assert.throws(() => r.p.check({}), (e) => e.status === 409 && e.message === 'The office cannot find Hermes Agent: hermes.exe is not on the PATH. Install it, then try again.');
     r.p.open(s, {});
@@ -697,10 +704,9 @@ test('no program: check is 409 before any worktree, open says why and ends, read
     assert.deepEqual([ready.ready, ready.needs.length], [false, 2]);
     assert.match(ready.needs[1], /hermes acp --check/);
     // resolveExe's code and file, whatever its message says (git.mjs).
-    const shim = rig({ kind: 'dsh', exe: () => { throw Object.assign(new Error('reworded'), { code: 'SCRIPT_INSTALL', file: 'C:\\npm\\dsh.cmd' }); } });
+    shim = rig({ kind: 'dsh', exe: () => { throw Object.assign(new Error('reworded'), { code: 'SCRIPT_INSTALL', file: 'C:\\npm\\dsh.cmd' }); } });
     assert.throws(() => shim.p.check({}), (e) => e.status === 409 && /needs dsh\.exe\. It found only C:\\npm\\dsh\.cmd/.test(e.message));
-    await shim.done();
-  } finally { await r.done(); }
+  } finally { await r.done(); if (shim) await shim.done(); }
 });
 
 test('a spawn that throws: the session says why and ends, no ghost at the desk', async () => {
@@ -858,13 +864,14 @@ test('fork: an agent with fork opens a copy of a past session in the new folder;
 });
 
 test('fork: dsh lists no fork, so it declares none; an agent that says fork at its handshake gets it', async () => {
-  assert.ok(!rig({ kind: 'dsh' }).p.features.includes('fork'));
+  const none = rig({ kind: 'dsh' });
   const r = rig({ kind: 'dsh', fake: { FAKE_ACP_FORK: '1' } });
   try {
+    assert.ok(!none.p.features.includes('fork'));
     await r.p.learn();
     assert.ok(r.p.features.includes('fork'));
     assert.equal(r.p.features.filter((f) => f === 'fork').length, 1);
-  } finally { await r.done(); }
+  } finally { await r.done(); await none.done(); }
 });
 
 test('skills: Hermes keeps its skills in HERMES_HOME/skills, else in ~/.hermes/skills; dsh has none the office shows', () => {
