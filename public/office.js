@@ -1209,7 +1209,10 @@
   function App() {
     var sel = useChatBot();
     // The Decisions inbox: open or closed. The page owns the state (OfficeScene inbox, onInbox), so it can close it.
-    var ib = useState(false), inbox = ib[0], setInbox = ib[1];
+    // The state is kept with the key of its scene (ibKey, set where sceneKey is known), so a new scene starts
+    // with the inbox closed in its first render, as the DS does when it keeps the state itself.
+    var ib = useState({ key: null, open: false }), ibKey = React.useRef(null);
+    var setInbox = React.useCallback(function (v) { ib[1]({ key: ibKey.current, open: !!v }); }, []);
     var s2 = useState(null), dlg = s2[0], setDlg = s2[1];
     var s3 = useState({ recent: [], templates: [], schedules: [] }), info = s3[0], setInfo = s3[1];
     // Toasts (toasts.js): an error or a toast with an action stays until closed; the others close after 8 s, and wait while the pointer or focus is on them.
@@ -1275,8 +1278,8 @@
     var needsMount = !!snap && view === 'office' && !cur2.mount && cur2.view === 'office';
     var mount = cur2.mount, def = mount ? mount.def : null;
     var sceneKey = mount ? 'm' + mount.id : cur2.key;
-    // A new scene starts with the inbox closed, as the DS does when it keeps the state itself.
-    useEffect(function () { setInbox(false); }, [sceneKey]);
+    ibKey.current = sceneKey;
+    var inbox = ib[0].open && ib[0].key === sceneKey;
     var fading = cur2.key !== wantKey || cur2.view !== view || stale || needsMount;
     useEffect(function () {
       if (!fading) return undefined;

@@ -215,6 +215,7 @@
       var known = {};   // uid -> mirror of what the scene was told
       var taken = {};   // bot name -> true
       var emitRef = null, lastUsage = { percent: null, t: 0 };
+      var primed = false, seedSnap = null;   // the first pass ran; the snapshot it restores (the store's at attach)
       var m = { repo: repo, id: ++mountSeq, def: d.def };
 
       function uniqueName(b) {
@@ -254,25 +255,27 @@
           }
         });
       }
-      function syncCalls(s, k, emit, quiet) {
+      // seat: for a bot seated again, { prev, out }: the mirror of its old seat and the live emitter. A call (or a
+      // result) the old seat never showed is news and goes out live; the rest is a restore.
+      function syncCalls(s, k, emit, quiet, seat) {
         var byAgent = {};
         (s.agents || []).forEach(function (a) { if (a.id && k.helpers[a.call] && !k.helpersDone[a.call]) byAgent[a.id] = k.helpers[a.call]; });
         (s.calls || []).forEach(function (c) {
-          var seen = k.calls[c.id];
+          var seen = k.calls[c.id], old = seat && seat.prev.calls[c.id];
           if (!seen) {
-            var who = (c.agent && byAgent[c.agent]) || k.name;
+            var who = (c.agent && byAgent[c.agent]) || k.name, fresh = !!seat && !old, ec = fresh ? seat.out : emit;
             seen = k.calls[c.id] = { bot: who, closed: false };
-            emit(stamp({ type: 'tool.call', bot: who, id: c.id, tool: V.toolShort(c.name), kind: V.toolKind(c.name), args: argsOf(c), say: !quiet }, c.t));
-            if (c.name === 'Skill' && c.detail) emit(stamp({ type: 'skill.load', bot: who, skill: c.detail }, c.t));
-            if (c.name === 'WebFetch' && c.detail) emit(stamp({ type: 'knowledge', bot: who, source: hostOf(c.detail), text: c.detail }, c.t));
-            if (c.name === 'WebSearch' && c.detail) emit(stamp({ type: 'knowledge', bot: who, source: 'Web search', text: c.detail }, c.t));
+            ec(stamp({ type: 'tool.call', bot: who, id: c.id, tool: V.toolShort(c.name), kind: V.toolKind(c.name), args: argsOf(c), say: !quiet || fresh }, c.t));
+            if (c.name === 'Skill' && c.detail) ec(stamp({ type: 'skill.load', bot: who, skill: c.detail }, c.t));
+            if (c.name === 'WebFetch' && c.detail) ec(stamp({ type: 'knowledge', bot: who, source: hostOf(c.detail), text: c.detail }, c.t));
+            if (c.name === 'WebSearch' && c.detail) ec(stamp({ type: 'knowledge', bot: who, source: 'Web search', text: c.detail }, c.t));
           }
           if (!seen.closed && c.ok !== null) {
             seen.closed = true;
             var r = { type: 'tool.result', bot: seen.bot, id: c.id, ok: c.ok };
             if (typeof c.ms === 'number') { r.ms = c.ms; stamp(r, c.t + c.ms); }
             if (c.err) r.summary = c.err;
-            emit(r);
+            (seat && !(old && old.closed) ? seat.out : emit)(r);
           }
         });
       }
@@ -293,26 +296,34 @@
       }
 
       // seedAll: the first pass of a newly attached scene. Every event of it restores state the office already had,
-      // so it carries seeded: true. A bot seated again on another floor is seeded in a live pass too.
-      function apply(snapshot, live, seedAll) {
+      // so it carries seeded: true, with its real time (at) where the snapshot has one (DS Reference, Scene mount).
+      // A restore inside a live pass (a bot seated again on another floor, an error a bot had before the scene saw it)
+      // is seeded without at: a seeded event with at after the last visit is news to the DS, so it would be recorded twice.
+      // out: the emitter of this pass.
+      function apply(snapshot, out, seedAll) {
         var seen = {};
-        var seeded = function (e) { e.seeded = true; live(e); };
-        var base = seedAll ? seeded : live;
+        var seeded = function (e) { e.seeded = true; out(e); };
+        var restore = function (e) { delete e.at; seeded(e); };
+        var base = seedAll ? seeded : out;
         // empty rooms: worktrees of this building that no session uses
         var rp = repoOf(snapshot, repo);
         if (rp) rp.worktrees.forEach(function (w) { roomOf(fromPlace(w.place), base); });
         snapshot.sessions.forEach(function (s) {
           if (!s.place) return;   // wait until the server knows the repo and branch
-          var pl = placeOf(s), k = known[s.uid], emit = base;
+          var pl = placeOf(s), k = known[s.uid], emit = base, prev = null, firstSight = false;
           // the session checked out another branch, or moved to another folder: seat it again
           if (k && !k.ended && k.place !== placeKey(pl)) {
-            emit({ type: 'bot.remove', bot: k.name }); delete taken[k.name]; delete known[s.uid]; k = null;
-            emit = seeded;   // the scene showed this bot and its requests already
+            emit({ type: 'bot.remove', bot: k.name }); delete taken[k.name]; delete known[s.uid];
+            prev = k; k = null;
+            emit = restore;   // the scene showed this bot and what its old seat lists (prev) already
           }
           if (pl.repo !== repo) return;   // another building
           seen[s.uid] = true;
+          // Per item of a bot seated again: what the old seat showed is a restore, anything else is news.
+          var pick = function (old) { return prev && !old ? out : emit; };
           if (!k) {
             if (s.status === 'ended') return;
+            firstSight = true;
             var name = uniqueName(s.name);
             k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: V.status(s).key, task: V.taskLine(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, model: s.model, ended: false, place: placeKey(pl), room: roomOf(pl, emit) };
             var bot = withColor({ name: name, role: 'coder', shape: shapeOf(s.uid), status: k.status, task: k.task, platform: 'Claude Code', identity: s.cwd }, s.uid);
@@ -328,7 +339,7 @@
             calls.forEach(function (c, i) { if (i < from && c.ok !== null) k.calls[c.id] = { bot: name, closed: true }; });
             (s.agents || []).forEach(function (a) { if (a.done) k.helpersDone[a.call] = true; });
             syncHelpers(s, k, emit);
-            syncCalls(s, k, emit, true);
+            syncCalls(s, k, emit, true, prev && { prev: prev, out: out });
             syncPlan(s, k, emit);
           } else {
             if (k.ended) return;
@@ -337,29 +348,29 @@
             syncCalls(s, k, emit);
             syncPlan(s, k, emit);
           }
-          var bot0 = k.name, restoring = emit === seeded;
+          var bot0 = k.name;
 
           // permission prompts: each pending question becomes one request with Approve and Decline
           (s.pending || []).forEach(function (r) {
             if (k.asked[r.id]) return;
             k.asked[r.id] = true;
-            emit(stamp({ type: 'request', bot: bot0, id: r.id, text: 'Allow ' + r.tool + (r.detail ? ': ' + clip(r.detail, 80) : '') + '?', risk: r.risk, tool: r.tool, preview: r.preview || r.detail }, r.t));
+            pick(prev && prev.asked[r.id])(stamp({ type: 'request', bot: bot0, id: r.id, text: 'Allow ' + r.tool + (r.detail ? ': ' + clip(r.detail, 80) : '') + '?', risk: r.risk, tool: r.tool, preview: r.preview || r.detail }, r.t));
           });
           // free-form questions from the session (office_ask): answer with Yes or No, or reply in the chat
           (s.questions || []).forEach(function (q) {
             if (k.asked[q.id]) return;
             k.asked[q.id] = true;
             // no risk value: the DS bulk 'Approve all low-risk' must never answer a question the user did not read
-            emit(stamp({ type: 'request', bot: bot0, id: q.id, text: q.text, tool: 'office_ask' }, q.t));
+            pick(prev && prev.asked[q.id])(stamp({ type: 'request', bot: bot0, id: q.id, text: q.text, tool: 'office_ask' }, q.t));
           });
           // what the session said (headless sessions only; a terminal session answers in its terminal).
           // Restored replies fill the chat without speech bubbles, like restored tool calls.
           (s.replies || []).forEach(function (r) {
             if (r.id <= k.replySeen) return;
             k.replySeen = r.id;
-            var msg = stamp({ type: 'message', bot: bot0, text: r.text }, r.t);
-            if (restoring) msg.say = false;
-            emit(msg);
+            var e = pick(prev && r.id <= prev.replySeen), msg = stamp({ type: 'message', bot: bot0, text: r.text }, r.t);
+            if (e !== out) msg.say = false;
+            e(msg);
           });
           // a queued message was read by the session
           var queued = (s.inbox || []).length;
@@ -371,13 +382,16 @@
             k.ended = true;
             emit(stamp({ type: 'session.end', bot: bot0, session: s.uid, ok: !s.error }, s.endedAt));
             emit({ type: 'status', bot: bot0, status: 'resting', task: task });
-            later(function () { if (emitRef !== live) return; live({ type: 'bot.remove', bot: bot0 }); delete taken[bot0]; }, REMOVE_AFTER_MS);
+            later(function () { if (emitRef !== out) return; out({ type: 'bot.remove', bot: bot0 }); delete taken[bot0]; }, REMOVE_AFTER_MS);
             return;
           }
-          // a failed turn: the bot shows the error until a new turn starts, or Retry or Dismiss
+          // a failed turn: the bot shows the error until a new turn starts, or Retry or Dismiss.
+          // A bot first seen in a live pass (it moved in from another building) had its error before this scene saw it:
+          // the error is restored, not news. A bot seated again restores the error its old seat showed.
           if (s.error && s.error.id > k.errorSeen) {
             k.errorSeen = s.error.id; k.status = 'error'; k.task = s.error.text;
-            emit(stamp({ type: 'error', bot: bot0, text: s.error.text }, s.error.at));
+            var ee = prev ? pick(s.error.id <= prev.errorSeen) : (firstSight && !seedAll ? restore : emit);
+            ee(stamp({ type: 'error', bot: bot0, text: s.error.text }, s.error.at));
             return;
           }
           if (st !== k.status) { k.status = st; k.task = task; emit({ type: 'status', bot: bot0, status: st, task: task }); }
@@ -401,13 +415,21 @@
         emit({ type: 'usage', percent: w.percent });
       }
 
-      m._follow = function (snap) { if (emitRef) { apply(snap, emitRef); syncUsage(snap, emitRef); } };
+      // The first pass restores the scene: the snapshot the store had at attach, every event seeded (DS Reference,
+      // Scene mount). It runs once, from the deferred call or from the first snapshot that arrives before it, whichever
+      // comes first; a snapshot after attach is applied live on top of it, so only what changed since then is news.
+      function prime(emit) {
+        if (primed) return;
+        primed = true;
+        var s0 = seedSnap; seedSnap = null;
+        if (s0) { apply(s0, emit, true); syncUsage(s0, function (e) { e.seeded = true; emit(e); }); }
+      }
+      m._follow = function (snap) { if (emitRef) { prime(emitRef); apply(snap, emitRef); syncUsage(snap, emitRef); } };
       m.attach = function (emit) {
         known = {}; taken = {}; layout = freshLayout(); lastUsage = { percent: null, t: 0 };
-        emitRef = emit;
+        emitRef = emit; primed = false; seedSnap = latest;
         if (attached.indexOf(m) < 0) attached.push(m);
-        // the first pass restores the scene: every event of it is seeded (DS Reference, Scene mount)
-        defer(function () { if (emitRef === emit && latest) { apply(latest, emit, true); syncUsage(latest, function (e) { e.seeded = true; emit(e); }); } });
+        defer(function () { if (emitRef === emit) prime(emit); });
       };
       m.detach = function () {
         emitRef = null;
