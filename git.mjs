@@ -81,10 +81,12 @@ function findExe(name, env, win) {
   throw new Error(`${name} was not found on PATH.`);
 }
 
+// A failed program rejects with its last stderr lines, and keeps the exit code (err.code: a number when the program
+// exited, null when it was killed) and killed, so gitNoMatch can tell git's "nothing matches" (code 1) from a failure.
 function run(cmd, args, cwd, timeout = 30000) {
   return new Promise((resolve, reject) => {
     execFile(resolveExe(cmd), args, { cwd, windowsHide: true, maxBuffer: 16 * 1024 * 1024, timeout }, (err, out, stderr) => {
-      if (err) return reject(new Error((String(stderr || '').trim() || err.message).split('\n').slice(-3).join(' ')));
+      if (err) return reject(Object.assign(new Error((String(stderr || '').trim() || err.message).split('\n').slice(-3).join(' ')), { code: err.code ?? null, killed: !!err.killed }));
       resolve(String(out));
     });
   });
@@ -414,8 +416,12 @@ export async function staleFloors(repo, { minAgeMs = FLOOR_MIN_AGE_MS } = {}) {
   const merged = new Set((await git(['branch', '--merged', main.branch, '--format=%(refname:short)'], repo, 15000)).split(/\r?\n/).filter(Boolean));
   const keep = await defaultBranch(repo);
   const out = [];
-  for (const b of new Set(wts.map((w) => w.branch))) {
+  // An agent room (base set, #69) sits on the floor of its base: its branch is no floor, and a floor with an agent room on
+  // it is in use (deleteFloor refuses it until the agent room is removed).
+  const agentOf = (w) => !!w.base && w.base !== w.branch;
+  for (const b of new Set(wts.filter((w) => !agentOf(w)).map((w) => w.branch))) {
     if (b === main.branch || b === keep || b === 'detached' || !merged.has(b)) continue;
+    if (wts.some((w) => agentOf(w) && w.base === b)) continue;
     const rooms = wts.filter((w) => w.branch === b);
     if (rooms.some((w) => w.main)) continue;
     const young = rooms.some((w) => { try { return Date.now() - fs.statSync(w.root).birthtimeMs < minAgeMs; } catch { return true; } });

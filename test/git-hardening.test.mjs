@@ -305,3 +305,20 @@ test('floorCandidates() leaves out agent branches, so they do not pile up as flo
     assert.ok(!list.includes(made.branch), list.join(','));
   } finally { s.done(); }
 });
+
+// #70 review, found while merging main: git's "nothing matches" (exit code 1) must reach gitNoMatch. run() dropped the exit
+// code, so bases() threw for every repository without agent branches and GET /api/branches answered 500.
+test('a repository with no agent branch: floorCandidates lists its branches, and layout reads no error', async () => {
+  const s = scratch();
+  try {
+    const repo = makeRepo(s.dir);
+    plain(repo, 'branch', 'side');
+    const warned = [], warn = console.warn;
+    console.warn = (m) => warned.push(String(m));
+    try {
+      assert.ok((await git.floorCandidates(repo)).includes('side'));
+      assert.equal((await git.layout(repo)).length, 1);
+    } finally { console.warn = warn; }
+    assert.deepEqual(warned, [], 'no "could not read the base branches" warning');
+  } finally { s.done(); }
+});
