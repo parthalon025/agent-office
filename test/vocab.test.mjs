@@ -261,3 +261,21 @@ test('the agents of a building as one word: the kinds of its sessions, in the or
   assert.equal(V.kindsWord([{}], kinds), '', 'a session with no kind adds nothing');
   assert.equal(V.kindsWord([], kinds), '');
 });
+
+// ----- adapter features (#72) -----
+test('features: only what the agent kind declares, in the table order, with the words the page shows', () => {
+  assert.deepEqual(V.featuresOf(mk({ features: ['fork', 'skills', 'resume', 'images', 'nonsense'] })).map((f) => f.key), ['skills', 'fork']);
+  assert.deepEqual(V.featuresOf(mk({ features: ['reason', 'teams', 'schedules'] })).map((f) => f.label), ['Reasons', 'Agent teams', 'Scheduled tasks']);
+  assert.deepEqual(V.featuresOf(mk({})), []);
+  assert.deepEqual(V.featuresOf(null), []);
+  assert.equal(V.hasFeature(mk({ features: ['skills'] }), 'skills'), true);
+  assert.equal(V.hasFeature(mk({ features: ['skills'] }), 'fork'), false);
+  assert.equal(V.hasFeature(mk({}), 'skills'), false);
+});
+
+test('requests: the reason an agent gives for a request comes with it, trimmed to one line', () => {
+  const s = mk({ pending: [{ id: 'p1', tool: 'Bash', detail: 'npm test', risk: 'medium', t: 1, reason: 'To check\nthe fix.' }, { id: 'p2', tool: 'Read', detail: 'a', risk: 'low', t: 2 }] });
+  const r = V.requests(s);
+  assert.equal(r[0].reason, 'To check the fix.');
+  assert.equal(r[1].reason, '');
+});

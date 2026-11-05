@@ -329,7 +329,7 @@ export function createTracker(deps = {}) {
     }
     const detail = describeTool(p.tool_name, p.tool_input);
     const suggestions = allowRules(p.permission_suggestions);
-    s.pending.push({ id, key: callKey(p), agent: p.agent_id || null, tool: p.tool_name, detail, risk: riskOf(p.tool_name, p.full_input || p.tool_input, rootOf(s)), preview: makePreview(p.tool_name, p.full_input || p.tool_input), always: ruleLabel(suggestions), t: now() });
+    s.pending.push({ id, key: callKey(p), agent: p.agent_id || null, tool: p.tool_name, detail, risk: riskOf(p.tool_name, p.full_input || p.tool_input, rootOf(s)), preview: makePreview(p.tool_name, p.full_input || p.tool_input), always: ruleLabel(suggestions), reason: p.ask_reason || null, t: now() });
     s.status = 'waiting'; s.note = `${p.tool_name} ${detail}`.trim();
     addFeed(s, 'wait', `asks to use ${s.note}`);
     changed();

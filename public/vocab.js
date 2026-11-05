@@ -16,6 +16,8 @@
      agentsSign(n)    -> "N agents" for a room shared by 2 or more agents (top-level sessions; helpers do not count), else ''
      requests(s)      -> every open request of a session, oldest first: { id, kind, tool, text, detail, risk, always, t }
                          kind is 'permission' (Approve or Decline) or 'question' (Yes or No; no risk value)
+     featuresOf(s)    -> the office features the session's agent kind declares (#72): [{ key, label }], in table order
+     hasFeature(s, k) -> true when the agent kind declares feature k. The page shows a feature only then, never a greyed-out control.
      alwaysOffer(s)   -> the first permission request that may offer "Always allow", or null. Never a question,
                          never a high-risk request, never one without a rule to save.
      kindWord(s, kinds) -> the agent kind of a session as a word ('Claude Code', 'Ollama'): the label of s.provider in
@@ -47,6 +49,17 @@
 
   function clip(t, n) { t = String(t || ''); return t.length > n ? t.slice(0, n - 1) + '…' : t; }
   function has(a) { return !!(a && a.length); }
+  function oneLine(t) { return clip(String(t == null ? '' : t).replace(/\s+/g, ' ').trim(), 300); }
+
+  // What an agent kind has beyond the seam (#72), in the order the page shows it. A provider declares the keys (providers/index.mjs
+  // features); the resume and images keys are not office features and have no entry. The server puts the list on the session.
+  var FEATURES = [
+    ['skills', 'Skills'], ['memory', 'Memory'], ['fork', 'Fork'], ['reason', 'Reasons'], ['teams', 'Agent teams'], ['schedules', 'Scheduled tasks']
+  ];
+  function hasFeature(s, key) { return !!(s && s.features && s.features.indexOf(key) >= 0); }
+  function featuresOf(s) {
+    return FEATURES.filter(function (f) { return hasFeature(s, f[0]); }).map(function (f) { return { key: f[0], label: f[1] }; });
+  }
 
   function isWaiting(s) { return !!s && s.status !== 'ended' && (has(s.pending) || has(s.questions)); }
 
@@ -112,10 +125,10 @@
     if (!s || s.status === 'ended') return [];
     var out = [];
     (s.pending || []).forEach(function (r, i) {
-      out.push({ id: r.id, kind: 'permission', tool: r.tool, detail: r.detail || '', text: 'Allow ' + r.tool + (r.detail ? ': ' + clip(r.detail, 160) : '') + '?', risk: r.risk, always: r.always || null, t: +r.t || 0, i: i });
+      out.push({ id: r.id, kind: 'permission', tool: r.tool, detail: r.detail || '', reason: oneLine(r.reason), text: 'Allow ' + r.tool + (r.detail ? ': ' + clip(r.detail, 160) : '') + '?', risk: r.risk, always: r.always || null, t: +r.t || 0, i: i });
     });
     (s.questions || []).forEach(function (q, i) {
-      out.push({ id: q.id, kind: 'question', tool: 'office_ask', detail: '', text: clip(q.text, 400), risk: undefined, always: null, t: +q.t || 0, i: 1000 + i });
+      out.push({ id: q.id, kind: 'question', tool: 'office_ask', detail: '', reason: '', text: clip(q.text, 400), risk: undefined, always: null, t: +q.t || 0, i: 1000 + i });
     });
     out.sort(function (a, b) { return a.t - b.t || a.i - b.i; });
     return out.map(function (r) { delete r.i; return r; });
@@ -232,5 +245,5 @@
     return 'Runs ' + label + ' inside the office. You talk to it in the chat and approve its steps here. It has no terminal window.';
   }
 
-  root.OfficeVocab = { kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, modelChoices: modelChoices, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security };
+  root.OfficeVocab = { kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, modelChoices: modelChoices, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

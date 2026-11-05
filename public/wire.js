@@ -26,7 +26,7 @@
   // A field the page does not read stays on the server. Add a field here when the page starts to read it.
   var SESSION_FIELDS = ['uid', 'provider', 'name', 'status', 'cwd', 'headless', 'note', 'model', 'mode', 'tool', 'prompt', 'promptAt', 'live',
     'error', 'turns', 'cost', 'costUnknown', 'usage', 'ctxTokens', 'ctxWindow', 'todos', 'agents', 'calls', 'replies', 'pending', 'questions',
-    'inbox', 'commands', 'skills', 'scheduleId', 'startedAt', 'endedAt', 'lastEvent', 'git', 'place'];
+    'inbox', 'commands', 'skills', 'features', 'scheduleId', 'startedAt', 'endedAt', 'lastEvent', 'git', 'place'];
   // Per session and broadcast. calls: the tracker's own limit (MAX_CALLS); the boards and the terminal count all of them.
   // replyChars: the newest replies whose text fits, and always the newest one. The rest is on request.
   var CAPS = { calls: 60, replyChars: 32000 };
@@ -64,7 +64,7 @@
     o.pending = (s.pending || []).map(function (r) { var x = Object.assign({}, r); delete x.key; return x; });   // key: the call key, server only
     o.inbox = (s.inbox || []).map(function (m) { return { t: m.t }; });   // the page counts queued messages
     o.git = s.git ? { branch: s.git.branch } : null;
-    ['todos', 'agents', 'questions', 'commands', 'skills'].forEach(function (f) { if (!o[f]) o[f] = []; });
+    ['todos', 'agents', 'questions', 'commands', 'skills', 'features'].forEach(function (f) { if (!o[f]) o[f] = []; });
     return o;
   }
   function lean(state) {

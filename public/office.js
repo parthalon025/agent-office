@@ -92,6 +92,22 @@
   }
   function Tag(p) { return h('span', { className: 'tag' }, p.children); }
   function Pair(a, b) { return h('div', { className: 'row' }, a, b); }
+  // Export (#72): the server writes the Markdown of a session (every agent kind has it); the browser saves it as a file.
+  function exportSession(uid, toast) {
+    return api('/api/export', { uid: uid }).then(function (j) {
+      var url = URL.createObjectURL(new Blob([j.text], { type: 'text/markdown;charset=utf-8' }));
+      var a = document.createElement('a');
+      a.href = url; a.download = j.filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      if (toast) toast({ tone: 'success', title: 'Exported', text: j.filename });
+    }, function (x) { if (toast) toast({ tone: 'error', title: 'Export failed', text: x.message }); });
+  }
+  // The words of what an agent kind has beyond the seam (vocab.js featuresOf): only the ones it declares.
+  function FeatureTags(p) {
+    var list = window.OfficeVocab.featuresOf(p.session);
+    return list.length ? h('span', { className: 'feature-tags', 'aria-label': 'Features of ' + (window.officeAdapter.kindWord(p.session) || 'this agent') }, list.map(function (f) { return h(Tag, { key: f.key }, f.label); })) : null;
+  }
   function Busy(p) { return p.on ? h(A.Skeleton, { lines: p.lines || 3, label: 'Loading' }) : null; }
   // Fields two to a row; a field that is null leaves no gap.
   function Pairs(list) {
@@ -247,6 +263,70 @@
             h(A.Button, { variant: 'quiet', onClick: function () { setSaving(null); } }, 'Cancel'))));
   }
 
+  // ---------- skills an agent writes (#72) ----------
+  // The room panel opens this for an agent kind that declares skills (Hermes). The user reads, edits and deletes. A write is held:
+  // the server answers 409 with confirm: 'skill' and the question, the dialog asks, and the same call goes again with confirmed: true.
+  function SkillsDialog(p) {
+    var ls = useState(null), list = ls[0], setList = ls[1];
+    var ed = useState(null), edit = ed[0], setEdit = ed[1];       // { name, text, orig }: the skill in the editor
+    var cf = useState(null), ask = cf[0], setAsk = cf[1];         // { action, name, text, question }: waiting for the user's yes
+    var bz = useState(''), busy = bz[0], setBusy = bz[1];
+    var er = useState(''), err = er[0], setErr = er[1];
+    function load() { api('/api/skills/list', { provider: p.kind }).then(function (j) { setList(j); }, function (x) { setList({ skills: [] }); setErr(x.message); }); }
+    useEffect(load, []);
+    function openEdit(name) {
+      setBusy(name); setErr('');
+      api('/api/skills/read', { provider: p.kind, name: name }).then(function (j) { setBusy(''); setEdit({ name: name, text: j.text, orig: j.text }); }, function (x) { setBusy(''); setErr(x.message); });
+    }
+    // action: 'save' or 'delete'. The first call asks; the call with confirmed: true writes.
+    function write(action, name, text, confirmed) {
+      setBusy(action + name); setErr('');
+      api('/api/skills/' + action, { provider: p.kind, name: name, text: text, confirmed: confirmed === true }).then(function () {
+        setBusy(''); setAsk(null); setEdit(null);
+        p.toast({ tone: 'success', title: p.agent, text: action === 'delete' ? 'Skill ' + name + ' deleted' : 'Skill ' + name + ' saved' });
+        load();
+      }, function (x) {
+        setBusy('');
+        if (x.body && x.body.confirm === 'skill' && !confirmed) { setAsk({ action: action, name: name, text: text, question: x.message }); return; }
+        setErr(x.message);
+      });
+    }
+    if (ask) {
+      var back = function () { setAsk(null); setErr(''); };
+      var del = ask.action === 'delete';
+      return h(A.Dialog, { key: 'ask', open: true, title: (del ? 'Delete ' : 'Save ') + ask.name, onClose: back, actions: [
+        h(A.Button, { key: 'c', variant: 'quiet', onClick: back }, 'Keep it as it is'),
+        h(A.Button, { key: 'y', variant: del ? 'danger' : 'primary', icon: del ? 'remove' : 'approve', loading: busy === ask.action + ask.name, onClick: function () { write(ask.action, ask.name, ask.text, true); } }, del ? 'Delete skill' : 'Save skill')] },
+        h('div', { className: 'form' }, h('p', { className: 'note' }, ask.question), err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
+    }
+    if (edit) {
+      var changed = edit.text !== edit.orig, leave = function () { setEdit(null); setErr(''); };
+      return h(A.Dialog, { key: 'edit', open: true, title: 'Skill ' + edit.name, onClose: leave, actions: [
+        h(A.Button, { key: 'c', variant: 'quiet', onClick: leave }, 'Back to the list'),
+        h(A.Button, { key: 's', variant: 'primary', icon: 'approve', disabled: !changed, loading: busy === 'save' + edit.name, onClick: function () { write('save', edit.name, edit.text, false); } }, 'Save skill')] },
+        h('div', { className: 'form wide' },
+          h('p', { className: 'note' }, p.agent + ' follows this skill in later sessions. Saving asks you first.'),
+          h(Area, { id: 'sk-text', label: 'SKILL.md', value: edit.text, rows: 14, onChange: function (v) { setEdit(Object.assign({}, edit, { text: v })); }, error: err || undefined })));
+    }
+    var skills = list ? list.skills : null;
+    return h(A.Dialog, { key: 'list', open: true, title: 'Skills of ' + p.agent, onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
+      h('div', { className: 'form wide' },
+        h('p', { className: 'note' }, 'Skills that ' + p.agent + ' wrote for itself. You can read, edit and delete them. It makes new ones on its own.'),
+        err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
+        h(Busy, { on: skills === null }),
+        skills && !skills.length ? h(A.EmptyState, { icon: 'skill', title: 'No skills yet', text: p.agent + ' has not written a skill.' }) : null,
+        h('ul', { className: 'past' }, (skills || []).map(function (k) {
+          return h('li', { key: k.name, className: 'past-row' },
+            h('div', { className: 'past-main' },
+              h('div', { className: 'past-title' }, h('b', null, k.title), h(Tag, null, k.name)),
+              k.description ? h('div', { className: 'past-snip' }, k.description) : null,
+              h('div', { className: 'past-meta mono' }, ago(k.at) + ' · ' + k.bytes + ' bytes')),
+            h('div', { className: 'past-actions' },
+              h(A.Button, { variant: 'quiet', icon: 'tool', loading: busy === k.name, onClick: function () { openEdit(k.name); } }, 'Edit'),
+              h(A.Button, { variant: 'quiet', icon: 'remove', onClick: function () { write('delete', k.name, '', false); } }, 'Delete')));
+        }))));
+  }
+
   // ---------- past sessions and search ----------
   function PastDialog(p) {
     var l = useState(null), list = l[0], setList = l[1];
@@ -256,6 +336,7 @@
     var bz = useState(''), busy = bz[0], setBusy = bz[1];
     var ak = useState(null), ask = ak[0], setAsk = ak[1];   // the session the user is about to forget
     var rc = useState(null), runAsk = rc[0], setRunAsk = rc[1];   // { s, text }: its agent reports no cost, so ask before it runs
+    var fa = useState(null), forkAsk = fa[0], setForkAsk = fa[1];   // { s, text }: Fork waits for the user's yes
     function load() { api('/api/history').then(function (j) { setList(j.sessions); }, function (x) { setErr(x.message); }); }
     useEffect(load, []);
     useEffect(function () {
@@ -273,6 +354,17 @@
         });
       });
     }
+    // Fork (#72) writes a worktree and a session, so the server holds it: 409 with confirm: 'fork' and the question; the same call with confirmed: true runs it.
+    function fork(s, confirmed) {
+      act(s.uid, function () {
+        return api('/api/fork', { uid: s.uid, confirmed: confirmed === true }).then(function () {
+          setForkAsk(null); if (p.toast) p.toast({ tone: 'success', title: s.name, text: 'Forked into a new worktree' }); p.onClose();
+        }, function (x) {
+          if (x.body && x.body.confirm === 'fork' && !confirmed) { setForkAsk({ s: s, text: x.message }); return; }
+          throw x;
+        });
+      });
+    }
     function forget(uid) { act(uid, function () { return api('/api/history/forget', { uid: uid }).then(function () { setAsk(null); if (p.toast) p.toast({ tone: 'info', title: 'Session forgotten', text: 'It is gone from Past sessions.' }); load(); }); }); }
     if (ask) {
       return h(A.Dialog, { open: true, title: 'Forget ' + ask.name, onClose: function () { setAsk(null); setErr(''); }, actions: [
@@ -280,6 +372,15 @@
         h(A.Button, { key: 'f', variant: 'danger', icon: 'remove', loading: busy === ask.uid, onClick: function () { forget(ask.uid); } }, 'Forget session')] },
         h('div', { className: 'form' },
           h('p', { className: 'note' }, 'Removes this session from Past sessions, with its saved history. You cannot reopen it after that. Files in the folder stay.'),
+          err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
+    }
+    if (forkAsk) {
+      var stopFork = function () { setForkAsk(null); setErr(''); };
+      return h(A.Dialog, { open: true, title: 'Fork ' + forkAsk.s.name, onClose: stopFork, actions: [
+        h(A.Button, { key: 'c', variant: 'quiet', onClick: stopFork }, 'Cancel'),
+        h(A.Button, { key: 'f', variant: 'primary', icon: 'flow', loading: busy === forkAsk.s.uid, onClick: function () { fork(forkAsk.s, true); } }, 'Fork session')] },
+        h('div', { className: 'form' },
+          h('p', { className: 'note' }, forkAsk.text),
           err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
     }
     if (runAsk) {
@@ -309,6 +410,8 @@
               h('div', { className: 'past-meta mono' }, ago(s.endedAt) + ' · ' + plural(s.turns || 0, 'turn') + ' · ' + F.costLabel(s.cost, s.costUnknown))),
             h('div', { className: 'past-actions' },
               h(A.Button, { variant: 'quiet', icon: 'rollback', loading: busy === s.uid, onClick: function () { reopen(s); } }, 'Reopen'),
+              window.OfficeVocab.hasFeature(s, 'fork') ? h(A.Button, { variant: 'quiet', icon: 'flow', disabled: busy === s.uid, title: 'Open a copy of this session in a new worktree', onClick: function () { fork(s, false); } }, 'Fork') : null,
+              h(A.Button, { variant: 'quiet', icon: 'copy', title: 'Save this session as a Markdown file', onClick: function () { exportSession(s.uid, p.toast); } }, 'Export'),
               h(A.Button, { variant: 'quiet', icon: 'trace', onClick: function () { p.onChanges(s.uid, s.name); } }, 'Changes'),
               h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setAsk(s); } }, 'Forget')));
         }))));
@@ -971,7 +1074,7 @@
           h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onClose }, 'Back to the room'), h('span', { className: 'note' }, 'Esc also goes back.')),
           h('ul', { className: 'stats-list' },
             row('Working', String(v.working)), row('Needs you', String(v.waiting)), row('Tool calls', String(v.toolCalls)),
-            row('Tokens', String(v.tokens)), row('Cost', F.cost(v.cost, v.unknown)), row('To do done', v.todosDone + ' of ' + v.todosTotal),
+            row('Tokens', v.tokens ? F.tokens(v.tokens) : 'none reported'), row('Cost', F.cost(v.cost, v.unknown)), row('To do done', v.todosDone + ' of ' + v.todosTotal),
             row('Last event', v.lastEvent ? ago(v.lastEvent) : 'none')))));
   }
 
@@ -1095,7 +1198,11 @@
     var bz = useState(false), busy = bz[0], setBusy = bz[1];
     var ad = useState(null), add = ad[0], setAdd = ad[1];
     var er = useState(''), err = er[0], setErr = er[1];
+    var sk = useState(null), skills = sk[0], setSkills = sk[1];   // { kind, agent }: the Skills dialog of an agent kind (#72)
     var cur = confirm ? list.filter(function (s) { return s.uid === confirm; })[0] : null;
+    // The agent kinds in this room that write skills (they declare the feature): one Skills button each, nothing for the others.
+    var skillKinds = [];
+    list.forEach(function (s) { if (window.OfficeVocab.hasFeature(s, 'skills') && s.provider && !skillKinds.some(function (k) { return k.kind === s.provider; })) skillKinds.push({ kind: s.provider, agent: window.officeAdapter.kindWord(s) }); });
     useEffect(function () { if (confirm && !cur) setConfirm(null); }, [confirm, !!cur]);
     var K = useKinds(!!add), addKind = add ? kindOf(K.list, add.provider) : null;
     useFirstModel(addKind, add || {}, function (fn) { setAdd(function (a) { return a ? fn(a) : a; }); });
@@ -1111,6 +1218,7 @@
         .then(function () { setBusy(false); setAdd(null); p.toast({ tone: 'success', title: 'Office', text: 'Agent added' }); }, function (x) { setBusy(false); setErr(x.message); });
     }
     var title = 'Agents in ' + ((place && place.roomName) || 'this room');
+    if (skills) return h(SkillsDialog, { kind: skills.kind, agent: skills.agent, toast: p.toast, onClose: function () { setSkills(null); } });
     if (cur) {
       return h(A.Dialog, { key: 'confirm', open: true, title: 'Close ' + cur.name, onClose: function () { setConfirm(null); setErr(''); }, actions: [
         h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setConfirm(null); setErr(''); } }, 'Keep session'),
@@ -1133,9 +1241,10 @@
           list.length ? h('ul', { className: 'agent-list' }, list.map(function (s) {
             return h('li', { key: s.uid, className: 'agent-row' },
               h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: colorOf(s.uid), status: statusOf(s), size: 28 }),
-              h('span', { className: 'agent-who' }, h('b', null, s.name), h('span', { className: 'agent-sub' }, window.OfficeVocab.status(s).word + ' · ' + window.officeAdapter.kindWord(s) + ' · ' + modelWord(s.model))),
+              h('span', { className: 'agent-who' }, h('b', null, s.name), h('span', { className: 'agent-sub' }, window.OfficeVocab.status(s).word + ' · ' + window.officeAdapter.kindWord(s) + ' · ' + modelWord(s.model)), h(FeatureTags, { session: s })),
               h(A.Button, { variant: 'quiet', icon: 'remove', onClick: function () { setErr(''); setConfirm(s.uid); } }, 'Close session'));
           })) : h(A.EmptyState, { icon: 'identity', compact: true, title: 'No agents here', text: 'Add an agent to start work in this room.' }),
+          skillKinds.map(function (k) { return h(A.Button, { key: k.kind, variant: 'quiet', icon: 'skill', onClick: function () { setSkills(k); } }, 'Skills of ' + k.agent); }),
           h(A.AddButton, { label: 'Add an agent', onClick: function () { setErr(''); setAdd({ name: '', provider: DEFAULT_KIND, model: '', prompt: '' }); } }))));
   }
 
@@ -1158,6 +1267,7 @@
         var q = r.kind === 'question', busyR = answering === r.id;
         return h('div', { key: r.id, className: 'ask' + (r.risk === 'high' ? ' is-high' : ''), role: 'group', 'aria-label': q ? 'Question' : 'Request' },
           h('div', { className: 'ask-t' }, r.risk ? h(A.RiskBadge, { risk: r.risk }) : null, p.showName ? h('b', null, who) : null, h('span', { className: 'ask-x' }, r.text)),
+          r.reason ? h('p', { className: 'ask-why' }, h('em', null, 'Reason: '), r.reason) : null,
           h('div', { className: 'ask-a' },
             h(A.Button, { variant: 'emphasis', icon: 'approve', loading: busyR, onClick: function () { answerReq(r, true, false); } }, q ? 'Yes' : 'Approve'),
             h(A.Button, { variant: 'quiet', icon: 'decline', disabled: busyR, onClick: function () { answerReq(r, false, false); } }, q ? 'No' : 'Decline'),
@@ -1248,8 +1358,11 @@
       window.addEventListener('keydown', onKey);
       return function () { window.removeEventListener('keydown', onKey); };
     }, []);
-    var rows = window.OfficeTerminal ? window.OfficeTerminal.lines(s, cols) : [{ text: 'The terminal view is not loaded.', tone: 'muted' }];
-    if (s && s.headless && rows.length && rows[rows.length - 1].text === '> ') rows = rows.slice(0, -1);
+    // The Timeline view lists the tool calls with their times (#72); Export saves the whole session as Markdown (every agent kind).
+    var tl = useState(false), showTimeline = tl[0], setShowTimeline = tl[1];
+    var OT = window.OfficeTerminal;
+    var rows = OT ? (showTimeline ? OT.timeline(s, cols) : OT.lines(s, cols)) : [{ text: 'The terminal view is not loaded.', tone: 'muted' }];
+    if (!showTimeline && s && s.headless && rows.length && rows[rows.length - 1].text === '> ') rows = rows.slice(0, -1);
     useEffect(function () { var v = vw.current; if (v && stick.current) v.scrollTop = v.scrollHeight; });
     function onScroll() { var v = vw.current; if (v) stick.current = v.scrollHeight - v.scrollTop - v.clientHeight < 24; }
     function send() {
@@ -1266,6 +1379,8 @@
         h(A.StatusDot, { status: s ? statusOf(s) : 'resting' }),
         h('b', { className: 'term-name' }, s ? s.name : p.name),
         h('span', { className: 'term-model mono' }, s ? window.officeAdapter.kindWord(s) + ' · ' + modelWord(s.model) : ''),
+        s ? h(A.Button, { variant: 'quiet', icon: 'trace', 'aria-pressed': showTimeline, title: showTimeline ? 'Show the terminal' : 'Show the tool calls with their times', onClick: function () { setShowTimeline(!showTimeline); stick.current = true; } }, showTimeline ? 'Terminal' : 'Timeline') : null,
+        s ? h(A.Button, { variant: 'quiet', icon: 'copy', title: 'Save this session as a Markdown file', onClick: function () { exportSession(s.uid, p.toast); } }, 'Export') : null,
         h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onClose }, 'Back')),
       h('div', { className: 'term-view', ref: vw, onScroll: onScroll, role: 'log', 'aria-live': 'off', tabIndex: 0 },
         h('span', { className: 'term-probe', ref: probe, 'aria-hidden': 'true' }, 'MMMMMMMMMM'),
@@ -1317,6 +1432,7 @@
             h('div', { className: 'past-main' },
               h('div', { className: 'past-title' }, h('b', null, sceneName({ uid: r.uid, name: r.bot })), h(Tag, null, r.buildingName), q ? null : h(A.RiskBadge, { risk: r.risk })),
               h('div', { className: 'past-snip' }, r.text),
+              r.reason ? h('div', { className: 'past-snip' }, h('em', null, 'reason: '), r.reason) : null,
               !q && r.preview && r.preview !== r.detail ? h('div', { className: 'past-sub mono', title: r.preview }, clip(String(r.preview).replace(/\s+/g, ' '), 140)) : null,
               h('div', { className: 'past-meta mono' }, r.roomName + ' · ' + ago(r.t))),
             h('div', { className: 'past-actions' },

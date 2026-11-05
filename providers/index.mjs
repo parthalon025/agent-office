@@ -13,7 +13,8 @@
 //                                      installed, signed in, model server up. needs: steps for the user, in plain words.
 //   models() -> Promise<[{ id, label }]>   the models the user can pick.
 //   open(s, opts)                      start the agent for tracker session s, in s.cwd. opts: { model, permissionMode, budget,
-//                                      resume }. May set s.pid when the agent runs in its own process.
+//                                      resume, fork }. fork: the session id of a past session to copy (only with the fork feature). May set s.pid when the
+//                                      agent runs in its own process.
 //   message(s, { text, attachments })  send one user message. Throws a status error (409) when the agent does not run.
 //   answer(s, request, decision)       the user's decision on a request. request: { id, suggestions }. decision: { allow, always }
 //                                      or {} (no decision: the request was dropped or timed out). Returns the reply body when the
@@ -48,6 +49,8 @@
 //   control(s, request, onDone) (optional) a control request to a running session: change mode or model, connectors
 //                                      (Claude Code). Without it the office refuses those requests (409).
 //   The Open dialog shows each kind's options from these facts (registry.kinds), so the page keeps no copy of them.
+//                                      The page shows a feature only for a kind that declares it. skills: also skillsDir() -> the folder of the skills
+//                                      the agent writes, or null. fork: open(s, { fork }). reason: the reason the agent gives for a request (ask_reason).
 //   Two timing rules. (1) A method returns before the events that follow from it: report them on a later tick. The office
 //   marks the turn after the call (startTurn after message, tracker.interrupt after interrupt), so a stopped turn reported
 //   inside interrupt() would read as an error. (2) After close, or after events.end, report nothing more for that session:
@@ -98,6 +101,8 @@ export const isGated = (p) => !p || p.gated !== false;
 export const supervisionOf = (p) => (isGated(p) ? null : typeof p.supervision === 'string' && p.supervision ? p.supervision : 'Unsupervised');
 /** The provider's cost word: 'unknown' when its agent reports no cost, else 'reported'. */
 export const costOf = (p) => (p && p.cost === 'unknown' ? 'unknown' : 'reported');
+/** A copy of the feature names the provider declares now (#72). A getter is read at this call: an ACP agent says some at its handshake. */
+export const featuresOf = (p) => (p && Array.isArray(p.features) ? [...p.features] : []);
 const FEATURE_RE = /^[a-z][a-z0-9-]{0,30}$/;
 /**
  * The spend limit of a new session in dollars, or null for no limit.
@@ -245,7 +250,7 @@ export function createRegistry(list) {
           (e) => ({ ready: false, version: null, needs: [`The office could not check ${p.label}: ${e.message}`] }));
         const models = r.ready ? await settled(() => p.models(), timeoutMs, () => []) : [];
         return { ...describe(p), ready: r.ready === true, version: r.version || null, needs: Array.isArray(r.needs) ? r.needs : [], models,
-          canResume: p.canResume === true, features: Array.isArray(p.features) ? [...p.features] : [] };
+          canResume: p.canResume === true, features: featuresOf(p) };
       }));
     },
   };

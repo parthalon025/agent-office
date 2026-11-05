@@ -799,3 +799,17 @@ test('rootOf: requests are rated against the worktree, else the folder the sessi
   s.worktree = { root: 'C:\\wt' };
   assert.equal(r.tracker.rootOf(s), 'C:\\wt');
 });
+
+// The reason an agent gives for a request (dsh asks again with a reason, #72) rides on the payload as ask_reason and shows on the request.
+test('a permission request keeps the reason the agent gave, trimmed; a request without one has none', () => {
+  const r = rig();
+  const s = r.tracker.newSession({ officeId: 'o1', uid: 'o1', name: 'a', cwd: ROOT, headless: true, status: 'working' });
+  const ask = (extra) => slimPayload({ hook_event_name: 'PermissionRequest', session_id: 'sid-q', cwd: ROOT, tool_name: 'Bash', tool_input: { command: 'npm test' }, ...extra }, 'o1');
+  r.tracker.permissionRequest(ask({ ask_reason: 'The last run failed. I need to see the full output. ' + 'x'.repeat(400) }));
+  r.tracker.permissionRequest(ask({ tool_input: { command: 'ls' } }));
+  assert.equal(s.pending[0].reason.length, 301);
+  assert.match(s.pending[0].reason, /^The last run failed\./);
+  assert.equal(s.pending[1].reason, null);
+  // Only a permission request carries it.
+  assert.equal(slimPayload({ hook_event_name: 'PostToolUse', tool_name: 'Bash', ask_reason: 'x' }).ask_reason, undefined);
+});

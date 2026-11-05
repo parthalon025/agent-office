@@ -12,12 +12,13 @@
 //   { write: { path, content } }         fs/write_text_file, then says "write: ok" or "write error: <message>"
 //   { term: { command, args, cwd, env, outputByteLimit } }  terminal/create, wait_for_exit, output, release, then says
 //                                        "term: exit <code>: <output>" or "term error: <message>"
+//   { usage: {...} }                     the token usage the turn's answer reports (ACP PromptResponse usage)
 //   { hang: true }                       waits until the client sends session/cancel
 //   { wait: ms }                         waits ms
 //   { stop: 'refusal' }                  ends the turn with that stop reason
 // A session/cancel ends the turn at once with stopReason cancelled.
 // Environment: FAKE_ACP_LOAD=1 advertises loadSession (session/load replays one exchange), FAKE_ACP_IMAGE=1 image prompts,
-// FAKE_ACP_VERSION the version in agentInfo, FAKE_ACP_EXIT=1 writes to stderr and exits 2 at once,
+// FAKE_ACP_FORK=1 advertises sessionCapabilities.fork (session/fork replays one exchange and gives session fork-1), FAKE_ACP_VERSION the version in agentInfo, FAKE_ACP_EXIT=1 writes to stderr and exits 2 at once,
 // FAKE_ACP_LOG a file where every message from the client is written, one JSON line each.
 import fs from 'node:fs';
 
@@ -71,6 +72,8 @@ async function runStep(sid, step) {
     const o = await request('terminal/output', { sessionId: sid, terminalId });
     await request('terminal/release', { sessionId: sid, terminalId });
     say(sid, `term: exit ${w.result?.exitCode}: ${String(o.result?.output || '').trim()}`);
+  } else if (step.usage) {
+    turn.usage = step.usage;
   } else if (step.hang) {
     await new Promise((resolve) => { turn.wake = resolve; });
   } else if (step.wait) {
@@ -97,7 +100,7 @@ async function prompt(id, p) {
   }
   if (mine.cancelled) stopReason = 'cancelled';
   turn = null;
-  send({ id, result: { stopReason } });
+  send({ id, result: { stopReason, ...(mine.usage ? { usage: mine.usage } : {}) } });
 }
 
 let buf = '';
@@ -115,7 +118,7 @@ process.stdin.on('data', (d) => {
     if (m.method === 'initialize') {
       send({ id: m.id, result: {
         protocolVersion: 1,
-        agentCapabilities: { loadSession: env.FAKE_ACP_LOAD === '1', promptCapabilities: { image: env.FAKE_ACP_IMAGE === '1' } },
+        agentCapabilities: { loadSession: env.FAKE_ACP_LOAD === '1', ...(env.FAKE_ACP_FORK === '1' ? { sessionCapabilities: { fork: {} } } : {}), promptCapabilities: { image: env.FAKE_ACP_IMAGE === '1' } },
         authMethods: [], agentInfo: { name: 'fake-acp', title: 'Fake ACP', version: env.FAKE_ACP_VERSION || '0.0.1' },
       } });
     } else if (m.method === 'session/new') send({ id: m.id, result: { sessionId: 'fake-sess-1' } });
@@ -124,6 +127,11 @@ process.stdin.on('data', (d) => {
       update(sid, { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'an old question' } });
       say(sid, 'an old answer');
       send({ id: m.id, result: {} });
+    } else if (m.method === 'session/fork') {
+      const sid = 'fake-fork-1';
+      update(sid, { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'an old question' } });
+      say(sid, 'an old answer');
+      send({ id: m.id, result: { sessionId: sid } });
     } else if (m.method === 'session/prompt') void prompt(m.id, m.params);
     else if (m.method === 'session/cancel') { if (turn) { turn.cancelled = true; if (turn.wake) turn.wake(); } }
     else if (m.id !== undefined) send({ id: m.id, error: { code: -32601, message: 'Method not found' } });

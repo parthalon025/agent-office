@@ -97,6 +97,8 @@ const cases = [
   ['Edit .env inside', 'Edit', { file_path: at('.env') }, 'medium'],
   ['Edit the home Claude settings', 'Edit', { file_path: path.join(home, '.claude', 'settings.json') }, 'high'],
   ['Edit the home git config', 'Write', { file_path: '~/.gitconfig' }, 'high'],
+  ['Write a skill of Hermes (it follows skills later, #72)', 'Write', { file_path: path.join(home, '.hermes', 'skills', 'deploy', 'SKILL.md') }, 'high'],
+  ['Edit the memory of Hermes inside the folder', 'Edit', { file_path: at('.hermes', 'MEMORY.md') }, 'high'],
   ['Edit another repo .git config', 'Edit', { file_path: path.join(outDir, 'other', '.git', 'config') }, 'high'],
   ['MultiEdit editor settings', 'MultiEdit', { file_path: at('.vscode', 'settings.json'), edits: [] }, 'high'],
   ['NotebookEdit inside', 'NotebookEdit', { notebook_path: at('nb.ipynb') }, 'low'],

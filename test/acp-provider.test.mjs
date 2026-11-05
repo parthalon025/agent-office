@@ -549,7 +549,7 @@ test('resume: an agent with loadSession can resume, Reopen loads the past sessio
     assert.equal(r.p.canResume, false, 'unknown before the agent said it');
     await r.p.learn();
     assert.equal(r.p.canResume, true);
-    assert.deepEqual(r.p.features, ['resume', 'skills', 'memory', 'fork']);
+    assert.deepEqual(r.p.features, ['resume', 'skills', 'memory']);
     assert.deepEqual(await r.p.readiness(), { ready: true, version: '0.21.5', needs: [] });
     const plan = createRegistry([r.p]).reopenPlan({ uid: 'old', sid: 'old-sess', provider: 'hermes', name: 'bot', cwd: r.root, replies: [] });
     assert.deepEqual([plan.fresh, plan.opts.resume], [false, 'old-sess']);
@@ -593,7 +593,7 @@ test('resume: an agent without loadSession cannot resume, so Reopen starts a fre
   try {
     await r.p.learn();
     assert.equal(r.p.canResume, false);
-    assert.deepEqual(r.p.features, ['skills', 'memory', 'fork']);
+    assert.deepEqual(r.p.features, ['skills', 'memory']);
     const plan = createRegistry([r.p]).reopenPlan({ uid: 'old', sid: 'old-sess', provider: 'hermes', name: 'bot', cwd: r.root, replies: [] });
     assert.equal(plan.fresh, true);
   } finally { await r.done(); }
@@ -715,4 +715,112 @@ test('a queued message that a stopped turn could not deliver goes with the next 
     assert.equal(texts[0], 'go on');
     assert.match(texts[1], /use tabs/);
   } finally { await r.done(s); }
+});
+
+// ---------- adapter features (#72) ----------
+test('reason: an agent kind that declares it shows the reason the agent gives with its request; one that does not, does not', async () => {
+  const r = rig({ kind: 'dsh' });
+  const s = await started(r, r.session({ provider: 'dsh' }));
+  try {
+    assert.ok(r.p.features.includes('reason'));
+    const ask = { toolCall: EDIT_CALL(r.root), options: OPTIONS };
+    r.steps(s, [{ ask: { ...ask, _meta: { reason: 'The test failed. I need to fix a.txt.' } } }, { ask: { ...ask, toolCall: EDIT_CALL(r.root, 'b.txt', 'tc2') } }]);
+    await until(() => s.pending.length === 1, 'the first request');
+    assert.equal(s.pending[0].reason, 'The test failed. I need to fix a.txt.');
+    r.release(s.pending[0].id, { allow: true });
+    await until(() => s.pending.length === 1 && r.replies(s).length === 1, 'the second request');
+    assert.equal(s.pending[0].reason, null, 'no reason given: none shown');
+    r.release(s.pending[0].id, { allow: false });
+    await r.idle(s);
+  } finally { await r.done(s); }
+  // Hermes does not declare reasons: whatever it puts there is not shown as the agent's reason.
+  const h = rig();
+  const t = await started(h, h.session());
+  try {
+    assert.ok(!h.p.features.includes('reason'));
+    h.steps(t, [{ ask: { toolCall: EDIT_CALL(h.root), options: OPTIONS, _meta: { reason: 'x' } } }]);
+    await until(() => t.pending.length === 1, 'the request');
+    assert.equal(t.pending[0].reason, null);
+    h.release(t.pending[0].id, { allow: false });
+    await h.idle(t);
+  } finally { await h.done(t); }
+});
+
+test('tokens: the usage an agent reports at the end of a turn is counted once per turn; an agent that reports none shows none', async () => {
+  const r = rig();
+  const s = await started(r, r.session());
+  try {
+    r.steps(s, [{ say: 'ok' }, { usage: { inputTokens: 1200, outputTokens: 300, cachedReadTokens: 800 } }]);
+    await r.idle(s);
+    assert.deepEqual(s.usage, { tokens: 1500, cached: 800, input: 1200 });
+    r.steps(s, [{ say: 'again' }, { usage: { inputTokens: 100, outputTokens: 50 } }]);
+    await until(() => s.turns === 2 && s.status === 'idle', 'the second turn');
+    assert.equal(s.usage.tokens, 1650, 'turns add up');
+    r.say(s, 'no usage here');
+    await until(() => s.turns === 3 && s.status === 'idle', 'the third turn');
+    assert.equal(s.usage.tokens, 1650);
+    assert.equal(s.cost, null, 'the cost stays unknown');
+  } finally { await r.done(s); }
+});
+
+test('tokens: an agent that reports only a total counts it as input', async () => {
+  const r = rig();
+  const s = await started(r, r.session());
+  try {
+    r.steps(s, [{ usage: { totalTokens: 900 } }]);
+    await r.idle(s);
+    assert.equal(s.usage.tokens, 900);
+  } finally { await r.done(s); }
+});
+
+test('fork: an agent with fork opens a copy of a past session in the new folder; the replay is not shown again', async () => {
+  const r = rig({ fake: { FAKE_ACP_FORK: '1' } });
+  const s = r.session();
+  try {
+    await r.p.learn();
+    assert.ok(r.p.features.includes('fork'));
+    await started(r, s, { fork: 'old-sess' });
+    assert.deepEqual(r.sent('session/fork').map((m) => m.params), [{ sessionId: 'old-sess', cwd: r.root, mcpServers: [] }]);
+    assert.equal(r.sent('session/new').length + r.sent('session/load').length, 0);
+    assert.deepEqual([s.sid, r.replies(s)], ['fake-fork-1', []]);
+    r.say(s, 'and now?');
+    await r.idle(s);
+    assert.deepEqual(r.sent('session/prompt').map((m) => m.params.sessionId), ['fake-fork-1']);
+  } finally { await r.done(s); }
+});
+
+test('fork: dsh lists no fork, so it declares none; an agent that says fork at its handshake gets it', async () => {
+  assert.ok(!rig({ kind: 'dsh' }).p.features.includes('fork'));
+  const r = rig({ kind: 'dsh', fake: { FAKE_ACP_FORK: '1' } });
+  try {
+    await r.p.learn();
+    assert.ok(r.p.features.includes('fork'));
+    assert.equal(r.p.features.filter((f) => f === 'fork').length, 1);
+  } finally { await r.done(); }
+});
+
+test('skills: Hermes keeps its skills in HERMES_HOME/skills, else in ~/.hermes/skills; dsh has none the office shows', () => {
+  const home = path.join(os.tmpdir(), 'ao-home');
+  const a = rig({ env: { HERMES_HOME: path.join(os.tmpdir(), 'hh') }, homedir: () => home });
+  const b = rig({ env: {}, homedir: () => home });
+  const d = rig({ kind: 'dsh' });
+  try {
+    assert.equal(a.p.skillsDir(), path.join(os.tmpdir(), 'hh', 'skills'));
+    assert.equal(b.p.skillsDir(), path.join(home, '.hermes', 'skills'));
+    assert.equal(d.p.skillsDir(), null);
+  } finally { fs.rmSync(a.base, { recursive: true, force: true }); fs.rmSync(b.base, { recursive: true, force: true }); fs.rmSync(d.base, { recursive: true, force: true }); }
+});
+
+test('fork: Hermes declares fork only when its handshake says session/fork, so a build without it never shows Fork', async () => {
+  const none = rig();
+  try {
+    assert.ok(!none.p.features.includes('fork'), 'before the handshake');
+    await none.p.learn();
+    assert.ok(!none.p.features.includes('fork'), 'a build without session/fork');
+  } finally { await none.done(); }
+  const some = rig({ fake: { FAKE_ACP_FORK: '1' } });
+  try {
+    await some.p.learn();
+    assert.deepEqual(some.p.features, ['skills', 'memory', 'fork']);
+  } finally { await some.done(); }
 });

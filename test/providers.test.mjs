@@ -10,7 +10,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { createTracker } from '../tracker.mjs';
 import { slimPayload } from '../payload.mjs';
-import { createRegistry, providerEvents, checkProvider, providerError, DEFAULT_PROVIDER, PROVIDER_METHODS, DEFAULT_SPEND_LIMIT, isPaid, isGated, supervisionOf, spendLimitFor } from '../providers/index.mjs';
+import { createRegistry, providerEvents, checkProvider, providerError, DEFAULT_PROVIDER, PROVIDER_METHODS, DEFAULT_SPEND_LIMIT, isPaid, isGated, supervisionOf, spendLimitFor, featuresOf } from '../providers/index.mjs';
 import { createLocal } from '../providers/local.mjs';
 import { createClaudeCode, claudeVersion, programPath, MODEL_RE } from '../providers/claude-code.mjs';
 import { resolveExe } from '../git.mjs';
@@ -765,4 +765,17 @@ test('contract: a provider other than Claude Code reports a subagent with agent_
   assert.equal(JSON.stringify(s.tool), parentTask, 'its call is not the parent task line');
   hook({ hook_event_name: 'SubagentStop', agent_id: 'sub-1' });
   assert.equal(s.agents[0].done, true);
+});
+
+test('featuresOf: a copy of what the provider declares, read when asked (a getter), [] when it declares none (#72)', () => {
+  let learned = false;
+  const p = { get features() { return learned ? ['resume', 'skills'] : ['skills']; } };
+  assert.deepEqual(featuresOf(p), ['skills']);
+  learned = true;
+  const f = featuresOf(p);
+  assert.deepEqual(f, ['resume', 'skills']);
+  f.push('x');
+  assert.deepEqual(featuresOf(p), ['resume', 'skills']);
+  assert.deepEqual(featuresOf({}), []);
+  assert.deepEqual(featuresOf(null), []);
 });

@@ -35,11 +35,11 @@ const DANGER = [
 ];
 
 // Path parts (folders or files) whose content a program runs without asking: git config, hooks and the
-// worktree link file; Claude Code settings, hooks, commands and skills; MCP server lists; editor tasks and
-// run settings; ssh config; the office's own hook and MCP files, with or without a port in the name (files.mjs). An
-// edit to one of them is high. The Start Menu folder holds the Startup folder (Programs\Startup): Windows runs what is
-// in it at sign-in.
-const RUNS = new Set(['.git', '.claude', '.vscode', '.idea', '.ssh', '.mcp.json', '.claude.json', '.gitconfig', 'start menu']);
+// worktree link file; Claude Code settings, hooks, commands and skills; Hermes skills, memory and config (.hermes, #72); MCP
+// server lists; editor tasks and run settings; ssh config; the office's own hook and MCP files, with or without a port in the
+// name (files.mjs). An edit to one of them is high. The Start Menu folder holds the Startup folder (Programs\Startup):
+// Windows runs what is in it at sign-in.
+const RUNS = new Set(['.git', '.claude', '.hermes', '.vscode', '.idea', '.ssh', '.mcp.json', '.claude.json', '.gitconfig', 'start menu']);
 // File names that run code: the office's hook and MCP files (any port), PowerShell profiles (profile.ps1,
 // Microsoft.PowerShell_profile.ps1, Microsoft.VSCode_profile.ps1) and sh, bash, zsh, csh and ksh profiles.
 const RUNS_FILE = /^(office-(hooks|hooks-http|mcp)(-\d+)?\.json|(microsoft\.[\w.]+_)?profile\.ps1|\.(bashrc|bash_profile|bash_login|bash_logout|profile|zshrc|zprofile|zshenv|zlogin|cshrc|tcshrc|kshrc))$/;

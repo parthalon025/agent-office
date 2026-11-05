@@ -308,12 +308,13 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .agent-who { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .agent-who b { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--type-title-weight); }
 .agent-sub { color: var(--muted); font: var(--type-caption-weight) var(--type-caption-size)/var(--type-caption-line) var(--font-sans); }
+.feature-tags { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-1); }
 @media (max-width: 820px) { .agent-row { flex-wrap: wrap; } .agent-who { flex-basis: 50%; } }
 
 /* ---------- terminal panel: one session as a full terminal ---------- */
 .terminal-panel { position: fixed; z-index: var(--z-sheet); right: var(--space-4); top: 68px; bottom: var(--strip-clear, 180px); width: min(560px, calc(100vw - 2 * var(--space-4))); display: flex; flex-direction: column; background: var(--panel); backdrop-filter: blur(var(--blur-panel)); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-panel); overflow: hidden; animation: page-in var(--duration-base) var(--ease-out) both; }
-.term-head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); }
-.term-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--type-title-weight); }
+.term-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); }
+.term-name { flex: 1 1 calc(var(--space-6) * 3); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--type-title-weight); }
 .term-model { color: var(--muted); }
 .term-view { position: relative; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: var(--space-3); background: var(--scene-dark); color: var(--bubble); font-family: var(--font-mono); font-size: var(--type-data-size); line-height: 1.45; outline: none; }
 .term-view:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
@@ -343,6 +344,8 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .ask.is-high { padding-left: var(--space-2); border-left: 3px solid var(--status-error); }
 .ask-t { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font: var(--type-body-weight) var(--type-body-size)/var(--type-body-line) var(--font-sans); }
 .ask-x { min-width: 0; overflow-wrap: anywhere; }
+.ask-why { margin: 0; color: var(--muted); overflow-wrap: anywhere; font: var(--type-caption-weight) var(--type-caption-size)/var(--type-caption-line) var(--font-sans); }
+.ask-why em { font-style: normal; color: var(--ink); }
 .ask-a { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 @media (max-width: 820px) { .ask-a .ao-btn { min-height: 40px; } }
 

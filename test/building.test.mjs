@@ -214,6 +214,16 @@ test('a permission prompt becomes one request; a question has no risk value', as
   assert.equal(m.ev.filter((e) => e.type === 'status').at(-1).status, 'waiting');
 });
 
+test('the reason an agent gives for a request goes with the request to the scene (#72)', async () => {
+  const r = rig();
+  const m = r.mount(KEY_A);
+  await r.hook(HOOKS.turnWithEdit[0]);
+  r.tracker.permissionRequest(slimPayload({ ...HOOKS.permission, ask_reason: 'The test failed; I need the full log.' }, null));
+  r.push(); r.push();
+  const req = of(m.ev, 'request').find((e) => e.tool === 'Bash');
+  assert.match(req.text, /^Allow Bash.*\? Reason: The test failed; I need the full log\.$/);
+});
+
 test('subagents: a helper bot is spawned, its tool calls show on it, and it leaves when done', async () => {
   const r = rig();
   const m = r.mount(KEY_A);
