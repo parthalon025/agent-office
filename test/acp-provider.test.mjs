@@ -17,8 +17,12 @@ import { createLocalTools } from '../providers/local-tools.mjs';
 import { decide, cleanRules } from '../security.mjs';
 import '../public/vocab.js';
 
-// A fake OpenClaw config: path -> value. A path that is not there is unset.
+// A fake OpenClaw config: path -> value. A path that is not there is unset. CLAW_OK: what an office session needs (#77):
+// workspace-only, and the office plugin enabled with this office's token file (CLAW_TOKEN, a path the rig hands the provider).
 const configOf = (o) => async (p) => (p in o ? { state: 'set', value: o[p] } : { state: 'unset' });
+const CLAW_TOKEN = path.join(os.tmpdir(), 'ao-office', '.office-token');
+const r2u = (p) => p.replace(/\\/g, '/');
+const CLAW_OK = { 'tools.fs.workspaceOnly': true, 'plugins.entries.agent-office.enabled': true, 'plugins.entries.agent-office.config.tokenFile': CLAW_TOKEN };
 const FAKE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-acp.mjs');
 
 async function until(fn, what, ms = 10_000) {
@@ -47,7 +51,7 @@ const made = new Set();
 after(() => { for (const d of made) fs.rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
 
 // One office with one ACP provider and a fake agent. fake: the fixture's environment (FAKE_ACP_*).
-// OpenClaw gets the opt-in switch on and a version that relays shell approvals, unless a test says otherwise.
+// OpenClaw gets a version the office plugin works with (2026.10.10), unless a test says otherwise.
 function rig({ kind = 'hermes', fake = {}, rules = ASK_ALL, ...over } = {}) {
   if (kind === 'openclaw') fake = { FAKE_ACP_VERSION: '2026.10.10', ...fake };
   const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-acp-')));
@@ -84,7 +88,7 @@ function rig({ kind = 'hermes', fake = {}, rules = ASK_ALL, ...over } = {}) {
   r.p = createAcp({
     events: r.events, kind,
     exe: (name) => `C:/bin/${name}.exe`,
-    ...(kind === 'openclaw' ? { gatewayUp: async () => true, readConfig: configOf({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'always' }) } : {}),
+    ...(kind === 'openclaw' ? { gatewayUp: async () => true, readConfig: configOf(CLAW_OK), tokenFile: CLAW_TOKEN } : {}),
     spawn: (file, args, opts) => {
       r.spawned.push({ file, args, opts });
       return realSpawn(process.execPath, [FAKE, ...args], { ...opts, env: { ...opts.env, ...fake, FAKE_ACP_LOG: logFile } });
@@ -900,20 +904,21 @@ test('fork: Hermes declares fork only when its handshake says session/fork, so a
   } finally { await some.done(); }
 });
 
-// ---------- OpenClaw (#73): an OpenClaw-shaped fake agent behind a Gateway the office never starts ----------
-// OpenClaw's `openclaw acp` is a bridge to a Gateway on loopback. It relays shell approvals as session/request_permission and
-// reports file edits only after the fact. The Gateway check and the config reader are injected; the agent is the same fake.
+// ---------- OpenClaw (#73, #77): an OpenClaw-shaped fake agent behind a Gateway the office never starts ----------
+// OpenClaw's `openclaw acp` is a bridge to a Gateway on loopback. The Agent Office plugin in that Gateway sends every tool call
+// of an office session to the office (gate()); the route is tested in test/openclaw-plugin.test.mjs and test/mcp-routes.test.mjs.
+// The Gateway check and the config reader are injected; the agent is the same fake.
 
 const EXEC = (id = 'e1', command = 'git status') => ({ toolCallId: id, title: command, kind: 'execute', rawInput: { command } });
-const LABEL = 'Partly supervised: commands ask, file edits do not';
+const NOT_OPEN = 'This OpenClaw session is not open in Agent Office.';
 
-test('openclaw: an ungated kind with its label, its own program, and the one Security row its config takes', () => {
+test('openclaw: a gated kind with no supervision label and its own program', () => {
   const r = rig({ kind: 'openclaw' });
   try {
     assert.doesNotThrow(() => checkProvider(r.p));
-    assert.deepEqual([r.p.kind, r.p.label, r.p.gated, isGated(r.p), supervisionOf(r.p), isPaid(r.p), r.p.cost], ['openclaw', 'OpenClaw', false, false, LABEL, true, 'unknown']);
-    assert.deepEqual([AGENTS.openclaw.program, AGENTS.openclaw.args], ['openclaw', ['acp']]);
-    assert.deepEqual(r.p.enforces, ['shell'], 'exec approval is the one row whose Ask, Allow and Deny config carries');
+    assert.deepEqual([r.p.kind, r.p.label, r.p.gated, isGated(r.p), supervisionOf(r.p), isPaid(r.p), r.p.cost], ['openclaw', 'OpenClaw', true, true, null, true, 'unknown']);
+    assert.deepEqual([AGENTS.openclaw.program, AGENTS.openclaw.args, AGENTS.openclaw.plugin], ['openclaw', ['acp'], true]);
+    assert.equal(r.p.enforces, undefined, 'the office decides every call: no row is left to its config');
   } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
 });
 
@@ -942,7 +947,7 @@ test('openclaw readiness: a Gateway on another loopback port (OFFICE_OPENCLAW_PO
   } finally { await r.done(s); }
 });
 
-test('openclaw readiness: ready on 2026.10.10 with the config on; an older or unnamed version is not ready (no shell approvals)', async () => {
+test('openclaw readiness: ready on 2026.10.10 with the config on; an older or unnamed version is not ready (the plugin needs it)', async () => {
   const good = rig({ kind: 'openclaw' });
   const old = rig({ kind: 'openclaw', fake: { FAKE_ACP_VERSION: '2026.9.30' } });
   const unnamed = rig({ kind: 'openclaw', fake: { FAKE_ACP_VERSION: 'dev' } });
@@ -950,101 +955,141 @@ test('openclaw readiness: ready on 2026.10.10 with the config on; an older or un
     assert.deepEqual(await good.p.readiness(), { ready: true, version: '2026.10.10', needs: [] });
     const o = await old.p.readiness();
     assert.deepEqual([o.ready, o.version], [false, '2026.9.30']);
-    assert.match(o.needs[0], /OpenClaw 2026\.9\.30 is older than 2026\.10\.10, or does not say its version\. Before 2026\.10\.10 it does not send shell approvals to the office, so commands would run without asking\./);
+    assert.match(o.needs[0], /OpenClaw 2026\.9\.30 is older than 2026\.10\.10, or does not say its version\. The office plugin needs 2026\.10\.10 or later to hold its tool calls\./);
     const u = await unnamed.p.readiness();
     assert.deepEqual([u.ready, u.version], [false, 'dev']);
     assert.match(u.needs[0], /OpenClaw dev is older than/);
   } finally { for (const x of [good, old, unnamed]) fs.rmSync(x.base, { recursive: true, force: true }); }
 });
 
-// Owner decision 3, default B (review): exec approval that is off or unreadable is not ready either. A session never runs
-// with commands that skip the office, so the label "commands ask" is always true.
-const EXEC_OFF = 'tools.exec.ask is "off", so shell commands run without asking the office. Run: openclaw config set tools.exec.ask always The office does not change the OpenClaw config. Fix it, then open the session again.';
-test('openclaw readiness: workspace-only or exec approval off or unreadable is not ready, with the command that turns it on', async () => {
-  const noWs = rig({ kind: 'openclaw', readConfig: configOf({}) });
+test('openclaw readiness: workspace-only or the office plugin off or unreadable is not ready, with the command that turns it on', async () => {
+  const noWs = rig({ kind: 'openclaw', readConfig: configOf({ ...CLAW_OK, 'tools.fs.workspaceOnly': false }) });
   const lost = rig({ kind: 'openclaw', readConfig: async () => ({ state: 'unreadable', why: 'it stopped' }) });
-  const noExec = rig({ kind: 'openclaw', readConfig: configOf({ 'tools.fs.workspaceOnly': true }) });
+  const noPlugin = rig({ kind: 'openclaw', readConfig: configOf({ 'tools.fs.workspaceOnly': true }) });
+  const other = rig({ kind: 'openclaw', readConfig: configOf({ ...CLAW_OK, 'plugins.entries.agent-office.config.tokenFile': 'C:/elsewhere/.office-token' }) });
   try {
     const f = await noWs.p.readiness();
     assert.equal(f.ready, false, 'file tools that reach outside the worktree: the office does not open it');
-    assert.ok(f.needs.some((n) => /tools\.fs\.workspaceOnly is unset/.test(n) && /openclaw config set tools\.fs\.workspaceOnly true/.test(n)), f.needs.join('\n'));
-    assert.ok(f.needs.some((n) => /tools\.exec\.ask is unset/.test(n) && /openclaw config set tools\.exec\.ask always/.test(n)));
+    assert.ok(f.needs.some((n) => /tools\.fs\.workspaceOnly is false/.test(n) && /openclaw config set tools\.fs\.workspaceOnly true/.test(n)), f.needs.join('\n'));
     const l = await lost.p.readiness();
     assert.equal(l.ready, false, 'a setting the office cannot read is never a pass');
     assert.ok(l.needs.some((n) => /could not read tools\.fs\.workspaceOnly, so it cannot confirm it/.test(n)), l.needs.join('\n'));
-    const e = await noExec.p.readiness();
-    assert.equal(e.ready, false, 'commands that run without asking: the office does not open it');
-    assert.ok(e.needs.some((n) => /tools\.exec\.ask is unset/.test(n) && /openclaw config set tools\.exec\.ask always/.test(n)), e.needs.join('\n'));
-    assert.ok(!e.needs.some((n) => /Unsupervised/.test(n)), 'no session opens as Unsupervised');
-  } finally { for (const x of [noWs, lost, noExec]) fs.rmSync(x.base, { recursive: true, force: true }); }
+    const e = await noPlugin.p.readiness();
+    assert.equal(e.ready, false, 'without the plugin nothing would ask: the office does not open it');
+    assert.ok(e.needs.some((n) => /plugins\.entries\.agent-office\.enabled is unset/.test(n) && /openclaw plugins install --link ".*integrations\/openclaw-plugin" --force/.test(n)), e.needs.join('\n'));
+    const o = await other.p.readiness();
+    assert.equal(o.ready, false, 'a plugin that asks another office does not hold these calls');
+    assert.ok(o.needs.some((n) => n.includes(`openclaw config set plugins.entries.agent-office.config.tokenFile "${r2u(CLAW_TOKEN)}"`)), o.needs.join('\n'));
+  } finally { for (const x of [noWs, lost, noPlugin, other]) fs.rmSync(x.base, { recursive: true, force: true }); }
 });
 
-// The server asks preflight() before the cost question (it names the label "commands ask"), so the question never comes
-// for a session that would not start: null when it may start, else why not.
-test('openclaw preflight: the gate check before the cost question; null when the config carries workspace-only and exec approval', async () => {
+// The server asks preflight() before the cost question and before a worktree, so neither comes for a session that would not start.
+test('openclaw preflight: the gate check before the cost question; null when workspace-only and the plugin are on', async () => {
   const ok = rig({ kind: 'openclaw' });
-  const off = rig({ kind: 'openclaw', readConfig: configOf({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'off' }) });
-  const ws = rig({ kind: 'openclaw', readConfig: configOf({ 'tools.exec.ask': 'always' }) });
+  const off = rig({ kind: 'openclaw', readConfig: configOf({ ...CLAW_OK, 'plugins.entries.agent-office.enabled': false }) });
   const h = rig();
   try {
     assert.equal(await ok.p.preflight(), null);
-    assert.equal(await off.p.preflight(), EXEC_OFF);
-    assert.match(await ws.p.preflight(), /^tools\.fs\.workspaceOnly is unset/);
+    assert.equal(await off.p.preflight(), 'plugins.entries.agent-office.enabled is false (wanted: true), so the agent-office plugin does not send its tool calls to this office. Run: openclaw plugins enable agent-office The office does not change the OpenClaw config. Fix it, then open the session again.');
     assert.equal(await h.p.preflight(), null, 'Hermes has no Gateway config to check');
-  } finally { for (const x of [ok, off, ws, h]) fs.rmSync(x.base, { recursive: true, force: true }); }
+  } finally { for (const x of [ok, off, h]) fs.rmSync(x.base, { recursive: true, force: true }); }
 });
 
-// The office's Security room says whether an agent kind may run now (security.mjs openRefusal: the Agents screen switch of an
-// ungated kind, a no-cost Deny); the server gives the provider that answer as deps.blocked. There is no switch of its own.
-test('openclaw is off until the user turns it on in the Security room: then it is not ready, reads no config, and no session starts', async () => {
-  let off = 'OpenClaw runs tool calls without asking the office. Turn on OpenClaw on the Agents screen of the Security room first.';
-  const reads = [];
-  const r = rig({ kind: 'openclaw', env: { ...process.env, OFFICE_ENABLE_OPENCLAW: '1' }, blocked: () => off, readConfig: async (p) => { reads.push(p); return { state: 'unset' }; } });
-  const s = r.session();
+test('openclaw: a session gets the Gateway key the plugin knows it by; a reopen keeps the key of its past record', async () => {
+  const r = rig({ kind: 'openclaw', fake: { FAKE_ACP_LOAD: '1' } });
+  const s = await started(r, r.session());
   try {
-    const ready = await r.p.readiness();
-    assert.equal(ready.ready, false);
-    assert.deepEqual(ready.needs, [off], 'the old environment switch turns nothing on');
-    assert.equal(await r.p.policy(), null, 'no config check while it is off');
-    assert.deepEqual([r.spawned.length, reads.length], [0, 0], 'not even a probe or a config read');
-    r.p.open(s, {});
-    await until(() => s.status === 'ended', 'the session to end');
-    assert.match(r.replies(s)[0], /^OpenClaw could not start a session: OpenClaw runs tool calls without asking the office\. Turn on OpenClaw/);
-    assert.equal(r.sent('initialize').length, 0);
-    off = null;
-    assert.notEqual(await r.p.policy(), null, 'on: the config is checked');
+    assert.deepEqual(r.sent('session/new')[0].params._meta, { sessionKey: 'agent-office:o1' });
+    assert.equal(s.gatewayKey, 'agent-office:o1');
+    assert.ok(r.tracker.feed.some((f) => f.text === 'OpenClaw config: workspace-only is on, and the agent-office plugin sends every tool call to the office.'));
+    await r.p.close(s);
+    const again = r.tracker.newSession({ uid: 'o2', officeId: 'o2', provider: 'openclaw', name: 'bot', cwd: r.root, startDir: r.root, headless: true, status: 'starting' });
+    await started(r, again, { resume: 'fake-sess-1', prior: { sid: 'fake-sess-1', gatewayKey: 'agent-office:o1' } });
+    assert.deepEqual(r.sent('session/load')[0].params._meta, { sessionKey: 'agent-office:o1' }, 'the same Gateway session');
+    assert.equal(again.gatewayKey, 'agent-office:o1');
+    await r.p.close(again);
+    const old = r.tracker.newSession({ uid: 'o3', officeId: 'o3', provider: 'openclaw', name: 'bot', cwd: r.root, startDir: r.root, headless: true, status: 'starting' });
+    await started(r, old, { resume: 'fake-sess-1', prior: { sid: 'fake-sess-1' } });
+    assert.equal(r.sent('session/load').length, 1, 'a record from before #77 has no key: its calls could not be held, so it does not load');
+    assert.deepEqual(r.freshened, ['o3']);
+    assert.equal(old.gatewayKey, 'agent-office:o3');
+    await r.p.close(old);
   } finally { await r.done(); }
 });
 
-test('openclaw: the shell command it relays is held with its text; approve sends allow once, decline sends reject once', async () => {
+test('openclaw gate: a file edit the plugin sends is held; approve allows it, decline denies it with the reason', async () => {
   const r = rig({ kind: 'openclaw' });
-  const s = await started(r, r.session({ supervision: LABEL }));
+  const s = await started(r, r.session());
   try {
-    r.steps(s, [{ ask: { toolCall: EXEC('e1', 'npm test'), options: OPTIONS } }, { ask: { toolCall: EXEC('e2', 'rm -rf build'), options: OPTIONS } }]);
-    await until(() => s.pending.length === 1, 'the first command');
-    assert.equal(s.status, 'waiting');
-    assert.deepEqual([s.pending[0].tool, s.pending[0].detail, s.pending[0].always], ['Bash', 'npm test', ''], 'no Always allow for an ACP agent');
-    r.release(s.pending[0].id, { allow: true, always: true });
-    await until(() => s.pending.length === 1 && r.replies(s).length === 1, 'the second command');
+    const edit = r.p.gate(s, { toolName: 'edit', params: { path: 'a.txt', old_string: 'one', new_string: 'uno' }, toolCallId: 'w1', derivedPaths: [] });
+    await until(() => s.pending.length === 1, 'the edit to be held');
+    assert.deepEqual([s.pending[0].tool, s.pending[0].detail, s.status], ['Edit', 'a.txt', 'waiting']);
+    assert.deepEqual(r.shown.at(-1), { tool: 'Edit', input: { file_path: 'a.txt' } });
+    r.release(s.pending[0].id, { allow: true });
+    assert.deepEqual(await edit, { allow: true, reason: '' });
+    const write = r.p.gate(s, { toolName: 'write', params: { path: 'b.txt', content: 'x' }, toolCallId: 'w2' });
+    await until(() => s.pending.length === 1, 'the write to be held');
     r.release(s.pending[0].id, { allow: false });
+    assert.deepEqual(await write, { allow: false, reason: 'Declined in Agent Office.' });
+    // The edits then arrive as ACP updates: they asked the office first, so the feed does not say they ran without asking.
+    r.steps(s, [{ tool: EDIT_CALL(r.root, 'a.txt', 'w1') }, { update: { toolCallId: 'w1', status: 'completed' } }]);
     await r.idle(s);
-    assert.deepEqual(r.replies(s), ['asked: selected once', 'asked: selected no']);
-    assert.equal(s.supervision, LABEL);
+    assert.ok(!r.tracker.feed.some((f) => /without asking the office/.test(f.text)), r.tracker.feed.map((f) => f.text).join('\n'));
   } finally { await r.done(s); }
 });
 
-test('openclaw: a file edit and a write arrive after the fact; the office cannot hold them and the feed says so', async () => {
-  const r = rig({ kind: 'openclaw' });
-  const s = await started(r, r.session({ supervision: LABEL }));
+test('openclaw gate: the Security room rules decide first; a Deny refuses with its reason and nothing waits', async () => {
+  const r = rig({ kind: 'openclaw', rules: cleanRules({ office: { 'shell|openclaw': 'deny', 'read-inside|openclaw': 'allow' } }) });
+  const s = await started(r, r.session({ worktree: { root: r.root } }));
   try {
-    r.steps(s, [{ tool: EDIT_CALL(r.root, 'a.txt', 'w1') }, { update: { toolCallId: 'w1', status: 'completed' } },
-      { tool: { toolCallId: 'w2', title: 'Write notes.md', kind: 'edit', locations: [{ path: path.join(r.root, 'notes.md') }] } }, { update: { toolCallId: 'w2', status: 'completed' } }]);
+    const d = await r.p.gate(s, { toolName: 'exec', params: { command: 'npm test' }, toolCallId: 'e1' });
+    assert.equal(d.allow, false);
+    assert.match(d.reason, /^Denied by the Security room: Shell commands/);
+    assert.deepEqual(await r.p.gate(s, { toolName: 'read', params: { path: 'a.txt' }, toolCallId: 'r1' }), { allow: true, reason: '' });
+    assert.equal(s.pending.length, 0, 'the rules answered both');
+  } finally { await r.done(s); }
+});
+
+test('openclaw gate: a call that starts work outside the session is denied at once; a closed session denies every call', async () => {
+  const r = rig({ kind: 'openclaw' });
+  const s = await started(r, r.session());
+  try {
+    const d = await r.p.gate(s, { toolName: 'sessions_spawn', params: { task: 'x' }, toolCallId: 'sp1' });
+    assert.equal(d.allow, false);
+    assert.match(d.reason, /^sessions_spawn starts work outside this session/);
+    assert.equal(s.pending.length, 0);
+    assert.ok(r.tracker.feed.some((f) => /^refused sessions_spawn: /.test(f.text)));
+    await r.p.close(s);
+    assert.deepEqual(await r.p.gate(s, { toolName: 'read', params: { path: 'a.txt' } }), { allow: false, reason: NOT_OPEN });
+  } finally { await r.done(); }
+});
+
+test('openclaw gate: when the plugin stops waiting the hold goes and the feed says so', async () => {
+  const r = rig({ kind: 'openclaw' });
+  const s = await started(r, r.session());
+  try {
+    const stop = new AbortController();
+    const p = r.p.gate(s, { toolName: 'exec', params: { command: 'npm test' }, toolCallId: 'e1' }, stop.signal);
+    await until(() => s.pending.length === 1, 'the command to be held');
+    stop.abort();
+    assert.deepEqual(await p, { allow: false, reason: 'OpenClaw stopped waiting for the answer.' });
+    await until(() => s.pending.length === 0, 'the hold to go');
+  } finally { await r.done(s); }
+});
+
+test('openclaw: its own exec approval for a call the office already answered gets that answer; the user is asked once', async () => {
+  const r = rig({ kind: 'openclaw' });
+  const s = await started(r, r.session());
+  try {
+    const p = r.p.gate(s, { toolName: 'exec', params: { command: 'npm test' }, toolCallId: 'e1' });
+    await until(() => s.pending.length === 1, 'the command to be held');
+    r.release(s.pending[0].id, { allow: true });
+    await p;
+    r.steps(s, [{ ask: { toolCall: EXEC('e1', 'npm test'), options: OPTIONS } }, { update: { toolCallId: 'e1', status: 'completed' } }]);
     await r.idle(s);
-    assert.equal(s.pending.length, 0, 'no request was ever made');
-    assert.deepEqual(s.calls.map((c) => [c.id, c.name, c.ok]), [['w1', 'Edit', true], ['w2', 'Edit', true]]);
-    const lines = r.tracker.feed.map((f) => f.text);
-    assert.ok(lines.includes('OpenClaw changed a.txt without asking the office.'), lines.join('\n'));
-    assert.ok(lines.includes('OpenClaw changed notes.md without asking the office.'));
+    assert.deepEqual(r.replies(s), ['asked: selected once']);
+    assert.equal(r.shown.length, 1, 'one card for one call');
+    assert.ok(!r.tracker.feed.some((f) => /ran a command without asking/.test(f.text)));
   } finally { await r.done(s); }
 });
 
@@ -1070,21 +1115,13 @@ test('openclaw: with no Gateway a session says so and ends; nothing runs', async
   } finally { await r.done(); }
 });
 
-test('openclaw: a session start checks the config before the session exists; a good one is one start line', async () => {
-  const good = rig({ kind: 'openclaw' });
-  const sg = await started(good, good.session({ supervision: LABEL }));
-  try {
-    assert.ok(good.tracker.feed.some((f) => f.text === 'OpenClaw config: workspace-only is on and commands ask.'));
-    assert.equal(sg.supervision, LABEL);
-  } finally { await good.done(sg); }
-});
-
 test('openclaw: the config is read before the first prompt goes out; a late config holds the session back (no fail-open race)', async () => {
   let release;
   const late = new Promise((r) => { release = r; });
-  const read = async (p) => { await late; return p === 'tools.fs.workspaceOnly' ? { state: 'set', value: true } : p === 'tools.exec.ask' ? { state: 'set', value: 'always' } : { state: 'unset' }; };
+  const good = configOf(CLAW_OK);
+  const read = async (p) => { await late; return good(p); };
   const r = rig({ kind: 'openclaw', readConfig: read });
-  const s = r.session({ supervision: LABEL });
+  const s = r.session();
   try {
     r.p.open(s, {});
     r.say(s, 'run the tests');
@@ -1094,25 +1131,28 @@ test('openclaw: the config is read before the first prompt goes out; a late conf
     release();
     await r.idle(s);
     assert.equal(r.sent('session/prompt').length, 1, 'the queued prompt went out after the config was read');
-    assert.equal(s.supervision, LABEL);
   } finally { release(); await r.done(s); }
 });
 
-test('openclaw: workspace-only unset ends the session with the command that turns it on; no session, no prompt', async () => {
-  const r = rig({ kind: 'openclaw', readConfig: configOf({ 'tools.exec.ask': 'always' }) });
-  const s = r.session({ supervision: LABEL });
-  try {
-    r.p.open(s, {});
-    r.say(s, 'edit everything');
-    await until(() => s.status === 'ended', 'the session to end');
-    assert.equal(r.replies(s)[0], 'OpenClaw could not start a session: tools.fs.workspaceOnly is unset, so its file tools can reach outside the worktree. Run: openclaw config set tools.fs.workspaceOnly true The office does not change the OpenClaw config. Fix it, then open the session again.');
-    assert.deepEqual([r.sent('session/new').length, r.sent('session/prompt').length], [0, 0]);
-  } finally { await r.done(); }
+test('openclaw: workspace-only or the plugin off ends the session with the commands that fix it; no session, no prompt', async () => {
+  for (const [config, want] of [
+    [{ ...CLAW_OK, 'tools.fs.workspaceOnly': false }, 'OpenClaw could not start a session: tools.fs.workspaceOnly is false, so its file tools can reach outside the worktree. Run: openclaw config set tools.fs.workspaceOnly true The office does not change the OpenClaw config. Fix it, then open the session again.'],
+    [{ ...CLAW_OK, 'plugins.deny': ['agent-office'] }, `OpenClaw could not start a session: plugins.deny is ["agent-office"] (wanted: no agent-office), so the agent-office plugin does not send its tool calls to this office. Run: openclaw config set plugins.deny "[]" --strict-json The office does not change the OpenClaw config. Fix it, then open the session again.`]]) {
+    const r = rig({ kind: 'openclaw', readConfig: configOf(config) });
+    const s = r.session();
+    try {
+      r.p.open(s, {});
+      r.say(s, 'edit everything');
+      await until(() => s.status === 'ended', 'the session to end');
+      assert.equal(r.replies(s)[0], want);
+      assert.deepEqual([r.sent('session/new').length, r.sent('session/prompt').length], [0, 0]);
+    } finally { await r.done(); }
+  }
 });
 
-test('openclaw: a config the office cannot read ends the session: workspace-only cannot be confirmed', async () => {
+test('openclaw: a config the office cannot read ends the session: nothing can be confirmed', async () => {
   const r = rig({ kind: 'openclaw', readConfig: async () => ({ state: 'unreadable', why: 'openclaw.exe stopped' }) });
-  const s = r.session({ supervision: LABEL });
+  const s = r.session();
   try {
     r.p.open(s, {});
     await until(() => s.status === 'ended', 'the session to end');
@@ -1121,9 +1161,9 @@ test('openclaw: a config the office cannot read ends the session: workspace-only
   } finally { await r.done(); }
 });
 
-test('openclaw: an old or unnamed version ends the session before it starts: its commands would not ask', async () => {
+test('openclaw: an old or unnamed version ends the session before it starts: the plugin would not be called', async () => {
   const r = rig({ kind: 'openclaw', fake: { FAKE_ACP_VERSION: '2026.9.30' } });
-  const s = r.session({ supervision: LABEL });
+  const s = r.session();
   try {
     r.p.open(s, {});
     await until(() => s.status === 'ended', 'the session to end');
@@ -1132,37 +1172,11 @@ test('openclaw: an old or unnamed version ends the session before it starts: its
   } finally { await r.done(); }
 });
 
-test('openclaw: exec approval off ends the session with the command that turns it on; no session, no prompt (decision 3 B)', async () => {
-  const r = rig({ kind: 'openclaw', readConfig: configOf({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'off' }) });
-  const s = r.session({ supervision: LABEL });
-  try {
-    r.p.open(s, {});
-    r.say(s, 'run everything');
-    await until(() => s.status === 'ended', 'the session to end');
-    assert.equal(r.replies(s)[0], 'OpenClaw could not start a session: ' + EXEC_OFF);
-    assert.deepEqual([r.sent('session/new').length, r.sent('session/prompt').length], [0, 0]);
-    assert.equal(s.supervision, LABEL, 'the label is never changed: no session ran');
-  } finally { await r.done(); }
-});
-
-test('openclaw: exec approval the office cannot read is not "commands ask": the session does not start, and says why', async () => {
-  const read = async (p) => (p === 'tools.fs.workspaceOnly' ? { state: 'set', value: true } : { state: 'unreadable', why: 'it stopped' });
-  const r = rig({ kind: 'openclaw', readConfig: read });
-  const s = r.session({ supervision: LABEL });
-  try {
-    r.p.open(s, {});
-    await until(() => s.status === 'ended', 'the session to end');
-    assert.match(r.replies(s)[0], /^OpenClaw could not start a session: the office could not read whether commands ask \(tools\.exec\.ask and tools\.exec\.mode\), so it cannot confirm that they do\. To turn it on, run: openclaw config set tools\.exec\.ask always/);
-    assert.equal(r.sent('session/new').length, 0);
-  } finally { await r.done(); }
-});
-
-test('openclaw policy: the rules its config carries are checked; the cells it cannot carry are listed as gaps', async () => {
-  const r = rig({ kind: 'openclaw', cells: () => ({ shell: 'ask', web: 'deny', mcp: 'ask', secrets: 'ask' }) });
+test('openclaw policy: the settings an office session needs, each with the Security room rows it carries; no gaps', async () => {
+  const r = rig({ kind: 'openclaw', readConfig: configOf({ 'tools.fs.workspaceOnly': true }) });
   try {
     const p = await r.p.policy();
-    assert.deepEqual(p.config.settings.map((x) => [x.path, x.ok]), [['tools.fs.workspaceOnly', true], ['tools.exec.ask', true], ['tools.deny', false]]);
-    assert.deepEqual(p.config.fix, [`openclaw config set tools.deny "['group:web']" --strict-json`]);
-    assert.deepEqual(p.gaps.map((g) => `${g.row}=${g.value}`), ['mcp=ask', 'secrets=ask']);
+    assert.deepEqual(p.config.settings.filter((x) => !x.ok).map((x) => x.path), ['plugins.entries.agent-office.enabled', 'plugins.entries.agent-office.config.tokenFile']);
+    assert.deepEqual(p.gaps, []);
   } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
 });

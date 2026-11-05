@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import net from 'node:net';
-import { gatewayPort, probeGateway, versionAtLeast, wantedConfig, checkConfig, configReader, DEFAULT_CELLS } from '../providers/openclaw.mjs';
+import { gatewayPort, probeGateway, versionAtLeast, wantedConfig, checkConfig, configReader, toolCall, PLUGIN_DIR } from '../providers/openclaw.mjs';
 
 const listen = (srv) => new Promise((resolve) => srv.listen(0, '127.0.0.1', () => resolve(srv.address().port)));
 
@@ -42,71 +42,76 @@ test('versionAtLeast: numeric, from any text that holds a version; unknown text 
   assert.equal(versionAtLeast(null, '2026.10.10'), false);
 });
 
-test('wantedConfig: workspace-only always; the shell cell sets exec approval; a Deny is a tool deny entry', () => {
-  const byPath = (w) => Object.fromEntries(w.want.map((x) => [x.path, x]));
-  const base = wantedConfig(DEFAULT_CELLS);
-  assert.equal(byPath(base)['tools.fs.workspaceOnly'].value, true);
-  assert.deepEqual(byPath(base)['tools.exec.ask'].value, 'always', 'the default shell cell is Ask');
-  assert.equal(byPath(base)['tools.deny'], undefined, 'nothing is denied by default');
-
-  const deny = wantedConfig({ ...DEFAULT_CELLS, shell: 'deny', web: 'deny', 'edit-inside': 'deny', mcp: 'deny', 'read-inside': 'deny' });
-  assert.deepEqual(byPath(deny)['tools.deny'].value, ['group:runtime', 'group:web', 'write', 'edit', 'apply_patch', 'group:plugins', 'read']);
-  assert.equal(byPath(deny)['tools.exec.ask'], undefined, 'a denied shell needs no approval setting');
-
-  const allow = wantedConfig({ ...DEFAULT_CELLS, shell: 'allow' });
-  assert.equal(byPath(allow)['tools.exec.ask'], undefined, 'Allow asks nothing of OpenClaw: the office answers its prompts');
-});
-
-test('wantedConfig: a cell OpenClaw config cannot carry is listed with its reason, never as enforced', () => {
-  const gaps = wantedConfig(DEFAULT_CELLS).gaps;
-  const rows = gaps.map((g) => `${g.row}=${g.value}`);
-  assert.ok(rows.includes('web=ask'), 'OpenClaw has no approval for web tools');
-  assert.ok(rows.includes('edit-inside=allow') === false, 'Allow needs no config');
-  assert.ok(rows.includes('settings=ask') && rows.includes('secrets=ask'), 'config cannot rule settings or secret files');
-  assert.ok(gaps.every((g) => typeof g.reason === 'string' && g.reason.length > 10));
-  // the shell is carried in all three values, so it is never a gap
-  for (const v of ['ask', 'allow', 'deny']) assert.equal(wantedConfig({ ...DEFAULT_CELLS, shell: v }).gaps.some((g) => g.row === 'shell'), false, v);
-  // a row the caller leaves out is not a gap and not wanted
-  assert.deepEqual(wantedConfig({ shell: 'ask' }).gaps, [], 'only the cells given are judged');
-});
-
+// ---------- the config an office session needs (#77): workspace-only, and the office plugin loaded and pointed at this office ----------
+const TOKEN = 'E:\\agent-office\\.office-token';
 const have = (o) => async (p) => (p in o ? { state: 'set', value: o[p] } : { state: 'unset' });
+const GOOD = { 'tools.fs.workspaceOnly': true, 'plugins.entries.agent-office.enabled': true, 'plugins.entries.agent-office.config.tokenFile': 'e:/agent-office/.office-token' };
+const CALLS = ['read-inside', 'edit-inside', 'files-outside', 'shell', 'web', 'mcp', 'settings', 'secrets'];
+const DIR = PLUGIN_DIR.replace(/\\/g, '/').replace(/\/$/, '');
 
-test('checkConfig: reports each wanted setting as on or off, and the command that fixes an off one', async () => {
-  const w = wantedConfig({ ...DEFAULT_CELLS, web: 'deny' });
+test('wantedConfig: workspace-only, plugins on, the office plugin allowed, enabled and given this office\'s token file', () => {
+  const w = wantedConfig({ tokenFile: TOKEN });
+  assert.deepEqual(w.want.map((x) => x.path), ['tools.fs.workspaceOnly', 'plugins.enabled', 'plugins.allow', 'plugins.deny', 'plugins.entries.agent-office.enabled', 'plugins.entries.agent-office.config.tokenFile']);
+  assert.deepEqual(w.want[0].rows, ['files-outside']);
+  for (const x of w.want.slice(1)) assert.deepEqual(x.rows, CALLS, x.path + ': every call goes through the plugin');
+  assert.deepEqual(w.gaps, [], 'the office decides every call: no cell is out of its reach');
+});
+
+test('checkConfig: a good config passes; each setting that is off names the command that fixes it', async () => {
+  const w = wantedConfig({ tokenFile: TOKEN });
+  const good = await checkConfig(w, have(GOOD));
+  assert.equal(good.ok, true, JSON.stringify(good.settings.filter((s) => !s.ok)));
+  assert.deepEqual(good.fix, []);
+  assert.equal((await checkConfig(w, have({ ...GOOD, 'plugins.enabled': true, 'plugins.allow': ['agent-office', 'x'], 'plugins.deny': ['y'] }))).ok, true);
+
   const bad = await checkConfig(w, have({}));
   assert.equal(bad.ok, false);
-  assert.deepEqual(bad.settings.map((s) => [s.path, s.ok]), [['tools.fs.workspaceOnly', false], ['tools.exec.ask', false], ['tools.deny', false]]);
-  // Each setting names the Security room rows it carries, so the wall can say which cells are not enforced (security.mjs).
-  assert.deepEqual(bad.settings.map((s) => s.rows), [['files-outside'], ['shell'], ['web']]);
+  assert.deepEqual(bad.settings.filter((s) => !s.ok).map((s) => s.path), ['tools.fs.workspaceOnly', 'plugins.entries.agent-office.enabled', 'plugins.entries.agent-office.config.tokenFile']);
   assert.deepEqual(bad.fix, [
     'openclaw config set tools.fs.workspaceOnly true',
-    'openclaw config set tools.exec.ask always',
-    `openclaw config set tools.deny "['group:web']" --strict-json`,
+    'openclaw plugins install --link "' + DIR + '" --force',
+    'openclaw config set plugins.entries.agent-office.config.tokenFile "E:/agent-office/.office-token"',
   ]);
-  assert.equal(bad.execAsks, false, 'exec approval is off: commands do not ask');
-
-  const good = await checkConfig(w, have({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'on-miss', 'tools.deny': ['GROUP:WEB', 'browser'] }));
-  assert.equal(good.ok, true);
-  assert.deepEqual(good.fix, []);
-  assert.equal(good.execAsks, true);
+  const off = await checkConfig(w, have({ ...GOOD, 'plugins.enabled': false, 'plugins.allow': ['x'], 'plugins.deny': ['Agent-Office'], 'plugins.entries.agent-office.enabled': false, 'plugins.entries.agent-office.config.tokenFile': 'E:/other/.office-token-4392' }));
+  assert.deepEqual(off.fix, [
+    'openclaw config set plugins.enabled true',
+    'openclaw config set plugins.allow "[\'x\', \'agent-office\']" --strict-json',
+    'openclaw config set plugins.deny "[]" --strict-json',
+    'openclaw plugins enable agent-office',
+    'openclaw config set plugins.entries.agent-office.config.tokenFile "E:/agent-office/.office-token"',
+  ]);
 });
 
-test('checkConfig: the new exec mode counts, and a deny list keeps entries the user already has', async () => {
-  const w = wantedConfig({ ...DEFAULT_CELLS, web: 'deny' });
-  const r = await checkConfig(w, have({ 'tools.fs.workspaceOnly': true, 'tools.exec.mode': 'ask', 'tools.deny': ['browser'] }));
-  assert.equal(r.settings.find((s) => s.path === 'tools.exec.ask').ok, true, 'mode ask is an approval');
-  assert.equal(r.execAsks, true);
-  assert.deepEqual(r.fix, [`openclaw config set tools.deny "['browser', 'group:web']" --strict-json`], 'the user\'s own entry stays');
-});
-
-test('checkConfig: a config the office cannot read is unknown, never a pass', async () => {
-  const w = wantedConfig(DEFAULT_CELLS);
-  const r = await checkConfig(w, async () => ({ state: 'unreadable', why: 'it stopped' }));
+test('checkConfig: a config the office cannot read is unknown, never a pass; an office without a token file never passes', async () => {
+  const r = await checkConfig(wantedConfig({ tokenFile: TOKEN }), async () => ({ state: 'unreadable', why: 'it stopped' }));
   assert.equal(r.ok, false);
   assert.equal(r.unreadable, true);
-  assert.equal(r.execAsks, null, 'unknown, not "asks" and not "does not ask"');
-  assert.ok(r.settings.every((s) => s.ok === false && s.have === 'unknown'));
+  assert.ok(r.settings.every((s) => s.ok === false && s.have === 'unknown' && s.fix === null));
+  const none = await checkConfig(wantedConfig({}), have(GOOD));
+  assert.equal(none.settings.find((s) => s.path.endsWith('tokenFile')).ok, false, 'the office cannot confirm a file it does not know');
+  // A token file path with a character the three shells read differently gets no command to copy.
+  const odd = await checkConfig(wantedConfig({ tokenFile: 'E:\\a%b\\.office-token' }), have({}));
+  assert.equal(odd.settings.find((s) => s.path.endsWith('tokenFile')).fix, null);
+});
+
+test('toolCall: OpenClaw tool ids as the tool names and inputs the office rates and shows', () => {
+  const t = (name, params, paths) => { const c = toolCall(name, params, paths); return [c.tool_name, c.tool_input, c.handoff]; };
+  assert.deepEqual(t('read', { path: 'src/a.js' }), ['Read', { file_path: 'src/a.js' }, null]);
+  assert.deepEqual(t('write', { file_path: 'b.md', content: 'x' }), ['Write', { file_path: 'b.md' }, null], 'an edit carries only its file, like every ACP edit');
+  assert.deepEqual(t('edit', { path: 'c.js', old_string: 'a', new_string: 'b' }), ['Edit', { file_path: 'c.js' }, null]);
+  assert.deepEqual(t('apply_patch', { input: '*** Begin Patch' }, ['d.js']), ['Edit', { file_path: 'd.js' }, null]);
+  assert.deepEqual(t('apply_patch', { input: '*** Begin Patch' }, ['d.js', 'e.js']), ['openclaw:apply_patch', { description: 'd.js, e.js' }, null], 'more than one file: no single file to rate, so it asks as an other call');
+  assert.deepEqual(t('exec', { command: 'npm test' }), ['Bash', { command: 'npm test' }, null]);
+  assert.deepEqual(t('bash', { command: 'ls' }), ['Bash', { command: 'ls' }, null]);
+  assert.deepEqual(t('process', { action: 'kill', sessionId: 's1' }), ['Bash', { command: 'process {"action":"kill","sessionId":"s1"}' }, null]);
+  assert.deepEqual(t('web_fetch', { url: 'https://example.com' }), ['WebFetch', { url: 'https://example.com' }, null]);
+  assert.deepEqual(t('web_search', { query: 'acp' }), ['WebSearch', { query: 'acp' }, null]);
+  assert.deepEqual(t('read', {}), ['openclaw:read', { description: '{}' }, null], 'a read with no path is not rated as a read');
+  assert.deepEqual(t('Read', { path: 'a' }), ['openclaw:Read', { description: '{"path":"a"}' }, null], 'a plugin tool that borrows a core name is not that tool');
+  assert.deepEqual(t('memory_search', { query: 'x' }), ['openclaw:memory_search', { description: '{"query":"x"}' }, null]);
+  for (const name of ['sessions_spawn', 'sessions_send', 'subagents', 'cron', 'automations', 'gateway', 'plugins', 'nodes']) {
+    assert.match(toolCall(name, {}).handoff, /outside this session/, name);
+  }
 });
 
 // A fake execFile for the config reader: `config get <path> --json` answers by path, `config validate` by `valid`.
@@ -150,21 +155,4 @@ test('configReader: reads that fail with exit 1 together share one validate', as
   const out = await Promise.all(['a', 'b', 'c'].map(read));
   assert.deepEqual(out.map((x) => x.state), ['unset', 'unset', 'unset']);
   assert.equal(calls.filter((c) => c.args[1] === 'validate').length, 1);
-});
-
-test('the deny command pastes into cmd, PowerShell and bash: double quotes outside, single quotes inside, and an odd name gets none', async () => {
-  const w = wantedConfig({ ...DEFAULT_CELLS, web: 'deny' });
-  const odd = await checkConfig(w, have({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'always', 'tools.deny': ["it's", 'a"b'] }));
-  const x = odd.settings.find((s) => s.path === 'tools.deny');
-  assert.equal(x.ok, false);
-  assert.equal(x.fix, null, 'a name with a quote has no command to copy; the note still names the setting');
-  const ok = await checkConfig(w, have({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'always', 'tools.deny': ['group:ui'] }));
-  assert.equal(ok.settings.find((s) => s.path === 'tools.deny').fix, `openclaw config set tools.deny "['group:ui', 'group:web']" --strict-json`);
-});
-
-test('checkConfig: when only one of the two exec keys cannot be read, no fix is offered for exec ask', async () => {
-  const w = wantedConfig(DEFAULT_CELLS);
-  const r = await checkConfig(w, async (p) => (p === 'tools.exec.mode' ? { state: 'unreadable', why: 'x' } : p === 'tools.fs.workspaceOnly' ? { state: 'set', value: true } : { state: 'unset' }));
-  assert.equal(r.execAsks, null);
-  assert.equal(r.settings.find((s) => s.path === 'tools.exec.ask').fix, null);
 });

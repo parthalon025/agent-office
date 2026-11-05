@@ -32,7 +32,7 @@ import { fileKey, riskOf } from '../risk.mjs';
 import { clip } from '../tracker.mjs';
 import { providerError } from './index.mjs';
 import { createLocalTools, killTree } from './local-tools.mjs';
-import { GATEWAY_HOST, DEFAULT_GATEWAY_PORT, MIN_VERSION, DEFAULT_CELLS, gatewayPort, probeGateway, versionAtLeast, wantedConfig, checkConfig, configReader } from './openclaw.mjs';
+import { GATEWAY_HOST, DEFAULT_GATEWAY_PORT, MIN_VERSION, PLUGIN_ID, gatewayPort, probeGateway, versionAtLeast, wantedConfig, checkConfig, configReader, officeKey, toolCall } from './openclaw.mjs';
 import * as COPILOT from './copilot.mjs';
 
 export const PROTOCOL_VERSION = 1;
@@ -75,19 +75,20 @@ export const AGENTS = {
     features: ['reason', 'teams', 'schedules'], pin: null, // a developer preview: pin the version tested on the owner's PC
     needs: ['Install DeepSeek Harness so that dsh.exe is on the PATH, and set DEEPSEEK_API_KEY.'],
   },
-  // OpenClaw (#73, ADR 0001). `openclaw acp` is a bridge to a Gateway that already runs on loopback (providers/openclaw.mjs);
-  // the office never starts or stops that Gateway. From v2026.10.10 the bridge relays shell approvals as
-  // session/request_permission. File edits, writes, browser and web tools have no approval step, so the agent is ungated.
-  // gateway: check the Gateway before the bridge starts. minVersion: older versions send no shell approvals.
-  // enforces: the one Security room row whose Ask, Allow and Deny the Gateway config carries (exec approval); policy() says
-  // whether the config really carries it, and which cells it cannot (security.mjs enforcement).
-  // It is off until the user turns it on on the Security room Agents screen, with the painted Confirm (spec #73, ADR 0001):
-  // the server passes that answer as deps.blocked (security.mjs openRefusal), so there is no switch here.
+  // OpenClaw (#73, #77, ADR 0001). `openclaw acp` is a bridge to a Gateway that already runs on loopback (providers/openclaw.mjs);
+  // the office never starts or stops that Gateway. Its own approvals cover shell commands only, so the office holds every call
+  // another way: the Agent Office plugin (integrations/openclaw-plugin) runs in the Gateway, and its before_tool_call handler
+  // sends every tool call of an office session to POST /hook/openclaw (gate() below) and waits; no answer means deny. The office
+  // marks its sessions by the Gateway session key it gives session/new (openclaw.mjs officeKey). So the agent is gated, and a
+  // session starts only when the Gateway config loads that plugin for this office (gateCheck; the office only reads it).
+  // gateway: check the Gateway before the bridge starts. plugin: the gate above. minVersion: the release the plugin is built
+  // against (2026.10.10: before_tool_call runs on the tool path, src/agents/agent-tools.before-tool-call*.ts; the 2026.1 copy
+  // on the owner's PC has no caller outside src/plugins/).
   openclaw: {
     label: 'OpenClaw', program: 'openclaw', args: ['acp'],
-    gated: false, supervision: 'Partly supervised: commands ask, file edits do not',
-    askTimeoutMs: null, gateway: true, minVersion: MIN_VERSION, enforces: ['shell'],
-    features: [], pin: null, // not run against a real Gateway yet: native Windows is untested upstream
+    gated: true, plugin: true,
+    askTimeoutMs: null, gateway: true, minVersion: MIN_VERSION,
+    features: [], pin: null, // not run against a real Gateway yet: OpenClaw on the owner's PC (2026.1.29) is too old to start
     needs: ['Install OpenClaw so that openclaw.exe is on the PATH, then start its Gateway.'], // a .cmd shim from npm is not accepted (resolveExe)
   },
   // GitHub Copilot CLI (#22, ADR 0001). From 1.0.105 (copilot help config, permissions, environment; the signed-out handshake in
@@ -260,7 +261,7 @@ function within(p, ms, why, setTimer, clearTimer) {
  * @param {number} [deps.readyWaitMs] how long one readiness answer waits for a probe that runs on (READY_WAIT_MS).
  * OpenClaw only (spec.gateway): @param {(port: number) => Promise<boolean>} [deps.gatewayUp] is a Gateway listening (probeGateway);
  * @param {(path: string) => Promise<object>} [deps.readConfig] reads one OpenClaw config key (configReader);
- * @param {() => object} [deps.cells] the Security room cells of the OpenClaw column, row -> ask | allow | deny.
+ * @param {string} [deps.tokenFile] the office's token file: the OpenClaw plugin must read this one (its config is checked).
  */
 export function createAcp(deps) {
   const spec = AGENTS[deps.kind];
@@ -282,8 +283,7 @@ export function createAcp(deps) {
   const port = gatewayPort(env);
   const gatewayUp = deps.gatewayUp || ((p) => probeGateway({ port: p }));
   const readConfig = deps.readConfig || configReader({ exe, execFile, env });
-  // cells(s): the Security room cells of this agent kind (row -> ask | allow | deny), for session s's building or office-wide.
-  const cells = deps.cells || (() => DEFAULT_CELLS);
+  const tokenFile = deps.tokenFile || null;
   // blocked(): why the Security room does not let this agent kind run now (its Agents screen), or null. It is the server's
   // security.mjs openRefusal, so the provider keeps no switch of its own.
   const blocked = deps.blocked || (() => null);
@@ -386,61 +386,43 @@ export function createAcp(deps) {
     if (!spec.gateway) return null;
     return (await gatewayUp(port)) ? null : `Not ready: start the ${label} Gateway. It should listen on ${GATEWAY_HOST}:${port}. The office never starts or stops it.`;
   }
-  // What the Gateway config says about the Security room rules, read-only: null for an agent with no config, one that is off
-  // (blocked: nothing is read then) or one that is not installed. Kept for a minute for the same cells; fresh: read it again
-  // now. s: the session whose building's cells count. A read that does not finish in POLICY_MS counts as unreadable, never as a pass.
+  // What the Gateway config says, read-only: null for an agent with no config, one that is off (blocked: nothing is read then)
+  // or one that is not installed. Kept for a minute; fresh: read it again now. A read that does not finish in POLICY_MS counts
+  // as unreadable, never as a pass.
   let policyNow = null;
-  async function policy(fresh = false, s = null) {
+  async function policy(fresh = false) {
     if (!spec.gateway || blocked()) return null;
     try { program(); } catch { return null; }
-    const want = cells(s), key = JSON.stringify(want);
-    if (!fresh && policyNow && policyNow.key === key && now() - policyNow.at < PROBE_TTL_MS) return policyNow.value;
-    const w = wantedConfig(want);
+    if (!fresh && policyNow && now() - policyNow.at < PROBE_TTL_MS) return policyNow.value;
+    const w = wantedConfig({ tokenFile });
     let config;
     try { config = await within(checkConfig(w, readConfig), POLICY_MS, 'reading its config took too long', setTimer, clearTimer); } catch (e) {
       config = await checkConfig(w, async () => ({ state: 'unreadable', why: textOf(e) }));
     }
-    policyNow = { at: now(), key, value: { config, gaps: w.gaps } };
+    policyNow = { at: now(), value: { config, gaps: w.gaps } };
     return policyNow.value;
   }
-  const setting = (c, path) => c.settings.find((x) => x.path === path);
   // The settings that are off, in words and with the command that turns each on. A setting the office could not read is never
   // a pass: it says it cannot confirm.
   function configNotes(c) {
     const notes = [];
     for (const x of c.settings) {
       if (x.ok) continue;
-      if (x.path === 'tools.exec.ask') {
-        if (c.execAsks === null) notes.push('the office could not read whether commands ask (tools.exec.ask and tools.exec.mode), so it cannot confirm that they do.');
-        else notes.push(`${x.path} is ${x.have}, so shell commands run without asking the office.${x.fix ? ` Run: ${x.fix}` : ''}`);
-      } else if (x.have === 'unknown') notes.push(`the office could not read ${x.path}, so it cannot confirm it.`);
-      else {
-        const run = x.fix ? ` Run: ${x.fix}` : '';
-        if (x.path === 'tools.fs.workspaceOnly') notes.push(`${x.path} is ${x.have}, so its file tools can reach outside the worktree.${run}`);
-        else notes.push(`${x.path} does not list ${JSON.stringify(x.value)}, so the Security room Deny rule does not reach ${label}.${run}`);
-      }
+      const run = x.fix ? ` Run: ${x.fix}` : '';
+      if (x.have === 'unknown') notes.push(`the office could not read ${x.path}, so it cannot confirm it.`);
+      else if (x.path === 'tools.fs.workspaceOnly') notes.push(`${x.path} is ${x.have}, so its file tools can reach outside the worktree.${run}`);
+      else notes.push(`${x.path} is ${x.have} (wanted: ${typeof x.value === 'string' ? x.value : JSON.stringify(x.value)}), so the ${PLUGIN_ID} plugin does not send its tool calls to this office.${run}`);
     }
     return notes;
   }
-  // The workspace-only rule is a precondition (spec #73: "start it with tools.fs.workspaceOnly on"). The office cannot write the
-  // config (the Gateway is shared, Q40; the office only reads), so it does not start the agent while the rule is off or unknown.
-  // Returns the text that says why, or null when it is on.
+  // Both are preconditions: workspace-only (spec #73: "start it with tools.fs.workspaceOnly on"), and the plugin that sends
+  // every tool call to the office (#77): without it nothing would ask, and the agent is gated only through it. The office
+  // cannot write the config (the Gateway is shared, Q40; the office only reads, ADR 0004), so it does not start the agent while
+  // a setting is off or unknown. Returns the text that says why, with each command that fixes it, or null when all are on.
   const NO_WRITE = ' The office does not change the OpenClaw config. Fix it, then open the session again.';
-  function workspaceBlock(c) {
-    const x = setting(c, 'tools.fs.workspaceOnly');
-    if (!x || x.ok) return null;
-    return configNotes({ ...c, settings: [x] })[0] + NO_WRITE;
-  }
-  // Exec approval is a precondition too (owner decision 3, default B): with it off or unreadable, commands would run without
-  // asking the office, and the label "commands ask" would be false. So the office does not start the agent, and says the
-  // command that turns it on. The setting is in the check only while the shell cell is Ask; else the words are built here.
-  const EXEC_ON = 'openclaw config set tools.exec.ask always';
-  function execBlock(c) {
-    if (c.execAsks === true) return null;
-    const x = setting(c, 'tools.exec.ask');
-    if (c.execAsks === null) return `the office could not read whether commands ask (tools.exec.ask and tools.exec.mode), so it cannot confirm that they do. To turn it on, run: ${EXEC_ON}${NO_WRITE}`;
-    if (x && !x.ok) return configNotes({ ...c, settings: [x] })[0] + NO_WRITE;
-    return `tools.exec.ask and tools.exec.mode do not ask, so shell commands run without asking the office. Run: ${EXEC_ON}${NO_WRITE}`;
+  function gateBlock(c) {
+    const notes = configNotes(c);
+    return notes.length ? notes.join(' ') + NO_WRITE : null;
   }
 
   // ----- reporting -----
@@ -568,11 +550,14 @@ export function createAcp(deps) {
     // edit that moved to a file the user declined is named. The hooks below keep the card, which the PreToolUse carried.
     const did = c.args || c, input = did.tool_input;
     const file = input.file_path ? norm(st, input.file_path) : null;
+    // A call the office plugin asked about (spec.plugin) went to the office before it ran: it did not run without asking.
+    const gated = st.gated.has(c.id);
+    st.gated.delete(c.id);
     // Hermes #31682: an edit the user declined can come back through another of the agent's own tools. The office cannot
     // stop the agent's own tools, so it says so when one reports that file changed.
     if (u.status === 'completed' && EDIT_KINDS.has(c.kind) && file && st.denied.has(file)) {
       emit(st, () => events.feed(s, 'wait', `${label} changed ${path.basename(String(input.file_path))} after you declined that edit.`));
-    } else if (u.status === 'completed' && !c.asked && !c.served) {
+    } else if (u.status === 'completed' && !c.asked && !c.served && !gated) {
       if (c.kind === 'execute') emit(st, () => events.feed(s, 'wait', `${label} ran a command without asking the office: ${clip(input.command || c.title, 100)}`));
       else if (EDIT_KINDS.has(c.kind) && !(file && st.wrote.has(file))) {
         emit(st, () => events.feed(s, 'wait', `${label} changed ${path.basename(String(input.file_path || c.title))} without asking the office.`));
@@ -639,6 +624,9 @@ export function createAcp(deps) {
       emit(st, () => events.feed(s, 'wait', `${label} offers only Always allow for ${c.tool_name} ${c.title}. The office never gives a lasting allow, so Approve declines.`.replace(/\s+\./, '.')));
     }
     if (st.closed || st.interrupted) return CANCELLED;
+    // spec.plugin: the office already answered this call when the plugin sent it (gate). OpenClaw's own exec approval for the
+    // same call gets that answer, so the user is not asked twice.
+    if (st.gated.has(c.id)) return st.gated.get(c.id) ? (once ? pick(once) : CANCELLED) : (no ? pick(no) : CANCELLED);
     const shown = { kind: c.kind, tool_name: c.tool_name, tool_input: { ...c.tool_input }, sig: sigOf(c), told: false };
     shown.file = EDIT_KINDS.has(c.kind) && shown.tool_input.file_path ? norm(st, shown.tool_input.file_path) : null;
     return new Promise((resolve) => {
@@ -834,7 +822,7 @@ export function createAcp(deps) {
     st.busy = false;
     st.endCancel = null;
     cancelAsks(st); // an agent that ended its turn waits for nothing
-    st.grants.clear(); st.denied.clear(); st.askFirst.clear(); st.wrote.clear(); st.deniedVague = false;
+    st.grants.clear(); st.denied.clear(); st.askFirst.clear(); st.wrote.clear(); st.gated.clear(); st.deniedVague = false;
     st.carry.push(...st.notes.splice(0)); // the inbox gave them up already: they go with the next prompt
     if (st.closed) return;
     if (st.interrupted) events.stream(s, { type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Stopped' });
@@ -859,25 +847,27 @@ export function createAcp(deps) {
   }
 
   // ----- the session -----
-  // OpenClaw, before the session exists (so before any prompt goes out): the version must relay shell approvals, the file tools
-  // must stay in the worktree, and exec approval must be on (owner decision 3, default B), so the label "commands ask" is
-  // true for every session that runs. The Gateway config is only read; the office never writes it. Returns the config
-  // check, for the feed lines after the session starts.
-  async function gateCheck(s) {
+  // OpenClaw, before the session exists (so before any prompt goes out): the version the plugin is built against, the file tools
+  // in the worktree, and the plugin loaded for this office, so every tool call of the session asks the office (#77). The
+  // Gateway config is only read; the office never writes it. Returns the config check, for the feed line after the start.
+  async function gateCheck() {
     if (spec.minVersion && !versionAtLeast(learned.version, spec.minVersion)) {
-      throw new Error(`${label} ${learned.version || '(unknown version)'} is older than ${spec.minVersion}, or does not say its version. Before ${spec.minVersion} it does not send shell approvals to the office, so commands would run without asking. Update ${label}.`);
+      throw new Error(`${label} ${learned.version || '(unknown version)'} is older than ${spec.minVersion}, or does not say its version. The office plugin needs ${spec.minVersion} or later to hold its tool calls. Update ${label}.`);
     }
-    const p = await policy(true, s);
+    const p = await policy(true);
     if (!p) throw new Error(`the office could not check the ${label} config.`);
-    const c = p.config;
-    const block = workspaceBlock(c) || execBlock(c);
+    const block = gateBlock(p.config);
     if (block) throw new Error(block);
-    return c;
+    return p.config;
   }
-  function announce(s, st, c) {
-    const notes = configNotes(c);
-    if (!notes.length) emit(st, () => events.feed(s, 'start', `${label} config: workspace-only is on and commands ask.`));
-    for (const n of notes) emit(st, () => events.feed(s, 'wait', `${label}: ${n}`));
+  function announce(s, st) {
+    emit(st, () => events.feed(s, 'start', `${label} config: workspace-only is on, and the ${PLUGIN_ID} plugin sends every tool call to the office.`));
+  }
+  // The Gateway session key of an office session (#77): the plugin knows the session by it. A reopened session keeps the key of
+  // its past record (session/load rebinds the same Gateway session); a new one gets a key with its own uid.
+  function gatewayKeyOf(s, o) {
+    const past = o.prior && typeof o.prior.gatewayKey === 'string' ? o.prior.gatewayKey : null;
+    return o.resume && past ? past : officeKey(s.uid);
   }
 
   async function start(s, st, o) {
@@ -887,27 +877,32 @@ export function createAcp(deps) {
     remember(init);
     if (init?.protocolVersion !== PROTOCOL_VERSION) throw new Error(`it speaks ACP version ${init?.protocolVersion}; the office speaks version ${PROTOCOL_VERSION}`);
     st.caps = learned.caps;
-    const gate = spec.gateway ? await gateCheck(s) : null; // before session/new: nothing runs while this is open
+    const gate = spec.gateway ? await gateCheck() : null; // before session/new: nothing runs while this is open
     if (st.closed) return;
+    // spec.plugin: the session key the plugin reads goes with session/new and session/load. A past record without one (from
+    // before #77) cannot be held, so it starts a new conversation instead.
+    const key = spec.plugin ? gatewayKeyOf(s, o) : null;
+    const meta = key ? { _meta: { sessionKey: key } } : {};
+    if (key) s.gatewayKey = key;
     let r, sid;
-    if (o.resume && st.caps.loadSession === true) {
+    if (o.resume && st.caps.loadSession === true && (!spec.plugin || o.prior?.gatewayKey)) {
       // The agent replays the past conversation as updates before it answers. The office already has those replies
       // (the past record), so the replay is not shown again.
       st.loading = true;
-      r = await within(st.rpc.request('session/load', { sessionId: String(o.resume), cwd: s.cwd, mcpServers: [] }), INIT_MS, 'it did not load the past session in time', setTimer, clearTimer);
+      r = await within(st.rpc.request('session/load', { sessionId: String(o.resume), cwd: s.cwd, mcpServers: [], ...meta }), INIT_MS, 'it did not load the past session in time', setTimer, clearTimer);
       st.loading = false;
       sid = String(o.resume);
     } else if (o.fork) {
       // A copy of a past session (#72). The agent replays the past as updates of the new session, before it answers; the office
       // has those replies already (the past record), so the replay is not shown again.
       st.loading = true;
-      r = await within(st.rpc.request('session/fork', { sessionId: String(o.fork), cwd: s.cwd, mcpServers: [] }), INIT_MS, 'it did not fork the past session in time', setTimer, clearTimer);
+      r = await within(st.rpc.request('session/fork', { sessionId: String(o.fork), cwd: s.cwd, mcpServers: [], ...meta }), INIT_MS, 'it did not fork the past session in time', setTimer, clearTimer);
       st.loading = false;
       sid = r && r.sessionId;
     } else {
       // Before the session id: the office keeps the past record of a conversation that did not continue.
       if (o.resume) emit(st, () => events.fresh(s, `${label} cannot load a past session now. A new session started.`));
-      r = await within(st.rpc.request('session/new', { cwd: s.cwd, mcpServers: [] }), INIT_MS, 'it did not start a session in time', setTimer, clearTimer);
+      r = await within(st.rpc.request('session/new', { cwd: s.cwd, mcpServers: [], ...meta }), INIT_MS, 'it did not start a session in time', setTimer, clearTimer);
       sid = r && r.sessionId;
     }
     if (typeof sid !== 'string' || !sid) throw new Error('it gave no session id');
@@ -915,7 +910,7 @@ export function createAcp(deps) {
     learnModels(r);
     // The session id first (the tracker saves the session when its sid arrives), then the bot sits down at rest.
     emit(st, () => events.stream(s, { type: 'system', subtype: 'init', session_id: sid, model: r.models?.currentModelId || (spec.modelArg && o.model && spec.modelRe.test(String(o.model)) ? String(o.model) : null) || null, permissionMode: 'default' }));
-    if (gate) announce(s, st, gate);
+    if (gate) announce(s, st);
     // With a first prompt waiting, the turn starts at once instead (no flicker from at rest to working).
     if (!st.queue.length) hook(s, st, { hook_event_name: 'SessionStart', source: o.resume ? 'resume' : 'startup' });
     const next = st.queue.shift();
@@ -971,15 +966,41 @@ export function createAcp(deps) {
     ...(spec.enforces ? { enforces: [...spec.enforces] } : {}),
     ...(spec.unenforced ? { unenforced: { ...spec.unenforced } } : {}),
     ...(spec.partly ? { partly: { ...spec.partly } } : {}),
-    // OpenClaw: the config check for the current Security room cells, and the cells its config cannot carry (null: no config).
+    // OpenClaw: the Gateway config check (null: no config, or the kind is off or not installed).
     policy: (fresh) => policy(fresh === true),
-    // The gate check of start() that needs no session, for the server to ask before the cost question (that question names
-    // the label "commands ask", so it must not come for a session that would not start): why the agent would not start, or
-    // null. Only an agent with a Gateway config has one; a missing program or an off kind is said elsewhere (null here).
+    // The gate check of start() that needs no session, for the server to ask before the cost question and before a worktree:
+    // why the agent would not start, or null. Only an agent with a Gateway config has one; a missing program or an off kind is
+    // said elsewhere (null here).
     async preflight() {
       if (!spec.gateway) return null;
       const p = await policy(true);
-      return p ? workspaceBlock(p.config) || execBlock(p.config) : null;
+      return p ? gateBlock(p.config) : null;
+    },
+    // spec.plugin (#77): one tool call the office plugin in the OpenClaw Gateway sends (POST /hook/openclaw, openclaw.mjs
+    // gateRequest). It is held like every request of the session (the Security room rules, then the user), and the answer goes
+    // back as { allow, reason }. A call that starts work outside the session is denied at once (openclaw.mjs toolCall). signal:
+    // the plugin stopped waiting (its limit, or OpenClaw cancelled the call); the hold then goes, and the feed says so.
+    gate(s, call, signal) {
+      const st = agents.get(s.uid);
+      if (!spec.plugin || !st || st.closed || st.dead) return Promise.resolve({ allow: false, reason: `This ${label} session is not open in Agent Office.` });
+      const m = toolCall(call.toolName, call.params, call.derivedPaths);
+      const id = call.toolCallId ? String(call.toolCallId) : null;
+      const done = (allow, reason = '') => { if (id) st.gated.set(id, allow); return { allow, reason }; };
+      if (m.handoff) {
+        emit(st, () => events.feed(s, 'tool', `refused ${call.toolName}: ${m.handoff}`));
+        return Promise.resolve(done(false, m.handoff));
+      }
+      if (st.interrupted) return Promise.resolve(done(false, 'The turn was stopped in Agent Office.'));
+      return new Promise((resolve) => {
+        const held = hold(s, st, m.tool_name, m.tool_input, (v, why) => {
+          if (v === 'allow') return resolve(done(true));
+          resolve(done(false, why || (v === 'cancel' ? 'The turn was stopped in Agent Office.' : v === 'withdraw' ? `${label} stopped waiting for the answer.` : 'Declined in Agent Office.')));
+        });
+        if (held && signal) {
+          if (signal.aborted) withdraw(s, st, held, `${label} stopped waiting for your answer.`);
+          else signal.addEventListener('abort', () => withdraw(s, st, held, `${label} stopped waiting for your answer.`), { once: true });
+        }
+      });
     },
 
     async readiness() {
@@ -994,15 +1015,14 @@ export function createAcp(deps) {
       const needs = spec.pin && learned.version !== spec.pin ? [`The office was tested with ${label} ${spec.pin}. This is ${learned.version || 'an unknown version'}.`] : [];
       let ready = true;
       if (spec.minVersion && !versionAtLeast(learned.version, spec.minVersion)) {
-        ready = false; // start() refuses the same way: an old or unnamed version sends no shell approvals
-        needs.push(`${label} ${learned.version || '(unknown version)'} is older than ${spec.minVersion}, or does not say its version. Before ${spec.minVersion} it does not send shell approvals to the office, so commands would run without asking. Update ${label}.`);
+        ready = false; // start() refuses the same way (gateCheck)
+        needs.push(`${label} ${learned.version || '(unknown version)'} is older than ${spec.minVersion}, or does not say its version. The office plugin needs ${spec.minVersion} or later to hold its tool calls. Update ${label}.`);
       }
       if (spec.gateway) {
         try {
           const c = (await policy()).config;
-          if (workspaceBlock(c) || execBlock(c)) ready = false;   // start() refuses the same way (gateCheck)
+          if (gateBlock(c)) ready = false;   // start() refuses the same way (gateCheck)
           needs.push(...configNotes(c).map((n) => `${label}: ${n}`));
-          if (c.execAsks === false && !setting(c, 'tools.exec.ask')) needs.push(`${label}: ${execBlock(c)}`);
         } catch (e) { ready = false; needs.push(`${label}: the office could not check its config: ${textOf(e)}`); }
       }
       return { ready, version: learned.version || 'unknown', needs };
@@ -1052,6 +1072,7 @@ export function createAcp(deps) {
         askFirst: new Set(),     // this turn: files whose edit request went unanswered or changed; a write to them asks first
         deniedVague: false,      // this turn: the user declined an edit that named no file, so every write asks first
         wrote: new Set(),        // this turn: files the office wrote for the agent
+        gated: new Map(),        // spec.plugin: toolCallId -> the office's answer to the plugin (true: allowed), until the call ends
         terminals: new Map(),    // terminalId -> a running or finished command (local-tools start())
         terminalIds: new Set(),  // every terminal id the office gave out
       };

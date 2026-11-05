@@ -17,6 +17,8 @@ import net from 'node:net';
 import { execFile as realExecFile } from 'node:child_process';
 import { clip } from '../tracker.mjs';
 import { helperCwd } from '../git.mjs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const GATEWAY_HOST = '127.0.0.1';
 export const DEFAULT_GATEWAY_PORT = 18789;
@@ -54,95 +56,137 @@ export function versionAtLeast(v, min = MIN_VERSION) {
   return true;
 }
 
-// ---------- the config the Security room rules need ----------
-// What the Security room cells (row -> ask | allow | deny) were before the user changes them. #70 owns the real rules; the
-// caller passes the cells of the OpenClaw column.
-// The server passes the OpenClaw column of the Security room (security.mjs cellsOf, for the session's building) as the cells.
-// DEFAULT_CELLS (the room's defaults: every cell Ask) is what a caller without the room gets. workspaceOnly and exec ask decide whether a
-// session starts and how it is labelled (providers/acp.mjs start()); the rest says which cells the wall marks Not enforced.
-export const DEFAULT_CELLS = { 'read-inside': 'ask', 'edit-inside': 'ask', 'files-outside': 'ask', shell: 'ask', web: 'ask', mcp: 'ask', settings: 'ask', secrets: 'ask' };
-// A Deny cell is these tool ids in tools.deny (tool groups and ids as OpenClaw names them).
-const DENY = { shell: ['group:runtime'], web: ['group:web'], 'edit-inside': ['write', 'edit', 'apply_patch'], mcp: ['group:plugins'], 'read-inside': ['read'] };
-const DENY_ORDER = ['shell', 'web', 'edit-inside', 'mcp', 'read-inside'];
-const NO_ASK = 'OpenClaw has no approval step for this kind of call, so it cannot ask.';
-const GAP = {
-  ask: { web: NO_ASK, mcp: NO_ASK, 'edit-inside': NO_ASK, 'read-inside': NO_ASK, 'files-outside': NO_ASK },
-};
-const NO_RULE = 'OpenClaw config has no rule for settings files that run code or for secret files.';
-const WORKSPACE = 'Workspace-only is always on, so a read or edit outside the worktree is denied whatever this cell says.';
+// ---------- the Agent Office plugin (#77): every tool call of an office session goes to the office ----------
+// OpenClaw loads integrations/openclaw-plugin into its Gateway. Its before_tool_call handler sends each tool call of a session the
+// office opened to POST /hook/openclaw and waits for the decision; no answer means deny. The office marks its sessions by the
+// Gateway session key it gives session/new (`_meta.sessionKey`): "agent-office:<uid>". The Gateway may put "agent:<id>:" in
+// front, so the rule reads the end of the key. The plugin keeps the same rule (gate.js OFFICE_KEY; the tests compare the two).
+export const PLUGIN_ID = 'agent-office';
+export const PLUGIN_DIR = fileURLToPath(new URL('../integrations/openclaw-plugin/', import.meta.url));
+export const OFFICE_KEY = /(?:^|:)agent-office:(o[0-9a-f]{8})$/i;
+/** The Gateway session key of an office session. */
+export const officeKey = (uid) => `agent-office:${uid}`;
+/** The office session id in a Gateway session key, or null when the key is not one the office gave. */
+export function officeIdOf(key) {
+  const m = typeof key === 'string' ? OFFICE_KEY.exec(key) : null;
+  return m ? m[1].toLowerCase() : null;
+}
+
+const str = (v, max) => typeof v === 'string' && v.length > 0 && v.length <= max;
+/**
+ * The body the plugin posts to /hook/openclaw (gate.js): { session_key, tool_name, params, tool_call_id?, run_id?, derived_paths? }.
+ * Returns { ok: true, call: { sessionKey, toolName, params, toolCallId, runId, derivedPaths } } or { ok: false, error }.
+ */
+export function gateRequest(body) {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return { ok: false, error: 'The body is not an object.' };
+  if (!str(body.session_key, 500)) return { ok: false, error: 'session_key is missing.' };
+  if (!str(body.tool_name, 200)) return { ok: false, error: 'tool_name is missing.' };
+  const params = body.params === undefined ? {} : body.params;
+  if (!params || typeof params !== 'object' || Array.isArray(params)) return { ok: false, error: 'params must be an object.' };
+  const id = (v) => (str(v, 200) ? v : null);
+  const paths = Array.isArray(body.derived_paths) ? body.derived_paths.filter((p) => str(p, 4000)).slice(0, 100) : [];
+  return { ok: true, call: { sessionKey: body.session_key, toolName: body.tool_name, params, toolCallId: id(body.tool_call_id), runId: id(body.run_id), derivedPaths: paths } };
+}
+
+// OpenClaw tool ids (docs.openclaw.ai/gateway/config-tools/tool-policy, v2026.10.10) as the tool names risk.mjs, payload.mjs and
+// vocab.js know. A tool the office does not know keeps its id behind "openclaw:", so a plugin tool that borrows a core name
+// ("Read") is never rated as that tool, and an unknown call is an "other" call: Ask by default.
+const SHELL_TOOLS = new Set(['exec', 'bash']);
+const RUN_TOOLS = new Set(['process', 'code_execution']);
+const FILE_TOOLS = { read: 'Read', write: 'Write', edit: 'Edit' };
+// Tools that start work the office cannot hold: another session (spawn, send, a conversation turn), a later run (cron,
+// automations), a paired device (nodes, computer), or a change to the Gateway itself (gateway, plugins, openclaw), which could
+// turn this plugin off. The office denies them in its sessions.
+const OUTSIDE = new Set(['sessions_spawn', 'sessions_send', 'subagents', 'conversations_send', 'conversations_turn', 'automations', 'cron', 'gateway', 'plugins', 'openclaw', 'nodes', 'computer']);
+const short = (v) => clip(JSON.stringify(v ?? {}), 300);
+/** One OpenClaw tool call as { tool_name, tool_input, handoff }: handoff is why the office denies it, or null. */
+export function toolCall(name, params = {}, derivedPaths = []) {
+  const p = params && typeof params === 'object' ? params : {};
+  const s = (v) => (typeof v === 'string' && v ? v : null);
+  const other = (input = { description: short(p) }) => ({ tool_name: `openclaw:${name}`, tool_input: input, handoff: null });
+  if (OUTSIDE.has(name)) return { tool_name: `openclaw:${name}`, tool_input: { description: short(p) }, handoff: `${name} starts work outside this session (another session, a later run, a paired device) or changes the Gateway. The office cannot hold that work, so it denies the call.` };
+  if (FILE_TOOLS[name]) { const f = s(p.path) || s(p.file_path) || s(p.filePath); return f ? { tool_name: FILE_TOOLS[name], tool_input: { file_path: f }, handoff: null } : other(); }
+  if (name === 'apply_patch') {
+    const paths = (Array.isArray(derivedPaths) ? derivedPaths : []).map(String);
+    return paths.length === 1 ? { tool_name: 'Edit', tool_input: { file_path: paths[0] }, handoff: null } : other({ description: clip(paths.join(', ') || 'a patch', 300) });
+  }
+  if (SHELL_TOOLS.has(name)) return s(p.command) ? { tool_name: 'Bash', tool_input: { command: p.command }, handoff: null } : other();
+  if (RUN_TOOLS.has(name)) return { tool_name: 'Bash', tool_input: { command: `${name} ${short(p)}` }, handoff: null };
+  if (name === 'web_fetch' && s(p.url)) return { tool_name: 'WebFetch', tool_input: { url: p.url }, handoff: null };
+  if ((name === 'web_search' || name === 'x_search') && s(p.query)) return { tool_name: 'WebSearch', tool_input: { query: p.query }, handoff: null };
+  return other();
+}
+
+// ---------- the config an office session needs ----------
+// The Security room rows (security.mjs CALL_ROWS): with the plugin, every call goes to the office, so its settings carry them all.
+const CALL_ROWS = ['read-inside', 'edit-inside', 'files-outside', 'shell', 'web', 'mcp', 'settings', 'secrets'];
+const ENTRY = `plugins.entries.${PLUGIN_ID}`;
+const unix = (p) => String(p).replace(/\\/g, '/').replace(/\/$/, '');
+const samePath = (a, b) => { const n = (p) => unix(path.resolve(String(p))); return process.platform === 'win32' ? n(a).toLowerCase() === n(b).toLowerCase() : n(a) === n(b); };
+// A path goes into a command in double quotes, with forward slashes (Windows takes them). A character that cmd, PowerShell or
+// bash reads as more than text gets no command: quoting it right for three shells is not something to guess.
+const SAFE_PATH = /^[\w:./\\ ()~+,=@-]+$/;
+const quotedPath = (p) => (SAFE_PATH.test(String(p)) ? `"${unix(p)}"` : null);
+// A list as a JSON5 array of single-quoted names inside double quotes, so it pastes into cmd, PowerShell and bash alike
+// (OpenClaw parses values as JSON5, docs.openclaw.ai/cli/config). A name with an odd character gets no command.
+const SAFE_ID = /^[\w:*.\-]+$/;
+const listCommand = (key, list) => (list.every((t) => SAFE_ID.test(t)) ? `openclaw config set ${key} "[${list.map((t) => `'${t}'`).join(', ')}]" --strict-json` : null);
+const norm = (x) => String(x).toLowerCase();
+const listOf = (r) => (r.state === 'set' && Array.isArray(r.value) ? r.value.map(String) : []);
 
 /**
- * The OpenClaw settings a set of Security room cells needs, and the cells config cannot carry.
- * cells: row -> 'ask' | 'allow' | 'deny' for the rows that rule tool calls. Only the rows given are judged.
- * Returns { want: [{ path, value, rows }], gaps: [{ row, value, reason }] }.
- *   tools.fs.workspaceOnly = true, always (spec #73).
- *   shell Ask: exec approval on (tools.exec.ask = always). Allow wants nothing: the office answers the prompt it gets.
- *   a Deny cell: its tool ids in tools.deny.
+ * What an office session needs in the Gateway config. tokenFile: this office's token file (the plugin reads its token and
+ * port there). Returns { want: [{ path, value, rows, check }], gaps: [] }. check(read result) -> { ok, fix }.
+ *   tools.fs.workspaceOnly = true (spec #73): its file tools stay in the worktree.
+ *   plugins.enabled not false, the plugin not left out by plugins.allow or named in plugins.deny, plugins.entries.agent-office
+ *   enabled, and its tokenFile this office's: then the plugin is loaded and asks this office about every tool call.
+ * No gap: the office decides every call (the Security room rules, then a hold).
  */
-export function wantedConfig(cells = {}) {
-  const want = [{ path: 'tools.fs.workspaceOnly', value: true, rows: ['files-outside'] }];
-  const gaps = [];
-  const c = cells || {};
-  if (c.shell === 'ask') want.push({ path: 'tools.exec.ask', value: 'always', rows: ['shell'] });
-  const deny = [], rows = [];
-  for (const row of DENY_ORDER) if (c[row] === 'deny') { deny.push(...DENY[row]); rows.push(row); }
-  if (deny.length) want.push({ path: 'tools.deny', value: deny, rows });
-  for (const row of Object.keys(c)) {
-    const v = c[row];
-    if (row === 'settings' || row === 'secrets') gaps.push({ row, value: v, reason: NO_RULE });
-    else if (row === 'files-outside') { if (v !== 'deny') gaps.push({ row, value: v, reason: WORKSPACE }); }
-    else if (v === 'ask' && GAP.ask[row]) gaps.push({ row, value: v, reason: GAP.ask[row] });
-  }
-  return { want, gaps };
+export function wantedConfig({ tokenFile = null } = {}) {
+  const set = (r) => r.state === 'set';
+  const want = [
+    { path: 'tools.fs.workspaceOnly', value: true, rows: ['files-outside'], check: (r) => ({ ok: set(r) && r.value === true, fix: 'openclaw config set tools.fs.workspaceOnly true' }) },
+    { path: 'plugins.enabled', value: true, rows: CALL_ROWS, check: (r) => ({ ok: !set(r) || r.value !== false, fix: 'openclaw config set plugins.enabled true' }) },
+    { path: 'plugins.allow', value: `unset, or a list with ${PLUGIN_ID}`, rows: CALL_ROWS, check: (r) => {
+      const list = listOf(r);
+      return { ok: !set(r) || !Array.isArray(r.value) || list.some((x) => norm(x) === PLUGIN_ID), fix: listCommand('plugins.allow', [...list, PLUGIN_ID]) };
+    } },
+    { path: 'plugins.deny', value: `no ${PLUGIN_ID}`, rows: CALL_ROWS, check: (r) => {
+      const list = listOf(r);
+      return { ok: !list.some((x) => norm(x) === PLUGIN_ID), fix: listCommand('plugins.deny', list.filter((x) => norm(x) !== PLUGIN_ID)) };
+    } },
+    { path: `${ENTRY}.enabled`, value: true, rows: CALL_ROWS, check: (r) => ({
+      ok: set(r) && r.value === true,
+      // Unset: the plugin is not installed. Installed from this folder (a link: an office update is the plugin update), it is on.
+      fix: set(r) ? `openclaw plugins enable ${PLUGIN_ID}` : (quotedPath(PLUGIN_DIR) && `openclaw plugins install --link ${quotedPath(PLUGIN_DIR)} --force`),
+    }) },
+    { path: `${ENTRY}.config.tokenFile`, value: tokenFile ? unix(tokenFile) : 'the office token file', rows: CALL_ROWS, check: (r) => ({
+      ok: Boolean(tokenFile) && set(r) && typeof r.value === 'string' && samePath(r.value, tokenFile),
+      fix: tokenFile && quotedPath(tokenFile) ? `openclaw config set ${ENTRY}.config.tokenFile ${quotedPath(tokenFile)}` : null,
+    }) },
+  ];
+  return { want, gaps: [] };
 }
 
-// The command that sets the deny list. It must paste into cmd, PowerShell and bash alike, and single quotes do not protect JSON
-// double quotes on native Windows. So the list is a JSON5 array of single-quoted names (OpenClaw parses values as JSON5,
-// docs.openclaw.ai/cli/config) inside double quotes. A name with a character outside a tool id's usual set gets no command:
-// quoting it right for three shells is not something to guess.
-const SAFE_ID = /^[\w:*.\-]+$/;
-function denyCommand(list) {
-  if (!list.every((t) => SAFE_ID.test(t))) return null;
-  return `openclaw config set tools.deny "[${list.map((t) => `'${t}'`).join(', ')}]" --strict-json`;
-}
-const norm = (x) => String(x).toLowerCase();
 const show = (r) => (r.state === 'unreadable' ? 'unknown' : r.state === 'unset' ? 'unset' : JSON.stringify(r.value));
 
 /**
  * Compare the wanted settings with the real ones. read(path) -> { state: 'set', value } | { state: 'unset' } | { state: 'unreadable', why }.
- * Returns { ok, unreadable, execAsks, settings: [{ path, value, have, ok, fix, rows }], fix: [command text] }. rows: the Security
- * room rows the setting carries (security.mjs enforcement says a cell is not enforced while its setting is off).
- * execAsks: true when OpenClaw asks before a shell command (tools.exec.ask is always or on-miss, or tools.exec.mode is ask),
- * false when it does not, null when the office could not read it. An unreadable setting is never a pass.
+ * Returns { ok, unreadable, settings: [{ path, value, have, ok, fix, rows }], fix: [command text] }. rows: the Security room rows
+ * the setting carries (security.mjs enforcement says a cell is not enforced while its setting is off). An unreadable setting is
+ * never a pass and gets no command.
  */
 export async function checkConfig(w, read) {
-  const paths = [...new Set([...w.want.map((x) => x.path), 'tools.exec.ask', 'tools.exec.mode'])];
-  const got = Object.fromEntries(await Promise.all(paths.map(async (p) => [p, await read(p)])));
-  const ask = got['tools.exec.ask'], mode = got['tools.exec.mode'];
-  const execAsks = ask.state === 'unreadable' || mode.state === 'unreadable' ? null
-    : mode.value === 'ask' || ['always', 'on-miss'].includes(ask.value);
+  const got = Object.fromEntries(await Promise.all(w.want.map(async (x) => [x.path, await read(x.path)])));
   const settings = [], fix = [];
   for (const x of w.want) {
     const r = got[x.path];
-    let ok = false, command = null;
-    if (x.path === 'tools.deny') {
-      const list = r.state === 'set' && Array.isArray(r.value) ? r.value.map(String) : [];
-      const missing = x.value.filter((t) => !list.some((h) => norm(h) === norm(t)));
-      ok = r.state !== 'unreadable' && !missing.length;
-      if (!ok) command = denyCommand([...list, ...missing]);
-    } else if (x.path === 'tools.exec.ask') {
-      ok = execAsks === true;
-      // execAsks null: one of the two keys could not be read, so there is nothing true to tell the user to change.
-      if (!ok && execAsks !== null) command = `openclaw config set ${x.path} ${x.value}`;
-    } else {
-      ok = r.state === 'set' && r.value === x.value;
-      if (!ok) command = `openclaw config set ${x.path} ${x.value}`;
-    }
-    settings.push({ path: x.path, value: x.value, have: show(r), ok, fix: command && r.state !== 'unreadable' ? command : null, rows: [...x.rows] });
-    if (command && r.state !== 'unreadable') fix.push(command);
+    const c = r.state === 'unreadable' ? { ok: false, fix: null } : x.check(r);
+    const command = c.ok ? null : c.fix || null;
+    settings.push({ path: x.path, value: x.value, have: show(r), ok: c.ok, fix: command, rows: [...x.rows] });
+    if (command) fix.push(command);
   }
-  const unreadable = paths.some((p) => got[p].state === 'unreadable');
-  return { ok: settings.every((s) => s.ok), unreadable, execAsks, settings, fix };
+  return { ok: settings.every((s) => s.ok), unreadable: w.want.some((x) => got[x.path].state === 'unreadable'), settings, fix };
 }
 
 /**

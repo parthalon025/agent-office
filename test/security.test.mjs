@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
-import { cleanRules, setRule, decide, permissionModeFor, openRefusal, costAsk, cellsOf, enforcement, preToolDecision, addCost, costThisMonth } from '../security.mjs';
+import { cleanRules, setRule, decide, permissionModeFor, openRefusal, costAsk, enforcement, preToolDecision, addCost, costThisMonth } from '../security.mjs';
 
 const WIN = process.platform === 'win32';
 const root = WIN ? 'C:\\work\\repo' : '/work/repo';
@@ -17,7 +17,7 @@ const status = (fn) => { try { fn(); } catch (e) { return [e.status, e.message];
 
 test('cleanRules keeps only cells the grid has, with values the row offers', () => {
   const r = cleanRules({ office: { 'shell|claude-code': 'deny', 'secrets|local': 'allow', 'nope|local': 'ask', 'shell|nobody': 'ask' },
-    buildings: { [B]: { 'web|local': 'allow', 'ungated|openclaw': 'on' }, bad: 'x' } });
+    buildings: { [B]: { 'web|local': 'allow', 'ungated|copilot': 'on' }, bad: 'x' } });
   assert.deepEqual(r, { office: { 'shell|claude-code': 'deny' }, buildings: { [B]: { 'web|local': 'allow' } } });
   assert.deepEqual(none(), { office: {}, buildings: {} });
 });
@@ -47,9 +47,9 @@ test('setRule: unknown rows, agent kinds and values are refused; the Agents rows
   assert.equal(status(() => setRule(none(), { scope: 'office', row: 'shell', col: 'x', value: 'ask' }))[0], 400);
   assert.equal(status(() => setRule(none(), { scope: 'office', row: 'shell', col: 'local', value: 'maybe' }))[0], 400);
   assert.equal(status(() => setRule(none(), { scope: 'office', row: 'ungated', col: 'claude-code', value: 'on', confirmed: true }))[0], 400, 'Claude Code is gated: no such cell');
-  assert.equal(status(() => setRule(none(), { scope: 'building', building: B, row: 'ungated', col: 'openclaw', value: 'on', confirmed: true }))[0], 400);
+  assert.equal(status(() => setRule(none(), { scope: 'building', building: B, row: 'ungated', col: 'copilot', value: 'on', confirmed: true }))[0], 400);
   assert.equal(status(() => setRule(none(), { scope: 'elsewhere', row: 'shell', col: 'local', value: 'ask' }))[0], 400);
-  assert.equal(setRule(none(), { scope: 'office', row: 'ungated', col: 'openclaw', value: 'on', confirmed: true }).rules.office['ungated|openclaw'], 'on');
+  assert.equal(setRule(none(), { scope: 'office', row: 'ungated', col: 'copilot', value: 'on', confirmed: true }).rules.office['ungated|copilot'], 'on');
 });
 
 test('setRule: a building override, and clearing it (a clear that loosens needs the confirm too)', () => {
@@ -276,9 +276,10 @@ test('M4: the local model runs its low calls unasked in a plain folder outside g
 });
 
 test('openRefusal: an ungated agent kind is off until turned on; an agent without cost reports can be denied', () => {
-  const ungated = { kind: 'openclaw', label: 'OpenClaw', gated: false };
-  assert.match(openRefusal(none(), ungated), /Turn on OpenClaw on the Agents screen of the Security room/);
-  assert.equal(openRefusal(setRule(none(), { scope: 'office', row: 'ungated', col: 'openclaw', value: 'on', confirmed: true }).rules, ungated), null);
+  const ungated = { kind: 'copilot', label: 'Copilot CLI', gated: false };
+  assert.match(openRefusal(none(), ungated), /Turn on Copilot on the Agents screen of the Security room/);
+  assert.equal(openRefusal(setRule(none(), { scope: 'office', row: 'ungated', col: 'copilot', value: 'on', confirmed: true }).rules, ungated), null);
+  assert.equal(openRefusal(none(), { kind: 'openclaw', label: 'OpenClaw', gated: true, cost: 'unknown' }), null, 'OpenClaw is gated (#77): no switch keeps it off');
   const noCost = { kind: 'hermes', label: 'Hermes', cost: 'unknown' };
   assert.equal(openRefusal(none(), noCost), null);
   assert.match(openRefusal(setRule(none(), { scope: 'office', row: 'no-cost', col: 'hermes', value: 'deny' }).rules, noCost), /does not report cost/);
@@ -286,13 +287,13 @@ test('openRefusal: an ungated agent kind is off until turned on; an agent withou
 });
 
 test('enforcement: a gated provider enforces every cell; a missing or ungated one says why not', () => {
-  const e = enforcement([{ kind: 'claude-code', label: 'Claude Code' }, { kind: 'ollama', label: 'Ollama' }, { kind: 'openclaw', label: 'OpenClaw', gated: false, enforces: ['shell'] }]);
+  const e = enforcement([{ kind: 'claude-code', label: 'Claude Code' }, { kind: 'ollama', label: 'Ollama' }, { kind: 'copilot', label: 'Copilot CLI', gated: false, enforces: ['shell'] }]);
   assert.equal(e['claude-code'].reason, '');
   assert.equal(e['claude-code'].rows.supervise, 'Paperclip is not connected to this office.');
   assert.equal(e.local.reason, '');
   assert.equal(e.hermes.reason, 'The office has no provider for this agent kind yet. The rule applies when it has one.');
-  assert.equal(e.openclaw.rows.shell, undefined, 'OpenClaw takes the shell rule into its own config');
-  assert.equal(e.openclaw.rows['edit-inside'], 'This agent runs this kind of call without asking the office.');
+  assert.equal(e.copilot.rows.shell, undefined, 'a row the agent asks about is enforced');
+  assert.equal(e.copilot.rows['edit-inside'], 'This agent runs this kind of call without asking the office.');
 });
 
 test('enforcement: Hermes edit requests are enforced; reads and its own skill and memory writes are not, and say why', () => {
@@ -308,38 +309,24 @@ test('enforcement: Hermes edit requests are enforced; reads and its own skill an
   assert.equal(e.rows['files-outside'], undefined, 'partly enforced is not "Not enforced"');
   assert.deepEqual(e.partly, { 'files-outside': EDITS, settings: EDITS });
   // an agent with no such fields shows no partly rows
-  assert.deepEqual(enforcement([{ kind: 'openclaw', label: 'OpenClaw', gated: false, enforces: ['shell'] }]).openclaw.partly, {});
+  assert.deepEqual(enforcement([{ kind: 'copilot', label: 'Copilot CLI', gated: false, enforces: ['shell'] }]).copilot.partly, {});
 });
 
-test('cellsOf: the call cells of one agent kind in a building, for an agent whose own config carries the rules (OpenClaw)', () => {
-  let r = setRule(none(), { scope: 'office', row: 'shell', col: 'openclaw', value: 'deny' }).rules;
-  r = setRule(r, { scope: 'building', building: B, row: 'web', col: 'openclaw', value: 'deny' }).rules;
-  const office = cellsOf(r, null, 'openclaw');
-  assert.deepEqual(office, { 'read-inside': 'ask', 'edit-inside': 'ask', 'files-outside': 'ask', shell: 'deny', web: 'ask', mcp: 'ask', settings: 'ask', secrets: 'ask' });
-  assert.equal(cellsOf(r, B, 'openclaw').web, 'deny', 'the building override counts');
-  assert.equal(cellsOf(r, null, 'openclaw').ungated, undefined, 'no Agents row: those are not calls');
-});
-
-test('enforcement: an ungated agent whose config the office read shows what that config really carries', () => {
-  const claw = { kind: 'openclaw', label: 'OpenClaw', gated: false, cost: 'unknown', enforces: ['shell'] }; // as providers/acp.mjs gives it
-  const NO_ASK = 'OpenClaw has no approval step for this kind of call, so it cannot ask.';
+test('enforcement: OpenClaw is gated (#77); the settings its config must carry say which cells are not enforced while they are off', () => {
+  const claw = { kind: 'openclaw', label: 'OpenClaw', gated: true, cost: 'unknown' }; // as providers/acp.mjs gives it
+  const ALL = ['read-inside', 'edit-inside', 'files-outside', 'shell', 'web', 'mcp', 'settings', 'secrets'];
+  assert.deepEqual(enforcement([claw]).openclaw.rows, {}, 'no config read yet: a gated agent enforces every cell');
   const policy = {
-    config: { ok: false, unreadable: false, execAsks: false, settings: [
+    config: { ok: false, unreadable: false, settings: [
       { path: 'tools.fs.workspaceOnly', value: true, have: 'true', ok: true, fix: null, rows: ['files-outside'] },
-      { path: 'tools.exec.ask', value: 'always', have: '"off"', ok: false, fix: 'openclaw config set tools.exec.ask always', rows: ['shell'] },
-      { path: 'tools.deny', value: ['group:web'], have: 'unknown', ok: false, fix: null, rows: ['web'] }] },
-    gaps: [{ row: 'mcp', value: 'ask', reason: NO_ASK }],
+      { path: 'plugins.entries.agent-office.enabled', value: true, have: 'false', ok: false, fix: 'openclaw plugins enable agent-office', rows: ALL }] },
+    gaps: [],
   };
   const e = enforcement([claw], { openclaw: policy }).openclaw;
   assert.equal(e.reason, '');
-  assert.equal(e.rows.shell, 'Its config does not carry this rule: tools.exec.ask is "off". Run: openclaw config set tools.exec.ask always');
-  assert.equal(e.rows.web, 'The office could not read tools.deny in its config, so it cannot confirm this rule.');
-  assert.equal(e.rows.mcp, NO_ASK);
-  assert.equal(e.rows['files-outside'], undefined, 'workspace-only is on');
-  assert.equal(e.rows['read-inside'], undefined, 'Allow: the agent runs it, as the cell says');
-  const good = enforcement([claw], { openclaw: { config: { settings: [{ path: 'tools.exec.ask', value: 'always', have: '"always"', ok: true, fix: null, rows: ['shell'] }] }, gaps: [] } }).openclaw;
-  assert.deepEqual(good.rows, {}, 'a config that carries every cell: all enforced');
-  assert.equal(enforcement([claw]).openclaw.rows['edit-inside'], 'This agent runs this kind of call without asking the office.', 'no config read yet: what the provider says it takes');
+  for (const row of ALL) assert.equal(e.rows[row], 'Its config does not carry this rule: plugins.entries.agent-office.enabled is false. Run: openclaw plugins enable agent-office', row);
+  const good = enforcement([claw], { openclaw: { config: { settings: [{ ...policy.config.settings[1], have: 'true', ok: true, fix: null }] }, gaps: [] } }).openclaw;
+  assert.deepEqual(good.rows, {}, 'the plugin on: every cell enforced');
 });
 
 test('cost per agent kind this month: a ledger by month, the last three months kept', () => {

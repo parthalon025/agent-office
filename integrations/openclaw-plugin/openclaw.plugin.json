@@ -1,0 +1,14 @@
+{
+  "id": "agent-office",
+  "name": "Agent Office",
+  "description": "Sends every tool call of an Agent Office session to the office and waits for the decision.",
+  "categories": ["security"],
+  "activation": { "onStartup": true },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "tokenFile": { "type": "string", "description": "The token file of the office (.office-token, or .office-token-<port>)." }
+    }
+  }
+}

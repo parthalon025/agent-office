@@ -167,7 +167,7 @@ test('security: every call row is Ask by default for every agent kind, also read
       if (S.applies(row, col)) assert.equal(S.valueOf(none, '', row, col), 'ask', row + ' ' + col);
     }
   }
-  assert.equal(S.valueOf(none, '', 'ungated', 'openclaw'), 'off', 'an ungated agent is off until the user turns it on');
+  assert.equal(S.valueOf(none, '', 'ungated', 'copilot'), 'off', 'an ungated agent is off until the user turns it on');
   // Agent Framework (#23) is new, so it has no past behavior to keep: its reads and edits inside ask too, unlike the local model.
   assert.equal(S.sourceOf(none, '', 'read-inside', 'agent-framework'), 'default');
   // It is gated and free: no Turn on cell, no cost cell, and each says why.
@@ -210,13 +210,13 @@ test('security: a loosening change is a change to Allow or On; Ask and Deny appl
 
 test('security: a building override wins over the office-wide rule; the Agents rows are office-wide only', () => {
   const repo = 'c:/work/repo';
-  const r = RULES({ 'shell|claude-code': 'deny', 'ungated|openclaw': 'on' }, { [repo]: { 'shell|claude-code': 'allow', 'ungated|openclaw': 'off' } });
+  const r = RULES({ 'shell|claude-code': 'deny', 'ungated|copilot': 'on' }, { [repo]: { 'shell|claude-code': 'allow', 'ungated|copilot': 'off' } });
   assert.equal(S.valueOf(r, repo, 'shell', 'claude-code'), 'allow');
   assert.equal(S.sourceOf(r, repo, 'shell', 'claude-code'), 'building');
   assert.equal(S.valueOf(r, 'c:/work/other', 'shell', 'claude-code'), 'deny');
   assert.equal(S.sourceOf(r, 'c:/work/other', 'shell', 'claude-code'), 'office');
   assert.equal(S.sourceOf(r, 'c:/work/other', 'web', 'claude-code'), 'default');
-  assert.equal(S.valueOf(r, repo, 'ungated', 'openclaw'), 'on', 'no building override on the Agents screen');
+  assert.equal(S.valueOf(r, repo, 'ungated', 'copilot'), 'on', 'no building override on the Agents screen');
   assert.equal(S.valueOf(r, null, 'shell', 'claude-code'), 'deny', 'no building known: the office-wide rule');
 });
 
@@ -228,7 +228,8 @@ test('security: a stored value the row does not offer is never used (Secrets is 
 });
 
 test('security: a row that is only for some agent kinds has no cell in the others', () => {
-  assert.equal(S.applies('ungated', 'openclaw'), true);
+  assert.equal(S.applies('ungated', 'copilot'), true);
+  assert.equal(S.applies('ungated', 'openclaw'), false, 'OpenClaw is gated through its office plugin (#77)');
   assert.equal(S.applies('ungated', 'claude-code'), false);
   assert.equal(S.applies('supervise', 'claude-code'), true);
   assert.equal(S.applies('supervise', 'local'), false);

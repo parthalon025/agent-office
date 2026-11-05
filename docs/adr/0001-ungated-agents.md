@@ -29,4 +29,4 @@ The rule "every tool call is held" would keep OpenClaw and unsupervised Papercli
 - An ungated agent can change any file the user can change. A fresh worktree limits accidents, not deliberate misuse.
 - The label and the "Not enforced" marks are the only signal. They must stay true when a provider changes.
 - Paperclip agents can become gated: "Supervise in office" turns off skip-permissions and adds the office hooks (after a confirm, because it writes to Paperclip).
-- The planned real fix is a sandbox: the office as a container stack (ADR 0002). An OpenClaw plugin on `before_tool_call` that sends every call to the office is a follow-up and would make OpenClaw gated.
+- The planned real fix is a sandbox: the office as a container stack (ADR 0002). An OpenClaw plugin on `before_tool_call` that sends every call to the office makes OpenClaw gated: built in #77 (`integrations/openclaw-plugin`); the live check on a real Gateway waits for an OpenClaw of 2026.10.10 or later on the owner's PC.

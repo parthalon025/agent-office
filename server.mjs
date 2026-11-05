@@ -22,6 +22,7 @@ import { createTracker, clip } from './tracker.mjs';
 import { createRegistry, providerEvents, isPaid, isGated, supervisionOf, costOf, spendLimitFor, featuresOf, DEFAULT_SPEND_LIMIT, DEFAULT_PROVIDER } from './providers/index.mjs';
 import { createLocal } from './providers/local.mjs';
 import { createAcp, AGENTS as ACP_AGENTS } from './providers/acp.mjs';
+import { gateRequest as openclawRequest, officeIdOf as openclawOfficeId } from './providers/openclaw.mjs';
 import { createAgentFramework } from './providers/agent-framework.mjs';
 import { cloudConfig } from './providers/cloud.mjs';
 import { createFoundry } from './providers/foundry.mjs';
@@ -31,7 +32,7 @@ import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, clea
 import * as startup from './startup.mjs';
 import { createNotes, cleanPin, PIN_MAX, NOTES_MAX, AGENT_WRITE_MAX } from './notes.mjs';
 import { createSkills } from './skills.mjs';
-import { cleanRules, setRule, decide, preToolDecision, permissionModeFor, openRefusal, costAsk, cellsOf, enforcement, addCost, costThisMonth } from './security.mjs';
+import { cleanRules, setRule, decide, preToolDecision, permissionModeFor, openRefusal, costAsk, enforcement, addCost, costThisMonth } from './security.mjs';
 import { realInside } from './risk.mjs';
 import { mcpAddArgs, mcpRemoveArgs, pluginArgs } from './extensions.mjs';
 import * as auth from './auth.mjs';
@@ -220,6 +221,8 @@ function recordHistory(s) {
     uid: s.uid, sid: s.sid, provider: s.provider, name: s.name, cwd: s.cwd, model: s.model, mode: s.mode, cost: s.cost, turns: s.turns,
     startedAt: s.startedAt, endedAt: s.endedAt, worktree: s.worktree, replies: s.replies.slice(-40), prompt: s.prompt, budget: s.budget,
     ...(s.costUnknown ? { costUnknown: true } : {}),
+    // OpenClaw (#77): the Gateway session key its plugin knows the session by, so a Reopen keeps holding its calls.
+    ...(s.gatewayKey ? { gatewayKey: s.gatewayKey } : {}),
     // For Export of a past session (#72): the tokens and the last calls, trimmed like the page's own list.
     usage: s.usage, calls: s.calls.slice(-HISTORY_CALLS).map(maskedCall),
   };
@@ -328,8 +331,8 @@ function saveRule(body) {
   void refreshEnforce(true); // an agent whose own config carries the cells checks it again for the new cells
   return { ok: true, from: r.from, to: r.to };
 }
-// What each agent kind enforces (security.mjs enforcement): from the providers of this office, and for an ungated agent whose
-// own config carries the rules (OpenClaw), from what that config was found to carry (provider.policy(), read-only). It is read
+// What each agent kind enforces (security.mjs enforcement): from the providers of this office, and for an agent whose
+// own config carries the rules (OpenClaw: workspace-only and its office plugin, #77), from what that config was found to carry (provider.policy(), read-only). It is read
 // at start, after a rule change and when the page asks for the agent kinds; a policy is null while the kind is off.
 let ENFORCE = null;
 async function refreshEnforce(fresh = false) {
@@ -366,10 +369,9 @@ const agentFramework = createAgentFramework({ events, servers: [lmstudio, ollama
 const providers = createRegistry([claude, ollama, lmstudio, agentFramework,
   // ACP agents (providers/acp.mjs): Hermes Agent, DeepSeek Harness, OpenClaw and Copilot CLI, one entry each in its AGENTS list.
   // blocked: the Security room's answer to whether this kind may run now (its Agents screen: an ungated kind is off until
-  // turned on, a no-cost Deny); cells: its call cells, for an agent whose own config carries them (OpenClaw). One rule source.
-  ...Object.keys(ACP_AGENTS).map((kind) => createAcp({ events, kind,
-    blocked: () => openRefusal(persisted.security, providers.get(kind)),
-    cells: (s) => cellsOf(persisted.security, s ? buildingOfSession(s) : null, V.security.columnOf(kind)) })),
+  // turned on, a no-cost Deny). One rule source. tokenFile: the OpenClaw plugin must read this office's token (#77).
+  ...Object.keys(ACP_AGENTS).map((kind) => createAcp({ events, kind, tokenFile: TOKEN_FILE,
+    blocked: () => openRefusal(persisted.security, providers.get(kind)) })),
   // The Microsoft cloud kinds are off until the owner sets them up in the environment (README). Nothing here calls the network
   // or signs in. Like the ungated ACP agents, the Agents screen of the Security room keeps them off until it turns them on.
   ...[['foundry', createFoundry, CLOUD.foundry], ['copilot-studio', createCopilotStudio, CLOUD.studio]].map(([kind, create, config]) => create({ events, config,
@@ -1043,8 +1045,8 @@ async function openSession(opts) {
 // question, Deny never gets here (checkOpen). The answer is 200 with confirm: 'cost' and the question (not an error); the
 // caller asks the user and sends the same request again with confirmCost: true. An ungated agent's label goes in the question too, so the yes is for what
 // it does (ADR 0001).
-// The provider's own gate check that needs no session (an OpenClaw config without workspace-only or exec approval, owner
-// decision 3 B), before the cost question: that question names the label ("commands ask"), so it never comes for an agent
+// The provider's own gate check that needs no session (an OpenClaw config without workspace-only or the office plugin,
+// #77), before the cost question, so that question never comes for an agent
 // that would not start. 409 without confirm, before a worktree or a session.
 async function preflight(provider) {
   const why = typeof provider.preflight === 'function' ? await provider.preflight() : null;
@@ -1341,6 +1343,30 @@ function send(res, status, body, type = 'application/json') {
   res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
 }
+// OpenClaw (#77): the Agent Office plugin in the OpenClaw Gateway (integrations/openclaw-plugin) sends each tool call of an
+// office session here (agent token) and waits. The session is the live OpenClaw session whose Gateway key the plugin names;
+// its provider holds the call like every request (gate: the Security room rules, then the user). The answer is
+// { decision: 'allow' } or { decision: 'deny', reason }; the plugin denies on any other answer and on no answer. When the
+// plugin stops waiting (its limit, a cancelled call), the request closes and the hold goes.
+async function onOpenClawCall(body, res) {
+  const q = openclawRequest(body);
+  if (!q.ok) return send(res, 400, { error: q.error });
+  const deny = (reason) => send(res, 200, { decision: 'deny', reason });
+  // A reopened session keeps the key of its past record, so the key names the session, not its uid.
+  const id = openclawOfficeId(q.call.sessionKey);
+  const s = id && [...sessions.values()].find((x) => x.provider === 'openclaw' && x.status !== 'ended' && openclawOfficeId(x.gatewayKey) === id);
+  if (!s) {
+    return deny('Agent Office has no open session for this OpenClaw session.');
+  }
+  const p = providerOf(s);
+  if (typeof p.gate !== 'function') return deny('Agent Office cannot hold the calls of this session.');
+  const stop = new AbortController();
+  res.on('close', () => { if (!res.writableEnded) stop.abort(); });
+  const d = await p.gate(s, q.call, stop.signal);
+  if (res.destroyed) return;
+  return d.allow ? send(res, 200, { decision: 'allow' }) : deny(d.reason || 'Declined in Agent Office.');
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let b = '';
@@ -1535,6 +1561,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/room/create') return send(res, 200, await floorAction('create-room', body));
     if (url.pathname === '/api/room/delete') return send(res, 200, await floorAction('remove-room', body));
     if (url.pathname === '/hook/permission') return onPermission(body, res);
+    if (url.pathname === '/hook/openclaw') return onOpenClawCall(body, res);
     if (url.pathname === '/mcp/inbox') return onMcpInbox(body, res);
     if (url.pathname === '/mcp/ask') return onMcpAsk(body, res);
     if (url.pathname === '/mcp/room') return send(res, 200, { text: describeRoom(await callerRoom(body)) });
