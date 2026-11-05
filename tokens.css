@@ -37,6 +37,7 @@
   --type-lab: #0f8b8d;
   --type-studio: #c2477a;
   --type-hq: #a36a12;
+  --type-security: #6650b8;
   --scene-floor: #f3f2ee;
   --scene-wall: #e3e6ea;
   --scene-wood: #d8b98a;
@@ -215,6 +216,7 @@
   --type-lab: #2fb3b5;
   --type-studio: #e0709a;
   --type-hq: #d0922e;
+  --type-security: #9a86e8;
   --scene-floor: #2a3039;
   --scene-wall: #232a34;
   --scene-wood: #8f7656;
@@ -268,6 +270,7 @@
   --type-lab: #0f7f7c;
   --type-studio: #b03f6e;
   --type-hq: #946010;
+  --type-security: #5a48a6;
   --scene-floor: #2f6456;
   --scene-wall: #e9ede7;
   --scene-wood: #f1f1ea;
@@ -322,6 +325,7 @@
     --type-lab: #2fb3b5;
     --type-studio: #e0709a;
     --type-hq: #d0922e;
+    --type-security: #9a86e8;
     --scene-floor: #2a3039;
     --scene-wall: #232a34;
     --scene-wood: #8f7656;

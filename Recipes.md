@@ -29,7 +29,7 @@ The DS draws the tab, the focus and the keys. Your `render` draws only the conte
 ## Show your agents
 
 1. Write a `building`: `floors[] → rooms[] → bots[]`. Give each bot a unique `name`, a `role` and a `shape` (blob, cone, octa, capsule).
-2. Put each room in the office type that fits the work: `team`, `lab`, `studio` or `hq` (war room).
+2. Put each room in the office type that fits the work: `team`, `lab`, `studio` or `hq` (war room). A `security` room holds no bots: it has six wall screens for settings, and a page paints them (`room.screens` names them).
 3. Pass it: `h(A.OfficeScene, { building })`. Or start from a solution: `solution: "hermes" | "copilot" | "microsoft" | "hq"`.
 
 Leave `color` out and the scene picks a body color for each bot. To set it yourself, take it from `AgentOffice.BODY_COLORS` (10 colors), for example `BODY_COLORS[n % BODY_COLORS.length]`, so a list and the scene show the same color. Do not copy the hex values. `BOT_COLORS` has only 4 colors (one for each shape) and is for portraits. Do not use it for a bot color. The color is a CSS color, not an index.

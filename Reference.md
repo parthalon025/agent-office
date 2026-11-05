@@ -27,7 +27,7 @@ This repo copy is the DS source. Reference.md is kept by hand in step with `kit/
 | `trigger.run` | `job`, `bot?`, `next?` | A scheduled job or trigger runs. |
 | `model` | `bot`, `model`, `fallback?` | A bot changes model, or falls back to another model. |
 | `floor.add` | `floor` | Add a floor. |
-| `room.add` | `floorId`, `room` | Add a room to a floor. |
+| `room.add` | `floorId`, `room` | Add a room to a floor. A room of type security has no bots and six wall screens that a page repaints; room.screens gives their six titles. |
 | `floor.update` | `floorId`, `floor` | Rename a floor (name, key). Nothing else on it changes. |
 | `room.update` | `roomId`, `room` | Rename a room, give it a new id, or change its type. Its bots stay and follow the new id. |
 | `bot.add` | `roomId`, `bot` (BotDef) | Add a bot to a room. BotDef fields are listed below. |
@@ -241,6 +241,7 @@ Each README has the full props table. Types: `components/index.d.ts`.
 | `type-lab` | `#0f8b8d` | `#2fb3b5` | `#0f7f7c` | Office type: lab / server room. |
 | `type-studio` | `#c2477a` | `#e0709a` | `#b03f6e` | Office type: studio. |
 | `type-hq` | `#a36a12` | `#d0922e` | `#946010` | Office type: war room / HQ. |
+| `type-security` | `#6650b8` | `#9a86e8` | `#5a48a6` | Office type: Security room (the permission rules on its wall screens). |
 | `scene-floor` | `#f3f2ee` | `#2a3039` | `#2f6456` | 3D floor slab top. |
 | `scene-wall` | `#e3e6ea` | `#232a34` | `#e9ede7` | 3D back wall. |
 | `scene-wood` | `#d8b98a` | `#8f7656` | `#f1f1ea` | 3D desk tops and side tables. |
@@ -429,4 +430,4 @@ Layout breakpoints for the office HUD (container width).
 
 ## Icons
 
-`add`, `approve`, `attach`, `bell`, `bot`, `broadcast`, `browser`, `building`, `channel`, `chat`, `checkpoint`, `chevron-down`, `chevron-right`, `close`, `code-run`, `computer-use`, `connector`, `copy`, `cost`, `day`, `decline`, `delegate`, `elevator`, `error`, `eval`, `filter`, `finished`, `floor`, `flow`, `hq`, `identity`, `info`, `knowledge`, `lab`, `mcp`, `memory`, `model`, `more`, `night`, `pause`, `plan`, `remove`, `resting`, `resume`, `retry`, `role-ae`, `role-analyst`, `role-coder`, `role-csa`, `role-csam`, `role-designer`, `role-fde`, `role-media`, `role-ops`, `role-partner`, `role-planner`, `role-research`, `role-sales`, `role-se`, `role-specialist`, `role-writer`, `rollback`, `room`, `schedule`, `search`, `send`, `session`, `settings`, `skill`, `sound`, `sound-off`, `studio`, `subagent`, `team`, `terminal`, `token`, `tool`, `tour`, `trace`, `trigger`, `waiting`, `working`, `zoom-in`, `zoom-out`
+`add`, `approve`, `attach`, `bell`, `bot`, `broadcast`, `browser`, `building`, `channel`, `chat`, `checkpoint`, `chevron-down`, `chevron-right`, `close`, `code-run`, `computer-use`, `connector`, `copy`, `cost`, `day`, `decline`, `delegate`, `elevator`, `error`, `eval`, `filter`, `finished`, `floor`, `flow`, `hq`, `identity`, `info`, `knowledge`, `lab`, `mcp`, `memory`, `model`, `more`, `night`, `pause`, `plan`, `remove`, `resting`, `resume`, `retry`, `role-ae`, `role-analyst`, `role-coder`, `role-csa`, `role-csam`, `role-designer`, `role-fde`, `role-media`, `role-ops`, `role-partner`, `role-planner`, `role-research`, `role-sales`, `role-se`, `role-specialist`, `role-writer`, `rollback`, `room`, `schedule`, `search`, `security`, `send`, `session`, `settings`, `skill`, `sound`, `sound-off`, `studio`, `subagent`, `team`, `terminal`, `token`, `tool`, `tour`, `trace`, `trigger`, `waiting`, `working`, `zoom-in`, `zoom-out`
