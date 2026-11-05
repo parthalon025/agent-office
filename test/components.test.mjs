@@ -53,7 +53,9 @@ test('office.js: the scene height follows the window, and no CSS overrides the D
 
 test('office.js: the welcome card waits while the Since you left card shows, and the dock holds the primary button then (#66)', () => {
   assert.match(office, /h\(A\.OfficeScene, \{[^\n]*\n(?:[^\n]*\n){0,12}?[^\n]*onSinceYouLeft: setSyl/, 'the scene reports the card');
-  assert.match(office, /var welcome = !!snap && !live\.length && !p\.syl;/);
+  // It also waits while the camera looks at a screen: the Security room screens work with no session (#70).
+  assert.match(office, /var welcome = !!snap && !live\.length && !p\.syl && !p\.look;/);
+  assert.match(office, /h\(Controls, \{[^\n]*\blook: !!look\b/);
   assert.match(office, /welcome \? h\('div', \{ className: 'welcome' \}/);
   assert.match(office, /h\(A\.Button, \{ variant: welcome \? 'quiet' : 'primary', icon: 'add'/);
   assert.match(office, /h\(Controls, \{[^\n]*\bsyl: syl && cur2\.view === 'office'/);
