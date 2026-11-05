@@ -490,9 +490,12 @@ test('a failed result sets an error with a growing id, and the next turn clears 
   const r = rig();
   const s = r.tracker.newSession({ officeId: 'o1', uid: 'o1', headless: true, status: 'working' });
   r.line(s, STREAM.resultError);
-  assert.deepEqual(s.error, { id: 1, text: 'API Error: 529 overloaded' });
+  // at: when the turn failed, so a scene mounted later can send the error with its real time (seeded, building.js)
+  assert.deepEqual(s.error, { id: 1, text: 'API Error: 529 overloaded', at: 1_000_000 });
+  r.t += 5000;
   r.line(s, STREAM.resultError);
   assert.equal(s.error.id, 2);
+  assert.equal(s.error.at, 1_005_000);
   r.hook(HOOKS.turnWithEdit[1], 'o1');
   assert.equal(s.error, null);
 });

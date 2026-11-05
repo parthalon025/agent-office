@@ -30,7 +30,7 @@ function problems(ev) {
   const sp = SCHEMA.events[ev.type];
   if (!sp) return ['unknown type: ' + ev.type];
   const out = [];
-  for (const [k, t0] of Object.entries(sp.fields)) {
+  for (const [k, t0] of Object.entries({ ...SCHEMA.common.fields, ...sp.fields })) {   // common: seeded, at (every event)
     const opt = t0.endsWith('?'), t = t0.replace(/\?$/, ''), v = ev[k];
     if (v === undefined || v === null) { if (!opt) out.push('missing ' + k); continue; }
     const ok = { string: typeof v === 'string', number: typeof v === 'number', boolean: typeof v === 'boolean', Status: STATES.has(v) }[t]
@@ -463,6 +463,84 @@ test('requests: every open request and question of every building, oldest first,
   r.tracker.sessions.forEach((s) => { s.status = 'ended'; });
   r.push();
   assert.deepEqual(r.store.requests(), []);
+});
+
+// A new scene starts empty, so the adapter sends the state again (DS Reference, Scene mount). Those events are
+// seeded: the scene applies them, but plays no sound and sends no toast or onNotify. Live events after that are not.
+test('a scene mounted later gets the whole state in one seeded pass: open requests and the error too, with their times', async () => {
+  const r = rig();
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'b', cwd: REPO_A });
+  await r.hook({ ...HOOKS.turnWithEdit[1], session_id: 'a', cwd: REPO_A });
+  await r.hook({ ...HOOKS.turnWithEdit[2], session_id: 'a', cwd: REPO_A });   // a tool call that is still open
+  r.t += 10;
+  r.tracker.permissionRequest(slimPayload({ ...HOOKS.permission, session_id: 'a', cwd: REPO_A }, null));
+  r.t += 10;
+  const [sa, sb] = [...r.tracker.sessions.values()];
+  r.tracker.askQuestion(sa, 'Use the old schema?');
+  sb.error = { id: 1, text: 'Out of budget.', at: r.t };
+  r.push();
+  const m = r.mount(KEY_A);
+  assert.ok(m.ev.length > 0);
+  for (const e of m.ev) assert.equal(e.seeded, true, `${e.type} is seeded`);
+  // the open requests and the error are in the first pass, not one snapshot later
+  const reqs = of(m.ev, 'request');
+  assert.deepEqual(reqs.map((e) => e.id).sort(), [...sa.pending.map((x) => x.id), ...sa.questions.map((x) => x.id)].sort());
+  assert.equal(reqs.find((e) => e.tool === 'Bash').at, sa.pending[0].t);
+  assert.equal(reqs.find((e) => e.tool === 'office_ask').at, sa.questions[0].t);
+  assert.deepEqual(of(m.ev, 'error').map((e) => [e.bot, e.text, e.at]), [['repo 2', 'Out of budget.', sb.error.at]]);
+  assert.equal(of(m.ev, 'bot.add').find((e) => e.bot.name === 'repo').at, sa.startedAt);
+  assert.equal(of(m.ev, 'tool.call')[0].at, sa.calls[0].t);
+  // the next snapshot says nothing new, and live news after that is not seeded
+  const n = m.ev.length;
+  r.push();
+  assert.equal(m.ev.length, n, 'nothing is sent twice');
+  r.t += 10;
+  r.tracker.permissionRequest(slimPayload({ ...HOOKS.permission, tool_input: { command: 'npm test' }, session_id: 'b', cwd: REPO_A }, null));
+  r.push();
+  const live = m.ev.slice(n);
+  assert.ok(of(live, 'request').length === 1);
+  for (const e of live) assert.equal(e.seeded, undefined, `live ${e.type} is not seeded`);
+});
+
+test('a bot seated again after a branch change is seeded: its open request does not toast a second time', async () => {
+  const r = rig();
+  const m = r.mount(KEY_A);
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  r.tracker.permissionRequest(slimPayload({ ...HOOKS.permission, session_id: 'a', cwd: REPO_A }, null));
+  r.push();
+  assert.equal(of(m.ev, 'request').filter((e) => !e.seeded).length, 1, 'the new request is live news');
+  const s = [...r.tracker.sessions.values()][0];
+  s.git = { ...s.git, branch: 'feat/y' };   // the session checked out another branch
+  const n = m.ev.length;
+  r.push();
+  const again = m.ev.slice(n);
+  assert.deepEqual(types(again).slice(0, 3), ['bot.remove', 'floor.add', 'bot.add']);
+  assert.equal(again[0].seeded, undefined, 'the bot leaving its old floor is news');
+  for (const e of again.slice(1)) assert.equal(e.seeded, true, `${e.type} restores state the scene had`);
+  assert.equal(of(again, 'request').length, 1, 'the open request is shown on the new floor');
+});
+
+test('alerts: the requests and errors of every building, for the page Notifier', async () => {
+  const r = rig();
+  assert.deepEqual(r.store.alerts(), [], 'no snapshot, no alerts');
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'b', cwd: REPO_B });
+  r.tracker.permissionRequest(slimPayload({ ...HOOKS.permission, session_id: 'b', cwd: REPO_B }, null));
+  const sa = [...r.tracker.sessions.values()].find((s) => s.cwd === REPO_A);
+  sa.error = { id: 3, text: 'Out of budget.', at: r.t };
+  r.push();
+  const list = r.store.alerts();
+  const req = r.store.requests()[0];
+  assert.deepEqual(list, [
+    { id: req.id, kind: 'request', bot: req.bot, risk: req.risk, text: 'other. ' + req.text, uid: req.uid, building: KEY_B },
+    { id: 'error:' + sa.uid + ':3', kind: 'error', bot: sa.name, text: 'repo. Out of budget.', uid: sa.uid, building: KEY_A },
+  ]);
+  // a new error is a new alert (a new id); a dismissed one is gone
+  sa.error = { id: 4, text: 'Out of budget.', at: r.t }; r.push();
+  assert.equal(r.store.alerts()[1].id, 'error:' + sa.uid + ':4');
+  r.tracker.dismissError(sa); r.push();
+  assert.deepEqual(r.store.alerts().map((x) => x.kind), ['request']);
 });
 
 test('two sessions with one name in one building get unique scene names, found by uid', async () => {

@@ -429,7 +429,8 @@
     function fit(now) {
       var a = showAllExt();
       zoomGoal = SHOW_ZOOM;
-      s.frame([0, a.tall / 3, 0], 20, 1, !!now || s.rm, a.ext, cssMs('duration-camera', 600));
+      // reduced motion: the engine cuts every camera move (stage.goal ends on its first step), so the page passes no flag
+      s.frame([0, a.tall / 3, 0], 20, 1, !!now, a.ext, cssMs('duration-camera', 600));
     }
     // Fly to a building, then call done (the page goes inside).
     function focus(key, done) {
@@ -437,7 +438,7 @@
       if (!b) { if (done) done(); return; }
       var hgt = b.floors.length * FLOOR_H;
       zoomGoal = 1;
-      s.frame([b.g.position.x, hgt / 2, b.g.position.z], 4.5, 1, s.rm, [BW + 2, hgt + 2, BD + 2], cssMs('duration-camera', 600));
+      s.frame([b.g.position.x, hgt / 2, b.g.position.z], 4.5, 1, false, [BW + 2, hgt + 2, BD + 2], cssMs('duration-camera', 600));
       if (done) setTimeout(done, s.rm ? 0 : cssMs('duration-camera', 600) + 80);
     }
 

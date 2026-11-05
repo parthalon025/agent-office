@@ -52,18 +52,16 @@
     useEffect(function () { return window.officeAdapter.onSnapshot(st[1]); }, []);
     return st[0];
   }
-  // The bot whose chat is open, and whether the Decisions inbox is open. The office draws those panels itself,
-  // so read the name from the message box and the inbox from its class.
+  // The bot whose chat is open. The office draws the chat itself, so read the name from the message box.
+  // (The Decisions inbox is controlled by the page: OfficeScene inbox and onInbox.)
   function useChatBot() {
-    var st = useState({ name: null, inbox: false });
+    var st = useState(null);
     useEffect(function () {
       var raf = 0;
       function read() {
         raf = 0;
         var input = document.querySelector('.ao-hud-chat .ao-input');
-        var name = input ? (input.placeholder || '').replace(/^Message\s+/, '') : null;
-        var inbox = !!document.querySelector('.ao-hud-inbox');
-        st[1](function (prev) { return prev.name === name && prev.inbox === inbox ? prev : { name: name, inbox: inbox }; });
+        st[1](input ? (input.placeholder || '').replace(/^Message\s+/, '') : null);
       }
       var mo = new MutationObserver(function () { if (!raf) raf = requestAnimationFrame(read); });
       mo.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['placeholder'] });
@@ -1209,7 +1207,9 @@
 
   // ---------- app ----------
   function App() {
-    var chatBot = useChatBot(), sel = chatBot.name, inbox = chatBot.inbox;
+    var sel = useChatBot();
+    // The Decisions inbox: open or closed. The page owns the state (OfficeScene inbox, onInbox), so it can close it.
+    var ib = useState(false), inbox = ib[0], setInbox = ib[1];
     var s2 = useState(null), dlg = s2[0], setDlg = s2[1];
     var s3 = useState({ recent: [], templates: [], schedules: [] }), info = s3[0], setInfo = s3[1];
     // Toasts (toasts.js): an error or a toast with an action stays until closed; the others close after 8 s, and wait while the pointer or focus is on them.
@@ -1274,12 +1274,9 @@
     var stale = !!snap && !!cur2.mount && cur2.mount.stale();
     var needsMount = !!snap && view === 'office' && !cur2.mount && cur2.view === 'office';
     var mount = cur2.mount, def = mount ? mount.def : null;
-    var onScreen = cur2.view === 'office' && !ambient && mount ? mount.repo : null;   // the building a full scene shows now
     var sceneKey = mount ? 'm' + mount.id : cur2.key;
-    // The Since you left card shows on the first scene of a page visit only. Every later scene is seeded with the
-    // whole mirror again, so its summary would count the same sessions and calls twice (the DS request is filed).
-    var sylScene = React.useRef(null);
-    if (def && sylScene.current === null) sylScene.current = sceneKey;
+    // A new scene starts with the inbox closed, as the DS does when it keeps the state itself.
+    useEffect(function () { setInbox(false); }, [sceneKey]);
     var fading = cur2.key !== wantKey || cur2.view !== view || stale || needsMount;
     useEffect(function () {
       if (!fading) return undefined;
@@ -1419,11 +1416,11 @@
         setBoard(null); setTerm(null);
       }
     }, [sel, inbox]);
-    // The newest surface wins: a page panel that opens while the Decisions inbox is open closes the inbox through its own DS control.
+    // The newest surface wins: a page panel that opens while the Decisions inbox is open closes the inbox.
     var wasPanel = React.useRef(false);
     useEffect(function () {
       var was = wasPanel.current; wasPanel.current = panelOpen;
-      if (panelOpen && !was && inbox) { var x = document.querySelector('.ao-hud-inbox-x'); if (x) x.click(); }
+      if (panelOpen && !was && inbox) setInbox(false);
     }, [panelOpen]);
     // zoom out to leave: scrolling out at the widest zoom goes floor -> building -> city
     useEffect(function () {
@@ -1446,13 +1443,17 @@
       window.addEventListener('wheel', onWheel, { passive: false, capture: true });
       return function () { window.removeEventListener('wheel', onWheel, true); };
     }, [cur2.view]);
+    // notifier: false: the page runs the one Notifier (alerts and the tab title for every building, below).
+    // Since you left shows on every scene: the adapter seeds the state it sends again, so the card counts only news.
     var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: mount.adapter, height: window.innerHeight, quality: 'auto', intro: intro, editable: false, simulate: false, toasts: false,
-      onNotify: function (n) {   // the scene's request and error toasts go to the page stack, where they stay until closed
+      inbox: inbox, onInbox: setInbox, notifier: false,
+      // The scene's live request and error toasts go to the page stack, where they stay until closed. Seeded events
+      // (a scene mounted again) send none: an open request stays in Needs you, the inbox and the tab title.
+      onNotify: function (n) {
         if (n.kind !== 'request' && n.kind !== 'error') return;
         var ns = mount ? mount.session(n.bot) : null;   // the session, so the toast and its Open outlive a scene change
         toast({ tone: n.kind === 'error' ? 'error' : 'warning', title: n.bot, text: n.text, bot: n.bot, req: n.kind === 'request', uid: ns ? ns.uid : '', action: { label: 'Open', onClick: function () { if (ns) goTo(ns); else if (officeRef.current) officeRef.current.select(n.bot); } } });
       },
-      sinceYouLeft: sylScene.current === sceneKey,
       ambient: ambient, onAmbientOpen: function () { setAmbient(false); }, onReady: function (o) {
         officeRef.current = o; readyKey.current = sceneKey;
         selectPending(o);
@@ -1528,19 +1529,6 @@
     }, [needIds]);
     function close() { setDlg(null); }
     function alertsOn() { try { return localStorage.getItem('ao-alerts') === '1'; } catch (x) { return false; } }
-    // The tab title counts every request of every building. The DS Notifier of the scene writes its own count (the shown building), so the page writes last.
-    useEffect(function () {
-      var el = document.querySelector('title');
-      if (!el) return undefined;
-      function fix() {
-        var want = (needs.length > 0 ? '(' + needs.length + ') ' : '') + document.title.replace(/^\(\d+\) /, '');
-        if (document.title !== want) document.title = want;
-      }
-      var mo = new MutationObserver(fix);
-      mo.observe(el, { childList: true, characterData: true, subtree: true });
-      fix();
-      return function () { mo.disconnect(); };
-    }, [needs.length]);
     function extensions(uid, name) { setDlg({ name: 'ext', uid: uid, label: name }); }
     // Go to a session: show its building (inside, from the city), then select its bot once that scene is ready.
     var pendingSel = React.useRef(null);
@@ -1629,9 +1617,11 @@
         onBack: blurScene, onOpen: function () { if (hostRef.current) hostRef.current.open(); } }) : null,
       d === 'sessions' ? h(SessionsDialog, { onClose: close, onGo: goTo }) : null,
       d === 'needs' ? h(NeedsDialog, { toast: toast, onClose: close, onGo: function (r) { var s = snap && snap.sessions.filter(function (x) { return x.uid === r.uid; })[0]; if (s) goTo(s); else close(); } }) : null,
-      // Alerts for requests in buildings that are not shown. The DS alert toggle decides; they show only while the page is hidden.
-      snap ? h(A.Notifier, { enabled: alertsOn(), count: needs.length, notifications: needs.filter(function (r) { return r.building !== onScreen; }).map(function (r) { return { id: r.id, kind: 'request', bot: r.bot, risk: r.risk, text: r.buildingName + '. ' + r.text }; }),
-        onClick: function (n) { var r = needs.filter(function (x) { return x.id === n.id; })[0]; if (r) { pick(r.building); if (view === 'city') go('office'); } } }) : null,
+      // The one Notifier (the scene has notifier: false). The tab title counts every request of every building, in the
+      // city too. Browser alerts for the requests and errors of every building; the DS alert toggle decides, and they
+      // show only while the page is hidden. A click goes to the session.
+      snap ? h(A.Notifier, { enabled: alertsOn(), count: needs.length, notifications: window.officeAdapter.alerts(snap),
+        onClick: function (n) { var s = n.uid ? window.officeAdapter.sessionByUid(n.uid) : null; if (s) goTo(s); } }) : null,
       h('div', { className: 'page-toasts', ref: toastBox },
         h(A.ToastStack, { toasts: toasts, onClose: function (id) { setToasts(function (l) { return window.OfficeToasts.remove(l, id); }); } })));
   }
