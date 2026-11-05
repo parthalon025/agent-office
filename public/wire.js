@@ -26,9 +26,10 @@
   // A field the page does not read stays on the server. Add a field here when the page starts to read it.
   var SESSION_FIELDS = ['uid', 'provider', 'name', 'status', 'cwd', 'headless', 'note', 'model', 'mode', 'tool', 'prompt', 'promptAt', 'live',
     'error', 'turns', 'cost', 'costUnknown', 'supervision', 'usage', 'ctxTokens', 'ctxWindow', 'todos', 'agents', 'calls', 'replies', 'pending', 'questions',
-    'inbox', 'commands', 'skills', 'features', 'scheduleId', 'startedAt', 'endedAt', 'lastEvent', 'git', 'place'];
+    'inbox', 'commands', 'skills', 'features', 'scheduleId', 'startedAt', 'endedAt', 'lastEvent', 'git', 'place', 'olderReplies'];
   // Per session and broadcast. calls: the tracker's own limit (MAX_CALLS); the boards and the terminal count all of them.
-  // replyChars: the newest replies whose text fits, and always the newest one. The rest is on request.
+  // replyChars: the newest replies whose text fits, and always the newest one. The rest is on request, and the session says
+  // how many it left out (olderReplies), so the page asks for them before it fills the chat (#80).
   var CAPS = { calls: 60, replyChars: 32000 };
   var SHAPE = {
     sessions: { key: 'uid', item: { calls: { key: 'id' }, replies: { key: 'id' } } },
@@ -61,6 +62,7 @@
     var o = pick(s, SESSION_FIELDS);
     o.calls = (s.calls || []).slice(-CAPS.calls).map(leanCall);
     o.replies = capReplies(s.replies || []);
+    o.olderReplies = (s.replies || []).length - o.replies.length;
     o.pending = (s.pending || []).map(function (r) { var x = Object.assign({}, r); delete x.key; return x; });   // key: the call key, server only
     o.inbox = (s.inbox || []).map(function (m) { return { t: m.t }; });   // the page counts queued messages
     o.git = s.git ? { branch: s.git.branch } : null;

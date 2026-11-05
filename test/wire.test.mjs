@@ -129,9 +129,12 @@ test('replies are capped per broadcast by characters, newest first, and the newe
   o.tr.pushReply(s, 'x'.repeat(8000));
   s.replies = [{ id: 1, text: 'y'.repeat(W.CAPS.replyChars + 10), t: 1 }];
   assert.equal(W.lean(o.state()).sessions[0].replies.length, 1, 'one reply longer than the cap still goes');
+  assert.equal(l.olderReplies, 40 - l.replies.length, 'the snapshot counts the replies it left out, so the page knows to ask for them');
+  assert.ok(l.olderReplies > 0);
   const few = office(1, 0), f = [...few.tr.sessions.values()][0];
   for (let i = 0; i < 40; i++) few.tr.pushReply(f, 'Short answer ' + i);
   assert.equal(W.lean(few.state()).sessions[0].replies.length, 40, 'short replies all go');
+  assert.equal(W.lean(few.state()).sessions[0].olderReplies, 0, 'and none is left out');
 });
 
 test('diff and apply: one new call is a small patch, and apply gives the same snapshot', () => {
