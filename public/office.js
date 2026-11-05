@@ -1514,6 +1514,8 @@
     // A scene gets a new one when the building changes, and when the adapter says it is stale: the DS has no
     // event that removes a floor or a room, so a removal mounts the building again.
     var fd = useState({ key: wantKey, repo: shown, view: view, mount: null, floor: null }), cur2 = fd[0], setCur2 = fd[1];
+    var floorMem = React.useRef(null);
+    if (!floorMem.current) floorMem.current = window.OfficeBuilding.floorMemory();   // the floor the user picked last, per building (#111)
     var stale = !!snap && !!cur2.mount && cur2.mount.stale();
     var needsMount = !!snap && view === 'office' && !cur2.mount && cur2.view === 'office';
     var mount = cur2.mount, def = mount ? mount.def : null;
@@ -1524,12 +1526,23 @@
     useEffect(function () {
       if (!fading) return undefined;
       var t = setTimeout(function () {
-        var next = view === 'office' && window.officeAdapter.latest() ? window.officeAdapter.mount(shown) : null;
-        // A rebuild of the same building keeps the floor the user looks at, if it still exists (#85). Floor ids are new
-        // for each mount, so the match is by branch. Another building or the city starts on the scene's default floor.
+        var OB = window.OfficeBuilding, snapNow = window.officeAdapter.latest();
+        var next = view === 'office' && snapNow ? window.officeAdapter.mount(shown) : null;
+        // The scene we leave (a rebuild, another building, the city) tells the memory which floor the user looked at.
+        // Floor ids are new for each mount, so every match is by branch.
+        var was = null;
+        if (cur2.mount && cur2.view === 'office' && hostRef.current) {
+          try { was = cur2.mount.floorBranch(hostRef.current.floorId()); } catch (x) { was = null; }
+          floorMem.current.leave(cur2.repo, was);
+        }
+        // A new scene opens on, in this order: the floor on screen before a rebuild of the same building (#85), the
+        // last floor the user picked in this building, the floor with the most live sessions (#111). Else the DS default.
         var floor = null;
-        if (next && cur2.mount && cur2.view === 'office' && cur2.repo === shown && hostRef.current) {
-          try { floor = window.OfficeBuilding.keepFloor(cur2.mount, hostRef.current.floorId(), next); } catch (x) { floor = null; }
+        if (next) {
+          var start = null;
+          try { start = OB.startFloor(next, snapNow, [cur2.repo === shown ? was : null, floorMem.current.picked(shown)]); } catch (x) { start = null; }
+          floorMem.current.open(shown, start ? start.branch : null);
+          floor = start ? start.id : null;
         }
         setCur2({ key: wantKey, repo: shown, view: view, mount: next, floor: floor });
       }, reduced() ? 0 : cssMs('duration-base', 240));

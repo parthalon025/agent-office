@@ -23,6 +23,7 @@ const GITS = {
   [REPO_A]: { repo: REPO_A, root: REPO_A, branch: 'main' },
   [REPO_B]: { repo: REPO_B, root: REPO_B, branch: 'main' },
   'C:\\work\\repo-feat': { repo: REPO_A, root: 'C:\\work\\repo-feat', branch: 'feat/x' },
+  'C:\\work\\repo-y': { repo: REPO_A, root: 'C:\\work\\repo-y', branch: 'feat/y' },
 };
 const KEY_A = normPath(REPO_A), KEY_B = normPath(REPO_B);
 
@@ -917,37 +918,40 @@ test('receive: a patch that does not start from the latest snapshot changes noth
   assert.equal(B.createStore().receive({ patch: 1, base: 1, seq: 2 }), false, 'a patch before any snapshot does not fit');
 });
 
+// Which floor a scene opens on (#85, #111). startFloor(mount, snap, prefer) answers { id, branch } or null.
+const wt = (branch, root) => ({ branch, root });
+const THREE = () => ({ repos: [{ path: REPO_A, worktrees: [wt('main', REPO_A), wt('feat/x', 'C:\\work\\repo-feat'), wt('feat/y', 'C:\\work\\repo-y')] }] });
+const idOf = (m, name) => m.def.floors.filter((f) => f.name === name)[0].id;
+
 test('a rebuild keeps the floor the user picked, by branch, when that floor still exists (#85)', () => {
-  const wt = (branch, root) => ({ branch, root });
-  const r = rig({ repos: [{ path: REPO_A, worktrees: [wt('main', REPO_A), wt('feat/x', 'C:\\work\\repo-feat'), wt('feat/y', 'C:\\work\\repo-y')] }] });
+  const r = rig(THREE());
   r.push();
   const m = r.mount(KEY_A);
-  const picked = m.def.floors.filter((f) => f.name === 'feat/y')[0].id;
+  const picked = idOf(m, 'feat/y');
   assert.equal(m.floorBranch(picked), 'feat/y');
   // a worktree of another floor goes: the page mounts again, and the ids of the floors move
   r.repos[0].worktrees.splice(1, 1);
   r.push();
   assert.equal(m.stale(), true);
   const next = r.mount(KEY_A);
-  const nextId = next.def.floors.filter((f) => f.name === 'feat/y')[0].id;
-  assert.notEqual(nextId, picked, 'the id changed, so the page must not carry the id');
-  assert.equal(B.keepFloor(m, picked, next), nextId, 'the picked floor stays');
+  assert.notEqual(idOf(next, 'feat/y'), picked, 'the id changed, so the page must not carry the id');
+  assert.deepEqual(B.startFloor(next, r.store.latest(), [m.floorBranch(picked)]), { id: idOf(next, 'feat/y'), branch: 'feat/y' }, 'the picked floor stays');
 });
 
 test('a rebuild does not keep a floor that is gone, a spare floor, or an unknown floor (#85)', () => {
-  const r = rig({ repos: [{ path: REPO_A, worktrees: [{ branch: 'main', root: REPO_A }, { branch: 'feat/x', root: 'C:\\work\\repo-feat' }] }] });
+  const r = rig({ repos: [{ path: REPO_A, worktrees: [wt('main', REPO_A), wt('feat/x', 'C:\\work\\repo-feat')] }] });
   r.push();
   const m = r.mount(KEY_A);
-  const x = m.def.floors.filter((f) => f.name === 'feat/x')[0].id;
+  const x = idOf(m, 'feat/x');
   r.repos[0].worktrees.pop();
   r.push();
   const next = r.mount(KEY_A);
-  assert.equal(B.keepFloor(m, x, next), null, 'the floor is gone: the scene uses its default');
-  assert.equal(B.keepFloor(m, 999, next), null);
-  assert.equal(B.keepFloor(m, null, next), null);
-  assert.equal(B.keepFloor(null, x, next), null);
+  assert.equal(B.startFloor(next, r.store.latest(), [m.floorBranch(x)]), null, 'the floor is gone, nothing is busy: the scene uses its default');
+  assert.equal(B.startFloor(next, r.store.latest(), [m.floorBranch(999)]), null);
+  assert.equal(B.startFloor(next, r.store.latest(), [null]), null);
+  assert.equal(B.startFloor(null, r.store.latest(), ['feat/x']), null);
   const empty = rig().mount(KEY_A);
-  assert.equal(B.keepFloor(m, x, empty), null, 'the spare floor is not a branch');
+  assert.equal(B.startFloor(empty, null, ['feat/x']), null, 'the spare floor is not a branch');
 });
 
 test('a floor added after mount is kept by its branch too (#85)', async () => {
@@ -959,6 +963,55 @@ test('a floor added after mount is kept by its branch too (#85)', async () => {
   assert.ok(add, 'a second floor is added');
   assert.equal(m.floorBranch(add.floor.id), 'feat/x');
   const next = r.mount(KEY_A);
-  const want = next.def.floors.filter((f) => f.name === 'feat/x')[0].id;
-  assert.equal(B.keepFloor(m, add.floor.id, next), want);
+  assert.deepEqual(B.startFloor(next, r.store.latest(), [m.floorBranch(add.floor.id)]), { id: idOf(next, 'feat/x'), branch: 'feat/x' });
+});
+
+test('a building with many floors opens on the floor with the most live sessions (#111)', async () => {
+  const r = rig(THREE());
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: 'C:\\work\\repo-feat' });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'b', cwd: 'C:\\work\\repo-y' });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'c', cwd: 'C:\\work\\repo-y' });
+  const m = r.mount(KEY_A);
+  assert.deepEqual(B.startFloor(m, r.store.latest(), []), { id: idOf(m, 'feat/y'), branch: 'feat/y' });
+  assert.deepEqual(B.startFloor(m, r.store.latest(), [null, 'gone']), { id: idOf(m, 'feat/y'), branch: 'feat/y' }, 'a pick that is gone does not count');
+});
+
+test('a tie between busy floors takes the lowest floor, and an ended session does not count (#111)', async () => {
+  const r = rig(THREE());
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: 'C:\\work\\repo-feat' });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'b', cwd: 'C:\\work\\repo-y' });
+  const m = r.mount(KEY_A);
+  assert.equal(B.startFloor(m, r.store.latest(), []).branch, 'feat/x', 'one each: the lower floor');
+  const snap = JSON.parse(JSON.stringify(r.store.latest()));
+  snap.sessions.filter((s) => s.place.floor === 'feat/x').forEach((s) => { s.status = 'ended'; });
+  assert.equal(B.startFloor(m, snap, []).branch, 'feat/y', 'the ended session left its floor');
+});
+
+test('the floor the user picked comes before the busy floor; sessions of another building do not count (#111)', async () => {
+  const r = rig(THREE());
+  r.repos.push({ path: REPO_B, worktrees: [wt('main', REPO_B)] });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: 'C:\\work\\repo-y' });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'b', cwd: REPO_B });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'c', cwd: REPO_B });
+  const m = r.mount(KEY_A);
+  assert.equal(B.startFloor(m, r.store.latest(), ['feat/x']).branch, 'feat/x', 'a floor with no bots, picked by the user');
+  assert.equal(B.startFloor(m, r.store.latest(), []).branch, 'feat/y');
+  const none = rig(THREE()); none.push();
+  assert.equal(B.startFloor(none.mount(KEY_A), none.store.latest(), []), null, 'no live session and no pick: the scene uses its default');
+});
+
+test('floor memory: a floor the page chose is not a pick; a floor the user moved to is (#111)', () => {
+  const mem = B.floorMemory();
+  assert.equal(mem.picked(KEY_A), null);
+  mem.open(KEY_A, 'feat/y');                 // the page opened the busy floor
+  mem.leave(KEY_A, 'feat/y');                // the user left without a move
+  assert.equal(mem.picked(KEY_A), null, 'not a pick');
+  mem.leave(KEY_A, null);                    // the building view
+  assert.equal(mem.picked(KEY_A), null);
+  mem.leave(KEY_A, 'feat/x');                // the user went to another floor
+  assert.equal(mem.picked(KEY_A), 'feat/x');
+  mem.open(KEY_A, 'feat/x');                 // the next scene opened on it
+  mem.leave(KEY_A, 'feat/x');
+  assert.equal(mem.picked(KEY_A), 'feat/x', 'the pick stays until the user moves again');
+  assert.equal(mem.picked(KEY_B), null, 'each building has its own');
 });

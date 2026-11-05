@@ -34,7 +34,8 @@
                            The DS has no event that removes a floor or a room, so the page mounts a new adapter.
      floorBranch(floorId)  the branch of a DS floor id in this scene, or null
      floorId(branch)       the DS floor id of a branch in this scene's definition, or null
-                           OfficeBuilding.keepFloor(fromMount, floorId, toMount) joins them for a rebuild.
+                           OfficeBuilding.startFloor(mount, snap, prefer) picks the floor a new scene opens on;
+                           OfficeBuilding.floorMemory() keeps the user's last pick per building.
      roomInfo(roomId)      { sessions, place } of one room of this building
      figures(roomId)       the server's figures for that room
      noteKey(roomId)       the server's notes key for that room
@@ -548,14 +549,39 @@
     return store;
   }
 
-  // The floor a new scene of a building starts on, so a rebuild keeps the floor the user picked: the floor id in
-  // the old scene (fromMount) as a floor id in the new scene (toMount). Floor ids are new for each mount, so the
-  // match is by branch. Null when the floor is gone or unknown: the scene then uses its own default.
-  function keepFloor(fromMount, floorId, toMount) {
-    if (!fromMount || !toMount || floorId == null) return null;
-    var br = fromMount.floorBranch(floorId);
-    return br == null ? null : toMount.floorId(br);
+  // The floor a new scene of a building starts on (#85, #111), as { id, branch }, or null for the scene's own default.
+  // prefer: branches in order, the first the new scene has wins (the floor on screen before a rebuild, the floor the
+  // user picked last). With no match the floor with the most live sessions wins; a tie goes to the lower floor.
+  // Floor ids are new for each mount, so every match is by branch.
+  function startFloor(toMount, snap, prefer) {
+    if (!toMount) return null;
+    var list = prefer || [];
+    for (var i = 0; i < list.length; i++) {
+      var id = list[i] == null ? null : toMount.floorId(list[i]);
+      if (id != null) return { id: id, branch: list[i] };
+    }
+    var count = {};
+    live(snap).forEach(function (s) { var pl = placeOf(s); if (pl.repo === toMount.repo) count[pl.branch] = (count[pl.branch] || 0) + 1; });
+    var best = null;
+    Object.keys(count).forEach(function (br) {
+      var bid = toMount.floorId(br);
+      if (bid == null) return;
+      if (!best || count[br] > best.n || (count[br] === best.n && bid < best.id)) best = { id: bid, branch: br, n: count[br] };
+    });
+    return best ? { id: best.id, branch: best.branch } : null;
   }
 
-  root.OfficeBuilding = { createStore: createStore, keepFloor: keepFloor, shapeOf: shapeOf, colorOf: colorOf, buildings: buildings, requests: requests, describe: describe, roomsNow: roomsNow };
+  // What the page remembers of floors, per building, for the life of the page. A floor the page chose (open) is not
+  // a pick: leave(repo, branch) records the floor on screen only when it is another one, so the user's last move
+  // stays and an automatic choice does not become one.
+  function floorMemory() {
+    var picked = {}, opened = {};
+    return {
+      open: function (repo, branch) { opened[repo] = branch == null ? null : branch; },
+      leave: function (repo, branch) { if (branch != null && branch !== opened[repo]) picked[repo] = branch; },
+      picked: function (repo) { return picked[repo] == null ? null : picked[repo]; }
+    };
+  }
+
+  root.OfficeBuilding = { createStore: createStore, startFloor: startFloor, floorMemory: floorMemory, shapeOf: shapeOf, colorOf: colorOf, buildings: buildings, requests: requests, describe: describe, roomsNow: roomsNow };
 })(typeof globalThis !== 'undefined' ? globalThis : window);
