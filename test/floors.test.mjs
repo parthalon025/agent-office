@@ -216,3 +216,43 @@ test('relayout, with real git: a repo stays, a plain folder and a removed folder
     fs.rmSync(plainDir, { recursive: true, force: true });
   }
 });
+
+// ---------- locate: a git that fails for a passing reason must not make a folder look like it is outside git (#98) ----------
+// Under load git can pass its time limit. The office reads its recent folders once, at start: a folder that locate gave up on
+// was never a building until the next start. A passing failure is tried again; "not a git repository" and a missing folder are answers.
+const TOP = ['/r', 'main', '/r/.git'].join('\n');
+const seq = (...steps) => { const calls = []; return Object.assign(async () => { const s = steps[Math.min(calls.length, steps.length - 1)]; calls.push(1); if (s instanceof Error) throw s; return s; }, { calls }); };
+const retry = { wait: async () => {}, exists: () => true };
+
+test('locate answers from git at once when git answers', async () => {
+  const exec = seq(TOP);
+  const g = await git.locate('/r', { exec, ...retry });
+  assert.equal(g.branch, 'main');
+  assert.equal(exec.calls.length, 1);
+});
+
+test('locate tries again when git fails for a passing reason, and answers when a later try works', async () => {
+  for (const msg of ['Command failed: git rev-parse (timed out)', 'fatal: Unable to create index.lock: File exists', 'spawn git ETIMEDOUT']) {
+    const exec = seq(new Error(msg), new Error(msg), TOP);
+    const g = await git.locate('/r', { exec, ...retry });
+    assert.equal(g && g.branch, 'main', msg);
+    assert.equal(exec.calls.length, 3, msg);
+  }
+});
+
+test('locate gives null after its tries when git keeps failing', async () => {
+  const exec = seq(new Error('timed out'));
+  assert.equal(await git.locate('/r', { exec, attempts: 3, ...retry }), null);
+  assert.equal(exec.calls.length, 3);
+});
+
+test('locate does not try again for a folder that is not a repository, or is gone', async () => {
+  for (const msg of ['fatal: not a git repository (or any of the parent directories): .git', 'fatal: Not a git repository']) {
+    const exec = seq(new Error(msg));
+    assert.equal(await git.locate('/nope', { exec, ...retry }), null, msg);
+    assert.equal(exec.calls.length, 1, msg);
+  }
+  const exec = seq(new Error('timed out'));
+  assert.equal(await git.locate('/nope', { exec, ...retry, exists: () => false }), null);
+  assert.equal(exec.calls.length, 1, 'a folder that is gone is an answer');
+});

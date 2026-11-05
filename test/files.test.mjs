@@ -7,13 +7,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import http from 'node:http';
-import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as auth from '../auth.mjs';
 import { officeFiles, portArg, portArgs, DEFAULT_PORT } from '../files.mjs';
+import { startOffice, startOnFreePort } from './fixtures/office-server.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const win = process.platform === 'win32';
@@ -119,12 +119,6 @@ test('hook.mjs and mcp.mjs read the token file of the port in their first argume
   }
 });
 
-const freePort = () => new Promise((resolve, reject) => {
-  const s = net.createServer();
-  s.once('error', reject);
-  s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); });
-});
-
 function copyOffice(dir) {
   fs.mkdirSync(dir, { recursive: true });
   for (const f of fs.readdirSync(ROOT)) if (f.endsWith('.mjs') || f === 'package.json') fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
@@ -138,27 +132,10 @@ function cleanEnv(extra = {}) {
   return { ...env, PATH: [path.dirname(process.execPath), ...(win ? [path.join(process.env.SystemRoot || 'C:\\Windows', 'System32')] : [])].join(path.delimiter), ...extra };
 }
 
-/** Starts server.mjs in dir. done resolves when it listens, or when it exits with a launch link (a copy on a busy port). */
-function startOffice(dir, env) {
-  const child = spawn(process.execPath, [path.join(dir, 'server.mjs')], { cwd: dir, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-  let out = '';
-  const exited = new Promise((r) => child.once('exit', r));
-  const done = new Promise((resolve, reject) => {
-    const t = setTimeout(() => reject(new Error('the office did not start in time:\n' + out)), 30000);
-    const onData = (d) => { out += d; if (/is open: /.test(out)) { clearTimeout(t); resolve('open'); } };
-    child.stdout.on('data', onData);
-    child.stderr.on('data', onData);
-    exited.then((code) => { clearTimeout(t); if (/already running/.test(out) && code === 0) resolve('exited'); else reject(new Error(`the office stopped (${code}):\n${out}`)); });
-  });
-  return { child, done, exited, out: () => out };
-}
-async function stopOffice(o) {
-  if (!o || o.child.exitCode !== null) return;
-  o.child.kill(); // this child's own pid; never by image name
-  await o.exited;
-}
+// Starting and stopping a copy: test/fixtures/office-server.mjs. `done` resolves 'open' when it listens, or 'exited' when it exits
+// with a launch link (a copy on a busy port). A port taken before the bind starts the copy again on a new port (startOnFreePort).
+const stopOffice = (o) => (o ? o.stop() : undefined);
 
-/** Every file in the folder itself (not its subfolders): name -> { text, mtime }. */
 function filesOf(dir) {
   const out = {};
   for (const f of fs.readdirSync(dir)) {
@@ -233,7 +210,7 @@ function callInbox(mcpFile) {
 
 const launchFiles = (info) => ({ settings: info.hooksFile, mcp: info.launchCommand.match(/--mcp-config "([^"]+)"/)[1] });
 
-test('a second office in the same folder never rewrites the first office\'s files, and each office\'s hooks reach it', { timeout: 180000 }, async () => {
+test('a second office in the same folder never rewrites the first office\'s files, and each office\'s hooks reach it', { timeout: 900000 }, async () => {
   const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-two-')));
   const dir = path.join(tmp, 'office'), lad = path.join(tmp, 'local'), work = path.join(tmp, 'work');
   copyOffice(dir);
@@ -252,14 +229,12 @@ test('a second office in the same folder never rewrites the first office\'s file
   for (const [f, text] of Object.entries(owner)) fs.writeFileSync(path.join(dir, f), text);
   const ownerFiles = filesOf(dir);
 
-  const [portA, portB] = [await freePort(), await freePort()];
-  const envOf = (port) => cleanEnv({ OFFICE_PORT: String(port), OFFICE_OPEN: '0', OFFICE_HOOKS: 'command', LOCALAPPDATA: lad, APPDATA: path.join(tmp, 'roaming'), OFFICE_RATE_FILE: path.join(tmp, 'no-rate.json') });
-  const envA = envOf(portA), envB = envOf(portB);
-  let a = null, b = null, again = null;
+  const baseEnv = cleanEnv({ OFFICE_OPEN: '0', OFFICE_HOOKS: 'command', LOCALAPPDATA: lad, APPDATA: path.join(tmp, 'roaming'), OFFICE_RATE_FILE: path.join(tmp, 'no-rate.json') });
+  let a = null, b = null, again = null, portA, portB, envA, envB;
   try {
     // The first office on another port: the owner's files stay as they were.
-    a = startOffice(dir, envA);
-    assert.equal(await a.done, 'open');
+    const startedA = await startOnFreePort(dir, baseEnv);
+    a = startedA.office; portA = startedA.port; envA = startedA.env;
     assertUnchanged(dir, ownerFiles, 'after the first office started');
     const infoA = await page(portA, envA, '/api/info');
     assert.equal(infoA.port, portA);
@@ -275,8 +250,8 @@ test('a second office in the same folder never rewrites the first office\'s file
     const before = filesOf(dir);
 
     // The second office on another port: no file that was there changes, not even its time.
-    b = startOffice(dir, envB);
-    assert.equal(await b.done, 'open');
+    const startedB = await startOnFreePort(dir, baseEnv);
+    b = startedB.office; portB = startedB.port; envB = startedB.env;
     assertUnchanged(dir, before, 'after the second office started');
     const filesB = launchFiles(await page(portB, envB, '/api/info'));
     assert.notEqual(filesB.settings, filesA.settings);
@@ -311,25 +286,33 @@ test('a second office in the same folder never rewrites the first office\'s file
   }
 });
 
-test('an office on another port keeps the token of an older .office-token that names its port, and never writes the plain files', { timeout: 120000 }, async () => {
+test('an office on another port keeps the token of an older .office-token that names its port, and never writes the plain files', { timeout: 900000 }, async () => {
   const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-upgrade-')));
   const dir = path.join(tmp, 'office'), lad = path.join(tmp, 'local'), work = path.join(tmp, 'work', 'old-settings');
   copyOffice(dir);
   fs.mkdirSync(lad);
   fs.mkdirSync(work, { recursive: true });
-  const port = await freePort();
   // Before #100 this office (on `port`) wrote the plain files. Sessions started then use them: their command hooks run
   // hook.mjs with no argument, which reads .office-token, and their HTTP hooks carry its token.
   const OLD = 'b'.repeat(48);
-  fs.writeFileSync(path.join(dir, '.office-token'), JSON.stringify({ token: OLD, port }));
-  fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ recent: [], schedules: [{ id: 'plain-schedule', name: 'Plain', prompt: 'x', cwd: tmp, kind: 'every', every: 10080, at: '09:00', enabled: false, lastRun: Date.now() }] }));
-  const plain = filesOf(dir);
-  const env = cleanEnv({ OFFICE_PORT: String(port), OFFICE_OPEN: '0', OFFICE_HOOKS: 'command', LOCALAPPDATA: lad, APPDATA: path.join(tmp, 'roaming'), OFFICE_RATE_FILE: path.join(tmp, 'no-rate.json') });
-  let o = null;
+  let plain = null;
+  // The token file names the port, so it is made for each try (a port taken before the bind starts the copy again on a new one).
+  const prepare = (port) => {
+    fs.writeFileSync(path.join(dir, '.office-token'), JSON.stringify({ token: OLD, port }));
+    fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({ recent: [], schedules: [{ id: 'plain-schedule', name: 'Plain', prompt: 'x', cwd: tmp, kind: 'every', every: 10080, at: '09:00', enabled: false, lastRun: Date.now() }] }));
+    plain = filesOf(dir);
+  };
+  const baseEnv = cleanEnv({ OFFICE_OPEN: '0', OFFICE_HOOKS: 'command', LOCALAPPDATA: lad, APPDATA: path.join(tmp, 'roaming'), OFFICE_RATE_FILE: path.join(tmp, 'no-rate.json') });
+  let o = null, port, env;
   try {
     for (const round of ['first start', 'restart']) {
-      o = startOffice(dir, env);
-      assert.equal(await o.done, 'open', round);
+      if (round === 'first start') {
+        const started = await startOnFreePort(dir, baseEnv, { prepare });
+        o = started.office; port = started.port; env = started.env;
+      } else {
+        o = startOffice(dir, env);
+        assert.equal(await o.done, 'open', round);
+      }
       assert.deepEqual(JSON.parse(fs.readFileSync(officeFiles(dir, port).token, 'utf8')), { token: OLD, port }, `${round}: the token is kept`);
       assertUnchanged(dir, plain, round);
       // Only the token comes over: the plain state.json may be the default office's (its schedules run there).

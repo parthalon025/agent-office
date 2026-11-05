@@ -19,3 +19,5 @@ not kept, so these result shapes follow the SDK type `SDKResultError` (claude-ag
 Not recorded yet: payloads from inside a subagent. The agent_id field on those events (SubagentStart,
 SubagentStop, and the tool events a subagent makes) still follows the documented shape, not a recording.
 Hook payloads go through payload.mjs slimPayload, as the server does.
+
+`office-server.mjs` is not a recording. It starts a real `server.mjs` copy for the tests that need one: ready on the server's own "is open" line, a fast failure when the server stops first, and a new port when the free port was taken before the bind (#98). Its own test is `test/office-server.test.mjs`.

@@ -7,11 +7,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import net from 'node:net';
-import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as auth from '../auth.mjs';
 import { officeFiles } from '../files.mjs';
+import { startOnFreePort } from './fixtures/office-server.mjs';
 import { createTracker, MAX_CALLS } from '../tracker.mjs';
 import { slimPayload } from '../payload.mjs';
 import { placeOfSession } from '../place.mjs';
@@ -198,7 +197,6 @@ test('the sender numbers patches; a client checks that a patch starts from what 
 // A copy of the office in a temp folder on a free port, with its own LOCALAPPDATA (as test/auth.test.mjs does). No claude
 // on PATH, no browser, no paid call: fake hooks only.
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const freePort = () => new Promise((res, rej) => { const s = net.createServer(); s.once('error', rej); s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => res(port)); }); });
 
 // An /events reader: every message, and the snapshot it adds up to (the way the page's store does it).
 function listen(port, token) {
@@ -221,28 +219,23 @@ function listen(port, token) {
   return r;
 }
 
-test('the server: a whole snapshot on connect, then patches that add up to it; pages that join late agree; full data on request', { timeout: 90000 }, async () => {
+test('the server: a whole snapshot on connect, then patches that add up to it; pages that join late agree; full data on request', { timeout: 900000 }, async () => {
   const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-wire-')));
   const dir = path.join(tmp, 'office'), lad = path.join(tmp, 'local');
   fs.mkdirSync(dir); fs.mkdirSync(lad);
   for (const f of fs.readdirSync(ROOT)) if (f.endsWith('.mjs') || f === 'package.json') fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
   for (const d of ['providers', 'public']) fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true });
-  const port = await freePort();
-  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toLowerCase() !== 'path'));
-  Object.assign(env, {
+  const baseEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toLowerCase() !== 'path'));
+  Object.assign(baseEnv, {
     PATH: [path.dirname(process.execPath), ...(process.platform === 'win32' ? [path.join(process.env.SystemRoot || 'C:\\Windows', 'System32')] : [])].join(path.delimiter),
-    OFFICE_PORT: String(port), OFFICE_OPEN: '0', OFFICE_HOOKS: 'command', LOCALAPPDATA: lad, APPDATA: path.join(tmp, 'roaming'), OFFICE_RATE_FILE: path.join(tmp, 'no-rate.json'),
+    OFFICE_OPEN: '0', OFFICE_HOOKS: 'command', LOCALAPPDATA: lad, APPDATA: path.join(tmp, 'roaming'), OFFICE_RATE_FILE: path.join(tmp, 'no-rate.json'),
   });
-  const child = spawn(process.execPath, [path.join(dir, 'server.mjs')], { cwd: dir, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-  let out = '';
+  let office = null;
   const readers = [];
   try {
-    await new Promise((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error('the office did not start in time:\n' + out)), 30000);
-      const onData = (d) => { out += d; if (/is open: /.test(out)) { clearTimeout(t); resolve(); } };
-      child.stdout.on('data', onData); child.stderr.on('data', onData);
-      child.on('exit', (code) => { clearTimeout(t); reject(new Error(`the office stopped (${code}):\n${out}`)); });
-    });
+    const started = await startOnFreePort(dir, baseEnv);
+    office = started.office;
+    const { port, env } = started;
     const agent = JSON.parse(fs.readFileSync(officeFiles(dir, port).token, 'utf8')).token;
     const page = JSON.parse(fs.readFileSync(auth.pageFile(env, port), 'utf8')).token;
     const hook = (body) => new Promise((res, rej) => {
@@ -303,8 +296,7 @@ test('the server: a whole snapshot on connect, then patches that add up to it; p
     assert.equal(noToken, 401, 'the page token is needed');
   } finally {
     readers.forEach((r) => r.close());
-    child.kill();
-    await new Promise((r) => (child.exitCode !== null ? r() : child.once('exit', r)));
+    if (office) await office.stop();
     fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   }
 });
