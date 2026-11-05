@@ -228,8 +228,8 @@ function addRepo(repoPath) {
 async function refreshRepo(k) {
   const r = repos.get(k);
   if (!r) return;
-  let wts;
-  try { wts = await git.layout(r.path); } catch { repos.delete(k); broadcast(); return; } // not a repository any more
+  const wts = await git.relayout(r.path, r.worktrees); // a failed `git worktree list` keeps the last good list
+  if (wts === null) { repos.delete(k); broadcast(); return; } // the folder is gone, or it is not a repository any more
   if (JSON.stringify(wts) !== JSON.stringify(r.worktrees)) { r.worktrees = wts; wts.forEach((w) => adoptNotes(placeOfWorktree(r.path, w))); broadcast(); }
 }
 function knownRepo(p) {

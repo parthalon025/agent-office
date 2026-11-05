@@ -112,3 +112,43 @@ test('staleFloors leaves out a floor whose room is younger than the minimum age'
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ---------- relayout: a failed `git worktree list` must not make the office forget a repository (#81) ----------
+const LAST = [{ root: path.normalize('C:\\r'), branch: 'main', main: true, prunable: false }];
+const NEW = [...LAST, { root: path.normalize('C:\\r2'), branch: 'x', main: false, prunable: false }];
+
+test('relayout gives the fresh list when git answers', async () => {
+  assert.deepEqual(await git.relayout('C:\\r', LAST, { list: async () => NEW, exists: () => true }), NEW);
+});
+
+test('relayout keeps the last good list when git fails and the folder is still there', async () => {
+  for (const msg of ['Command failed: timed out', 'fatal: Unable to create index.lock: File exists', 'fatal: detected dubious ownership in repository']) {
+    const failing = async () => { throw new Error(msg); };
+    assert.equal(await git.relayout('C:\\r', LAST, { list: failing, exists: () => true }), LAST, msg);
+  }
+});
+
+test('relayout drops the repository when its folder is gone', async () => {
+  const failing = async () => { throw new Error('spawn git ENOENT'); };
+  assert.equal(await git.relayout('C:\\r', LAST, { list: failing, exists: () => false }), null);
+});
+
+test('relayout drops the repository when git says it is no longer a repository', async () => {
+  const failing = async () => { throw new Error('fatal: not a git repository (or any of the parent directories): .git'); };
+  assert.equal(await git.relayout('C:\\r', LAST, { list: failing, exists: () => true }), null);
+});
+
+test('relayout, with real git: a repo stays, a plain folder and a removed folder are dropped', async () => {
+  const dir = repo();
+  const plainDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-plain-')));
+  try {
+    const first = await git.relayout(dir, []);
+    assert.equal(first.length, 1);
+    assert.equal(await git.relayout(plainDir, first), null);         // a folder that is not a repository
+    fs.rmSync(dir, { recursive: true, force: true });
+    assert.equal(await git.relayout(dir, first), null);              // the folder is gone
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(plainDir, { recursive: true, force: true });
+  }
+});

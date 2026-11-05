@@ -235,6 +235,18 @@ export async function layout(repo) {
   return list.filter((w) => !w.bare && !w.prunable);
 }
 
+/**
+ * The worktrees of a known repository, read again. When git fails for a passing reason (a timeout, a lock,
+ * a busy disk) the last good list stays. Returns `null` only when the repository is really gone: its folder
+ * is missing, or git says the folder is not a repository. `deps` (`list`, `exists`) are for tests.
+ */
+export async function relayout(repo, last, { list = layout, exists = fs.existsSync } = {}) {
+  try { return await list(repo); } catch (e) {
+    if (!exists(repo) || /not a git repository/i.test(String(e && e.message))) return null;
+    return last;
+  }
+}
+
 /** The files git tracks in a folder (relative, forward slashes), at most 20000. */
 export async function files(root) {
   return (await git(['ls-files'], root, 20000)).split(/\r?\n/).filter(Boolean).slice(0, 20000);
