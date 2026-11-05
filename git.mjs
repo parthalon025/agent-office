@@ -106,14 +106,30 @@ export async function repoTop(cwd) {
   try { return (await git(['rev-parse', '--show-toplevel'], cwd)).trim(); } catch { throw new Error('That folder is not in a git repository, so it cannot get a worktree.'); }
 }
 
-/** Where a folder sits in git: the main repository, this worktree's top folder and its branch. Null outside git. */
+// Where a folder sits in git. Throws when git fails, for any reason. `env` goes to git (ENGLISH for a caller that reads the error).
+async function placeIn(cwd, env) {
+  const [top, branch, common] = (await git(['rev-parse', '--show-toplevel', '--abbrev-ref', 'HEAD', '--path-format=absolute', '--git-common-dir'], cwd, 8000, env)).trim().split(/\r?\n/);
+  const dir = path.resolve(cwd, common);
+  const repo = path.basename(dir).toLowerCase() === '.git' ? path.dirname(dir) : dir;
+  return { repo: path.normalize(repo), root: path.normalize(top), branch: branch === 'HEAD' ? 'detached' : branch };
+}
+
+/** Where a folder sits in git: the main repository, this worktree's top folder and its branch. Null outside git, and also when git fails for a moment. */
 export async function locate(cwd) {
-  try {
-    const [top, branch, common] = (await git(['rev-parse', '--show-toplevel', '--abbrev-ref', 'HEAD', '--path-format=absolute', '--git-common-dir'], cwd, 8000)).trim().split(/\r?\n/);
-    const dir = path.resolve(cwd, common);
-    const repo = path.basename(dir).toLowerCase() === '.git' ? path.dirname(dir) : dir;
-    return { repo: path.normalize(repo), root: path.normalize(top), branch: branch === 'HEAD' ? 'detached' : branch };
-  } catch { return null; }
+  try { return await placeIn(cwd); } catch { return null; }
+}
+
+/**
+ * `locate` for a caller that must not read a passing git failure as "outside git": the office start, which picks the
+ * branch port and makes the recent folders buildings. Answers the place, `null` only when the folder is missing or git
+ * says it is not a repository, and `KEEP` when git failed for a passing reason (a timeout on a busy computer, a
+ * repository with no commit yet): the caller asks again later. `deps` (`place`, `exists`) are for tests.
+ */
+export async function locateOrKeep(cwd, { place = (d) => placeIn(d, ENGLISH), exists = fs.existsSync } = {}) {
+  try { return await place(cwd); } catch (e) {
+    if (!exists(cwd) || /not a git repository/i.test(String(e && e.message))) return null;
+    return KEEP;
+  }
 }
 
 // ---------- ports ----------
@@ -237,7 +253,7 @@ export async function layout(repo) {
   return list.filter((w) => !w.bare && !w.prunable);
 }
 
-/** What `relayout` answers when git failed for a passing reason: change nothing. */
+/** What `relayout` and `locateOrKeep` answer when git failed for a passing reason: change nothing, ask again later. */
 export const KEEP = Symbol('keep');
 
 /**

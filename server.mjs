@@ -36,7 +36,13 @@ const PUBLIC = path.join(ROOT, 'public');
 // back to another port: if that one is busy, the office stops (see server.on('error')).
 const BRANCH_PORT = process.env.OFFICE_PORT === 'branch'
   ? await (async () => {
-    try { const name = git.checkoutName(await git.locate(ROOT)); return { name, port: git.branchPort(name) }; } catch (e) {
+    try {
+      // A passing git failure (a timeout while the computer is busy) does not mean "outside git": ask again first.
+      let loc = git.KEEP;
+      for (let i = 0; i < 3 && loc === git.KEEP; i++) loc = await git.locateOrKeep(ROOT);
+      if (loc === git.KEEP) throw new Error('git did not give the branch of this folder (it timed out, or the repository has no commit yet). Start the office again.');
+      const name = git.checkoutName(loc); return { name, port: git.branchPort(name) };
+    } catch (e) {
       process.stderr.write(`Agent Office cannot pick a port for this folder: ${e.message}\n`, () => process.exit(1));
       return await new Promise(() => {}); // wait for the exit
     }
@@ -309,9 +315,15 @@ async function floorActionRaw(action, body) {
   await refreshRepo(repoKey(r.path));
   return out;
 }
-setInterval(() => { for (const k of repos.keys()) void refreshRepo(k); }, 30000).unref();
-// Recent folders that are in git are buildings too, so they can get floors before any session runs.
-for (const d of persisted.recent) git.locate(d).then((g) => { if (g) addRepo(g.repo); });
+// Recent folders that are in git are buildings too, so they can get floors before any session runs. A folder whose git
+// call failed for a passing reason (a timeout while the computer is busy, as at sign-in) is asked again every 30 s; a
+// folder that is gone or not in git is not asked again.
+const unplacedRecent = new Set(persisted.recent);
+const placeRecent = () => {
+  for (const d of unplacedRecent) git.locateOrKeep(d).then((g) => { if (g === git.KEEP) return; unplacedRecent.delete(d); if (g) addRepo(g.repo); });
+};
+placeRecent();
+setInterval(() => { for (const k of repos.keys()) void refreshRepo(k); placeRecent(); }, 30000).unref();
 
 // Finds the claude process above a hook's parent, so the office can close sessions it did not launch.
 // The hook's parent shell dies right after the hook returns, so the walk has to happen while the hook

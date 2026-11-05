@@ -3,6 +3,7 @@
 // Pure rules (git.mjs) plus the real server with OFFICE_PORT=branch. Offline: no claude on PATH, no browser, no paid call.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
@@ -59,7 +60,8 @@ function startOffice(dir, env) {
   child.stdout.on('data', (d) => { out += d; });
   child.stderr.on('data', (d) => { out += d; });
   const settled = new Promise((resolve) => {
-    const t = setTimeout(() => resolve({ listening: /is open: /.test(out), code: null }), 30000);
+    // An office that starts while other suites run can need 25 s (seen with three suites at once); a fast start returns at once.
+    const t = setTimeout(() => resolve({ listening: /is open: /.test(out), code: null }), 60000);
     const check = () => { if (/is open: /.test(out)) { clearTimeout(t); resolve({ listening: true, code: null }); } };
     child.stdout.on('data', check);
     child.on('exit', (code) => { clearTimeout(t); resolve({ listening: false, code }); });
@@ -67,22 +69,28 @@ function startOffice(dir, env) {
   return { child, settled, out: () => out };
 }
 
-test('OFFICE_PORT=branch: the office uses the port of its branch, says so, and stops when that port is busy', { timeout: 120000 }, async () => {
+test('OFFICE_PORT=branch: the office uses the port of its branch, says so, and stops when that port is busy', { timeout: 240000 }, async () => {
   const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-bport-')));
   const dir = path.join(tmp, 'office'), lad = path.join(tmp, 'local');
   fs.mkdirSync(dir);
   fs.mkdirSync(lad);
   for (const f of fs.readdirSync(ROOT)) if (f.endsWith('.mjs') || f === 'package.json') fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
   for (const d of ['providers', 'public']) fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true });
-  // The port comes from the branch name, so a fixed name collides with another suite that runs at the same time. Take the first name whose port is free now.
-  let branch = '';
+  // The port comes from the branch name, and other suites can run this test at the same time. So the names carry an id of
+  // this run (suites start at different ports), and the free port found stays held: it is the blocker of the busy step
+  // below. A port that was checked, let go and taken again later could go to another suite in between (EADDRINUSE).
+  const runId = crypto.randomBytes(3).toString('hex');
+  let branch = '', blocker = null;
   for (let i = 0; !branch; i++) {
     if (i > 200) assert.fail('no free branch port to test with');
-    const name = 'test/port-check-' + i;
-    try { await holdPort(git.branchPort(name)).then((s) => new Promise((r) => s.close(r))); branch = name; } catch { /* in use: try the next name */ }
+    const name = `test/port-check-${runId}-${i}`;
+    try { blocker = await holdPort(git.branchPort(name)); branch = name; } catch { /* in use: try the next name */ }
   }
-  sh(['init', '-b', branch], dir);
-  sh(['commit', '--allow-empty', '-m', 'x'], dir);
+  const release = () => (blocker ? new Promise((r) => { const b = blocker; blocker = null; b.close(r); }) : Promise.resolve());
+  try {
+    sh(['init', '-b', branch], dir);
+    sh(['commit', '--allow-empty', '-m', 'x'], dir);
+  } catch (e) { await release(); throw e; }
   const want = git.branchPort(branch);
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toLowerCase() !== 'path'));
   Object.assign(env, {
@@ -93,12 +101,11 @@ test('OFFICE_PORT=branch: the office uses the port of its branch, says so, and s
   const own = officeFiles(dir, want); // a branch port is never the default one, so the names carry the port (files.mjs)
   const filesIn = (d) => fs.readdirSync(d).filter((f) => fs.statSync(path.join(d, f)).isFile()).sort();
   try {
-    // Busy: the office stops, names the port and the branch, and does not move to another port.
-    const blocker = await holdPort(want);
+    // Busy (the blocker from the port search holds it): the office stops, names the port and the branch, and does not move to another port.
     const before = filesIn(dir);
     const busy = startOffice(dir, env);
     const r1 = await busy.settled;
-    await new Promise((r) => blocker.close(r));
+    await release();
     assert.equal(r1.listening, false, busy.out());
     assert.equal(r1.code, 1, busy.out());
     assert.match(busy.out(), new RegExp(`port ${want}[. ]`));
@@ -129,6 +136,7 @@ test('OFFICE_PORT=branch: the office uses the port of its branch, says so, and s
     assert.equal(r3.code, 1);
     assert.match(nogit.out(), /not in a git repository/i);
   } finally {
+    await release();
     await new Promise((r) => setTimeout(r, 300));
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* a temp folder may stay */ }
   }

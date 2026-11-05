@@ -202,6 +202,49 @@ test('relayout still drops a plain folder under a German locale (git is asked fo
   }
 });
 
+// ---------- locateOrKeep: at the office start, a passing git failure is not "outside git" ----------
+// The start reads the branch port and makes the recent folders buildings. A `git rev-parse` that timed out while the
+// computer was busy gave null, so a recent repository never became a building in that run (floors-routes failed when
+// three suites ran at once), and a branch office stopped with "not in a git repository".
+const PLACE = { repo: path.normalize('C:\\r'), root: path.normalize('C:\\r'), branch: 'main' };
+
+test('locateOrKeep gives the place when git answers', async () => {
+  assert.deepEqual(await git.locateOrKeep('C:\\r', { place: async () => PLACE, exists: () => true }), PLACE);
+});
+
+test('locateOrKeep says KEEP when git fails and the folder is still there', async () => {
+  for (const msg of ['Command failed: git rev-parse --show-toplevel', "fatal: ambiguous argument 'HEAD': unknown revision", 'fatal: detected dubious ownership in repository']) {
+    const failing = async () => { throw new Error(msg); };
+    assert.equal(await git.locateOrKeep('C:\\r', { place: failing, exists: () => true }), git.KEEP, msg);
+  }
+});
+
+test('locateOrKeep says null when the folder is gone or git says it is not a repository', async () => {
+  assert.equal(await git.locateOrKeep('C:\\r', { place: async () => { throw new Error('spawn git ENOENT'); }, exists: () => false }), null);
+  const notRepo = async () => { throw new Error('fatal: not a git repository (or any of the parent directories): .git'); };
+  assert.equal(await git.locateOrKeep('C:\\r', { place: notRepo, exists: () => true }), null);
+});
+
+test('locateOrKeep, with real git: a repo, a repo with no commit yet, a plain folder under a German locale, a removed folder', async () => {
+  const dir = repo();
+  const empty = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-empty-')));
+  const plainDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-plain-')));
+  plain(empty, 'init', '-b', 'main');
+  const keep = { LANG: process.env.LANG, LC_ALL: process.env.LC_ALL, LANGUAGE: process.env.LANGUAGE };
+  try {
+    assert.deepEqual(await git.locateOrKeep(dir), await git.locate(dir));
+    assert.equal((await git.locateOrKeep(dir)).branch, 'main');
+    assert.equal(await git.locateOrKeep(empty), git.KEEP);    // no commit yet: ask again later, it can become a building
+    Object.assign(process.env, { LANG: 'de_DE.UTF-8', LC_ALL: 'de_DE.UTF-8', LANGUAGE: 'de' });
+    assert.equal(await git.locateOrKeep(plainDir), null);     // not a repository: git is asked for English
+    fs.rmSync(dir, { recursive: true, force: true });
+    assert.equal(await git.locateOrKeep(dir), null);          // the folder is gone
+  } finally {
+    for (const [k, v] of Object.entries(keep)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    for (const d of [dir, empty, plainDir]) fs.rmSync(d, { recursive: true, force: true });
+  }
+});
+
 test('relayout, with real git: a repo stays, a plain folder and a removed folder are dropped', async () => {
   const dir = repo();
   const plainDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-plain-')));
