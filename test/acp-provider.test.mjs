@@ -217,6 +217,40 @@ test('fs: an edit the user declined cannot come back through fs/write_text_file 
   } finally { await r.done(s); }
 });
 
+test('fs: the declined file is refused under another spelling of its path too', async () => {
+  const r = rig();
+  const s = await started(r, r.session());
+  try {
+    fs.mkdirSync(path.join(r.root, 'sub'));
+    const spellings = [path.join(r.root, 'sub', '..', 'a.txt')];
+    // Windows reads these as the same file: a trailing dot, the default data stream, another case.
+    if (process.platform === 'win32') spellings.push(path.join(r.root, 'a.txt.'), path.join(r.root, 'a.txt::$DATA'), path.join(r.root, 'A.TXT'));
+    r.steps(s, [{ ask: { toolCall: EDIT_CALL(r.root), options: OPTIONS } }, ...spellings.map((p) => ({ write: { path: p, content: 'sneaked in' } }))]);
+    await until(() => s.pending.length === 1, 'the edit request');
+    r.release(s.pending[0].id, { allow: false });
+    await r.idle(s);
+    assert.equal(r.replies(s).length, 1 + spellings.length);
+    r.replies(s).slice(1).forEach((x, i) => assert.match(x, /^write error: .*declined/i, spellings[i]));
+    assert.equal(fs.readFileSync(path.join(r.root, 'a.txt'), 'utf8'), 'one\ntwo\n');
+  } finally { await r.done(s); }
+});
+
+test('fs: after a declined edit that names no file, every write in that turn asks first', async () => {
+  const r = rig();
+  const s = await started(r, r.session());
+  try {
+    const vague = { toolCallId: 'v1', title: 'Apply the patch', kind: 'edit' };
+    r.steps(s, [{ ask: { toolCall: vague, options: OPTIONS } }, { write: { path: path.join(r.root, 'a.txt'), content: 'patched' } }]);
+    await until(() => s.pending.length === 1, 'the edit request');
+    r.release(s.pending[0].id, { allow: false });
+    await until(() => s.pending.length === 1 && r.replies(s).length === 1, 'the write to wait, though it is low risk');
+    assert.deepEqual([s.pending[0].tool, s.pending[0].risk], ['Write', 'low']);
+    r.release(s.pending[0].id, { allow: false });
+    await r.idle(s);
+    assert.equal(fs.readFileSync(path.join(r.root, 'a.txt'), 'utf8'), 'one\ntwo\n');
+  } finally { await r.done(s); }
+});
+
 test('fs: an approved edit is written once without a second question', async () => {
   const r = rig();
   const s = await started(r, r.session());
@@ -389,6 +423,16 @@ test('resume: an agent with loadSession can resume, Reopen loads the past sessio
   } finally { await r.done(s); }
 });
 
+test('learn: two at once start the agent once, and what it said is kept for a while', async () => {
+  const r = rig();
+  try {
+    await Promise.all([r.p.learn(), r.p.learn(), r.p.readiness()]);
+    await r.p.learn();
+    assert.equal(r.spawned.length, 1);
+    assert.equal(r.spawned[0].opts.cwd, os.tmpdir(), 'the probe runs in the temp folder, not in a session folder');
+  } finally { await r.done(); }
+});
+
 test('resume: an agent without loadSession cannot resume, so Reopen starts a fresh session', async () => {
   const r = rig();
   try {
@@ -432,6 +476,16 @@ test('no program: check is 409 before any worktree, open says why and ends, read
     const shim = rig({ kind: 'dsh', exe: () => { throw new Error('dsh is installed as a script (C:\\npm\\dsh.cmd). The office needs dsh.exe.'); } });
     assert.throws(() => shim.p.check({}), (e) => e.status === 409 && /needs dsh\.exe\. It found only C:\\npm\\dsh\.cmd/.test(e.message));
     await shim.done();
+  } finally { await r.done(); }
+});
+
+test('a spawn that throws: the session says why and ends, no ghost at the desk', async () => {
+  const r = rig({ spawn: () => { throw new Error('spawn EINVAL'); } });
+  const s = r.session();
+  try {
+    r.p.open(s, {});
+    await until(() => s.status === 'ended', 'the session to end');
+    assert.deepEqual(r.replies(s), ['Could not start Hermes Agent: spawn EINVAL']);
   } finally { await r.done(); }
 });
 

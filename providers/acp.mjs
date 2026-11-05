@@ -19,6 +19,7 @@
 // ACP reports no cost in the stable protocol, so the provider is paid with cost 'unknown' (owner decision Q22). The process
 // calls and the timers are injected, so tests drive a fake agent (test/fixtures/fake-acp.mjs). Nothing starts on import.
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn as realSpawn, execFile as realExecFile } from 'node:child_process';
@@ -70,6 +71,22 @@ function rpcError(code, message) { const e = new Error(message); e.code = code; 
 const REFUSED = -32000; // the office said no (a path outside the root, a declined call)
 
 const WIN = process.platform === 'win32';
+/**
+ * One key per file, whatever the spelling: the file Windows would open. a.txt, A.TXT, a.txt., a.txt::$DATA, sub\..\a.txt,
+ * an 8.3 short name and a path through a junction all give one key. The declined files of a turn are kept by it, so a
+ * declined edit cannot come back under another name.
+ */
+export function fileKey(root, p) {
+  let abs = path.resolve(String(root || ''), String(p ?? ''));
+  if (WIN) {
+    const [head, ...rest] = abs.split(/[\\/]+/);
+    abs = [head, ...rest.map((part) => part.replace(/:.*$/, '').replace(/[. ]+$/, ''))].join('\\');
+  }
+  try { abs = fs.realpathSync.native(abs); } catch {
+    try { abs = path.join(fs.realpathSync.native(path.dirname(abs)), path.basename(abs)); } catch { /* a new folder: the text form */ }
+  }
+  return WIN ? abs.toLowerCase() : abs;
+}
 const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,100}$/;
 // One argument as the shell reads it: cmd.exe on Windows (local-tools runs cmd /d /s /c), sh elsewhere.
 function quoteArg(a) {
@@ -188,6 +205,34 @@ export function createAcp(deps) {
     const caps = init && typeof init.agentCapabilities === 'object' && init.agentCapabilities ? init.agentCapabilities : {};
     learned = { caps, version: String(init?.agentInfo?.version || '') || null, at: now(), ok: true, why: '' };
   }
+  // readiness and learn(): one handshake with the agent in a temp folder, then it stops. A failure is kept like an answer.
+  let probing = null;
+  async function probe() {
+    let file;
+    try { file = program(); } catch (e) { learned = { caps: null, version: null, at: now(), ok: false, why: e.message }; return; }
+    let child;
+    try { child = spawn(file, spec.args, { cwd: probeDir, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...env } }); } catch (e) {
+      learned = { caps: null, version: null, at: now(), ok: false, why: textOf(e) };
+      return;
+    }
+    let err = '';
+    child.stderr?.setEncoding?.('utf8');
+    child.stderr?.on('data', (d) => { err = (err + d).slice(-600); });
+    const rpc = channel(child, { onRequest: () => { throw rpcError(-32601, 'Method not found'); }, onNotify: () => {} });
+    const gone = new Promise((_r, reject) => {
+      child.on('error', (e) => reject(e));
+      child.on('exit', (code) => reject(new Error(clip(err.trim(), 300) || `it stopped with exit code ${code}`)));
+    });
+    try {
+      remember(await within(Promise.race([handshake(rpc), gone]), PROBE_MS, 'no answer in time', setTimer, clearTimer));
+    } catch (e) {
+      learned = { caps: null, version: null, at: now(), ok: false, why: textOf(e) };
+    } finally {
+      gone.catch(() => {});
+      rpc.fail('probe over');
+      if (child.pid) killTree(child.pid, execFile);
+    }
+  }
   const handshake = (rpc) => rpc.request('initialize', {
     protocolVersion: PROTOCOL_VERSION,
     clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: true },
@@ -262,9 +307,9 @@ export function createAcp(deps) {
     // The agent finished a call the user has not answered yet: it did not wait (Hermes stops after its own time).
     for (const id of [...c.held]) giveUp(s, st, id, `${label} moved on without your answer.`);
     if (u.status === 'completed' && !c.asked && !c.served) {
-      if (c.kind === 'execute') events.feed(s, 'wait', `${label} ran a command without asking the office: ${clip(c.tool_input.command || c.title, 100)}`);
+      if (c.kind === 'execute') emit(st, () => events.feed(s, 'wait', `${label} ran a command without asking the office: ${clip(c.tool_input.command || c.title, 100)}`));
       else if (EDIT_KINDS.has(c.kind) && !(c.tool_input.file_path && st.wrote.has(norm(st, c.tool_input.file_path)))) {
-        events.feed(s, 'wait', `${label} changed ${path.basename(String(c.tool_input.file_path || c.title))} without asking the office.`);
+        emit(st, () => events.feed(s, 'wait', `${label} changed ${path.basename(String(c.tool_input.file_path || c.title))} without asking the office.`));
       }
     }
     const said = (Array.isArray(u.content) ? u.content : []).map((x) => (x?.type === 'content' && x.content?.type === 'text' ? x.content.text : '')).find(Boolean);
@@ -276,7 +321,7 @@ export function createAcp(deps) {
   // ----- approvals -----
   const CANCELLED = { outcome: { outcome: 'cancelled' } };
   const pick = (o) => ({ outcome: { outcome: 'selected', optionId: o.optionId } });
-  const norm = (st, p) => { const a = path.resolve(st.root, String(p)); return process.platform === 'win32' ? a.toLowerCase() : a; };
+  const norm = (st, p) => fileKey(st.root, p);
   // The agent no longer waits for request id: the office frees the hold (answer then gets {}), and the feed says why.
   function giveUp(s, st, id, why) {
     const ask = st.asks.get(id);
@@ -311,7 +356,12 @@ export function createAcp(deps) {
       const id = hold(s, st, c.tool_name, c.tool_input, (v) => {
         c.held.delete(id);
         if (v === 'allow' && once) { grant(st, c); resolve(pick(once)); } else if (v === 'cancel' || !no) resolve(CANCELLED);
-        else { if (EDIT_KINDS.has(c.kind) && c.tool_input.file_path) st.denied.add(norm(st, c.tool_input.file_path)); resolve(pick(no)); }
+        else {
+          // A declined edit: that file is refused for the rest of the turn. One that names no file makes every write ask.
+          if (EDIT_KINDS.has(c.kind) && c.tool_input.file_path) st.denied.add(norm(st, c.tool_input.file_path));
+          else if (EDIT_KINDS.has(c.kind)) st.deniedVague = true;
+          resolve(pick(no));
+        }
       });
       if (!id) return;
       c.held.add(id);
@@ -331,7 +381,8 @@ export function createAcp(deps) {
   // A call the office runs for the agent is refused when its path is outside the root (before anyone is asked), runs at once
   // when riskOf rates it low or the user just approved that same call, and is held otherwise.
   function allowed(s, st, toolName, input) {
-    if (riskOf(toolName, input, st.root) === 'low') return Promise.resolve(true);
+    const strict = toolName === 'Write' && st.deniedVague; // the user declined an edit of a file the office could not name
+    if (!strict && riskOf(toolName, input, st.root) === 'low') return Promise.resolve(true);
     const key = toolName === 'Bash' ? 'Bash\n' + input.command : 'Write\n' + norm(st, input.file_path);
     if ((toolName === 'Bash' || toolName === 'Write') && st.grants.delete(key)) return Promise.resolve(true);
     if (st.closed || st.interrupted) return Promise.resolve(false);
@@ -399,6 +450,7 @@ export function createAcp(deps) {
   };
 
   function onUpdate(s, st, params) {
+    if (st.closed) return; // a line that comes in while the agent stops: nothing after close (seam timing rule 2)
     if (params.sessionId !== st.sid || st.loading) return; // a loaded session replays its past: the office has those replies
     const u = params.update || {};
     switch (u.sessionUpdate) {
@@ -454,7 +506,7 @@ export function createAcp(deps) {
     st.busy = false;
     st.endCancel = null;
     cancelAsks(st); // an agent that ended its turn waits for nothing
-    st.grants.clear(); st.denied.clear(); st.wrote.clear();
+    st.grants.clear(); st.denied.clear(); st.wrote.clear(); st.deniedVague = false;
     st.carry.push(...st.notes.splice(0)); // the inbox gave them up already: they go with the next prompt
     if (st.closed) return;
     if (st.interrupted) events.stream(s, { type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Stopped' });
@@ -467,6 +519,7 @@ export function createAcp(deps) {
 
   // ----- requests from the agent -----
   function onRequest(s, st, method, params) {
+    if (st.closed) throw rpcError(REFUSED, 'The session closed.');
     if (params.sessionId !== st.sid) throw rpcError(-32602, 'Unknown session.');
     flushText(s, st); // what the agent said before a request shows with it (a request may wait for the user)
     if (method === 'session/request_permission') return onPermission(s, st, params);
@@ -549,29 +602,12 @@ export function createAcp(deps) {
       return { ready: true, version: learned.version || 'unknown', needs };
     },
 
-    // One handshake with the agent in a temp folder, then it stops. What it says is kept for a minute.
-    async learn() {
-      if (learned.at && now() - learned.at < PROBE_TTL_MS) return;
-      let file;
-      try { file = program(); } catch (e) { learned = { caps: null, version: null, at: now(), ok: false, why: e.message }; return; }
-      const child = spawn(file, spec.args, { cwd: probeDir, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...env } });
-      let err = '';
-      child.stderr?.setEncoding?.('utf8');
-      child.stderr?.on('data', (d) => { err = (err + d).slice(-600); });
-      const rpc = channel(child, { onRequest: () => { throw rpcError(-32601, 'Method not found'); }, onNotify: () => {} });
-      const gone = new Promise((_r, reject) => {
-        child.on('error', (e) => reject(e));
-        child.on('exit', (code) => reject(new Error(clip(err.trim(), 300) || `it stopped with exit code ${code}`)));
-      });
-      try {
-        remember(await within(Promise.race([handshake(rpc), gone]), PROBE_MS, 'no answer in time', setTimer, clearTimer));
-      } catch (e) {
-        learned = { caps: null, version: null, at: now(), ok: false, why: textOf(e) };
-      } finally {
-        gone.catch(() => {});
-        rpc.fail('probe over');
-        if (child.pid) killTree(child.pid, execFile);
-      }
+    // One handshake with the agent in a temp folder, then it stops. What it says is kept for a minute, and calls that
+    // overlap share one probe.
+    learn() {
+      if (learned.at && now() - learned.at < PROBE_TTL_MS) return Promise.resolve();
+      if (!probing) probing = probe().finally(() => { probing = null; });
+      return probing;
     },
 
     async models() { return []; }, // the agent picks its model in its own settings
@@ -582,14 +618,16 @@ export function createAcp(deps) {
       if (o.model) throw providerError(400, `${label} picks its model in its own settings. Leave the model empty.`);
       if (o.permissionMode && o.permissionMode !== 'default') throw providerError(400, `${label} runs with the office's approvals only. Leave the permission mode empty.`);
     },
-
     open(s, o = {}) {
-      let file;
-      try { file = program(); } catch (e) {
-        setImmediate(() => { events.reply(s, `Could not start ${label}: ${e.message}`); events.end(s, 'could not start'); });
+      let file, child;
+      // A missing program or a spawn that throws: the session says why and ends, on a later tick (seam timing rule 1).
+      try {
+        file = program();
+        child = spawn(file, spec.args, { cwd: s.cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...env, OFFICE_ID: s.officeId } });
+      } catch (e) {
+        setImmediate(() => { events.reply(s, `Could not start ${label}: ${textOf(e)}`); events.end(s, 'could not start'); });
         return;
       }
-      const child = spawn(file, spec.args, { cwd: s.cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: { ...env, OFFICE_ID: s.officeId } });
       s.pid = child.pid;
       const root = s.worktree?.root || s.startDir || s.cwd;
       const st = {
@@ -598,7 +636,8 @@ export function createAcp(deps) {
         calls: new Map(),        // toolCallId -> what the office knows of the call
         asks: new Map(),         // request id -> a held request: the agent's own, or a file or command the office serves
         grants: new Set(),       // this turn: a command or a file write the user approved, served once without a second prompt
-        denied: new Set(),       // this turn: files whose edit the user declined; a write to them is refused at once
+        denied: new Set(),       // this turn: files whose edit the user declined (fileKey); a write to them is refused at once
+        deniedVague: false,      // this turn: the user declined an edit that named no file, so every write asks first
         wrote: new Set(),        // this turn: files the office wrote for the agent
         terminals: new Map(),    // terminalId -> a running or finished command (local-tools start())
         terminalIds: new Set(),  // every terminal id the office gave out
