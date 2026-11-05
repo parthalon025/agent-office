@@ -88,7 +88,7 @@ export const supervisionOf = (p) => (isGated(p) ? null : typeof p.supervision ==
 export const costOf = (p) => (p && p.cost === 'unknown' ? 'unknown' : 'reported');
 /** A copy of the feature names the provider declares now (#72). A getter is read at this call: an ACP agent says some at its handshake. */
 export const featuresOf = (p) => (p && Array.isArray(p.features) ? [...p.features] : []);
-const FEATURE_RE =/^[a-z][a-z0-9-]{0,30}$/;
+const FEATURE_RE = /^[a-z][a-z0-9-]{0,30}$/;
 /**
  * The spend limit of a new session in dollars, or null for no limit.
  * requested: what the caller asked for. Missing (undefined, null, '' or not a number) means the default; 0 or less means the user

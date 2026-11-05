@@ -35,7 +35,7 @@ export const PROTOCOL_VERSION = 1;
 // One entry per agent. program: the name resolveExe finds on PATH. args: what starts its ACP mode on stdio.
 // askTimeoutMs: how long the agent waits for an approval before it moves on by itself (the office's hold is longer, so the
 // feed says when the agent gave up first). features: what the agent has beyond the seam, for the page (#72); 'resume' and
-// 'images' come from the handshake, and so does 'fork' (sessionCapabilities.fork). skillsHome: where the agent keeps its skills, the
+// 'images' come from the handshake, and so does 'fork' (sessionCapabilities.fork): no agent declares it here, so the Fork button never shows for a build that has no session/fork. skillsHome: where the agent keeps its skills, the
 // variable that moves it and the folder under the user's home (the office lists them, #72; only with the 'skills' feature). pin: the version the office was tested against (null: not tested with a real one yet).
 // gated (ADR 0001): true only when the agent asks the office before every tool call that is not low risk; an agent where only
 // some calls ask is ungated, with its supervision label. Neither agent has been run against the office yet (pin: null).
@@ -47,14 +47,14 @@ export const AGENTS = {
     // a write asked, a touch ran without asking). Its default mode asks before edits.
     gated: false, supervision: 'Partly supervised: file edits ask, commands do not',
     askTimeoutMs: 60_000, // Hermes issue #63302: a fixed 60 s timeout on edit approval (command approval has its own setting)
-    features: ['skills', 'memory', 'fork'], skillsHome: { env: 'HERMES_HOME', dir: '.hermes' }, pin: null,
+    features: ['skills', 'memory'], skillsHome: { env: 'HERMES_HOME', dir: '.hermes' }, pin: null,
     needs: ['Install Hermes Agent so that hermes.exe is on the PATH, then run hermes acp --check in a terminal.'],
   },
   dsh: {
     label: 'DeepSeek Harness', program: 'dsh', args: ['--profile', 'acp'],
     gated: true, // research (2026-11-04): it sends its tool approvals over ACP and fails closed when no client answers
     askTimeoutMs: null,
-    // dsh-acp lists forks, deletion and transcript replay as unsupported, so no fork here.
+    // dsh-acp lists forks, deletion and transcript replay as unsupported; fork would show only if its handshake said it.
     features: ['reason', 'teams', 'schedules'], pin: null, // a developer preview: pin the version tested on the owner's PC
     needs: ['Install DeepSeek Harness so that dsh.exe is on the PATH, and set DEEPSEEK_API_KEY.'],
   },
@@ -680,8 +680,10 @@ export function createAcp(deps) {
       const f = [];
       if (learned.caps?.loadSession === true) f.push('resume');
       if (learned.caps?.promptCapabilities?.image === true) f.push('images');
-      if (learned.caps?.sessionCapabilities?.fork && !spec.features.includes('fork')) f.push('fork');
-      return [...f, ...spec.features];
+      f.push(...spec.features);
+      // Only what the handshake said: a build without session/fork must not offer Fork (the worktree would be made for nothing).
+      if (learned.caps?.sessionCapabilities?.fork && !f.includes('fork')) f.push('fork');
+      return f;
     },
     // Where this agent keeps the skills it writes (#72), or null for an agent kind without the 'skills' feature.
     skillsDir() {

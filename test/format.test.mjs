@@ -164,3 +164,31 @@ test('exportFileName: a safe file name from the session name and the start time'
   assert.equal(F.exportFileName({ name: 'My: bot/1?', startedAt: Date.UTC(2026, 10, 4, 14, 0, 0) }, 'utc'), 'my-bot-1-2026-11-04-1400.md');
   assert.equal(F.exportFileName({ name: '', startedAt: Date.UTC(2026, 10, 4, 9, 5, 0) }, 'utc'), 'session-2026-11-04-0905.md');
 });
+
+test('redactSecrets: keys, tokens and credential flags in a command become the mask; plain text stays', () => {
+  const M = F.SECRET_MASK;
+  assert.equal(F.redactSecrets('git status'), 'git status');
+  assert.equal(F.redactSecrets(''), '');
+  assert.equal(F.redactSecrets(null), '');
+  assert.equal(F.redactSecrets('curl -H "Authorization: Bearer abc123def456ghi789" https://x'), `curl -H "Authorization: Bearer ${M}" https://x`);
+  assert.equal(F.redactSecrets('curl -H x-office-token: 0123456789abcdef http://127.0.0.1'), `curl -H x-office-token: ${M} http://127.0.0.1`);
+  assert.equal(F.redactSecrets('deploy --token s3cr3tvalue --force'), `deploy --token ${M} --force`);
+  assert.equal(F.redactSecrets('PASSWORD=hunter2 run.sh'), `PASSWORD=${M} run.sh`);
+  assert.equal(F.redactSecrets('echo sk-abcdefghijklmnopqrstuvwxyz0123'), `echo ${M}`);
+  assert.equal(F.redactSecrets('echo AKIAABCDEFGHIJKLMNOP and ghp_' + 'a'.repeat(36)), `echo ${M} and ${M}`);
+  assert.equal(F.redactSecrets('cat -----BEGIN RSA PRIVATE KEY-----'), `cat ${M}`);
+});
+
+test('exportText: a secret in a call is masked in the Markdown', () => {
+  const md = F.exportText({ name: 'x', cwd: '', startedAt: 0, turns: 1, cost: 0, calls: [{ id: 'a', name: 'Bash', detail: 'deploy --token s3cr3tvalue', t: 1000, ms: 5, ok: false, err: 'bad token sk-abcdefghijklmnopqrstuvwxyz0123' }], replies: [] }, { zone: 'utc' });
+  assert.ok(!md.includes('s3cr3tvalue') && !md.includes('sk-abcdef'), md);
+  assert.ok(md.includes('deploy --token ' + F.SECRET_MASK), md);
+});
+
+test('redactSecrets and the notes scan agree on the key shapes', async () => {
+  const { scanNote } = await import('../notes.mjs');
+  for (const k of ['sk-abcdefghijklmnopqrstuvwxyz0123', 'AKIAABCDEFGHIJKLMNOP', 'ghp_' + 'a'.repeat(36), '-----BEGIN RSA PRIVATE KEY-----']) {
+    assert.ok(scanNote(`value ${k}`), `the notes scan misses ${k}`);
+    assert.equal(F.redactSecrets(`value ${k}`), `value ${F.SECRET_MASK}`, `redactSecrets misses ${k}`);
+  }
+});

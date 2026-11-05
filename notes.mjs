@@ -22,8 +22,10 @@ export class NotesError extends Error {
 
 // Prompt-injection scan of what an agent writes to the board (#72). The next agent reads the board as context, so a line there can act
 // as an instruction. [pattern, why]. A match refuses the write (422): the agent rewrites it as a plain fact. The user is not scanned.
-// Zero-width, direction-control and byte-order characters (U+200B-200F, 202A-202E, 2060-2064, 2066-2069, FEFF): text a reader cannot see.
-const HIDDEN = new RegExp('[' + [[0x200b, 0x200f], [0x202a, 0x202e], [0x2060, 0x2064], [0x2066, 0x2069], [0xfeff, 0xfeff]]
+// Zero-width, direction-control and byte-order characters (U+200B, U+200E-200F, 202A-202E, 2060-2064, 2066-2069, FEFF): text a reader
+// cannot see. U+200C and U+200D are not on the list: an emoji sequence (a family, a flag with a modifier) needs the joiner. They are
+// removed from the copy that is scanned for phrases, so a joiner inside a word does not hide it.
+const HIDDEN = new RegExp('[' + [[0x200b, 0x200b], [0x200e, 0x200f], [0x202a, 0x202e], [0x2060, 0x2064], [0x2066, 0x2069], [0xfeff, 0xfeff]]
   .map(([a, b]) => String.fromCharCode(a) + '-' + String.fromCharCode(b)).join('') + ']');
 const IGNORE = 'it tells the reader to ignore its instructions';
 const SCAN = [
@@ -41,12 +43,14 @@ const SCAN = [
 /** Why an agent's note text is refused, or null when it is a plain note. */
 export function scanNote(text) {
   const t = String(text ?? '');
-  for (const [re, why] of SCAN) if (re.test(t)) return why;
+  // The text as written, and a copy with joiners gone and every whitespace run as one space: a line break must not split a phrase.
+  const flat = t.replace(/[\u200c\u200d]/g, '').replace(/\s+/g, ' ');
+  for (const [re, why] of SCAN) if (re.test(t) || re.test(flat)) return why;
   return null;
 }
-// What an agent wants to write: the cap, then the scan. Throws a NotesError.
-function checkAgentWrite(text) {
-  if (text.length > AGENT_WRITE_MAX) throw new NotesError(413, `An agent can write ${AGENT_WRITE_MAX} characters at a time to the notes board. This text has ${text.length}. Write the short facts only.`);
+// What an agent wants to write: the cap (an append only; a rewrite is held by the board cap), then the scan. Throws a NotesError.
+function checkAgentWrite(text, capped = true) {
+  if (capped && text.length > AGENT_WRITE_MAX) throw new NotesError(413, `An agent can write ${AGENT_WRITE_MAX} characters at a time to the notes board. This text has ${text.length}. Write the short facts only.`);
   const why = scanNote(text);
   if (why) throw new NotesError(422, `The notes board refused this text: ${why}. The next agent reads the board as context. Write a plain fact instead.`);
 }
@@ -118,6 +122,10 @@ function union(server, mine) {
 export function cleanPin(text) {
   const t = String(text).replace(/\s+/g, ' ').replace(/[\u0000-\u001f\u007f]/g, '').trim();
   if (t.length > PIN_MAX) throw new NotesError(413, `A pin can have ${PIN_MAX} characters. This one has ${t.length}.`);
+  // Every other agent in the room reads the pin (office_room), so it gets the same scan as a note. It sees the text as given, so a
+  // line break in the middle of a phrase is caught by the scan's flat pass.
+  const why = scanNote(String(text));
+  if (why) throw new NotesError(422, `The blackboard refused this pin: ${why}. Every agent in the room reads it as context. Write a plain fact instead.`);
   return t;
 }
 
@@ -198,7 +206,7 @@ export function createNotes({ notes, pins, now = Date.now }) {
     /** An agent replaces all notes. An empty text clears the board. Returns the old text. */
     replace(key, name, text) {
       const next = norm(text);
-      checkAgentWrite(next);
+      checkAgentWrite(next, false); // a rewrite may fill the board; the board cap below is its limit
       checkCap(next, 'The notes board');
       const old = textOf(key);
       write(key, next, name);
@@ -210,7 +218,7 @@ export function createNotes({ notes, pins, now = Date.now }) {
 
     /** Sets or clears the pin. One line: whitespace runs become one space, control characters go. Returns 'set', 'cleared' or 'none'. */
     pin(key, name, text) {
-      const t = cleanPin(text);
+      const t = cleanPin(text); // the length check and the scan: a refused pin changes nothing
       if (t) { pins[key] = { text: t, by: name, at: now() }; return 'set'; }
       if (pins[key]) { delete pins[key]; return 'cleared'; }
       return 'none';

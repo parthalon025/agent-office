@@ -14,6 +14,9 @@
      maskSecret(text, secret) -> the text with every copy of the secret replaced by SECRET_MASK (a fixed length, so the
                         length of the secret does not show). The secret is text, not a pattern. Used by the Attach
                         sessions dialog to hide the agent token until the user clicks Show.
+     redactSecrets(text) -> the text with keys, bearer tokens and token, password or secret values replaced by SECRET_MASK. By
+                        pattern, for commands and errors that are kept or exported (history.json, Export). notes.mjs keeps
+                        its own list of the key shapes it refuses; test/format.test.mjs holds both to the same samples.
      cleanupNote(result) -> [tone, title, text] for the toast after a floor clean-up ({ deleted, skipped } from the server).
      tokens(n)       -> '999', '1.2k', '3.4M' (token counts, one form on every surface)
      clock(t, zone?) -> 'HH:MM:SS' local time (zone 'utc' for tests); a dash when t is not a time
@@ -70,6 +73,15 @@
     var t = String(text == null ? '' : text), k = String(secret == null ? '' : secret);
     return k ? t.split(k).join(SECRET_MASK) : t;
   }
+  // Key shapes (private key header, sk-, AWS, GitHub), a bearer token, and the value after a token, password, secret or API key
+  // flag, header or variable. A command in a session can hold any of them; the record of calls must not keep them.
+  var SECRET_SHAPES = /-----BEGIN [A-Z ]*PRIVATE KEY-----|\bsk-[A-Za-z0-9_-]{20,}|\bAKIA[0-9A-Z]{16}\b|\bgh[pousr]_[A-Za-z0-9]{30,}/g;
+  var SECRET_BEARER = /\b(Bearer\s+)[A-Za-z0-9._~+\/=-]{8,}/gi;
+  var SECRET_NAMED = /(--(?:token|password|passwd|secret|api-?key)[= ]|\b[\w-]*(?:token|password|passwd|secret|api[_-]?key)\s*[:=]\s*)(["']?)[^\s"']+/gi;
+  function redactSecrets(text) {
+    return String(text == null ? '' : text).replace(SECRET_SHAPES, SECRET_MASK).replace(SECRET_BEARER, '$1' + SECRET_MASK)
+      .replace(SECRET_NAMED, function (m, a, q) { return a + q + SECRET_MASK; });
+  }
   // ----- token counts, the call timeline and the export of a session (#72) -----
   function tokens(n) { n = +n || 0; return n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k' : String(Math.round(n)); }
   function two(n) { return (n < 10 ? '0' : '') + n; }
@@ -111,7 +123,8 @@
     out.push('');
     if (s.prompt) out.push('## First instruction', '', s.prompt, '');
     out.push('## Timeline', '');
-    var rows = timeline(s.calls, { start: s.startedAt, zone: o.zone });
+    var calls = (s.calls || []).map(function (c) { return Object.assign({}, c, { detail: redactSecrets(c.detail), err: c.err ? redactSecrets(c.err) : c.err }); });
+    var rows = timeline(calls, { start: s.startedAt, zone: o.zone });
     if (!rows.length) out.push('No tool calls were recorded.', '');
     else {
       out.push('| Time | Call | Result | Duration |', '| --- | --- | --- | --- |');
@@ -129,5 +142,5 @@
     var p = parts(s.startedAt || 0, zone);
     return base + '-' + p.y + '-' + two(p.mo) + '-' + two(p.d) + '-' + two(p.h) + two(p.mi) + '.md';
   }
-  root.OfficeFormat = { tokens: tokens, clock: clock, duration: duration, timeline: timeline, exportText: exportText, exportFileName: exportFileName, money: money, cost: cost, costLabel: costLabel, plural: plural, folderName: folderName, shortPath: shortPath, hintPill: hintPill, cleanupNote: cleanupNote, maskSecret: maskSecret, SECRET_MASK: SECRET_MASK };
+  root.OfficeFormat = { tokens: tokens, clock: clock, duration: duration, timeline: timeline, exportText: exportText, exportFileName: exportFileName, money: money, cost: cost, costLabel: costLabel, plural: plural, folderName: folderName, shortPath: shortPath, hintPill: hintPill, cleanupNote: cleanupNote, maskSecret: maskSecret, redactSecrets: redactSecrets, SECRET_MASK: SECRET_MASK };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

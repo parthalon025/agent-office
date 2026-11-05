@@ -549,7 +549,7 @@ test('resume: an agent with loadSession can resume, Reopen loads the past sessio
     assert.equal(r.p.canResume, false, 'unknown before the agent said it');
     await r.p.learn();
     assert.equal(r.p.canResume, true);
-    assert.deepEqual(r.p.features, ['resume', 'skills', 'memory', 'fork']);
+    assert.deepEqual(r.p.features, ['resume', 'skills', 'memory']);
     assert.deepEqual(await r.p.readiness(), { ready: true, version: '0.21.5', needs: [] });
     const plan = createRegistry([r.p]).reopenPlan({ uid: 'old', sid: 'old-sess', provider: 'hermes', name: 'bot', cwd: r.root, replies: [] });
     assert.deepEqual([plan.fresh, plan.opts.resume], [false, 'old-sess']);
@@ -593,7 +593,7 @@ test('resume: an agent without loadSession cannot resume, so Reopen starts a fre
   try {
     await r.p.learn();
     assert.equal(r.p.canResume, false);
-    assert.deepEqual(r.p.features, ['skills', 'memory', 'fork']);
+    assert.deepEqual(r.p.features, ['skills', 'memory']);
     const plan = createRegistry([r.p]).reopenPlan({ uid: 'old', sid: 'old-sess', provider: 'hermes', name: 'bot', cwd: r.root, replies: [] });
     assert.equal(plan.fresh, true);
   } finally { await r.done(); }
@@ -809,4 +809,18 @@ test('skills: Hermes keeps its skills in HERMES_HOME/skills, else in ~/.hermes/s
     assert.equal(b.p.skillsDir(), path.join(home, '.hermes', 'skills'));
     assert.equal(d.p.skillsDir(), null);
   } finally { fs.rmSync(a.base, { recursive: true, force: true }); fs.rmSync(b.base, { recursive: true, force: true }); fs.rmSync(d.base, { recursive: true, force: true }); }
+});
+
+test('fork: Hermes declares fork only when its handshake says session/fork, so a build without it never shows Fork', async () => {
+  const none = rig();
+  try {
+    assert.ok(!none.p.features.includes('fork'), 'before the handshake');
+    await none.p.learn();
+    assert.ok(!none.p.features.includes('fork'), 'a build without session/fork');
+  } finally { await none.done(); }
+  const some = rig({ fake: { FAKE_ACP_FORK: '1' } });
+  try {
+    await some.p.learn();
+    assert.deepEqual(some.p.features, ['skills', 'memory', 'fork']);
+  } finally { await some.done(); }
 });
