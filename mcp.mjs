@@ -75,7 +75,11 @@ const ROOM_FIELDS = ['notes_append', 'notes_replace', 'pin'];
 
 function config() {
   if (!PORT) return null;
-  try { return JSON.parse(fs.readFileSync(officeFiles(here, PORT).token, 'utf8')); } catch { return null; }
+  let cfg;
+  try { cfg = JSON.parse(fs.readFileSync(officeFiles(here, PORT).token, 'utf8')); } catch { return null; }
+  // With a port argument, the token file must name that port.
+  if (process.argv[2] !== undefined && process.argv[2] !== '' && cfg.port !== PORT) throw new Error(`The token file of port ${PORT} names port ${cfg.port}. Start the office on port ${PORT} again.`);
+  return cfg;
 }
 
 async function office(route, body, ms) {

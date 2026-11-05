@@ -103,6 +103,15 @@ test('hook.mjs and mcp.mjs read the token file of the port in their first argume
       assert.match(m.content[0].text, /not running/, args[0]);
     }
     assert.equal(plain.got.length + other.got.length, 4, 'no request for a bad port');
+
+    // A token file that names another port than the argument is not this office's: the hook is silent, the MCP tool fails clearly.
+    fs.writeFileSync(officeFiles(tmp, 4391).token, JSON.stringify({ token: 'wrong-token', port: other.port }));
+    const hm = await run('hook.mjs', ['4391'], payload);
+    assert.deepEqual([hm.code, hm.out], [0, '']);
+    const mm = JSON.parse((await run('mcp.mjs', ['4391'], inbox)).out).result;
+    assert.equal(mm.isError, true);
+    assert.match(mm.content[0].text, /names port/);
+    assert.equal(plain.got.length + other.got.length, 4, 'no request for a mismatched token file');
   } finally {
     await plain.close();
     await other.close();
@@ -338,4 +347,20 @@ test('an office on another port keeps the token of an older .office-token that n
     await stopOffice(o);
     fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   }
+});
+
+test('smoke.mjs takes a port like probe.mjs and stops before any session', { timeout: 30000 }, async () => {
+  const run = (args) => new Promise((resolve, reject) => {
+    const c = spawn(process.execPath, [path.join(ROOT, 'test', 'smoke.mjs'), ...args], { cwd: ROOT, env: cleanEnv(), windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    let err = '';
+    c.stderr.on('data', (d) => { err += d; });
+    c.on('error', reject);
+    c.on('exit', (code) => resolve({ code, err }));
+  });
+  const bad = await run(['x']);
+  assert.equal(bad.code, 1);
+  assert.match(bad.err, /is not a port/);
+  const none = await run(['1']);
+  assert.equal(none.code, 1);
+  assert.match(none.err, /port 1 is not running/);
 });

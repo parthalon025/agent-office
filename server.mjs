@@ -60,9 +60,8 @@ const readToken = (file, port) => {
 // Before #100 an office on another port kept its token in .office-token too. When that file still names this port, its
 // token is this office's, and the settings files that office made carry it: keep it, so those settings keep working.
 // Only the token: state.json and history.json may belong to the office on the default port (its schedules, its notes).
-const AGENT_TOKEN = readToken(TOKEN_FILE)
-  || (PORT !== DEFAULT_PORT && readToken(officeFiles(ROOT).token, PORT))
-  || auth.newAgentToken();
+const OLD_PLAIN_TOKEN = !readToken(TOKEN_FILE) && PORT !== DEFAULT_PORT ? readToken(officeFiles(ROOT).token, PORT) : null;
+const AGENT_TOKEN = readToken(TOKEN_FILE) || OLD_PLAIN_TOKEN || auth.newAgentToken();
 const PAGE_TOKEN = auth.newPageToken();
 const PAGE_FILE = auth.pageFile(process.env, PORT);
 const launchCodes = auth.createLaunchCodes();
@@ -1259,6 +1258,7 @@ server.listen(PORT, HOST, () => {
     writeSecret(PAGE_FILE, JSON.stringify({ token: PAGE_TOKEN, port: PORT }));
   } catch (e) { console.warn(`Could not save the page token for npm run probe and a second npm start: ${e.message}`); }
   const link = auth.launchUrl(PORT, launchCodes.mint());
+  if (OLD_PLAIN_TOKEN) console.log(`Port ${PORT} reuses the agent token of the old .office-token, so settings made before this version keep working. This office keeps its own files from now on.`);
   if (BRANCH_PORT) console.log(`Branch "${BRANCH_PORT.name}" uses port ${PORT}.`);
   console.log(`Agent Office is open: ${link}\nThe link works once, for 5 minutes. A reload keeps working. For a new link, run npm start again.`);
   console.log(`Hooks: ${hooksMode} (Claude Code ${CLAUDE_VERSION}). For outside sessions: claude --settings "${activeHooksFile()}" --mcp-config "${MCP_FILE}"`);

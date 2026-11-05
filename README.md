@@ -218,7 +218,7 @@ The office knows three kinds of session. A session **in the office** runs `claud
 
 ```
 npm run probe   # HTTP hooks on this Claude Code version (one tiny call)
-npm run smoke   # opens real Haiku sessions in a throwaway repo (a few cents); the office must be running
+npm run smoke   # opens real Haiku sessions in a throwaway repo (a few cents); the office must be running; npm run smoke -- <port> for an office on another port
 python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/wheel-gate.js public/vocab.js public/scene-host.js public/building.js public/format.js public/toasts.js public/wire.js components/bundle.css components/bundle.js kit/page.html
 ```
 

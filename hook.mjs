@@ -23,6 +23,8 @@ const port = portArg(process.argv[2]);
 if (!port) process.exit(0);
 let cfg;
 try { cfg = JSON.parse(fs.readFileSync(officeFiles(here, port).token, 'utf8')); } catch { process.exit(0); }
+// With a port argument, the token file must name that port. A file that names another port is not this office's: say nothing.
+if (process.argv[2] !== undefined && process.argv[2] !== '' && cfg.port !== port) process.exit(0);
 
 // Same trimmed fields as HTTP hooks (payload.mjs). The server's PowerShell helper walks up from
 // hook_ppid to find the claude process.

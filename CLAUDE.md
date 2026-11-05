@@ -20,7 +20,7 @@ Read `DS-README.md`, `Recipes.md` and `Reference.md` before you change the UI, a
 npm start            # server on 127.0.0.1:4317; prints and opens a one-time launch link (OFFICE_OPEN=0: print only). Again while it runs: a new link
 npm run start:branch # server on the port of this checkout's branch (4330-4399); OFFICE_OPEN=0, so it only prints the link
 npm run probe        # prove HTTP hooks on this Claude Code version (one tiny call); npm run probe -- <port> for an office on another port
-npm run smoke        # end-to-end test with real Haiku sessions, a few cents; needs the office running
+npm run smoke        # end-to-end test with real Haiku sessions, a few cents; needs the office running; npm run smoke -- <port> for an office on another port
 ```
 
 Stop the server by the pid that owns port 4317 (`netstat -ano | grep :4317`, then `taskkill //PID <pid> //F`). Never kill by image name: that would kill other Claude Code sessions.
