@@ -25,7 +25,9 @@ import { mcpAddArgs, mcpRemoveArgs, pluginArgs } from './extensions.mjs';
 import * as auth from './auth.mjs';
 import './public/format.js'; // money, plurals and short paths, shared with the page (globalThis.OfficeFormat)
 import './public/vocab.js'; // session vocabulary, shared with the page (globalThis.OfficeVocab)
+import './public/wire.js'; // the /events wire format: lean snapshot and patches, shared with the page (globalThis.OfficeWire)
 const V = globalThis.OfficeVocab;
+const W = globalThis.OfficeWire;
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
@@ -996,25 +998,39 @@ function readPlan() {
 }
 setInterval(readPlan, 15000).unref();
 
-const snapshot = () => ({
-  sessions: [...sessions.values()].map(({ ...s }) => ({ ...s, place: s.placed ? roomPlace(s) : null })),
-  feed: feed.slice(-80),
+// One session with all its data and its place: GET /api/session (full data on request; the snapshot is lean).
+const fullSession = (s) => ({ ...s, place: s.placed ? roomPlace(s) : null });
+// What /events sends: only what the page reads, with caps per session (public/wire.js lean).
+const snapshot = () => W.lean({
+  sessions: [...sessions.values()].map(fullSession),
   plan,
   figures: allFigures(),    // noteKey -> room figures (sessions, working, waiting, toolCalls, tokens, cost, todosDone, todosTotal, lastEvent)
   notes: persisted.notes,   // noteKey -> { text, at, v, by? }: each room's notes board (v: version counter; a cleared board stays with text '' and at 0; by: the agent session that last wrote it)
   pins: persisted.pins,     // noteKey -> { text, by, at }: a short message an agent pinned on the room's blackboard
   repos: [...repos.entries()].map(([key, r]) => ({ key, ...r, worktrees: r.worktrees.map((w) => ({ ...w, place: placeOfWorktree(r.path, w) })) })),
-  now: Date.now(),
 });
+// A page gets the whole snapshot when it connects, then one patch per broadcast with only what changed (wire.js).
+// State changes within BROADCAST_MS go out as one patch, so a burst of hooks sends at most 10 messages a second.
+const BROADCAST_MS = 100;
+const wire = W.sender();
 let pending = null;
 readPlan();
 function broadcast() {
-  if (pending) return;
-  pending = setTimeout(() => {
-    pending = null;
-    const data = `data: ${JSON.stringify(snapshot())}\n\n`;
-    for (const c of clients) c.write(data);
-  }, 40);
+  if (!pending) pending = setTimeout(flush, BROADCAST_MS);
+}
+function flush() {
+  clearTimeout(pending); pending = null;
+  if (!clients.size) { wire.reset(); return; }   // no page has the base: the next one connects to a new one
+  const p = wire.next(snapshot());
+  if (!p) return;
+  const data = `data: ${JSON.stringify(p)}\n\n`;
+  for (const c of clients) c.write(data);
+}
+// A page connects: the others get what changed until now, so all pages share one base, and the new one gets it whole.
+function connectPage(res) {
+  if (clients.size) flush(); else { wire.reset(); wire.next(snapshot()); }
+  res.write(`data: ${JSON.stringify(wire.full())}\n\n`);
+  clients.add(res);
 }
 setInterval(() => { for (const c of clients) c.write(': ping\n\n'); }, 20000).unref();
 
@@ -1025,7 +1041,7 @@ setInterval(() => { for (const c of clients) c.write(': ping\n\n'); }, 20000).un
 const MIME = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
 const FONT_FILES = fs.readdirSync(path.join(PUBLIC, 'vendor', 'fonts')).filter((f) => /^[a-z0-9-]+\.woff2$/.test(f));
 const STATIC_FILES = new Map([
-  ['/office.js', 'public/office.js'], ['/scene-host.js', 'public/scene-host.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/vocab.js', 'public/vocab.js'], ['/format.js', 'public/format.js'], ['/wheel-gate.js', 'public/wheel-gate.js'], ['/building.js', 'public/building.js'], ['/toasts.js', 'public/toasts.js'], ['/tokens.css', 'tokens.css'],
+  ['/office.js', 'public/office.js'], ['/scene-host.js', 'public/scene-host.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/vocab.js', 'public/vocab.js'], ['/wire.js', 'public/wire.js'],['/format.js', 'public/format.js'], ['/wheel-gate.js', 'public/wheel-gate.js'], ['/building.js', 'public/building.js'], ['/toasts.js', 'public/toasts.js'], ['/tokens.css', 'tokens.css'],
   ['/components/bundle.css', 'components/bundle.css'], ['/components/bundle.js', 'components/bundle.js'],
   ['/components/lib/three.min.js', 'components/lib/three.min.js'],
   ['/components/lib/three-orbit-controls.js', 'components/lib/three-orbit-controls.js'],
@@ -1064,10 +1080,14 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/auth') return send(res, 200, { ok: true }); // the page asks: does my cookie work?
     if (req.method === 'GET' && url.pathname === '/events') {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
-      res.write(`data: ${JSON.stringify(snapshot())}\n\n`);
-      clients.add(res);
+      connectPage(res);
       req.on('close', () => clients.delete(res));
       return;
+    }
+    if (req.method === 'GET' && url.pathname === '/api/session') {
+      const s = sessions.get(String(url.searchParams.get('uid') || ''));
+      // feed: what the session did, in short lines (the last 200 of the office keep them; the snapshot does not carry them)
+      return s ? send(res, 200, { session: fullSession(s), feed: feed.filter((f) => f.uid === s.uid) }) : send(res, 404, { error: 'No such session.' });
     }
     if (req.method === 'GET' && url.pathname === '/api/choices') return send(res, 200, { folders: recentChoices(persisted.recent, url.searchParams.get('first') || '') });
     // Each agent kind with its readiness, what it needs and its models (providers/index.mjs status), for the settings view (#20).
