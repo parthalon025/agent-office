@@ -291,7 +291,11 @@ export function createRegistry(list, { now = Date.now, statusTtlMs = STATUS_KEEP
      *   user fixed the problem, so it does not count.
      * - A round that rejects keeps nothing: the next ask runs a new round. A round that ends after a newer one began
      *   leaves the newer answer alone.
+     * - Two fresh asks that overlap share one round on purpose: a double click on Check again asks the providers once.
+     * - forgetStatus() drops the kept answer and cuts the round that runs loose: its answer goes to the asks that wait for
+     *   it, but is not kept and is not shared with later asks.
      */
+    forgetStatus() { kept = null; running = null; },
     statusCached({ fresh = false, timeoutMs } = {}) {
       if (running && (!fresh || running.fresh)) return running.promise;
       if (!fresh && kept && now() - kept.at < statusTtlMs) return Promise.resolve(kept.answer);

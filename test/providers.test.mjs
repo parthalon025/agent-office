@@ -182,8 +182,68 @@ test('cached status: asks that overlap share one round; a fresh ask shares a rou
   assert.equal(c.calls.readiness, 2, 'the plain round, then one round for both fresh asks');
   assert.equal(out[1], out[2], 'two fresh asks share');
   assert.equal(out[1], out[3], 'a plain ask during the fresh round shares it');
-  // The older round ends last: it must not replace the newer answer.
-  assert.equal((await c.reg.statusCached())[0].version, out[1][0].version);
+});
+
+// Rounds that return different answers and end in a set order. readiness() takes the next gate from a queue and reports
+// the label it was given, so the answer says which round it came from.
+function orderedRegistry() {
+  const o = office();
+  const queue = [];
+  const p = { ...createFake(o.events), readiness: async () => {
+    const step = queue.shift();
+    await step.wait;
+    if (step.fail) throw new Error(step.label);
+    return { ready: true, version: step.label, needs: [] };
+  } };
+  const reg = createRegistry([p], { now: () => 1000 });
+  const step = (label, fail = false) => { const s = { label, fail }; s.wait = new Promise((r) => { s.go = r; }); queue.push(s); return s; };
+  return { reg, step };
+}
+
+test('cached status: a plain round that ends after a fresh round began keeps nothing; later asks get the fresh answer', async () => {
+  const { reg, step } = orderedRegistry();
+  const slow = step('plain'), quick = step('fresh');
+  const plain = reg.statusCached();
+  const fresh = reg.statusCached({ fresh: true });
+  quick.go();
+  assert.equal((await fresh)[0].version, 'fresh');
+  slow.go();
+  assert.equal((await plain)[0].version, 'plain', 'its own ask still gets its answer');
+  assert.equal((await reg.statusCached())[0].version, 'fresh', 'but a later ask gets the fresh one');
+});
+
+test('cached status: a plain round that fails after a fresh round began does not drop the fresh round', async () => {
+  const { reg, step } = orderedRegistry();
+  const quick = step('fresh');
+  // status() itself rejects for the first round (a provider that throws still gives a not-ready entry, so force it).
+  const real = reg.status.bind(reg); let n = 0, fail;
+  reg.status = (o) => (++n === 1 ? new Promise((_, rej) => { fail = rej; }) : real(o));
+  const plain = reg.statusCached();
+  const fresh = reg.statusCached({ fresh: true });
+  fail(new Error('plain round failed')); // the plain round ends while the fresh one still runs
+  await assert.rejects(plain, /plain round failed/);
+  const third = reg.statusCached(); // must share the fresh round that still runs; a new round would find no step
+  quick.go();
+  assert.equal((await fresh)[0].version, 'fresh');
+  assert.equal(await third, await fresh, 'the old failure did not clear the fresh round');
+  assert.equal((await reg.statusCached())[0].version, 'fresh');
+});
+
+test('cached status: forgetStatus drops the kept answer and a running round is neither kept nor shared', async () => {
+  const { reg, step } = orderedRegistry();
+  const first = step('one');
+  first.go();
+  assert.equal((await reg.statusCached())[0].version, 'one');
+  reg.forgetStatus();
+  const second = step('two'), third = step('three');
+  const running = reg.statusCached();
+  reg.forgetStatus(); // the rule changed while it ran
+  const after = reg.statusCached();
+  third.go();
+  assert.equal((await after)[0].version, 'three', 'an ask after the change does not share the old round');
+  second.go();
+  assert.equal((await running)[0].version, 'two', 'the old round still answers its own ask');
+  assert.equal((await reg.statusCached())[0].version, 'three', 'and is not kept over the newer answer');
 });
 
 test('cached status: a round that rejects is not kept; the next ask runs a new round', async () => {

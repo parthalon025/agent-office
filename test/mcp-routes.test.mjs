@@ -496,7 +496,11 @@ test('Hermes is off until the Security room turns it on: the open is refused bef
   assert.equal((await snapshot()).sessions.length, before);
   const on = { scope: 'office', row: 'ungated', col: 'hermes', value: 'on' };
   assert.equal((await call('/api/security/set', on)).status, 409, 'turning it on loosens: the wall asks for the Confirm');
+  // #104: a plain ask keeps its answer for 30 s, so the rule change must drop it, or the old "Turn on Hermes" would stay.
+  const plain = async () => (await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json())).providers.find((p) => p.kind === 'hermes');
+  assert.match((await plain()).needs.join(' '), /Turn on Hermes on the Agents screen/, 'off: the answer says so, and is kept');
   assert.equal((await call('/api/security/set', { ...on, confirmed: true })).status, 200);
+  assert.doesNotMatch((await plain()).needs.join(' '), /Turn on Hermes on the Agents screen/, 'a plain ask right after the change gets the new answer');
 });
 
 test('an ACP agent asks once before it runs: no cost report, so the open is refused until the user says yes', { skip: SKIP }, async () => {

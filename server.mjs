@@ -328,6 +328,7 @@ function saveRule(body) {
   const where = scope === 'building' ? (body.building ? `the building ${basename(body.building) || body.building}` : 'Other folders') : 'all buildings';
   addFeed({ uid: 'security', name: 'Security' }, 'tool', `${S.rows[body.row].label}, ${col.label}: ${S.word(r.to)} (${where})`);
   broadcast();
+  providers.forgetStatus(); // readiness reads this rule (blocked), so the kept GET /api/providers answer is stale (#104)
   void refreshEnforce(true); // an agent whose own config carries the cells checks it again for the new cells
   return { ok: true, from: r.from, to: r.to };
 }
