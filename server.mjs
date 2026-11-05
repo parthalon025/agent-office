@@ -59,7 +59,7 @@ const BRANCH_PORT = process.env.OFFICE_PORT === 'branch'
     let name;
     try {
       // A passing git failure (a time limit while the computer is busy) is not "outside git": locateOrKeep tries 3 times,
-      // then answers KEEP, and the message says so. Null (not in git) is checkoutName's error.
+      // then answers KEEP, and the message says so. Null (not in git, git missing, a folder git refuses) is checkoutName's error.
       const loc = await git.locateOrKeep(ROOT);
       if (loc === git.KEEP) throw new Error('git did not give the branch of this folder (it timed out, or the repository has no commit yet). Start the office again.');
       name = git.checkoutName(loc);
@@ -339,7 +339,7 @@ async function floorActionRaw(action, body) {
 }
 // Recent folders that are in git are buildings too, so they can get floors before any session runs. git.locateOrKeep
 // tries a passing failure 3 times; a folder that still got KEEP (git kept passing its time limit while the computer was
-// busy, as at sign-in) is asked again every 30 s. A folder that is gone or not in git is not asked again.
+// busy, as at sign-in) is asked again every 30 s. A folder that is gone, not in git or refused by git is not asked again.
 // A lookup that still runs is not started a second time.
 const unplacedRecent = new Set(persisted.recent);
 const placingRecent = new Set();

@@ -261,7 +261,14 @@ test('locate does not try again for a folder that is not a repository, or is gon
 // The start reads the branch port and makes the recent folders buildings. locate gives null after its tries, so a recent
 // repository whose git call kept passing its time limit (three suites at once, sign-in) was never a building in that run,
 // and a branch office stopped with "not in a git repository". locateOrKeep makes the same tries, then answers KEEP, and
-// the caller asks again later.
+// the caller asks again later. A failure that asking again does not change is null at once, also for locate.
+// `run` keeps the last 3 lines of git's message. For a folder of another owner they name safe.directory, not "dubious ownership".
+const DUBIOUS = "To add an exception for this directory, call:  \tgit config --global --add safe.directory C:/r";
+// The error resolveExe gives when there is no git, as `run` passes it on.
+const NO_GIT = (() => {
+  const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-nogit-'));
+  try { git.resolveExe('git', { PATH: empty, SystemRoot: process.env.SystemRoot }); return 'git was found'; } catch (e) { return e.message; } finally { fs.rmSync(empty, { recursive: true, force: true }); }
+})();
 
 test('locateOrKeep gives the place when git answers', async () => {
   const exec = seq(TOP);
@@ -270,7 +277,7 @@ test('locateOrKeep gives the place when git answers', async () => {
 });
 
 test('locateOrKeep tries a passing failure 3 times, then says KEEP; a later try that works gives the place', async () => {
-  for (const msg of ['Command failed: git rev-parse (timed out)', "fatal: ambiguous argument 'HEAD': unknown revision or path not in the working tree.", 'fatal: detected dubious ownership in repository']) {
+  for (const msg of ['Command failed: git rev-parse (timed out)', "fatal: ambiguous argument 'HEAD': unknown revision or path not in the working tree.", 'fatal: Unable to create index.lock: File exists']) {
     const exec = seq(new Error(msg));
     assert.equal(await git.locateOrKeep('/r', { exec, ...retry }), git.KEEP, msg);
     assert.equal(exec.calls.length, 3, msg);
@@ -279,28 +286,40 @@ test('locateOrKeep tries a passing failure 3 times, then says KEEP; a later try 
   assert.equal((await git.locateOrKeep('/r', { exec, ...retry })).branch, 'main');
 });
 
-test('locateOrKeep says null when the folder is gone or git says it is not a repository', async () => {
-  let exec = seq(new Error('fatal: not a git repository (or any of the parent directories): .git'));
-  assert.equal(await git.locateOrKeep('/r', { exec, ...retry }), null);
-  assert.equal(exec.calls.length, 1);
-  exec = seq(new Error('timed out'));
-  assert.equal(await git.locateOrKeep('/r', { exec, ...retry, exists: () => false }), null);
+test('a lasting git failure is null at once, not KEEP: not a repository, git refuses the folder, no git, folder gone (locate and locateOrKeep)', async () => {
+  assert.match(NO_GIT, /git was not found on PATH/, 'resolveExe names the missing git');
+  for (const msg of ['fatal: not a git repository (or any of the parent directories): .git', DUBIOUS, "fatal: detected dubious ownership in repository at 'C:/r'", "fatal: unsafe repository ('C:/r' is owned by someone else)", NO_GIT, 'git is installed as a script (C:\\bin\\git.cmd). The office starts programs without a shell, so it needs git.exe on PATH.', 'spawn C:\\Program Files\\Git\\cmd\\git.exe ENOENT']) {
+    for (const fn of [git.locateOrKeep, git.locate]) {
+      const exec = seq(new Error(msg));
+      assert.equal(await fn('/r', { exec, ...retry }), null, `${fn.name}: ${msg}`);
+      assert.equal(exec.calls.length, 1, `${fn.name} does not ask again: ${msg}`);
+    }
+  }
+  const exec = seq(new Error('timed out'));
+  assert.equal(await git.locateOrKeep('/r', { exec, ...retry, exists: () => false }), null, 'a folder that is gone is an answer');
   assert.equal(exec.calls.length, 1);
 });
 
-test('locateOrKeep, with real git: a repo, a repo with no commit yet, a plain folder under a German locale, a removed folder', async () => {
+test('locateOrKeep, with real git: a repo, no commit yet, a plain folder under a German locale, a folder of another owner, a removed folder', async () => {
   const dir = repo();
   const empty = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-empty-')));
   const plainDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-plain-')));
   plain(empty, 'init', '-b', 'main');
   const fast = { wait: async () => {} };
-  const keep = { LANG: process.env.LANG, LC_ALL: process.env.LC_ALL, LANGUAGE: process.env.LANGUAGE };
+  const noConfig = path.join(plainDir, 'empty.gitconfig');
+  fs.writeFileSync(noConfig, '');
+  const keep = Object.fromEntries(['LANG', 'LC_ALL', 'LANGUAGE', 'GIT_TEST_ASSUME_DIFFERENT_OWNER', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM'].map((k) => [k, process.env[k]]));
   try {
     assert.deepEqual(await git.locateOrKeep(dir), await git.locate(dir));
     assert.equal((await git.locateOrKeep(dir)).branch, 'main');
     assert.equal(await git.locateOrKeep(empty, fast), git.KEEP);  // no commit yet: ask again later, it can become a building
     Object.assign(process.env, { LANG: 'de_DE.UTF-8', LC_ALL: 'de_DE.UTF-8', LANGUAGE: 'de' });
     assert.equal(await git.locateOrKeep(plainDir, fast), null);    // not a repository: git is asked for English
+    // git's own switch for "this repository belongs to another user": git refuses it ("detected dubious ownership").
+    // No global or system config, so a safe.directory entry on this computer (or a CI runner) cannot let it through.
+    Object.assign(process.env, { GIT_TEST_ASSUME_DIFFERENT_OWNER: '1', GIT_CONFIG_GLOBAL: noConfig, GIT_CONFIG_NOSYSTEM: '1' });
+    assert.equal(await git.locateOrKeep(dir, fast), null, 'a folder git refuses is not asked again');
+    for (const k of ['GIT_TEST_ASSUME_DIFFERENT_OWNER', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM']) delete process.env[k];
     fs.rmSync(dir, { recursive: true, force: true });
     assert.equal(await git.locateOrKeep(dir, fast), null);         // the folder is gone
   } finally {
