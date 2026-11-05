@@ -8,6 +8,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import v8 from 'node:v8';
+import vm from 'node:vm';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const bundle = readFileSync(join(root, 'components', 'bundle.js'), 'utf8').replace(/\r\n/g, '\n');
@@ -655,7 +657,7 @@ function gpuKit() {
   const lib = new Function('Stage', 'Kit', 'cancelAnimationFrame', 'readFonts', 'readTokens',
     bundle.slice(at, end) +
     source('Stage.prototype.clear=function', '};\n') + source('Stage.prototype.gc=function', '};\n') + source('Stage.prototype.dispose=function', '};\n') +
-    source('Kit.prototype.refresh=function', '};\n') +
+    source('Kit.prototype.prune=function', '};\n') + source('Kit.prototype.refresh=function', '};\n') +
     'return { LIVE: LIVE };'
   )(Stage, Kit, () => {}, () => ({ sans: 'sans' }), () => ({ bg: '#fff' }));
   // a stage as the constructor leaves it: in LIVE, with a renderer, a Kit and observers
@@ -778,8 +780,8 @@ test('Kit.refresh frees the textures it drops from K.tex, once; screens get the 
   K.screenTex = function (role) { return this.tex['scr-' + role] || (this.tex['scr-' + role] = X('new-' + (++made))); };
   const scene = new Node3({ isScene: true }), scr = mesh3(G('gScr'), { map: oldScr, emissiveMap: oldScr, needsUpdate: false });
   scene.add(scr);
-  const recolored = [];
-  Object.assign(K, { el: null, tex: { 'scr-coder': oldScr, blob }, themed: [[{ color: { set: (c) => recolored.push(c) } }, 'bg']], screens: [[scr, 'coder']] });
+  const recolored = [], themedMat = { color: { set: (c) => recolored.push(c) } };
+  Object.assign(K, { el: null, tex: { 'scr-coder': oldScr, blob }, themed: [[new WeakRef(themedMat), 'bg']], screens: [[scr, 'coder']] });
   K.refresh();
   assert.equal(spent.get(oldScr), 1);
   assert.equal(spent.get(blob), 1);
@@ -792,6 +794,119 @@ test('Kit.refresh frees the textures it drops from K.tex, once; screens get the 
   assert.equal(spent.get(oldScr), 1, 'an old texture is freed once');
   assert.equal(spent.get(first), 1, 'the texture of the last refresh is freed by the next one');
   assert.equal(spent.get(K.tex['scr-coder']), undefined, 'the shown one is kept');
+});
+
+// #99: K.themed holds a WeakRef to each themed material, so a material that nothing uses any more drops out. Kit.refresh
+// recolors the live ones and drops the dead ones; Kit.t prunes when the list has doubled since the last prune. Page code
+// that keeps a material (the City's one-material-per-token cache) keeps it in the list. The rules run on the real Kit
+// code with a fake material. A fake WeakRef gives exact counts; a real GC (the v8 flag is set at run time, so plain
+// `npm test` needs no --expose-gc) checks the heap rule.
+v8.setFlagsFromString('--expose-gc');
+const gc = vm.runInNewContext('gc');
+const settle = async () => { for (let i = 0; i < 2; i++) { await new Promise((r) => setTimeout(r, 0)); gc(); } };
+// a WeakRef that the test can kill at once
+const killable = () => {
+  const dead = new Set();
+  return { dead, Ref: class { constructor(t) { this.t = t; } deref() { return dead.has(this.t) ? undefined : this.t; } } };
+};
+// the real Kit constructor, t, prune and refresh on a fake material; `tokens` is what readTokens returns on every call
+function themedKit(tokens, WR = WeakRef) {
+  class Mat { constructor(o) { Object.assign(this, o); const c = this.color; this.color = { v: c, set(x) { this.v = x; } }; } }
+  const Kit = new Function('T', 'readFonts', 'readTokens', 'WeakRef',
+    source('function Kit(el)', '}\n') + source('Kit.prototype.t=function', '};\n') + source('Kit.prototype.prune=function', '};\n') +
+    source('Kit.prototype.refresh=function', '};\n') + 'return Kit;'
+  )({ MeshStandardMaterial: Mat }, () => ({}), () => tokens, WR);
+  const K = new Kit(null);
+  Object.assign(K, { tex: {}, screens: [] });
+  return K;
+}
+
+test('Kit.t returns a distinct themed material on every call and lists it by weak reference (#99)', () => {
+  const K = themedKit({ bg: '#111' });
+  const a = K.t('bg'), b = K.t('bg', { roughness: 0.2 });
+  assert.notEqual(a, b, 'two callers never share one material');
+  assert.equal(a.color.v, '#111');
+  a.emissive = 'x';
+  assert.equal(b.emissive, undefined, 'a change to one material does not reach another');
+  assert.equal(K.themed.length, 2);
+  assert.equal(K.themed[0][0].deref(), a);
+  assert.equal(K.themed[0][1], 'bg');
+});
+
+test('Kit.refresh recolors the materials that are alive and drops the dead entries (#99)', () => {
+  const tok = { bg: '#111' }, { dead, Ref } = killable();
+  const K = themedKit(tok, Ref);
+  const kept = [K.t('bg'), K.t('bg')], gone = [K.t('bg'), K.t('bg'), K.t('bg')];
+  gone.forEach((m) => dead.add(m));
+  tok.bg = '#eee';
+  K.refresh();
+  assert.deepEqual(kept.map((m) => m.color.v), ['#eee', '#eee'], 'a material in use takes the new tokens');
+  assert.deepEqual(gone.map((m) => m.color.v), ['#111', '#111', '#111'], 'a dead material is not visited');
+  assert.equal(K.themed.length, 2, 'the dead entries are gone');
+});
+
+test('Kit.t prunes dead entries when the list has doubled since the last prune (#99)', () => {
+  const { dead, Ref } = killable();
+  const K = themedKit({ bg: '#111' }, Ref);
+  let floor = [], peak = 0;
+  for (let n = 0; n < 30; n++) {
+    floor.forEach((m) => dead.add(m));            // the old floor leaves the scene
+    floor = [];
+    for (let i = 0; i < 100; i++) floor.push(K.t('bg'));
+    peak = Math.max(peak, K.themed.length);
+  }
+  assert.ok(peak < 500, `the list stays near twice the live size, not 3000 (peak ${peak})`);
+});
+
+test('Kit.themed stops growing across floor rebuilds and theme changes under a real GC (#99)', async () => {
+  const K = themedKit({ bg: '#111' });
+  let scene = [];
+  for (let n = 0; n < 30; n++) {
+    scene = [];                                   // the old floor leaves the scene
+    for (let i = 0; i < 100; i++) scene.push(K.t('bg'));
+    await settle();
+    K.refresh();                                  // a theme change
+  }
+  assert.ok(K.themed.length < 150, `about one floor of materials is listed (${K.themed.length}), not 3000`);
+  assert.ok(scene.every((m) => m.color.v === '#111'), 'the floor in the scene is still themed');
+});
+
+test('Kit.t alone keeps K.themed bounded when no theme change comes (#99)', async () => {
+  const K = themedKit({ bg: '#111' });
+  let scene = [], peak = 0;
+  for (let n = 0; n < 30; n++) {
+    scene = [];
+    for (let i = 0; i < 100; i++) scene.push(K.t('bg'));
+    await settle();
+    peak = Math.max(peak, K.themed.length);
+  }
+  assert.ok(peak < 600, `the list is pruned while it is built (peak ${peak})`);
+  assert.equal(scene.length, 100);
+});
+
+test('a material that page code caches, out of the scene for a while, takes the current theme (#99, the city.js mat() pattern)', async () => {
+  const tok = { 'scene-slab': '#aaa' };
+  const K = themedKit(tok);
+  const mats = {};
+  const mat = (token, o) => { const k = token + (o ? JSON.stringify(o) : ''); return mats[k] || (mats[k] = K.t(token, o)); };
+  let scene = [mat('scene-slab')];                // used once ...
+  const ground = scene[0];
+  scene = [];                                     // ... then stage.clear: only the page cache holds it
+  for (let i = 0; i < 50; i++) { K.t('scene-slab'); await settle(); K.refresh(); }
+  tok['scene-slab'] = '#222';                     // Night
+  K.refresh();
+  assert.equal(ground.color.v, '#222', 'the cached material follows the theme');
+  scene = [mat('scene-slab')];                    // used again after stage.clear
+  assert.equal(scene[0], ground, 'the cache returns the same material');
+  assert.equal(scene[0].color.v, '#222');
+});
+
+test('Stage.dispose still releases K.themed (#99)', () => {
+  const lib = gpuKit();
+  const s = lib.stage(new Node3({ isScene: true }));
+  s.K.themed = [[new WeakRef({}), 'bg']];
+  s.dispose();
+  assert.deepEqual(s.K.themed, []);
 });
 
 // ----- Themes (x1.7): one list, AO.MODES, drives the engine, the mode controls and the palette; Fluent and Fluent Dark are full themes -----
