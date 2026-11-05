@@ -34,7 +34,12 @@
   function call(path, opts) { return window.officeAdapter.ready.then(function () { return fetch(path, opts); }); }
   function api(path, body) {
     return call(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) })
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { if (!r.ok) { var e = new Error(j.error || 'The office could not do that (' + r.status + ').'); e.status = r.status; e.body = j; throw e; } return j; }); });
+      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok) { var e = new Error(j.error || 'The office could not do that (' + r.status + ').'); e.status = r.status; e.body = j; throw e; }
+        // A question before the call can run (the cost question: 200 { confirm, question }): the caller asks, as for a 409.
+        if (j && j.confirm && j.question) { var q = new Error(j.question); q.status = r.status; q.body = j; throw q; }
+        return j;
+      }); });
   }
   function getInfo(first) { return call('/api/info' + (first ? '?first=' + encodeURIComponent(first) : '')).then(function (r) { return r.json(); }); }
   function ago(t) {

@@ -494,8 +494,9 @@ test('Hermes is off until the Security room turns it on: the open is refused bef
 test('an ACP agent asks once before it runs: no cost report, so the open is refused until the user says yes', { skip: SKIP }, async () => {
   const before = (await snapshot()).sessions.length;
   const no = await call('/api/open', { cwd: acpRepo, name: 'hermes-ask', provider: 'hermes', where: 'office', isolation: 'worktree' });
-  assert.equal(no.status, 409);
-  assert.deepEqual(no.json, { error: 'This agent does not report cost. Partly supervised: file edits and risky commands ask. Run it?', confirm: 'cost' });
+  // Review minor: the question is a normal answer (200), not an error, so the page logs no failed request for it.
+  assert.equal(no.status, 200);
+  assert.deepEqual(no.json, { confirm: 'cost', question: 'This agent does not report cost. Partly supervised: file edits and risky commands ask. Run it?' });
   assert.equal((await snapshot()).sessions.length, before, 'no session, no worktree before the yes');
   const model = await call('/api/open', { cwd: acpRepo, name: 'hermes-model', provider: 'hermes', isolation: 'worktree', model: 'opus', confirmCost: true });
   assert.equal(model.status, 400, 'the agent picks its own model');
@@ -525,7 +526,7 @@ test('the no-cost cell of the Security room: Allow opens an agent without cost r
     await rule('ask');
   }
   const asked = await call('/api/open', { cwd: acpRepo, name: 'hermes-asked', provider: 'hermes', where: 'office' });
-  assert.deepEqual([asked.status, asked.json.confirm], [409, 'cost'], 'Ask asks again');
+  assert.deepEqual([asked.status, asked.json.confirm, asked.json.uid], [200, 'cost', undefined], 'Ask asks again');
 });
 
 test('an ungated agent (ADR 0001) opens and reopens only in a new worktree of its own: not in the folder, not in a terminal', { skip: SKIP }, async () => {
@@ -576,7 +577,7 @@ test('an ACP session: cost unknown and no spend limit, a held request answered f
   const past = await until(async () => (await call('/api/history', {})).json.sessions.find((x) => x.uid === uid), 'the past record');
   assert.deepEqual([past.costUnknown, past.cost], [true, null]);
   const again = await call('/api/reopen', { uid });
-  assert.deepEqual([again.status, again.json.confirm], [409, 'cost']);
+  assert.deepEqual([again.status, again.json.confirm, again.json.uid], [200, 'cost', undefined]);
   const yes = await call('/api/reopen', { uid, confirmCost: true });
   assert.equal(yes.status, 200, JSON.stringify(yes.json));
   await until(async () => { const x = await sessionOf(yes.json.uid); return x && x.sid ? x : null; }, 'the reopened session to start');
@@ -757,8 +758,8 @@ test('OpenClaw (#73): a config that is off is refused before the cost question a
   assert.equal(worktrees(), trees, 'no worktree');
   fs.writeFileSync(clawConfig, JSON.stringify({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'always' }));
   const ok = await call('/api/open', { cwd: acpRepo, name: 'claw-asks', provider: 'openclaw', where: 'office', isolation: 'worktree' });
-  assert.deepEqual([ok.status, ok.json.confirm], [409, 'cost'], 'a config that carries both: now the cost question, with the label');
-  assert.match(ok.json.error, /Partly supervised: commands ask, file edits do not/);
+  assert.deepEqual([ok.status, ok.json.confirm], [200, 'cost'], 'a config that carries both: now the cost question, with the label');
+  assert.match(ok.json.question, /Partly supervised: commands ask, file edits do not/);
 });
 
 test('OpenClaw (#73): no Gateway on the port is "Not ready: start the OpenClaw Gateway", and the office starts nothing', { skip: SKIP }, async () => {

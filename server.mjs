@@ -991,8 +991,10 @@ async function preflight(provider) {
 function confirmCost(provider, confirmed) {
   if (confirmed === true || !costAsk(persisted.security, provider)) return;
   const label = supervisionOf(provider);
-  const e = httpError(409, `This agent does not report cost. ${label ? label + '. ' : ''}Run it?`);
-  e.confirm = 'cost';
+  // A normal question, not an error (review minor): 200 { confirm: 'cost', question } and no uid, so the page logs no failed
+  // request each time it asks. The route's catch sends it (e.question).
+  const e = httpError(200, `This agent does not report cost. ${label ? label + '. ' : ''}Run it?`);
+  e.confirm = 'cost'; e.question = true;
   throw e;
 }
 
@@ -1516,8 +1518,10 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/close') { await closeSession(String(body.uid)); return send(res, 200, { ok: true }); }
     return send(res, 404, { error: 'Not found' });
   } catch (e) {
-    // confirm: the request needs the user's yes first (confirmCost); the page asks and sends it again.
-    send(res, e.status || 500, { error: e.message, ...(e.confirm ? { confirm: e.confirm } : {}) });
+    // confirm: the request needs the user's yes first; the page asks and sends it again. The cost question (confirmCost) is a
+    // normal answer, 200 { confirm, question }; the fork and skill questions are still 409 { error, confirm }.
+    if (e.question) send(res, 200, { confirm: e.confirm, question: e.message });
+    else send(res, e.status || 500, { error: e.message, ...(e.confirm ? { confirm: e.confirm } : {}) });
   }
 });
 
