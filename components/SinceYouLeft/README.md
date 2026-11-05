@@ -6,6 +6,7 @@ A summary card for the person who comes back. It tells what happened while they 
 - In `OfficeScene`, `summary.since` is the last time the person saw this building: the page was hidden, or the scene was disposed while the page showed. Events with `seeded: true` do not count, except a seeded event with `at` after `since` (Reference, Scene mount).
 - The title is "Since you left (<relative time>)", for example "Since you left (2 hours ago)".
 - Four figures: Finished, Needs you, Errors, Spend. Each status figure has a dot and a word.
+- Needs you and its "waits for your decision" lines come from one list: the bots with an open request (`summary.waiting`). In `OfficeScene`, the card reads `office.summary(since)` again on each change while it shows, so the figure, the lines and "Open decisions" follow the requests.
 - Up to 3 top lines from `summary.top`.
 - "Replay" calls `onReplay`. Use it to start the TimeScrubber at `summary.since`.
 - "Open decisions" calls `onDecisions`. It is the emphasis button when a bot needs the person. It is off when no bot needs the person.

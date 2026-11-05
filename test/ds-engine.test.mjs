@@ -1,5 +1,6 @@
 // DS scene engine rules in components/bundle.js: reduced-motion camera cuts (#36), the zoom step (#56), seeded events
-// and Since you left (#35), and the schema copy in kit/schema.json. The bundle needs WebGL and React, so each test
+// and Since you left (#35), unread and Activity of seeded events (#61), the Needs you source of Since you left (#62),
+// the frame inset clamp (#65), and the schema copy in kit/schema.json. The bundle needs WebGL and React, so each test
 // takes the one function it checks out of the bundle text and runs it on plain stand-ins (no THREE, no DOM).
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -29,6 +30,7 @@ class V {
   sub(v) { this.x -= v.x; this.y -= v.y; this.z -= v.z; return this; }
   lerp(v, a) { this.x += (v.x - this.x) * a; this.y += (v.y - this.y) * a; this.z += (v.z - this.z) * a; return this; }
   distanceTo(v) { return Math.hypot(this.x - v.x, this.y - v.y, this.z - v.z); }
+  setFromMatrixColumn(m, i) { return this.copy(m.cols[i]); }
 }
 function Stage() {}
 new Function('T', 'Stage', 'DUR',
@@ -197,7 +199,7 @@ test('a seeded event from the future is recorded at now, and history keeps HMAX 
 test('applyEvent: seeded events skip record(), and apply with sound, toasts and notifications off (#35)', () => {
   const log = [];
   const run = new Function('record', 'recordSeeded', 'emit', 'log',
-    'var rp=null,seeding=false;' +
+    'var rp=null,seeding=false,seedNews=false,newsEv=new WeakSet();' +
     'function applyEv0(ev){log.push([ev.type, seeding]);}' +
     source(' function applyEvent(') + source(' function applyEv(') +
     'return { applyEvent: applyEvent, seeding: function () { return seeding; } };'
@@ -256,4 +258,147 @@ test('kit/schema.json has the events, commands and common fields of the bundle s
   assert.deepEqual(B.commands, K.commands);
   assert.deepEqual(B.common, K.common);
   assert.deepEqual(Object.keys(K.common.fields), ['seeded', 'at']);
+});
+
+// chat() and logLine() of mountOffice, on a plain store, with the seeding flags that applyEv sets.
+function chatRules(seeding, news) {
+  const st = { chats: {}, unread: {}, log: [], sel: null };
+  const has = bundle.includes(' function logLine(');
+  const f = new Function('st', 'hm', 'seeding', 'seedNews',
+    source(' function chat(') + (has ? source(' function logLine(') : 'function logLine(){}') +
+    'return { chat: chat, logLine: logLine };'
+  )(st, () => '09:00', seeding, news);
+  return Object.assign(f, { st });
+}
+const bot = (name = 'Ada') => ({ name });
+
+test('a seeded message that is not news restores the chat, but raises no unread count (#61)', () => {
+  const r = chatRules(true, false), b = bot();
+  r.chat(b, { from: 'agent', text: 'Tests pass.' });
+  assert.equal(r.st.chats.Ada.length, 1, 'the chat line is state: it is restored');
+  assert.equal(r.st.unread.Ada || 0, 0);
+});
+
+test('a live message, and a seeded message that is news, raise the unread count (#61)', () => {
+  const live = chatRules(false, false), news = chatRules(true, true), b = bot();
+  live.chat(b, { from: 'agent', text: 'Tests pass.' });
+  news.chat(b, { from: 'agent', text: 'Tests pass.' });
+  assert.equal(live.st.unread.Ada, 1);
+  assert.equal(news.st.unread.Ada, 1);
+  live.chat(b, { from: 'user', text: 'Push it.' });
+  assert.equal(live.st.unread.Ada, 1, 'a line from the user is not unread');
+  live.st.sel = b;
+  live.chat(b, { from: 'agent', text: 'Pushed.' });
+  assert.equal(live.st.unread.Ada, 1, 'the open bot gets no unread count');
+});
+
+test('logLine: Activity skips a seeded event that is not news, and keeps 40 lines (#61)', () => {
+  const quiet = chatRules(true, false), news = chatRules(true, true), live = chatRules(false, false);
+  quiet.logLine('Ada', 'Said · Tests pass.');
+  assert.deepEqual(quiet.st.log, []);
+  news.logLine('Ada', 'Said · Tests pass.');
+  assert.deepEqual(news.st.log, [{ time: '09:00', name: 'Ada', text: 'Said · Tests pass.' }]);
+  for (let i = 0; i < 45; i++) live.logLine('Ada', 'Line ' + i);
+  assert.equal(live.st.log.length, 40);
+  assert.equal(live.st.log[0].text, 'Line 44', 'the newest line is first');
+});
+
+test('every Activity line of the office goes through logLine (#61)', () => {
+  assert.equal((bundle.match(/st\.log\.unshift\(/g) || []).length, 1, 'one unshift, in logLine');
+  assert.match(source(' function logLine('), /if\(seeding&&!seedNews\)return;st\.log\.unshift\(/);
+});
+
+test('applyEv: a seeded event is news only when recordSeeded recorded it; in a replay every event is news (#61)', () => {
+  const seen = [];
+  const run = new Function('record', 'recordSeeded', 'emit', 'seen',
+    'var rp=null,seeding=false,seedNews=false,newsEv=new WeakSet();' +
+    'function applyEv0(ev){seen.push([ev.text, seeding, seedNews]);}' +
+    source(' function applyEvent(') + source(' function applyEv(') +
+    'return { applyEvent: applyEvent, applyEv: applyEv, flags: function () { return [seeding, seedNews]; }, replay: function (on) { rp = on ? { buf: [] } : null; return rp; } };'
+  )(() => {}, (e) => e.at > 1000, () => {}, seen);
+  run.applyEvent(ev('message', { text: 'old', seeded: true, at: 900 }));
+  run.applyEvent(ev('message', { text: 'new', seeded: true, at: 2000 }));
+  run.applyEvent(ev('message', { text: 'live' }));
+  const r = run.replay(true);
+  run.applyEvent(ev('message', { text: 'buffered', seeded: true, at: 3000 }));
+  run.applyEv(ev('message', { text: 'replayed', seeded: true, at: 500 }));   // runTo: a recorded event
+  run.replay(false);
+  r.buf.forEach((e) => run.applyEv(e));   // stopReplay: the events that came during the replay
+  assert.deepEqual(seen, [['old', true, false], ['new', true, true], ['live', false, false], ['replayed', true, true], ['buffered', true, true]]);
+  assert.deepEqual(run.flags(), [false, false], 'both flags are off again');
+});
+
+// summary() of mountOffice, on plain bots.
+function summaryOf(bots, history = []) {
+  return new Function('st', 'bots', 'seen0',
+    'var byName=function(n){return bots.filter(function(b){return b.name===n;})[0];};' +
+    source(' function evStatus(') + source(' function cut(') + source(' function summary(', 'return R;}\n') + 'return summary;'
+  )({ history }, bots, 1000);
+}
+
+test('Since you left: Needs you and its lines come from one source, the bots with an open request (#62)', () => {
+  const bots = [
+    { name: 'Ada', status: 'waiting', task: 'Pick a branch', request: null },
+    { name: 'Bo', status: 'waiting', task: 'Run npm test?', request: { id: 'r1', text: 'Run npm test?' } },
+    { name: 'Cy', status: 'working', task: 'Build', request: null }
+  ];
+  const R = summaryOf(bots)(1000);
+  assert.equal(R.waiting, 1, 'a waiting status alone is not a decision');
+  assert.deepEqual(R.top.filter((t) => / waits for your decision: /.test(t)), ['Bo waits for your decision: Run npm test?']);
+  const none = summaryOf([{ name: 'Ada', status: 'waiting', task: 'Pick a branch', request: null }])(1000);
+  assert.equal(none.waiting, 0);
+  assert.deepEqual(none.top, [], 'no line lists a bot that Needs you does not count');
+});
+
+test('OfficeScene shows the office summary in Since you left, with no second Needs you count (#62)', () => {
+  assert.equal(bundle.includes('{waiting:waiting.length}'), false, 'no override of the summary count');
+  assert.equal(bundle.includes('h(A.SinceYouLeft,{summary:a().summary(D.syl.since),'), true, 'the live summary, for the same since');
+});
+
+// fitD, freeInset and fr: framing between the HUD insets, on a camera that looks down -z.
+function StageF() {}
+new Function('T', 'Stage', ['fitD', 'freeInset']
+  .filter((n) => bundle.includes('Stage.prototype.' + n + '=function'))
+  .map((n) => source('Stage.prototype.' + n + '=function', '};\n')).join('')
+)({ Vector3: V }, StageF);
+function framed(cw, ch, inset, ext = [5, 2, 1]) {
+  const s = Object.create(StageF.prototype);
+  let got = null;
+  Object.assign(s, {
+    el: { clientWidth: cw, clientHeight: ch },
+    cam: { matrixWorld: { cols: [new V(1, 0, 0), new V(0, 1, 0), new V(0, 0, 1)] }, updateMatrixWorld() {} },
+    frame(c) { got = c; }
+  });
+  new Function('s', 'T', 'inset', source(' function fr(') + 'return fr;')(s, { Vector3: V }, inset)([0, 0, 0], true, ext);
+  const D = s.fitD(ext), wpp = 2 * D / ch;
+  return { center: cw / 2 - got[0] / wpp, D };   // the scene center on screen, in px from the left
+}
+
+test('a frame inset inside the view frames the scene between the insets, as before (#65)', () => {
+  const f = framed(1360, 800, { left: 300, right: 200 });
+  assert.ok(Math.abs(f.center - (300 + 1160) / 2) < 1e-6);
+  assert.ok(Math.abs(f.D - Math.max(2, 5 / (860 / 800)) * 1.06) < 1e-9);
+});
+
+test('a frame inset wider than the view is clamped: the scene stays in the view, in the free area (#65)', () => {
+  const f = framed(1000, 500, { left: 2000, right: 0 });
+  assert.ok(f.center >= 0 && f.center <= 1000, 'the scene center is on screen, not at ' + f.center);
+  assert.ok(Math.abs(f.center - (650 + 1000) / 2) < 1e-6, 'centered in the 35% that is left');
+  assert.ok(Math.abs(f.D - 5 / 0.7 * 1.06) < 1e-9, 'fitted to 35% of the width');
+  const both = framed(1000, 500, { left: 600, right: 600 });
+  assert.ok(Math.abs(both.center - 500) < 1e-6, 'equal insets keep the center');
+});
+
+test('freeInset: no inset is null; negative sides count as 0; the free area keeps 35% of the width (#65)', () => {
+  const s = Object.create(StageF.prototype);
+  s.el = { clientWidth: 1000 };
+  s.inset = null;
+  assert.equal(s.freeInset(), null);
+  s.inset = { left: -50, right: 100 };
+  assert.deepEqual(s.freeInset(), { left: 0, right: 100 });
+  s.inset = { left: 1300, right: 0 };
+  assert.deepEqual(s.freeInset(), { left: 650, right: 0 });
+  s.inset = { left: 300, right: 700 };
+  const fi = s.freeInset();
+  assert.ok(Math.abs(fi.left - 195) < 1e-9 && Math.abs(fi.right - 455) < 1e-9, 'both sides shrink in proportion');
 });

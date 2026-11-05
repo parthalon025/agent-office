@@ -34,9 +34,9 @@ export interface IconProps { name: string; size?: number; label?: string; color?
 export interface LogoProps { variant?: "mark" | "wordmark" | "lockup"; size?: number; height?: number }
 /** Fields every event can carry (schema `common`). */
 export interface EventCommon {
-  /** State the office already had, sent again when a scene mounts. The scene applies it, but records no history, plays no sound and sends no notification or toast. */
+  /** State the office already had, sent again when a scene mounts. The scene applies it, but records no history, plays no sound, sends no notification or toast, and adds no unread count or Activity line. */
   seeded?: boolean;
-  /** Time of the event in ms. A seeded event with `at` after the last time the building was seen counts as news in Since you left. */
+  /** Time of the event in ms. A seeded event with `at` after the last time the building was seen is news: it adds unread counts and Activity lines, and Since you left counts it. */
   at?: number;
 }
 /** Events an adapter emits into the office. The scene changes ONLY from these. */
