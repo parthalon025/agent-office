@@ -13,6 +13,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startFakeOpenAI } from './fixtures/fake-openai.mjs';
 import { pageFile } from '../auth.mjs';
+import { officeFiles } from '../files.mjs';
 import * as git from '../git.mjs';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -29,7 +30,8 @@ const freePort = () => new Promise((resolve, reject) => {
   s.listen(0, '127.0.0.1', () => { const { port: p } = s.address(); s.close(() => resolve(p)); });
   s.on('error', reject);
 });
-const until = async (fn, what, ms = 15000) => {
+// A server that starts while other suites run can need more than 15 s; a fast start still returns at once.
+const until = async (fn, what, ms = 45000) => {
   const t0 = Date.now();
   for (;;) {
     const v = await fn();
@@ -61,12 +63,13 @@ before(async () => {
   const copy = path.join(base, 'office');
   fs.mkdirSync(copy);
   for (const f of fs.readdirSync(SRC)) {
-    if (/\.(mjs|json|ps1)$/.test(f) && !['state.json', 'history.json'].includes(f) && !f.startsWith('office-')) fs.copyFileSync(path.join(SRC, f), path.join(copy, f));
+    if (/\.(mjs|json|ps1)$/.test(f) && !/^(state|history)(-\d+)?\.json$/.test(f) && !f.startsWith('office-')) fs.copyFileSync(path.join(SRC, f), path.join(copy, f));
   }
   for (const d of ['providers', 'public']) fs.cpSync(path.join(SRC, d), path.join(copy, d), { recursive: true });
-  fs.writeFileSync(path.join(copy, 'state.json'), JSON.stringify({ recent: [repo] })); // the repo is a building before any session
   fake = await startFakeOpenAI({ script: [{ text: 'ok' }], models: ['fake-model'] });
   port = await freePort();
+  // The repo is a building before any session. The state file of an office on a free port has the port in its name.
+  fs.writeFileSync(officeFiles(copy, port).state, JSON.stringify({ recent: [repo] }));
   const env = { ...process.env, OFFICE_PORT: String(port), OFFICE_HOOKS: 'command', OFFICE_OLLAMA_URL: fake.url, OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
     OFFICE_FLOOR_MIN_AGE_MS: '0', OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local') };
   child = spawn(process.execPath, ['server.mjs'], { cwd: copy, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env });
@@ -79,7 +82,7 @@ before(async () => {
 after(async () => {
   if (child) child.kill();
   if (fake) await fake.close();
-  for (const b of [...FLOORS, 'late']) await git.deleteFloor(repo, b, true).catch(() => {});
+  for (const b of [...FLOORS, 'late', 'fresh']) await git.deleteFloor(repo, b, true).catch(() => {});
   await new Promise((r) => setTimeout(r, 300)); // let Windows release the folder
   if (base) try { fs.rmSync(base, { recursive: true, force: true }); } catch { /* a temp folder may stay */ }
 });
@@ -118,4 +121,16 @@ test('a room made outside the office, with a session in it, is not removed befor
   assert.ok(fs.existsSync(root));
   const d = await call('/api/floor/delete', { repo, branch: 'late' });
   assert.equal(d.status, 409, 'delete floor must also see the session');
+});
+
+// No call before this one refreshes the office's copy of the room list (clean-up does, after each run), so a
+// delete that read the cached list would not know the new room and would delete the floor under the session.
+test('delete floor reads git, not the cached room list, so it sees a room made a moment ago', { skip: SKIP }, async () => {
+  const root = path.join(path.dirname(rooms.busy), tag + 'fresh');
+  plain(repo, 'worktree', 'add', '-b', 'fresh', root, 'main');
+  await openIn(root, 'fresh-bot');
+  const d = await call('/api/floor/delete', { repo, branch: 'fresh' });
+  assert.equal(d.status, 409, JSON.stringify(d.json));
+  assert.match(d.json.error || '', /works on this floor/);
+  assert.ok(fs.existsSync(root), 'the room must stay');
 });

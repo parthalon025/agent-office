@@ -27,6 +27,12 @@
 //                                      default spend limit (spendLimitFor). true or false only.
 //   canResume              (optional)  true when open(s, { resume }) continues a past conversation (Claude Code). Without it,
 //                                      Reopen starts a fresh session in the same folder with the same model (reopenPlan).
+//   modes                  (optional)  the permission modes open() takes (opts.permissionMode), as names. Without it: none.
+//   needsModel             (optional)  true when open() needs opts.model (a local model). Without it the agent has a default.
+//   openWindow(s, opts)    (optional)  open the agent in its own terminal window (Claude Code). Without it: in the office only.
+//   control(s, request, onDone) (optional) a control request to a running session: change mode or model, connectors
+//                                      (Claude Code). Without it the office refuses those requests (409).
+//   The Open dialog shows each kind's options from these facts (registry.kinds), so the page keeps no copy of them.
 //   Two timing rules. (1) A method returns before the events that follow from it: report them on a later tick. The office
 //   marks the turn after the call (startTurn after message, tracker.interrupt after interrupt), so a stopped turn reported
 //   inside interrupt() would read as an error. (2) After close, or after events.end, report nothing more for that session:
@@ -100,6 +106,10 @@ export function checkProvider(p) {
   if (p.check !== undefined && typeof p.check !== 'function') missing.push('check() (optional, but then a function)');
   if (p.paid !== undefined && typeof p.paid !== 'boolean') missing.push('paid (optional, but then true or false)');
   if (p.canResume !== undefined && typeof p.canResume !== 'boolean') missing.push('canResume (optional, but then true or false)');
+  if (p.modes !== undefined && !(Array.isArray(p.modes) && p.modes.every((m) => typeof m === 'string' && m))) missing.push('modes (optional, but then a list of mode names)');
+  if (p.needsModel !== undefined && typeof p.needsModel !== 'boolean') missing.push('needsModel (optional, but then true or false)');
+  if (p.openWindow !== undefined && typeof p.openWindow !== 'function') missing.push('openWindow() (optional, but then a function)');
+  if (p.control !== undefined && typeof p.control !== 'function') missing.push('control() (optional, but then a function)');
   if (missing.length) throw new Error(`The provider ${p.kind || '(no kind)'} lacks: ${missing.join(', ')}.`);
   if (!KIND_RE.test(p.kind)) throw new Error(`The provider kind ${p.kind} must be lower-case letters, digits and dashes.`);
   return p;
@@ -141,6 +151,17 @@ function settled(p, ms, fallback) {
   return Promise.race([Promise.resolve().then(p).catch(fallback), late]).finally(() => clearTimeout(timer));
 }
 
+/**
+ * What the page needs to know of one agent kind to offer it, with no call to the provider:
+ * { kind, label, paid (a spend limit applies), terminal (it can open in a terminal window), modes (permission modes it
+ * takes), needsModel (the user must pick a model), control (a running session takes control requests: a model or mode
+ * change, connectors; the dock offers them only then) }.
+ */
+export function describe(p) {
+  return { kind: p.kind, label: p.label, paid: isPaid(p), terminal: typeof p.openWindow === 'function', modes: Array.isArray(p.modes) ? [...p.modes] : [],
+    needsModel: p.needsModel === true, control: typeof p.control === 'function' };
+}
+
 /** The providers of one office, by kind. */
 export function createRegistry(list) {
   const by = new Map();
@@ -159,6 +180,8 @@ export function createRegistry(list) {
     /** The provider of a session. A session the tracker first saw in a hook is a Claude Code session. */
     of: (s) => get(s.provider),
     list: () => [...by.values()],
+    /** Every agent kind as describe() gives it, in the order the office lists them (Claude Code first). The snapshot sends it. */
+    kinds: () => [...by.values()].map(describe),
     /**
      * How the office opens a past session (a history record) again. A provider that can resume continues the conversation
      * with its replies, cost and turns; the record leaves the past list, because the reopened session records itself.
@@ -172,15 +195,16 @@ export function createRegistry(list) {
       return { provider, opts, fresh: true, note: 'A new session started. This agent kind cannot resume a past session.' };
     },
     /**
-     * Readiness and models of every provider, for the settings view (#20). A provider that fails or does not answer in
-     * time is not ready, and the reason is its need. Models are asked only of a ready provider.
+     * describe() of every provider with its readiness and models, for the Open dialog and the Agent kinds view (#20).
+     * A provider that fails or does not answer in time is not ready, and the reason is its need. Models are asked only
+     * of a ready provider.
      */
     status({ timeoutMs = STATUS_MS } = {}) {
       return Promise.all([...by.values()].map(async (p) => {
         const r = await settled(() => p.readiness(), timeoutMs,
           (e) => ({ ready: false, version: null, needs: [`The office could not check ${p.label}: ${e.message}`] }));
         const models = r.ready ? await settled(() => p.models(), timeoutMs, () => []) : [];
-        return { kind: p.kind, label: p.label, ready: r.ready === true, version: r.version || null, needs: Array.isArray(r.needs) ? r.needs : [], models };
+        return { ...describe(p), ready: r.ready === true, version: r.version || null, needs: Array.isArray(r.needs) ? r.needs : [], models };
       }));
     },
   };

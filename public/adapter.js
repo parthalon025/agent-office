@@ -113,7 +113,7 @@
         var du = uidsOf(cmd)[0];
         return du ? post('/api/dismiss', { uid: du }) : Promise.resolve({ ok: true });
       }
-      default: return Promise.resolve({ ok: false, reason: 'Not available for Claude Code sessions.' });
+      default: return Promise.resolve({ ok: false, reason: 'The office does not support this command.' });
     }
   }
 
@@ -130,11 +130,13 @@
   facade.mount = function (repo) {
     var m = store.mount(repo);
     m.adapter = AgentOffice.adapters.create({
-      name: 'Claude Code',
       subscribe: m.attach,
       send: function (cmd) { return send(m, cmd); },
       dispose: m.detach
     });
+    // The HUD names the adapter ("Connected: ..."). The DS reads adapter.name each time it draws, so the name follows
+    // the agent kinds of the building's open sessions (building.js agentName) instead of a fixed 'Claude Code'.
+    Object.defineProperty(m.adapter, 'name', { configurable: true, enumerable: true, get: function () { return m.agentName() || 'Agent Office'; } });
     return m;
   };
   window.officeAdapter = facade;

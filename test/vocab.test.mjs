@@ -188,3 +188,71 @@ test('security: a row that is only for some agent kinds has no cell in the other
   assert.equal(typeof S.na('ungated', 'claude-code'), 'string', 'a cell with no rule says why');
   assert.deepEqual([S.word('ask'), S.word('allow'), S.word('deny'), S.word('off'), S.word('on')], ['Ask', 'Allow', 'Deny', 'Off', 'On']);
 });
+
+test('the agent kind word: the label of the session\'s kind, from the snapshot\'s kinds', () => {
+  const kinds = [{ kind: 'claude-code', label: 'Claude Code' }, { kind: 'lmstudio', label: 'LM Studio' }];
+  assert.equal(V.kindWord(mk({ provider: 'lmstudio' }), kinds), 'LM Studio');
+  assert.equal(V.kindWord(mk({ provider: 'claude-code' }), kinds), 'Claude Code');
+  assert.equal(V.kindWord(mk({ provider: 'copilot' }), kinds), 'copilot', 'a kind the list does not know shows its id, never nothing');
+  assert.equal(V.kindWord(mk({ provider: 'ollama' })), 'ollama', 'no list yet');
+  assert.equal(V.kindWord(mk({}), kinds), '', 'no kind: no word');
+  assert.equal(V.kindWord(null, kinds), '');
+});
+
+// The agent kinds of the Open dialog, a room's Add agent and the Agent kinds view (office.js reads these).
+const CC = { kind: 'claude-code', label: 'Claude Code', paid: true, terminal: true, modes: ['default', 'plan', 'acceptEdits'], needsModel: false, models: [{ id: 'opus', label: 'Opus' }] };
+const OL = { kind: 'ollama', label: 'Ollama', paid: false, terminal: false, modes: [], needsModel: true, models: [{ id: 'qwen' }, { id: 'llama', label: 'Llama' }] };
+const FALL = [{ value: '', label: 'Default' }, { value: 'opus', label: 'Opus' }];
+
+test('the state of a kind: Checking until it answers, then Ready or Not ready', () => {
+  assert.deepEqual(V.kindState(null), { key: 'resting', word: 'Checking' });
+  assert.deepEqual(V.kindState({ ...CC, checking: true }), { key: 'resting', word: 'Checking' });
+  assert.deepEqual(V.kindState({ ...CC, ready: true }), { key: 'finished', word: 'Ready' });
+  assert.deepEqual(V.kindState({ ...OL, ready: false }), { key: 'waiting', word: 'Not ready' });
+});
+
+test('model choices: a kind with a default model starts with Default; a local model offers only its models', () => {
+  assert.deepEqual(V.modelChoices(CC, FALL), [{ value: '', label: 'Default' }, { value: 'opus', label: 'Opus' }]);
+  assert.deepEqual(V.modelChoices(OL, FALL), [{ value: 'qwen', label: 'qwen' }, { value: 'llama', label: 'Llama' }], 'no Default, the id when there is no label');
+  assert.equal(V.modelChoices(null, FALL), FALL, 'no kinds yet: the fallback list');
+  assert.equal(V.modelChoices({ ...CC, models: [] }, FALL), FALL, 'Claude Code before its answer: the fallback list');
+  assert.deepEqual(V.modelChoices({ ...CC, models: [] }), [{ value: '', label: 'Default' }], 'no fallback: Default only');
+  assert.deepEqual(V.modelChoices({ ...OL, models: [], checking: true }, FALL), [{ value: '', label: 'Looking for models' }]);
+  assert.deepEqual(V.modelChoices({ ...OL, models: [] }, FALL), [{ value: '', label: 'No models' }], 'a local kind never gets the Claude list');
+});
+
+test('a kind that needs a model opens only with one; its first model is picked', () => {
+  assert.equal(V.firstModel(OL), 'qwen');
+  assert.equal(V.firstModel(CC), '', 'a kind with a default model starts on Default');
+  assert.equal(V.firstModel({ ...OL, models: [] }), '');
+  assert.equal(V.firstModel(null), '');
+  assert.equal(V.noModelFor({ ...OL, models: [] }), true);
+  assert.equal(V.noModelFor(OL), false);
+  assert.equal(V.noModelFor({ ...CC, models: [] }), false, 'Claude Code has a default model');
+  assert.equal(V.noModelFor(null), false);
+});
+
+test('a kind change keeps only the options that kind takes', () => {
+  const form = { provider: 'claude-code', model: 'opus', where: 'terminal', permissionMode: 'plan', name: 'x' };
+  assert.deepEqual(V.withKind(form, OL, 'ollama'), { provider: 'ollama', model: 'qwen', where: 'office', permissionMode: '', name: 'x' });
+  assert.deepEqual(V.withKind({ ...form, provider: 'ollama' }, CC, 'claude-code'), { ...form, model: '' }, 'Claude Code keeps the window and the mode');
+  assert.deepEqual(V.withKind({ ...form, permissionMode: 'bypassPermissions' }, CC, 'claude-code'), { ...form, model: '', permissionMode: '' }, 'a mode the kind does not take is dropped');
+  assert.deepEqual(V.withKind(form, null, 'copilot'), { ...form, provider: 'copilot', model: '' }, 'an unknown kind changes nothing else');
+});
+
+test('the note of a kind says where it runs and what it costs', () => {
+  assert.match(V.kindNote(null, false), /^Runs Claude Code inside the office\./);
+  assert.match(V.kindNote(null, true), /^Starts Claude Code in a new terminal window/);
+  assert.match(V.kindNote(CC, false), /^Runs Claude Code inside the office\./);
+  assert.match(V.kindNote(OL, false), /^Runs a model from Ollama on this machine.*It costs nothing\.$/);
+  assert.match(V.kindNote(OL, true), /^Starts Ollama in a new terminal window/);
+});
+
+test('the agents of a building as one word: the kinds of its sessions, in the order of the kinds, each once', () => {
+  const kinds = [{ kind: 'claude-code', label: 'Claude Code' }, { kind: 'ollama', label: 'Ollama' }];
+  assert.equal(V.kindsWord([{ provider: 'ollama' }, { provider: 'claude-code' }, { provider: 'ollama' }], kinds), 'Claude Code, Ollama');
+  assert.equal(V.kindsWord([{ provider: 'ollama' }], kinds), 'Ollama');
+  assert.equal(V.kindsWord([{ provider: 'copilot' }, { provider: 'ollama' }], kinds), 'Ollama, copilot', 'a kind the list does not know comes last, as its id');
+  assert.equal(V.kindsWord([{}], kinds), '', 'a session with no kind adds nothing');
+  assert.equal(V.kindsWord([], kinds), '');
+});

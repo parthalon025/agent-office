@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import * as git from './git.mjs';
 import { slimPayload } from './payload.mjs';
 import { createTracker, clip } from './tracker.mjs';
-import { createRegistry, providerEvents, isPaid, spendLimitFor, DEFAULT_SPEND_LIMIT } from './providers/index.mjs';
+import { createRegistry, providerEvents, isPaid, spendLimitFor, DEFAULT_SPEND_LIMIT, DEFAULT_PROVIDER } from './providers/index.mjs';
 import { createLocal } from './providers/local.mjs';
 import { createClaudeCode, claudeVersion, MODEL_RE, MODES } from './providers/claude-code.mjs';
 import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, cleanRecent, recentChoices, securityRoomIdOf } from './place.mjs';
@@ -25,6 +25,7 @@ import { cleanRules, setRule, decide, preToolDecision, permissionModeFor, openRe
 import { inside } from './risk.mjs';
 import { mcpAddArgs, mcpRemoveArgs, pluginArgs } from './extensions.mjs';
 import * as auth from './auth.mjs';
+import { officeFiles, portArgs, DEFAULT_PORT } from './files.mjs';
 import './public/format.js'; // money, plurals and short paths, shared with the page (globalThis.OfficeFormat)
 import './public/vocab.js'; // session vocabulary, shared with the page (globalThis.OfficeVocab)
 import './public/wire.js'; // the /events wire format: lean snapshot and patches, shared with the page (globalThis.OfficeWire)
@@ -43,17 +44,26 @@ const BRANCH_PORT = process.env.OFFICE_PORT === 'branch'
     }
   })()
   : null;
-const PORT = BRANCH_PORT ? BRANCH_PORT.port : Number(process.env.OFFICE_PORT) || 4317;
+const PORT = BRANCH_PORT ? BRANCH_PORT.port : Number(process.env.OFFICE_PORT) || DEFAULT_PORT;
 const HOST = '127.0.0.1';
-// Two tokens (auth.mjs has the rules). The agent token opens /hook* and /mcp/* only. It is kept in .office-token,
+// The files of this office in its folder (files.mjs): the plain names on the default port, names with the port in
+// them on any other port, so a second office in this folder never rewrites the first one's files (#100). All of them
+// are written only once this office owns its port (the listen callback).
+const FILES = officeFiles(ROOT, PORT);
+// Two tokens (auth.mjs has the rules). The agent token opens /hook* and /mcp/* only. It is kept in the token file,
 // which hook.mjs and mcp.mjs read, and reused across restarts, so hooks of sessions that are already running keep
 // working. The page token opens /events and /api/* only. It is new at each start and never written in this folder:
 // the browser gets it as an HttpOnly cookie for a one-time launch code, the user's own tools read PAGE_FILE.
-const TOKEN_FILE = path.join(ROOT, '.office-token');
-const AGENT_TOKEN = (() => {
-  try { const t = JSON.parse(fs.readFileSync(TOKEN_FILE, 'utf8')).token; if (auth.AGENT_TOKEN_RE.test(t)) return t; } catch { /* first run */ }
-  return auth.newAgentToken();
-})();
+const TOKEN_FILE = FILES.token;
+const readToken = (file, port) => {
+  try { const c = JSON.parse(fs.readFileSync(file, 'utf8')); if (auth.AGENT_TOKEN_RE.test(c.token) && (port === undefined || c.port === port)) return c.token; } catch { /* none */ }
+  return null;
+};
+// Before #100 an office on another port kept its token in .office-token too. When that file still names this port, its
+// token is this office's, and the settings files that office made carry it: keep it, so those settings keep working.
+// Only the token: state.json and history.json may belong to the office on the default port (its schedules, its notes).
+const OLD_PLAIN_TOKEN = !readToken(TOKEN_FILE) && PORT !== DEFAULT_PORT ? readToken(officeFiles(ROOT).token, PORT) : null;
+const AGENT_TOKEN = readToken(TOKEN_FILE) || OLD_PLAIN_TOKEN || auth.newAgentToken();
 const PAGE_TOKEN = auth.newPageToken();
 const PAGE_FILE = auth.pageFile(process.env, PORT);
 const launchCodes = auth.createLaunchCodes();
@@ -69,11 +79,11 @@ function writeSecret(file, text) {
   });
   if (warning) console.warn(`WARNING: ${warning}`);
 }
-const HOOKS_CMD_FILE = path.join(ROOT, 'office-hooks.json');
-const HOOKS_HTTP_FILE = path.join(ROOT, 'office-hooks-http.json');
-const STATE_FILE = path.join(ROOT, 'state.json');
-const MCP_FILE = path.join(ROOT, 'office-mcp.json');
-const HISTORY_FILE = path.join(ROOT, 'history.json');
+const HOOKS_CMD_FILE = FILES.hooksCmd;
+const HOOKS_HTTP_FILE = FILES.hooksHttp;
+const STATE_FILE = FILES.state;
+const MCP_FILE = FILES.mcp;
+const HISTORY_FILE = FILES.history;
 
 const HOOK_EVENTS = [
   'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PermissionRequest',
@@ -103,7 +113,8 @@ const rememberDir = (dir) => {
 const NODE = process.execPath.replace(/\\/g, '/');
 // The hook may wait as long as the longest hold below; the server decides when to give up.
 const askSeconds = 1000;
-const hookCommand = `"${NODE}" "${path.join(ROOT, 'hook.mjs').replace(/\\/g, '/')}"`;
+// On a port other than the default, the port follows as an argument, so hook.mjs reads this office's token file.
+const hookCommand = [`"${NODE}" "${path.join(ROOT, 'hook.mjs').replace(/\\/g, '/')}"`, ...portArgs(PORT)].join(' ');
 // The office tools are safe to pre-allow: they only talk to this server, and office_room_update
 // changes only the caller's own room boards (notes and blackboard pin in state.json).
 const PERMISSIONS = { allow: ['mcp__office__office_inbox', 'mcp__office__office_ask', 'mcp__office__office_room', 'mcp__office__office_room_update'] };
@@ -132,16 +143,13 @@ const httpSettings = {
   })),
   permissions: PERMISSIONS,
 };
-writeSecret(HOOKS_CMD_FILE, JSON.stringify(commandSettings, null, 2));
-writeSecret(HOOKS_HTTP_FILE, JSON.stringify(httpSettings, null, 2));
 
 // Use HTTP hooks only after a probe proved them on this Claude Code version (npm run probe).
 const CLAUDE_VERSION = claudeVersion();
 const httpProven = () => persisted.httpHooks?.ok === true && persisted.httpHooks.version === CLAUDE_VERSION;
 let hooksMode = process.env.OFFICE_HOOKS === 'command' ? 'command' : (process.env.OFFICE_HOOKS === 'http' || httpProven() ? 'http' : 'command');
 const activeHooksFile = () => (hooksMode === 'http' ? HOOKS_HTTP_FILE : HOOKS_CMD_FILE);
-const mcpConfig = { mcpServers: { office: { command: process.execPath.replace(/\\/g, '/'), args: [path.join(ROOT, 'mcp.mjs').replace(/\\/g, '/')] } } };
-writeSecret(MCP_FILE, JSON.stringify(mcpConfig, null, 2));
+const mcpConfig = { mcpServers: { office: { command: process.execPath.replace(/\\/g, '/'), args: [path.join(ROOT, 'mcp.mjs').replace(/\\/g, '/'), ...portArgs(PORT)] } } };
 
 // ---------- past sessions ----------
 // Sessions that run inside the office are saved, so a restart or a closed session can be reopened
@@ -259,7 +267,7 @@ function saveRule(body) {
 let ENFORCE = null;
 
 // ---------- providers: the agent tools behind the sessions (providers/) ----------
-// Every provider reports through the same events into the tracker. Claude Code is the only one now. Its hooks come in over
+// Every provider reports through the same events into the tracker: Claude Code, Ollama and LM Studio. Claude Code's hooks come in over
 // the hook routes below, and a permission decision goes back as the hook's answer (claude.answer gives the body).
 // A quiet answer (a low call a local agent asks about, allowed by default) changes nothing the page shows: no snapshot.
 const events = providerEvents({ tracker, onChange: () => broadcast(), hold: (r) => { holdRequest(r); if (!r.quiet) broadcast(); } });
@@ -275,6 +283,8 @@ const officeTools = {
 const providers = createRegistry([claude, createLocal({ events, kind: 'ollama', baseUrl: process.env.OFFICE_OLLAMA_URL, officeTools }), createLocal({ events, kind: 'lmstudio', baseUrl: process.env.OFFICE_LMSTUDIO_URL, officeTools })]);
 const providerOf = (s) => providers.of(s);
 ENFORCE = enforcement(providers.list());
+// The agent kinds as the page offers and shows them (providers/index.mjs describe). Fixed while the server runs.
+const KINDS = providers.kinds();
 
 const basename = (p) => (p ? p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : '');
 
@@ -292,9 +302,9 @@ function addRepo(repoPath) {
 async function refreshRepo(k) {
   const r = repos.get(k);
   if (!r) return;
-  let wts;
-  try { wts = await git.layout(r.path); } catch { repos.delete(k); broadcast(); return; } // not a repository any more
-  if (JSON.stringify(wts) !== JSON.stringify(r.worktrees)) { r.worktrees = wts; wts.forEach((w) => adoptNotes(placeOfWorktree(r.path, w))); broadcast(); }
+  const done = await git.refreshEntry(r); // a failed `git worktree list` changes nothing; overlapping refreshes keep the newest answer
+  if (done === 'gone') { if (repos.get(k) === r) repos.delete(k); broadcast(); return; } // the folder is gone, or it is not a repository any more
+  if (done === 'changed') { r.worktrees.forEach((w) => adoptNotes(placeOfWorktree(r.path, w))); broadcast(); }
 }
 function knownRepo(p) {
   const r = repos.get(repoKey(String(p || '')));
@@ -330,6 +340,8 @@ async function repoTree(root) {
 }
 
 // Git refusals (branch exists, not merged, uncommitted changes) are the user's to fix: answer 409.
+// A room on a floor: a worktree of the branch, or an agent room whose base is that branch (it sits on that floor, #69).
+const onFloor = (w, branch) => w.branch === branch || (!!w.base && w.base === branch);
 async function floorAction(action, body) {
   try { return await floorActionRaw(action, body); } catch (e) { throw e.status ? e : httpError(409, e.message); }
 }
@@ -344,7 +356,8 @@ async function floorActionRaw(action, body) {
     if (s) throw httpError(409, `${s.name} works in this room. Close the session first.`);
     out = await git.removeRoom(r.path, String(body.root || ''), body.force === true);
   } else if (action === 'delete-floor') {
-    for (const w of (await git.layout(r.path)).filter((x) => x.branch === branch)) { // git's list, not the 30 s copy
+    // git's list, not the 30 s copy; the floor's rooms are its worktrees and the agent rooms that sit on it (#69 base)
+    for (const w of (await git.layout(r.path)).filter((x) => onFloor(x, branch))) {
       const s = roomInUse(w.root);
       if (s) throw httpError(409, `${s.name} works on this floor. Close the session first.`);
     }
@@ -355,7 +368,7 @@ async function floorActionRaw(action, body) {
     const wts = await git.layout(r.path);
     out = { deleted: [], skipped: [] };
     for (const b of (Array.isArray(body.branches) ? body.branches : []).map(String)) {
-      const busy = wts.filter((w) => w.branch === b).map((w) => roomInUse(w.root)).find(Boolean);
+      const busy = wts.filter((w) => onFloor(w, b)).map((w) => roomInUse(w.root)).find(Boolean);
       if (!safe.has(b) || busy) { out.skipped.push(b); continue; }
       try { await git.deleteFloor(r.path, b, false); out.deleted.push(b); } catch { out.skipped.push(b); }
     }
@@ -851,7 +864,8 @@ function openHeadless(provider, { cwd, name, prompt, worktree = null, budget = n
 }
 
 // ---------- open / close ----------
-// opts.provider: the agent kind (default Claude Code). The Open dialog offers only Claude Code until #20.
+// opts.provider: the agent kind (default Claude Code). The Open dialog offers every kind (#20); a kind without openWindow
+// opens in the office only.
 async function openSession(opts) {
   if (process.platform !== 'win32') throw httpError(501, 'Opening sessions is only implemented for Windows.');
   const cwd = String(opts.cwd || '').trim();
@@ -1028,7 +1042,8 @@ setInterval(() => { const now = Date.now(); for (const sch of persisted.schedule
 // ---------- past sessions: list and search ----------
 function pastSummary(h) {
   const last = h.replies?.length ? h.replies[h.replies.length - 1].text : '';
-  return { uid: h.uid, name: h.name, cwd: h.cwd, model: h.model, cost: h.cost, turns: h.turns, startedAt: h.startedAt, endedAt: h.endedAt,
+  // provider: the agent kind. A record from before providers has none: it is Claude Code's (as in providers.reopenPlan).
+  return { uid: h.uid, provider: h.provider || DEFAULT_PROVIDER, name: h.name, cwd: h.cwd, model: h.model, cost: h.cost, turns: h.turns, startedAt: h.startedAt, endedAt: h.endedAt,
     branch: h.worktree?.branch || null, worktreeRoot: h.worktree?.root || null, last: clip(String(last).replace(/\s+/g, ' '), 140), firstAsk: clip(h.prompt || '', 140) };
 }
 function search(q) {
@@ -1120,6 +1135,7 @@ const snapshot = () => W.lean({
   // The Security room (#70): the rules (office-wide and per building), why a cell is not enforced for an agent kind
   // (security.mjs enforcement), and the Spend screen (the default spend limit, cost per agent kind this month).
   security: { rules: persisted.security, enforce: ENFORCE, spend: { limit: defaultSpend(), ...costThisMonth(persisted.costs, Date.now()) } },
+  kinds: KINDS,             // the agent kinds: the label of each session's kind, and the Open dialog's options before readiness comes
 });
 // A page gets the whole snapshot when it connects, then one patch per broadcast with only what changed (wire.js).
 // State changes within BROADCAST_MS go out as one patch, so a burst of hooks sends at most 10 messages a second.
@@ -1255,7 +1271,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/floor/stale') {
       const r = knownRepo(body.repo);
       const wts = await git.layout(r.path);
-      return send(res, 200, { floors: (await git.staleFloors(r.path)).filter((f) => !wts.some((w) => w.branch === f.branch && roomInUse(w.root))) });
+      return send(res, 200, { floors: (await git.staleFloors(r.path)).filter((f) => !wts.some((w) => onFloor(w, f.branch) && roomInUse(w.root))) });
     }
     if (url.pathname === '/api/floor/cleanup') return send(res, 200, await floorAction('cleanup-floors', body));
     if (url.pathname === '/api/floor/delete') return send(res, 200, await floorAction('delete-floor', body));
@@ -1342,8 +1358,12 @@ server.on('error', async (e) => {
 });
 
 server.listen(PORT, HOST, () => {
-  // Written only once we own the port, so a second copy can never invalidate a running office's tokens.
+  // Written only once we own the port, so a second copy can never invalidate a running office's tokens or settings:
+  // a copy on a busy port writes nothing, and an office on another port has its own files (files.mjs).
   writeSecret(TOKEN_FILE, JSON.stringify({ token: AGENT_TOKEN, port: PORT }));
+  writeSecret(HOOKS_CMD_FILE, JSON.stringify(commandSettings, null, 2));
+  writeSecret(HOOKS_HTTP_FILE, JSON.stringify(httpSettings, null, 2));
+  writeSecret(MCP_FILE, JSON.stringify(mcpConfig, null, 2));
   // Saved state (schedule prompts, notes) and past sessions (replies) are limited too (#27 L10): once here, with
   // what this office loaded. savePersisted and saveHistory then write plainly, and a plain write keeps the ACL.
   // After listen, so a second copy that exits on EADDRINUSE never rewrites them.
@@ -1354,6 +1374,7 @@ server.listen(PORT, HOST, () => {
     writeSecret(PAGE_FILE, JSON.stringify({ token: PAGE_TOKEN, port: PORT }));
   } catch (e) { console.warn(`Could not save the page token for npm run probe and a second npm start: ${e.message}`); }
   const link = auth.launchUrl(PORT, launchCodes.mint());
+  if (OLD_PLAIN_TOKEN) console.log(`Port ${PORT} reuses the agent token of the old .office-token, so settings made before this version keep working. This office keeps its own files from now on.`);
   if (BRANCH_PORT) console.log(`Branch "${BRANCH_PORT.name}" uses port ${PORT}.`);
   console.log(`Agent Office is open: ${link}\nThe link works once, for 5 minutes. A reload keeps working. For a new link, run npm start again.`);
   console.log(`Hooks: ${hooksMode} (Claude Code ${CLAUDE_VERSION}). For outside sessions: claude --settings "${activeHooksFile()}" --mcp-config "${MCP_FILE}"`);

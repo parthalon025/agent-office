@@ -7,12 +7,28 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { resolveExe } from '../git.mjs';
 import { pageFile, routeOf } from '../auth.mjs';
+import { officeFiles, portArg } from '../files.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-// Two tokens (auth.mjs): the agent token from .office-token for /hook* and /mcp/*, the page token from the
-// office's page file for /events and /api/*.
-const cfg = JSON.parse(fs.readFileSync(path.join(here, '..', '.office-token'), 'utf8'));
-const page = JSON.parse(fs.readFileSync(pageFile(process.env, cfg.port), 'utf8'));
+// Usage: npm run smoke (the office of npm start), or npm run smoke -- <port> (an office on another port).
+// Two tokens (auth.mjs): the agent token from the token file of the port (files.mjs) for /hook* and /mcp/*, the page
+// token from the office's page file for /events and /api/*. Both are read before any session opens, so a wrong port
+// stops here, before a paid call.
+const asked = portArg(process.argv[2]);
+if (!asked) {
+  console.error(`"${process.argv[2]}" is not a port. Run npm run smoke, or npm run smoke -- <port> for an office on another port.`);
+  process.exit(1);
+}
+let cfg, page;
+try {
+  cfg = JSON.parse(fs.readFileSync(officeFiles(path.join(here, '..'), asked).token, 'utf8'));
+  page = JSON.parse(fs.readFileSync(pageFile(process.env, cfg.port), 'utf8'));
+} catch {
+  console.error(process.argv[2]
+    ? `The office on port ${asked} is not running. Start it, then run npm run smoke -- ${asked} again.`
+    : 'The office is not running. Start it with npm start, then run npm run smoke again.');
+  process.exit(1);
+}
 const tokenFor = (route) => (routeOf('POST', route) === 'agent' ? cfg.token : page.token);
 const S = path.join(os.tmpdir(), 'agent-office-smoke').split(path.sep).join('/');
 fs.mkdirSync(S, { recursive: true });

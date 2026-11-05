@@ -1,22 +1,31 @@
 #!/usr/bin/env node
 // Checks that HTTP hooks work on this Claude Code version and, if so, switches the office to them.
 // Needs the office to be running. Makes one tiny Haiku call.
+// Usage: npm run probe (the office of npm start), or npm run probe -- <port> (an office on another port).
 // First statement: Windows never looks for a program in the current folder (git.mjs resolveExe has the reason).
 process.env.NoDefaultCurrentDirectoryInExePath = '1';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pageFile } from './auth.mjs';
+import { officeFiles, portArg } from './files.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-// .office-token names the port of the running office. /api/probe-http is a page route, so the call carries the
-// page token, which the office keeps outside this folder for the user's own tools (auth.mjs pageFile).
+// The token file of the port (files.mjs) names the port of the running office. /api/probe-http is a page route, so the
+// call carries the page token, which the office keeps outside this folder for the user's own tools (auth.mjs pageFile).
+const asked = portArg(process.argv[2]);
+if (!asked) {
+  console.error(`"${process.argv[2]}" is not a port. Run npm run probe, or npm run probe -- <port> for an office on another port.`);
+  process.exit(1);
+}
 let page;
 try {
-  const { port } = JSON.parse(fs.readFileSync(path.join(here, '.office-token'), 'utf8'));
+  const { port } = JSON.parse(fs.readFileSync(officeFiles(here, asked).token, 'utf8'));
   page = JSON.parse(fs.readFileSync(pageFile(process.env, port), 'utf8'));
 } catch {
-  console.error('The office is not running. Start it with npm start, then run npm run probe again.');
+  console.error(process.argv[2]
+    ? `The office on port ${asked} is not running. Start it, then run npm run probe -- ${asked} again.`
+    : 'The office is not running. Start it with npm start, then run npm run probe again.');
   process.exit(1);
 }
 console.log('Probing HTTP hooks (about 15 seconds)...');

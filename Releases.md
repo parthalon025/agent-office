@@ -56,6 +56,7 @@ Versions keep the `x` prefix.
 - A room outside git no longer asks for a file list. The board says "Not a git folder".
 - A click on a desk monitor in front of a board opens only the terminal.
 - The page loads again after a stale chat header call was removed.
+- A second office in the same folder no longer takes over the hooks of the first one (#100). An office on a port other than 4317 (`OFFICE_PORT`, `npm run start:branch`) keeps its own files, with the port in the name: `.office-token-<port>`, `office-hooks-<port>.json`, `office-hooks-http-<port>.json`, `office-mcp-<port>.json`, `state-<port>.json` and `history-<port>.json`. Its settings pass the port to `hook.mjs` and `mcp.mjs`. The office on 4317 keeps the old names, so its settings files stay as they were. A second office no longer runs the schedules of the first one. A copy that stops because its port is busy writes no file. If you run an office on a port other than 4317, it now keeps its own notes, schedules, templates, past sessions and spend limit, so it starts empty; your old data stays in `state.json` and `history.json`.
 
 ## x0.1
 

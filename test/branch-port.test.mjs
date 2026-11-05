@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, execFileSync } from 'node:child_process';
 import * as git from '../git.mjs';
+import { officeFiles } from '../files.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const win = process.platform === 'win32';
@@ -73,7 +74,13 @@ test('OFFICE_PORT=branch: the office uses the port of its branch, says so, and s
   fs.mkdirSync(lad);
   for (const f of fs.readdirSync(ROOT)) if (f.endsWith('.mjs') || f === 'package.json') fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
   for (const d of ['providers', 'public']) fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true });
-  const branch = 'test/port-check';
+  // The port comes from the branch name, so a fixed name collides with another suite that runs at the same time. Take the first name whose port is free now.
+  let branch = '';
+  for (let i = 0; !branch; i++) {
+    if (i > 200) assert.fail('no free branch port to test with');
+    const name = 'test/port-check-' + i;
+    try { await holdPort(git.branchPort(name)).then((s) => new Promise((r) => s.close(r))); branch = name; } catch { /* in use: try the next name */ }
+  }
   sh(['init', '-b', branch], dir);
   sh(['commit', '--allow-empty', '-m', 'x'], dir);
   const want = git.branchPort(branch);
@@ -83,9 +90,12 @@ test('OFFICE_PORT=branch: the office uses the port of its branch, says so, and s
     OFFICE_PORT: 'branch', OFFICE_OPEN: '0', OFFICE_HOOKS: 'command', LOCALAPPDATA: lad, APPDATA: path.join(tmp, 'roaming'),
     OFFICE_RATE_FILE: path.join(tmp, 'no-rate.json'),
   });
+  const own = officeFiles(dir, want); // a branch port is never the default one, so the names carry the port (files.mjs)
+  const filesIn = (d) => fs.readdirSync(d).filter((f) => fs.statSync(path.join(d, f)).isFile()).sort();
   try {
     // Busy: the office stops, names the port and the branch, and does not move to another port.
     const blocker = await holdPort(want);
+    const before = filesIn(dir);
     const busy = startOffice(dir, env);
     const r1 = await busy.settled;
     await new Promise((r) => blocker.close(r));
@@ -93,7 +103,7 @@ test('OFFICE_PORT=branch: the office uses the port of its branch, says so, and s
     assert.equal(r1.code, 1, busy.out());
     assert.match(busy.out(), new RegExp(`port ${want}[. ]`));
     assert.ok(busy.out().includes(branch), busy.out());
-    assert.ok(!fs.existsSync(path.join(dir, '.office-token')), 'a stopped copy writes no token');
+    assert.deepEqual(filesIn(dir), before, 'a stopped copy writes no file: no token, no hook or MCP settings');
 
     // Free: it listens on that port and prints it.
     const ok = startOffice(dir, env);
@@ -103,14 +113,16 @@ test('OFFICE_PORT=branch: the office uses the port of its branch, says so, and s
       assert.match(ok.out(), new RegExp(`port ${want}[. ]`));
       assert.ok(ok.out().includes(branch), ok.out());
       assert.ok(ok.out().includes(`127.0.0.1:${want}/`), ok.out());
-      assert.equal(JSON.parse(fs.readFileSync(path.join(dir, '.office-token'), 'utf8')).port, want);
+      assert.equal(JSON.parse(fs.readFileSync(own.token, 'utf8')).port, want);
+      // The office of npm start keeps the plain names: a branch office never writes them (#100).
+      for (const f of Object.values(officeFiles(dir))) assert.ok(!fs.existsSync(f), `a branch office wrote ${path.basename(f)}`);
     } finally { ok.child.kill(); }
 
     // Outside git: a clear stop, no port guess.
     const plain = path.join(tmp, 'plain');
     fs.cpSync(dir, plain, { recursive: true });
     fs.rmSync(path.join(plain, '.git'), { recursive: true, force: true });
-    fs.rmSync(path.join(plain, '.office-token'), { force: true });
+    fs.rmSync(officeFiles(plain, want).token, { force: true });
     const nogit = startOffice(plain, env);
     const r3 = await nogit.settled;
     assert.equal(r3.listening, false, nogit.out());

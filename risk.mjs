@@ -36,17 +36,18 @@ const DANGER = [
 
 // Path parts (folders or files) whose content a program runs without asking: git config, hooks and the
 // worktree link file; Claude Code settings, hooks, commands and skills; MCP server lists; editor tasks and
-// run settings; ssh config; the office's own hook and MCP files. An edit to one of them is high.
-// The Start Menu folder holds the Startup folder (Programs\Startup): Windows runs what is in it at sign-in.
-const RUNS = new Set(['.git', '.claude', '.vscode', '.idea', '.ssh', '.mcp.json', '.claude.json', '.gitconfig',
-  'office-hooks.json', 'office-hooks-http.json', 'office-mcp.json', 'start menu']);
-// File names a shell runs at its start: PowerShell profiles (profile.ps1, Microsoft.PowerShell_profile.ps1,
-// Microsoft.VSCode_profile.ps1) and sh, bash, zsh, csh and ksh profiles.
-const RUNS_FILE = /^((microsoft\.[\w.]+_)?profile\.ps1|\.(bashrc|bash_profile|bash_login|bash_logout|profile|zshrc|zprofile|zshenv|zlogin|cshrc|tcshrc|kshrc))$/;
+// run settings; ssh config; the office's own hook and MCP files, with or without a port in the name (files.mjs). An
+// edit to one of them is high. The Start Menu folder holds the Startup folder (Programs\Startup): Windows runs what is
+// in it at sign-in.
+const RUNS = new Set(['.git', '.claude', '.vscode', '.idea', '.ssh', '.mcp.json', '.claude.json', '.gitconfig', 'start menu']);
+// File names that run code: the office's hook and MCP files (any port), PowerShell profiles (profile.ps1,
+// Microsoft.PowerShell_profile.ps1, Microsoft.VSCode_profile.ps1) and sh, bash, zsh, csh and ksh profiles.
+const RUNS_FILE = /^(office-(hooks|hooks-http|mcp)(-\d+)?\.json|(microsoft\.[\w.]+_)?profile\.ps1|\.(bashrc|bash_profile|bash_login|bash_logout|profile|zshrc|zprofile|zshenv|zlogin|cshrc|tcshrc|kshrc))$/;
 // Credential folders and secret-looking file names. A read outside the root is high, inside it is medium.
+// .office-token[-<port>] and office-hooks-http[-<port>].json hold an office's agent token (files.mjs);
 // office-page-<port>.json holds the office's page token for the user's own tools (auth.mjs pageFile).
 const SECRET_DIRS = new Set(['.ssh', '.gnupg', '.aws', '.azure', '.kube']);
-const SECRET_FILE = /^(\.env.*|.*\.(pem|key|pfx|p12)|id_(rsa|dsa|ecdsa|ed25519).*|\.credentials\.json|\.office-token|office-hooks-http\.json|office-page-\d+\.json|\.npmrc|\.netrc|_netrc|\.git-credentials|\.pypirc)$/;
+const SECRET_FILE = /^(\.env.*|.*\.(pem|key|pfx|p12)|id_(rsa|dsa|ecdsa|ed25519).*|\.credentials\.json|\.office-token(-\d+)?|office-hooks-http(-\d+)?\.json|office-page-\d+\.json|\.npmrc|\.netrc|_netrc|\.git-credentials|\.pypirc)$/;
 
 const WIN = process.platform === 'win32';
 const norm = (p) => { const r = path.resolve(String(p)); return WIN ? r.toLowerCase() : r; };
@@ -114,11 +115,12 @@ function resolveIn(root, abs) {
 }
 
 // The office's own saved state (#70): state.json holds the Security room rules and the schedules (prompts the office runs),
-// history.json the past sessions. A change to them changes what the office does at its next start, so they are settings
-// that run code. Matched by absolute path in the office folder (this file's folder), not by name: another project's
-// state.json is a plain file.
-const OFFICE_DIR = path.dirname(fileURLToPath(import.meta.url));
-const OWN_STATE = new Set(['state.json', 'history.json'].map((f) => norm(path.join(OFFICE_DIR, f))));
+// history.json the past sessions; an office on another port has state-<port>.json and history-<port>.json (files.mjs).
+// A change to them changes what the office does at its next start, so they are settings that run code. Matched in the
+// office folder (this file's folder) only, not by name alone: another project's state.json is a plain file.
+const OFFICE_DIR = norm(path.dirname(fileURLToPath(import.meta.url)));
+const OWN_STATE = /^(state|history)(-\d+)?\.json$/i;
+const ownState = (p) => !!p && path.dirname(norm(p)) === OFFICE_DIR && OWN_STATE.test(path.basename(String(p)));
 let realHome;   // the real path of the home folder, looked up once
 /**
  * True when a root holds the user's own settings, so nothing in it counts as inside: a drive root, the home folder or a
@@ -166,7 +168,7 @@ function place(root, p) {
   // A .git folder anywhere on the path holds git's config and hooks, and the Start Menu holds the Startup folder, also when
   // the root is below them.
   if (!k.runs && whole.some((x) => forms(x).some((n) => n === '.git' || n === 'start menu'))) k.runs = true;
-  if (OWN_STATE.has(norm(abs)) || (real && OWN_STATE.has(norm(real)))) k.runs = true;
+  if (ownState(abs) || ownState(real)) k.runs = true;
   return { inside: isIn, ...k };
 }
 

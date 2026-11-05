@@ -14,6 +14,7 @@ import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { pageFile } from '../auth.mjs';
+import { officeFiles } from '../files.mjs';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let base, copy, work, home, repo, child, port, agentToken, pageToken, log = '';
@@ -84,7 +85,7 @@ before(async () => {
   const g = (...a) => execFileSync(resolveExe('git'), ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8', windowsHide: true });
   g('init', '-q', '-b', 'main'); fs.writeFileSync(path.join(repo, 'a.txt'), 'a\n'); g('add', '-A'); g('commit', '-q', '-m', 'init');
   for (const f of fs.readdirSync(SRC)) {
-    if (/\.(mjs|json|ps1)$/.test(f) && !['state.json', 'history.json'].includes(f) && !f.startsWith('office-')) fs.copyFileSync(path.join(SRC, f), path.join(copy, f));
+    if (/\.(mjs|json|ps1)$/.test(f) && !/^(state|history)(-\d+)?\.json$/.test(f) && !f.startsWith('office-')) fs.copyFileSync(path.join(SRC, f), path.join(copy, f));
   }
   for (const d of ['providers', 'public']) fs.cpSync(path.join(SRC, d), path.join(copy, d), { recursive: true });
   port = await freePort();
@@ -93,7 +94,8 @@ before(async () => {
   child.stdout.on('data', (d) => { log += d; });
   child.stderr.on('data', (d) => { log += d; });
   const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')).token; } catch { return null; } };
-  agentToken = await until(() => read(path.join(copy, '.office-token')), 'the server to listen');
+  // the office's files carry the port in their names (files.mjs), as the port is not the default one
+  agentToken = await until(() => read(officeFiles(copy, port).token), 'the server to listen');
   pageToken = await until(() => read(pageFile(env, port)), 'the page token file');
   // A terminal Claude Code session in a folder outside git (building key ''), seated once its place is known.
   assert.equal((await hook(ev('SessionStart', { source: 'startup' }))).status, 200);
@@ -206,7 +208,7 @@ test('a per-building override applies in its building only', async () => {
   assert.deepEqual(s.security.rules, { office: { 'shell|claude-code': 'deny' }, buildings: { 'c:\\elsewhere': { 'shell|claude-code': 'allow' } } });
 });
 
-test('the rules are saved in state.json', async () => {
-  const saved = await until(() => { try { return JSON.parse(fs.readFileSync(path.join(copy, 'state.json'), 'utf8')).security; } catch { return null; } }, 'state.json');
+test('the rules are saved in the state file (state.json, or state-<port>.json on another port)', async () => {
+  const saved = await until(() => { try { return JSON.parse(fs.readFileSync(officeFiles(copy, port).state, 'utf8')).security; } catch { return null; } }, 'the state file');
   assert.equal(saved.office['shell|claude-code'], 'deny');
 });
