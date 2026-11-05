@@ -22,7 +22,8 @@
                          screens [{ id, title, rows }], rows { id: { label, options, def, office?, only? } }, columns
                          [{ id, label }] (agent kinds), columnOf(providerKind), options(row), valueOf(rules, building, row,
                          col), sourceOf(...) ('building' | 'office' | 'default'), next(row, value), loosens(row, from, to),
-                         applies(row, col), na(row, col), word(value), key(row, col).
+                         applies(row, col), na(row, col), word(value), key(row, col), own(map, key) (an own key, never
+                         an inherited one: rule maps come from requests and state.json).
                          rules: { office: { 'row|col': value }, buildings: { buildingKey: { 'row|col': value } } }.
 */
 (function (root) {
@@ -115,9 +116,13 @@
   // every other row can have a per-building override. A rule the row does not offer is never used.
   var SEC_COLUMNS = [{ id: 'claude-code', label: 'Claude Code' }, { id: 'hermes', label: 'Hermes' }, { id: 'dsh', label: 'dsh' },
     { id: 'openclaw', label: 'OpenClaw' }, { id: 'local', label: 'Local model' }];
-  var SEC_KIND = { 'claude-code': 'claude-code', ollama: 'local', lmstudio: 'local', hermes: 'hermes', dsh: 'dsh', openclaw: 'openclaw' };
+  // The tables are looked up by names that come from requests and saved files, so they have no prototype: '__proto__' or
+  // 'constructor' is no row, agent kind or word. Rule maps (rules.office, rules.buildings) are read by own keys only (own).
+  function bare(o) { return Object.assign(Object.create(null), o); }
+  function own(o, k) { return !!o && typeof o === 'object' && Object.prototype.hasOwnProperty.call(o, k); }
+  var SEC_KIND = bare({ 'claude-code': 'claude-code', ollama: 'local', lmstudio: 'local', hermes: 'hermes', dsh: 'dsh', openclaw: 'openclaw' });
   var RULE = ['ask', 'allow', 'deny'], ASK_DENY = ['ask', 'deny'], TOGGLE = ['off', 'on'];
-  var SEC_ROWS = {
+  var SEC_ROWS = bare({
     'read-inside': { label: 'Read inside the worktree', options: RULE, def: 'allow' },
     'edit-inside': { label: 'Edit inside the worktree', options: RULE, def: 'allow' },
     'files-outside': { label: 'Read or edit outside it', options: RULE, def: 'ask' },
@@ -132,7 +137,7 @@
     supervise: { label: 'Paperclip: Supervise in office', options: TOGGLE, def: 'off', office: true, only: ['claude-code'], na: 'Not used' },
     // An agent that reports no cost: Ask (the office asks once per session), Allow (it runs without asking), Deny (it never runs).
     'no-cost': { label: 'Run without cost reports', options: RULE, def: 'ask', office: true, only: ['hermes', 'dsh', 'openclaw'], na: { 'claude-code': 'Reports cost', local: 'Free' } }
-  };
+  });
   var SEC_SCREENS = [
     { id: 'files', title: 'Files', rows: ['read-inside', 'edit-inside', 'files-outside'] },
     { id: 'commands', title: 'Commands', rows: ['shell'] },
@@ -141,21 +146,21 @@
     { id: 'agents', title: 'Agents', rows: ['ungated', 'supervise', 'no-cost'] },
     { id: 'spend', title: 'Spend', rows: [] }
   ];
-  var SEC_WORD = { ask: 'Ask', allow: 'Allow', deny: 'Deny', off: 'Off', on: 'On' };
+  var SEC_WORD = bare({ ask: 'Ask', allow: 'Allow', deny: 'Deny', off: 'Off', on: 'On' });
   function secKey(row, col) { return row + '|' + col; }
   function secApplies(row, col) { var r = SEC_ROWS[row]; return !!r && (!r.only || r.only.indexOf(col) >= 0); }
   function secOk(row, v) { return SEC_ROWS[row].options.indexOf(v) >= 0; }
   // The rule of a cell and where it comes from: the building's override, the office-wide rule, or the default.
   function secLook(rules, building, row, col) {
     if (!secApplies(row, col)) return null;
-    var r = SEC_ROWS[row], k = secKey(row, col), b = rules && rules.buildings && building != null ? rules.buildings[building] : null;
-    if (!r.office && b && secOk(row, b[k])) return { value: b[k], source: 'building' };
+    var r = SEC_ROWS[row], k = secKey(row, col), b = rules && building != null && own(rules.buildings, building) ? rules.buildings[building] : null;
+    if (!r.office && own(b, k) && secOk(row, b[k])) return { value: b[k], source: 'building' };
     var o = rules && rules.office;
-    if (o && secOk(row, o[k])) return { value: o[k], source: 'office' };
+    if (own(o, k) && secOk(row, o[k])) return { value: o[k], source: 'office' };
     return { value: r.def, source: 'default' };
   }
   var security = {
-    roomName: 'Security', screens: SEC_SCREENS, rows: SEC_ROWS, columns: SEC_COLUMNS, key: secKey, applies: secApplies,
+    roomName: 'Security', screens: SEC_SCREENS, rows: SEC_ROWS, columns: SEC_COLUMNS, key: secKey, applies: secApplies, own: own,
     columnOf: function (kind) { return SEC_KIND[kind || 'claude-code'] || null; },
     options: function (row) { return SEC_ROWS[row] ? SEC_ROWS[row].options.slice() : []; },
     valueOf: function (rules, building, row, col) { var x = secLook(rules, building, row, col); return x ? x.value : null; },

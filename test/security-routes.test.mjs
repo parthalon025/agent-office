@@ -2,6 +2,8 @@
 // the route that changes a rule (page group), and what the snapshot and state.json carry. The server runs from a throwaway copy
 // of the code (like test/mcp-routes.test.mjs), on a free port, with its own LOCALAPPDATA and OFFICE_OPEN=0. A terminal session
 // is made by posting Claude Code hook payloads to /hook/http, so no Claude Code runs and nothing is paid for.
+// The server gets its own home folder (USERPROFILE, HOME), so a session can start "in the home folder" without touching the
+// real one. The snapshot is lean (public/wire.js): session data and feed lines come from GET /api/session.
 // Run: node --test test/security-routes.test.mjs
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { pageFile } from '../auth.mjs';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-let base, copy, work, child, port, agentToken, pageToken, log = '';
+let base, copy, work, home, repo, child, port, agentToken, pageToken, log = '';
 
 const freePort = () => new Promise((resolve, reject) => {
   const s = net.createServer();
@@ -52,22 +54,41 @@ async function snapshot() {
 }
 const SID = 'sid-sec-1';
 const ev = (name, extra = {}) => ({ hook_event_name: name, session_id: SID, cwd: work, ...extra });
-const permission = (tool, input) => ev('PermissionRequest', { tool_name: tool, tool_input: input, permission_suggestions: [] });
+const permission = (tool, input, extra = {}) => ev('PermissionRequest', { tool_name: tool, tool_input: input, permission_suggestions: [], ...extra });
 const set = (change) => page('/api/security/set', change);
-const feedHas = async (text) => (await snapshot()).feed.some((f) => f.text === text);
+const fullOf = async (uid) => { const r = await fetch(`http://127.0.0.1:${port}/api/session?uid=${encodeURIComponent(uid)}`, { headers: { 'x-office-token': pageToken } }); return r.ok ? r.json() : null; };
+// The terminal session that started in a folder (its cwd), as the page sees it (lean), and its feed lines.
+const sessionIn = async (cwd) => (await snapshot()).sessions.find((x) => x.cwd === cwd);
+const feedOf = async (cwd) => { const s = await sessionIn(cwd); return s ? (await fullOf(s.uid)).feed.map((f) => f.text) : []; };
+const feedHas = async (text, cwd = work) => (await feedOf(cwd)).includes(text);
+// A request that the office holds: the hook waits until the test answers it on the page route (declined).
+async function heldThenDeclined(body, cwd) {
+  const ctl = new AbortController();
+  const answer = hook(body, ctl.signal);
+  const s = await until(async () => { const x = await sessionIn(cwd); return x && x.pending.length ? x : null; }, `the ${body.tool_name} request in ${cwd} to wait`);
+  assert.equal(s.pending.length, 1);
+  assert.equal((await page('/api/answer', { id: s.pending[0].id, allow: false })).status, 200);
+  return (await answer).json;
+}
 
 before(async () => {
   base = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-sec-'));
   copy = path.join(base, 'office');
   work = path.join(base, 'work');
-  fs.mkdirSync(work);
-  fs.mkdirSync(copy);
+  home = path.join(base, 'home');
+  repo = path.join(base, 'repo');
+  for (const d of [work, copy, home, repo]) fs.mkdirSync(d);
+  // a git repository: a terminal session there is in a worktree (its main checkout)
+  const { resolveExe } = await import('../git.mjs');
+  const { execFileSync } = await import('node:child_process');
+  const g = (...a) => execFileSync(resolveExe('git'), ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8', windowsHide: true });
+  g('init', '-q', '-b', 'main'); fs.writeFileSync(path.join(repo, 'a.txt'), 'a\n'); g('add', '-A'); g('commit', '-q', '-m', 'init');
   for (const f of fs.readdirSync(SRC)) {
     if (/\.(mjs|json|ps1)$/.test(f) && !['state.json', 'history.json'].includes(f) && !f.startsWith('office-')) fs.copyFileSync(path.join(SRC, f), path.join(copy, f));
   }
   for (const d of ['providers', 'public']) fs.cpSync(path.join(SRC, d), path.join(copy, d), { recursive: true });
   port = await freePort();
-  const env = { ...process.env, OFFICE_PORT: String(port), OFFICE_HOOKS: 'command', OFFICE_RATE_FILE: path.join(base, 'no-rate.json'), OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local') };
+  const env = { ...process.env, OFFICE_PORT: String(port), OFFICE_HOOKS: 'command', OFFICE_RATE_FILE: path.join(base, 'no-rate.json'), OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local'), USERPROFILE: home, HOME: home };
   child = spawn(process.execPath, ['server.mjs'], { cwd: copy, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env });
   child.stdout.on('data', (d) => { log += d; });
   child.stderr.on('data', (d) => { log += d; });
@@ -76,7 +97,12 @@ before(async () => {
   pageToken = await until(() => read(pageFile(env, port)), 'the page token file');
   // A terminal Claude Code session in a folder outside git (building key ''), seated once its place is known.
   assert.equal((await hook(ev('SessionStart', { source: 'startup' }))).status, 200);
-  await until(async () => (await snapshot()).sessions.find((s) => s.sid === SID && s.place), 'the session to be placed');
+  await until(async () => (await sessionIn(work))?.place, 'the session to be placed');
+  // and one in a git repository, and one in the (server's) home folder
+  for (const [sid, cwd] of [['sid-sec-git', repo], ['sid-sec-home', home]]) {
+    assert.equal((await hook({ hook_event_name: 'SessionStart', session_id: sid, cwd, source: 'startup' })).status, 200);
+    await until(async () => (await sessionIn(cwd))?.place, `the session in ${path.basename(cwd)} to be placed`);
+  }
 });
 after(async () => {
   if (child) child.kill();
@@ -99,21 +125,41 @@ test('the rule route is a page route: the agent token does not open it', async (
 });
 
 test('Allow answers at once, with a feed line (the default for an edit inside the worktree)', async () => {
-  const r = await hook(permission('Edit', { file_path: path.join(work, 'a.txt'), old_string: 'a', new_string: 'b' }));
+  const r = await hook(permission('Edit', { file_path: path.join(repo, 'a.txt'), old_string: 'a', new_string: 'b' }, { session_id: 'sid-sec-git', cwd: repo }));
   assert.equal(r.status, 200);
   assert.deepEqual(r.json, { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision: { behavior: 'allow' } } });
-  assert.ok(await feedHas('allowed by Security: Edit inside the worktree'));
+  assert.ok(await feedHas('allowed by Security: Edit inside the worktree', repo));
+});
+
+// #70 review (blocker): the default Allow of the inside rows is for a git worktree only. A terminal session in a folder
+// outside git, or in the home folder, has no worktree: its edits wait for the user as they did before the Security room.
+test('a session outside git, or in the home folder, has no worktree: its edits are held, also the Startup folder', async () => {
+  const outside = await heldThenDeclined(permission('Edit', { file_path: path.join(work, 'a.txt'), old_string: 'a', new_string: 'b' }), work);
+  assert.equal(outside.hookSpecificOutput.decision.behavior, 'deny', 'the user declined it: it was not allowed by Security');
+  const startup = path.join(home, 'AppData', 'Roaming', 'Microsoft', 'Windows', 'Start Menu', 'Programs', 'Startup', 'x.cmd');
+  const profile = path.join(home, 'Documents', 'PowerShell', 'Microsoft.PowerShell_profile.ps1');
+  for (const f of [startup, profile, path.join(home, 'notes.txt')]) {
+    const r = await heldThenDeclined(permission('Write', { file_path: f, content: 'x' }, { session_id: 'sid-sec-home', cwd: home }), home);
+    assert.equal(r.hookSpecificOutput.decision.behavior, 'deny', f);
+  }
+  assert.ok(!(await feedOf(home)).some((t) => /allowed by Security/.test(t)), 'nothing in the home folder was allowed by Security');
+});
+
+test('PreToolUse makes Claude Code ask before it reads a secret file in its own folder (it would not ask by itself)', async () => {
+  const pre = await hook({ hook_event_name: 'PreToolUse', session_id: 'sid-sec-git', cwd: repo, tool_name: 'Read', tool_use_id: 'toolu_sec_env', tool_input: { file_path: path.join(repo, '.env') } });
+  assert.deepEqual(pre.json, { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: 'The Security room asks for secret files.' } });
+});
+
+test('the wall cannot remove the spend limit in one step: No limit needs confirmed', async () => {
+  const r = await page('/api/settings/spend', { limit: 0 });
+  assert.equal(r.status, 409);
+  assert.equal((await snapshot()).security.spend.limit, 2);
 });
 
 test('Ask holds the request as today, until the user answers', async () => {
-  const ctl = new AbortController();
-  const answer = hook(permission('Bash', { command: 'npm test' }), ctl.signal);
-  const s = await until(async () => (await snapshot()).sessions.find((x) => x.sid === SID && x.pending.length), 'the request to wait');
-  assert.equal(s.pending[0].tool, 'Bash');
-  assert.equal((await page('/api/answer', { id: s.pending[0].id, allow: false })).status, 200);
-  const r = await answer;
-  assert.equal(r.json.hookSpecificOutput.decision.behavior, 'deny');
-  assert.equal(r.json.hookSpecificOutput.decision.message, 'Declined from Agent Office.');
+  const r = await heldThenDeclined(permission('Bash', { command: 'npm test' }), work);
+  assert.equal(r.hookSpecificOutput.decision.behavior, 'deny');
+  assert.equal(r.hookSpecificOutput.decision.message, 'Declined from Agent Office.');
 });
 
 test('Deny refuses at once without a prompt, and Claude hears why', async () => {
@@ -121,12 +167,12 @@ test('Deny refuses at once without a prompt, and Claude hears why', async () => 
   const r = await hook(permission('Bash', { command: 'npm test' }));
   assert.deepEqual(r.json.hookSpecificOutput.decision, { behavior: 'deny', message: 'Denied by the Security room: Shell commands.' });
   assert.ok(await feedHas('denied by Security: Shell commands'));
-  const s = (await snapshot()).sessions.find((x) => x.sid === SID);
+  const s = await sessionIn(work);
   assert.deepEqual(s.pending, [], 'nothing waits');
   // PreToolUse: the call is refused before Claude Code's own permission check, and it ends as failed
   const pre = await hook(ev('PreToolUse', { tool_name: 'Bash', tool_use_id: 'toolu_sec_1', tool_input: { command: 'ls' } }));
   assert.deepEqual(pre.json, { hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: 'Denied by the Security room: Shell commands.' } });
-  const call = (await snapshot()).sessions.find((x) => x.sid === SID).calls.find((c) => c.id === 'toolu_sec_1');
+  const call = (await sessionIn(work)).calls.find((c) => c.id === 'toolu_sec_1');
   assert.deepEqual([call.ok, call.err], [false, 'Denied by the Security room: Shell commands.']);
   // a PreToolUse with no rule to apply has no answer
   const free = await hook(ev('PreToolUse', { tool_name: 'Read', tool_use_id: 'toolu_sec_2', tool_input: { file_path: path.join(work, 'a.txt') } }));

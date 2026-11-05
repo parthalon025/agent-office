@@ -22,6 +22,7 @@ import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, clea
 import * as startup from './startup.mjs';
 import { createNotes, cleanPin, PIN_MAX } from './notes.mjs';
 import { cleanRules, setRule, decide, preToolDecision, permissionModeFor, openRefusal, enforcement, addCost, costThisMonth } from './security.mjs';
+import { inside } from './risk.mjs';
 import { mcpAddArgs, mcpRemoveArgs, pluginArgs } from './extensions.mjs';
 import * as auth from './auth.mjs';
 import './public/format.js'; // money, plurals and short paths, shared with the page (globalThis.OfficeFormat)
@@ -206,11 +207,19 @@ const { sessions, feed, addFeed, newSession, placeSession, findSession, onHook, 
 
 // ---------- the Security room: the user's permission rules (#70) ----------
 // The rules live in security.mjs and public/vocab.js; this file applies them. A call is rated against the session's root
-// (tracker.rootOf, like the Approve card) in its building. A session not placed yet (git not looked up) gets the
-// office-wide rules: its building is not known.
+// (tracker.rootOf, like the Approve card) in its building. A session not placed yet (git not looked up) has no building
+// (null): the office-wide rule applies unless some building has a stricter override, and then the call is held.
 const buildingOfSession = (s) => (s.placed ? roomPlace(s).buildingKey : null);
+// The root is in a git worktree: the office made one for the session, or git placed the session in a repository whose
+// worktree holds the root. Only then do the rows Read inside and Edit inside apply (a terminal session in the home folder
+// or in a folder outside git has no worktree, so its edits are Ask by default).
+function inWorktree(s, root) {
+  if (s.worktree && s.worktree.root) return true;
+  return !!(s.placed && s.git && s.git.root && root && inside(s.git.root, root));
+}
 function callOf(s, p, opts = {}) {
-  return { building: buildingOfSession(s), kind: s.provider, tool: p.tool_name, input: p.full_input || p.rate_input || p.tool_input, root: tracker.rootOf(s), provider: opts.provider === true };
+  const root = tracker.rootOf(s);
+  return { building: buildingOfSession(s), kind: s.provider, tool: p.tool_name, input: p.full_input || p.rate_input || p.tool_input, root, worktree: inWorktree(s, root), provider: opts.provider === true };
 }
 // Claude Code's PreToolUse: a Deny rule refuses the call before Claude Code's own permission check (its allow rules and
 // modes cannot run it), and a tightened read or edit inside makes Claude Code ask. Returns the hook's answer, or null.
@@ -242,7 +251,7 @@ function saveRule(body) {
   savePersisted();
   const S = V.security, col = S.columns.find((c) => c.id === body.col);
   const where = scope === 'building' ? (body.building ? `the building ${basename(body.building) || body.building}` : 'Other folders') : 'all buildings';
-  feed.push({ t: Date.now(), uid: 'security', name: 'Security', kind: 'tool', text: `${S.rows[body.row].label}, ${col.label}: ${S.word(r.to)} (${where})` });
+  addFeed({ uid: 'security', name: 'Security' }, 'tool', `${S.rows[body.row].label}, ${col.label}: ${S.word(r.to)} (${where})`);
   broadcast();
   return { ok: true, from: r.from, to: r.to };
 }
@@ -252,7 +261,8 @@ let ENFORCE = null;
 // ---------- providers: the agent tools behind the sessions (providers/) ----------
 // Every provider reports through the same events into the tracker. Claude Code is the only one now. Its hooks come in over
 // the hook routes below, and a permission decision goes back as the hook's answer (claude.answer gives the body).
-const events = providerEvents({ tracker, onChange: () => broadcast(), hold: (r) => { holdRequest(r); broadcast(); } });
+// A quiet answer (a low call a local agent asks about, allowed by default) changes nothing the page shows: no snapshot.
+const events = providerEvents({ tracker, onChange: () => broadcast(), hold: (r) => { holdRequest(r); if (!r.quiet) broadcast(); } });
 const claude = createClaudeCode({ events, files: () => ({ settings: activeHooksFile(), mcp: MCP_FILE, launcher: path.join(ROOT, 'launch.ps1') }) });
 // The four office tools for agents the office runs itself (no MCP process): the same handlers the /mcp/* routes call.
 // They answer text or throw httpError. Function declarations are hoisted, so they are ready when a local agent calls one.
@@ -950,9 +960,12 @@ persisted.schedules = persisted.schedules || [];
 // The default spend limit of new paid sessions, schedules and goals, in dollars (0 = none). The user changes it in the Attach
 // sessions dialog. Never saved means the built-in default.
 const defaultSpend = () => (Number.isFinite(persisted.spendLimit) && persisted.spendLimit >= 0 ? persisted.spendLimit : DEFAULT_SPEND_LIMIT);
+// No limit (0) is the loosest spend setting: a change to it needs confirmed: true (the wall's painted Confirm, or the
+// Save of the typed field in the Attach sessions dialog), so no single click on the wall removes the limit (#70).
 function saveSpendLimit(x) {
   const n = x.limit === null || x.limit === '' ? 0 : Number(x.limit);
   if (!Number.isFinite(n) || n < 0 || n > 1000) throw httpError(400, 'The spend limit is a number from 0 to 1000. 0 means no limit.');
+  if (n === 0 && defaultSpend() !== 0 && x.confirmed !== true) throw httpError(409, 'Confirm No limit first.');
   persisted.spendLimit = n;
   savePersisted();
   return { spendLimit: n };
@@ -1005,7 +1018,7 @@ async function runSchedule(sch) {
     const uid = await openSession({ cwd: sch.cwd, name: sch.name, prompt: sch.prompt, model: sch.model, permissionMode: sch.permissionMode, isolation: sch.isolation, maxBudget: sch.maxBudget, scheduleId: sch.id, where: 'office' });
     return uid;
   } catch (e) {
-    feed.push({ t: Date.now(), uid: 'schedule', name: sch.name, kind: 'end', text: 'schedule could not start: ' + e.message });
+    addFeed({ uid: 'schedule', name: sch.name }, 'end', 'schedule could not start: ' + e.message);
     broadcast();
     return null;
   }

@@ -756,9 +756,18 @@ test('a quiet answer (a low call a provider may run) writes no feed line', () =>
   const r = rig({ screen: () => ({ allow: true, line: 'allowed by Security: Read inside the worktree', quiet: true }) });
   r.hook(HOOKS.turnWithEdit[1]);
   const before = r.tracker.feed.length;
+  const s = r.only(), seen = s.lastEvent;
+  r.t += 1000;
+  const [changes, located] = [r.changes, r.located.length];
   const got = r.tracker.permissionRequest(slimPayload(HOOKS.permission), { provider: true });
   assert.deepEqual(got.auto, { allow: true });
+  assert.equal(got.quiet, true, 'the server sends no snapshot for it');
   assert.equal(r.tracker.feed.length, before);
+  // #70 review: a local agent asks about every Read, LS and Grep. A quiet answer changes nothing the page shows, so it
+  // costs no snapshot and no git lookup.
+  assert.equal(r.changes, changes, 'no change callback');
+  assert.equal(r.located.length, located, 'no git lookup');
+  assert.equal(s.lastEvent, seen, 'the session is not touched');
 });
 
 test('refuseCall: a call the office refused before it ran ends as failed, with the reason and a feed line', () => {
