@@ -9,12 +9,15 @@
 //   session/update plan            -> a TodoWrite result (the session's plan)
 //   session/request_permission     -> events.permission, held until the user answers. The office sends allow once or reject
 //                                     once, never an "always" option: Hermes writes those as a lasting allowlist outside
-//                                     the office (owner decision Q23).
+//                                     the office (owner decision Q23). The answer is for what the card showed: a call the
+//                                     agent changes while it waits is declined at once, and nothing approved moves to it.
 //   interrupt                      -> session/cancel
 // The office also serves the agent's files and terminals (clientCapabilities fs and terminal, owner decision Q24) with
 // providers/local-tools.mjs: limited to the session's root, rated with riskOf, and held like any other call when not low
 // risk. A path outside the root is refused before anyone is asked. So an agent that uses them is held more strictly than one
 // that only asks: an edit the user declined in a turn cannot come back through fs/write_text_file (Hermes issue #31682).
+// An agent may ignore those capabilities and use its own tools (Hermes does): the office then sees a call only in its
+// updates, cannot stop it, and says so in the feed. Such an agent is not gated (ADR 0001; AGENTS gated and supervision).
 //
 // ACP reports no cost in the stable protocol, so the provider is paid with cost 'unknown' (owner decision Q22). The process
 // calls and the timers are injected, so tests drive a fake agent (test/fixtures/fake-acp.mjs). Nothing starts on import.
