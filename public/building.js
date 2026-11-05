@@ -420,7 +420,7 @@
             // The old seat held its replies (the older ones were still loading), so it told none of them: this seat tells them
             // the way the old seat would have (a first sight, or what it had seen before), and keeps the wait for newer ones.
             // The same for its error: errKind and errPrev say how the error is told, because the pass that tells it may come later.
-            if (prev && prev.held) { k.firstKind = prev.firstKind; k.prevSeen = prev.prevSeen; k.holdTop = prev.holdTop; k.errKind = prev.errKind; k.errPrev = prev.errPrev; }
+            if (prev && prev.held) { k.firstKind = prev.firstKind; k.prevSeen = prev.prevSeen; k.holdTop = prev.holdTop; k.errKind = prev.errKind; k.errPrev = prev.errPrev; k.errTop = prev.errTop; }
             var bot = withColor({ name: name, role: 'coder', shape: shapeOf(s.uid), status: k.status, task: k.task, platform: V.platform(s, snapshot.kinds), identity: s.cwd }, s.uid);
             if (s.skills && s.skills.length) bot.skills = s.skills.slice(0, 16);
             if (s.scheduleId) bot.triggers = [s.name];
@@ -474,7 +474,7 @@
             if (!s.olderReplies) k.olderDone = true;
             else {
               var old = loadOlder(s.uid, list.length ? list[0].id : Infinity);
-              if (old.wait) { hold = true; if (k.holdTop === undefined) k.holdTop = list.length ? list[list.length - 1].id : 0; }
+              if (old.wait) { hold = true; if (k.holdTop === undefined) { k.holdTop = list.length ? list[list.length - 1].id : 0; k.errTop = s.error ? s.error.id : 0; } }
               else { if (old.list) list = old.list.concat(list); k.olderDone = true; }
             }
           }
@@ -483,8 +483,9 @@
           // path of the store's request ends with a pass over this snapshot, so nothing is lost (#80).
           if (hold) return;
           // How the error is told was fixed when the bot was seated (errKind, errPrev); from this pass on, a failure is news.
-          var errKind = k.errKind, errPrev = k.errPrev;
-          k.errKind = 'live'; k.errPrev = null;
+          // A failure that came during the hold (an id above errTop) is news, as a reply above holdTop is.
+          var errKind = k.errKind, errPrev = k.errPrev, errTop = k.errTop;
+          k.errKind = 'live'; k.errPrev = null; k.errTop = undefined;
           list.forEach(function (r) {
             if (r.id <= k.replySeen) return;
             k.replySeen = r.id;
@@ -513,7 +514,7 @@
           // pass has its error seeded, with its time. All of this holds when the pass that tells it comes after a hold.
           if (s.error && s.error.id > k.errorSeen) {
             k.errorSeen = s.error.id; k.status = 'error'; k.task = s.error.text;
-            var ee = errPrev !== null ? (s.error.id <= errPrev ? restore : out) : errKind === 'seed' ? seeded : errKind === 'restore' ? restore : emit;
+            var ee = errTop !== undefined && s.error.id > errTop ? out : errPrev !== null ? (s.error.id <= errPrev ? restore : out) : errKind === 'seed' ? seeded : errKind === 'restore' ? restore : emit;
             ee(stamp({ type: 'error', bot: bot0, text: s.error.text }, s.error.at));
             return;
           }

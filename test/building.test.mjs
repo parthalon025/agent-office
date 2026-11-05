@@ -1184,6 +1184,45 @@ test('an old error stays seeded when the bot is seated again while its replies l
   assert.equal(of(m.ev, 'error').at(-1).seeded, undefined, 'a new failure is live');
 });
 
+test('a failure during the hold is news: a bot first seen on page load, a bot that moves in, and a bot seated again', async () => {
+  const pageLoad = async () => {
+    const asked = [], r = rig({ wire: true, fetchReplies: (uid) => serverReplies(r, asked)(uid) });
+    await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+    const s = [...r.tracker.sessions.values()][0];
+    bigReplies(r, s, 12); r.push();
+    const m = r.mount(KEY_A);
+    return { r, s, m, again: () => { s.git = { ...GITS['C:\\work\\repo-feat'] }; s.cwd = 'C:\\work\\repo-feat'; r.t += 5; r.push(); } };
+  };
+  const fail = (r, s, id) => { s.error = { id, text: 'Out of budget.', at: r.t + 1 }; r.t += 2; r.push(); };
+  { // first seen on page load
+    const { r, s, m } = await pageLoad();
+    fail(r, s, 1);
+    await settle();
+    assert.equal(of(m.ev, 'error').length, 1);
+    assert.equal(of(m.ev, 'error')[0].seeded, undefined, 'page load: live');
+  }
+  { // moves in from another building
+    const asked = [], r = rig({ wire: true, fetchReplies: (uid) => serverReplies(r, asked)(uid) });
+    await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_B });
+    const s = [...r.tracker.sessions.values()][0];
+    bigReplies(r, s, 12); r.push();
+    const m = r.mount(KEY_A);
+    s.git = { ...GITS[REPO_A] }; s.cwd = REPO_A; r.t += 5; r.push();
+    fail(r, s, 1);
+    await settle();
+    assert.equal(of(m.ev, 'error').length, 1);
+    assert.equal(of(m.ev, 'error')[0].seeded, undefined, 'moved in: live');
+  }
+  { // seated again
+    const { r, s, m, again } = await pageLoad();
+    again();
+    fail(r, s, 1);
+    await settle();
+    assert.equal(of(m.ev, 'error').length, 1);
+    assert.equal(of(m.ev, 'error')[0].seeded, undefined, 're-seat: live');
+  }
+});
+
 test('a session that ends while the older replies load still shows its replies, then its end', async () => {
   const asked = [], r = rig({ wire: true, fetchReplies: (uid) => serverReplies(r, asked)(uid) });
   await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
