@@ -207,10 +207,12 @@ export function createTracker(deps = {}) {
       if (ev === 'SessionEnd') return null;
       s = newSession({ name: basename(p.cwd) || 'session' });
     }
+    const firstSid = !s.sid;
     s.sid = p.session_id;
     if (p.cwd) { s.cwd = p.cwd; if (!s.startDir) s.startDir = p.cwd; }
     if (!s.name) s.name = basename(s.cwd) || 'session';
     if (p.model) s.model = p.model;
+    if (firstSid) persist.history?.(s); // it can be found again from now on, also before its first turn ends
     s.lastEvent = now();
     if (s.status === 'ended' && ev !== 'SessionEnd') { s.endedAt = null; s.status = 'idle'; }
     const input = p.tool_input || {};
@@ -318,6 +320,8 @@ export function createTracker(deps = {}) {
 
   // Dismiss: the failed turn's error is gone from every surface (the snapshot no longer carries it).
   function dismissError(s) { if (s.error) { s.error = null; changed(); } }
+  // A failure the stream did not report as a result line, for example a session that ended before it started. Shows as Error until Dismiss.
+  function fail(s, why) { s.error = { id: ++s.errorSeq, text: clip(why, 200) }; changed(); }
 
   // The user stopped the turn.
   function interrupt(s) {
@@ -354,7 +358,7 @@ export function createTracker(deps = {}) {
     } else if (m.type === 'system' && m.subtype === 'init') {
       if (m.model) s.model = m.model;
       if (m.permissionMode) s.mode = m.permissionMode;
-      if (!s.sid && m.session_id) s.sid = m.session_id;
+      if (!s.sid && m.session_id) { s.sid = m.session_id; persist.history?.(s); } // see onHook: saved as soon as it has a sid
       if (Array.isArray(m.slash_commands)) s.commands = m.slash_commands.filter((x) => typeof x === 'string').slice(0, 400);
       if (Array.isArray(m.skills)) s.skills = m.skills.filter((x) => typeof x === 'string').slice(0, 400);
       // Claude reports these only after its first message, so keep the last list for sessions that have not spoken yet.
@@ -396,7 +400,7 @@ export function createTracker(deps = {}) {
 
   return {
     sessions, feed, addFeed, newSession, findSession, placeSession,
-    onHook, permissionRequest, askQuestion, settle, interrupt, userMessage, startTurn, dismissError,
+    onHook, permissionRequest, askQuestion, settle, interrupt, userMessage, startTurn, dismissError, fail,
     onStream, pushReply, endSession, dropPending, dropQuestions,
   };
 }

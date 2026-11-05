@@ -92,6 +92,7 @@ Add a new file only for a distinct job. Extend the file that owns the concern fi
 - Waiting = a pending permission prompt or an open question (`isWaiting`). The `status` field alone does not count, and a subagent's tool call does not hide a request.
 - A tool result settles one permission request: the oldest one with the same `callKey` (agent, tool and trimmed input). Never match on the short label from `describeTool`: it keeps only a basename or the start of a command.
 - A permission request is rated against the session's root (`rootOf` in `tracker.mjs`): `worktree.root`, else `startDir` (the office's launch folder, or the first `cwd` a hook reported). Never against the live `cwd`: it follows the agent, so a `cd` would widen what is low risk.
+- Reopen keeps the past record until the reopened session has a `sid` (`reopening` in `server.mjs`). The tracker saves a session the moment its sid first arrives (init line or first hook), so the record swap happens then, not at the first turn end. While the reopened session is live and not ended, its past record is hidden from Past sessions and a second reopen answers 409. A reopen that ends before init keeps the record and shows Error through `tracker.fail`; a close the user asked for gives no error (#54).
 - A failed turn shows as Error on every surface until Dismiss (`POST /api/dismiss`, `tracker.dismissError`) or the next turn starts (`tracker.startTurn`, or the `UserPromptSubmit` hook).
 
 ## Gotchas learned the hard way

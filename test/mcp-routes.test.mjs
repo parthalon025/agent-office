@@ -19,6 +19,7 @@ import { pageFile, routeOf } from '../auth.mjs';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SKIP = process.platform !== 'win32' ? 'opening sessions is only implemented for Windows' : false;
+const PAST_UID = 'past-claude-1';
 let base, work, child, port, agentToken, pageToken, fake, log = '';
 
 const freePort = () => new Promise((resolve, reject) => {
@@ -80,7 +81,15 @@ before(async () => {
   for (const d of ['providers', 'public']) fs.cpSync(path.join(SRC, d), path.join(copy, d), { recursive: true });
   fake = await startFakeOpenAI({ script: [{ text: 'ok' }], models: ['fake-model'] });
   port = await freePort();
-  const env = { ...process.env, OFFICE_PORT: String(port), OFFICE_HOOKS: 'command', OFFICE_OLLAMA_URL: fake.url, OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
+  // A claude.exe that fails before init: node.exe under that name. It answers the headless flags with "bad option" and exits
+  // at once, so Reopen of a Claude Code record starts a process that never reaches init. No Claude Code, no paid call.
+  const bin = path.join(base, 'bin');
+  fs.mkdirSync(bin);
+  try { fs.linkSync(process.execPath, path.join(bin, 'claude.exe')); } catch { fs.copyFileSync(process.execPath, path.join(bin, 'claude.exe')); }
+  // A past Claude Code session the server loads at start (history.json is read once, at start).
+  fs.writeFileSync(path.join(copy, 'history.json'), JSON.stringify([{ uid: PAST_UID, sid: 'past-sid-1', provider: 'claude-code', name: 'past-claude', cwd: work, model: 'sonnet',
+    cost: 0.5, turns: 2, startedAt: 1000, endedAt: 2000, worktree: null, replies: [{ id: 1, text: 'earlier answer' }], prompt: 'earlier ask', budget: null }]));
+  const env = { ...process.env, PATH: bin + path.delimiter + (process.env.PATH || process.env.Path || ''), OFFICE_PORT: String(port), OFFICE_HOOKS: 'command', OFFICE_OLLAMA_URL: fake.url, OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
     OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local') };
   child = spawn(process.execPath, ['server.mjs'], { cwd: copy, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env });
   child.stdout.on('data', (d) => { log += d; });
@@ -238,4 +247,60 @@ test('a new schedule gets the default spend limit; the user can change or clear 
   await call('/api/settings/spend', { limit: 4 });
   assert.equal(await save({}), 4, 'the default the user set');
   await call('/api/settings/spend', { limit: 2 });
+});
+
+test('a Claude Code reopen that fails before init keeps the past session in history and shows the failure', { skip: SKIP }, async () => {
+  const before = (await call('/api/history', {})).json.sessions.map((x) => x.uid);
+  assert.ok(before.includes(PAST_UID), 'the seeded past session is listed');
+  const re = await call('/api/reopen', { uid: PAST_UID });
+  assert.equal(re.status, 200, JSON.stringify(re.json));
+  const s = await until(async () => { const x = await sessionOf(re.json.uid); return x && x.status === 'ended' ? x : null; }, 'the reopened session to end');
+  const after = (await call('/api/history', {})).json.sessions.map((x) => x.uid);
+  assert.ok(after.includes(PAST_UID), 'the past session is still in history');
+  assert.ok(s.error, 'the failure shows as an error on the session');
+  assert.match(s.error.text, /Past sessions/, 'the error says the past session stays');
+  assert.match(s.replies.at(-1).text, /stopped before it started/, 'the reply says why');
+  const again = await call('/api/reopen', { uid: PAST_UID });
+  assert.equal(again.status, 200, 'the user can try again');
+});
+
+// A claude.exe that stays alive: cmd.exe under that name ignores the headless flags and waits on stdin, like a Claude Code
+// that has not got its first message yet. It never sends init, so a hook for the session stands in for "it has started".
+const liveClaude = async () => {
+  const exe = path.join(base, 'bin', 'claude.exe');
+  await until(() => { try { fs.rmSync(exe, { force: true }); return true; } catch { return false; } }, 'the failing claude.exe to be free');
+  fs.copyFileSync(path.join(process.env.SystemRoot || 'C:\Windows', 'System32', 'cmd.exe'), exe);
+};
+const pastUids = async () => (await call('/api/history', {})).json.sessions.map((x) => x.uid);
+
+test('a live reopen hides its past record and cannot start twice; closing it before it starts gives the record back, with no error', { skip: SKIP }, async () => {
+  await liveClaude();
+  const re = await call('/api/reopen', { uid: PAST_UID });
+  assert.equal(re.status, 200, JSON.stringify(re.json));
+  const live = await sessionOf(re.json.uid);
+  assert.ok(live && live.status !== 'ended', 'the reopened session is live');
+  assert.ok(!(await pastUids()).includes(PAST_UID), 'one session shows once: the past record is hidden while its reopen is live');
+  const twice = await call('/api/reopen', { uid: PAST_UID });
+  assert.equal(twice.status, 409, 'a second click does not start a second process on the same conversation');
+  assert.match(twice.json.error, /open again/);
+  assert.equal((await call('/api/close', { uid: re.json.uid })).status, 200);
+  const s = await sessionOf(re.json.uid);
+  assert.equal(s.status, 'ended');
+  assert.equal(s.error, null, 'a close the user asked for is not a failed reopen');
+  assert.ok((await pastUids()).includes(PAST_UID), 'the past record is back once the reopen is over');
+});
+
+test('a live reopen swaps the past record for its own as soon as it has a sid', { skip: SKIP }, async () => {
+  await liveClaude();
+  const re = await call('/api/reopen', { uid: PAST_UID });
+  assert.equal(re.status, 200, JSON.stringify(re.json));
+  const hook = await fetch(`http://127.0.0.1:${port}/hook/http`, {
+    method: 'POST', headers: { 'content-type': 'application/json', 'x-office-token': agentToken, 'x-office-id': re.json.uid },
+    body: JSON.stringify({ hook_event_name: 'SessionStart', session_id: 'resumed-sid-1', cwd: work, source: 'resume' }),
+  });
+  assert.equal(hook.status, 200);
+  const h = await until(async () => { const l = await pastUids(); return l.includes(re.json.uid) ? l : null; }, 'the reopened session in Past sessions');
+  assert.ok(!h.includes(PAST_UID), 'the old record is gone: the session is listed once, under its new uid');
+  assert.equal((await call('/api/reopen', { uid: PAST_UID })).status, 404, 'there is no old record to reopen');
+  await call('/api/close', { uid: re.json.uid });
 });

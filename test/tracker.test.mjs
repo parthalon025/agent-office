@@ -619,3 +619,33 @@ test('a relative tool path is resolved against the session cwd, then made relati
   await wait();
   assert.deepEqual(s.calls.map((c) => c.file), ['sub/hello.txt', 'sub/notes.txt', 'sub/abs.txt', null]);
 });
+
+test('fail: a session that ended before it started shows as an error until Dismiss', () => {
+  const r = rig();
+  const s = r.tracker.newSession({ uid: 'o1', officeId: 'o1', name: 'bot', cwd: REPO, headless: true, status: 'starting' });
+  r.tracker.endSession(s, 'exited (1)');
+  const before = r.changes;
+  r.tracker.fail(s, 'Could not reopen. Stays in Past sessions.');
+  assert.equal(s.status, 'ended');
+  assert.equal(s.error.text, 'Could not reopen. Stays in Past sessions.');
+  assert.ok(r.changes > before, 'the page is told');
+  r.tracker.dismissError(s);
+  assert.equal(s.error, null);
+});
+
+test('a session records itself as soon as it has a sid, from the init line or the first hook, and only then', () => {
+  const r = rig();
+  const a = r.tracker.newSession({ uid: 'o1', officeId: 'o1', name: 'bot', cwd: REPO, headless: true, status: 'starting' });
+  assert.equal(r.history.length, 0, 'no sid, no record');
+  r.line(a, { type: 'system', subtype: 'init', model: 'm', session_id: 'sid-a' });
+  assert.equal(a.sid, 'sid-a');
+  assert.deepEqual(r.history, [{ uid: 'o1', status: 'starting' }], 'the init line gives the sid, and the session records itself');
+  r.line(a, { type: 'system', subtype: 'init', model: 'm', session_id: 'sid-a' });
+  assert.equal(r.history.length, 1, 'a later init does not record again');
+  const b = r.tracker.newSession({ uid: 'o2', officeId: 'o2', name: 'bot2', cwd: REPO, headless: true, status: 'starting' });
+  const n = r.history.length;
+  r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'sid-b' }, 'o2');
+  assert.equal(b.sid, 'sid-b');
+  assert.equal(r.history.length, n + 1, 'the first hook gives the sid, and the session records itself');
+  assert.equal(r.history.at(-1).uid, 'o2');
+});
