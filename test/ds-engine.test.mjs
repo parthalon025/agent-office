@@ -983,3 +983,56 @@ test('the modes fit a narrow box: under 520 px a segment with an icon shows the 
   assert.match(css, /\.ao-office\{[^}]*container-type:inline-size/, 'the office is the container');
   assert.match(office, /\.city-tools \{[^}]*container-type: inline-size;/, 'the City tools are a container too');
 });
+
+// The rules of a style sheet in order: { cond, sel, body }, where cond is the @container or @media line around the rule ('' at top level).
+function cssRules(text) {
+  const s = text.replace(/\r\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, ''), out = [];
+  (function walk(from, to, cond) {
+    for (let j = from; j < to;) {
+      const open = s.indexOf('{', j);
+      if (open < 0 || open >= to) break;
+      let depth = 1, k = open + 1;
+      for (; depth && k < to; k++) { if (s[k] === '{') depth++; else if (s[k] === '}') depth--; }
+      const head = s.slice(j, open).trim().replace(/\s+/g, ' ');
+      if (head.startsWith('@')) walk(open + 1, k - 1, head);
+      else out.push({ cond, sel: head, body: s.slice(open + 1, k - 1).replace(/\s*([:;])\s*/g, '$1').trim() });
+      j = k;
+    }
+  })(0, s.length, '');
+  return out;
+}
+
+test('the office top bar keeps to the rows above the side columns: icons only where the labels do not fit, the counts hide, the columns start below the last toggle', () => {
+  const css = cssRules(readFileSync(join(root, 'components', 'bundle.css'), 'utf8'));
+  const office = cssRules(readFileSync(join(root, 'public', 'office.css'), 'utf8'));
+  // the bar holds the brand, the mode toggle, the view toggle and the counts, in this order: the view toggle is the last .ao-seg of the bar
+  assert.match(bundle, /h\("div",\{className:"ao-hud-top"\},h\("div",\{className:"ao-panel ao-brand"\}[^\n]*\n\s*h\(A\.ModeToggle,[^\n]*\n\s*h\(A\.ViewToggle,[^\n]*\n\s*h\("div",\{className:"ao-hud-counts"\}/);
+  assert.match(source('function ViewToggle(p){'), /className:"ao-panel ao-seg"/);
+  const rule = (cond, sel) => css.filter((r) => r.cond === cond && r.sel === sel);
+  const sr = 'position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)';
+  const label = '.ao-hud-top .ao-seg button:not([aria-pressed="true"]) .ao-seg-l';
+  assert.ok(rule('@container (max-width:999px)', label).some((r) => r.body.startsWith(sr)), 'in the bar the mode toggle shows icons only to 999 px');
+  assert.ok(rule('@container (max-width:1199px)', '[data-theme="sublevel"] ' + label).some((r) => r.body.startsWith(sr)), 'and to 1199 px in Sublevel');
+  assert.ok(rule('@container (max-width:959px)', '.ao-hud-counts').some((r) => r.body === 'display:none'), 'the counts hide below 960 px, where a second row would touch the right column');
+  assert.ok(rule('', '.ao-hud-top>.ao-seg').some((r) => r.body === 'anchor-name:--ao-hud-seg'), 'each toggle of the bar is the anchor; the last one in the tree wins');
+  // The top of a column, from the last rule that sets it in each band. The anchored rule comes after every fixed top, so it has the last word.
+  const isCol = (sel, col) => sel.split(',').map((x) => x.trim()).includes(col);
+  const tops = (col) => css.map((r, i) => ({ ...r, i })).filter((r) => isCol(r.sel, col) && /(^|;)top:/.test(r.body)).map((r) => ({ i: r.i, cond: r.cond, top: r.body.match(/(?:^|;)top:([^;]*)/)[1] }));
+  const last = (col, cond) => tops(col).filter((t) => t.cond === cond).pop();
+  const net = (min, gap) => `max(${min}px,calc(anchor(--ao-hud-seg bottom,0px) + ${gap}px))`;
+  assert.equal(last('.ao-hud-left', '').top, net(68, 16), 'above 820 px the Floors column is never above 68 px, and starts below the last toggle');
+  assert.equal(last('.ao-hud-right', '').top, net(68, 16));
+  assert.equal(last('.ao-hud-left', '@container (max-width:820px)').top, net(108, 10), 'two rows of the bar to 521 px');
+  assert.equal(last('.ao-hud-right', '@container (max-width:820px)').top, 'auto', 'to 820 px the right column sits at the bottom');
+  assert.equal(last('.ao-hud-left', '@container (max-width:520px)').top, net(154, 10), 'three rows below 521 px');
+  // A later rule wins over an earlier one of the same weight, also across bands: after the top-level net, a column top is set only by the net of a band.
+  const after = last('.ao-hud-left', '').i;
+  for (const col of ['.ao-hud-left', '.ao-hud-right']) {
+    for (const t of tops(col).filter((x) => x.i > after)) assert.ok(t.cond && (/anchor\(--ao-hud-seg bottom/.test(t.top) || t.top === 'auto'), `${col} top after the net: ${t.cond} ${t.top}`);
+  }
+  // the page does not move the columns: a page top would undo the net
+  for (const r of office) {
+    const lastPart = r.sel.split(',').map((x) => x.trim().split(' ').pop());
+    if (lastPart.some((p) => /\.ao-hud-(left|right)\b/.test(p))) assert.doesNotMatch(r.body, /(^|;)top:/, `office.css sets no top on ${r.sel}`);
+  }
+});

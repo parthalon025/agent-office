@@ -395,6 +395,8 @@ Layout breakpoints for the office HUD (container width).
 | `bp-compact` | `1100px` | At this width and below: the activity log hides and the broadcast bar moves left. |
 | `bp-wide` | `1360px` | The reference width for previews and the full HUD. |
 
+The office top bar (brand, mode toggle, view toggle, status counts) keeps to the rows above the side columns: one row above `bp-phone`, two rows to 521 px, three rows below. In the bar the mode toggle shows icons only (the pressed mode keeps its label) to 999 px, and to 1199 px in Sublevel. The status counts go to a second row between the columns, and hide below 960 px. When a toggle still goes to a lower row (Sublevel from 821 to 899 px, or a long building or agent name), the side columns start below the last toggle of the bar (CSS anchor positioning), so no toggle is under a column. A page that puts its own panel under the bar starts it at 68 px above `bp-phone`, as the columns do.
+
 ### scene
 
 3D layout in scene units (1 unit is about 0.5 m). The engine reads these on mount.
