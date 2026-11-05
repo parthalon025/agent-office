@@ -92,6 +92,10 @@ test('supervision words (ADR 0001): the label of an ungated agent, its short for
   assert.equal(V.supervisionHead(PARTLY), 'Partly supervised');
   assert.equal(V.supervisionHead('Unsupervised'), 'Unsupervised');
   assert.equal(V.supervisionHead(''), '');
+  // The room sign and the desk screen show the whole label on two lines, split at the colon, never cut.
+  assert.deepEqual(V.supervisionLines(PARTLY), ['Partly supervised:', 'commands ask, file edits do not']);
+  assert.deepEqual(V.supervisionLines('Unsupervised'), ['Unsupervised']);
+  assert.deepEqual(V.supervisionLines(''), []);
   assert.equal(V.platform(mk({})), 'Claude Code');
   assert.equal(V.platform(mk({ supervision: PARTLY })), PARTLY, 'the label is on the bot card');
 });

@@ -21,7 +21,7 @@ import { resolveExe } from '../git.mjs';
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SKIP = process.platform !== 'win32' ? 'opening sessions is only implemented for Windows' : false;
 const PAST_UID = 'past-claude-1';
-let base, work, acpRepo, child, port, agentToken, pageToken, fake, gateway, gatewayPort, log = '';
+let base, work, acpRepo, clawConfig, child, port, agentToken, pageToken, fake, gateway, gatewayPort, log = '';
 
 const freePort = () => new Promise((resolve, reject) => {
   const s = net.createServer();
@@ -82,6 +82,10 @@ before(async () => {
   gatewayPort = await freePort();
   gateway = net.createServer((c) => c.destroy());
   await new Promise((resolve) => gateway.listen(gatewayPort, '127.0.0.1', resolve));
+  // Its config reads (`node config get ...`) are answered by a preloaded stand-in from a JSON file the test can change. Exec
+  // approval is on and workspace-only is on, as a good install has them.
+  clawConfig = path.join(base, 'openclaw-config.json');
+  fs.writeFileSync(clawConfig, JSON.stringify({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'always' }));
   const fakeAcp = path.join(SRC, 'test', 'fixtures', 'fake-acp.mjs');
   fs.writeFileSync(path.join(work, 'acp'), `import(require('node:url').pathToFileURL(${JSON.stringify(fakeAcp)}).href);\n`);
   // Hermes Agent is ungated (ADR 0001), so it opens only in a new worktree: a repository whose commit has the acp file, so the
@@ -100,7 +104,11 @@ before(async () => {
   { uid: 'past-hermes-1', sid: 'old-hermes', provider: 'hermes', name: 'past-hermes', cwd: work, model: null, cost: null, costUnknown: true, turns: 1,
     startedAt: 1000, endedAt: 2000, worktree: null, replies: [], prompt: '', budget: null }]));
   const env = { ...process.env, PATH: bin + path.delimiter + (process.env.PATH || process.env.Path || ''), OFFICE_PORT: String(port), OFFICE_HOOKS: 'command', OFFICE_OLLAMA_URL: fake.url, OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
-    OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local'), USERPROFILE: path.join(base, 'home'), OFFICE_OPENCLAW_PORT: String(gatewayPort) };
+    OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local'), USERPROFILE: path.join(base, 'home'), OFFICE_OPENCLAW_PORT: String(gatewayPort),
+    // OpenClaw is off unless OFFICE_ENABLE_OPENCLAW=1 (until the Security room can turn it on, #70), and it needs a version that
+    // relays shell approvals: the fake agent says so. The config stand-in is preloaded into every node the server starts.
+    OFFICE_ENABLE_OPENCLAW: '1', FAKE_ACP_VERSION: '2026.10.10', FAKE_OPENCLAW_CONFIG: clawConfig,
+    NODE_OPTIONS: `--require=${path.join(SRC, 'test', 'fixtures', 'fake-openclaw-config.cjs').split(path.sep).join('/')}` };
   child = spawn(process.execPath, ['server.mjs'], { cwd: copy, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env });
   child.stdout.on('data', (d) => { log += d; });
   child.stderr.on('data', (d) => { log += d; });
@@ -424,10 +432,28 @@ test('OpenClaw (#73): ungated and partly supervised, opens only in a new worktre
   assert.deepEqual([s.provider, s.costUnknown, s.cost, s.budget], ['openclaw', true, null, null]);
   assert.ok(s.worktree && s.cwd.startsWith(path.join(base, 'home')), 'a new worktree under the server home folder');
   assert.equal((await pageSnapshot()).sessions.find((x) => x.uid === r.json.uid).supervision, 'Partly supervised: commands ask, file edits do not', 'the page gets the label');
-  const feed = await until(async () => { const f = (await fullOf(r.json.uid)).feed.map((x) => x.text); return f.some((t) => /^OpenClaw: tools\./.test(t)) ? f : null; }, 'the config lines');
+  const feed = (await fullOf(r.json.uid)).feed.map((x) => x.text);
   assert.ok(feed.includes('OpenClaw: Partly supervised: commands ask, file edits do not. The feed says what it ran without asking.'), feed.join(' | '));
-  assert.ok(feed.some((t) => /tools\.fs\.workspaceOnly is unset.*Run: openclaw config set tools\.fs\.workspaceOnly true/.test(t)), 'the stand-in cannot return a config, so the office reports it as unset: ' + feed.join(' | '));
+  assert.ok(feed.includes('OpenClaw config: workspace-only is on and commands ask.'), 'the config was read and confirmed: ' + feed.join(' | '));
   await call('/api/close', { uid: r.json.uid });
+});
+
+test('OpenClaw (#73): a config that is off is read before the session starts, and the session says so on every surface', { skip: SKIP }, async () => {
+  // Workspace-only unset: the session does not start. The reply names the command; the office changes nothing.
+  fs.writeFileSync(clawConfig, JSON.stringify({ 'tools.exec.ask': 'always' }));
+  const no = await call('/api/open', { cwd: acpRepo, name: 'claw-nows', provider: 'openclaw', where: 'office', isolation: 'worktree', confirmCost: true });
+  assert.equal(no.status, 200, JSON.stringify(no.json));
+  const ended = await until(async () => { const x = await sessionOf(no.json.uid); return x && x.status === 'ended' ? x : null; }, 'the session to end');
+  assert.equal(ended.sid, null, 'no session was made');
+  assert.match(ended.replies.at(-1).text, /^OpenClaw could not start a session: tools\.fs\.workspaceOnly is unset.*Run: openclaw config set tools\.fs\.workspaceOnly true/);
+  // Exec approval off: the session starts, and the label the page gets is Unsupervised from the first snapshot with a session id.
+  fs.writeFileSync(clawConfig, JSON.stringify({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'off' }));
+  const off = await call('/api/open', { cwd: acpRepo, name: 'claw-noexec', provider: 'openclaw', where: 'office', isolation: 'worktree', confirmCost: true });
+  assert.equal(off.status, 200, JSON.stringify(off.json));
+  await until(async () => { const x = await sessionOf(off.json.uid); return x && x.sid ? x : null; }, 'the session to start');
+  assert.equal((await pageSnapshot()).sessions.find((x) => x.uid === off.json.uid).supervision, 'Unsupervised');
+  await call('/api/close', { uid: off.json.uid });
+  fs.writeFileSync(clawConfig, JSON.stringify({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'always' }));
 });
 
 test('OpenClaw (#73): no Gateway on the port is "Not ready: start the OpenClaw Gateway", and the office starts nothing', { skip: SKIP }, async () => {

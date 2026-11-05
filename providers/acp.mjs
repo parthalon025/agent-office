@@ -1,6 +1,6 @@
 // ACP provider: agents that speak the Agent Client Protocol (agentclientprotocol.com, protocol version 1) behind the provider
-// seam (providers/index.mjs). One factory for many agents: each agent is an entry in AGENTS, not a new file. The first two are
-// Hermes Agent (`hermes acp`) and DeepSeek Harness (`dsh --profile acp`).
+// seam (providers/index.mjs). One factory for many agents: each agent is an entry in AGENTS, not a new file. The agents are
+// Hermes Agent (`hermes acp`), DeepSeek Harness (`dsh --profile acp`) and OpenClaw (`openclaw acp`, behind a Gateway).
 //
 // The office is the ACP client. It starts the agent by its absolute path (git.mjs resolveExe), speaks newline-delimited
 // JSON-RPC 2.0 on its stdin and stdout, and reports everything in the tracker's vocabulary (events.hook, events.stream):
@@ -38,7 +38,7 @@ export const PROTOCOL_VERSION = 1;
 // feed says when the agent gave up first). features: what the agent has beyond the seam, for the page (#72); 'resume' and
 // 'images' come from the handshake. pin: the version the office was tested against (null: not tested with a real one yet).
 // gated (ADR 0001): true only when the agent asks the office before every tool call that is not low risk; an agent where only
-// some calls ask is ungated, with its supervision label. Neither agent has been run against the office yet (pin: null).
+// some calls ask is ungated, with its supervision label. None of the agents has been run against the office yet (pin: null).
 export const AGENTS = {
   hermes: {
     label: 'Hermes Agent', program: 'hermes', args: ['acp'],
@@ -63,17 +63,21 @@ export const AGENTS = {
   // session/request_permission. File edits, writes, browser and web tools have no approval step, so the agent is ungated.
   // gateway: check the Gateway before the bridge starts. minVersion: older versions send no shell approvals.
   // enforces: the one Security room row whose Ask, Allow and Deny the Gateway config carries (exec approval).
+  // optIn: the environment variable that turns this agent on. Spec #73 says it is off until the user turns it on in the
+  // Security room Agents screen (with the painted Confirm). That room is #70 and does not exist yet, so until it does this
+  // switch keeps the owner decision (ADR 0001) true: off unless OFFICE_ENABLE_OPENCLAW=1. #70 replaces it.
   openclaw: {
     label: 'OpenClaw', program: 'openclaw', args: ['acp'],
     gated: false, supervision: 'Partly supervised: commands ask, file edits do not',
-    askTimeoutMs: null, gateway: true, minVersion: MIN_VERSION, enforces: ['shell'],
+    askTimeoutMs: null, gateway: true, minVersion: MIN_VERSION, enforces: ['shell'], optIn: 'OFFICE_ENABLE_OPENCLAW',
     features: [], pin: null, // not run against a real Gateway yet: native Windows is untested upstream
-    needs: ['Install OpenClaw so that openclaw.exe is on the PATH, then start its Gateway.'],
+    needs: ['Install OpenClaw so that openclaw.exe is on the PATH, then start its Gateway.'], // a .cmd shim from npm is not accepted (resolveExe)
   },
 };
 
 const INIT_MS = 20_000;          // the handshake and the first session
 const PROBE_MS = 10_000;         // readiness: one handshake
+const POLICY_MS = 20_000;        // OpenClaw: reading its config before a session starts
 const PROBE_TTL_MS = 60_000;     // what a probe learned is good for this long
 const CANCEL_MS = 10_000;        // after session/cancel, the turn ends here even when the agent never answers
 const TERMINAL_MS = 10 * 60_000; // the longest an agent's terminal runs
@@ -270,34 +274,55 @@ export function createAcp(deps) {
   });
 
   // ----- OpenClaw: the Gateway and its config (providers/openclaw.mjs) -----
-  // Why there is no Gateway, or null. The office only looks: it never starts, stops or restarts it.
-  async function gatewayDown() {
+  // Why the agent cannot start now, or null: it is off (optIn), or no Gateway answers. The office only looks: it never starts,
+  // stops or restarts the Gateway.
+  async function notReady() {
     if (!spec.gateway) return null;
+    if (spec.optIn && env[spec.optIn] !== '1') {
+      return `${label} is off. Until the Security room can turn it on (#70), set ${spec.optIn}=1 and restart the office. It runs some tool calls without asking.`;
+    }
     return (await gatewayUp(port)) ? null : `Not ready: start the ${label} Gateway. It should listen on ${GATEWAY_HOST}:${port}. The office never starts or stops it.`;
   }
   // What the Gateway config says about the Security room rules, read-only. Kept for a minute; fresh: read it again now.
+  // A read that does not finish in POLICY_MS counts as unreadable, never as a pass.
   let policyNow = null;
   async function policy(fresh = false) {
     if (!spec.gateway) return null;
     if (!fresh && policyNow && now() - policyNow.at < PROBE_TTL_MS) return policyNow.value;
     const w = wantedConfig(cells());
-    policyNow = { at: now(), value: { config: await checkConfig(w, readConfig), gaps: w.gaps } };
+    let config;
+    try { config = await within(checkConfig(w, readConfig), POLICY_MS, 'reading its config took too long', setTimer, clearTimer); } catch (e) {
+      config = await checkConfig(w, async () => ({ state: 'unreadable', why: textOf(e) }));
+    }
+    policyNow = { at: now(), value: { config, gaps: w.gaps } };
     return policyNow.value;
   }
+  const setting = (c, path) => c.settings.find((x) => x.path === path);
   // The settings that are off, in words and with the command that turns each on. A setting the office could not read is never
-  // a pass: one line says it cannot confirm.
+  // a pass: it says it cannot confirm.
   function configNotes(c) {
-    if (c.unreadable) return ['the office could not read its config, so it cannot confirm that commands ask or that file tools stay in the worktree.'];
     const notes = [];
     for (const x of c.settings) {
       if (x.ok) continue;
-      const run = x.fix ? ` Run: ${x.fix}` : '';
-      if (x.path === 'tools.fs.workspaceOnly') notes.push(`${x.path} is ${x.have}, so its file tools can reach outside the worktree.${run}`);
-      else if (x.path === 'tools.exec.ask') notes.push(`${x.path} is ${x.have}, so shell commands run without asking the office.${run}`);
-      else notes.push(`${x.path} does not list ${JSON.stringify(x.value)}, so the Security room Deny rule does not reach ${label}.${run}`);
+      if (x.path === 'tools.exec.ask') {
+        if (c.execAsks === null) notes.push('the office could not read whether commands ask (tools.exec.ask and tools.exec.mode), so it cannot confirm that they do.');
+        else notes.push(`${x.path} is ${x.have}, so shell commands run without asking the office.${x.fix ? ` Run: ${x.fix}` : ''}`);
+      } else if (x.have === 'unknown') notes.push(`the office could not read ${x.path}, so it cannot confirm it.`);
+      else {
+        const run = x.fix ? ` Run: ${x.fix}` : '';
+        if (x.path === 'tools.fs.workspaceOnly') notes.push(`${x.path} is ${x.have}, so its file tools can reach outside the worktree.${run}`);
+        else notes.push(`${x.path} does not list ${JSON.stringify(x.value)}, so the Security room Deny rule does not reach ${label}.${run}`);
+      }
     }
-    if (c.execAsks === false && !notes.some((n) => /shell commands run without asking/.test(n))) notes.push('exec approval is off, so shell commands run without asking the office.');
     return notes;
+  }
+  // The workspace-only rule is a precondition (spec #73: "start it with tools.fs.workspaceOnly on"). The office cannot write the
+  // config (the Gateway is shared, Q40; the office only reads), so it does not start the agent while the rule is off or unknown.
+  // Returns the text that says why, or null when it is on.
+  function workspaceBlock(c) {
+    const x = setting(c, 'tools.fs.workspaceOnly');
+    if (!x || x.ok) return null;
+    return configNotes({ ...c, settings: [x] })[0] + ' The office does not change the OpenClaw config. Fix it, then open the session again.';
   }
 
   // ----- reporting -----
@@ -642,24 +667,36 @@ export function createAcp(deps) {
   }
 
   // ----- the session -----
-  // OpenClaw, once the session runs: read the Gateway config and say what is off. Exec approval off means commands do not ask,
-  // so the session no longer carries "commands ask" (ADR 0001: the label must stay true). The office never writes the config.
-  async function checkPolicy(s, st) {
-    const p = await policy(true);
-    if (st.closed) return;
-    const c = p.config, notes = configNotes(c);
-    if (c.execAsks === false && s.supervision) s.supervision = 'Unsupervised';
-    if (!notes.length) emit(st, () => events.feed(s, 'start', `${label} config: workspace-only is on${c.execAsks ? ' and commands ask' : ''}.`));
+  // OpenClaw, before the session exists (so before any prompt goes out): the version must relay shell approvals, the file tools
+  // must stay in the worktree, and the label must be true. Exec approval is not confirmed on (off, or the office could not
+  // read it): the session is labelled Unsupervised from its first message, never "commands ask". The Gateway config is only
+  // read; the office never writes it. Returns the config check, for the feed lines after the session starts.
+  async function gateCheck(s) {
+    if (spec.minVersion && !versionAtLeast(learned.version, spec.minVersion)) {
+      throw new Error(`${label} ${learned.version || '(unknown version)'} is older than ${spec.minVersion}, or does not say its version. Before ${spec.minVersion} it does not send shell approvals to the office, so commands would run without asking. Update ${label}.`);
+    }
+    const c = (await policy(true)).config;
+    const block = workspaceBlock(c);
+    if (block) throw new Error(block);
+    if (c.execAsks !== true && s.supervision) s.supervision = 'Unsupervised';
+    return c;
+  }
+  function announce(s, st, c) {
+    const notes = configNotes(c);
+    if (!notes.length) emit(st, () => events.feed(s, 'start', `${label} config: workspace-only is on and commands ask.`));
     for (const n of notes) emit(st, () => events.feed(s, 'wait', `${label}: ${n}`));
+    if (c.execAsks !== true) emit(st, () => events.feed(s, 'wait', `${label}: this session is Unsupervised. Commands do not wait for the office.`));
   }
 
   async function start(s, st, o) {
-    const down = await gatewayDown();
+    const down = await notReady();
     if (down) throw new Error(down);
     const init = await within(handshake(st.rpc), INIT_MS, 'it did not answer the handshake in time', setTimer, clearTimer);
     remember(init);
     if (init?.protocolVersion !== PROTOCOL_VERSION) throw new Error(`it speaks ACP version ${init?.protocolVersion}; the office speaks version ${PROTOCOL_VERSION}`);
     st.caps = learned.caps;
+    const gate = spec.gateway ? await gateCheck(s) : null; // before session/new: nothing runs while this is open
+    if (st.closed) return;
     let r, sid;
     if (o.resume && st.caps.loadSession === true) {
       // The agent replays the past conversation as updates before it answers. The office already has those replies
@@ -678,7 +715,7 @@ export function createAcp(deps) {
     st.sid = sid;
     // The session id first (the tracker saves the session when its sid arrives), then the bot sits down at rest.
     emit(st, () => events.stream(s, { type: 'system', subtype: 'init', session_id: sid, model: r.models?.currentModelId || null, permissionMode: 'default' }));
-    if (spec.gateway) checkPolicy(s, st).catch(() => {});
+    if (gate) announce(s, st, gate);
     // With a first prompt waiting, the turn starts at once instead (no flicker from at rest to working).
     if (!st.queue.length) hook(s, st, { hook_event_name: 'SessionStart', source: o.resume ? 'resume' : 'startup' });
     const next = st.queue.shift();
@@ -728,18 +765,25 @@ export function createAcp(deps) {
 
     async readiness() {
       try { program(); } catch (e) { return { ready: false, version: null, needs: [e.message, ...spec.needs] }; }
-      const down = await gatewayDown(); // before the bridge starts: without a Gateway it has nothing to talk to
+      const down = await notReady(); // before the bridge starts: off, or without a Gateway it has nothing to talk to
       if (down) return { ready: false, version: null, needs: [down] };
       await this.learn();
       if (!learned.ok) return { ready: false, version: null, needs: [`${label} did not answer the ACP handshake: ${learned.why}`, ...spec.needs] };
       const needs = spec.pin && learned.version !== spec.pin ? [`The office was tested with ${label} ${spec.pin}. This is ${learned.version || 'an unknown version'}.`] : [];
+      let ready = true;
       if (spec.minVersion && !versionAtLeast(learned.version, spec.minVersion)) {
-        needs.push(`${label} ${learned.version || '(unknown version)'} is older than ${spec.minVersion}. Before ${spec.minVersion} it does not send shell approvals to the office, so commands run without asking. Update ${label}.`);
+        ready = false; // start() refuses the same way: an old or unnamed version sends no shell approvals
+        needs.push(`${label} ${learned.version || '(unknown version)'} is older than ${spec.minVersion}, or does not say its version. Before ${spec.minVersion} it does not send shell approvals to the office, so commands would run without asking. Update ${label}.`);
       }
       if (spec.gateway) {
-        try { needs.push(...configNotes((await policy()).config).map((n) => `${label}: ${n}`)); } catch (e) { needs.push(`${label}: the office could not check its config: ${textOf(e)}`); }
+        try {
+          const c = (await policy()).config;
+          if (workspaceBlock(c)) ready = false;
+          needs.push(...configNotes(c).map((n) => `${label}: ${n}`));
+          if (c.execAsks !== true) needs.push(`${label}: a session opens as Unsupervised until commands ask.`);
+        } catch (e) { ready = false; needs.push(`${label}: the office could not check its config: ${textOf(e)}`); }
       }
-      return { ready: true, version: learned.version || 'unknown', needs };
+      return { ready, version: learned.version || 'unknown', needs };
     },
 
     // One handshake with the agent in a temp folder, then it stops. What it says is kept for a minute, and calls that

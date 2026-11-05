@@ -80,7 +80,7 @@ test('checkConfig: reports each wanted setting as on or off, and the command tha
   assert.deepEqual(bad.fix, [
     'openclaw config set tools.fs.workspaceOnly true',
     'openclaw config set tools.exec.ask always',
-    'openclaw config set tools.deny \'["group:web"]\' --strict-json',
+    `openclaw config set tools.deny "['group:web']" --strict-json`,
   ]);
   assert.equal(bad.execAsks, false, 'exec approval is off: commands do not ask');
 
@@ -95,7 +95,7 @@ test('checkConfig: the new exec mode counts, and a deny list keeps entries the u
   const r = await checkConfig(w, have({ 'tools.fs.workspaceOnly': true, 'tools.exec.mode': 'ask', 'tools.deny': ['browser'] }));
   assert.equal(r.settings.find((s) => s.path === 'tools.exec.ask').ok, true, 'mode ask is an approval');
   assert.equal(r.execAsks, true);
-  assert.deepEqual(r.fix, ['openclaw config set tools.deny \'["browser","group:web"]\' --strict-json'], 'the user\'s own entry stays');
+  assert.deepEqual(r.fix, [`openclaw config set tools.deny "['browser', 'group:web']" --strict-json`], 'the user\'s own entry stays');
 });
 
 test('checkConfig: a config the office cannot read is unknown, never a pass', async () => {
@@ -107,20 +107,62 @@ test('checkConfig: a config the office cannot read is unknown, never a pass', as
   assert.ok(r.settings.every((s) => s.ok === false && s.have === 'unknown'));
 });
 
-test('configReader: runs openclaw config get <path> --json by its absolute path and reads the answer', async () => {
+// A fake execFile for the config reader: `config get <path> --json` answers by path, `config validate` by `valid`.
+function fakeExec({ get = {}, valid = true } = {}) {
   const calls = [];
   const execFile = (file, args, opts, cb) => {
     calls.push({ file, args });
-    const p = args[2];
-    if (p === 'tools.fs.workspaceOnly') cb(null, 'true\n', '');
-    else if (p === 'tools.deny') cb(null, '["browser"]\n', '');
-    else if (p === 'tools.exec.ask') { const e = new Error('unset'); e.code = 1; cb(e, '{"ok":false}\n', ''); }
-    else { const e = new Error('spawn failed'); e.code = 'ENOENT'; cb(e, '', ''); }
+    if (args[1] === 'validate') { if (valid) cb(null, 'ok\n', ''); else { const e = new Error('invalid'); e.code = 1; cb(e, '', ''); } return; }
+    const r = get[args[2]];
+    if (r === undefined) { const e = new Error('spawn failed'); e.code = 'ENOENT'; cb(e, '', ''); } else if (r instanceof Error) cb(r, '', 'bad'); else cb(null, r, '');
   };
-  const read = configReader({ exe: (n) => `C:/bin/${n}.exe`, execFile });
+  return { calls, read: configReader({ exe: (n) => `C:/bin/${n}.exe`, execFile }) };
+}
+const exit1 = () => Object.assign(new Error('Command failed'), { code: 1 });
+
+test('configReader: runs openclaw config get <path> --json by its absolute path and reads the answer', async () => {
+  const { calls, read } = fakeExec({ get: { 'tools.fs.workspaceOnly': 'true\n', 'tools.deny': '["browser"]\n', 'tools.exec.ask': exit1() } });
   assert.deepEqual(await read('tools.fs.workspaceOnly'), { state: 'set', value: true });
   assert.deepEqual(await read('tools.deny'), { state: 'set', value: ['browser'] });
-  assert.deepEqual(await read('tools.exec.ask'), { state: 'unset' }, 'exit 1 is an unset key: the runtime default applies');
+  assert.deepEqual(await read('tools.exec.ask'), { state: 'unset' }, 'exit 1 with a valid config is an unset key: the runtime default applies');
   assert.equal((await read('tools.exec.mode')).state, 'unreadable');
   assert.deepEqual(calls[0], { file: 'C:/bin/openclaw.exe', args: ['config', 'get', 'tools.fs.workspaceOnly', '--json'] });
+  assert.equal(calls.filter((c) => c.args[1] === 'validate').length, 1, 'validate runs only after an exit 1');
+});
+
+test('configReader: exit 1 from a broken config, a crash or the wrong program is unreadable, never unset', async () => {
+  const bad = fakeExec({ get: { 'tools.exec.ask': exit1() }, valid: false });
+  const r = await bad.read('tools.exec.ask');
+  assert.equal(r.state, 'unreadable');
+  assert.match(r.why, /config validate/);
+  // A program that prints text that is not JSON (a stand-in, a wrong binary).
+  const text = fakeExec({ get: { 'tools.fs.workspaceOnly': 'Usage: not json\n' } });
+  assert.deepEqual(await text.read('tools.fs.workspaceOnly'), { state: 'unreadable', why: 'it printed text that is not JSON' });
+  // The program cannot be found at all.
+  const none = configReader({ exe: () => { throw new Error('openclaw.exe is not on the PATH'); }, execFile: () => assert.fail('nothing runs') });
+  assert.deepEqual(await none('tools.deny'), { state: 'unreadable', why: 'openclaw.exe is not on the PATH' });
+});
+
+test('configReader: reads that fail with exit 1 together share one validate', async () => {
+  const { calls, read } = fakeExec({ get: { a: exit1(), b: exit1(), c: exit1() } });
+  const out = await Promise.all(['a', 'b', 'c'].map(read));
+  assert.deepEqual(out.map((x) => x.state), ['unset', 'unset', 'unset']);
+  assert.equal(calls.filter((c) => c.args[1] === 'validate').length, 1);
+});
+
+test('the deny command pastes into cmd, PowerShell and bash: double quotes outside, single quotes inside, and an odd name gets none', async () => {
+  const w = wantedConfig({ ...DEFAULT_CELLS, web: 'deny' });
+  const odd = await checkConfig(w, have({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'always', 'tools.deny': ["it's", 'a"b'] }));
+  const x = odd.settings.find((s) => s.path === 'tools.deny');
+  assert.equal(x.ok, false);
+  assert.equal(x.fix, null, 'a name with a quote has no command to copy; the note still names the setting');
+  const ok = await checkConfig(w, have({ 'tools.fs.workspaceOnly': true, 'tools.exec.ask': 'always', 'tools.deny': ['group:ui'] }));
+  assert.equal(ok.settings.find((s) => s.path === 'tools.deny').fix, `openclaw config set tools.deny "['group:ui', 'group:web']" --strict-json`);
+});
+
+test('checkConfig: when only one of the two exec keys cannot be read, no fix is offered for exec ask', async () => {
+  const w = wantedConfig(DEFAULT_CELLS);
+  const r = await checkConfig(w, async (p) => (p === 'tools.exec.mode' ? { state: 'unreadable', why: 'x' } : p === 'tools.fs.workspaceOnly' ? { state: 'set', value: true } : { state: 'unset' }));
+  assert.equal(r.execAsks, null);
+  assert.equal(r.settings.find((s) => s.path === 'tools.exec.ask').fix, null);
 });

@@ -335,8 +335,9 @@
         snapshot.sessions.forEach(function (s) {
           if (!s.place) return;   // wait until the server knows the repo and branch
           var pl = placeOf(s), k = known[s.uid], emit = base, prev = null, firstSight = false;
-          // the session checked out another branch, or moved to another folder: seat it again
-          if (k && !k.ended && k.place !== placeKey(pl)) {
+          // the session checked out another branch, or moved to another folder: seat it again. So does a changed supervision
+          // label (an agent whose config turned out not to ask): the DS sets the card's platform line only when the bot is added.
+          if (k && !k.ended && (k.place !== placeKey(pl) || k.sup !== V.supervision(s))) {
             emit({ type: 'bot.remove', bot: k.name }); delete taken[k.name]; delete known[s.uid];
             prev = k; k = null;
             emit = restore;   // the scene showed this bot and what its old seat lists (prev) already
@@ -349,7 +350,7 @@
             if (s.status === 'ended') return;
             firstSight = true;
             var name = uniqueName(s.name);
-            k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: V.status(s).key, task: V.taskLine(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, model: s.model, ended: false, place: placeKey(pl), room: roomOf(pl, emit) };
+            k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: V.status(s).key, task: V.taskLine(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, model: s.model, ended: false, place: placeKey(pl), sup: V.supervision(s), room: roomOf(pl, emit) };
             var bot = withColor({ name: name, role: 'coder', shape: shapeOf(s.uid), status: k.status, task: k.task, platform: V.platform(s), identity: s.cwd }, s.uid);
             if (s.skills && s.skills.length) bot.skills = s.skills.slice(0, 16);
             if (s.scheduleId) bot.triggers = [s.name];

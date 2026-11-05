@@ -126,6 +126,24 @@ test('the bot of an ungated agent carries its supervision label on its card; a g
   assert.equal(of(r2.mount(KEY_A).ev, 'bot.add')[0].bot.platform, 'Partly supervised: commands ask, file edits do not');
 });
 
+test('a supervision label that changes after the bot is seated seats it again, so the card never keeps a label that is no longer true', async () => {
+  const r = rig();
+  const m = r.mount(KEY_A);
+  await r.hook(HOOKS.turnWithEdit[0]);
+  const s = [...r.tracker.sessions.values()][0];
+  s.supervision = 'Partly supervised: commands ask, file edits do not';
+  r.push();
+  assert.equal(of(m.ev, 'bot.add').at(-1).bot.platform, 'Partly supervised: commands ask, file edits do not');
+  const adds = of(m.ev, 'bot.add').length;
+  s.supervision = 'Unsupervised';   // the config said commands do not ask
+  r.push();
+  assert.equal(of(m.ev, 'bot.add').length, adds + 1);
+  assert.equal(of(m.ev, 'bot.add').at(-1).bot.platform, 'Unsupervised');
+  assert.ok(of(m.ev, 'bot.remove').length >= 2, 'the old card is removed first');
+  r.push();   // nothing changed: nothing is seated again
+  assert.equal(of(m.ev, 'bot.add').length, adds + 1);
+});
+
 test('a turn with an edit: working, tool call without a bubble on replay, result, finished', async () => {
   const r = rig();
   const m0 = r.mount(KEY_A);

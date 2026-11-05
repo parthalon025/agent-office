@@ -67,10 +67,15 @@
   // Supervision (ADR 0001): an ungated agent carries a label. The server sets it on the session (providers/index.mjs
   // supervisionOf); the words come from the provider. This is the one place the page reads it.
   //   supervision(s)     the full label, '' for a gated agent. On the bot card, the desk terminal and the stats.
-  //   supervisionHead(l) the words before the colon, for the room sign, which has no room for the rest.
+  //   supervisionHead(l) the words before the colon, for the one-line title bar of a desk monitor.
+  //   supervisionLines(l) the whole label as one or two lines, split after the colon: the room sign and the desk screen.
   //   platform(s)        the line under the bot's name: the label when it has one.
   function supervision(s) { return s && typeof s.supervision === 'string' ? s.supervision : ''; }
   function supervisionHead(label) { return String(label || '').split(':')[0]; }
+  function supervisionLines(label) {
+    var t = String(label || ''), i = t.indexOf(': ');
+    return !t ? [] : i < 0 ? [t] : [t.slice(0, i + 1), t.slice(i + 2)];
+  }
   function platform(s) { return supervision(s) || 'Claude Code'; }
 
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
@@ -111,5 +116,5 @@
     return requests(s).filter(function (r) { return r.kind === 'permission' && r.always && r.risk !== 'high'; })[0] || null;
   }
 
-  root.OfficeVocab = { requests: requests, alwaysOffer: alwaysOffer, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, supervision: supervision, supervisionHead: supervisionHead, platform: platform };
+  root.OfficeVocab = { requests: requests, alwaysOffer: alwaysOffer, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

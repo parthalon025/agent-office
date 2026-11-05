@@ -392,10 +392,10 @@ export function createTracker(deps = {}) {
       for (const b of m.message?.content || []) if (b.type === 'text' && b.text && b.text.trim()) pushReply(s, b.text);
     } else if (m.type === 'usage') {
       // An agent that reports a token total, not per message (ACP usage_update: used, size). It replaces the last total. It
-      // carries no cost: an agent that reports none stays costUnknown.
-      const used = Number(m.used), size = Number(m.size);
-      if (Number.isFinite(used) && used >= 0) { s.usage.tokens = used; s.ctxTokens = used; }
-      if (Number.isFinite(size) && size > 0) s.ctxWindow = size;
+      // sets the Tokens figure only: the OpenClaw bridge sends Gateway session totals, not the tokens in context, so the
+      // Context bar (ctxTokens, ctxWindow) stays unknown rather than read 100% by mistake. It carries no cost either.
+      const used = Number(m.used);
+      if (Number.isFinite(used) && used >= 0) s.usage.tokens = used;
       changed();
     } else if (m.type === 'result') {
       s.live = '';

@@ -2,7 +2,10 @@
 // `openclaw acp`, a bridge to a Gateway that already runs on loopback (default 127.0.0.1:18789). So this is not a second
 // client. It holds only what ACP does not carry:
 //   - gatewayPort / probeGateway: is a Gateway there? The office never starts or stops it (owner decision Q40); other clients use it.
-//   - versionAtLeast: OpenClaw relays exec approvals over ACP from v2026.10.10 (spec #67).
+//   - versionAtLeast: OpenClaw relays exec approvals over ACP from v2026.10.10 (spec #67). The version compared is the one the
+//     bridge reports in the ACP initialize answer (agentInfo.version). In the OpenClaw source that is the package's own VERSION
+//     (dist/acp/types.js, seen in release 2026.1.29), so it is the release. A bridge that reports none is "unknown", and unknown
+//     is not new enough.
 //   - wantedConfig / checkConfig / configReader: the OpenClaw settings that the Security room rules need. The Gateway runs the
 //     tools, so its config decides. The office only READS that config (`openclaw config get`); it never writes it. A setting that
 //     is off is named with the command that turns it on, and the session says so. A rule that config cannot carry is a "gap":
@@ -54,6 +57,9 @@ export function versionAtLeast(v, min = MIN_VERSION) {
 // ---------- the config the Security room rules need ----------
 // What the Security room cells (row -> ask | allow | deny) were before the user changes them. #70 owns the real rules; the
 // caller passes the cells of the OpenClaw column.
+// Pre-wired for the Security room (#70). Nothing in the office reads these cells yet: the caller passes DEFAULT_CELLS until
+// that room exists, and the Deny and gap tables below are exercised by tests only. Only workspaceOnly and exec ask affect a
+// session today (providers/acp.mjs start()).
 export const DEFAULT_CELLS = { 'read-inside': 'allow', 'edit-inside': 'allow', 'files-outside': 'ask', shell: 'ask', web: 'ask', mcp: 'ask', settings: 'ask', secrets: 'ask' };
 // A Deny cell is these tool ids in tools.deny (tool groups and ids as OpenClaw names them).
 const DENY = { shell: ['group:runtime'], web: ['group:web'], 'edit-inside': ['write', 'edit', 'apply_patch'], mcp: ['group:plugins'], 'read-inside': ['read'] };
@@ -90,6 +96,15 @@ export function wantedConfig(cells = {}) {
   return { want, gaps };
 }
 
+// The command that sets the deny list. It must paste into cmd, PowerShell and bash alike, and single quotes do not protect JSON
+// double quotes on native Windows. So the list is a JSON5 array of single-quoted names (OpenClaw parses values as JSON5,
+// docs.openclaw.ai/cli/config) inside double quotes. A name with a character outside a tool id's usual set gets no command:
+// quoting it right for three shells is not something to guess.
+const SAFE_ID = /^[\w:*.\-]+$/;
+function denyCommand(list) {
+  if (!list.every((t) => SAFE_ID.test(t))) return null;
+  return `openclaw config set tools.deny "[${list.map((t) => `'${t}'`).join(', ')}]" --strict-json`;
+}
 const norm = (x) => String(x).toLowerCase();
 const show = (r) => (r.state === 'unreadable' ? 'unknown' : r.state === 'unset' ? 'unset' : JSON.stringify(r.value));
 
@@ -113,10 +128,11 @@ export async function checkConfig(w, read) {
       const list = r.state === 'set' && Array.isArray(r.value) ? r.value.map(String) : [];
       const missing = x.value.filter((t) => !list.some((h) => norm(h) === norm(t)));
       ok = r.state !== 'unreadable' && !missing.length;
-      if (!ok) command = `openclaw config set tools.deny '${JSON.stringify([...list, ...missing])}' --strict-json`;
+      if (!ok) command = denyCommand([...list, ...missing]);
     } else if (x.path === 'tools.exec.ask') {
       ok = execAsks === true;
-      if (!ok) command = `openclaw config set ${x.path} ${x.value}`;
+      // execAsks null: one of the two keys could not be read, so there is nothing true to tell the user to change.
+      if (!ok && execAsks !== null) command = `openclaw config set ${x.path} ${x.value}`;
     } else {
       ok = r.state === 'set' && r.value === x.value;
       if (!ok) command = `openclaw config set ${x.path} ${x.value}`;
@@ -128,16 +144,28 @@ export async function checkConfig(w, read) {
   return { ok: settings.every((s) => s.ok), unreadable, execAsks, settings, fix };
 }
 
-/** A reader of the OpenClaw config by `openclaw config get <path> --json`. exe: the program resolver. Read-only. */
+/**
+ * A reader of the OpenClaw config by `openclaw config get <path> --json`. exe: the program resolver. Read-only.
+ * Exit 1 means "valid key, no value" (docs.openclaw.ai/cli/config), but a crash, an invalid config or the wrong program also
+ * exit 1. So exit 1 counts as unset only when `openclaw config validate` passes (exit 0) right after it. Any other failure,
+ * and a validate that fails or cannot run, is "unreadable": the caller then cannot confirm the setting and says so.
+ */
 export function configReader({ exe, execFile = realExecFile, env = process.env, timeoutMs = READ_MS }) {
-  return (path) => new Promise((resolve) => {
+  const run = (args) => new Promise((resolve) => {
     let file;
-    try { file = exe('openclaw'); } catch (e) { return resolve({ state: 'unreadable', why: clip(String(e.message || e), 200) }); }
-    execFile(file, ['config', 'get', path, '--json'], { cwd: helperCwd(env), windowsHide: true, timeout: timeoutMs, env: { ...env }, maxBuffer: 1 << 20 }, (err, stdout) => {
-      // Exit 1 on a valid key with no value: the runtime default applies (docs.openclaw.ai/cli/config).
-      if (err && err.code === 1) return resolve({ state: 'unset' });
-      if (err) return resolve({ state: 'unreadable', why: clip(String(err.message || err), 200) });
-      try { resolve({ state: 'set', value: JSON.parse(String(stdout).trim()) }); } catch { resolve({ state: 'unreadable', why: 'it printed text that is not JSON' }); }
-    });
+    try { file = exe('openclaw'); } catch (e) { return resolve({ err: e, stdout: '' }); }
+    execFile(file, args, { cwd: helperCwd(env), windowsHide: true, timeout: timeoutMs, env: { ...env }, maxBuffer: 1 << 20 }, (err, stdout) => resolve({ err, stdout }));
   });
+  // Reads that fail with exit 1 at the same time share one validate.
+  let validating = null;
+  const valid = () => (validating ||= run(['config', 'validate']).then((r) => !r.err).finally(() => { validating = null; }));
+  const why = (e) => clip(String(e.message || e), 200);
+  return async (path) => {
+    const { err, stdout } = await run(['config', 'get', path, '--json']);
+    if (err && err.code === 1) {
+      return (await valid()) ? { state: 'unset' } : { state: 'unreadable', why: 'it exited with 1 and `openclaw config validate` does not pass' };
+    }
+    if (err) return { state: 'unreadable', why: why(err) };
+    try { return { state: 'set', value: JSON.parse(String(stdout).trim()) }; } catch { return { state: 'unreadable', why: 'it printed text that is not JSON' }; }
+  };
 }

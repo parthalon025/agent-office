@@ -282,17 +282,23 @@
   }
 
   // ---------- the door sign ----------
-  // sup: the short supervision label of the least supervised agent in the room ('' when all are gated; ADR 0001). The sign has
-  // room for the words before the colon only; the bot card, the desk terminal and the stats display carry the whole label.
+  // sup: the supervision label of the least supervised agent in the room ('' when all are gated; ADR 0001), whole, on two
+  // lines (OfficeVocab.supervisionLines). The font shrinks until the longer line fits left of the count; it is never cut.
   function paintSign(c, w, h, count, tok, f, sup) {
     var col = function (k, fb) { return tok[k] || fb || '#888'; }, sans = f.sans || 'sans-serif', mono = f.mono || 'monospace';
     c.fillStyle = col('scene-dark'); rr(c, 0, 0, w, h, 26); c.fill();
     c.strokeStyle = mix(col('status-waiting'), col('scene-dark'), 0.35); c.lineWidth = 6; rr(c, 6, 6, w - 12, h - 12, 22); c.stroke();
     c.textBaseline = 'middle'; c.textAlign = 'left';
     c.fillStyle = col('bubble');
-    if (sup) {
-      c.font = '600 54px ' + sans; c.fillText('Agents', 36, h * 0.36);
-      c.font = '600 36px ' + sans; c.globalAlpha = 0.85; c.fillText(sup, 36, h * 0.74); c.globalAlpha = 1;
+    var rows = sup ? window.OfficeVocab.supervisionLines(sup) : [];
+    if (rows.length) {
+      var room = w - 150 - 36 - 16, px = 32;
+      c.font = '600 ' + px + 'px ' + sans;
+      while (px > 18 && Math.max.apply(null, rows.map(function (t) { return c.measureText(t).width; })) > room) { px -= 1; c.font = '600 ' + px + 'px ' + sans; }
+      c.globalAlpha = 0.85;
+      rows.forEach(function (t, i) { c.fillText(t, 36, h * (rows.length === 1 ? 0.7 : 0.58 + 0.24 * i)); });
+      c.globalAlpha = 1;
+      c.font = '600 46px ' + sans; c.fillText('Agents', 36, h * 0.24);
     } else { c.font = '600 62px ' + sans; c.fillText('Agents', 36, h / 2 + 3); }
     c.fillStyle = col('status-working'); rr(c, w - 150, 28, 114, h - 56, (h - 56) / 2); c.fill();
     c.fillStyle = col('on-status', col('bubble')); c.font = '700 56px ' + mono; c.textAlign = 'center'; c.fillText(String(count), w - 93, h / 2 + 3);
@@ -557,7 +563,7 @@
         s.tex.needsUpdate = true;
       });
       doors.forEach(function (d) {
-        var v = statsOf(d.roomId), n = v.sessions, sup = window.OfficeVocab.supervisionHead(v.supervision), sig = skinVersion + K.look + n + '|' + sup;
+        var v = statsOf(d.roomId), n = v.sessions, sup = v.supervision || '', sig = skinVersion + K.look + n + '|' + sup;
         if (sig === d.sig) return;
         d.sig = sig;
         paintSign(d.canvas.getContext('2d'), d.canvas.width, d.canvas.height, n, K.tok, K.f || {}, sup);
