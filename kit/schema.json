@@ -485,6 +485,8 @@
   "scene-slab",
   "scene-sofa",
   "scene-subagent",
+  "scene-walk-speed",
+  "scene-walk-speed-ephemeral",
   "scene-wall",
   "scene-wall-h",
   "scene-wall-side",

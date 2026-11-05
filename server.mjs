@@ -6,6 +6,7 @@
 // Every spawn also uses an absolute path from git.resolveExe.
 process.env.NoDefaultCurrentDirectoryInExePath = '1';
 import http from 'node:http';
+import net from 'node:net';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -32,20 +33,41 @@ const W = globalThis.OfficeWire;
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
-// OFFICE_PORT=branch: the port of this checkout's branch (git.branchPort), so each worktree has its own. It never falls
-// back to another port: if that one is busy, the office stops (see server.on('error')).
+// OFFICE_PORT=branch: a port of this checkout's branch (git.branchPorts), so each worktree has its own. The first free
+// port of the name's fixed sequence is taken, and the start message says which one (#106). An office of this checkout on
+// any port of the sequence stops the start, and so does a sequence with no free port (see server.on('error')).
+// An office never takes another port than those of its sequence.
+const stopAtStart = async (text) => { process.stderr.write(text + '\n', () => process.exit(1)); return await new Promise(() => {}); }; // wait for the exit
+// Free: a short listen on the port that is closed again. The real listen below still decides (a port lost in between stops the office).
+const portIsFree = (port) => new Promise((resolve) => {
+  const probe = net.createServer();
+  probe.once('error', () => resolve(false));
+  probe.listen(port, '127.0.0.1', () => probe.close(() => resolve(true)));
+});
+// Own: the office on that port answers /api/info (with the page token of that port) with a hooks file directly in this
+// folder. Not "inside": an office of a worktree below this folder (.claude/worktrees/...) is another checkout (#106).
+async function portIsOwn(port) {
+  try {
+    const { token } = JSON.parse(fs.readFileSync(auth.pageFile(process.env, port), 'utf8'));
+    const r = await fetch(`http://127.0.0.1:${port}/api/info`, { headers: { 'x-office-token': token }, signal: AbortSignal.timeout(3000) });
+    const j = await r.json();
+    return r.ok && typeof j.hooksFile === 'string' && normPath(path.dirname(j.hooksFile)) === normPath(ROOT);
+  } catch { return false; }
+}
 const BRANCH_PORT = process.env.OFFICE_PORT === 'branch'
   ? await (async () => {
+    let name;
     try {
-      // A passing git failure (a timeout while the computer is busy) does not mean "outside git": ask again first.
-      let loc = git.KEEP;
-      for (let i = 0; i < 3 && loc === git.KEEP; i++) loc = await git.locateOrKeep(ROOT);
+      // A passing git failure (a time limit while the computer is busy) is not "outside git": locateOrKeep tries 3 times,
+      // then answers KEEP, and the message says so. Null (not in git) is checkoutName's error.
+      const loc = await git.locateOrKeep(ROOT);
       if (loc === git.KEEP) throw new Error('git did not give the branch of this folder (it timed out, or the repository has no commit yet). Start the office again.');
-      const name = git.checkoutName(loc); return { name, port: git.branchPort(name) };
-    } catch (e) {
-      process.stderr.write(`Agent Office cannot pick a port for this folder: ${e.message}\n`, () => process.exit(1));
-      return await new Promise(() => {}); // wait for the exit
-    }
+      name = git.checkoutName(loc);
+    } catch (e) { return stopAtStart(`Agent Office cannot pick a port for this folder: ${e.message}`); }
+    const r = await git.pickBranchPort(name, { isFree: portIsFree, isOwn: portIsOwn });
+    if (r.own) return stopAtStart(`Agent Office is already open on port ${r.own} for branch "${name}", from this folder. Nothing was changed.\nOpen that office, or stop it by the process id that owns its port (netstat -ano | findstr :${r.own}), never by image name.`);
+    if (!r.port) return stopAtStart(`Agent Office stopped: no port is free for branch "${name}".\nThese ports are busy: ${r.busy.join(', ')}. Nothing was changed, and no other port was tried.\nFind a process id with: netstat -ano | findstr :<port>. Stop that process by its id, never by image name.`);
+    return { name, port: r.port, busy: r.busy };
   })()
   : null;
 const PORT = BRANCH_PORT ? BRANCH_PORT.port : Number(process.env.OFFICE_PORT) || DEFAULT_PORT;
@@ -315,12 +337,23 @@ async function floorActionRaw(action, body) {
   await refreshRepo(repoKey(r.path));
   return out;
 }
-// Recent folders that are in git are buildings too, so they can get floors before any session runs. A folder whose git
-// call failed for a passing reason (a timeout while the computer is busy, as at sign-in) is asked again every 30 s; a
-// folder that is gone or not in git is not asked again.
+// Recent folders that are in git are buildings too, so they can get floors before any session runs. git.locateOrKeep
+// tries a passing failure 3 times; a folder that still got KEEP (git kept passing its time limit while the computer was
+// busy, as at sign-in) is asked again every 30 s. A folder that is gone or not in git is not asked again.
+// A lookup that still runs is not started a second time.
 const unplacedRecent = new Set(persisted.recent);
+const placingRecent = new Set();
 const placeRecent = () => {
-  for (const d of unplacedRecent) git.locateOrKeep(d).then((g) => { if (g === git.KEEP) return; unplacedRecent.delete(d); if (g) addRepo(g.repo); });
+  for (const d of unplacedRecent) {
+    if (placingRecent.has(d)) continue;
+    placingRecent.add(d);
+    git.locateOrKeep(d).then((g) => {
+      placingRecent.delete(d);
+      if (g === git.KEEP) return;
+      unplacedRecent.delete(d);
+      if (g) addRepo(g.repo);
+    });
+  }
 };
 placeRecent();
 setInterval(() => { for (const k of repos.keys()) void refreshRepo(k); placeRecent(); }, 30000).unref();
@@ -1133,7 +1166,7 @@ const server = http.createServer(async (req, res) => {
         settingsSnippet: JSON.stringify(hooksMode === 'http' ? httpSettings : commandSettings, null, 2),
         agentToken: AGENT_TOKEN, // the Attach sessions dialog hides it until the user clicks Show (#60)
         launchCommand: `claude --settings "${activeHooksFile()}" --mcp-config "${MCP_FILE}"`,
-        startup: startup.state(STARTUP_DIR),
+        startup: startup.status(STARTUP_DIR, ROOT, PORT),
         hooksMode, claudeVersion: CLAUDE_VERSION, templates: persisted.templates, schedules: persisted.schedules, spendLimit: defaultSpend(),
       });
     }
@@ -1155,7 +1188,10 @@ const server = http.createServer(async (req, res) => {
       const out = onHook(p);
       return send(res, 200, out ? JSON.stringify(out) : '');
     }
-    if (url.pathname === '/api/startup') return send(res, 200, body.enabled === true ? startup.enable(STARTUP_DIR, ROOT, process.execPath) : startup.disable(STARTUP_DIR));
+    if (url.pathname === '/api/startup') {
+      // Only the office on 4317 in the main folder owns the entry (#108); the others get 403 with the reason.
+      return send(res, 200, startup.change(STARTUP_DIR, ROOT, process.execPath, PORT, body.enabled));
+    }
     if (url.pathname === '/api/launch-link') return send(res, 200, { url: auth.launchUrl(PORT, launchCodes.mint()) }); // a second npm start asks for one
     if (url.pathname === '/api/probe-http') return send(res, 200, await probeHttp());
     if (url.pathname === '/api/notes/save') {
@@ -1250,8 +1286,8 @@ async function linkFromRunningOffice() {
 const sayAndExit = (stream, text, code) => stream.write(text + '\n', () => process.exit(code));
 server.on('error', async (e) => {
   if (e.code !== 'EADDRINUSE') return sayAndExit(process.stderr, e.message, 1);
-  // Branch mode owns one port per branch: a busy port means another copy (or program) holds it. Say so and stop.
-  if (BRANCH_PORT) return sayAndExit(process.stderr, `Agent Office stopped: port ${PORT} for branch "${BRANCH_PORT.name}" is busy.\nAnother copy or program holds it. Nothing was changed, and no other port was tried.\nFind its process id with: netstat -ano | findstr :${PORT}. Stop that process by its id, never by image name.`, 1);
+  // Branch mode picked a free port of the branch's sequence a moment ago: a busy port now means another copy (or program) took it. Say so and stop.
+  if (BRANCH_PORT) return sayAndExit(process.stderr, `Agent Office stopped: port ${PORT} for branch "${BRANCH_PORT.name}" was free a moment ago and is busy now.\nAnother copy or program took it. Nothing was changed, and no other port was tried.\nFind its process id with: netstat -ano | findstr :${PORT}. Stop that process by its id, never by image name.`, 1);
   const link = await linkFromRunningOffice();
   if (!link) return sayAndExit(process.stderr, `Agent Office is already running on port ${PORT}, and it gave no launch link to this copy.\nNothing was changed. Stop the other copy first, or set OFFICE_PORT.`, 1);
   openBrowser(link);
@@ -1276,7 +1312,7 @@ server.listen(PORT, HOST, () => {
   } catch (e) { console.warn(`Could not save the page token for npm run probe and a second npm start: ${e.message}`); }
   const link = auth.launchUrl(PORT, launchCodes.mint());
   if (OLD_PLAIN_TOKEN) console.log(`Port ${PORT} reuses the agent token of the old .office-token, so settings made before this version keep working. This office keeps its own files from now on.`);
-  if (BRANCH_PORT) console.log(`Branch "${BRANCH_PORT.name}" uses port ${PORT}.`);
+  if (BRANCH_PORT) console.log(`Branch "${BRANCH_PORT.name}" uses port ${PORT}.${BRANCH_PORT.busy.length ? ` Port ${BRANCH_PORT.busy.join(', ')} ${BRANCH_PORT.busy.length > 1 ? 'were' : 'was'} busy, so it took the next free port of its sequence.` : ''}`);
   console.log(`Agent Office is open: ${link}\nThe link works once, for 5 minutes. A reload keeps working. For a new link, run npm start again.`);
   console.log(`Hooks: ${hooksMode} (Claude Code ${CLAUDE_VERSION}). For outside sessions: claude --settings "${activeHooksFile()}" --mcp-config "${MCP_FILE}"`);
   openBrowser(link);

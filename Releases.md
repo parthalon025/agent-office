@@ -49,6 +49,7 @@ Versions keep the `x` prefix.
 
 ### Fixed
 
+- Two branches with the same branch port no longer block each other (#106). A branch has a fixed sequence of 12 ports, and `npm run start:branch` takes the first free one and says which port it took. It stops when an office of the same folder holds any port of the sequence (an office of a worktree below the folder does not count), and it stops with all the ports named when none is free. A branch that moves to another port of its sequence starts with the files of that port. The branch-port test no longer depends on other running offices (#96).
 - A session never shows as Finished after an error.
 - A subagent tool call no longer hides a request that waits for you.
 - A note an agent adds while you type no longer undoes your deletion.

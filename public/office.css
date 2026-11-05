@@ -35,8 +35,8 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
   --rail-clear: 302px;   /* the DS right rail: 270px wide, 16px from the edge, and a gap */
   left: calc((100vw - var(--rail-clear)) / 2); width: max-content; max-width: calc(100vw - var(--rail-clear) - var(--space-4));
 }
-/* The palette sits above every dialog (both are --z-dialog, and DOM order put the dialog on top). */
-.ao-cmdk-o { z-index: calc(var(--z-dialog) + 1); }
+/* The palette sits above every dialog (both are --z-dialog, and DOM order put the dialog on top) and above the toast stack, so a toast never covers an option (#79). */
+.ao-cmdk-o { z-index: calc(var(--z-dialog) + 2); }
 
 /* the dock stops before the HUD rail column (right 300px, up to 68px wide) and, when narrow, clears the log lane */
 @media (max-width: 1359px) { .strip { right: 380px; } }
@@ -107,16 +107,15 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .past-actions { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-1); flex: none; }
 
 /* page toasts hold every toast: results of page actions, requests and errors from the scene (the DS HUD stack is off, toasts: false) */
-.page-toasts { position: fixed; z-index: calc(var(--z-dialog) + 1); right: auto; left: 362px; bottom: var(--strip-clear, 180px); width: min(360px, calc(100vw - 2 * var(--space-4))); }
-/* toasts keep out of the right column, where the chat and its message box sit */
-@media (max-width: 1100px) { .page-toasts { left: var(--space-4); } }
-@media (max-width: 820px) {
-  .page-toasts { left: var(--space-4); right: var(--space-4); bottom: var(--strip-clear, 200px); }
-  /* sticky request and error toasts stay until answered, so the stack is capped (about one toast, then it scrolls) and
-     sits at the top whenever a chat or a panel (terminal, board, stats) uses the bottom edge */
-  .page-toasts { max-height: calc(var(--space-6) * 3); overflow: auto; }
-  #office:has(.ao-hud-chat) .page-toasts, #office.has-panel .page-toasts { top: 64px; bottom: auto; }
-}
+/* office.js places the stack at every width (toasts.js place, #79): --toast-x (left edge), --toast-bottom and --toast-room
+   (most height; it scrolls then), so it never covers the top controls, the floors card, the dock or a request bar.
+   --toast-home is its own left edge; the defaults below apply until office.js has measured. No other rule places it. */
+.page-toasts { --toast-home: 362px; --toast-x: var(--toast-home); --toast-bottom: var(--strip-clear, 180px); --toast-room: 100vh; position: fixed; z-index: calc(var(--z-dialog) + 1); left: var(--toast-x); bottom: var(--toast-bottom); max-height: var(--toast-room); overflow-y: auto; width: min(360px, calc(100vw - 2 * var(--space-4))); }
+/* no free band: the stack waits out of sight, and its clocks wait (office.js) */
+.page-toasts.is-off { visibility: hidden; }
+@media (max-width: 1100px) { .page-toasts { --toast-home: var(--space-4); } }
+/* sticky request and error toasts stay until answered, so on a narrow screen the stack is capped (about one toast, then it scrolls) */
+@media (max-width: 820px) { .page-toasts { max-height: min(calc(var(--space-6) * 3), var(--toast-room)); } }
 
 /* welcome card */
 .welcome-logo { display: flex; justify-content: center; padding-top: var(--space-2); }

@@ -821,7 +821,7 @@ test('AO.MODES lists every theme of tokens.json, in order, each with a look id, 
 
 test('every look has its light (LOOKS), its effects (FX) and its light-* and fx-* tokens, and readScene reads them', () => {
   const run = new Function('AO', 'getComputedStyle', 'document',
-    'var DEPTH,PITCH,GAP,FLOOR_H,DUR={},HANDOFF={},NAV={},LOOKS;' + source('var FX={', '};\n') + source('function num(cs,n,f){', '}\n') +
+    'var DEPTH,PITCH,GAP,FLOOR_H,DUR={},HANDOFF={},WALK={},NAV={},LOOKS;' + source('var FX={', '};\n') + source('function num(cs,n,f){', '}\n') +
     source('LOOKS={day:', '};\n') + source('function readScene(el){', '}\n') + 'readScene();return {FX:FX,LOOKS:LOOKS};');
   const { FX, LOOKS } = run({ MODES: modes() }, () => ({ getPropertyValue: (n) => rootVals[n.slice(2)] ?? '' }), { documentElement: {} });
   for (const { id } of modes()) {
@@ -1035,4 +1035,54 @@ test('the office top bar keeps to the rows above the side columns: icons only wh
     const lastPart = r.sel.split(',').map((x) => x.trim().split(' ').pop());
     if (lastPart.some((p) => /\.ao-hud-(left|right)\b/.test(p))) assert.doesNotMatch(r.body, /(^|;)top:/, `office.css sets no top on ${r.sel}`);
   }
+});
+
+// ---- #82: walk speed is a DS token; a temporary helper walks about twice as fast, in and out ----
+function walkRig() {
+  const WALK = { bot: 2.6, ephemeral: 5.2 };
+  const walkStep = new Function('WALK', source('function walkStep(b,dt)', 'return walking;}\n') + 'return walkStep;')(WALK);
+  // seconds a bot needs for a straight path of 29 units, in 60 fps steps
+  const secs = (bot) => {
+    Object.assign(bot, { pos: new V(0, 0, 0), path: [new V(29, 0, 0)] });
+    let t = 0;
+    while (bot.path.length && t < 120) { walkStep(bot, 1 / 60); t += 1 / 60; }
+    return t;
+  };
+  return { WALK, walkStep, secs };
+}
+
+test('walk: a normal bot takes about 11 s for 29 units, a helper at most 6 s (#82)', () => {
+  const { secs } = walkRig();
+  const normal = secs({}), helper = secs({ ephemeral: true });
+  assert.ok(Math.abs(normal - 11.2) < 0.2, `normal bot ${normal.toFixed(2)} s`);
+  assert.ok(helper <= 6, `helper ${helper.toFixed(2)} s`);
+  assert.ok(Math.abs(normal / helper - 2) < 0.1, 'about twice as fast');
+});
+
+test('walk: the speed comes from the token values, so a page can change it (#82)', () => {
+  const { WALK, secs } = walkRig();
+  WALK.bot = 5.2; WALK.ephemeral = 2.6;
+  assert.ok(secs({}) < 6 && secs({ ephemeral: true }) > 10);
+});
+
+test('walk: the arrive step fires once, at the end of the path, at both speeds (#82)', () => {
+  const { walkStep } = walkRig();
+  for (const ephemeral of [false, true]) {
+    let arrived = 0;
+    const b = { ephemeral, pos: new V(0, 0, 0), path: [new V(3, 0, 0), new V(3, 0.5, 4)], onArrive: () => arrived++ };
+    let walking, n = 0;
+    do { walking = walkStep(b, 1 / 60); n++; } while (walking && n < 2000);
+    assert.equal(arrived, 1, `ephemeral ${ephemeral}`);
+    assert.equal(b.onArrive, null);
+    assert.equal(b.pos.y, 0.5);
+    assert.equal(b.pos.z, 4);
+  }
+});
+
+test('walk: no literal speed is left in the walk step or the bot animation, and the engine reads both tokens (#82)', () => {
+  assert.ok(!/\b2\.6\b/.test(source('function walkStep(b,dt)', 'return walking;}\n')), 'no 2.6 in walkStep');
+  const at = bundle.indexOf('function animateBot(');
+  assert.ok(at >= 0 && !/sp=2\.6/.test(bundle.slice(at, at + 600)), 'no literal speed in animateBot');
+  assert.ok(bundle.slice(at, at + 200).includes('walkStep(b,dt)'), 'animateBot still calls walkStep, or bots would stop walking');
+  assert.match(source('function readScene(el)', '\n (AO.MODES||[])'), /WALK\.bot=num\(cs,"scene-walk-speed",2\.6\).*WALK\.ephemeral=num\(cs,"scene-walk-speed-ephemeral",5\.2\)/);
 });

@@ -105,6 +105,8 @@
   --scene-bot-h: 1.1;
   --scene-nav-pad: 0.45;
   --scene-nav-cell: 0.25;
+  --scene-walk-speed: 2.6;
+  --scene-walk-speed-ephemeral: 5.2;
   --light-day-sky: 0.75;
   --light-day-sun: 0.9;
   --light-day-lamp: 0;

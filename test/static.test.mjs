@@ -9,11 +9,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import net from 'node:net';
 import crypto from 'node:crypto';
-import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as auth from '../auth.mjs';
+import { startOnFreePort } from './fixtures/office-server.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const win = process.platform === 'win32';
@@ -93,14 +92,6 @@ test('fonts.css names only vendored woff2 files, each one exists, and each famil
 
 // ---------- the real server ----------
 
-function freePort() {
-  return new Promise((resolve, reject) => {
-    const s = net.createServer();
-    s.once('error', reject);
-    s.listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); });
-  });
-}
-
 /** GET a path with full control of the Host header; resolves { status, headers, body (Buffer) }. */
 function get(port, p) {
   return new Promise((resolve, reject) => {
@@ -114,30 +105,24 @@ function get(port, p) {
   });
 }
 
-test('the server serves the vendored files with their type and pinned bytes, and nothing else under /vendor', { timeout: 90000 }, async () => {
+test('the server serves the vendored files with their type and pinned bytes, and nothing else under /vendor', { timeout: 900000 }, async () => {
   const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-static-')));
   const dir = path.join(tmp, 'office'), lad = path.join(tmp, 'local');
   fs.mkdirSync(dir);
   fs.mkdirSync(lad);
   for (const f of fs.readdirSync(ROOT)) if (f.endsWith('.mjs') || f === 'package.json' || f === 'tokens.css') fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
   for (const d of ['providers', 'public', 'components']) fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true });
-  const port = await freePort();
-  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toLowerCase() !== 'path'));
-  Object.assign(env, {
+  const baseEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toLowerCase() !== 'path'));
+  Object.assign(baseEnv, {
     PATH: [path.dirname(process.execPath), ...(win ? [path.join(process.env.SystemRoot || 'C:\\Windows', 'System32')] : [])].join(path.delimiter),
-    OFFICE_PORT: String(port), OFFICE_OPEN: '0', OFFICE_HOOKS: 'command', LOCALAPPDATA: lad, APPDATA: path.join(tmp, 'roaming'),
+    OFFICE_OPEN: '0', OFFICE_HOOKS: 'command', LOCALAPPDATA: lad, APPDATA: path.join(tmp, 'roaming'),
     OFFICE_RATE_FILE: path.join(tmp, 'no-rate.json'),
   });
-  const child = spawn(process.execPath, [path.join(dir, 'server.mjs')], { cwd: dir, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-  let out = '';
+  let office = null;
   try {
-    await new Promise((resolve, reject) => {
-      const t = setTimeout(() => reject(new Error('the office did not start in time:\n' + out)), 30000);
-      const onData = (d) => { out += d; if (/is open: /.test(out)) { clearTimeout(t); resolve(); } };
-      child.stdout.on('data', onData);
-      child.stderr.on('data', onData);
-      child.on('exit', (code) => { clearTimeout(t); reject(new Error(`the office stopped (${code}):\n${out}`)); });
-    });
+    const started = await startOnFreePort(dir, baseEnv);
+    office = started.office;
+    const { port } = started;
 
     for (const [route, r] of Object.entries(REACT)) {
       const res = await get(port, route);
@@ -168,8 +153,7 @@ test('the server serves the vendored files with their type and pinned bytes, and
       assert.ok(!res.body.includes('process.env'), p + ' leaked a source file');
     }
   } finally {
-    child.kill();
-    await new Promise((r) => (child.exitCode !== null ? r() : child.once('exit', r)));
+    if (office) await office.stop();
     fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   }
 });

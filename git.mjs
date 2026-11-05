@@ -106,43 +106,76 @@ export async function repoTop(cwd) {
   try { return (await git(['rev-parse', '--show-toplevel'], cwd)).trim(); } catch { throw new Error('That folder is not in a git repository, so it cannot get a worktree.'); }
 }
 
-// Where a folder sits in git. Throws when git fails, for any reason. `env` goes to git (ENGLISH for a caller that reads the error).
-async function placeIn(cwd, env) {
-  const [top, branch, common] = (await git(['rev-parse', '--show-toplevel', '--abbrev-ref', 'HEAD', '--path-format=absolute', '--git-common-dir'], cwd, 8000, env)).trim().split(/\r?\n/);
-  const dir = path.resolve(cwd, common);
-  const repo = path.basename(dir).toLowerCase() === '.git' ? path.dirname(dir) : dir;
-  return { repo: path.normalize(repo), root: path.normalize(top), branch: branch === 'HEAD' ? 'detached' : branch };
-}
-
-/** Where a folder sits in git: the main repository, this worktree's top folder and its branch. Null outside git, and also when git fails for a moment. */
-export async function locate(cwd) {
-  try { return await placeIn(cwd); } catch { return null; }
+// Where a folder sits in git, or KEEP when git still failed for a passing reason after `attempts` tries. See locate and locateOrKeep.
+async function placeOrKeep(cwd, { exec = git, exists = fs.existsSync, wait = (ms) => new Promise((r) => setTimeout(r, ms)), attempts = 3 } = {}) {
+  for (let i = 1; ; i++) try {
+    const [top, branch, common] = (await exec(['rev-parse', '--show-toplevel', '--abbrev-ref', 'HEAD', '--path-format=absolute', '--git-common-dir'], cwd, 8000, ENGLISH)).trim().split(/\r?\n/);
+    const dir = path.resolve(cwd, common);
+    const repo = path.basename(dir).toLowerCase() === '.git' ? path.dirname(dir) : dir;
+    return { repo: path.normalize(repo), root: path.normalize(top), branch: branch === 'HEAD' ? 'detached' : branch };
+  } catch (e) {
+    if (!exists(cwd) || /not a git repository/i.test(String(e && e.message))) return null; // git is asked for English: this reads its message
+    if (i >= attempts) return KEEP;
+    await wait(250 * i);
+  }
 }
 
 /**
- * `locate` for a caller that must not read a passing git failure as "outside git": the office start, which picks the
- * branch port and makes the recent folders buildings. Answers the place, `null` only when the folder is missing or git
- * says it is not a repository, and `KEEP` when git failed for a passing reason (a timeout on a busy computer, a
- * repository with no commit yet): the caller asks again later. `deps` (`place`, `exists`) are for tests.
+ * Where a folder sits in git: { repo, root, branch }, or null when it is not in a repository or the folder is gone.
+ * A failure that is only passing (git passed its time limit on a loaded machine, a lock) is tried again, `attempts` times in all, because null is an answer the office acts on (#98);
+ * after the last try the answer is null too. `deps` (`exec`, `exists`, `wait`, `attempts`) are for tests.
  */
-export async function locateOrKeep(cwd, { place = (d) => placeIn(d, ENGLISH), exists = fs.existsSync } = {}) {
-  try { return await place(cwd); } catch (e) {
-    if (!exists(cwd) || /not a git repository/i.test(String(e && e.message))) return null;
-    return KEEP;
-  }
+export async function locate(cwd, deps) {
+  const g = await placeOrKeep(cwd, deps);
+  return g === KEEP ? null : g;
+}
+
+/**
+ * `locate` for the office start, which must not read a passing git failure as "outside git": it picks the branch port
+ * and makes the recent folders buildings. The same tries, but after the last one the answer is `KEEP` (git kept passing
+ * its time limit on a busy computer, or the repository has no commit yet): the caller asks again later. `null` only when
+ * the folder is gone or git says it is not a repository. Same `deps` as `locate`.
+ */
+export async function locateOrKeep(cwd, deps) {
+  return placeOrKeep(cwd, deps);
 }
 
 // ---------- ports ----------
 // Each checkout gets its own port for browser tests, so worktrees never share one and never touch the owner's office
-// on 4317. The port comes from the branch name alone (FNV-1a, 32 bit, over the UTF-8 bytes), so it is the same on every
-// machine and every run. The range is reserved: 4330 to 4399. Two names can share a port (70 ports); the second office
-// then stops with a message and does not move to another port.
+// on 4317. The first port comes from the branch name alone (FNV-1a, 32 bit, over the UTF-8 bytes), so it is the same on
+// every machine and every run. The range is reserved: 4330 to 4399. Two names can share a first port (70 ports), so a
+// name has a short fixed sequence: its first port, then the next ones in order (wrapping at the end of the range). The
+// office takes the first port of the sequence that is free and says which one it took. It never leaves the sequence,
+// never starts when an office of the same checkout holds any port of it (a checkout never runs two), and never takes over a port that is busy (#96, #106).
 export const BRANCH_PORT_MIN = 4330;
 export const BRANCH_PORT_MAX = 4399;
-export function branchPort(name) {
+export const BRANCH_PORT_TRIES = 12;
+const BRANCH_PORT_SPAN = BRANCH_PORT_MAX - BRANCH_PORT_MIN + 1;
+/** The fixed sequence of ports of a name: `count` ports, the first one is `branchPort(name)`. */
+export function branchPorts(name, count = BRANCH_PORT_TRIES) {
   let h = 0x811c9dc5;
   for (const b of Buffer.from(String(name), 'utf8')) h = Math.imul(h ^ b, 0x01000193) >>> 0;
-  return BRANCH_PORT_MIN + (h % (BRANCH_PORT_MAX - BRANCH_PORT_MIN + 1));
+  const n = Math.max(1, Math.min(BRANCH_PORT_SPAN, Math.trunc(count) || 1));
+  return Array.from({ length: n }, (_, i) => BRANCH_PORT_MIN + ((h + i) % BRANCH_PORT_SPAN));
+}
+export const branchPort = (name) => branchPorts(name, 1)[0];
+/**
+ * Picks the port of a name: the first one of its sequence that is free. `isFree(port)` and `isOwn(port)` are injected
+ * (async). Every busy port of the sequence is asked, not only those before the first free one: an office of this
+ * checkout may hold a later port (it started while an earlier port was busy), and a second office of one checkout is
+ * never started. Such a port ends the search: `{ port: null, own: <port>, busy }`. When every port is busy:
+ * `{ port: null, busy }`. Else `{ port, busy }`, where `busy` lists the ports before `port` that were skipped.
+ */
+export async function pickBranchPort(name, { isFree, isOwn }, count = BRANCH_PORT_TRIES) {
+  const busy = [];
+  let port = null;
+  let skipped = 0;
+  for (const p of branchPorts(name, count)) {
+    if (await isFree(p)) { if (port === null) { port = p; skipped = busy.length; } continue; }
+    busy.push(p);
+    if (await isOwn(p)) return { port: null, own: p, busy: port === null ? busy : busy.slice(0, skipped) };
+  }
+  return port === null ? { port: null, busy } : { port, busy: busy.slice(0, skipped) };
 }
 /** The name a checkout's port comes from: its branch, or the worktree folder name when HEAD is detached. `loc` is what `locate` returns. */
 export function checkoutName(loc) {

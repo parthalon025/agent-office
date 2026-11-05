@@ -124,7 +124,7 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `OFFICE_PORT` | `4317` | Port on 127.0.0.1. `branch` takes a fixed port from the current branch name (4330-4399), so each worktree has its own; `npm run start:branch` sets it. If that port is busy, the office stops and does not try another. An office on a port other than 4317 has its own files, with the port in the name (see Files), so it never takes over the hooks, notes or schedules of the office on 4317 in the same folder. |
+| `OFFICE_PORT` | `4317` | Port on 127.0.0.1. `branch` takes a port from the current branch name (4330-4399), so each worktree has its own; `npm run start:branch` sets it. The name gives a fixed sequence of 12 ports. The office takes the first free one and prints which port it took. It stops, and takes no other port, when an office of the same folder already holds any one of them, or none is free. A branch that takes another port of its sequence than last time starts with the files of that port (empty notes, schedules and past sessions, a new agent token). A session attached with the settings file of the old port keeps posting to the old port. An office on a port other than 4317 has its own files, with the port in the name (see Files), so it never takes over the hooks, notes or schedules of the office on 4317 in the same folder. |
 | `OFFICE_OPEN` | on | `0` stops the server from opening the launch link in your browser. It still prints the link. |
 | `OFFICE_HOOKS` | auto | `command` or `http` forces a hook mode. |
 | `OFFICE_ASK_TIMEOUT_S` | `60` | How long a terminal session's permission prompt waits for the office before the terminal dialog decides. Sessions in the office wait 15 minutes. |
@@ -145,7 +145,7 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 | `hook.mjs` | Command hook. Sends one event to the server. |
 | `mcp.mjs` | MCP server with `office_inbox`, `office_ask`, `office_room` and `office_room_update`. |
 | `launch.ps1` | Starts a session in a terminal window. |
-| `startup.mjs` | Adds or removes the Start with Windows entry (a .cmd in your Startup folder). At sign-in the office starts and opens its launch link. |
+| `startup.mjs` | Adds or removes the Start with Windows entry (a .cmd in your Startup folder). At sign-in the office starts and opens its launch link. Only the office on port 4317 in the main folder can change the entry; an office on another port or in a worktree shows it read-only with the reason. |
 | `probe.mjs` | Tests HTTP hooks on this Claude Code version. |
 | `public/` | The page: `vocab.js` (shared status words, tool names and room figures), `wheel-gate.js` (one scroll-out gesture leaves one level), `scene-host.js` (the one reader of the 3D stage: floor, view, rooms, pick, cursor), `building.js` (snapshot store and building adapter), `toasts.js` (toast rules), `adapter.js`, `office.js`, `office.css`, `chat-extras.js`, `index.html`. `vendor/` holds React 18.3.1 and the fonts, byte for byte as published (`vendor/README.md`: sources, SHA-256, how to update). |
 | `test/*.test.mjs` | Offline unit tests (`npm test`): access rules (with a real server on a free port), vendored files and the static file list (also on a real server), click-to-load chat images in the design system, place rules, risk classifier, session vocabulary, hook payload, session tracker, scene host, notes merge, snapshot store and building adapter, contrast pairs, wheel gate, toast rules. |
@@ -170,7 +170,7 @@ An office on a port other than 4317 (`OFFICE_PORT`, `npm run start:branch`) writ
 - "Always allow" writes the rule Claude suggests to that project's `.claude/settings.local.json`, and only when you click it.
 - Creating a pull request runs `git push` and `gh pr create`. The office asks you to confirm and lists the steps first.
 - The office never edits `~/.claude/settings.json` or your credentials.
-- Saved sessions (`history.json`) contain Claude's replies, and `state.json` keeps schedule prompts and room notes. They stay on this machine, and only your Windows user, SYSTEM and Administrators can read them (set when the office starts).
+- Saved sessions (`history.json`) contain Claude's replies, and `state.json` keeps schedule prompts and room notes. They stay on this machine, and only your Windows user, SYSTEM and Administrators can read them (set when the office starts). An agent edit of `state.json`, `history.json` or their per-port files is rated high, because schedules in them run later.
 - Remote access is not supported. Reaching an agent that can run commands needs real login and encryption. If you want it from a phone, put the office behind Tailscale.
 
 ## Troubleshooting
