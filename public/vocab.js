@@ -19,6 +19,17 @@
                          never a high-risk request, never one without a rule to save.
      kindWord(s, kinds) -> the agent kind of a session as a word ('Claude Code', 'Ollama'): the label of s.provider in
                          kinds (the snapshot's kinds), else the kind id. '' when the session has no kind.
+     kindsWord(list, kinds) -> the kinds of a list of sessions as one word ('Claude Code, Ollama'): each kind once,
+                         in the order of kinds, a kind it does not know last. '' when no session has a kind.
+   Agent kinds as the Open dialog, a room's Add agent and the Agent kinds view show them. A kind k is a snapshot kind
+   (providers/index.mjs describe) with its GET /api/providers answer: { checking, ready, models, needs, ... }.
+     kindState(k)     -> { key, word }: Checking (no answer yet), Ready or Not ready, with a DS status key
+     modelChoices(k, fallback) -> the Model options. A kind with a default model starts with Default; a local model
+                         offers only its models. No kind, or a default-model kind before its answer: fallback.
+     firstModel(k)    -> the model a kind starts on: the first of a kind that needs one, else '' (Default)
+     noModelFor(k)    -> true when the kind needs a model and has none to pick (Open session waits)
+     withKind(form, k, id) -> the form after a kind change: its first model, and only the options that kind takes
+     kindNote(k, terminal) -> the line that says where a kind runs and what it costs
 */
 (function (root) {
   'use strict';
@@ -105,6 +116,42 @@
     var k = (kinds || []).filter(function (x) { return x && x.kind === id; })[0];
     return (k && k.label) || String(id);
   }
+  function kindsWord(list, kinds) {
+    var ids = [];
+    (list || []).forEach(function (s) { var id = s && s.provider; if (id && ids.indexOf(id) < 0) ids.push(id); });
+    var order = (kinds || []).map(function (k) { return k && k.kind; });
+    ids.sort(function (a, b) {
+      var ia = order.indexOf(a), ib = order.indexOf(b);
+      return (ia < 0 ? order.length : ia) - (ib < 0 ? order.length : ib);
+    });
+    return ids.map(function (id) { return kindWord({ provider: id }, kinds); }).join(', ');
+  }
 
-  root.OfficeVocab = { kindWord: kindWord, requests: requests, alwaysOffer: alwaysOffer, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures };
+  function kindState(k) {
+    if (!k || k.checking) return { key: 'resting', word: 'Checking' };
+    return k.ready ? { key: 'finished', word: 'Ready' } : { key: 'waiting', word: 'Not ready' };
+  }
+  function modelChoices(k, fallback) {
+    var ms = (k && k.models) || [];
+    if (!k || (!ms.length && !k.needsModel)) return fallback || [{ value: '', label: 'Default' }];
+    var opts = ms.map(function (m) { return { value: m.id, label: m.label || m.id }; });
+    if (!k.needsModel) return [{ value: '', label: 'Default' }].concat(opts);
+    return opts.length ? opts : [{ value: '', label: k.checking ? 'Looking for models' : 'No models' }];
+  }
+  function firstModel(k) { return k && k.needsModel && k.models && k.models.length ? k.models[0].id : ''; }
+  function noModelFor(k) { return !!(k && k.needsModel && !(k.models || []).length); }
+  function withKind(form, k, id) {
+    var modes = (k && k.modes) || [];
+    return Object.assign({}, form, { provider: id, model: firstModel(k),
+      where: k && !k.terminal ? 'office' : form.where,
+      permissionMode: k && form.permissionMode && modes.indexOf(form.permissionMode) < 0 ? '' : form.permissionMode });
+  }
+  function kindNote(k, terminal) {
+    var label = (k && k.label) || 'Claude Code';
+    if (terminal) return 'Starts ' + label + ' in a new terminal window with the office hooks attached.';
+    if (k && !k.paid) return 'Runs a model from ' + label + ' on this machine, inside the office. It reads and changes files in the folder and runs commands. Risky steps come to you for approval. It costs nothing.';
+    return 'Runs ' + label + ' inside the office. You talk to it in the chat and approve its steps here. It has no terminal window.';
+  }
+
+  root.OfficeVocab = { kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, modelChoices: modelChoices, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

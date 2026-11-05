@@ -107,22 +107,29 @@
   // (Claude Code runs claude --version). Until it answers a kind is checking, and Claude Code offers the models in MODELS.
   var DEFAULT_KIND = 'claude-code';
   function kindOf(list, id) { return (list || []).filter(function (k) { return k.kind === (id || DEFAULT_KIND); })[0] || null; }
+  // The kind rules and words (state, model choices, first model, the note, a kind change) live in vocab.js.
+  var KV = window.OfficeVocab;
+  // Claude Code before its answer (or no kinds yet) offers the models in MODELS.
+  function modelChoices(k) { return KV.modelChoices(k, !k || k.kind === DEFAULT_KIND ? MODELS : null); }
   // on: false asks nothing yet (a room's list shows before its Add agent form).
+  // checking: an ask is out. A second ask (Check again) keeps the last answer on screen until the new one comes,
+  // so a not-ready box stays and its Check again button shows that it works.
   function useKinds(on) {
     var snap = useSnapshot();
-    var st = useState(null), status = st[0], setStatus = st[1];   // kind -> its /api/providers entry, or null while checking
+    var st = useState(null), status = st[0], setStatus = st[1];   // kind -> its /api/providers entry, or null before the first answer
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
     var rd = useState(0), round = rd[0], setRound = rd[1];
     var ask = on !== false;
     useEffect(function () {
       var live = true;
-      setStatus(null);
-      if (!ask) return undefined;
+      if (!ask) { setStatus(null); setBusy(false); return undefined; }
+      setBusy(true);
       call('/api/providers').then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); }).then(function (j) {
         if (!live) return;
         var by = {};
         (j.providers || []).forEach(function (x) { by[x.kind] = x; });
-        setStatus(by);
-      }, function () { if (live) setStatus({}); });
+        setStatus(by); setBusy(false);
+      }, function () { if (live) { setStatus({}); setBusy(false); } });
       return function () { live = false; };
     }, [round, ask]);
     var list = ((snap && snap.kinds) || []).map(function (k) {
@@ -130,31 +137,9 @@
       var r = status[k.kind] || { ready: false, version: null, models: [], needs: ['The office could not check ' + k.label + '. Check again.'] };
       return Object.assign({}, k, { checking: false, ready: r.ready === true, version: r.version || null, needs: r.needs || [], models: r.models || [] });
     });
-    return { list: list, checking: !status, recheck: function () { setRound(round + 1); } };
+    return { list: list, checking: busy || !status, recheck: function () { setRound(round + 1); } };
   }
-  // The state of a kind as a DS status and a word.
-  function readyOf(k) {
-    if (!k || k.checking) return { key: 'resting', word: 'Checking' };
-    return k.ready ? { key: 'finished', word: 'Ready' } : { key: 'waiting', word: 'Not ready' };
-  }
-  // The model choices of a kind. A kind with a default model starts with Default. A local model has no default: one of its models.
-  function modelChoices(k) {
-    var ms = (k && k.models) || [];
-    if (!k || (!ms.length && k.kind === DEFAULT_KIND)) return MODELS;   // Claude Code before its answer, or no kinds yet
-    var opts = ms.map(function (m) { return { value: m.id, label: m.label || m.id }; });
-    if (!k.needsModel) return [{ value: '', label: 'Default' }].concat(opts);
-    return opts.length ? opts : [{ value: '', label: k.checking ? 'Looking for models' : 'No models' }];
-  }
-  function firstModel(k) { return k && k.needsModel && k.models && k.models.length ? k.models[0].id : ''; }
-  // A kind that needs a model and has none to pick cannot open a session.
-  function noModelFor(k) { return !!(k && k.needsModel && !(k.models || []).length); }
-  function kindNote(k, terminal) {
-    if (!k) return terminal ? 'Starts Claude Code in a new terminal window with the office hooks attached.' : 'Runs Claude Code inside the office. You talk to it in the chat and approve its steps here. It has no terminal window.';
-    if (terminal) return 'Starts ' + k.label + ' in a new terminal window with the office hooks attached.';
-    if (!k.paid) return 'Runs a model from ' + k.label + ' on this machine, inside the office. It reads and changes files in the folder and runs commands. Risky steps come to you for approval. It costs nothing.';
-    return 'Runs ' + k.label + ' inside the office. You talk to it in the chat and approve its steps here. It has no terminal window.';
-  }
-  // Why a kind is not ready, and what to do.
+  // Why a kind is not ready, and what to do. p: { kind, onRecheck, checking (a Check again is out) }
   function KindNeeds(p) {
     var k = p.kind, needs = k.needs && k.needs.length ? k.needs : ['It did not say what it needs.'];
     return h('div', { className: 'kind-need', role: 'status' },
@@ -166,17 +151,11 @@
   function KindFields(p) {
     var K = p.kinds, k = kindOf(K.list, p.kind);
     var opts = K.list.map(function (x) { return { value: x.kind, label: x.label + (x.checking || x.ready ? '' : ' · Not ready') }; });
-    var model = h(A.Select, { id: p.id + '-model', label: 'Model', options: modelChoices(k), value: p.model, disabled: noModelFor(k), onChange: p.onModel,
+    var model = h(A.Select, { id: p.id + '-model', label: 'Model', options: modelChoices(k), value: p.model, disabled: KV.noModelFor(k), onChange: p.onModel,
       hint: k && k.needsModel && k.checking ? 'Asking ' + k.label + ' for its models.' : undefined });
     return h(React.Fragment, null,
       K.list.length > 1 ? Pair(h(A.Select, { id: p.id + '-kind', label: 'Agent', options: opts, value: k ? k.kind : '', onChange: p.onKind }), model) : model,
-      k && !k.checking && !k.ready ? h(KindNeeds, { kind: k, onRecheck: K.recheck }) : null);
-  }
-  // The form state a kind change gives: its first model, and only the options that kind takes.
-  function withKind(form, k, id) {
-    return Object.assign({}, form, { provider: id, model: firstModel(k),
-      where: k && !k.terminal ? 'office' : form.where,
-      permissionMode: k && form.permissionMode && k.modes.indexOf(form.permissionMode) < 0 ? '' : form.permissionMode });
+      k && !k.checking && !k.ready ? h(KindNeeds, { kind: k, onRecheck: K.recheck, checking: K.checking }) : null);
   }
   // A local model's list comes later than the dialog: pick its first model when it arrives, or when the one picked is gone.
   function useFirstModel(k, form, setForm) {
@@ -184,7 +163,7 @@
     useEffect(function () {
       if (!k || !k.needsModel) return;
       var ok = (k.models || []).some(function (m) { return m.id === form.model; });
-      if (!ok) setForm(function (f) { return Object.assign({}, f, { model: firstModel(k) }); });
+      if (!ok) setForm(function (f) { return Object.assign({}, f, { model: KV.firstModel(k) }); });
     }, [k ? k.kind : '', ids]);
   }
 
@@ -216,7 +195,7 @@
     }
     function delTemplate() { api('/api/template/delete', { id: form.template }).then(function () { setForm(Object.assign({}, form, { template: '' })); p.onTemplates(); }, function (x) { setErr(x.message); }); }
     var terminal = canWindow && form.where === 'terminal';
-    var blocked = noModelFor(k);
+    var blocked = KV.noModelFor(k);
     // The server owns the folder rules (place.mjs recentChoices); until its answer comes, show the stored list.
     var fc = useState(null), fetched = fc[0], setFetched = fc[1];
     useEffect(function () {
@@ -232,10 +211,10 @@
         h(A.Button, { key: 'o', variant: saving === null ? 'primary' : 'quiet', icon: 'add', loading: busy, disabled: blocked, onClick: submit }, 'Open session')
       ]
     }, h('div', { className: 'form' },
-      h('p', { className: 'note' }, kindNote(k, terminal)),
+      h('p', { className: 'note' }, KV.kindNote(k, terminal)),
       h(A.TextInput, { id: 'f-cwd', label: 'Folder', value: form.cwd, placeholder: 'E:\\pensiv', onChange: set('cwd'), error: err || undefined, hint: p.shownPath && form.cwd === p.shownPath ? 'The building you are looking at.' : undefined }),
       folders.length ? h('div', { className: 'chips', role: 'group', 'aria-label': 'Recent folders' }, folders.map(function (d) { return h(A.Button, { key: d, variant: 'quiet', icon: 'floor', title: d, onClick: function () { set('cwd')(d); } }, F.shortPath(d)); })) : null,
-      h(KindFields, { id: 'f', kinds: K, kind: form.provider, model: form.model, onKind: function (id) { setForm(withKind(form, kindOf(K.list, id), id)); }, onModel: set('model') }),
+      h(KindFields, { id: 'f', kinds: K, kind: form.provider, model: form.model, onKind: function (id) { setForm(KV.withKind(form, kindOf(K.list, id), id)); }, onModel: set('model') }),
       Pairs([
         h(A.TextInput, { key: 'n', id: 'f-name', label: 'Bot name (optional)', value: form.name, placeholder: 'Defaults to the folder name', onChange: set('name') }),
         canWindow ? h(A.Select, { key: 'w', id: 'f-where', label: 'Runs', options: WHERE, value: form.where, onChange: set('where') }) : null,
@@ -515,7 +494,7 @@
         h('p', { className: 'note' }, 'The agents the office can run. A kind that is not ready says what it needs. Local models run on this machine and cost nothing.'),
         h(Busy, { on: !K.list.length }),
         h('ul', { className: 'past' }, K.list.map(function (k) {
-          var r = readyOf(k);
+          var r = KV.kindState(k);
           var facts = [k.terminal ? 'Runs in the office or a terminal window' : 'Runs in the office', k.paid ? 'Spend limit applies' : 'No cost',
             k.modes.length ? 'Permission modes' : null, k.needsModel ? 'You pick the model' : null].filter(Boolean).join(' · ');
           var names = k.models.map(function (m) { return m.label || m.id; }).join(', ');
@@ -527,7 +506,7 @@
                 ? (names ? h('div', { className: 'past-sub mono', title: names }, 'Models: ' + names) : null)
                 : h('ul', { className: 'kind-steps' }, (k.needs.length ? k.needs : ['It did not say what it needs.']).map(function (n, i) { return h('li', { key: i }, n); }))),
             h('div', { className: 'past-actions' },
-              h(A.Button, { variant: 'quiet', icon: 'add', disabled: k.checking || noModelFor(k), onClick: function () { p.onOpen(k.kind); } }, 'Open session')));
+              h(A.Button, { variant: 'quiet', icon: 'add', disabled: k.checking || KV.noModelFor(k), onClick: function () { p.onOpen(k.kind); } }, 'Open session')));
         }))));
   }
 
@@ -1089,12 +1068,12 @@
           err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
     }
     return h(A.Dialog, { key: add ? 'add' : 'list', open: true, title: title, onClose: p.onClose, actions: add
-      ? [h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setAdd(null); setErr(''); } }, 'Cancel'), h(A.Button, { key: 'a', variant: 'primary', icon: 'add', loading: busy, disabled: noModelFor(addKind), onClick: addAgent }, 'Add agent')]
+      ? [h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setAdd(null); setErr(''); } }, 'Cancel'), h(A.Button, { key: 'a', variant: 'primary', icon: 'add', loading: busy, disabled: KV.noModelFor(addKind), onClick: addAgent }, 'Add agent')]
       : [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
       h('div', { className: 'form' },
         add ? h(React.Fragment, null,
           h('p', { className: 'note' }, 'The agent runs in the office, in the folder of this room.'),
-          h(KindFields, { id: 'ra', kinds: K, kind: add.provider, model: add.model, onKind: function (id) { setAdd(withKind(add, kindOf(K.list, id), id)); }, onModel: function (v) { setAdd(Object.assign({}, add, { model: v })); } }),
+          h(KindFields, { id: 'ra', kinds: K, kind: add.provider, model: add.model, onKind: function (id) { setAdd(KV.withKind(add, kindOf(K.list, id), id)); }, onModel: function (v) { setAdd(Object.assign({}, add, { model: v })); } }),
           h(A.TextInput, { id: 'ra-name', label: 'Name (optional)', value: add.name, placeholder: 'Defaults to the folder name', onChange: function (v) { setAdd(Object.assign({}, add, { name: v })); } }),
           h(Area, { id: 'ra-prompt', label: 'First instruction (optional)', value: add.prompt, rows: 4, placeholder: 'Review the open PRs and list what blocks merge.', onChange: function (v) { setAdd(Object.assign({}, add, { prompt: v })); } }),
           err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null)

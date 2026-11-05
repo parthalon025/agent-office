@@ -20,7 +20,9 @@
        mark: on tool call lines, the outcome word that ends the text ('ok 2.1s', 'failed', '...').
        ask: on a permission question or an office_ask question (tone 'prompt').
      status(session) -> { key, word, live }   key is a DS status ('working', 'waiting', ...)
-     toolName(name) -> the short tool name the terminal shows */
+     toolName(name) -> the short tool name the terminal shows
+     stats(session, kind) -> { rows: [[label, value, 'bar'?, pct?]], todos, done, note }: the stats monitor.
+       kind: the agent kind as a word. With a to-do list the Agent row holds kind, model and mode. */
 (function () {
   'use strict';
   var T = window.THREE, H = window.OfficeSceneHost;
@@ -219,7 +221,9 @@
   function money(c) { return window.OfficeFormat.money(c); }
   function age(ms) { var m = Math.floor(Math.max(0, ms) / 60000); return m < 1 ? 'under 1 min' : m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60) + ' min'; }
   function failedCalls(calls) { return calls.filter(function (c) { return c.ok === false && !/^stopped$/i.test(str(c.err)); }).length; }
-  function statsOf(s) {
+  // The stats monitor's rows. kind: the agent kind as a word (vocab.js kindWord), '' when unknown.
+  // With a to-do list the kind, model and mode share one Agent row, so the list keeps the lines it had before kinds.
+  function statsOf(s, kind) {
     var S = { rows: [], todos: [], done: 0, note: '' };
     if (!s) { S.note = 'No session at this desk.'; return S; }
     var calls = (s.calls || []).filter(function (c) { return c && !c.agent; }), bad = failedCalls(calls);
@@ -231,16 +235,18 @@
     var todos = (s.todos || []).filter(function (t) { return t && t.text; }), pct = ctxPct(s), u = s.usage || {};
     S.todos = todos.map(function (t) { return { text: oneLine(t.text), status: t.status }; });
     S.done = todos.filter(function (t) { return t.status === 'completed'; }).length;
-    // Agent: the kind (Claude Code, Ollama, ...) and where it runs, the word every list shows (vocab.js kindWord)
-    var a = window.officeAdapter, kind = a && a.kindWord ? a.kindWord(s) : '';
-    S.rows.push(['Agent', (kind ? kind + DOT : '') + (s.headless ? 'in the office' : 'in a terminal')]);
-    S.rows.push(['Model', (shortModel(s.model) || 'default') + (s.mode ? DOT + (MODES[s.mode] || s.mode) : '')]);
+    var model = (shortModel(s.model) || 'default') + (s.mode ? DOT + (MODES[s.mode] || s.mode) : '');
+    var pre = kind ? kind + DOT : '';
+    if (todos.length) S.rows.push(['Agent', pre + model]);
+    else S.rows.push(['Agent', pre + (s.headless ? 'in the office' : 'in a terminal')], ['Model', model]);
     S.rows.push(['Context', pct == null ? '--' : pct + '%', 'bar', pct]);
     if (!todos.length) S.rows.push(['Tokens', u.tokens ? fmtTok(u.tokens) + (u.input ? DOT + Math.round(100 * (u.cached || 0) / u.input) + '% cached' : '') : '--']);
     S.rows.push(['Spend', money(s.cost) + DOT + plural(+s.turns || 0, 'turn', 'turns')]);
     if (!todos.length) S.rows.push(['Time', age(Date.now() - (+s.startedAt || Date.now()))], ['Tools', tools]);
     return S;
   }
+  // the agent kind of a session as a word, the one every list shows (vocab.js kindWord through the store)
+  function kindOf(s) { var a = window.officeAdapter; return s && a && a.kindWord ? a.kindWord(s) : ''; }
   function footOf(s) {
     if (!s) return null;
     if (s.helper) return { left: 'Subagent', right: plural((s.calls || []).length, 'call', 'calls'), pct: null };
@@ -522,7 +528,7 @@
         v.sub = s && s.helper ? 'subagent' : shortModel(s && s.model);
         v.lines = lines(s, e.P.cols, e.P.rows);
         if (e.footer) v.foot = footOf(s);
-      } else { v.sub = 'Stats'; v.stats = statsOf(s); }
+      } else { v.sub = 'Stats'; v.stats = statsOf(s, kindOf(s)); }
       return v;
     }
     // The blinking cursor: a small plane on the glass, so blinking costs no repaint.
@@ -777,5 +783,5 @@
     };
   }
 
-  window.OfficeTerminal = { attach: attach, lines: lines, status: status, toolName: toolName };
+  window.OfficeTerminal = { attach: attach, lines: lines, status: status, toolName: toolName, stats: statsOf };
 })();

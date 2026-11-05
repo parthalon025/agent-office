@@ -38,6 +38,9 @@
      roomInfo(roomId)      { sessions, place } of one room of this building
      figures(roomId)       the server's figures for that room
      noteKey(roomId)       the server's notes key for that room
+     agentName(snap?)      the agent kinds of the building's open sessions as one word ('Claude Code, Ollama'), for
+                           the scene's connection name; an empty building gives the first kind (a new session's
+                           kind), and '' before any snapshot
      session(botName), lookup(botName), uidsOf(cmd), roomsShown()
    The scene's events are the DS events (kit/schema.json). */
 (function (root) {
@@ -506,6 +509,11 @@
       m.figures = function (roomId, snap) {
         var s = snap || latest, nk = m.noteKey(roomId, s);
         return (s && s.figures && s.figures[nk]) || V.figures([]);
+      };
+      m.agentName = function (snap) {
+        var sn = snap || latest, kinds = (sn && sn.kinds) || [];
+        var mine = live(sn).filter(function (x) { return placeOf(x).repo === repo; });
+        return V.kindsWord(mine, kinds) || (kinds[0] && kinds[0].label) || '';
       };
       // the name the scene gives a bot (a folder name used twice gets a number), or null when it is not seated
       m.botName = function (uid) { var k = known[uid]; return k && !k.ended ? k.name : null; };

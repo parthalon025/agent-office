@@ -131,6 +131,23 @@ test('a bot names its agent kind on its card (platform), from the snapshot\'s ki
   assert.equal(B.createStore().kindWord({ provider: 'ollama' }), 'ollama', 'no snapshot yet: the kind id');
 });
 
+test('a building names the agent kinds of its open sessions (the HUD connection name), not always Claude Code', async () => {
+  const kinds = [{ kind: 'claude-code', label: 'Claude Code' }, { kind: 'ollama', label: 'Ollama' }];
+  const r = rig({ wire: true, kinds });
+  r.push();
+  const m = r.mount(KEY_A);
+  assert.equal(m.agentName(), 'Claude Code', 'an empty building: the kind a new session gets (the first kind)');
+  const local = r.tracker.newSession({ uid: 'o-local', officeId: 'o-local', provider: 'ollama', name: 'local', cwd: REPO_A, startDir: REPO_A, launched: true, headless: true, status: 'starting' });
+  r.tracker.placeSession(local, true);
+  await new Promise((res) => setImmediate(res));
+  r.push();
+  assert.equal(m.agentName(), 'Ollama', 'only Ollama bots: Ollama');
+  await r.hook(fromHooks('turnWithEdit', REPO_A, 'cc-1')[0]);
+  assert.equal(m.agentName(), 'Claude Code, Ollama', 'both kinds, in the order of the kinds');
+  assert.equal(r.store.mount(KEY_B).agentName(), 'Claude Code', 'another building does not count these sessions');
+  assert.equal(B.createStore().mount(KEY_A).agentName(), '', 'no snapshot: no name (the page has its own word)');
+});
+
 test('a turn with an edit: working, tool call without a bubble on replay, result, finished', async () => {
   const r = rig();
   const m0 = r.mount(KEY_A);
