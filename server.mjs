@@ -26,11 +26,23 @@ import { mcpAddArgs, mcpRemoveArgs, pluginArgs } from './extensions.mjs';
 import * as auth from './auth.mjs';
 import './public/format.js'; // money, plurals and short paths, shared with the page (globalThis.OfficeFormat)
 import './public/vocab.js'; // session vocabulary, shared with the page (globalThis.OfficeVocab)
+import './public/wire.js'; // the /events wire format: lean snapshot and patches, shared with the page (globalThis.OfficeWire)
 const V = globalThis.OfficeVocab;
+const W = globalThis.OfficeWire;
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
-const PORT = Number(process.env.OFFICE_PORT) || 4317;
+// OFFICE_PORT=branch: the port of this checkout's branch (git.branchPort), so each worktree has its own. It never falls
+// back to another port: if that one is busy, the office stops (see server.on('error')).
+const BRANCH_PORT = process.env.OFFICE_PORT === 'branch'
+  ? await (async () => {
+    try { const name = git.checkoutName(await git.locate(ROOT)); return { name, port: git.branchPort(name) }; } catch (e) {
+      process.stderr.write(`Agent Office cannot pick a port for this folder: ${e.message}\n`, () => process.exit(1));
+      return await new Promise(() => {}); // wait for the exit
+    }
+  })()
+  : null;
+const PORT = BRANCH_PORT ? BRANCH_PORT.port : Number(process.env.OFFICE_PORT) || 4317;
 const HOST = '127.0.0.1';
 // Two tokens (auth.mjs has the rules). The agent token opens /hook* and /mcp/* only. It is kept in .office-token,
 // which hook.mjs and mcp.mjs read, and reused across restarts, so hooks of sessions that are already running keep
@@ -50,9 +62,9 @@ const launchCodes = auth.createLaunchCodes();
 function writeSecret(file, text) {
   const warning = auth.writeOwnerOnly(file, text, {
     fs,
-    icacls: (args) => execFileSync(git.resolveExe('icacls'), args, { windowsHide: true, stdio: 'pipe', timeout: 15000 }),
+    icacls: (args) => execFileSync(git.resolveExe('icacls'), args, { cwd: git.helperCwd(), windowsHide: true, stdio: 'pipe', timeout: 15000 }),
     readAcl: (f) => auth.parseAcl(execFileSync(git.resolveExe('powershell'), ['-NoProfile', '-NonInteractive', '-Command', auth.ACL_SCRIPT],
-      { windowsHide: true, encoding: 'utf8', stdio: 'pipe', timeout: 30000, env: { ...process.env, AO_ACL_FILE: f } })),
+      { cwd: git.helperCwd(), windowsHide: true, encoding: 'utf8', stdio: 'pipe', timeout: 30000, env: { ...process.env, AO_ACL_FILE: f } })),
   });
   if (warning) console.warn(`WARNING: ${warning}`);
 }
@@ -274,18 +286,28 @@ async function floorActionRaw(action, body) {
   const r = knownRepo(body.repo);
   const branch = String(body.branch || '').trim();
   let out;
-  if (action === 'create-floor') out = await git.createFloor(r.path, branch, String(body.from || '').trim());
-  else if (action === 'create-room') out = await git.createRoom(r.path, branch);
+  if (action === 'create-floor') out = await git.createFloor(r.path, branch, String(body.from || '').trim(), String(body.name || ''));
+  else if (action === 'create-room') out = await git.createRoom(r.path, branch, String(body.name || ''));
   else if (action === 'remove-room') {
     const s = roomInUse(String(body.root || ''));
     if (s) throw httpError(409, `${s.name} works in this room. Close the session first.`);
     out = await git.removeRoom(r.path, String(body.root || ''), body.force === true);
   } else if (action === 'delete-floor') {
-    for (const w of r.worktrees.filter((x) => x.branch === branch)) {
+    for (const w of (await git.layout(r.path)).filter((x) => x.branch === branch)) { // git's list, not the 30 s copy
       const s = roomInUse(w.root);
       if (s) throw httpError(409, `${s.name} works on this floor. Close the session first.`);
     }
     out = await git.deleteFloor(r.path, branch, body.force === true);
+  } else if (action === 'cleanup-floors') {
+    // Only floors that are still unused and safe now, whatever the page sent. Never forced.
+    const safe = new Set((await git.staleFloors(r.path)).map((f) => f.branch));
+    const wts = await git.layout(r.path);
+    out = { deleted: [], skipped: [] };
+    for (const b of (Array.isArray(body.branches) ? body.branches : []).map(String)) {
+      const busy = wts.filter((w) => w.branch === b).map((w) => roomInUse(w.root)).find(Boolean);
+      if (!safe.has(b) || busy) { out.skipped.push(b); continue; }
+      try { await git.deleteFloor(r.path, b, false); out.deleted.push(b); } catch { out.skipped.push(b); }
+    }
   } else throw httpError(400, 'Unknown action.');
   await refreshRepo(repoKey(r.path));
   return out;
@@ -312,7 +334,7 @@ const WALK = [
 let walker = null;
 const walks = new Map();
 function startWalker() {
-  const child = spawn(git.resolveExe('powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', WALK], { windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
+  const child = spawn(git.resolveExe('powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', WALK], { cwd: git.helperCwd(), windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
   let buf = '';
   child.stdout.on('data', (d) => {
     buf += d;
@@ -1031,25 +1053,39 @@ function readPlan() {
 }
 setInterval(readPlan, 15000).unref();
 
-const snapshot = () => ({
-  sessions: [...sessions.values()].map(({ ...s }) => ({ ...s, place: s.placed ? roomPlace(s) : null })),
-  feed: feed.slice(-80),
+// One session with all its data and its place: GET /api/session (full data on request; the snapshot is lean).
+const fullSession = (s) => ({ ...s, place: s.placed ? roomPlace(s) : null });
+// What /events sends: only what the page reads, with caps per session (public/wire.js lean).
+const snapshot = () => W.lean({
+  sessions: [...sessions.values()].map(fullSession),
   plan,
   figures: allFigures(),    // noteKey -> room figures (sessions, working, waiting, toolCalls, tokens, cost, priced, unknown, todosDone, todosTotal, lastEvent)
   notes: persisted.notes,   // noteKey -> { text, at, v, by? }: each room's notes board (v: version counter; a cleared board stays with text '' and at 0; by: the agent session that last wrote it)
   pins: persisted.pins,     // noteKey -> { text, by, at }: a short message an agent pinned on the room's blackboard
   repos: [...repos.entries()].map(([key, r]) => ({ key, ...r, worktrees: r.worktrees.map((w) => ({ ...w, place: placeOfWorktree(r.path, w) })) })),
-  now: Date.now(),
 });
+// A page gets the whole snapshot when it connects, then one patch per broadcast with only what changed (wire.js).
+// State changes within BROADCAST_MS go out as one patch, so a burst of hooks sends at most 10 messages a second.
+const BROADCAST_MS = 100;
+const wire = W.sender();
 let pending = null;
 readPlan();
 function broadcast() {
-  if (pending) return;
-  pending = setTimeout(() => {
-    pending = null;
-    const data = `data: ${JSON.stringify(snapshot())}\n\n`;
-    for (const c of clients) c.write(data);
-  }, 40);
+  if (!pending) pending = setTimeout(flush, BROADCAST_MS);
+}
+function flush() {
+  clearTimeout(pending); pending = null;
+  if (!clients.size) { wire.reset(); return; }   // no page has the base: the next one connects to a new one
+  const p = wire.next(snapshot());
+  if (!p) return;
+  const data = `data: ${JSON.stringify(p)}\n\n`;
+  for (const c of clients) c.write(data);
+}
+// A page connects: the others get what changed until now, so all pages share one base, and the new one gets it whole.
+function connectPage(res) {
+  if (clients.size) flush(); else { wire.reset(); wire.next(snapshot()); }
+  res.write(`data: ${JSON.stringify(wire.full())}\n\n`);
+  clients.add(res);
 }
 setInterval(() => { for (const c of clients) c.write(': ping\n\n'); }, 20000).unref();
 
@@ -1060,7 +1096,7 @@ setInterval(() => { for (const c of clients) c.write(': ping\n\n'); }, 20000).un
 const MIME = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
 const FONT_FILES = fs.readdirSync(path.join(PUBLIC, 'vendor', 'fonts')).filter((f) => /^[a-z0-9-]+\.woff2$/.test(f));
 const STATIC_FILES = new Map([
-  ['/office.js', 'public/office.js'], ['/scene-host.js', 'public/scene-host.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/vocab.js', 'public/vocab.js'], ['/format.js', 'public/format.js'], ['/wheel-gate.js', 'public/wheel-gate.js'], ['/building.js', 'public/building.js'], ['/toasts.js', 'public/toasts.js'], ['/tokens.css', 'tokens.css'],
+  ['/office.js', 'public/office.js'], ['/scene-host.js', 'public/scene-host.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/vocab.js', 'public/vocab.js'], ['/wire.js', 'public/wire.js'], ['/format.js', 'public/format.js'], ['/wheel-gate.js', 'public/wheel-gate.js'], ['/building.js', 'public/building.js'], ['/toasts.js', 'public/toasts.js'], ['/tokens.css', 'tokens.css'],
   ['/components/bundle.css', 'components/bundle.css'], ['/components/bundle.js', 'components/bundle.js'],
   ['/components/lib/three.min.js', 'components/lib/three.min.js'],
   ['/components/lib/three-orbit-controls.js', 'components/lib/three-orbit-controls.js'],
@@ -1099,10 +1135,14 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/auth') return send(res, 200, { ok: true }); // the page asks: does my cookie work?
     if (req.method === 'GET' && url.pathname === '/events') {
       res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-store', connection: 'keep-alive' });
-      res.write(`data: ${JSON.stringify(snapshot())}\n\n`);
-      clients.add(res);
+      connectPage(res);
       req.on('close', () => clients.delete(res));
       return;
+    }
+    if (req.method === 'GET' && url.pathname === '/api/session') {
+      const s = sessions.get(String(url.searchParams.get('uid') || ''));
+      // feed: what the session did, in short lines (the last 200 of the office keep them; the snapshot does not carry them)
+      return s ? send(res, 200, { session: fullSession(s), feed: feed.filter((f) => f.uid === s.uid) }) : send(res, 404, { error: 'No such session.' });
     }
     if (req.method === 'GET' && url.pathname === '/api/choices') return send(res, 200, { folders: recentChoices(persisted.recent, url.searchParams.get('first') || '') });
     // Each agent kind with its readiness, what it needs and its models (providers/index.mjs status), for the settings view (#20).
@@ -1151,6 +1191,12 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/tree') return send(res, 200, await repoTree(String(body.root || '')));
     if (url.pathname === '/api/branches') return send(res, 200, { branches: await git.branches(knownRepo(body.repo).path) });
     if (url.pathname === '/api/floor/create') return send(res, 200, await floorAction('create-floor', body));
+    if (url.pathname === '/api/floor/stale') {
+      const r = knownRepo(body.repo);
+      const wts = await git.layout(r.path);
+      return send(res, 200, { floors: (await git.staleFloors(r.path)).filter((f) => !wts.some((w) => w.branch === f.branch && roomInUse(w.root))) });
+    }
+    if (url.pathname === '/api/floor/cleanup') return send(res, 200, await floorAction('cleanup-floors', body));
     if (url.pathname === '/api/floor/delete') return send(res, 200, await floorAction('delete-floor', body));
     if (url.pathname === '/api/room/create') return send(res, 200, await floorAction('create-room', body));
     if (url.pathname === '/api/room/delete') return send(res, 200, await floorAction('remove-room', body));
@@ -1204,7 +1250,7 @@ function openBrowser(link) {
   if (process.platform !== 'win32' || process.env.OFFICE_OPEN === '0') return;
   if (!/^http:\/\/127\.0\.0\.1:\d+\/#n=[0-9a-f]+$/.test(link)) return; // nothing that cmd could read as a command
   try {
-    const c = spawn(git.resolveExe('cmd.exe'), ['/d', '/s', '/c', `start "" "${link}"`], { cwd: ROOT, windowsVerbatimArguments: true, windowsHide: true, stdio: 'ignore', detached: true });
+    const c = spawn(git.resolveExe('cmd.exe'), ['/d', '/s', '/c', `start "" "${link}"`], { cwd: git.helperCwd(), windowsVerbatimArguments: true, windowsHide: true, stdio: 'ignore', detached: true });
     c.on('error', () => {});
     c.unref();
   } catch { /* the printed link still works */ }
@@ -1225,6 +1271,8 @@ async function linkFromRunningOffice() {
 const sayAndExit = (stream, text, code) => stream.write(text + '\n', () => process.exit(code));
 server.on('error', async (e) => {
   if (e.code !== 'EADDRINUSE') return sayAndExit(process.stderr, e.message, 1);
+  // Branch mode owns one port per branch: a busy port means another copy (or program) holds it. Say so and stop.
+  if (BRANCH_PORT) return sayAndExit(process.stderr, `Agent Office stopped: port ${PORT} for branch "${BRANCH_PORT.name}" is busy.\nAnother copy or program holds it. Nothing was changed, and no other port was tried.\nFind its process id with: netstat -ano | findstr :${PORT}. Stop that process by its id, never by image name.`, 1);
   const link = await linkFromRunningOffice();
   if (!link) return sayAndExit(process.stderr, `Agent Office is already running on port ${PORT}, and it gave no launch link to this copy.\nNothing was changed. Stop the other copy first, or set OFFICE_PORT.`, 1);
   openBrowser(link);
@@ -1244,6 +1292,7 @@ server.listen(PORT, HOST, () => {
     writeSecret(PAGE_FILE, JSON.stringify({ token: PAGE_TOKEN, port: PORT }));
   } catch (e) { console.warn(`Could not save the page token for npm run probe and a second npm start: ${e.message}`); }
   const link = auth.launchUrl(PORT, launchCodes.mint());
+  if (BRANCH_PORT) console.log(`Branch "${BRANCH_PORT.name}" uses port ${PORT}.`);
   console.log(`Agent Office is open: ${link}\nThe link works once, for 5 minutes. A reload keeps working. For a new link, run npm start again.`);
   console.log(`Hooks: ${hooksMode} (Claude Code ${CLAUDE_VERSION}). For outside sessions: claude --settings "${activeHooksFile()}" --mcp-config "${MCP_FILE}"`);
   openBrowser(link);

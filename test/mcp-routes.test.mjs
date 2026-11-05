@@ -51,23 +51,9 @@ async function open(name) {
   assert.equal(r.status, 200, JSON.stringify(r.json));
   return r.json.uid;
 }
-// The sessions the server shows: the first snapshot of the event stream.
-async function snapshot() {
-  const ctl = new AbortController();
-  try {
-    const r = await fetch(`http://127.0.0.1:${port}/events`, { headers: { 'x-office-token': pageToken }, signal: ctl.signal });
-    const reader = r.body.getReader();
-    let buf = '';
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) return null;
-      buf += Buffer.from(value).toString('utf8');
-      const m = /data: (.*)\n\n/.exec(buf);
-      if (m) return JSON.parse(m[1]);
-    }
-  } finally { ctl.abort(); }
-}
-const sessionOf = async (uid) => (await snapshot()).sessions.find((s) => s.uid === uid);
+// One session with all its data (provider, budget, ...) and its feed lines: the snapshot carries only what the page reads.
+const fullOf = async (uid) => { const r = await fetch(`http://127.0.0.1:${port}/api/session?uid=${encodeURIComponent(uid)}`, { headers: { 'x-office-token': pageToken } }); return r.ok ? r.json() : null; };
+const sessionOf = async (uid) => (await fullOf(uid))?.session;
 
 before(async () => {
   if (SKIP) return;
@@ -231,8 +217,8 @@ test('a past local session reopens as a fresh local session in the same folder',
   assert.equal(s.provider, 'ollama');
   assert.equal(s.model, 'fake-model', 'the same model as the past session');
   assert.equal(s.cwd.toLowerCase(), work.toLowerCase());
-  const snap = await snapshot();
-  assert.ok(snap.feed.some((f) => /cannot resume a past session/.test(f.text || '')), 'the feed says why it is a new session');
+  const { feed } = await fullOf(re.json.uid);
+  assert.ok(feed.some((f) => /cannot resume a past session/.test(f.text || '')), 'the feed says why it is a new session');
 });
 
 // ---------- default spend limit (#33). No paid session opens here: a paid one would start claude. ----------
@@ -338,26 +324,42 @@ test('a live reopen swaps the past record for its own as soon as it has a sid', 
 });
 
 // ---------- an ACP agent (#71): the stand-in hermes.exe runs the fake ACP agent ----------
+// What the page has: the lean snapshot that /events sends first (public/wire.js).
+async function pageSnapshot() {
+  const ctl = new AbortController();
+  try {
+    const r = await fetch(`http://127.0.0.1:${port}/events`, { headers: { 'x-office-token': pageToken }, signal: ctl.signal });
+    const reader = r.body.getReader();
+    let buf = '';
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return null;
+      buf += Buffer.from(value).toString('utf8');
+      const m = /data: (.*)\n\n/.exec(buf);
+      if (m) return JSON.parse(m[1]);
+    }
+  } finally { ctl.abort(); }
+}
 
 test('an ACP agent asks once before it runs: no cost report, so the open is refused until the user says yes', { skip: SKIP }, async () => {
-  const before = (await snapshot()).sessions.length;
+  const before = (await pageSnapshot()).sessions.length;
   const no = await call('/api/open', { cwd: acpRepo, name: 'hermes-ask', provider: 'hermes', where: 'office', isolation: 'worktree' });
   assert.equal(no.status, 409);
   assert.deepEqual(no.json, { error: 'This agent does not report cost. Partly supervised: file edits ask, commands do not. Run it?', confirm: 'cost' });
-  assert.equal((await snapshot()).sessions.length, before, 'no session, no worktree before the yes');
+  assert.equal((await pageSnapshot()).sessions.length, before, 'no session, no worktree before the yes');
   const model = await call('/api/open', { cwd: acpRepo, name: 'hermes-model', provider: 'hermes', isolation: 'worktree', model: 'opus', confirmCost: true });
   assert.equal(model.status, 400, 'the agent picks its own model');
 });
 
 test('an ungated agent (ADR 0001) opens and reopens only in a new worktree of its own: not in the folder, not in a terminal', { skip: SKIP }, async () => {
-  const before = (await snapshot()).sessions.length;
+  const before = (await pageSnapshot()).sessions.length;
   for (const body of [{ where: 'office' }, { where: 'office', isolation: 'same' }, { where: 'terminal', isolation: 'worktree' }]) {
     const r = await call('/api/open', { cwd: acpRepo, name: 'hermes-here', provider: 'hermes', confirmCost: true, ...body });
     assert.equal(r.status, 409, JSON.stringify(body));
     assert.equal(r.json.error, 'Hermes Agent runs some tool calls without asking the office (Partly supervised: file edits ask, commands do not), so it opens only in a new worktree. Set Work in to New git worktree.');
     assert.equal(r.json.confirm, undefined, 'refused before the cost question');
   }
-  assert.equal((await snapshot()).sessions.length, before);
+  assert.equal((await pageSnapshot()).sessions.length, before);
   const again = await call('/api/reopen', { uid: 'past-hermes-1', confirmCost: true });
   assert.equal(again.status, 409);
   assert.match(again.json.error, /so it reopens only in its own worktree/);
@@ -371,7 +373,9 @@ test('an ACP session: cost unknown and no spend limit, a held request answered f
   assert.deepEqual([s.provider, s.costUnknown, s.cost, s.budget, s.status], ['hermes', true, null, null, 'idle']);
   assert.equal(s.supervision, 'Partly supervised: file edits ask, commands do not');
   assert.ok(s.worktree && s.cwd.startsWith(path.join(base, 'home')), 'a new worktree under the server home folder');
-  const feed = (await snapshot()).feed.filter((f) => f.uid === uid).map((f) => f.text);
+  const feed = (await fullOf(uid)).feed.map((f) => f.text);
+  const onPage = (await pageSnapshot()).sessions.find((x) => x.uid === uid);
+  assert.equal(onPage.costUnknown, true, 'the page gets it, so it shows unknown, never $0.00');
   assert.ok(feed.includes('Hermes Agent does not report cost. The office shows it as unknown, and no spend limit can stop it.'), feed.join('\n'));
   assert.ok(feed.includes('Hermes Agent: Partly supervised: file edits ask, commands do not. The feed says what it ran without asking.'), feed.join('\n'));
   // A request the agent raises waits in the office until the user answers there.

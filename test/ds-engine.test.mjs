@@ -245,6 +245,82 @@ test('seen time is after every recorded event, also one in the same ms (#35)', (
   assert.ok(seenNow([{ t: 10 }]) >= now);
 });
 
+// ---------- the saved history has a size cap (agent-office #30) ----------
+// A localStorage stand-in with a quota in characters (keys and values), like the browser's.
+function storage(quota, init = {}) {
+  const m = new Map(Object.entries(init));
+  const used = () => [...m].reduce((n, [k, v]) => n + k.length + v.length, 0);
+  return {
+    m, sets: 0,
+    get length() { return m.size; },
+    key: (i) => [...m.keys()][i] ?? null,
+    getItem: (k) => (m.has(k) ? m.get(k) : null),
+    setItem(k, v) {
+      this.sets++;
+      const old = m.get(k);
+      m.set(k, String(v));
+      if (used() > quota) { if (old === undefined) m.delete(k); else m.set(k, old); const e = new Error('The quota has been exceeded.'); e.name = 'QuotaExceededError'; throw e; }
+    },
+    removeItem: (k) => { m.delete(k); },
+  };
+}
+function saver(store, { HBYTES = 4000, HTEXT = 40, history = [] } = {}) {
+  const st = { history, lastSeen: 500 };
+  return Object.assign(new Function('st', 'HKEY', 'HBYTES', 'HTEXT', 'window', 'hsz',
+    'var saveT=null,lastSave=0;' + source(' function hslim(') + source(' function hfit(') + source(' function hevict(') + source(' function hsave(') +
+    'return { hsave: hsave, hfit: hfit, hslim: hslim };'
+  )(st, 'ao-history:Here', HBYTES, HTEXT, { localStorage: store }, new WeakMap()), { st });
+}
+const entries = (n, text = 'ok') => Array.from({ length: n }, (_, i) => ({ t: 1000 + i, ev: { type: 'message', bot: 'Ada', text: text + ' ' + i } }));
+
+test('saved history: the newest entries that fit the size cap, in time order; long text is cut in the saved copy only', () => {
+  const store = storage(1e9);
+  const long = 'x'.repeat(500) + ' end';
+  const h = entries(400);
+  h[399].ev.text = long;
+  h[399].ev.attachments = [{ name: 'a.png', url: 'data:image/png;base64,' + 'A'.repeat(900) }];
+  const s = saver(store, { history: h });
+  s.hsave();
+  const raw = store.m.get('ao-history:Here');
+  assert.ok(raw.length <= 4000 + 60, `${raw.length} characters saved`);
+  const d = JSON.parse(raw);
+  assert.equal(d.v, 1); assert.equal(d.lastSeen, 500);
+  assert.ok(d.history.length > 10 && d.history.length < 400, `${d.history.length} entries kept`);
+  assert.deepEqual(d.history.map((x) => x.t), h.slice(-d.history.length).map((x) => x.t), 'the newest ones, in order');
+  const last = d.history.at(-1).ev;
+  assert.equal(last.text.length, 40, 'a long text is cut');
+  assert.ok(last.text.endsWith('…'));
+  assert.equal(last.attachments[0].url, '', 'a long data URL is dropped, not cut');
+  assert.equal(last.attachments[0].name, 'a.png');
+  assert.equal(h[399].ev.text, long, 'the history in memory keeps the whole text (replay shows it until reload)');
+  assert.equal(s.st.history.length, 400);
+});
+
+test('saved history: when the browser is full, the building seen longest ago goes first, then the oldest half', () => {
+  const old = JSON.stringify({ v: 1, lastSeen: 10, history: entries(30) }), newer = JSON.stringify({ v: 1, lastSeen: 900, history: entries(30) });
+  const store = storage(old.length + newer.length + 1500, { 'ao-history:Old': old, 'ao-history:Newer': newer, 'ao-view': 'office' });
+  const s = saver(store, { HBYTES: 2500, history: entries(200) });
+  s.hsave();
+  assert.ok(store.m.has('ao-history:Here'), 'this building is saved');
+  assert.ok(!store.m.has('ao-history:Old'), 'the building seen longest ago is gone');
+  assert.ok(store.m.has('ao-history:Newer'), 'a building seen later stays');
+  assert.equal(store.m.get('ao-view'), 'office', 'other keys stay');
+  const kept = JSON.parse(store.m.get('ao-history:Here')).history.length;
+  // no other building to remove: the oldest half of this one goes, until it fits
+  const tight = storage(2200);
+  const t = saver(tight, { HBYTES: 100000, history: entries(200) });
+  t.hsave();
+  const d = JSON.parse(tight.m.get('ao-history:Here'));
+  assert.ok(d.history.length > 0 && d.history.length < 200, `${d.history.length} entries`);
+  assert.equal(d.history.at(-1).t, 1199, 'the newest entry stays');
+  assert.ok(kept > 0);
+  // nothing fits at all: no throw, nothing saved, and it stops trying
+  const none = storage(10);
+  const n = saver(none, { history: entries(50) });
+  assert.doesNotThrow(() => n.hsave());
+  assert.ok(none.sets <= 8, `${none.sets} tries`);
+});
+
 test('a plan keeps its own copy of the steps, so plan.step does not change the recorded event (#50)', () => {
   assert.match(bundle, /st\.plans\[b\.name\]=\{goal:ev\.goal,steps:\(ev\.steps\|\|\[\]\)\.map\(function\(x\)\{return Object\.assign\(\{\},x\);\}\)\}/);
 });

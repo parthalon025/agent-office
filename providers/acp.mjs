@@ -174,7 +174,7 @@ function within(p, ms, why, setTimer, clearTimer) {
  * @param {object} deps
  * @param {object} deps.events the provider events (providers/index.mjs providerEvents).
  * @param {string} deps.kind a key of AGENTS.
- * @param {Function} [deps.spawn] child_process.spawn.  @param {Function} [deps.execFile] child_process.execFile (taskkill).
+ * @param {Function} [deps.spawn] child_process.spawn.  @param {Function} [deps.execFile] child_process.execFile, for taskkill.
  * @param {(name: string) => string} [deps.exe] the program resolver: an absolute path, or it throws (git.mjs resolveExe).
  * @param {object} [deps.env] the environment for the agent (process.env).
  * @param {(root: string) => object} [deps.makeTools] createLocalTools.

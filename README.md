@@ -4,7 +4,7 @@
 
 A 3D office that shows your Claude Code sessions as bots at desks, and lets you run them without a terminal. Open a session, talk to it in a chat, approve its steps, see what it changed, and close it, all from one browser tab.
 
-It is built on the Agent Office design system (x1.6.2), which lives in this folder. The design system documents are in [DS-README.md](DS-README.md).
+It is built on the Agent Office design system (x1.6.5), which lives in this folder. The design system documents are in [DS-README.md](DS-README.md).
 
 ## What it does
 
@@ -19,7 +19,7 @@ It is built on the Agent Office design system (x1.6.2), which lives in this fold
 - **Toasts.** A toast with an action, and every error, stays until you close it. The others close after 8 seconds, and wait while the pointer or the focus is on them.
 - **Since you left.** When you open a building, the card counts what happened there since you last saw it. A building you come back to shows only the news. Requests that were open before do not show a toast again; they stay in Needs you and in Decisions.
 - **Repos as buildings.** A git repository is a building, a branch is a floor and a worktree is a room. Pick the building in the control strip; one **Needs you** button shows how many requests wait in every building. Folders outside git share the "Other folders" building.
-- **Floors and rooms.** The Floors dialog creates a floor (a new branch with its first worktree), adds a room (one more worktree on a branch, also on a branch that has one), removes a room and deletes a floor (its worktrees and the branch). Git refusals (uncommitted changes, commits that are not merged) show with a button to go ahead anyway. The main folder and a room with an open session cannot be removed.
+- **Floors and rooms.** The Floors dialog creates a floor (a new branch with its first worktree), adds a room (one more worktree on a branch, also on a branch that has one), removes a room and deletes a floor (its worktrees and the branch). You can name a room when you add it: the name is the worktree folder name (letters, digits, dots and dashes; Windows reserved names are refused). **Clean up unused floors** lists the floors that are merged into the main branch, have clean rooms, no session and are over an hour old (never the default branch). Press Keep this floor to leave one out, then confirm to delete the rest. It never forces. Git refusals (uncommitted changes, commits that are not merged) show with a button to go ahead anyway. The main folder and a room with an open session cannot be removed.
 - **Extensions.** The Extensions button (More > Actions for the selected bot, or Ctrl+K) lists the session's connectors (MCP servers) and plugins. Turn a connector off or on for this session, reconnect it, add one (a URL or a command) or remove one. Turn a plugin off or on for this folder, install or remove one. Saved changes go to the local or project scope of the folder, never to your user settings.
 - **Sessions as bots.** Each session sits at a desk in the room of its worktree. Typing means working, an amber badge means it needs you, and a red badge means the turn failed (Retry or Dismiss).
 - **Subagents as helpers.** A Task or Agent call brings a grey helper by the elevator. The helper does its own tool calls and leaves when it returns its result.
@@ -136,7 +136,7 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `OFFICE_PORT` | `4317` | Port on 127.0.0.1. |
+| `OFFICE_PORT` | `4317` | Port on 127.0.0.1. `branch` takes a fixed port from the current branch name (4330-4399), so each worktree has its own; `npm run start:branch` sets it. If that port is busy, the office stops and does not try another. |
 | `OFFICE_OPEN` | on | `0` stops the server from opening the launch link in your browser. It still prints the link. |
 | `OFFICE_HOOKS` | auto | `command` or `http` forces a hook mode. |
 | `OFFICE_ASK_TIMEOUT_S` | `60` | How long a terminal session's permission prompt waits for the office before the terminal dialog decides. Sessions in the office wait 15 minutes. |
@@ -229,7 +229,7 @@ The office knows three kinds of session. A session **in the office** runs `claud
 ```
 npm run probe   # HTTP hooks on this Claude Code version (one tiny call)
 npm run smoke   # opens real Haiku sessions in a throwaway repo (a few cents); the office must be running
-python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/wheel-gate.js public/vocab.js public/scene-host.js public/building.js public/format.js public/toasts.js
+python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/wheel-gate.js public/vocab.js public/scene-host.js public/building.js public/format.js public/toasts.js public/wire.js components/bundle.css components/bundle.js kit/page.html
 ```
 
 ## Limits

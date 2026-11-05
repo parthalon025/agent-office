@@ -1,4 +1,4 @@
-"""Agent Office kit x1.6.2: checks for a page or an adapter built with the system.
+"""Agent Office kit x1.6.5: checks for a page or an adapter built with the system.
 Usage: python3 kit/check.py [files...] [--events log.jsonl]
 Checks: no literal colors in CSS, only known tokens (DS tokens, and custom properties the checked files define) and icons, an x version mark in each title,
 no emoji, and (with --events) each event against kit/schema.json. Exit code 1 on an error."""
@@ -59,9 +59,12 @@ for p in args:
     css += "\n".join(re.findall(r'style="([^"]*)"', s))
     for m in re.finditer(r"#[0-9a-fA-F]{3,8}\b|rgba?\(", css): errors.append("%s: literal color %s (use a token)" % (n, m.group(0)))
     for m in re.finditer(r"var\(--([a-z0-9-]+)", s):
-        if m.group(1) not in TOK: errors.append("%s: unknown token --%s" % (n, m.group(1)))
+        # a name that ends in "-" is the start of a name built at run time ("var(--status-" + s): some token must start with it
+        t = m.group(1)
+        if not (any(k.startswith(t) for k in TOK) if t.endswith("-") else t in TOK): errors.append("%s: unknown token --%s" % (n, t))
     for m in re.finditer(r'(?:Icon,\s*\{\s*name:\s*|icon:\s*)"([a-z0-9-]+)"', s):
-        if m.group(1) not in ICONS: errors.append("%s: unknown icon %s" % (n, m.group(1)))
+        t = m.group(1)   # a name that ends in "-" is the start of a name built at run time ("role-" + r)
+        if not (any(k.startswith(t) for k in ICONS) if t.endswith("-") else t in ICONS): errors.append("%s: unknown icon %s" % (n, t))
     t = re.search(r"<title>(.*?)</title>", s)
     if t and not re.search(r"\bx\d+\.\d+\b|\b\d+\.\d+\b", t.group(1)): errors.append("%s: title has no version mark (for example x0.1)" % n)
     if re.search("[\U0001F300-\U0001FAFF☀-➿]", s): errors.append("%s: emoji or symbol glyph (use the icon set)" % n)
