@@ -246,3 +246,20 @@ test('Spend: every cost word fits its column, in the full and the paged view', (
     assert.ok(t.text.length * t.s * 0.62 <= t.maxW, `${t.text} fits the paged view`);
   }
 });
+
+// Review minor: the paged header had one button that named the current scope, so "This building" was not on the wall while the
+// scope was All buildings. Both choices show, as in the full view, and fit at the paged size.
+test('paged view: both scope choices are on the wall, the chosen one marked; a click on the other switches', () => {
+  for (const scope of ['office', 'building']) {
+    const v = view({ screen: 'commands', paged: true, h: 1100, scope }), p = P.plan(v, data());
+    const hots = p.hots.filter((h) => h.kind === 'scope');
+    assert.deepEqual(hots.map((h) => h.scope).sort(), ['building', 'office']);
+    const t = p.items.filter((i) => i.t === 'text' && /^(All buildings|This building)$/.test(i.text));
+    assert.deepEqual(t.map((i) => i.text).sort(), ['All buildings', 'This building']);
+    for (const i of t) assert.ok(i.text.length * i.s * 0.62 <= i.maxW, i.text + ' fits');
+    const other = hots.find((h) => h.scope !== scope);
+    assert.equal(P.step(v, other, data()).view.scope, other.scope);
+    const title = p.items.find((i) => i.t === 'text' && i.text === 'Commands');
+    assert.ok(title.x + title.text.length * title.s * 0.62 < Math.min(...hots.map((h) => h.x)), 'the title does not run under the choices');
+  }
+});

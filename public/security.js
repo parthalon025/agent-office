@@ -123,19 +123,17 @@
     text(p, 48, big ? 80 : 76, ts, 'ink', sc.title, { wt: 600 });
     if (permScreen(view.screen)) {
       var scope = view.scope === 'building' ? 'building' : 'office';
-      if (big) {
-        var id = 'scope', lbl = scope === 'building' ? 'This building' : 'All buildings', bw = 440;
-        hot(p, button(p, W - 48 - bw, 22, bw, 80, lbl, 46, { kind: 'scope', id: id, scope: scope === 'building' ? 'office' : 'building' }, isHover(view, id)));
-      } else {
-        ['office', 'building'].forEach(function (s, i) {
-          var id = 'scope-' + s, bw = 250, x = W - 48 - (2 - i) * (bw + 12) + 12, on = scope === s;
-          // the chosen scope is the primary pair (accent and on-accent): ink on the room's accent was 2.76:1 at Night
-          if (on) fill(p, x, 30, bw, 58, 'primary', 29); else stroke(p, x + 1.5, 31.5, bw - 3, 55, 'line', 3, 29);
-          if (isHover(view, id)) stroke(p, x - 5, 25, bw + 10, 68, 'focus', 4, 34);
-          text(p, x + bw / 2, 30 + 29 + 10, 28, on ? 'onPrimary' : 'ink', s === 'office' ? 'All buildings' : 'This building', { wt: 600, align: 'center', maxW: bw - 16 });
-          hot(p, { kind: 'scope', id: id, scope: s, x: x, y: 30, w: bw, h: 58 });
-        });
-      }
+      // Both choices, the chosen one marked. The paged view draws them bigger; one button that named only the current scope
+      // hid "This building" there (review minor).
+      var bw = big ? 344 : 250, bh = big ? 80 : 58, by = big ? 22 : 30, fs = big ? 40 : 28;
+      ['office', 'building'].forEach(function (s, i) {
+        var id = 'scope-' + s, x = W - 48 - (2 - i) * (bw + 12) + 12, on = scope === s;
+        // the chosen scope is the primary pair (accent and on-accent): ink on the room's accent was 2.76:1 at Night
+        if (on) fill(p, x, by, bw, bh, 'primary', bh / 2); else stroke(p, x + 1.5, by + 1.5, bw - 3, bh - 3, 'line', 3, bh / 2);
+        if (isHover(view, id)) stroke(p, x - 5, by - 5, bw + 10, bh + 10, 'focus', 4, bh / 2 + 5);
+        text(p, x + bw / 2, by + bh / 2 + fs * 0.36, fs, on ? 'onPrimary' : 'ink', s === 'office' ? 'All buildings' : 'This building', { wt: 600, align: 'center', maxW: bw - 16 });
+        hot(p, { kind: 'scope', id: id, scope: s, x: x, y: by, w: bw, h: bh });
+      });
     } else text(p, W - 48, big ? 80 : 74, big ? 40 : 28, 'muted', 'Office-wide', { align: 'right' });
   }
 
