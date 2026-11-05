@@ -231,12 +231,12 @@ Each README has the full props table. Types: `components/index.d.ts`.
 | `line` | `rgba(30,45,60,0.10)` | `rgba(200,215,230,0.10)` | `rgba(20,60,50,0.16)` | `rgba(0,0,0,0.10)` | `rgba(255,255,255,0.10)` | Panel borders and dividers. Hairline only. |
 | `ink` | `#18212b` | `#e6ebf0` | `#102a33` | `#242424` | `#ffffff` | Primary text on bg, panel and chip. |
 | `muted` | `#5f6b78` | `#8e9aa7` | `#4d6660` | `#616161` | `#adadad` | Secondary text: task lines, timestamps, counts. 4.6:1 or more on bg, panel and chip. |
-| `accent` | `#2f6fe4` | `#6c9dff` | `#1f6f8b` | `#0f6cbd` | `#479ef5` | Primary action (Approve, Retry), focus ring, routine markers. |
+| `accent` | `#2f6fe4` | `#6c9dff` | `#1f6f8b` | `#0f6cbd` | `#4aa0f6` | Primary action (Approve, Retry), focus ring, routine markers. |
 | `on-accent` | `#ffffff` | `#0d1420` | `#ffffff` | `#ffffff` | `#141414` | Text on accent. |
 | `emphasis` | `{accent}` | `{accent}` | `#b5302b` | `{accent}` | `{accent}` | The 10% color: alerts and the one key action in a decision (Approve on a request, unread counts, room alert beacons). In Day, Night, Fluent and Fluent Dark it equals accent; in Sublevel it is red. Never a fill larger than a button. |
 | `on-emphasis` | `{on-accent}` | `{on-accent}` | `#ffffff` | `{on-accent}` | `{on-accent}` | Text on emphasis. |
-| `on-status` | `#ffffff` | `#ffffff` | `#ffffff` | `#ffffff` | `#141414` | Text and glyphs on a status fill (danger button, check in the finished bubble). |
-| `bubble` | `#ffffff` | `#f2f5f8` | `#f6f8f5` | `#ffffff` | `#f5f5f5` | Fill of status bubbles and speech bubbles over bots, in 2D and 3D. |
+| `on-status` | `#ffffff` | `#ffffff` | `#ffffff` | `#ffffff` | `#141414` | Text on a status fill (danger button, the status word on a desk terminal, the count on a door sign). Not the check in the finished bubble: that is a cut-out in bubble. |
+| `bubble` | `#ffffff` | `#f2f5f8` | `#f6f8f5` | `#ffffff` | `#f5f5f5` | Fill of status bubbles and speech bubbles over bots, in 2D and 3D. Also the check mark cut out of the finished disk (3:1 or more on status-finished-on-bubble). |
 | `status-working` | `#1f9a58` | `#2fb36d` | `#1d8a5a` | `#107c10` | `#54b054` | Bot is working. Dot, bubble glyph, monitor glow. |
 | `status-waiting` | `#c27c17` | `#e3992f` | `#b07514` | `#d2560b` | `#faa06b` | Bot needs a human decision. Always shows in Waiting on me. |
 | `status-error` | `#d1403b` | `#e5605b` | `#c23b36` | `#c50f1f` | `#dc626d` | Bot failed. Always shows in Waiting on me with Retry. |
@@ -288,6 +288,8 @@ Each README has the full props table. Types: `components/index.d.ts`.
 | `status-*-text` | `bg`, card, `chip` | 4.5:1 | A status word on a theme surface. |
 | `status-*-on-bubble` | `bubble` | 4.5:1 | A status word on a bubble or a whiteboard face. |
 | `on-accent` | `accent` | 4.5:1 | Label of a primary button. |
+| `accent` | `chip` | 4.5:1 | Accent text on a selected row: the More link of a decision card, a ghost button. Day is 4.21:1 (agent-office #117): the test holds Day as a known failure until that is fixed. |
+| `bubble` | `status-finished-on-bubble` | 3:1 | The check mark cut out of the finished disk (StatusBubble and the 3D bubble). |
 | `on-floor` | every `floor-*` | 4.9:1 | Floor header text. |
 | `status-*` | card | 3:1 | Status dot, next to a word. |
 | `type-*` | `chip` | 3:1 | Type dot, room icon and room floor stripe. |

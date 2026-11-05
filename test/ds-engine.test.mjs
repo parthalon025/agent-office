@@ -902,9 +902,9 @@ test('Fluent and Fluent Dark set the system faces and small corners through toke
   // one selector for the family: [data-theme|="fluent"] matches "fluent" and "fluent-dark", so no Fluent rule is copied per theme
   assert.match(css, /\[data-theme\|="fluent"\]\{--font-sans:var\(--font-fluent-sans\);--font-mono:var\(--font-fluent-mono\);--radius-sm:var\(--radius-fluent-sm\);--radius-md:var\(--radius-fluent-md\);--radius-lg:var\(--radius-fluent-lg\)\}/);
   assert.ok(!css.includes('[data-theme="fluent"]'), 'no rule for Fluent alone: the look rules are for the family');
-  const dk = css.split('\n').filter((l) => l.includes('[data-theme="fluent-dark"]'));
+  const dk = css.split(/\r?\n/).filter((l) => l.includes('[data-theme="fluent-dark"]'));
   assert.equal(dk.length, 1, 'Fluent Dark has one rule of its own');
-  assert.match(dk[0], /^\[data-theme="dark"\] \.ao-dec-x,[^{]*\[data-theme="fluent-dark"\] \.ao-inbox-all input\{color-scheme:dark\}/, 'and it is the dark form controls, shared with Night');
+  assert.match(dk[0], /^\[data-theme="dark"\],\[data-theme="fluent-dark"\]\{color-scheme:dark\}$/, 'and it is the dark color scheme, shared with Night');
   // the structure swatch needs no theme list: floor-ops by default, the green carpet in Sublevel
   assert.match(css, /\.ao-ratio-30\{flex:30;background:var\(--floor-ops\);color:var\(--on-floor\)\}/);
   assert.ok(!/\[data-theme="(light|dark)"\] \.ao-ratio-30/.test(css));
@@ -917,6 +917,22 @@ test('Fluent and Fluent Dark set the system faces and small corners through toke
     const sh = tokensJson.shadow.tokens.find((t) => t.name === 'shadow-panel').value[th];
     assert.equal(sh.split('),').length, 2, `${th}: two shadow layers`);
   }
+});
+
+test('the browser draws scrollbars and check boxes dark in every dark theme of AO.MODES, and light in the others', () => {
+  const css = readFileSync(join(root, 'components', 'bundle.css'), 'utf8');
+  // the theme root sets the scheme, and color-scheme is inherited, so no control needs a rule of its own
+  const lines = css.split(/\r?\n/);
+  assert.ok(lines.includes('[data-theme]{color-scheme:light}'), 'a light theme inside a dark one sets the light scheme back');
+  const rule = lines.filter((l) => /\{color-scheme:dark\}$/.test(l) && l.startsWith('[data-theme='));
+  assert.equal(rule.length, 1, 'one rule lists the dark themes');
+  assert.ok(lines.indexOf(rule[0]) > lines.indexOf('[data-theme]{color-scheme:light}'), 'after the light default, so it wins at the same specificity');
+  const listed = [...rule[0].matchAll(/\[data-theme="([a-z-]+)"\]/g)].map((m) => m[1]);
+  assert.deepEqual(listed, modes().filter((m) => m.dark).map((m) => m.theme), 'the list is the themes with dark: true');
+  assert.match(css, /@media \(prefers-color-scheme:dark\)\{:root:not\(\[data-theme\]\)\{color-scheme:dark\}\}/, 'no theme and OS dark mode: the Night tokens and the dark scheme');
+  assert.ok(!/\.ao-[a-z-]+[^{}]*\{color-scheme:dark\}/.test(css), 'no control rule of its own');
+  // the notes editor is a light face in every theme, so its scrollbar stays light
+  assert.match(readFileSync(join(root, 'public', 'office.css'), 'utf8'), /\.notes-text \{[^}]*background: var\(--bubble\);[^}]*color-scheme: light; \}/);
 });
 
 test('the fluent and fluentdark icons are in the bundle, the schema and assets/Icons, with the same drawing; neither is a four-pane mark', () => {

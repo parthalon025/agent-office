@@ -522,7 +522,10 @@ details.panel summary .cnt.hot,.ao-ph .hot{color:var(--emphasis)}
 .ao-hud-chat~.ao-hud-zoom>:nth-child(n+3){border-top:1px solid var(--line)}
 .ao-hud-chat~.ao-hud-zoom>:nth-child(even){border-left:1px solid var(--line)}
 .ao-hud-chat~.ao-hud-cast{right:376px}
-[data-theme="dark"] .ao-dec-x,[data-theme="dark"] .ao-inbox-all input,[data-theme="fluent-dark"] .ao-dec-x,[data-theme="fluent-dark"] .ao-inbox-all input{color-scheme:dark}
+/* the browser's own parts (scrollbars, check boxes) follow the theme: dark in a dark theme (dark: true in AO.MODES). color-scheme is inherited, so a light theme inside a dark one sets it back; with no theme, OS dark mode gives the Night tokens (tokens.css) and the dark scheme */
+[data-theme]{color-scheme:light}
+[data-theme="dark"],[data-theme="fluent-dark"]{color-scheme:dark}
+@media (prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark}}
 /* scrubber shares the lane of the broadcast bar, so it clears the zoom and usage panels */
 .ao-hud-scrub{left:362px;right:340px;transform:none;width:auto;max-width:640px;margin:0 auto}
 .ao-office:has(.ao-hud-chat) .ao-hud-scrub{right:376px}

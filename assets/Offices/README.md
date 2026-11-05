@@ -14,7 +14,7 @@ Flat isometric (30 degree) room thumbnails. viewBox `0 0 320 200`. Each room has
 - **Night** (`<type>-night.svg`): Night scene colours (floor `#2a3039`, walls `#232a34` / `#1e242d`). Screens and LEDs glow (stacked soft circles, no filters). Small warm lamp pools (`#f2b766`) on the floor, the bench, the stage or the table.
 - **Sublevel** (`<type>-sublevel.svg`): green carpet (`#2f6456`, small carpet tiles), white desks (`#f1f1ea`), black chairs (`#1c2326`), off-white walls with a low wainscot band, boxy off-white terminals with tiny number grids (`#cfe3e0` on `#102a33`). Bots have square eyes.
 - **Fluent**: no set of its own yet. `OfficeTypeCard` shows the Day set in Fluent, so the type stripe in the picture has the Day type colour, not the Fluent `type-*` colour of the badge next to it (team `#4f6bed`, lab `#038387`, studio `#c239b3`, hq `#9a6a00`). A Fluent set is agent-office #112.
-- **Fluent Dark**: no set of its own yet. It is a dark theme (`dark: true` in `AgentOffice.MODES`), so `OfficeTypeCard` shows the Night set, with the Night type colour in the stripe, not the Fluent Dark `type-*` colour of the badge (team `#778df1`, lab `#4cb4b7`, studio `#da7ed0`, hq `#efb839`). The same issue (#112) covers it.
+- **Fluent Dark**: no set of its own yet. It is a dark theme (`dark: true` in `AgentOffice.MODES`), so `OfficeTypeCard` shows the Night set, with the Night type colour in the stripe, not the Fluent Dark `type-*` colour of the badge (team `#778df1`, lab `#4cb4b7`, studio `#da7ed0`, hq `#efb839`). A Fluent Dark set is part of agent-office #112 too.
 
 The glows use opacity only: no gradients, filters or ids, so many thumbnails can share one page.
 

@@ -21,7 +21,7 @@ const lum = (c) => { const f = (x) => { x /= 255; return x <= 0.03928 ? x / 12.9
 const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
 
 function each(fn) { for (const th of TH) { const T = (n) => rgb(val(n, th)); fn(T, th, over(T('panel'), T('bg'))); } }
-function atLeast(label, min, a, b, th) { const r = ratio(a, b); assert.ok(r >= min, `${label} in ${th}: ${r.toFixed(2)} < ${min}`); }
+function atLeast(label, min, a, b, th) { const r = ratio(a, b); assert.ok(r >= min, `${label} in ${th}: ${r.toFixed(3)} < ${min}`); }
 
 test('the pairs run in every theme: Day, Night, Sublevel, Fluent and Fluent Dark', () => {
   assert.deepEqual(TH, ['light', 'dark', 'sublevel', 'fluent', 'fluent-dark']);
@@ -53,6 +53,27 @@ test('on-accent on accent: 4.5:1; on-floor on every floor-* fill: 4.9:1', () => 
   atLeast('on-accent on accent', 4.5, T('on-accent'), T('accent'), th);
   for (const f of ['ops', 'sales', 'research', 'content', 'hq']) atLeast(`on-floor on floor-${f}`, 4.9, T('on-floor'), T('floor-' + f), th);
 }));
+
+// Accent is text in the DS too: the More link of a decision card sits on chip when the card is selected or focused
+// (.ao-dec-more, .ao-dec.is-sel), and a ghost button can sit on a chip row. Day is 4.21:1, an older gap (#117): it is
+// held as a known failure, so this test fails once Day passes and the exception must go.
+test('accent text on chip: 4.5:1 (Day: known gap, agent-office #117)', () => each((T, th) => {
+  if (th === 'light') { assert.ok(ratio(T('accent'), T('chip')) < 4.5, 'Day passes now: remove the Day exception (#117)'); return; }
+  atLeast('accent on chip', 4.5, T('accent'), T('chip'), th);
+}));
+
+// The check mark of the finished bubble is a cut-out of the bubble face, drawn in bubble on the status-finished-on-bubble
+// disk (StatusBubble and Kit.prototype.bubble). It is a glyph: 3:1. on-status is for text on a raw status fill and is
+// dark in Fluent Dark, where it was 2.77:1 on the disk.
+test('finished bubble: the check (bubble) on its disk (status-finished-on-bubble), 3:1', () => each((T, th) => {
+  atLeast('check on the finished disk', 3, T('bubble'), T('status-finished-on-bubble'), th);
+}));
+
+test('the finished check is drawn in bubble, in 2D and in 3D', () => {
+  const b = read('components/bundle.js');
+  assert.ok(/h\("path",\{d:"M6\.5 11\.5l3 3 6-6",style:\{stroke:"var\(--bubble\)"\}/.test(b), 'StatusBubble draws the check in bubble');
+  assert.ok(/if\(st==="finished"\)\{c\.beginPath\(\);c\.arc\(64,64,40,0,7\);c\.fill\(\);c\.strokeStyle=K\.tok\.bubble;/.test(b), 'Kit.prototype.bubble draws the check in bubble');
+});
 
 test('type colors on chip and accent on bg: 3:1', () => each((T, th) => {
   for (const t of ['team', 'lab', 'studio', 'hq']) atLeast(`type-${t} on chip`, 3, T('type-' + t), T('chip'), th);
