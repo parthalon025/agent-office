@@ -123,7 +123,7 @@ The office uses **HTTP hooks** when they were proven on your Claude Code version
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `OFFICE_PORT` | `4317` | Port on 127.0.0.1. |
+| `OFFICE_PORT` | `4317` | Port on 127.0.0.1. `branch` takes a fixed port from the current branch name (4330-4399), so each worktree has its own; `npm run start:branch` sets it. If that port is busy, the office stops and does not try another. |
 | `OFFICE_OPEN` | on | `0` stops the server from opening the launch link in your browser. It still prints the link. |
 | `OFFICE_HOOKS` | auto | `command` or `http` forces a hook mode. |
 | `OFFICE_ASK_TIMEOUT_S` | `60` | How long a terminal session's permission prompt waits for the office before the terminal dialog decides. Sessions in the office wait 15 minutes. |

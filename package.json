@@ -6,6 +6,7 @@
   "description": "A floor-plan dashboard for Claude Code sessions, fed by hooks. Open and close sessions from the office.",
   "scripts": {
     "start": "node server.mjs",
+    "start:branch": "node -e \"process.env.OFFICE_PORT='branch';process.env.OFFICE_OPEN='0';import('./server.mjs')\"",
     "probe": "node probe.mjs",
     "smoke": "node test/smoke.mjs",
     "test": "node --test \"test/*.test.mjs\""

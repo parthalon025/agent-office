@@ -101,6 +101,24 @@ export async function locate(cwd) {
   } catch { return null; }
 }
 
+// ---------- ports ----------
+// Each checkout gets its own port for browser tests, so worktrees never share one and never touch the owner's office
+// on 4317. The port comes from the branch name alone (FNV-1a, 32 bit, over the UTF-8 bytes), so it is the same on every
+// machine and every run. The range is reserved: 4330 to 4399. Two names can share a port (70 ports); the second office
+// then stops with a message and does not move to another port.
+export const BRANCH_PORT_MIN = 4330;
+export const BRANCH_PORT_MAX = 4399;
+export function branchPort(name) {
+  let h = 0x811c9dc5;
+  for (const b of Buffer.from(String(name), 'utf8')) h = Math.imul(h ^ b, 0x01000193) >>> 0;
+  return BRANCH_PORT_MIN + (h % (BRANCH_PORT_MAX - BRANCH_PORT_MIN + 1));
+}
+/** The name a checkout's port comes from: its branch, or the worktree folder name when HEAD is detached. `loc` is what `locate` returns. */
+export function checkoutName(loc) {
+  if (!loc) throw new Error('This folder is not in a git repository, so it has no branch to take a port from.');
+  return loc.branch === 'detached' ? path.basename(loc.root) : loc.branch;
+}
+
 const WORKTREE_ROOT = path.join(os.homedir(), '.agent-office', 'worktrees');
 
 /** Creates a branch `office/<name>-<id>` in its own folder and returns where Claude should work. */

@@ -29,7 +29,17 @@ const V = globalThis.OfficeVocab;
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(ROOT, 'public');
-const PORT = Number(process.env.OFFICE_PORT) || 4317;
+// OFFICE_PORT=branch: the port of this checkout's branch (git.branchPort), so each worktree has its own. It never falls
+// back to another port: if that one is busy, the office stops (see server.on('error')).
+const BRANCH_PORT = process.env.OFFICE_PORT === 'branch'
+  ? await (async () => {
+    try { const name = git.checkoutName(await git.locate(ROOT)); return { name, port: git.branchPort(name) }; } catch (e) {
+      process.stderr.write(`Agent Office cannot pick a port for this folder: ${e.message}\n`, () => process.exit(1));
+      return await new Promise(() => {}); // wait for the exit
+    }
+  })()
+  : null;
+const PORT = BRANCH_PORT ? BRANCH_PORT.port : Number(process.env.OFFICE_PORT) || 4317;
 const HOST = '127.0.0.1';
 // Two tokens (auth.mjs has the rules). The agent token opens /hook* and /mcp/* only. It is kept in .office-token,
 // which hook.mjs and mcp.mjs read, and reused across restarts, so hooks of sessions that are already running keep
@@ -1179,6 +1189,8 @@ async function linkFromRunningOffice() {
 const sayAndExit = (stream, text, code) => stream.write(text + '\n', () => process.exit(code));
 server.on('error', async (e) => {
   if (e.code !== 'EADDRINUSE') return sayAndExit(process.stderr, e.message, 1);
+  // Branch mode owns one port per branch: a busy port means another copy (or program) holds it. Say so and stop.
+  if (BRANCH_PORT) return sayAndExit(process.stderr, `Agent Office stopped: port ${PORT} for branch "${BRANCH_PORT.name}" is busy.\nAnother copy or program holds it. Nothing was changed, and no other port was tried.\nFind its process id with: netstat -ano | findstr :${PORT}. Stop that process by its id, never by image name.`, 1);
   const link = await linkFromRunningOffice();
   if (!link) return sayAndExit(process.stderr, `Agent Office is already running on port ${PORT}, and it gave no launch link to this copy.\nNothing was changed. Stop the other copy first, or set OFFICE_PORT.`, 1);
   openBrowser(link);
@@ -1198,6 +1210,7 @@ server.listen(PORT, HOST, () => {
     writeSecret(PAGE_FILE, JSON.stringify({ token: PAGE_TOKEN, port: PORT }));
   } catch (e) { console.warn(`Could not save the page token for npm run probe and a second npm start: ${e.message}`); }
   const link = auth.launchUrl(PORT, launchCodes.mint());
+  if (BRANCH_PORT) console.log(`Branch "${BRANCH_PORT.name}" uses port ${PORT}.`);
   console.log(`Agent Office is open: ${link}\nThe link works once, for 5 minutes. A reload keeps working. For a new link, run npm start again.`);
   console.log(`Hooks: ${hooksMode} (Claude Code ${CLAUDE_VERSION}). For outside sessions: claude --settings "${activeHooksFile()}" --mcp-config "${MCP_FILE}"`);
   openBrowser(link);
