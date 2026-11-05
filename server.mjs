@@ -1111,7 +1111,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true, version: r.version, text: r.text, merged: r.merged });
     }
     if (url.pathname === '/api/tree') return send(res, 200, await repoTree(String(body.root || '')));
-    if (url.pathname === '/api/branches') return send(res, 200, { branches: await git.branches(knownRepo(body.repo).path) });
+    if (url.pathname === '/api/branches') return send(res, 200, { branches: await git.floorCandidates(knownRepo(body.repo).path) });
     if (url.pathname === '/api/floor/create') return send(res, 200, await floorAction('create-floor', body));
     if (url.pathname === '/api/floor/delete') return send(res, 200, await floorAction('delete-floor', body));
     if (url.pathname === '/api/room/create') return send(res, 200, await floorAction('create-room', body));

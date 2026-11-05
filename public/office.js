@@ -441,7 +441,7 @@
         h('div', { className: 'form' },
           h('p', { className: 'note' }, isFloor
             ? 'Deletes the branch ' + confirm.branch + ' and removes its rooms (worktree folders). Git refuses when the branch has commits that are not merged.'
-            : 'Deletes the folder ' + confirm.root + '. The branch ' + confirm.branch + ' and its floor stay.'),
+            : 'Deletes the folder ' + confirm.root + '. The branch ' + confirm.branch + ' stays' + (confirm.floor && confirm.floor !== confirm.branch ? '. The floor ' + confirm.floor + ' stays.' : ' with its floor.')),
           err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
     }
 
@@ -469,7 +469,7 @@
                 return h('div', { key: w.root, className: 'room-row' },
                   h(A.OfficeTypeBadge, { type: 'lab', label: w.place.room }), h('span', { className: 'past-sub mono', title: w.root }, F.shortPath(w.root)),
                   here.map(function (s) { return h('span', { key: s.uid, className: 'room-bot', title: s.name }, h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: colorOf(s.uid), status: statusOf(s), size: 20 }), s.name); }),
-                  w.main ? null : h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setConfirm({ kind: 'room', branch: b, root: w.root }); } }, 'Remove room'));
+                  w.main ? null : h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setConfirm({ kind: 'room', branch: w.branch, floor: b, root: w.root }); } }, 'Remove room'));
               })),
             h('div', { className: 'past-actions' },
               h(A.Button, { variant: 'quiet', icon: 'add', loading: busy === 'room:' + b, onClick: function () { run('room:' + b, '/api/room/create', { branch: b }); } }, 'Add room'),

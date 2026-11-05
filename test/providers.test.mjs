@@ -625,3 +625,22 @@ test('spend limit: a provider that does not say it is free is paid; paid must be
   assert.doesNotThrow(() => checkProvider({ ...base, paid: true }));
   assert.throws(() => checkProvider({ ...base, paid: 'no' }), /paid/);
 });
+
+// ---------- the subagent rule of the contract (#69): any provider that tags hooks with agent_id gets helpers ----------
+test('contract: a provider other than Claude Code reports a subagent with agent_id, and it is a helper in the parent session', () => {
+  const o = office();
+  const fake = createFake(o.events);
+  const s = o.session({ provider: fake.kind });
+  const hook = (p) => o.events.hook(s, p);
+  hook({ hook_event_name: 'UserPromptSubmit', prompt: 'go' });
+  hook({ hook_event_name: 'PreToolUse', tool_name: 'Task', tool_use_id: 't1', tool_input: { description: 'Look around', subagent_type: 'Explore' } });
+  const parentTask = JSON.stringify(s.tool);
+  hook({ hook_event_name: 'SubagentStart', agent_id: 'sub-1', agent_type: 'Explore' });
+  hook({ hook_event_name: 'PreToolUse', tool_name: 'Read', tool_use_id: 'r1', agent_id: 'sub-1', tool_input: { file_path: 'a.js' } });
+  assert.equal(o.tracker.sessions.size, 1, 'a subagent never becomes a session (no room, no desk, no count)');
+  assert.deepEqual(s.agents.map((a) => [a.type, a.id, a.done]), [['Explore', 'sub-1', false]]);
+  assert.equal(s.calls.find((c) => c.id === 'r1').agent, 'sub-1', 'its call is on the helper');
+  assert.equal(JSON.stringify(s.tool), parentTask, 'its call is not the parent task line');
+  hook({ hook_event_name: 'SubagentStop', agent_id: 'sub-1' });
+  assert.equal(s.agents[0].done, true);
+});

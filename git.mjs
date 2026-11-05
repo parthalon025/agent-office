@@ -96,11 +96,17 @@ export async function repoTop(cwd) {
 // place.mjs puts the room of such a worktree on the floor of its base branch. Nothing else reads it.
 const BASE_VAR = 'officebase';
 const baseKey = (branch) => `branch.${branch}.${BASE_VAR}`;
-const gitNoMatch = (e) => /^Command failed/.test(e.message); // `git config` exits 1 with no output when nothing matches
+/** `git config --get` and `--get-regexp` exit with code 1 and no output when nothing matches. Any other failure
+ *  (a kill, a timeout, a lock, a bad config) has another code, or none, and is a real error. */
+export const gitNoMatch = (e) => e?.code === 1;
+
+// The office makes only agent/<name>-<id> branches with a base, so no other branch costs a config read.
+const hasBase = (branch) => String(branch || '').startsWith('agent/');
+const branchExists = (cwd, branch) => git(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], cwd, 8000).then(() => true, (e) => { if (gitNoMatch(e)) return false; throw e; });
 
 /** The base branch of one branch, or '' when it has none. */
 async function baseOf(cwd, branch) {
-  if (!branch || branch === 'detached' || branch === 'HEAD') return '';
+  if (!hasBase(branch)) return '';
   try { return (await git(['config', '--local', '--get', baseKey(branch)], cwd, 8000)).trim(); }
   catch (e) { if (gitNoMatch(e)) return ''; throw e; }
 }
@@ -113,8 +119,12 @@ export async function locate(cwd) {
     const dir = path.resolve(cwd, common);
     const repo = path.basename(dir).toLowerCase() === '.git' ? path.dirname(dir) : dir;
     const out = { repo: path.normalize(repo), root: path.normalize(top), branch: branch === 'HEAD' ? 'detached' : branch };
-    const base = await baseOf(cwd, out.branch).catch(() => '');
-    if (base) out.base = base;
+    // A failed base read is not a reason to lose the location: the room sits on its own floor, and the log says why.
+    // A base branch that is gone (deleted, renamed) is no base either.
+    try {
+      const base = await baseOf(cwd, out.branch);
+      if (base && await branchExists(cwd, base)) out.base = base;
+    } catch (e) { console.warn(`Agent Office: could not read the base branch of ${out.branch}: ${e.message}`); }
     return out;
   } catch { return null; }
 }
@@ -147,15 +157,34 @@ export async function createWorktree(cwd, name) {
   const rel = path.relative(top, path.resolve(cwd));
   const main = (await locate(cwd))?.repo || top;
   const current = (await git(['rev-parse', '--abbrev-ref', 'HEAD'], top, 8000)).trim();
-  const base = current === 'HEAD' ? '' : (await baseOf(top, current).catch(() => '')) || current;
+  // A failed config read stops the open: a wrong base would put the room on the wrong floor with no warning.
+  const base = current === 'HEAD' ? '' : (await baseOf(top, current)) || current;
   const slug = nameSlug(name);
   const id = crypto.randomBytes(2).toString('hex');
   const branch = `agent/${slug}-${id}`;
   const parent = path.join(path.dirname(main), `${path.basename(main)}.worktrees`);
-  fs.mkdirSync(parent, { recursive: true });
-  const root = fs.existsSync(path.join(parent, slug)) ? path.join(parent, `${slug}-${id}`) : path.join(parent, slug);
-  await git(['worktree', 'add', '-b', branch, root, 'HEAD'], top, 120000);
-  if (base) await git(['config', '--local', baseKey(branch), base], top, 8000);
+  try { fs.mkdirSync(parent, { recursive: true }); }
+  catch (e) { throw new Error(`The office cannot make the folder ${parent} (${e.code || e.message}). Check that you can write next to the repository, or use the folder as it is.`); }
+  // Claim the folder with a plain mkdir (it fails when the folder exists, so two opens never take one name), then
+  // let git fill the empty folder.
+  const claim = (dir) => {
+    try { fs.mkdirSync(dir); return true; }
+    catch (e) { if (e.code === 'EEXIST') return false; throw new Error(`The office cannot make the folder ${dir} (${e.code || e.message}).`); }
+  };
+  let root = path.join(parent, slug);
+  if (!claim(root)) { root = path.join(parent, `${slug}-${id}`); if (!claim(root)) throw new Error(`The folder ${root} exists. Try again.`); }
+  try { await git(['worktree', 'add', '-b', branch, root, 'HEAD'], top, 120000); }
+  catch (e) { fs.rmSync(root, { recursive: true, force: true }); throw e; }
+  if (base) {
+    try { await git(['config', '--local', baseKey(branch), base], top, 8000); }
+    catch (e) {
+      // No half-made room: without its base the new room would sit on a floor of its own.
+      await git(['worktree', 'remove', '--force', root], top, 60000).catch(() => {});
+      await git(['branch', '-D', branch], top, 8000).catch(() => {});
+      fs.rmSync(root, { recursive: true, force: true });
+      throw new Error(`The office could not save the base branch of the new room: ${e.message}`);
+    }
+  }
   return { root, branch, base, repo: main, path: rel && !rel.startsWith('..') ? path.join(root, rel) : root };
 }
 
@@ -206,7 +235,7 @@ export async function removeWorktree({ root, repo, branch }, force = false) {
 export async function assertNoFilters(cwd) {
   let out = '';
   try { out = await git(['config', '--show-scope', '--get-regexp', '^filter\\.'], cwd, 8000); }
-  catch (e) { if (!/^Command failed/.test(e.message)) throw e; } // exit code 1 with no output = none set
+  catch (e) { if (!gitNoMatch(e)) throw e; } // exit code 1 with no output = none set
   const names = new Set();
   for (const line of out.split(/\r?\n/).filter(Boolean)) {
     const [scope, rest = ''] = line.split('\t');
@@ -243,8 +272,10 @@ export async function layout(repo) {
     else if (cur && line.startsWith('prunable')) cur.prunable = true;
     else if (cur && line === 'bare') cur.bare = true;
   }
-  const base = await bases(repo).catch(() => new Map());
-  for (const w of list) if (base.has(w.branch)) w.base = base.get(w.branch);
+  let base = new Map(), live = null;
+  try { base = await bases(repo); if (base.size) live = new Set(await branches(repo, Infinity)); }
+  catch (e) { console.warn(`Agent Office: could not read the base branches of ${repo}: ${e.message}`); }
+  for (const w of list) if (base.has(w.branch) && live.has(base.get(w.branch))) w.base = base.get(w.branch);
   return list.filter((w) => !w.bare && !w.prunable);
 }
 
@@ -254,8 +285,15 @@ export async function files(root) {
 }
 
 /** Local branches, the most recent commit first. */
-export async function branches(repo) {
-  return (await git(['for-each-ref', '--sort=-committerdate', '--format=%(refname:short)', 'refs/heads'], repo, 15000)).split(/\r?\n/).filter(Boolean).slice(0, 200);
+export async function branches(repo, limit = 200) {
+  return (await git(['for-each-ref', '--sort=-committerdate', '--format=%(refname:short)', 'refs/heads'], repo, 15000)).split(/\r?\n/).filter(Boolean).slice(0, limit);
+}
+
+/** Branches that can become a floor: all of them but the agent branches the office made (they have a base and
+ *  sit on the floor of that base; a finished agent's branch stays in git but is not a floor of its own). */
+export async function floorCandidates(repo) {
+  const agents = await bases(repo);
+  return (await branches(repo)).filter((b) => !agents.has(b));
 }
 
 const BRANCH_RE = /^(?!-)(?!.*\.\.)(?!.*\/\/)(?!.*@\{)[A-Za-z0-9._\/-]{1,100}(?<![./])$/;

@@ -232,3 +232,76 @@ test('deleteFloor refuses while an agent room sits on the floor, and deletes it 
     assert.deepEqual(await git.deleteFloor(repo, 'side', true), { deleted: true });
   } finally { s.done(); }
 });
+
+// ---------- review fixes for #69 ----------
+test('gitNoMatch: only exit code 1 means "no such key"; a kill, a timeout or a bare "Command failed" does not', () => {
+  assert.equal(git.gitNoMatch(Object.assign(new Error('x'), { code: 1 })), true);
+  assert.equal(git.gitNoMatch(Object.assign(new Error('Command failed: git config'), { code: 128 })), false);
+  assert.equal(git.gitNoMatch(Object.assign(new Error('Command failed: git config'), { code: null, killed: true })), false);
+  assert.equal(git.gitNoMatch(new Error('Command failed: git config')), false);
+});
+
+test('createWorktree cleans up the new room when the base cannot be saved, and the open fails with that error', async () => {
+  const s = scratch();
+  try {
+    const repo = makeRepo(s.dir);
+    plain(repo, ...IDENT, 'commit', '-q', '-a', '-m', 'two');
+    fs.writeFileSync(path.join(repo, '.git', 'config.lock'), ''); // git config cannot write while this exists
+    await assert.rejects(git.createWorktree(repo, 'locked'), /lock/i);
+    fs.rmSync(path.join(repo, '.git', 'config.lock'));
+    assert.equal(plain(repo, 'branch', '--list', 'agent/*').trim(), '', 'no branch left behind');
+    assert.equal((await git.layout(repo)).length, 1, 'no worktree left behind');
+    assert.ok(!fs.existsSync(path.join(s.dir, 'repo.worktrees', 'locked')), 'no folder left behind');
+  } finally { s.done(); }
+});
+
+test('createWorktree says in plain words when the folder next to the repository cannot be made', async () => {
+  const s = scratch();
+  try {
+    const repo = makeRepo(s.dir);
+    plain(repo, ...IDENT, 'commit', '-q', '-a', '-m', 'two');
+    fs.writeFileSync(path.join(s.dir, 'repo.worktrees'), 'a file, not a folder');
+    await assert.rejects(git.createWorktree(repo, 'x'), /The office cannot make the folder .*repo\.worktrees/);
+  } finally { s.done(); }
+});
+
+test('two agents that ask for one folder name at once get two folders (the folder is claimed, not checked)', async () => {
+  const s = scratch();
+  try {
+    const repo = makeRepo(s.dir);
+    plain(repo, ...IDENT, 'commit', '-q', '-a', '-m', 'two');
+    const [a, b, c] = await Promise.all([git.createWorktree(repo, 'same'), git.createWorktree(repo, 'same'), git.createWorktree(repo, 'same')]);
+    assert.equal(new Set([a, b, c].map((x) => path.normalize(x.root).toLowerCase())).size, 3);
+    assert.equal((await git.layout(repo)).length, 4);
+  } finally { s.done(); }
+});
+
+test('a base branch that is gone (deleted or renamed) is no base: the room keeps its own floor', async () => {
+  const s = scratch();
+  try {
+    const repo = makeRepo(s.dir);
+    plain(repo, ...IDENT, 'commit', '-q', '-a', '-m', 'two');
+    plain(repo, 'branch', 'side');
+    const made = await git.createWorktree(repo, 'orphan');
+    plain(repo, 'config', `branch.${made.branch}.officebase`, 'side');
+    assert.equal((await git.locate(made.root)).base, 'side');
+    plain(repo, 'branch', '-m', 'side', 'side2');
+    assert.equal((await git.locate(made.root)).base, undefined, 'locate');
+    assert.equal((await git.layout(repo)).find((w) => w.branch === made.branch).base, undefined, 'layout');
+  } finally { s.done(); }
+});
+
+test('floorCandidates() leaves out agent branches, so they do not pile up as floors without a room', async () => {
+  const s = scratch();
+  try {
+    const repo = makeRepo(s.dir);
+    plain(repo, ...IDENT, 'commit', '-q', '-a', '-m', 'two');
+    plain(repo, 'branch', 'side');
+    const made = await git.createWorktree(repo, 'gone soon');
+    await git.removeRoom(repo, made.root, true);
+    assert.ok(plain(repo, 'branch', '--list', made.branch).trim(), 'the branch is still there');
+    const list = await git.floorCandidates(repo);
+    assert.ok(list.includes('side'));
+    assert.ok(!list.includes(made.branch), list.join(','));
+  } finally { s.done(); }
+});
