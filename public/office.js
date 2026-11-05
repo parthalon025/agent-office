@@ -1348,7 +1348,8 @@
 
     // With no live session the welcome card shows. One card at a time: it waits while the DS Since you left card
     // shows (they share the middle of the screen, and do not both fit on a phone), and the dock holds the primary button then (#66).
-    var welcome = !!snap && !live.length && !p.syl;
+    // It also waits while the camera looks at a screen (p.look): the Security room screens work with no session (#70).
+    var welcome = !!snap && !live.length && !p.syl && !p.look;
     return h(React.Fragment, null,
       welcome ? h('div', { className: 'welcome' },
         h('div', { className: 'welcome-logo' }, h(A.Logo, { variant: 'lockup', height: 28 })),
@@ -1822,7 +1823,7 @@
 
     return h(React.Fragment, null,
       h('div', { className: 'view' + (fading ? ' is-fading' : '') }, scene),
-      ambient ? null : h(Controls, { sel: cur2.view === 'office' ? sel : null, syl: syl && cur2.view === 'office', buildings: list, shown: shown, shownName: (list.filter(function (b) { return b.key === shown; })[0] || def || {}).name, toast: toast, needs: needs.length, onNeeds: function () { setDlg({ name: 'needs' }); }, onBuilding: function (k) { pick(k); if (view === 'city') go('office'); }, onCity: function () { go('city'); }, onOffice: function () { introNext.current = true; go('office'); }, view: cur2.view, onSessions: function () { setDlg({ name: 'sessions' }); }, onCompact: function () { setAmbient(true); },
+      ambient ? null : h(Controls, { sel: cur2.view === 'office' ? sel : null, syl: syl && cur2.view === 'office', look: !!look, buildings: list, shown: shown, shownName: (list.filter(function (b) { return b.key === shown; })[0] || def || {}).name, toast: toast, needs: needs.length, onNeeds: function () { setDlg({ name: 'needs' }); }, onBuilding: function (k) { pick(k); if (view === 'city') go('office'); }, onCity: function () { go('city'); }, onOffice: function () { introNext.current = true; go('office'); }, view: cur2.view, onSessions: function () { setDlg({ name: 'sessions' }); }, onCompact: function () { setAmbient(true); },
         onFloors: function () { setDlg({ name: 'floors' }); }, onExtensions: extensions, onTerminal: openTerminal, onOpen: function () { show('open'); }, onPast: function () { show('past'); }, onSchedules: function () { show('schedules'); }, onHooks: function () { show('hooks'); }, onKinds: function () { setDlg({ name: 'kinds' }); }, onChanges: changes }),
       d === 'open' ? h(OpenDialog, { shownPath: shownPath, kind: dlg.kind, spendLimit: info.spendLimit, recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
       d === 'kinds' ? h(KindsDialog, { onOpen: function (kind) { refresh().then(function () { setDlg({ name: 'open', kind: kind }); }); }, onClose: close }) : null,

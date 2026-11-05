@@ -176,7 +176,8 @@ export function openRefusal(rules, provider) {
 // The reasons name no agent kind, so a screen can say one reason once for several kinds ("Not enforced for Hermes, dsh.").
 const NOT_SET_UP = 'The office has no provider for this agent kind yet. The rule applies when it has one.';
 const UNGATED = 'This agent runs this kind of call without asking the office.';
-const CLAUDE_DECIDES = 'Ask holds only the calls Claude Code asks about. Its own allow rules and permission mode can run a call without asking.';
+// Short enough for one line on the wall (public/security.js footer). The agent: Claude Code, the only kind with these rows.
+const CLAUDE_DECIDES = 'The agent asks only when its own allow rules and permission mode say so.';
 const NO_COST_ASK = 'The office does not ask about cost yet: Ask lets the agent run, like Allow.';
 /**
  * Per agent kind (column): { reason, rows, asks }. reason '' means the office enforces the cells of that kind; else every

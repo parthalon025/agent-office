@@ -169,7 +169,7 @@ test('Spend: minus at $1 (or under $1.50) never removes the limit; No limit need
 });
 
 test('an Ask that Claude Code decides by itself says Partly enforced, and why; Deny there says nothing', () => {
-  const why = 'Ask holds only the calls Claude Code asks about. Its own allow rules and permission mode can run a call without asking.';
+  const why = 'The agent asks only when its own allow rules and permission mode say so.';
   const enf = { ...enforce, 'claude-code': { ...enforce['claude-code'], asks: { shell: why } } };
   const d = (rules) => ({ sec: { rules, enforce: enf, spend: {} }, building: B, buildingName: 'repo' });
   const v = view({ screen: 'commands' });
