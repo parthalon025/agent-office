@@ -20,7 +20,17 @@
    Without a working cookie the page says so (officeAdapter.onAuth) and asks again every 5 s: a launch link opened
    in another tab gives this tab the new cookie too. */
 (function () {
-  var store = window.OfficeBuilding.createStore();
+  var problemFns = [];
+  // The lean snapshot leaves out the oldest replies of a session with long replies (wire.js olderReplies). The store asks for
+  // them here before a chat fills (#80): the whole reply list of one session, from GET /api/session.
+  var store = window.OfficeBuilding.createStore({
+    fetchReplies: function (uid) {
+      return ready.then(function () { return fetch('/api/session?uid=' + encodeURIComponent(uid)); })
+        .then(function (r) { if (!r.ok) throw new Error('No session.'); return r.json(); })
+        .then(function (j) { return (j.session && j.session.replies) || []; });
+    },
+    onProblem: function (text) { problemFns.forEach(function (fn) { fn(text); }); }
+  });
 
   var authFns = [], auth = null, es = null, retry = null;
   function setAuth(a) {
@@ -126,6 +136,11 @@
     authFns.push(fn);
     if (auth) fn(auth);
     return function () { authFns = authFns.filter(function (f) { return f !== fn; }); };
+  };
+  // fn(text) when the page could not load something it needs to show a bot's chat in full (older replies). Returns the unsubscribe.
+  facade.onProblem = function (fn) {
+    problemFns.push(fn);
+    return function () { problemFns = problemFns.filter(function (f) { return f !== fn; }); };
   };
   facade.mount = function (repo) {
     var m = store.mount(repo);

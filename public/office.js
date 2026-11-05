@@ -1612,6 +1612,10 @@
         shown = a.ok ? null : toast({ tone: 'error', title: 'No access to the office', text: a.reason });
       });
     }, []);
+    // Older replies that did not load (#80): the chat of that bot shows the newest ones. An error toast stays until closed.
+    useEffect(function () {
+      return window.officeAdapter.onProblem(function (text) { toast({ tone: 'error', title: 'Older replies', text: text }); });
+    }, []);
     var timed = window.OfficeToasts.hasTimed(toasts);
     useEffect(function () {
       if (!timed) return undefined;

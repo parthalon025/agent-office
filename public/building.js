@@ -205,8 +205,30 @@
     var store = {};
 
     store.latest = function () { return latest; };
+    // The older replies of a session that the lean snapshot left out (#80). The page asks the server once (opts.fetchReplies(uid)
+    // gives the session's whole reply list) and keeps the answer; a failure is told once (opts.onProblem(text)) and the chat
+    // shows the newest replies. A new scene tries again (attach clears the failures). Entries of sessions that are gone are dropped.
+    var oldReplies = {}, oldAsked = {}, oldFailed = {};
+    // firstId: the id of the newest-window's first reply. Answers { list } (replies older than that, in order), { wait } or { none }.
+    store._older = function (uid, firstId) {
+      var have = oldReplies[uid];
+      if (have && have.length && have[have.length - 1].id < firstId - 1) have = oldReplies[uid] = null;   // replies came since: a gap, ask again
+      if (have) return { list: have.filter(function (r) { return r.id < firstId; }) };
+      if (!opts.fetchReplies || oldFailed[uid]) return { none: true };
+      if (!oldAsked[uid]) {
+        oldAsked[uid] = true;
+        Promise.resolve().then(function () { return opts.fetchReplies(uid); }).then(function (list) { oldReplies[uid] = Array.isArray(list) ? list : []; }, function () {
+          oldFailed[uid] = true;
+          if (opts.onProblem) { try { opts.onProblem('The chat shows only the newest replies. The older replies did not load.'); } catch (x) { /* a bad listener must not stop the office */ } }
+        }).then(function () { delete oldAsked[uid]; attached.slice().forEach(function (m) { m._follow(latest); }); });
+      }
+      return { wait: true };
+    };
     store.set = function (snap) {
       latest = snap;
+      var live = {};
+      (snap.sessions || []).forEach(function (s) { live[s.uid] = true; });
+      [oldReplies, oldFailed].forEach(function (c) { Object.keys(c).forEach(function (u) { if (!live[u]) delete c[u]; }); });
       attached.slice().forEach(function (m) { m._follow(snap); });
       listeners.slice().forEach(function (fn) { try { fn(snap); } catch (x) { /* a bad listener must not stop the office */ } });
     };
@@ -383,7 +405,7 @@
             if (s.status === 'ended') return;
             firstSight = true;
             var name = uniqueName(s.name);
-            k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: V.status(s).key, task: V.taskLine(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, model: s.model, ended: false, place: placeKey(pl), sup: V.supervision(s), room: roomOf(pl, emit) };
+            k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: V.status(s).key, task: V.taskLine(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, olderDone: false, firstKind: seedAll ? 'seed' : 'restore', prevSeen: prev ? prev.replySeen : null, model: s.model, ended: false, place: placeKey(pl), sup: V.supervision(s), room: roomOf(pl, emit) };
             // platform: the line on the bot's card: the supervision label of an ungated agent, else its agent kind (Claude Code,
             // Ollama, ...), the same word every list shows (vocab.js)
             var bot = withColor({ name: name, role: 'coder', shape: shapeOf(s.uid), status: k.status, task: k.task, platform: V.platform(s, snapshot.kinds), identity: s.cwd }, s.uid);
@@ -428,13 +450,32 @@
           // scene sees for the first time in a live pass are restored too (seeded, without at, like its error below): it
           // may have said them live here before (a round trip through another building, a reopened session that
           // carries its old replies), and a seeded event with at after the last visit would be recorded a second time (#58).
-          (s.replies || []).forEach(function (r) {
-            if (r.id <= k.replySeen) return;
-            k.replySeen = r.id;
-            var e = prev ? pick(r.id <= prev.replySeen) : (firstSight && !seedAll ? restore : emit), msg = stamp({ type: 'message', bot: bot0, text: r.text }, r.t);
-            if (e !== out) msg.say = false;
-            e(msg);
-          });
+          // The snapshot is lean: a session with long replies carries only its newest ones and says how many it left out
+          // (olderReplies, #80). The chat appends in event order, so a bot's replies wait until the older ones are here
+          // (the store asks the server once), then all go in together, oldest first. k.firstKind and k.prevSeen keep how
+          // the bot's first replies are told, because the pass that tells them may come later. A reply that arrives while
+          // the older ones load (above holdTop) is news and speaks. If the older ones cannot load, the newest ones go in
+          // and the store has told the page.
+          var list = s.replies || [], hold = false;
+          if (!k.olderDone) {
+            if (!s.olderReplies) k.olderDone = true;
+            else {
+              var old = store._older(s.uid, list.length ? list[0].id : Infinity);
+              if (old.wait) { hold = true; if (k.holdTop === undefined) k.holdTop = list.length ? list[list.length - 1].id : 0; }
+              else { if (old.list) list = old.list.concat(list); k.olderDone = true; }
+            }
+          }
+          if (!hold) {
+            list.forEach(function (r) {
+              if (r.id <= k.replySeen) return;
+              k.replySeen = r.id;
+              var kind = k.holdTop !== undefined && r.id > k.holdTop ? 'live' : k.prevSeen !== null ? (r.id <= k.prevSeen ? 'restore' : 'live') : k.firstKind;
+              var e = kind === 'seed' ? seeded : kind === 'restore' ? restore : out, msg = stamp({ type: 'message', bot: bot0, text: r.text }, r.t);
+              if (e !== out) msg.say = false;
+              e(msg);
+            });
+            k.firstKind = 'live'; k.prevSeen = null; k.holdTop = undefined;
+          }
           // a queued message was read by the session
           var queued = (s.inbox || []).length;
           if (queued < k.inbox) emit({ type: 'message', bot: bot0, text: 'I read your message.', format: 'plain' });
@@ -489,7 +530,7 @@
       }
       m._follow = function (snap) { seeWorktrees(snap); if (emitRef) { prime(emitRef); apply(snap, emitRef); syncUsage(snap, emitRef); } };
       m.attach = function (emit) {
-        known = {}; taken = {}; layout = freshLayout(); lastUsage = { percent: null, t: 0 };
+        known = {}; taken = {}; layout = freshLayout(); lastUsage = { percent: null, t: 0 }; oldFailed = {};
         emitRef = emit; primed = false; seedSnap = latest;
         if (attached.indexOf(m) < 0) attached.push(m);
         defer(function () { if (emitRef === emit) prime(emit); });

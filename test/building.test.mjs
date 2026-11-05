@@ -52,7 +52,7 @@ function rig(over = {}) {
     onChange: () => {},
     setTimer: () => 0,
   });
-  r.store = B.createStore({ now: () => r.t, defer: over.defer || ((fn) => fn()), setTimer: (fn, ms) => { r.timers.push({ fn, ms }); } });
+  r.store = B.createStore({ now: () => r.t, defer: over.defer || ((fn) => fn()), setTimer: (fn, ms) => { r.timers.push({ fn, ms }); }, fetchReplies: over.fetchReplies, onProblem: over.onProblem });
   r.snap = () => {
     const sessions = [...r.tracker.sessions.values()].map((s) => ({ ...s, place: s.placed ? placeOfSession(s.git, s.cwd) : null }));
     const by = {};
@@ -994,6 +994,129 @@ test('a reopened session carries its old replies: restored in a live pass, no bu
   r.t += 5; r.tracker.pushReply(fresh, 'Third.'); r.push();
   const nw = of(m.ev, 'message').filter((e) => e.bot === botB).at(-1);
   assert.deepEqual([nw.text, nw.seeded, nw.say], ['Third.', undefined, undefined]);
+});
+
+// #80: the lean snapshot (wire.js) leaves out the oldest replies of a session whose replies go over the cap. The page
+// asks the server for the whole list (GET /api/session) before it fills the chat, so the lines go in in order.
+const bigReplies = (r, s, n) => { for (let i = 0; i < n; i++) { r.t += 5; r.tracker.pushReply(s, 'R' + i + ' ' + 'x'.repeat(7990)); } };
+const names = (ev, bot) => said(ev, bot).map((t) => t.split(' ')[0]);
+const upTo = (n) => Array.from({ length: n }, (_, i) => 'R' + i);
+const settle = () => new Promise((res) => setImmediate(res));
+// what GET /api/session answers: the whole reply list of the session, as JSON
+const serverReplies = (r, asked) => async (uid) => { asked.push(uid); return JSON.parse(JSON.stringify([...r.tracker.sessions.values()].find((x) => x.uid === uid).replies)); };
+
+test('a session with more replies than the snapshot carries: the chat gets the older ones first, in order, each once, restored', async () => {
+  const asked = [], r = rig({ wire: true, fetchReplies: (uid) => serverReplies(r, asked)(uid) });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  const s = [...r.tracker.sessions.values()][0];
+  bigReplies(r, s, 12);
+  r.push();
+  const lean = r.store.sessionByUid(s.uid);
+  assert.equal(lean.replies.length + lean.olderReplies, 12, 'the snapshot says how many replies it left out');
+  assert.ok(lean.olderReplies > 0);
+  const m = r.mount(KEY_A);
+  assert.deepEqual(said(m.ev), [], 'newer lines wait: they would go in before the older ones');
+  await settle();
+  assert.deepEqual(names(m.ev), upTo(12), 'every reply the tracker keeps, in order');
+  assert.deepEqual(of(m.ev, 'message').map((e) => [e.seeded, e.say]), Array(12).fill([true, false]), 'restored: no speech bubble');
+  r.push(); r.push();
+  assert.equal(of(m.ev, 'message').length, 12, 'a later snapshot repeats nothing');
+  r.t += 5; r.tracker.pushReply(s, 'New.'); r.push();
+  const nw = of(m.ev, 'message').at(-1);
+  assert.deepEqual([nw.text, nw.seeded, nw.say], ['New.', undefined, undefined], 'a reply after that speaks');
+  assert.deepEqual(asked, [s.uid], 'one request');
+});
+
+test('a reply that comes while the older ones load goes in after them and speaks', async () => {
+  const asked = [], r = rig({ wire: true, fetchReplies: (uid) => serverReplies(r, asked)(uid) });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  const s = [...r.tracker.sessions.values()][0];
+  bigReplies(r, s, 12); r.push();
+  const m = r.mount(KEY_A);
+  r.t += 5; r.tracker.pushReply(s, 'New.'); r.push();   // the request is out
+  assert.deepEqual(said(m.ev), []);
+  await settle();
+  assert.deepEqual(said(m.ev).map((t) => t.split(' ')[0]), [...upTo(12), 'New.']);
+  assert.deepEqual(of(m.ev, 'message').map((e) => e.say), [...Array(12).fill(false), undefined]);
+});
+
+test('older replies that cannot load: the newest ones show, the page is told once, and a new scene tries again', async () => {
+  const problems = [], asked = [];
+  let fail = true;
+  const r = rig({ wire: true, onProblem: (t) => problems.push(t),
+    fetchReplies: (uid) => (fail ? (asked.push(uid), Promise.reject(new Error('down'))) : serverReplies(r, asked)(uid)) });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  const s = [...r.tracker.sessions.values()][0];
+  bigReplies(r, s, 12); r.push();
+  const lean = r.store.sessionByUid(s.uid);
+  const m = r.mount(KEY_A);
+  await settle();
+  assert.deepEqual(names(m.ev), upTo(12).slice(12 - lean.replies.length), 'the replies the snapshot carries');
+  assert.equal(problems.length, 1);
+  assert.match(problems[0], /older replies/i);
+  r.push(); r.push(); await settle();
+  assert.equal(asked.length, 1, 'no new request on every snapshot');
+  assert.equal(problems.length, 1);
+  fail = false;
+  const m2 = r.mount(KEY_A);
+  await settle();
+  assert.deepEqual(names(m2.ev), upTo(12), 'a new scene gets them all');
+});
+
+test('a second scene of the building has the older replies at once: the page asks the server once', async () => {
+  const asked = [], r = rig({ wire: true, fetchReplies: (uid) => serverReplies(r, asked)(uid) });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  const s = [...r.tracker.sessions.values()][0];
+  bigReplies(r, s, 12); r.push();
+  const m = r.mount(KEY_A);
+  await settle();
+  m.detach();
+  const m2 = r.mount(KEY_A);
+  assert.deepEqual(names(m2.ev), upTo(12), 'no waiting: the page kept them');
+  assert.equal(asked.length, 1);
+});
+
+test('replies that came after the page kept the older ones: a new scene asks again, so no reply is missing between them', async () => {
+  const asked = [], r = rig({ wire: true, fetchReplies: (uid) => serverReplies(r, asked)(uid) });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  const s = [...r.tracker.sessions.values()][0];
+  bigReplies(r, s, 12); r.push();
+  const m = r.mount(KEY_A);
+  await settle();
+  m.detach();
+  for (let i = 12; i < 24; i++) { r.t += 5; r.tracker.pushReply(s, 'R' + i + ' ' + 'x'.repeat(7990)); }
+  r.push();
+  const m2 = r.mount(KEY_A);
+  await settle();
+  assert.deepEqual(names(m2.ev), upTo(24));
+  assert.equal(asked.length, 2);
+});
+
+test('a bot that leaves and comes back keeps the older replies: restored once, nothing is recorded twice', async () => {
+  const asked = [], r = rig({ wire: true, fetchReplies: (uid) => serverReplies(r, asked)(uid) });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  const s = [...r.tracker.sessions.values()][0];
+  bigReplies(r, s, 12); r.push();
+  const m = r.mount(KEY_A);
+  await settle();
+  s.git = { ...GITS[REPO_B] }; s.cwd = REPO_B; r.t += 5; r.push();
+  s.git = { ...GITS[REPO_A] }; s.cwd = REPO_A; r.t += 5; r.push();
+  await settle();
+  const all = of(m.ev, 'message');
+  assert.deepEqual(all.slice(12).map((e) => e.text.split(' ')[0]), upTo(12));
+  assert.ok(all.slice(12).every((e) => e.seeded === true && e.say === false && e.at === undefined), 'restored with no time');
+  assert.equal(asked.length, 1);
+});
+
+test('replies that all fit the snapshot need no request', async () => {
+  const asked = [], r = rig({ wire: true, fetchReplies: (uid) => serverReplies(r, asked)(uid) });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  const s = [...r.tracker.sessions.values()][0];
+  r.tracker.pushReply(s, 'One.'); r.tracker.pushReply(s, 'Two.'); r.push();
+  assert.equal(r.store.sessionByUid(s.uid).olderReplies, 0);
+  const m = r.mount(KEY_A);
+  assert.deepEqual(said(m.ev), ['One.', 'Two.']);
+  assert.equal(asked.length, 0);
 });
 
 // ---------- the wire (wire.js): lean snapshots and patches give the scene the same events ----------
