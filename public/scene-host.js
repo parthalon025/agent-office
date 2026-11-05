@@ -19,10 +19,14 @@
      framePose(it, cam, view, free, fill) -> { target, pos, zoom }: the camera that shows an item in the free part
      uvOn(it, point)                   -> { x, y } the point on a plane (0 to 1, x from its left edge, y from its bottom
                                           edge), or null: where on a screen a click is (in-scene controls, #70)
+     projectRect(it, cam, view)        -> { left, top, width, height } in client px: the box of a plane on screen, through an
+                                          orthographic camera that looks from cam.p at cam.t (the pinned layer, #89)
+     layerSame(a, b)                   -> true when two layer states draw the same (a rect within 0.5 px)
      parts                             -> finders for the DS geometry: isWall, isBackWall, isSideWall, isSign, isBoard
 
-   Browser part: attach(office, { covers() -> [rect] }) -> host, one per mounted office.
+   Browser part: attach(office, { covers() -> [rect], waiting() -> number }) -> host, one per mounted office.
      covers: the page's boxes over the scene (HUD columns, the dock, a side panel), in client px.
+     waiting: the count of requests that wait for the user (every building); the bezel of the screen in focus shows it.
      host.view(), host.inBuilding(), host.shownFloor(), host.onShownFloor(m, fg), host.inScene(m), host.shown(m)
      host.floorId()                    -> the DS id of the floor the user looks at, or null (building view, or unclear)
      host.rooms()                      -> [{ rg, room }] of the shown floor
@@ -31,8 +35,13 @@
      host.register(target)             -> off(); a pick target (see below)
      host.leave()                      -> the target drops its hover (the host clears the cursor)
      host.rehover()                    -> pick again under the pointer on the next frame
-     host.focused()                    -> { key, name, open, item, verb, kind } of the item in focus, or null
+     host.focused()                    -> { key, name, open, item, verb, kind, pin } of the item in focus, or null
      host.flying()                     -> true while the camera flies to an item or back
+     host.settled()                    -> true when nothing moves the camera: no flight, no engine framing, no intro
+     host.layer()                      -> the pinned layer: { key, kind, pin, item, rect, shown, waiting } of the screen in
+                                          focus, or null. rect: the screen's box in client px, every frame; shown: false
+                                          during a flight (the layer hides), true once it lands; waiting: opts.waiting()
+     host.onLayer(fn)                  -> off(); fn(layer() or null) in the frame it changes (before the engine draws)
      host.open()                       -> the second step for the item in focus (the page's Open button)
      host.show(target, item, open?)    -> the keyboard path: look at an item, and with open take the second step too
      host.blur()                       -> fly back to the camera the first look saved
@@ -56,7 +65,12 @@
    door) calls click() at once. A click on another screen looks at that one; a click on empty scene, Esc (the
    page) or Back flies back. The camera flies here only, and the engine does not reframe while an item is in focus.
    fill: the share of the free part the plane fills (default 0.88). clear: after the landing the camera stands this
-   far in front of the plane, so what stands closer to the viewer (a bot, its bubble, a desk) is clipped away. */
+   far in front of the plane, so what stands closer to the viewer (a bot, its bubble, a desk) is clipped away.
+   pin: a pinned screen (#89). Its look is its use: once the camera lands, the page lays a real DOM layer (chat, terminal,
+   diff) exactly over host.layer().rect, so text can be read, typed, selected and copied there. The layer follows the
+   screen every frame, hides during a flight, and refits at once (no flight) on a resize, a theme rebuild or a floor
+   rebuild. The page positions it with setProperty, never a style attribute (the CSP). Every focused screen, pinned or
+   not, has a bezel: the page shows layer().waiting on it. */
 (function (root) {
   'use strict';
 
@@ -207,6 +221,42 @@
     return { x: 0.5 + vdot(d, ax) / (2 * wx), y: 0.5 + vdot(d, ay) / (2 * wy) };
   }
 
+  // The box of a plane on screen (#89). it = { c, ax, ay } (planeOf). cam = { p: position, t: the point it looks at,
+  // up, zoom, top, bottom, left?, right? }: the DS camera is orthographic and looks at the controls' target (lookAt), so
+  // the camera axes come from p, t and up, like THREE's. Without left and right the frustum has the view's aspect.
+  // view: the canvas box in client px { left, top, right, bottom }. Null when the camera has no direction.
+  function projectRect(it, cam, view) {
+    if (!it || !cam || !view) return null;
+    var p = v3(cam.p), f = vnorm(vadd(v3(cam.t), p, -1)), up = vnorm(v3(cam.up || [0, 1, 0])) || [0, 1, 0];
+    if (!f) return null;
+    var right = vnorm(vcross(f, up));
+    if (!right) return null;
+    var u = vcross(right, f), z = cam.zoom > 0 ? cam.zoom : 1;
+    var W = view.right - view.left, Hh = view.bottom - view.top;
+    if (!(W > 0) || !(Hh > 0)) return null;
+    var top = +cam.top || 1, bot = cam.bottom != null ? +cam.bottom : -top;
+    var hh = (top - bot) / (2 * z), cy = (top + bot) / 2, hw, cx;
+    if (isFinite(cam.left) && isFinite(cam.right) && cam.right > cam.left) { hw = (cam.right - cam.left) / (2 * z); cx = (cam.left + cam.right) / 2; }
+    else { hw = hh * W / Hh; cx = 0; }
+    if (!(hh > 0) || !(hw > 0)) return null;
+    var c = v3(it.c), ax = v3(it.ax), ay = v3(it.ay), xs = [], ys = [];
+    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(function (q) {
+      var d = vadd(vadd(vadd(c, ax, q[0]), ay, q[1]), p, -1);
+      xs.push(view.left + ((vdot(d, right) - cx) / hw + 1) / 2 * W);
+      ys.push(view.top + (1 - (vdot(d, u) - cy) / hh) / 2 * Hh);
+    });
+    var l = Math.min.apply(null, xs), t = Math.min.apply(null, ys);
+    return { left: l, top: t, width: Math.max.apply(null, xs) - l, height: Math.max.apply(null, ys) - t };
+  }
+  // Two layer states draw the same: same screen, same state, a rect within half a pixel.
+  function layerSame(a, b) {
+    if (!a || !b) return a === b;
+    if (a.key !== b.key || a.shown !== b.shown || a.pin !== b.pin || a.waiting !== b.waiting || a.item !== b.item) return false;
+    var r = a.rect, s = b.rect;
+    if (!r || !s) return r === s;
+    return Math.abs(r.left - s.left) < 0.5 && Math.abs(r.top - s.top) < 0.5 && Math.abs(r.width - s.width) < 0.5 && Math.abs(r.height - s.height) < 0.5;
+  }
+
   // The DS geometry the page's decor looks for.
   function geo(m, type) { return m && m.isMesh && m.geometry && m.geometry.type === type && m.geometry.parameters; }
   function isWall(m) { var p = geo(m, 'BoxGeometry'); return !!p && Math.abs(p.height - 5.2) < 0.001; }
@@ -219,7 +269,7 @@
   };
 
   var pure = { inScene: inScene, shown: shown, floorOf: floorOf, floorGroups: floorGroups, shownFloor: shownFloor, viewOf: viewOf, roomGroups: roomGroups, rebuilt: rebuilt, choose: choose,
-    focusStep: focusStep, freeRect: freeRect, facing: facing, framePose: framePose, uvOn: uvOn, parts: parts };
+    focusStep: focusStep, freeRect: freeRect, facing: facing, framePose: framePose, uvOn: uvOn, projectRect: projectRect, layerSame: layerSame, parts: parts };
 
   // ---------- browser ----------
   // A token in px or ms from the page's CSS (no DOM in the tests: the fallback).
@@ -235,7 +285,8 @@
     try { var ins0 = office && office.inspect && office.inspect(); st = ins0 && ins0.stage; } catch (x) { st = null; }
     if (!T || !st || !st.scene || !st.K || !st.r || !st.cam || !st.anim) return null;
     var K = st.K, cv = st.r.domElement, scene = st.scene;
-    var targets = [], frames = [], rebuildFns = [], focusFns = [], dead = false;
+    var targets = [], frames = [], rebuildFns = [], focusFns = [], layerFns = [], dead = false;
+    var lastLayer = null, lastSize = null;   // the layer state the listeners have, and the canvas size of the last frame
     var ray = new T.Raycaster(), ndc = new T.Vector2();
     var ptr = null, hoverT = null, hoverItem = null, cursorMine = false, down = null, downFg = null, prev = null;
     // focus: the item in focus ({ target, item, key, mesh, spec, open }), its state for focusStep, the camera the
@@ -383,7 +434,7 @@
       }
     }
     function info() {
-      return foc ? { key: foc.key, name: foc.target.name, open: foc.open, item: foc.item, verb: foc.spec.verb || '', kind: foc.spec.kind || foc.target.name } : null;
+      return foc ? { key: foc.key, name: foc.target.name, open: foc.open, item: foc.item, verb: foc.spec.verb || '', kind: foc.spec.kind || foc.target.name, pin: !!foc.spec.pin } : null;
     }
     function notify() {
       var f = info();
@@ -447,8 +498,10 @@
       try { f = foc.target.find ? foc.target.find(foc.key) : null; } catch (x) { f = null; }
       if (f && f.mesh && onShownFloor(f.mesh, fg)) {
         foc.item = f.item || foc.item;
-        if (f.mesh !== foc.mesh) { foc.mesh = f.mesh; foc.spec = Object.assign({}, foc.spec, { mesh: f.mesh }); }
+        var moved = f.mesh !== foc.mesh;
+        if (moved) { foc.mesh = f.mesh; foc.spec = Object.assign({}, foc.spec, { mesh: f.mesh }); }
         if (why.indexOf('theme') >= 0 || why.indexOf('floors') >= 0) refit(true, true);
+        else if (moved && foc.spec.pin) refit(true);   // a pinned layer stays whole on screen when the floor is built again
         return;
       }
       var ins = inspect() || {};
@@ -457,12 +510,14 @@
     // Frame the item in focus again. now: at once (no flight), unless a flight to it still runs.
     // reset: the engine moved the camera (a theme change framed the floor). The camera is no longer where the user left
     // it, so with no free part (a phone, a panel over the view) the item is framed in the whole view, not left on the floor.
+    // A camera that already shows the item so does not move (a flight to the same place would only hide a pinned layer).
     function refit(now, reset) {
       if (!foc) return;
       var pose = poseOf(foc.spec, !reset);
       if (!pose) return;
       widenZoom(pose.zoom);
       if (fly && !fly.home) { fly.p1 = pose.pos; fly.t1 = pose.target; fly.z1 = pose.zoom; fly.near = pose.near || null; return; }   // still flying in: land on the new frame
+      if (!fly && posed(pose)) return;
       if (now === true) {
         fly = null;
         var p = pose.near || pose.pos;
@@ -473,17 +528,42 @@
       }
       flyTo(pose, cssNum('duration-camera', 600), null);
     }
-    // the screen box of a plane: the notes editor lays its text box exactly over the board
+    // The camera is already where the pose puts it (within a millionth of the view).
+    function posed(pose) {
+      var c = st.cam, t = ctlTarget(), p = pose.near || pose.pos, e = 1e-6 * (camNow().dist || 1);
+      return Math.abs(c.zoom - pose.zoom) < 1e-6 * pose.zoom &&
+        Math.abs(t.x - pose.target[0]) < e && Math.abs(t.y - pose.target[1]) < e && Math.abs(t.z - pose.target[2]) < e &&
+        Math.abs(c.position.x - p[0]) < e && Math.abs(c.position.y - p[1]) < e && Math.abs(c.position.z - p[2]) < e;
+    }
+    // The camera terms projectRect needs, as they are now: the controls point the camera at their target each frame.
+    function camState() {
+      var c = st.cam;
+      return { p: vec(c.position), t: vec(ctlTarget()), up: c.up ? vec(c.up) : [0, 1, 0], zoom: c.zoom, top: c.top, bottom: c.bottom, left: c.left, right: c.right };
+    }
+    // the screen box of a plane (default: the item in focus): the pinned layer and the notes editor lie exactly over it
     function rect(mesh) {
-      var m = mesh || (foc && foc.mesh), g = m && m.geometry && m.geometry.parameters;
-      if (!g || !(g.width > 0) || !(g.height > 0) || !m.localToWorld) return null;
-      var r = cv.getBoundingClientRect(), xs = [], ys = [];
-      [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(function (q) {
-        var v = new T.Vector3(q[0] * g.width / 2, q[1] * g.height / 2, 0);
-        m.localToWorld(v); v.project(st.cam);
-        xs.push(r.left + (v.x + 1) / 2 * r.width); ys.push(r.top + (1 - v.y) / 2 * r.height);
-      });
-      return { left: Math.min.apply(null, xs), top: Math.min.apply(null, ys), width: Math.max.apply(null, xs) - Math.min.apply(null, xs), height: Math.max.apply(null, ys) - Math.min.apply(null, ys) };
+      var m = mesh || (foc && foc.mesh);
+      return projectRect(planeOf(m), camState(), viewRect());
+    }
+    // ----- the pinned layer (#89): the box of the screen in focus, every frame; hidden while the camera flies -----
+    function waitingNow() { try { var n = opts.waiting ? +opts.waiting() : 0; return n > 0 ? Math.floor(n) : 0; } catch (x) { return 0; } }
+    function layerNow() {
+      if (!foc) return null;
+      var r = fly ? null : rect(foc.mesh);
+      return { key: foc.key, kind: foc.spec.kind || foc.target.name, pin: !!foc.spec.pin, item: foc.item, rect: r, shown: !fly && !!r, waiting: waitingNow() };
+    }
+    function emitLayer() {
+      var l = layerNow();
+      if (layerSame(l, lastLayer)) return;
+      lastLayer = l;
+      layerFns.slice().forEach(function (fn) { try { fn(l); } catch (x) { /* one listener must not stop the others */ } });
+    }
+    // The canvas changed size (the window, the DS height prop): frame the item in focus again at once, so a pinned layer
+    // stays on its screen and does not hide for a flight.
+    function sizeStep() {
+      var r = cv.getBoundingClientRect(), s = Math.round(r.width) + 'x' + Math.round(r.height);
+      if (lastSize && s !== lastSize && foc) refit(true);
+      lastSize = s;
     }
 
     // ----- clicks: one click, one action -----
@@ -533,10 +613,12 @@
       } catch (x) { /* one bad frame must not stop the office */ }
       try {
         if (foc && st.goal) st.goal = null;   // a goal set before the focus began: the engine must not reframe while an item is in focus
+        sizeStep();
         stepFly(dt);
         if (fly && ptr) ptr.dirty = true;     // the item under the pointer moves while the camera flies
         if (ptr && ptr.dirty) { ptr.dirty = false; hoverStep(); }
       } catch (x) { /* one bad frame must not stop the office */ }
+      try { emitLayer(); } catch (x) { /* one bad frame must not stop the office */ }
       frames.slice().forEach(function (fn) { try { fn(dt, t); } catch (x) { /* one bad frame must not stop the office */ } });
     }
     try { prev = state(); } catch (x) { prev = null; }
@@ -562,7 +644,9 @@
       restoreZoom();
       foc = null; saved = null; heldGoal = null;
       if (goalHooked) { delete st.goal; st.goal = goalVal; }   // the stage's own property again
-      targets = []; frames = []; rebuildFns = []; focusFns = []; hoverT = null;
+      var hadLayer = !!lastLayer; lastLayer = null;
+      if (hadLayer) layerFns.slice().forEach(function (fn) { try { fn(null); } catch (x) { /* gone */ } });   // the layer goes with the scene
+      targets = []; frames = []; rebuildFns = []; focusFns = []; layerFns = []; hoverT = null;
     }
     return {
       stage: st, canvas: cv,
@@ -588,10 +672,14 @@
       hovered: function () { return hoverT ? { target: hoverT, item: hoverItem } : null; },
       focused: info,
       flying: function () { return !!fly; },
+      settled: function () { return !dead && !fly && !goalVal && !st.intro; },
+      layer: function () { return lastLayer; },
+      onLayer: function (fn) { return add(layerFns, fn); },
       open: function () { if (foc && focusStep(focusS, { type: 'click', key: foc.key }).act === 'open') openFocus(null, null, null); },
       show: show,
       blur: function () { if (focusStep(focusS, { type: 'back' }).act === 'back') back(); },
-      refit: function () { refit(false); },
+      // a pinned layer is on the screen: frame it again at once, so the layer follows and does not hide for a flight
+      refit: function () { refit(!!(foc && foc.spec.pin)); },
       free: free,
       rect: rect,
       onFocus: function (fn) { return add(focusFns, fn); },

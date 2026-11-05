@@ -146,6 +146,23 @@ test('OfficeTypeCard: every office type has a picture in Day, Night and Sublevel
   assert.match(readFileSync(join(root, 'components', 'OfficeTypeCard', 'preview.html'), 'utf8'), /\["security",/);
 });
 
+// #89: the terminal and changes side panels are gone; the desk monitor and the room's wall screen are pinned screens. No
+// approval can hide: every screen in focus shows the bezel count, and the desk screen shows the requests of its session.
+test('office.js: pinned screens replace the terminal and changes panels, and every screen in focus has the bezel count (#89)', () => {
+  const js = readFileSync(join(pub, 'office.js'), 'utf8'), css = readFileSync(join(pub, 'office.css'), 'utf8');
+  assert.doesNotMatch(js, /TerminalPanel|terminal-panel/, 'no terminal side panel');
+  assert.doesNotMatch(css, /\.terminal-panel/, 'no terminal side panel style');
+  const fn = (name) => { const at = js.indexOf('function ' + name + '('); assert.ok(at >= 0, name); return js.slice(at, js.indexOf('\n  }\n', at)); };
+  assert.match(fn('DeskScreen'), /h\(RequestBar, \{ session: s/, 'the desk screen shows the requests of its session');
+  assert.match(fn('DeskScreen'), /h\(Bezel, \{ inline: true, count: p\.waiting/, 'the desk screen has the bezel count');
+  assert.match(fn('ChangesScreen'), /h\(Bezel, \{ inline: true, count: p\.waiting/, 'the changes screen has the bezel count');
+  assert.match(js, /layer && !pinned && hostRef\.current \? h\(Bezel, \{ host: hostRef\.current/, 'a screen that is not pinned has the bezel count too');
+  assert.match(js, /waiting: function \(\) \{ return needsRef\.current; \}/, 'the count is every request of every building');
+  assert.match(fn('ChangesScreen'), /h\(ChangesConfirm, \{ c: c \}\)/, 'pull request and worktree removal keep their confirm dialog');
+  assert.match(fn('putBox'), /setProperty\('--pin-x'/, 'the box is set with setProperty, never a style attribute');
+  assert.doesNotMatch(fn('DeskScreen') + fn('ChangesScreen') + fn('Bezel'), /style:/, 'no style prop on a pinned layer');
+});
+
 // Review M6: at 400 px the Security wall was a 172 px strip between the floor list and the room card. While a Security screen
 // is in focus at 820 px and below, the page hides those two (as has-panel hides the right column; the Decisions inbox stays),
 // frames the screen again, and the look bar shows the open requests, so an approval never hides.

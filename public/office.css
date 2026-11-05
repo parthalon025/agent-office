@@ -81,7 +81,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
   /* the Since you left card and the room card both sit on the dock, so the room card waits until the card closes (#66) */
   #office:has(.ao-hud-syl) .ao-hud-right:not(.ao-hud-inbox):not(.ao-hud-chat) { display: none; }
 }
-/* One panel at a time: the terminal, board and stats panels take the right column. */
+/* One panel at a time: a pinned screen (desk chat and terminal, room changes) and the board and stats panels take the right column. */
 /* hide the column but keep its box: the DS camera reads its left edge to frame the scene */
 #office.has-panel .ao-hud-right:not(.ao-hud-inbox) { visibility: hidden; pointer-events: none; }
 /* A Security room screen in focus on a narrow screen (review M6): the floor list and the room card give the wall the view's
@@ -320,11 +320,37 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .feature-tags { display: flex; flex-wrap: wrap; gap: var(--space-1); margin-top: var(--space-1); }
 @media (max-width: 820px) { .agent-row { flex-wrap: wrap; } .agent-who { flex-basis: 50%; } }
 
-/* ---------- terminal panel: one session as a full terminal ---------- */
-.terminal-panel { position: fixed; z-index: var(--z-sheet); right: var(--space-4); top: 68px; bottom: var(--strip-clear, 180px); width: min(560px, calc(100vw - 2 * var(--space-4))); display: flex; flex-direction: column; background: var(--panel); backdrop-filter: blur(var(--blur-panel)); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-panel); overflow: hidden; animation: page-in var(--duration-base) var(--ease-out) both; }
-.term-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); }
-.term-name { flex: 1 1 calc(var(--space-6) * 3); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--type-title-weight); }
-.term-model { color: var(--muted); }
+/* ---------- pinned screens (#89): a DOM layer exactly over the screen in focus (office.js DeskScreen, ChangesScreen) ----------
+   scene-host.js gives the screen's box every frame; office.js sets it as --pin-x, --pin-y, --pin-w and --pin-h with setProperty
+   (no style attribute: the CSP). The layer hides while the camera flies ([hidden]) and is a DOM panel with the full Definition of
+   done: focus, keyboard, screen reader. On a small box (is-small) the head and the input get tighter. */
+.pin { position: fixed; z-index: var(--z-sheet); left: var(--pin-x, 0); top: var(--pin-y, 0); width: var(--pin-w, 0); height: var(--pin-h, 0); box-sizing: border-box; display: flex; flex-direction: column; min-width: 0; background: linear-gradient(var(--panel), var(--panel)), var(--bg); border: 1px solid var(--line); border-radius: var(--radius-md); box-shadow: var(--shadow-panel); overflow: hidden; color: var(--ink); animation: page-fade var(--duration-base) var(--ease-out) both; }
+.pin[hidden], .bezel[hidden] { display: none; }
+.pin-head { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); border-bottom: 1px solid var(--line); background: var(--panel); }
+.pin-name { flex: 1 1 calc(var(--space-6) * 3); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--type-title-weight); }
+.pin-sub { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.pin .ao-tabs { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.pin .ao-tablist { flex: none; overflow-y: hidden; }
+.pin .ao-tabpanel { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0; }
+.pin-chat, .pin-term { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.pin-log { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-2) var(--space-3); display: flex; flex-direction: column; gap: var(--space-2); outline: none; }
+.pin-log:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.pin-input { flex: none; border-top: 1px solid var(--line); }
+.pin-chat .pin-input { display: flex; flex-direction: column; background: var(--panel); }
+.pin-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); padding: var(--space-1) var(--space-2) 0; }
+.pin-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3); outline: none; }
+.pin-body .diff { max-height: none; flex: none; }
+.pin-changes .pin-head .ao-btn { flex: none; }
+.pin .asks { max-height: 40%; }
+.pin.is-small .pin-sub, .pin.is-small .pin-chips { display: none; }
+.pin.is-small .pin-head { gap: var(--space-1); padding: 2px var(--space-1); }
+.pin.is-small .pin-log, .pin.is-small .pin-body { padding: var(--space-1) var(--space-2); }
+.pin.is-small .ao-composer { padding: var(--space-1); }
+@media (prefers-reduced-motion: reduce) { .pin { animation: none; } }
+/* the face is opaque (the panel color over bg): the painted monitor or board under it must not show through the text */
+/* the bezel count: on the top right corner of the frame of a screen in focus; in the head of a pinned screen */
+.bezel { position: fixed; z-index: var(--z-sheet); left: var(--pin-x, 0); top: var(--pin-y, 0); transform: translate(calc(-100% + var(--space-2)), -50%); }
+.bezel.is-inline { position: static; transform: none; }
 .term-view { position: relative; flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: var(--space-3); background: var(--scene-dark); color: var(--bubble); font-family: var(--font-mono); font-size: var(--type-data-size); line-height: 1.45; outline: none; }
 .term-view:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
 .term-probe { position: absolute; visibility: hidden; white-space: pre; pointer-events: none; font: inherit; }
@@ -343,8 +369,6 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .term-field::placeholder { color: color-mix(in srgb, var(--bubble) 55%, var(--scene-dark)); }
 .term-field:focus-visible { box-shadow: 0 1px 0 var(--accent); }
 .term-note { margin: 0; padding: var(--space-2) var(--space-3); border-top: 1px solid var(--line); color: var(--muted); font: var(--type-caption-weight) var(--type-caption-size)/var(--type-caption-line) var(--font-sans); }
-@media (max-width: 820px) { .terminal-panel { top: auto; height: min(50vh, calc(100% - var(--strip-clear, 200px) - 72px)); } }
-@media (prefers-reduced-motion: reduce) { .terminal-panel { animation: none; } }
 
 /* ---------- requests inside a panel (RequestBar in office.js) ---------- */
 .asks { flex: none; display: flex; flex-direction: column; gap: var(--space-2); max-height: 45%; overflow: auto; padding: var(--space-2) var(--space-3); border-top: 1px solid var(--line); background: var(--panel); }
