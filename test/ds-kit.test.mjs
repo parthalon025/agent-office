@@ -184,54 +184,57 @@ test('the 3D bubble sprite draws its glyph in status-*-on-bubble, with a fallbac
 
 test('kit/check.py: events are checked against the bot type and the usage fields', { skip: !python }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-kit-'));
-  const log = path.join(dir, 'events.jsonl');
-  const run = (events) => {
-    fs.writeFileSync(log, events.map((e) => JSON.stringify(e)).join('\n'));
-    const r = py(['--events', log]);
-    return { code: r.status, out: r.stdout };
-  };
-  const good = run([
-    { type: 'bot.add', roomId: 'r', bot: { name: 'a', shape: 'cone', platform: 'Claude Code', tools: ['x'], _live: 1 } },
-    { type: 'usage', percent: 3, cost: 0.4, costLimit: 2, costs: { a: 0.1 } },
-  ]);
-  assert.equal(good.code, 0, good.out);
-  const bad = run([{ type: 'bot.add', roomId: 'r', bot: { name: 'a', shape: 'cube', colour: '#fff', status: 'nope' } }, { type: 'usage', cost: 'x' }]);
-  assert.equal(bad.code, 1);
-  assert.match(bad.out, /bot\.shape must be one of blob, cone, octa, capsule/);
-  assert.match(bad.out, /unknown field bot\.colour/);
-  assert.match(bad.out, /bot\.status must be Status/);
-  assert.match(bad.out, /usage: cost must be number/);
-  fs.rmSync(dir, { recursive: true, force: true });
+  try {
+    const log = path.join(dir, 'events.jsonl');
+    const run = (events) => {
+      fs.writeFileSync(log, events.map((e) => JSON.stringify(e)).join('\n'));
+      const r = py(['--events', log]);
+      return { code: r.status, out: r.stdout };
+    };
+    const good = run([
+      { type: 'bot.add', roomId: 'r', bot: { name: 'a', shape: 'cone', platform: 'Claude Code', tools: ['x'], _live: 1 } },
+      { type: 'usage', percent: 3, cost: 0.4, costLimit: 2, costs: { a: 0.1 } },
+    ]);
+    assert.equal(good.code, 0, good.out);
+    const bad = run([{ type: 'bot.add', roomId: 'r', bot: { name: 'a', shape: 'cube', colour: '#fff', status: 'nope' } }, { type: 'usage', cost: 'x' }]);
+    assert.equal(bad.code, 1);
+    assert.match(bad.out, /bot\.shape must be one of blob, cone, octa, capsule/);
+    assert.match(bad.out, /unknown field bot\.colour/);
+    assert.match(bad.out, /bot\.status must be Status/);
+    assert.match(bad.out, /usage: cost must be number/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('kit/check.py: a custom property that the checked page defines is a known token', { skip: !python }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-kit-'));
-  const f = (n, s) => { const p = path.join(dir, n); fs.writeFileSync(p, s); return p; };
-  const css1 = f('a.css', ':root { --page-gap: 4px; }\n.x { margin: var(--page-gap); padding: var(--space-2); }\n');
-  const js1 = f('a.js', "el.style.setProperty('--page-live', '1');\nconst s = 'var(--page-live)';\n");
-  const html = f('a.html', '<title>Page x0.1</title><style>:root { --page-pad: 1px; } p { margin: var(--page-pad); }</style>');
-  const ok = py([css1, js1, html]);
-  assert.equal(ok.status, 0, ok.stdout);
-  const miss = f('b.css', '.x { margin: var(--page-nothing); }\n');
-  const no = py([miss]);
-  assert.equal(no.status, 1);
-  assert.match(no.stdout, /unknown token --page-nothing/);
-  fs.rmSync(dir, { recursive: true, force: true });
+  try {
+    const f = (n, s) => { const p = path.join(dir, n); fs.writeFileSync(p, s); return p; };
+    const css1 = f('a.css', ':root { --page-gap: 4px; }\n.x { margin: var(--page-gap); padding: var(--space-2); }\n');
+    const js1 = f('a.js', "el.style.setProperty('--page-live', '1');\nconst s = 'var(--page-live)';\n");
+    const html = f('a.html', '<title>Page x0.1</title><style>:root { --page-pad: 1px; } p { margin: var(--page-pad); }</style>');
+    const ok = py([css1, js1, html]);
+    assert.equal(ok.status, 0, ok.stdout);
+    const miss = f('b.css', '.x { margin: var(--page-nothing); }\n');
+    const no = py([miss]);
+    assert.equal(no.status, 1);
+    assert.match(no.stdout, /unknown token --page-nothing/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('kit/check.py: a name built at run time is checked by its prefix', { skip: !python }, () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ds-kit-'));
-  const f = (n, s) => { const p = path.join(dir, n); fs.writeFileSync(p, s); return p; };
-  const run = (p) => py([p]);
-  const ok = run(f('a.js', 'el.style.color = "var(--status-" + s + ")"; h(Icon, { name: "role-" + r });\n'));
-  assert.equal(ok.status, 0, ok.stdout);
-  const badTok = run(f('b.js', 'el.style.color = "var(--nothing-" + s + ")";\n'));
-  assert.equal(badTok.status, 1);
-  assert.match(badTok.stdout, /unknown token --nothing-/);
-  const badIcon = run(f('c.js', 'h(Icon, { name: "nothing-" + r });\n'));
-  assert.equal(badIcon.status, 1);
-  assert.match(badIcon.stdout, /unknown icon nothing-/);
-  fs.rmSync(dir, { recursive: true, force: true });
+  try {
+    const f = (n, s) => { const p = path.join(dir, n); fs.writeFileSync(p, s); return p; };
+    const run = (p) => py([p]);
+    const ok = run(f('a.js', 'el.style.color = "var(--status-" + s + ")"; h(Icon, { name: "role-" + r });\n'));
+    assert.equal(ok.status, 0, ok.stdout);
+    const badTok = run(f('b.js', 'el.style.color = "var(--nothing-" + s + ")";\n'));
+    assert.equal(badTok.status, 1);
+    assert.match(badTok.stdout, /unknown token --nothing-/);
+    const badIcon = run(f('c.js', 'h(Icon, { name: "nothing-" + r });\n'));
+    assert.equal(badIcon.status, 1);
+    assert.match(badIcon.stdout, /unknown icon nothing-/);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('the DS files pass kit/check.py (the same list as CI)', { skip: !python }, () => {

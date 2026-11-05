@@ -369,6 +369,12 @@ export function createTracker(deps = {}) {
   function dismissError(s) { if (s.error) { s.error = null; changed(); } }
   // A failure the stream did not report as a result line, for example a session that ended before it started. Shows as Error until Dismiss.
   function fail(s, why) { s.error = { id: ++s.errorSeq, text: clip(why, 200) }; changed(); }
+  // A reopened session that ended before it started. The fixed hint comes first, so the 200-character cap of `fail` cuts only
+  // the agent's last reply (a stderr with a long path), never the line that says the past session stays.
+  function failReopen(s) {
+    const last = String(s.replies.at(-1)?.text || '').replace(/\s+/g, ' ').trim();
+    fail(s, `Could not reopen. The past session stays in Past sessions.${last ? ' ' + last : ''}`);
+  }
 
   // The user stopped the turn.
   function interrupt(s) {
@@ -460,7 +466,7 @@ export function createTracker(deps = {}) {
 
   return {
     sessions, feed, addFeed, newSession, findSession, placeSession,
-    onHook, permissionRequest, refuseCall, rootOf, askQuestion, settle, interrupt, userMessage, startTurn, dismissError, fail,
+    onHook, permissionRequest, refuseCall, rootOf, askQuestion, settle, interrupt, userMessage, startTurn, dismissError, fail, failReopen,
     onStream, pushReply, endSession, dropPending, dropQuestions,
   };
 }

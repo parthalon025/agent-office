@@ -1,7 +1,7 @@
 // Microsoft Agent Framework provider tests (#23). The team runner is a fake child process that plays recorded runner lines
 // (test/fixtures/agent-framework.jsonl), with a real tracker and the real tool gate. One test runs the real Python runner
 // against a stand-in framework package (test/fixtures/fake-af), when Python is on this machine. No model, no network, no cost.
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -52,9 +52,15 @@ const INSIDE = allowCell('edit-inside', allowCell('read-inside'));
 // The office side: a tracker, the events, the holds without sockets (as server.mjs holds them), and the provider.
 // rules: the Security room rules; the tracker checks them before a hold, as the server's tracker does, and a decision is
 // answered on a later tick (the server's holdRequest). The session works in its own git worktree, as an office session does.
+// Every folder a rig or a test makes is removed at the end of the file, so a test that fails before its cleanup leaves
+// nothing in %TEMP% (#124). The test's own cleanup removes its folder first.
+const made = new Set();
+after(() => { for (const d of made) fs.rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); });
+
 function rig({ env = {}, servers = [LMSTUDIO, OLLAMA_DOWN], execFile, exe, officeTools, tools, rules = cleanRules(null) } = {}) {
   const o = { holds: new Map(), ids: {}, spawned: [], killed: [], ran: [] };
   o.cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-af-'));
+  made.add(o.cwd);
   o.tracker = createTracker({
     now: Date.now, makeId: (k) => `${k[0]}${(o.ids[k] = (o.ids[k] || 0) + 1)}`, locate: async () => null,
     setTimer: () => 0, releaseHold: (id, d) => o.release(id, d),
@@ -137,11 +143,12 @@ test('the team file: the default team, a valid file, and every mistake says what
 
 test('teamOf: the folder\'s agent-team.json, else the default team; an unreadable file is a 400', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-team-'));
-  assert.deepEqual(teamOf(dir).agents.map((a) => a.name), ['lead', 'coder', 'reviewer']);
-  fs.writeFileSync(path.join(dir, TEAM_FILE), JSON.stringify({ agents: [{ name: 'solo', instructions: 'Do it.' }] }));
-  assert.deepEqual(teamOf(dir).agents.map((a) => a.name), ['solo']);
-  assert.throws(() => teamOf(dir, () => { const e = new Error('denied'); e.code = 'EACCES'; throw e; }), (e) => e.status === 400 && /cannot read it \(EACCES\)/.test(e.message));
-  fs.rmSync(dir, { recursive: true, force: true });
+  try {
+    assert.deepEqual(teamOf(dir).agents.map((a) => a.name), ['lead', 'coder', 'reviewer']);
+    fs.writeFileSync(path.join(dir, TEAM_FILE), JSON.stringify({ agents: [{ name: 'solo', instructions: 'Do it.' }] }));
+    assert.deepEqual(teamOf(dir).agents.map((a) => a.name), ['solo']);
+    assert.throws(() => teamOf(dir, () => { const e = new Error('denied'); e.code = 'EACCES'; throw e; }), (e) => e.status === 400 && /cannot read it \(EACCES\)/.test(e.message));
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('the runner gets no cloud key: only the allowlist, and UTF-8 pipes', () => {
