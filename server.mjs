@@ -1012,6 +1012,9 @@ async function reopenSession(uid, { confirmed = false } = {}) {
     const rec = history.find((h) => h.uid === uid);
     if (!rec) throw httpError(404, 'That past session is gone.');
     if (pastInUse().has(uid)) throw httpError(409, 'That session is open again. Close it first, or wait until it has started.');
+    // Its room was removed (Remove in Changes): its folder is now the main folder, where it never worked. Reopen would continue
+    // it there, on the user's branch, so the office says so and opens nothing. Fork (a new worktree) stays possible.
+    if (rec.roomGone) throw httpError(409, `Its room was removed (branch ${rec.roomGone.branch}). Reopen would run it in your main folder, so the office does not reopen it. Open a new session${featuresOf(providers.get(rec.provider)).includes('fork') ? ', or fork it into a new worktree' : ''}.`);
     if (!fs.existsSync(rec.cwd)) throw httpError(409, `Its folder is gone: ${rec.cwd}. It may have been a removed worktree.`);
     return rec;
   };
@@ -1492,7 +1495,9 @@ const server = http.createServer(async (req, res) => {
       const r = folderOf(String(body.uid));
       if (sessions.get(r.uid) && sessions.get(r.uid).status !== 'ended') throw httpError(409, 'Close the session first.');
       const out = await git.removeWorktree(r.worktree || {}, body.force === true);
-      const h = history.find((x) => x.uid === r.uid); if (h) { const repo = h.worktree?.repo; h.worktree = null; if (repo) h.cwd = repo; saveHistory(); }
+      // The past record keeps the main folder as its folder (Fork and Search read it) and says which room is gone, so Reopen
+      // refuses: it would run the agent in the user's own folder (reopenSession).
+      const h = history.find((x) => x.uid === r.uid); if (h) { const repo = h.worktree?.repo; if (h.worktree) h.roomGone = { branch: h.worktree.branch, root: h.worktree.root }; h.worktree = null; if (repo) h.cwd = repo; saveHistory(); }
       return send(res, 200, out);
     }
     if (url.pathname === '/api/pr') {

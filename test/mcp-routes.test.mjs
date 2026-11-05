@@ -429,6 +429,35 @@ test('/api/open gives each agent a worktree on the base floor; isolation "same" 
   for (const u of [a, b, c, d, e]) await call('/api/close', { uid: u });
 });
 
+// Review minor: Remove room rewrote the past record to the main folder, so Reopen ran the agent in the user's own folder on
+// its branch (and a Claude Code resume would not find its conversation there). Reopen now says the room is gone, and opens nothing.
+test('Reopen of a session whose room was removed says the room is gone and opens nothing in the main folder', { skip: SKIP }, async () => {
+  const { resolveExe } = await import('../git.mjs');
+  const { execFileSync } = await import('node:child_process');
+  const repo = path.join(base, 'gone-repo');
+  fs.mkdirSync(repo);
+  const g = (...a) => execFileSync(resolveExe('git'), ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8', windowsHide: true });
+  g('init', '-q', '-b', 'trunk'); fs.writeFileSync(path.join(repo, 'a.txt'), 'a\n'); g('add', '-A'); g('commit', '-q', '-m', 'init');
+  fake.reset([{ text: 'done' }]);
+  const r = await call('/api/open', { cwd: repo, name: 'gone', provider: 'ollama', model: 'fake-model', where: 'office' });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  const uid = r.json.uid;
+  const s = await until(async () => { const x = await sessionOf(uid); return x?.worktree ? x : null; }, 'its worktree');
+  await call('/api/message', { uid, text: 'hi' });
+  await until(async () => (await sessionOf(uid)).status === 'idle', 'the turn to end');
+  assert.equal((await call('/api/close', { uid })).status, 200);
+  await until(async () => ((await call('/api/history', {})).json.sessions || []).some((x) => x.uid === uid), 'the past record');
+  const rm = await call('/api/worktree/remove', { uid, force: true });
+  assert.equal(rm.status, 200, JSON.stringify(rm.json));
+  assert.equal(fs.existsSync(s.worktree.root), false, 'the room is gone');
+  const before = (await snapshot()).sessions.length;
+  const re = await call('/api/reopen', { uid });
+  assert.equal(re.status, 409, JSON.stringify(re.json));
+  assert.match(re.json.error, /^Its room was removed \(branch agent\/gone-[0-9a-f]{4}\)\. Reopen would run it in your main folder, so the office does not reopen it\./);
+  assert.equal((await snapshot()).sessions.length, before, 'nothing opened');
+  assert.ok(((await call('/api/history', {})).json.sessions || []).some((x) => x.uid === uid), 'the past record stays');
+});
+
 // Review M5: agent rooms opened at once in one repository each write the repository config; they are made one at a time.
 test('agents opened at once in one repository all get a room of their own on the base floor', { skip: SKIP }, async () => {
   const { resolveExe } = await import('../git.mjs');
