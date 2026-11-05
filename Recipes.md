@@ -121,7 +121,7 @@ Copy `kit/part.js`. Build meshes with `A.office.Parts` helpers inside a workstat
 ## Add a solution or a theme
 
 - **Solution:** `A.solutions[id] = { id, label, summary, building }`. Do not change the default templates.
-- **Theme:** give every color and shadow token a value, plus `light-<theme>-*` and `fx-*-<theme>`. Check ContrastCheck in the new theme.
+- **Theme:** give every color and shadow token a value, plus `light-<look>-*` and `fx-*-<look>`, and add the theme to `AgentOffice.MODES` (look id, `data-theme` value, label, icon) and to `LOOKS` in the engine, so the scene light, the mode controls and the palette know it. A theme with its own faces or corners adds `font-<theme>-*` or `radius-<theme>-*` tokens and sets them on `[data-theme="<theme>"]` in `bundle.css`, as Sublevel and Fluent do. Check ContrastCheck in the new theme; `test/contrast.test.mjs` runs every theme in `tokens.json`.
 - **Office type:** not supported without an engine change. Ask for a new version of the system.
 
 ## Add a component
@@ -130,14 +130,14 @@ Use tokens only. Write a README with a props table and a "consumer provides" lin
 
 ## Test your page
 
-1. Screenshots: Day, Night, Sublevel; 1360, 1100 and 400 px; `quality: "low"`; reduced motion. Look at each one.
+1. Screenshots: Day, Night, Sublevel, Fluent; 1360, 1100 and 400 px; `quality: "low"`; reduced motion. Look at each one.
 2. Walk test: `office.applyEvent({ type: "status", bot, status: "resting" })` for each bot in a room, then `"working"`. Look while they walk. For a number, use `office.inspect().nav[floor].path(from, to)`.
 3. Adapter test: click Approve and check that the scene changes only after the adapter replies.
 4. Run `python3 kit/check.py <your files>`. A custom property that your own files define counts as a known token. That is `--name:` in a CSS file, in an HTML `<style>` block or in an HTML `style=""` attribute, and `setProperty('--name', ...)` in a script or an HTML file. A `var(--name)` that nothing defines is an error. A name that the code builds at run time, such as `"var(--status-" + s` or `"role-" + r`, is checked by its prefix: a name that ends in "-" must start some token or icon.
 
 ## Prompt templates
 
-**Build a page:** "Build <page> x0.1 with Agent Office DS x1.6.6. Read README, Recipes and Reference. Start from kit/page.html. Use tokens and the icon set only. Write copy in Simplified Technical English. Run kit/check.py and take the screenshots in the definition of done. Report what you checked."
+**Build a page:** "Build <page> x0.1 with Agent Office DS x1.7. Read README, Recipes and Reference. Start from kit/page.html. Use tokens and the icon set only. Write copy in Simplified Technical English. Run kit/check.py and take the screenshots in the definition of done. Report what you checked."
 
 **Connect a platform:** "Write an Agent Office adapter x0.1 for <platform>. Read Recipes (Connect a platform) and the events and commands in Reference. Copy kit/adapter.js. Fill the mapping tables first, then the code. Set AgentOffice.strict = true and play a recorded log. Report each event type you saw."
 

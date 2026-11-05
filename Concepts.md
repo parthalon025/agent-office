@@ -100,10 +100,10 @@ A harness that cannot wait for an answer (watch mode, trace) must not send `requ
 
 - **Color meaning.** Status colors mean state, floor colors mean floor, type colors mean office type, `accent` means action and focus, `emphasis` means look now. The meanings are the same in 2D and 3D.
 - **60-30-10.** 60% neutral (bg, panels, walls, desks), 30% structure (carpet, floor bands, panel heads, accent), 10% emphasis (beacons, unread counts, the key action). One emphasis item per decision.
-- **Themes.** Day (`light`), Night (`dark`) and Sublevel (`sublevel`), an original retro-corporate look: flat square panels, Archivo wide uppercase heads, Chivo Mono names, VT323 figures, green carpet and fluorescent light.
-- **Type.** IBM Plex Sans for interface text, IBM Plex Mono for numbers. Sublevel swaps the faces, not the scale.
+- **Themes.** Day (`light`), Night (`dark`), Sublevel (`sublevel`), an original retro-corporate look: flat square panels, Archivo wide uppercase heads, Chivo Mono names, VT323 figures, green carpet and fluorescent light, and Fluent (`fluent`), a bright, quiet office after the open Fluent 2 design tokens: neutral greys, a blue accent, 4 px controls and 8 px panels with a soft two-layer shadow, sentence-case heads, an accent pill on the current row, soft daylight with low bloom and a light haze. Fluent is an original look: it has no product logo, no product name and no product art.
+- **Type.** IBM Plex Sans for interface text, IBM Plex Mono for numbers. Sublevel and Fluent swap the faces, not the scale. Fluent uses the system faces (Segoe UI Variable, Cascadia Mono, with fallbacks), so it loads no font file.
 - **Icons.** Line icons on a 24 px grid, 1.75 px stroke, round caps. Use the `Icon` component. No emoji.
-- **Shape.** 4 px base. Panels `radius-lg`, rows `radius-md`, buttons `radius-sm`, dots `radius-full`.
+- **Shape.** 4 px base. Panels `radius-lg`, rows `radius-md`, buttons `radius-sm`, dots `radius-full`. Fluent sets them smaller (`radius-fluent-*`: 4, 4 and 8 px).
 
 ## Words
 

@@ -276,7 +276,7 @@ details.panel summary .cnt.hot,.ao-ph .hot{color:var(--emphasis)}
 .ao-ratio-60{flex:60;background:var(--bg);color:var(--ink)}
 .ao-ratio-30{flex:30;background:var(--scene-floor);color:var(--on-floor)}
 .ao-ratio-10{flex:10;background:var(--emphasis);color:var(--on-emphasis)}
-[data-theme="light"] .ao-ratio-30,[data-theme="dark"] .ao-ratio-30{background:var(--floor-ops)}
+[data-theme="light"] .ao-ratio-30,[data-theme="dark"] .ao-ratio-30,[data-theme="fluent"] .ao-ratio-30{background:var(--floor-ops)}
 
 /* x0.8 orchestration */
 .ao-agentpanel{display:flex;flex-direction:column;min-height:0;height:100%;width:100%}
@@ -661,3 +661,17 @@ details.panel summary .cnt.hot,.ao-ph .hot{color:var(--emphasis)}
 [data-theme="sublevel"] .ao-rt-code-h,[data-theme="sublevel"] .ao-rt-copy,[data-theme="sublevel"] .ao-rt-dl{text-transform:uppercase;letter-spacing:.06em;font-size:10px}
 [data-theme="sublevel"] .ao-lb{font-family:var(--font-sublevel-sans)}
 .ao-rt-copy{display:inline-flex;align-items:center;gap:4px}
+/* x1.7 Fluent theme: a light, soft look after the open Fluent 2 design tokens. System faces (no font file), 4 px controls and 8 px surfaces
+   (radius-fluent-*), the two-layer elevation shadow in shadow-panel, sentence-case heads, and an accent pill on the current row and the pressed segment. */
+[data-theme="fluent"]{--font-sans:var(--font-fluent-sans);--font-mono:var(--font-fluent-mono);--radius-sm:var(--radius-fluent-sm);--radius-md:var(--radius-fluent-md);--radius-lg:var(--radius-fluent-lg)}
+[data-theme="fluent"] .ao-ph,[data-theme="fluent"] .ao-inbox-h,[data-theme="fluent"] .ao-cmdk-gh{text-transform:none;letter-spacing:0;font-size:12px;font-weight:600;color:var(--ink)}
+[data-theme="fluent"] .ao-tbl th{font-family:var(--font-sans);text-transform:none;letter-spacing:0;font-size:11px;font-weight:600}
+[data-theme="fluent"] .ao-btn{font-weight:600}
+[data-theme="fluent"] .ao-input{border-bottom-color:var(--muted)}
+[data-theme="fluent"] .ao-row,[data-theme="fluent"] .ao-bot,[data-theme="fluent"] .ao-seg button{position:relative}
+[data-theme="fluent"] .ao-row[aria-current="true"]::before,[data-theme="fluent"] .ao-bot[aria-selected="true"]::before{content:"";position:absolute;left:0;top:50%;width:3px;height:16px;margin-top:-8px;border-radius:var(--radius-full);background:var(--accent)}
+[data-theme="fluent"] .ao-row[aria-current="true"] .ao-fnum{background:var(--accent);color:var(--on-accent)}
+[data-theme="fluent"] .ao-seg button[aria-pressed="true"]::after{content:"";position:absolute;left:50%;bottom:1px;width:16px;height:3px;margin-left:-8px;border-radius:var(--radius-full);background:var(--accent)}
+/* x1.7 five modes: in a container under 520 px (the office, or a page box with container-type) a mode segment with an icon shows the icon only,
+   and the pressed one keeps its label. The label stays for screen readers and as the tooltip. */
+@container (max-width:520px){.ao-seg button:not([aria-pressed="true"]) .ao-seg-l{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.ao-seg button:not([aria-pressed="true"]):has(.ao-seg-l){padding:6px 9px}}

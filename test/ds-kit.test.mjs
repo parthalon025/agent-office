@@ -17,8 +17,11 @@ const css = read('tokens.css');
 const python = ['python3', 'python'].find((p) => spawnSync(p, ['--version']).status === 0);
 
 test('tokens.css has every color token of tokens.json, with the same value, in each theme', () => {
-  const block = (open) => { const at = css.indexOf(open); return css.slice(at, css.indexOf('\n}', at)); };
-  const themes = { light: block(':root, [data-theme="light"] {'), dark: block('[data-theme="dark"] {'), sublevel: block('[data-theme="sublevel"] {') };
+  const block = (open) => { const at = css.indexOf(open); assert.ok(at >= 0, `tokens.css has ${open}`); return css.slice(at, css.indexOf('\n}', at)); };
+  // every theme of tokens.json, in its order: Day is the root block, each other theme has its own block
+  const ids = JSON.parse(read('tokens.json')).color.themes.map((t) => t.id);
+  assert.deepEqual(ids, ['light', 'dark', 'sublevel', 'fluent']);
+  const themes = Object.fromEntries(ids.map((id) => [id, block(id === 'light' ? ':root, [data-theme="light"] {' : `\n[data-theme="${id}"] {`)]));
   for (const [th, text] of Object.entries(themes)) {
     for (const t of tokens) {
       const want = t.value[th].replace(/^\{(.+)\}$/, 'var(--$1)');

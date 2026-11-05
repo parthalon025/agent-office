@@ -1,5 +1,5 @@
 // Readable in every theme: the text and ink pairs that the page and the 3D scripts draw, from tokens.json.
-// Each pair needs 4.5:1 (text) or 3:1 (a status dot) in Day, Night and Sublevel. The CSS checks pin the rules
+// Each pair needs 4.5:1 (text) or 3:1 (a status dot) in every theme of tokens.json (Day, Night, Sublevel, Fluent). The CSS checks pin the rules
 // that use those pairs, so a later edit cannot put a status color back on text.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,7 +8,7 @@ import fs from 'node:fs';
 const root = new URL('../', import.meta.url);
 const read = (f) => fs.readFileSync(new URL(f, root), 'utf8');
 const tokens = JSON.parse(read('tokens.json')).color.tokens;
-const TH = ['light', 'dark', 'sublevel'];
+const TH = JSON.parse(read('tokens.json')).color.themes.map((t) => t.id);   // every theme, Fluent included
 const val = (name, th) => { let v = tokens.find((t) => t.name === name).value[th]; while (/^\{/.test(v)) v = tokens.find((t) => t.name === v.slice(1, -1)).value[th]; return v; };
 const rgb = (h) => {
   const m = h.match(/rgba?\(([^)]+)\)/);
@@ -22,6 +22,10 @@ const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) +
 
 function each(fn) { for (const th of TH) { const T = (n) => rgb(val(n, th)); fn(T, th, over(T('panel'), T('bg'))); } }
 function atLeast(label, min, a, b, th) { const r = ratio(a, b); assert.ok(r >= min, `${label} in ${th}: ${r.toFixed(2)} < ${min}`); }
+
+test('the pairs run in every theme: Day, Night, Sublevel and Fluent', () => {
+  assert.deepEqual(TH, ['light', 'dark', 'sublevel', 'fluent']);
+});
 
 test('notes editor: ink and placeholder on the whiteboard face', () => each((T, th) => {
   const ink = mix(T('scene-dark'), T('status-finished'), 0.7), hint = mix(T('scene-dark'), T('bubble'), 0.82);

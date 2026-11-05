@@ -167,7 +167,7 @@
     opts = opts || {};
     var s = new O.Stage(el, { root: opts.root || null, quality: opts.quality || 'auto', label: '3D city. Each building is a repository. Click one to go inside.', D: 22 });
     if (s.dead) return { update: function () {}, focus: function () {}, fit: function () {}, zoomBy: function () {}, dispose: function () {},
-      setMode: function (m) { var t = { day: 'light', night: 'dark', sublevel: 'sublevel' }[m]; if (t && opts.root) opts.root.setAttribute('data-theme', t); }, state: function () { return null; } };
+      setMode: function (m) { var t = (A.MODES || []).filter(function (x) { return x.id === m; })[0]; if (t && opts.root) opts.root.setAttribute('data-theme', t.theme); }, state: function () { return null; } };
     var K = s.K, world = new T.Group(), mats = {};
     // one themed material per token, so a theme change repaints them all
     function mat(token, o) { var k = token + (o ? JSON.stringify(o) : ''); return mats[k] || (mats[k] = K.t(token, o)); }
@@ -503,7 +503,7 @@
 
     return {
       update: update, focus: focus, fit: fit, zoomBy: zoomBy,
-      // the theme of the page: day, night or sublevel (the stage sets data-theme on the root)
+      // the theme of the page: an id of AgentOffice.MODES (day, night, sublevel, fluent); the stage sets data-theme on the root
       setMode: function (m) { s.setMode(m); },
       // for tests and the console: the camera zoom and its limits
       state: function () { return { zoom: s.cam.zoom, min: s.ctl ? s.ctl.minZoom : null, max: s.ctl ? s.ctl.maxZoom : null, buildings: Object.keys(items).length, entering: entering }; },

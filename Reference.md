@@ -109,7 +109,20 @@ The `bot` of `bot.add`. `kit/check.py --events` and `AgentOffice.validate` check
 - `zoom(factor)`: zoom by a factor (the HUD + and - buttons use 1.2 and 1/1.2). The zoom stays inside the controls' `minZoom` and `maxZoom` (0.4 and 4 by default). A step never goes the wrong way: when a framed view is past the limit, + keeps the zoom. Returns the new zoom.
 - Camera moves (`setView`, `setFloor`, `focusRoom`, `setFrameInset`) glide for `duration-camera`. With `prefers-reduced-motion` they cut, and a floor change shows the new floor at once. Each move still sets `stage.goal` (`office.inspect().stage`), and the next frame ends it. So a page that holds `stage.goal` back, for example while an item is in focus, holds the cut too.
 
-Globals: `AgentOffice.BODY_COLORS` (the 10 bot body colors, a frozen array), `AgentOffice.BOT_COLORS` (one portrait color for each shape), `AgentOffice.money(n)` (the DS money format), `AgentOffice.validate(event)`, `AgentOffice.schema`, `AgentOffice.strict`, `AgentOffice.adapters.create`, `AgentOffice.adapters.mock`, `AgentOffice.solutions`, `AgentOffice.office.ROLES`, `.Work`, `.Parts`, `.helpers`, `.Nav`. `components/index.d.ts` types them: `AgentOfficeGlobals`, set on `window.AgentOffice`.
+Globals: `AgentOffice.MODES` (the themes, see Themes below), `AgentOffice.BODY_COLORS` (the 10 bot body colors, a frozen array), `AgentOffice.BOT_COLORS` (one portrait color for each shape), `AgentOffice.money(n)` (the DS money format), `AgentOffice.validate(event)`, `AgentOffice.schema`, `AgentOffice.strict`, `AgentOffice.adapters.create`, `AgentOffice.adapters.mock`, `AgentOffice.solutions`, `AgentOffice.office.ROLES`, `.Work`, `.Parts`, `.helpers`, `.Nav`. `components/index.d.ts` types them: `AgentOfficeGlobals`, set on `window.AgentOffice`.
+
+### Themes
+
+`AgentOffice.MODES` is the one list of themes. The scene engine, `ModeToggle` (its default options), the `OfficeScene` HUD toggle and the command palette read it. A page that shows its own theme control reads it too and keeps no copy. Read it; do not change it.
+
+| `id` (look) | `theme` (`data-theme`) | `label` | `icon` | Look |
+| --- | --- | --- | --- | --- |
+| `day` | `light` | Day | `day` | Daylight office; the sun follows the clock. |
+| `night` | `dark` | Night | `night` | Dark office, warm room lamps, glow and fog. |
+| `sublevel` | `sublevel` | Sublevel | `terminal` | Retro corporate floor under fluorescent light. |
+| `fluent` | `fluent` | Fluent | `fluent` | Bright, quiet office in soft daylight, low bloom and light haze. System faces, 4 px controls and 8 px panels. |
+
+The `id` names the look: the engine reads `light-<id>-*` and `fx-*-<id>`. An unknown `data-theme` shows the Day look.
 
 ### Bot colors
 
@@ -157,11 +170,12 @@ Globals: `AgentOffice.BODY_COLORS` (the 10 bot body colors, a frozen array), `Ag
 | `EmptyState` | Feedback | What a panel shows when it has nothing: an icon, a title that says what is true, a line that says what to do, and at most one action. |
 | `FloorHeader` | Navigation | The colored head of the roster panel. |
 | `FloorList` | Navigation | The list of floors, top floor first. |
+| `FluentOffice` | Themes | The office in the Fluent theme: a bright, quiet office in soft daylight, with neutral greys, a blue accent, small round corners and the system faces. |
 | `Foundations` | Docs | Motion, layers, breakpoints and 3D units in one place. |
 | `HermesOffice` | Solutions | The Hermes orchestrator office. |
-| `Icon` | Foundations | The icon set: 34 line icons on a 24px grid with a 1.75px stroke, round caps and joins. |
+| `Icon` | Foundations | The icon set: 85 line icons on a 24px grid with a 1.75px stroke, round caps and joins. |
 | `Logo` | Foundations | The Agent Office mark, wordmark and lockup. |
-| `ModeToggle` | Actions | A segmented control for the scene mode: Day, Night, Tour. |
+| `ModeToggle` | Actions | A segmented control for the scene mode: Day, Night, Sublevel, Fluent and Tour (`AgentOffice.MODES` plus Tour). |
 | `ModelBadge` | Orchestration | The model an agent runs on. |
 | `Notifier` | Daily | Alerts for a person who works in another tab. |
 | `OfficeScene` | 3D office | The 3D office itself and the main component of the system. |
@@ -202,63 +216,63 @@ Each README has the full props table. Types: `components/index.d.ts`.
 
 ### color
 
-| Token | light | dark | sublevel | Use |
-| --- | --- | --- | --- | --- |
-| `bg` | `#e9edf1` | `#10141a` | `#dfe6e1` | Page and 3D scene background behind every panel. |
-| `panel` | `rgba(255,255,255,0.86)` | `rgba(24,30,38,0.86)` | `rgba(246,248,245,0.93)` | Glass HUD panels over the 3D scene. Always pair with blur-panel. |
-| `chip` | `#f1f4f7` | `#1f2630` | `#e7ece8` | Hover, selected row, pressed segment, quiet button fill. |
-| `line` | `rgba(30,45,60,0.10)` | `rgba(200,215,230,0.10)` | `rgba(20,60,50,0.16)` | Panel borders and dividers. Hairline only. |
-| `ink` | `#18212b` | `#e6ebf0` | `#102a33` | Primary text on bg, panel and chip. |
-| `muted` | `#5f6b78` | `#8e9aa7` | `#4d6660` | Secondary text: task lines, timestamps, counts. 4.6:1 or more on bg, panel and chip. |
-| `accent` | `#2f6fe4` | `#6c9dff` | `#1f6f8b` | Primary action (Approve, Retry), focus ring, routine markers. |
-| `on-accent` | `#ffffff` | `#0d1420` | `#ffffff` | Text on accent. |
-| `emphasis` | `{accent}` | `{accent}` | `#b5302b` | The 10% color: alerts and the one key action in a decision (Approve on a request, unread counts, room alert beacons). In Day and Night it equals accent; in Sublevel it is red. Never a fill larger than a button. |
-| `on-emphasis` | `{on-accent}` | `{on-accent}` | `#ffffff` | Text on emphasis. |
-| `on-status` | `#ffffff` | `#ffffff` | `#ffffff` | Text and glyphs on a status fill (danger button, check in the finished bubble). |
-| `bubble` | `#ffffff` | `#f2f5f8` | `#f6f8f5` | Fill of status bubbles and speech bubbles over bots, in 2D and 3D. |
-| `status-working` | `#1f9a58` | `#2fb36d` | `#1d8a5a` | Bot is working. Dot, bubble glyph, monitor glow. |
-| `status-waiting` | `#c27c17` | `#e3992f` | `#b07514` | Bot needs a human decision. Always shows in Waiting on me. |
-| `status-error` | `#d1403b` | `#e5605b` | `#c23b36` | Bot failed. Always shows in Waiting on me with Retry. |
-| `status-resting` | `#78818b` | `#8a939d` | `#7f8c8a` | Bot is idle in the lounge. |
-| `status-finished` | `#3b74e0` | `#5b93f5` | `#2f6bc8` | Bot finished a task; check bubble at the desk. |
-| `status-working-text` | `#197a46` | `#2fb36d` | `#18734b` | Text color for the working status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-working. |
-| `status-waiting-text` | `#945f12` | `#e3992f` | `#895b10` | Text color for the waiting status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-waiting. |
-| `status-error-text` | `#c4332e` | `#e6645f` | `#b63733` | Text color for the error status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-error. |
-| `status-resting-text` | `#646b74` | `#8a939d` | `#5d6765` | Text color for the resting status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-resting. |
-| `status-finished-text` | `#2363dc` | `#5b93f5` | `#2c63ba` | Text color for the finished status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-finished. |
-| `status-working-on-bubble` | `#1b854c` | `#217e4d` | `#1b7f53` | Text color for the working status on bubble (a light face in every theme). 4.5:1 or more. |
-| `status-waiting-on-bubble` | `#a46913` | `#9a6315` | `#996611` | Text color for the waiting status on bubble (a light face in every theme). 4.5:1 or more. |
-| `status-error-on-bubble` | `#d1403b` | `#d42822` | `#c23b36` | Text color for the error status on bubble (a light face in every theme). 4.5:1 or more. |
-| `status-resting-on-bubble` | `#6e7780` | `#666f7a` | `#677371` | Text color for the resting status on bubble (a light face in every theme). 4.5:1 or more. |
-| `status-finished-on-bubble` | `#3771df` | `#1565f1` | `#2f6bc8` | Text color for the finished status on bubble (a light face in every theme). 4.5:1 or more. |
-| `floor-ops` | `#4a6278` | `#587089` | `#3f5d70` | Floor 1 identity. Roster header fill, building-view floor band; white text on it. |
-| `floor-sales` | `#b5523b` | `#b5523b` | `#5d4a7a` | Floor 2 identity. Roster header fill; white text on it. |
-| `floor-research` | `#2f7f44` | `#2f7f44` | `#2c6b57` | Floor 3 identity. Roster header fill; white text on it. |
-| `floor-content` | `#7a52c7` | `#7a52c7` | `#2f5f86` | Floor 4 identity. Roster header fill; white text on it. |
-| `floor-hq` | `#8a5a12` | `#8a5a12` | `#7a5414` | Floor 5 (HQ) identity. Roster header fill; white text on it. |
-| `on-floor` | `#ffffff` | `#ffffff` | `#ffffff` | Text on any floor-* fill. 4.9:1 or more. |
-| `scrim` | `#0a1016` | `#0a1016` | `#0a1016` | Dark veil behind a dialog or the command palette. Mix it with transparent: color-mix(in srgb, var(--scrim) 45%, transparent). |
-| `type-team` | `#3a7ca5` | `#5f9fc8` | `#2f6b7a` | Office type: team floor. Type badge dot, room icon, the stripe on the room floor edge. |
-| `type-lab` | `#0f8b8d` | `#2fb3b5` | `#0f7f7c` | Office type: lab / server room. |
-| `type-studio` | `#c2477a` | `#e0709a` | `#b03f6e` | Office type: studio. |
-| `type-hq` | `#a36a12` | `#d0922e` | `#946010` | Office type: war room / HQ. |
-| `scene-floor` | `#f3f2ee` | `#2a3039` | `#2f6456` | 3D floor slab top. |
-| `scene-wall` | `#e3e6ea` | `#232a34` | `#e9ede7` | 3D back wall. |
-| `scene-wood` | `#d8b98a` | `#8f7656` | `#f1f1ea` | 3D desk tops and side tables. |
-| `scene-chair` | `#2f5d4a` | `#24493b` | `#1c2326` | 3D chairs and sofas. |
-| `scene-rug` | `#c0563f` | `#a8483a` | `#2a5560` | 3D lounge rug. Marks the resting zone. |
-| `scene-wall-side` | `#d9dde2` | `#1e242d` | `#e2e7e2` | 3D left wall. One step darker than scene-wall so the corner reads. |
-| `scene-slab` | `#c9ced4` | `#1b2028` | `#b9c4bf` | 3D floor slab edge and kit plinths. |
-| `scene-rail` | `#ffffff` | `#59616c` | `#f4f6f2` | 3D front railing slats. |
-| `scene-sofa` | `#2f5f52` | `#24493b` | `#2c5b6b` | 3D lounge sofas. |
-| `scene-metal` | `#9aa2ab` | `#6f7884` | `#b8c0bf` | 3D desk pedestals and bases. |
-| `scene-dark` | `#2b323b` | `#2b323b` | `#263238` | 3D monitors, lamps, racks, tripods. |
-| `scene-glass` | `#bcd3e6` | `#3d5468` | `#cfe3e0` | 3D glass partitions between rooms and the room boxes in the building view. Used at 22–28% opacity. |
-| `scene-subagent` | `#9aa3ad` | `#6f7884` | `#b9c4bf` | 3D body of a temporary subagent. Grey so it reads as on loan; it leaves when it returns. |
+| Token | light | dark | sublevel | fluent | Use |
+| --- | --- | --- | --- | --- | --- |
+| `bg` | `#e9edf1` | `#10141a` | `#dfe6e1` | `#f3f3f3` | Page and 3D scene background behind every panel. |
+| `panel` | `rgba(255,255,255,0.86)` | `rgba(24,30,38,0.86)` | `rgba(246,248,245,0.93)` | `rgba(251,251,251,0.88)` | Glass HUD panels over the 3D scene. Always pair with blur-panel. |
+| `chip` | `#f1f4f7` | `#1f2630` | `#e7ece8` | `#ebebeb` | Hover, selected row, pressed segment, quiet button fill. |
+| `line` | `rgba(30,45,60,0.10)` | `rgba(200,215,230,0.10)` | `rgba(20,60,50,0.16)` | `rgba(0,0,0,0.10)` | Panel borders and dividers. Hairline only. |
+| `ink` | `#18212b` | `#e6ebf0` | `#102a33` | `#242424` | Primary text on bg, panel and chip. |
+| `muted` | `#5f6b78` | `#8e9aa7` | `#4d6660` | `#616161` | Secondary text: task lines, timestamps, counts. 4.6:1 or more on bg, panel and chip. |
+| `accent` | `#2f6fe4` | `#6c9dff` | `#1f6f8b` | `#0f6cbd` | Primary action (Approve, Retry), focus ring, routine markers. |
+| `on-accent` | `#ffffff` | `#0d1420` | `#ffffff` | `#ffffff` | Text on accent. |
+| `emphasis` | `{accent}` | `{accent}` | `#b5302b` | `{accent}` | The 10% color: alerts and the one key action in a decision (Approve on a request, unread counts, room alert beacons). In Day, Night and Fluent it equals accent; in Sublevel it is red. Never a fill larger than a button. |
+| `on-emphasis` | `{on-accent}` | `{on-accent}` | `#ffffff` | `{on-accent}` | Text on emphasis. |
+| `on-status` | `#ffffff` | `#ffffff` | `#ffffff` | `#ffffff` | Text and glyphs on a status fill (danger button, check in the finished bubble). |
+| `bubble` | `#ffffff` | `#f2f5f8` | `#f6f8f5` | `#ffffff` | Fill of status bubbles and speech bubbles over bots, in 2D and 3D. |
+| `status-working` | `#1f9a58` | `#2fb36d` | `#1d8a5a` | `#107c10` | Bot is working. Dot, bubble glyph, monitor glow. |
+| `status-waiting` | `#c27c17` | `#e3992f` | `#b07514` | `#d2560b` | Bot needs a human decision. Always shows in Waiting on me. |
+| `status-error` | `#d1403b` | `#e5605b` | `#c23b36` | `#c50f1f` | Bot failed. Always shows in Waiting on me with Retry. |
+| `status-resting` | `#78818b` | `#8a939d` | `#7f8c8a` | `#7a7a7a` | Bot is idle in the lounge. |
+| `status-finished` | `#3b74e0` | `#5b93f5` | `#2f6bc8` | `#227ed4` | Bot finished a task; check bubble at the desk. |
+| `status-working-text` | `#197a46` | `#2fb36d` | `#18734b` | `#0e700e` | Text color for the working status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-working. |
+| `status-waiting-text` | `#945f12` | `#e3992f` | `#895b10` | `#a94409` | Text color for the waiting status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-waiting. |
+| `status-error-text` | `#c4332e` | `#e6645f` | `#b63733` | `#b10e1c` | Text color for the error status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-error. |
+| `status-resting-text` | `#646b74` | `#8a939d` | `#5d6765` | `#5c5c5c` | Text color for the resting status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-resting. |
+| `status-finished-text` | `#2363dc` | `#5b93f5` | `#2c63ba` | `#115ea3` | Text color for the finished status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-finished. |
+| `status-working-on-bubble` | `#1b854c` | `#217e4d` | `#1b7f53` | `#107c10` | Text color for the working status on bubble (a light face in every theme). 4.5:1 or more. |
+| `status-waiting-on-bubble` | `#a46913` | `#9a6315` | `#996611` | `#bc4b09` | Text color for the waiting status on bubble (a light face in every theme). 4.5:1 or more. |
+| `status-error-on-bubble` | `#d1403b` | `#d42822` | `#c23b36` | `#c50f1f` | Text color for the error status on bubble (a light face in every theme). 4.5:1 or more. |
+| `status-resting-on-bubble` | `#6e7780` | `#666f7a` | `#677371` | `#707070` | Text color for the resting status on bubble (a light face in every theme). 4.5:1 or more. |
+| `status-finished-on-bubble` | `#3771df` | `#1565f1` | `#2f6bc8` | `#0f6cbd` | Text color for the finished status on bubble (a light face in every theme). 4.5:1 or more. |
+| `floor-ops` | `#4a6278` | `#587089` | `#3f5d70` | `#4d5f6b` | Floor 1 identity. Roster header fill, building-view floor band; white text on it. |
+| `floor-sales` | `#b5523b` | `#b5523b` | `#5d4a7a` | `#b6480e` | Floor 2 identity. Roster header fill; white text on it. |
+| `floor-research` | `#2f7f44` | `#2f7f44` | `#2c6b57` | `#427505` | Floor 3 identity. Roster header fill; white text on it. |
+| `floor-content` | `#7a52c7` | `#7a52c7` | `#2f5f86` | `#6656d1` | Floor 4 identity. Roster header fill; white text on it. |
+| `floor-hq` | `#8a5a12` | `#8a5a12` | `#7a5414` | `#8e562e` | Floor 5 (HQ) identity. Roster header fill; white text on it. |
+| `on-floor` | `#ffffff` | `#ffffff` | `#ffffff` | `#ffffff` | Text on any floor-* fill. 4.9:1 or more. |
+| `scrim` | `#0a1016` | `#0a1016` | `#0a1016` | `#0a1016` | Dark veil behind a dialog or the command palette. Mix it with transparent: color-mix(in srgb, var(--scrim) 45%, transparent). |
+| `type-team` | `#3a7ca5` | `#5f9fc8` | `#2f6b7a` | `#4f6bed` | Office type: team floor. Type badge dot, room icon, the stripe on the room floor edge. |
+| `type-lab` | `#0f8b8d` | `#2fb3b5` | `#0f7f7c` | `#038387` | Office type: lab / server room. |
+| `type-studio` | `#c2477a` | `#e0709a` | `#b03f6e` | `#c239b3` | Office type: studio. |
+| `type-hq` | `#a36a12` | `#d0922e` | `#946010` | `#9a6a00` | Office type: war room / HQ. |
+| `scene-floor` | `#f3f2ee` | `#2a3039` | `#2f6456` | `#eeeeee` | 3D floor slab top. |
+| `scene-wall` | `#e3e6ea` | `#232a34` | `#e9ede7` | `#e8e8e8` | 3D back wall. |
+| `scene-wood` | `#d8b98a` | `#8f7656` | `#f1f1ea` | `#e2cfae` | 3D desk tops and side tables. |
+| `scene-chair` | `#2f5d4a` | `#24493b` | `#1c2326` | `#3a4048` | 3D chairs and sofas. |
+| `scene-rug` | `#c0563f` | `#a8483a` | `#2a5560` | `#5a8fd0` | 3D lounge rug. Marks the resting zone. |
+| `scene-wall-side` | `#d9dde2` | `#1e242d` | `#e2e7e2` | `#dedede` | 3D left wall. One step darker than scene-wall so the corner reads. |
+| `scene-slab` | `#c9ced4` | `#1b2028` | `#b9c4bf` | `#c7c7c7` | 3D floor slab edge and kit plinths. |
+| `scene-rail` | `#ffffff` | `#59616c` | `#f4f6f2` | `#ffffff` | 3D front railing slats. |
+| `scene-sofa` | `#2f5f52` | `#24493b` | `#2c5b6b` | `#4a5560` | 3D lounge sofas. |
+| `scene-metal` | `#9aa2ab` | `#6f7884` | `#b8c0bf` | `#a8a8a8` | 3D desk pedestals and bases. |
+| `scene-dark` | `#2b323b` | `#2b323b` | `#263238` | `#292929` | 3D monitors, lamps, racks, tripods. |
+| `scene-glass` | `#bcd3e6` | `#3d5468` | `#cfe3e0` | `#cfe4fa` | 3D glass partitions between rooms and the room boxes in the building view. Used at 22–28% opacity. |
+| `scene-subagent` | `#9aa3ad` | `#6f7884` | `#b9c4bf` | `#a3a3a3` | 3D body of a temporary subagent. Grey so it reads as on loan; it leaves when it returns. |
 
 #### Contrast pairs the DS checks
 
-`test/contrast.test.mjs` measures these pairs in Day, Night and Sublevel. A page can check its own uses against the same list. Card = `panel` over `bg`.
+`test/contrast.test.mjs` measures these pairs in every theme: Day, Night, Sublevel and Fluent. A page can check its own uses against the same list. Card = `panel` over `bg`.
 
 | Foreground | Background | Needs | Use |
 | --- | --- | --- | --- |
@@ -288,12 +302,15 @@ Each README has the full props table. Types: `components/index.d.ts`.
 | `radius-md` | `8px` | Rows, segments. |
 | `radius-lg` | `12px` | Panels. |
 | `radius-full` | `9999px` | Status dots, avatars, bubbles. |
+| `radius-fluent-sm` | `4px` | Buttons and controls in Fluent. The theme sets radius-sm to it. |
+| `radius-fluent-md` | `4px` | Rows and segments in Fluent. The theme sets radius-md to it. |
+| `radius-fluent-lg` | `8px` | Panels, cards and dialogs in Fluent. The theme sets radius-lg to it. |
 
 ### shadow
 
 | Token | Value | Use |
 | --- | --- | --- |
-| `shadow-panel` | `{"light": "0 6px 24px rgba(10,20,30,0.08)", "dark": "0 6px 24px rgba(0,0,0,0.35)", "sublevel": "0 1px 0 rgba(16,42,51,0.10)"}` | Every floating HUD panel. Nothing else casts a shadow. |
+| `shadow-panel` | `{"light": "0 6px 24px rgba(10,20,30,0.08)", "dark": "0 6px 24px rgba(0,0,0,0.35)", "sublevel": "0 1px 0 rgba(16,42,51,0.10)", "fluent": "0 0 2px rgba(0,0,0,0.12), 0 4px 8px rgba(0,0,0,0.14)"}` | Every floating HUD panel. Nothing else casts a shadow. |
 
 ### blur
 
@@ -395,6 +412,9 @@ Layout breakpoints for the office HUD (container width).
 | `light-sublevel-sky` | `0.78` | Fluorescent fill in Sublevel. |
 | `light-sublevel-sun` | `0.38` | Ceiling key light in Sublevel, from above. |
 | `light-sublevel-lamp` | `0` | Room lamps in Sublevel: off. |
+| `light-fluent-sky` | `0.85` | Even sky fill in Fluent: soft daylight. |
+| `light-fluent-sun` | `0.65` | Sun in Fluent: softer than Day, high and from the front, so shadows are short. |
+| `light-fluent-lamp` | `0` | Room lamps in Fluent: off. |
 
 ### fx
 
@@ -405,20 +425,25 @@ Layout breakpoints for the office HUD (container width).
 | `fx-bloom-day` | `0.12` | Bloom strength in Day. |
 | `fx-bloom-night` | `0.7` | Bloom strength in Night: screens, lamps, windows, packets and beacons glow. |
 | `fx-bloom-sublevel` | `0.25` | Bloom strength in Sublevel. |
+| `fx-bloom-fluent` | `0.08` | Bloom strength in Fluent: low, so only screens and beacons glow a little. |
 | `fx-threshold-day` | `1.3` | Light level where bloom starts in Day. Above white, so walls do not glow. |
 | `fx-threshold-night` | `0.8` | Light level where bloom starts in Night. |
 | `fx-threshold-sublevel` | `1.15` | Light level where bloom starts in Sublevel. |
+| `fx-threshold-fluent` | `1.35` | Light level where bloom starts in Fluent. Above white, so walls do not glow. |
 | `fx-exposure-day` | `1` | Exposure in Day. |
 | `fx-exposure-night` | `1.08` | Exposure in Night. |
 | `fx-exposure-sublevel` | `1` | Exposure in Sublevel. |
+| `fx-exposure-fluent` | `1` | Exposure in Fluent. |
 | `fx-fog-day` | `0` | Depth haze in Day: off. |
 | `fx-fog-night` | `0.3` | Depth haze in Night, in the bg color. |
 | `fx-fog-sublevel` | `0.12` | Depth haze in Sublevel. |
+| `fx-fog-fluent` | `0.06` | Depth haze in Fluent: light, in the bg color. |
 | `fx-bloom-radius` | `0.45` | Bloom spread. |
 | `fx-knee` | `0.82` | Highlight roll-off: light above this level compresses softly, light below keeps the token color. |
 | `fx-vignette-day` | `0` | Corner darkening in Day: off, so the scene edge meets the page bg. |
 | `fx-vignette-night` | `0.18` | Corner darkening in Night. |
 | `fx-vignette-sublevel` | `0.06` | Corner darkening in Sublevel. |
+| `fx-vignette-fluent` | `0` | Corner darkening in Fluent: off, so the scene edge meets the page bg. |
 
 ### font families
 
@@ -427,7 +452,9 @@ Layout breakpoints for the office HUD (container width).
 - `font-term`: "VT323", "IBM Plex Mono", ui-monospace, monospace
 - `font-sublevel-sans`: "Archivo", "IBM Plex Sans", system-ui, sans-serif
 - `font-sublevel-mono`: "Chivo Mono", "IBM Plex Mono", ui-monospace, monospace
+- `font-fluent-sans`: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif (system faces: the office loads no font file for them)
+- `font-fluent-mono`: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace
 
 ## Icons
 
-`add`, `approve`, `attach`, `bell`, `bot`, `broadcast`, `browser`, `building`, `channel`, `chat`, `checkpoint`, `chevron-down`, `chevron-right`, `close`, `code-run`, `computer-use`, `connector`, `copy`, `cost`, `day`, `decline`, `delegate`, `elevator`, `error`, `eval`, `filter`, `finished`, `floor`, `flow`, `hq`, `identity`, `info`, `knowledge`, `lab`, `mcp`, `memory`, `model`, `more`, `night`, `pause`, `plan`, `remove`, `resting`, `resume`, `retry`, `role-ae`, `role-analyst`, `role-coder`, `role-csa`, `role-csam`, `role-designer`, `role-fde`, `role-media`, `role-ops`, `role-partner`, `role-planner`, `role-research`, `role-sales`, `role-se`, `role-specialist`, `role-writer`, `rollback`, `room`, `schedule`, `search`, `send`, `session`, `settings`, `skill`, `sound`, `sound-off`, `studio`, `subagent`, `team`, `terminal`, `token`, `tool`, `tour`, `trace`, `trigger`, `waiting`, `working`, `zoom-in`, `zoom-out`
+`add`, `approve`, `attach`, `bell`, `bot`, `broadcast`, `browser`, `building`, `channel`, `chat`, `checkpoint`, `chevron-down`, `chevron-right`, `close`, `code-run`, `computer-use`, `connector`, `copy`, `cost`, `day`, `decline`, `delegate`, `elevator`, `error`, `eval`, `filter`, `finished`, `floor`, `flow`, `fluent`, `hq`, `identity`, `info`, `knowledge`, `lab`, `mcp`, `memory`, `model`, `more`, `night`, `pause`, `plan`, `remove`, `resting`, `resume`, `retry`, `role-ae`, `role-analyst`, `role-coder`, `role-csa`, `role-csam`, `role-designer`, `role-fde`, `role-media`, `role-ops`, `role-partner`, `role-planner`, `role-research`, `role-sales`, `role-se`, `role-specialist`, `role-writer`, `rollback`, `room`, `schedule`, `search`, `send`, `session`, `settings`, `skill`, `sound`, `sound-off`, `studio`, `subagent`, `team`, `terminal`, `token`, `tool`, `tour`, `trace`, `trigger`, `waiting`, `working`, `zoom-in`, `zoom-out`

@@ -688,12 +688,11 @@
       return { key: b.key, name: b.name, sessions: b.sessions, waiting: b.waiting, floors: def.floors.map(function (f) { return { name: f.name, key: f.key }; }), bots: bots };
     });
   }
-  var CITY_MODES = [{ id: 'day', label: 'Day', icon: 'day' }, { id: 'night', label: 'Night', icon: 'night' }, { id: 'sublevel', label: 'Sublevel', icon: 'terminal' }];
+  // The themes come from the DS (AgentOffice.MODES: Day, Night, Sublevel, Fluent); the page keeps no copy of the list.
+  var CITY_MODES = A.MODES;
   function themeMode() {
     var t = document.documentElement.getAttribute('data-theme');
-    if (t === 'dark') return 'night';
-    if (t === 'sublevel') return 'sublevel';
-    if (t === 'light') return 'day';
+    for (var i = 0; i < CITY_MODES.length; i++) if (CITY_MODES[i].theme === t) return CITY_MODES[i].id;
     return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
   }
   // How many bots are in each state across all buildings (DS StatusCounts keys; a finished bot is at rest).

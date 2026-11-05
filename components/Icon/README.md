@@ -1,6 +1,6 @@
 # Icon
 
-The icon set: 34 line icons on a 24px grid with a 1.75px stroke, round caps and joins. Inline icons take `currentColor`. The same icons are in `assets/Icons` as files with the `ink` color.
+The icon set: 85 line icons on a 24px grid with a 1.75px stroke, round caps and joins. Inline icons take `currentColor`. The same icons are in `assets/Icons` as files with the `ink` color.
 
 ## Props
 
