@@ -1,7 +1,7 @@
 // Floors and rooms: a named room, and the clean-up list of unused floors (git.mjs staleFloors).
 // Offline: a throwaway repo in os.tmpdir. Rooms are made under the office's worktree folder with a unique
 // name and removed at the end of each test.
-import test from 'node:test';
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,8 +14,13 @@ const GIT = git.resolveExe('git');
 const IDENT = ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false'];
 const plain = (cwd, ...a) => execFileSync(GIT, [...IDENT, ...a], { cwd, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
 
+// Every repository this file makes, and the <repo>.worktrees folder next to it that an agent room (createWorktree) makes:
+// removed at the end, so no run leaves folders in %TEMP% (a test's own finally may have removed them already).
+const made = [];
+after(() => { for (const d of made) for (const x of [d, d + '.worktrees']) fs.rmSync(x, { recursive: true, force: true }); });
 function repo() {
   const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-floors-')));
+  made.push(dir);
   plain(dir, 'init', '-b', 'main');
   fs.writeFileSync(path.join(dir, 'a.txt'), 'a');
   plain(dir, 'add', '-A'); plain(dir, 'commit', '-m', 'one');
