@@ -129,9 +129,10 @@
       } else {
         ['office', 'building'].forEach(function (s, i) {
           var id = 'scope-' + s, bw = 250, x = W - 48 - (2 - i) * (bw + 12) + 12, on = scope === s;
-          if (on) fill(p, x, 30, bw, 58, 'accent', 29); else stroke(p, x + 1.5, 31.5, bw - 3, 55, 'line', 3, 29);
+          // the chosen scope is the primary pair (accent and on-accent): ink on the room's accent was 2.76:1 at Night
+          if (on) fill(p, x, 30, bw, 58, 'primary', 29); else stroke(p, x + 1.5, 31.5, bw - 3, 55, 'line', 3, 29);
           if (isHover(view, id)) stroke(p, x - 5, 25, bw + 10, 68, 'focus', 4, 34);
-          text(p, x + bw / 2, 30 + 29 + 10, 28, on ? 'onAccent' : 'ink', s === 'office' ? 'All buildings' : 'This building', { wt: 600, align: 'center', maxW: bw - 16 });
+          text(p, x + bw / 2, 30 + 29 + 10, 28, on ? 'onPrimary' : 'ink', s === 'office' ? 'All buildings' : 'This building', { wt: 600, align: 'center', maxW: bw - 16 });
           hot(p, { kind: 'scope', id: id, scope: s, x: x, y: 30, w: bw, h: 58 });
         });
       }
@@ -395,7 +396,32 @@
     return { view: view, taken: k && k.length === 1 };   // other printable keys do nothing while typing
   }
 
-  var pure = { plan: plan, hotAt: hotAt, step: step, key: key, PAGED_BELOW: PAGED_BELOW, CANVAS_W: CANVAS_W };
+  // Tone names to token colors: the only colors the screens paint. The face is scene-dark: text is the bubble color, status
+  // tones mix into the face. t: the first token that is set; or: a tone when none is; mix: [a, b, k], k of b in a (like
+  // THREE.Color.lerp; three r147 mixes in sRGB). test/contrast.test.mjs checks every text on the fill under it at 4.5:1.
+  // The Confirm cell and band are status-waiting-on-bubble with ink (bubble) text: the DS pair for amber words on a bubble,
+  // so it reads at 4.5:1 both ways; ink on raw status-waiting did not in Day and Sublevel (review minor).
+  var TONES = {
+    face: { t: ['scene-dark'] }, ink: { t: ['bubble'] }, muted: { mix: ['ink', 'face', 0.42] }, line: { mix: ['ink', 'face', 0.7] },
+    accent: { t: ['type-security', 'accent'] }, focus: { t: ['accent'] },
+    allowFill: { mix: [{ t: ['status-working'] }, 'face', 0.45] }, denyFill: { mix: [{ t: ['status-error'] }, 'face', 0.4] }, askFill: 'face',
+    pending: { t: ['status-waiting-on-bubble'] }, pendingBand: 'pending', onPending: 'ink',
+    primary: { t: ['accent'] }, onPrimary: { t: ['on-accent'], or: 'ink' },
+    buttonFill: { mix: ['ink', 'face', 0.82] }, editFill: { mix: ['ink', 'face', 0.88] }, error: { mix: [{ t: ['status-error'] }, 'ink', 0.5] }
+  };
+  // tok(name) -> a color or nothing; mix(a, b, k) -> a color. Returns tone name -> color.
+  function toneColors(tok, mixFn) {
+    var out = {};
+    function get(x) {
+      if (typeof x === 'string') { if (!Object.prototype.hasOwnProperty.call(out, x)) out[x] = get(TONES[x]); return out[x]; }
+      if (x.t) { for (var i = 0; i < x.t.length; i++) { var c = tok(x.t[i]); if (c) return c; } return x.or ? get(x.or) : null; }
+      return mixFn(get(x.mix[0]), get(x.mix[1]), x.mix[2]);
+    }
+    Object.keys(TONES).forEach(get);
+    return out;
+  }
+
+  var pure = { plan: plan, hotAt: hotAt, step: step, key: key, PAGED_BELOW: PAGED_BELOW, CANVAS_W: CANVAS_W, TONES: TONES, toneColors: toneColors };
 
   // ---------- browser ----------
   // opts: { host, data() -> data, post(route, body) -> Promise, onError(text) }
@@ -408,13 +434,7 @@
     function tk(k) { return K.tok[k]; }
     function mix(a, b, t) { try { return '#' + new T.Color(a).lerp(new T.Color(b), t).getHexString(); } catch (e) { return a; } }
     // Tone names to token colors. The face is scene-dark: text is the bubble color, status tones mix into the face.
-    function colors() {
-      var face = tk('scene-dark'), ink = tk('bubble');
-      return { face: face, ink: ink, muted: mix(ink, face, 0.42), line: mix(ink, face, 0.7), accent: tk('type-security') || tk('accent'), onAccent: tk('bubble'),
-        focus: tk('accent'), allowFill: mix(tk('status-working'), face, 0.45), denyFill: mix(tk('status-error'), face, 0.4), askFill: face,
-        pending: tk('status-waiting'), pendingBand: tk('status-waiting'), onPending: face, primary: tk('accent'), onPrimary: tk('on-accent') || ink,
-        buttonFill: mix(ink, face, 0.82), editFill: mix(ink, face, 0.88), error: mix(tk('status-error'), ink, 0.35) };
-    }
+    function colors() { return toneColors(tk, mix); }
     function viewOf(it) {
       var v = views[it.screen] || (views[it.screen] = { page: 0, pending: null, hover: null, note: null });
       var f = host.focused(), focused = !!f && f.key === keyOf(it);
