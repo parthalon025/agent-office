@@ -378,11 +378,13 @@
             pick(prev && prev.asked[q.id])(stamp({ type: 'request', bot: bot0, id: q.id, text: q.text, tool: 'office_ask' }, q.t));
           });
           // what the session said (headless sessions only; a terminal session answers in its terminal).
-          // Restored replies fill the chat without speech bubbles, like restored tool calls.
+          // Restored replies fill the chat without speech bubbles, like restored tool calls. The replies of a bot this
+          // scene sees for the first time are restored too (seeded, with their time), also in a live pass: the scene
+          // never had them, so the DS records them once, and an old backlog does not speak (#58).
           (s.replies || []).forEach(function (r) {
             if (r.id <= k.replySeen) return;
             k.replySeen = r.id;
-            var e = pick(prev && r.id <= prev.replySeen), msg = stamp({ type: 'message', bot: bot0, text: r.text }, r.t);
+            var e = firstSight && !prev ? seeded : pick(prev && r.id <= prev.replySeen), msg = stamp({ type: 'message', bot: bot0, text: r.text }, r.t);
             if (e !== out) msg.say = false;
             e(msg);
           });

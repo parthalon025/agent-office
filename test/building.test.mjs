@@ -651,3 +651,67 @@ test('two sessions with one name in one building get unique scene names, found b
   assert.deepEqual(pv.map((x) => x.name), names);
   assert.deepEqual(pv.map((x) => x.uid), [a.uid, b.uid]);
 });
+
+// #58: a reply that came before the page saw the session must be in that bot's chat, whichever way the bot first shows.
+const said = (ev, bot) => of(ev, 'message').filter((e) => !bot || e.bot === bot).map((e) => e.text);
+
+test('replies from before the page opened fill the chat, in order, each once, equal texts too', async () => {
+  const r = rig();
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  const s = [...r.tracker.sessions.values()][0];
+  r.tracker.pushReply(s, 'Done.'); r.t += 5; r.tracker.pushReply(s, 'Done.'); r.t += 5; r.tracker.pushReply(s, 'Last.');
+  r.push();
+  const m = r.mount(KEY_A);
+  assert.deepEqual(said(m.ev), ['Done.', 'Done.', 'Last.']);
+  r.push(); r.push();
+  assert.deepEqual(said(m.ev), ['Done.', 'Done.', 'Last.'], 'a later snapshot repeats nothing');
+});
+
+test('a bot that first shows after the mount (its place came late) brings the replies it already had', async () => {
+  const r = rig();
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  const s = [...r.tracker.sessions.values()][0];
+  s.placed = false;   // the server has not found the repo and branch yet
+  r.tracker.pushReply(s, 'Early answer.');
+  r.push();
+  const m = r.mount(KEY_A);
+  assert.deepEqual(said(m.ev), [], 'no place, no bot yet');
+  s.placed = true;
+  r.t += 10;
+  r.push();
+  assert.deepEqual(said(m.ev), ['Early answer.']);
+  r.push();
+  assert.deepEqual(said(m.ev), ['Early answer.'], 'once');
+});
+
+test('a bot that moves in from another building brings the replies it already had', async () => {
+  const r = rig();
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_B });
+  const s = [...r.tracker.sessions.values()][0];
+  r.tracker.pushReply(s, 'Said in the other building.');
+  r.push();
+  const m = r.mount(KEY_A);
+  assert.deepEqual(said(m.ev), []);
+  s.git = { ...GITS[REPO_A] }; s.cwd = REPO_A;   // it moved into this building
+  r.t += 10;
+  r.push();
+  assert.deepEqual(said(m.ev), ['Said in the other building.']);
+});
+
+test('replies of a bot first seen in a live pass are restored, not spoken: seeded with their time, no bubble; later replies speak', async () => {
+  const r = rig();
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_B });
+  const s = [...r.tracker.sessions.values()][0];
+  r.tracker.pushReply(s, 'One.'); r.t += 5; r.tracker.pushReply(s, 'Two.');
+  r.push();
+  const m = r.mount(KEY_A);
+  s.git = { ...GITS[REPO_A] }; s.cwd = REPO_A;
+  r.t += 10;
+  r.push();
+  const old = of(m.ev, 'message');
+  assert.deepEqual(old.map((e) => [e.text, e.seeded, e.say, e.at]), [['One.', true, false, s.replies[0].t], ['Two.', true, false, s.replies[1].t]]);
+  r.t += 10;
+  r.tracker.pushReply(s, 'Three.'); r.push();
+  const nw = of(m.ev, 'message').at(-1);
+  assert.deepEqual([nw.text, nw.seeded, nw.say], ['Three.', undefined, undefined]);
+});
