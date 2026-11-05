@@ -41,7 +41,7 @@ export const PROTOCOL_VERSION = 1;
 // gated (ADR 0001): true only when the agent asks the office before every tool call that is not low risk; an agent where only
 // some calls ask is ungated, with its supervision label. None of the agents has been run against the office yet (pin: null).
 const HERMES_EDITS = 'Edit requests come to the office and the rule applies. Reads, and writes to its own skills and memory, run without asking.';
-const HERMES_SHELL = 'Commands that Hermes rates dangerous come to the office and the rule applies. The others run without asking.';
+const HERMES_SHELL = 'Only the commands Hermes rates dangerous come to the office.';   // one line on the wall
 export const AGENTS = {
   hermes: {
     label: 'Hermes Agent', program: 'hermes', args: ['acp'],
