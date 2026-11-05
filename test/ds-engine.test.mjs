@@ -1,7 +1,8 @@
 // DS scene engine rules in components/bundle.js: reduced-motion camera cuts (#36), the zoom step (#56), seeded events
 // and Since you left (#35), unread and Activity of seeded events (#61), the Needs you source of Since you left (#62),
-// the frame inset clamp (#65), and the schema copy in kit/schema.json. The bundle needs WebGL and React, so each test
-// takes the one function it checks out of the bundle text and runs it on plain stand-ins (no THREE, no DOM).
+// the frame inset clamp (#65), GPU memory on dispose, clear and theme change (#84), and the schema copy in
+// kit/schema.json. The bundle needs WebGL and React, so each test takes the one function it checks out of the bundle
+// text and runs it on plain stand-ins (no THREE, no DOM).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -629,4 +630,166 @@ test('retire: reduced motion and a floor that is not on screen do not wait for t
     assert.equal(r.left.length, 1, JSON.stringify(opt));
     assert.deepEqual(r.removed, ['sub']);
   }
+});
+
+// #84: GPU memory. Stage.dispose frees what the stage holds on the GPU (scene, cleared groups, Kit caches, shadows, post
+// effects), then the renderer and its WebGL context. Stage.clear takes a group out at once and frees it after the next
+// frame. Kit.refresh frees the textures it drops. Nothing that the scene, the Kit or another live stage still uses is
+// freed. The rules run on plain stand-ins that count their dispose calls.
+let spent, order;   // resource -> number of dispose calls; every call in order
+const gpuRes = (kind, o = {}) => { const r = Object.assign({ kind }, o); r.dispose = () => { spent.set(r, (spent.get(r) || 0) + 1); order.push(r.n || kind); }; return r; };
+const G = (n) => gpuRes('geo', { n }), X = (n) => gpuRes('tex', { n, isTexture: true }), M = (n, o) => gpuRes('mat', Object.assign({ n }, o));
+class Node3 {
+  constructor(o) { Object.assign(this, o); this.children = []; this.parent = null; }
+  add(...c) { for (const x of c) { if (x.parent) x.parent.remove(x); x.parent = this; this.children.push(x); } return this; }
+  remove(c) { const i = this.children.indexOf(c); if (i >= 0) { this.children.splice(i, 1); c.parent = null; } return this; }
+  traverse(fn) { fn(this); for (const c of this.children.slice()) c.traverse(fn); }
+}
+const mesh3 = (geometry, material) => new Node3({ geometry, material });
+function gpuKit() {
+  spent = new Map(); order = [];
+  const at = bundle.indexOf('/* ---------- GPU memory ---------- */'), end = bundle.indexOf('/* ---------- stage ---------- */');
+  assert.ok(at >= 0 && end > at, 'bundle has the GPU memory block before the stage');
+  function Stage() {}
+  function Kit() {}
+  const lib = new Function('Stage', 'Kit', 'cancelAnimationFrame', 'readFonts', 'readTokens',
+    bundle.slice(at, end) +
+    source('Stage.prototype.clear=function', '};\n') + source('Stage.prototype.gc=function', '};\n') + source('Stage.prototype.dispose=function', '};\n') +
+    source('Kit.prototype.refresh=function', '};\n') +
+    'return { LIVE: LIVE };'
+  )(Stage, Kit, () => {}, () => ({ sans: 'sans' }), () => ({ bg: '#fff' }));
+  // a stage as the constructor leaves it: in LIVE, with a renderer, a Kit and observers
+  lib.stage = (scene) => {
+    const s = Object.create(Stage.prototype);
+    const r = { dispose() { order.push('renderer.dispose'); }, forceContextLoss() { order.push('forceContextLoss'); }, domElement: { remove() { order.push('canvas.remove'); } } };
+    Object.assign(s, { scene, r, raf: 1, lamps: [], anim: [], K: { tex: {}, mats: {}, themed: [], screens: [] }, mo: { disconnect() {} }, ro: { disconnect() {} }, ctl: { dispose() {} } });
+    lib.LIVE.push(s);
+    return s;
+  };
+  return Object.assign(lib, { Stage, Kit });
+}
+
+test('Stage.dispose frees each geometry, material and texture of the scene and the Kit caches once, then the WebGL context (#84)', () => {
+  const lib = gpuKit();
+  const g1 = G('g1'), g2 = G('sprite'), g3 = G('g3');
+  const t1 = X('t1'), t2 = X('t2'), t3 = X('t3'), t4 = X('bubble'), t5 = X('t5'), t6 = X('t6'), t7 = X('blob');
+  const m1 = M('m1', { map: t1, emissiveMap: t1 }), m2 = M('m2', { normalMap: t2 }), m3 = M('m3', { uniforms: { tDiffuse: { value: t3 }, k: { value: 1 } } });
+  const m4 = M('m4', { map: t4 }), m5 = M('m5', { alphaMap: t5, envMap: t6 }), m6 = M('m6', { map: null });
+  const shadow = gpuRes('shadow', { n: 'shadow' });
+  const scene = new Node3({ isScene: true });
+  const floor = new Node3({});
+  floor.add(mesh3(g3, m5));
+  scene.add(mesh3(g1, m1), mesh3(g1, [m2, m3]), mesh3(g2, m4), new Node3({ isLight: true, shadow }), floor);
+  const s = lib.stage(scene);
+  Object.assign(s.K, { tex: { bubble: t4, blob: t7 }, mats: { k: m6 } });
+  const passes = ['render', 'bloom', 'grade'].map((n) => gpuRes('pass', { n }));
+  s.comp = gpuRes('composer', { n: 'composer', passes });
+  s.dispose();
+  const all = [g1, g2, g3, t1, t2, t3, t4, t5, t6, t7, m1, m2, m3, m4, m5, m6, shadow, ...passes, s.comp];
+  for (const r of all) assert.equal(spent.get(r), 1, r.n + ' disposed once');
+  assert.equal(spent.size, all.length, 'nothing else');
+  assert.deepEqual(order.slice(-3), ['renderer.dispose', 'forceContextLoss', 'canvas.remove'], 'the renderer and the context go last');
+  assert.equal(lib.LIVE.includes(s), false, 'out of the live stages');
+  assert.equal(s.dead, true);
+  assert.deepEqual([s.K.tex, s.K.mats], [{}, {}], 'the Kit caches are empty');
+  const n = order.length;
+  s.dispose();
+  assert.equal(order.length, n, 'a second dispose frees nothing and keeps the renderer calls at one');
+  for (const r of all) assert.equal(spent.get(r), 1);
+});
+
+test('Stage.dispose keeps what another live stage draws or caches; that stage frees it later (#84)', () => {
+  const lib = gpuKit();
+  const gS = G('gS'), tS = X('tS'), mS = M('mS', { map: tS }), tK = X('tK'), gA = G('gA'), tA = X('tA'), mA = M('mA', { map: tA, emissiveMap: tS }), mB = M('mB', { map: tK });
+  const sa = new Node3({ isScene: true }), sb = new Node3({ isScene: true });
+  sa.add(mesh3(gS, mS), mesh3(gA, mA), mesh3(gA, M('mK', { map: tK })));
+  sb.add(mesh3(gS, mS), mesh3(G('gB'), mB));
+  const a = lib.stage(sa), b = lib.stage(sb);
+  b.K.tex.cached = tK;   // in B's Kit cache, drawn by A too
+  a.dispose();
+  for (const r of [gS, tS, mS, tK, mB]) assert.equal(spent.get(r), undefined, r.n + ' is kept: stage B still uses it');
+  for (const r of [gA, tA, mA]) assert.equal(spent.get(r), 1, r.n + ' is freed');
+  b.dispose();
+  for (const r of [gS, tS, mS, tK, mB]) assert.equal(spent.get(r), 1, r.n + ' is freed with the last stage');
+  assert.equal(lib.LIVE.length, 0);
+});
+
+test('Stage.clear takes the group out at once and frees it after the next frame, except what the scene or the Kit still uses (#84)', () => {
+  const lib = gpuKit();
+  const scene = new Node3({ isScene: true }), F = new Node3({});
+  const gF = G('gF'), tF = X('tF'), mF = M('mF', { map: tF }), gK = G('gK'), mK = M('mK'), gSp = G('sprite'), tBub = X('bubble'), mBub = M('mBub', { map: tBub });
+  const tR = X('tR'), mR = M('mR', { map: tR }), gR = G('gR');
+  const lamp = new Node3({ isLight: true, shadow: gpuRes('shadow', { n: 'lampShadow' }) }), screen = mesh3(G('gScr'), M('mScr'));
+  F.add(mesh3(gF, mF), mesh3(gK, mK), mesh3(gSp, mBub), mesh3(gR, mR), lamp, screen);
+  scene.add(F, mesh3(gSp, M('otherSprite')));
+  const s = lib.stage(scene);
+  Object.assign(s.K, { tex: { bubble: tBub }, mats: { k: mK }, screens: [[screen, 'coder']] });
+  s.lamps = [lamp];
+  s.clear(F);
+  assert.equal(F.parent, null, 'out of the scene at once');
+  assert.deepEqual(s.lamps, [], 'its lamps are gone');
+  assert.deepEqual(s.K.screens, [], 'its screens are gone');
+  assert.equal(spent.size, 0, 'nothing is freed before the next frame');
+  scene.add(mesh3(G('gNew'), mR));   // the page builds again with a material it keeps (a rebuilt floor, new streets)
+  s.gc();
+  for (const r of [gF, tF, mF, gK, gR, lamp.shadow, screen.geometry, screen.material]) assert.equal(spent.get(r), 1, r.n + ' freed once');
+  for (const r of [mK, tBub, gSp, mR, tR]) assert.equal(spent.get(r), undefined, r.n + ' kept: the Kit or the scene still uses it');
+  const n = order.length;
+  s.gc();
+  assert.equal(order.length, n, 'a second gc frees nothing');
+});
+
+test('Stage.dispose frees a cleared group that the next frame did not free; clear after dispose frees at once (#84)', () => {
+  const lib = gpuKit();
+  const scene = new Node3({ isScene: true }), F = new Node3({}), L = new Node3({});
+  const gF = G('gF'), mF = M('mF', { map: X('tF') }), gL = G('gL'), mL = M('mL');
+  F.add(mesh3(gF, mF)); L.add(mesh3(gL, mL));
+  scene.add(F, L);
+  const s = lib.stage(scene);
+  s.clear(F);
+  s.dispose();
+  for (const r of [gF, mF, mF.map, gL, mL]) assert.equal(spent.get(r), 1, r.n + ' freed once');
+  const late = new Node3({}), gLate = G('gLate');
+  late.add(mesh3(gLate, M('mLate')));
+  s.clear(late);   // page code that cleans up after the stage is gone
+  assert.equal(spent.get(gLate), 1);
+});
+
+test('the stage registers as live once it has a renderer, and its loop frees cleared groups after each frame (#84)', () => {
+  const ctor = source('function Stage(el,o){', 'requestAnimationFrame(loop);};loop();}\n');
+  const made = ctor.indexOf('s.r=new T.WebGLRenderer'), live = ctor.indexOf('LIVE.push(s);');
+  assert.ok(made > 0 && live > made, 'LIVE.push after the renderer is made');
+  assert.ok(ctor.indexOf('return;}', made) < live, 'a stage without WebGL is not live');
+  assert.match(ctor, /s\.draw\(\);if\(s\.junk&&s\.junk\.length\)s\.gc\(\);s\.raf=requestAnimationFrame\(loop\);/);
+});
+
+test('a finished handoff arc goes through stage.clear, and a speech bubble frees its material with its texture (#84)', () => {
+  // the arc line, its dot and the floor label (a canvas texture each) went out of the scene, but only the line geometry was freed
+  assert.match(bundle, /if\(x\.t>=1\)\{s\.clear\(x\.ln\);s\.clear\(x\.dot\);if\(x\.lb\)s\.clear\(x\.lb\);arcs\.splice\(i,1\);\}/);
+  assert.equal((bundle.match(/b\.say\.sp\.material\.map\.dispose\(\);/g) || []).length, 2, 'two places end a speech bubble');
+  assert.equal((bundle.match(/b\.say\.sp\.material\.map\.dispose\(\);b\.say\.sp\.material\.dispose\(\);/g) || []).length, 2);
+});
+
+test('Kit.refresh frees the textures it drops from K.tex, once; screens get the new ones (#84)', () => {
+  const lib = gpuKit();
+  const K = Object.create(lib.Kit.prototype);
+  const oldScr = X('scr-coder'), blob = X('blob');
+  let made = 0;
+  K.screenTex = function (role) { return this.tex['scr-' + role] || (this.tex['scr-' + role] = X('new-' + (++made))); };
+  const scene = new Node3({ isScene: true }), scr = mesh3(G('gScr'), { map: oldScr, emissiveMap: oldScr, needsUpdate: false });
+  scene.add(scr);
+  const recolored = [];
+  Object.assign(K, { el: null, tex: { 'scr-coder': oldScr, blob }, themed: [[{ color: { set: (c) => recolored.push(c) } }, 'bg']], screens: [[scr, 'coder']] });
+  K.refresh();
+  assert.equal(spent.get(oldScr), 1);
+  assert.equal(spent.get(blob), 1);
+  assert.equal(scr.material.map, K.tex['scr-coder']);
+  assert.notEqual(scr.material.map, oldScr);
+  assert.equal(scr.material.emissiveMap, scr.material.map);
+  assert.deepEqual(recolored, ['#fff'], 'themed materials still take the new tokens');
+  const first = K.tex['scr-coder'];
+  K.refresh();
+  assert.equal(spent.get(oldScr), 1, 'an old texture is freed once');
+  assert.equal(spent.get(first), 1, 'the texture of the last refresh is freed by the next one');
+  assert.equal(spent.get(K.tex['scr-coder']), undefined, 'the shown one is kept');
 });
