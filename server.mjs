@@ -615,7 +615,7 @@ function roomContents(pl) {
   return [
     'What is in the room',
     'The room is a lab room in a 3D building. Fixed parts (the office draws them the same in every lab room):',
-    '- A floor and a back wall. The first room of a floor has a solid left wall with a wide window, and a wall clock on the back wall. Other rooms have a glass wall on the left.',
+    '- A floor and a back wall. The first room of a floor has a solid left wall with a wide window, and a wall clock on the back wall. Other rooms have a glass wall on the left. On the ground floor the Security room comes first, so every lab room there has a glass wall on the left.',
     `- A room sign on the back wall with the room name (${pl.room}), the room type and the office version.`,
     '- Server racks along the back wall, with a metal shelf on top. A cable tray runs above the racks and carries data packets from the desks to the racks.',
     '- A work table with a small monitor and an amber block.',
@@ -625,6 +625,7 @@ function roomContents(pl) {
     '- On the floor: an elevator lobby on the left side with the elevator and a railing, and a meter near the front right corner.',
     'The page adds to every lab room: a blackboard on the back wall with what the agents do (plan, browser steps, last steps, the repository and a pinned note), a chalk ledge with two pieces of chalk, a whiteboard with the user notes and a marker tray, a stats display on the left wall (sessions, tool calls, tokens and cost), a door with an Agents sign on the left wall, a warm lamp that is lit at night, and two plants.',
     'The window of the first room is a picture: by day a blue sky with clouds over a low skyline, at night a dark sky with a moon over a skyline with lit windows, in Sublevel a lit corridor. It does not show the street.',
+    'The ground floor of every building also has the Security room, left of the lab rooms. No agent works in it. Its six wall screens (Files, Commands, Network, Secrets, Agents, Spend) are where the user sets the permission rules: Ask, Allow or Deny for each kind of tool call and agent kind. The office applies them before it asks the user.',
     'In the building view (outside the floors) the office draws a road with lane marks along the front and the right side of the building, sidewalks with trees, two street lights that glow at night, and a flock of birds that circles over the tower.',
     'You can change only the notes board and the blackboard pin (office_room_update). You cannot move furniture, desks, boards, the door or bots. The office places them.',
   ];
