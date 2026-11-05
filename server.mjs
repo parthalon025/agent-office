@@ -483,7 +483,8 @@ function workOf(x) {
 function figuresText(f) {
   const out = [plural(f.sessions, 'open session', 'open sessions'), `${f.working} working`, `${f.waiting} waiting for the user`,
     plural(f.toolCalls, 'recent tool call', 'recent tool calls'), `${f.tokens.toLocaleString('en-US')} tokens`];
-  if (f.priced) out.push(`${globalThis.OfficeFormat.money(f.cost)} spent`);
+  if (f.unknown) out.push(`spend ${globalThis.OfficeFormat.cost(f.cost, f.unknown)} (an agent here reports no cost)`);
+  else if (f.priced) out.push(`${globalThis.OfficeFormat.money(f.cost)} spent`);
   if (f.todosTotal) out.push(`${f.todosDone} of ${f.todosTotal} plan steps done`);
   return out.join(', ') + '.';
 }
@@ -1012,7 +1013,7 @@ const snapshot = () => ({
   sessions: [...sessions.values()].map(({ ...s }) => ({ ...s, place: s.placed ? roomPlace(s) : null })),
   feed: feed.slice(-80),
   plan,
-  figures: allFigures(),    // noteKey -> room figures (sessions, working, waiting, toolCalls, tokens, cost, todosDone, todosTotal, lastEvent)
+  figures: allFigures(),    // noteKey -> room figures (sessions, working, waiting, toolCalls, tokens, cost, priced, unknown, todosDone, todosTotal, lastEvent)
   notes: persisted.notes,   // noteKey -> { text, at, v, by? }: each room's notes board (v: version counter; a cleared board stays with text '' and at 0; by: the agent session that last wrote it)
   pins: persisted.pins,     // noteKey -> { text, by, at }: a short message an agent pinned on the room's blackboard
   repos: [...repos.entries()].map(([key, r]) => ({ key, ...r, worktrees: r.worktrees.map((w) => ({ ...w, place: placeOfWorktree(r.path, w) })) })),

@@ -65,8 +65,9 @@
   function todoStatus(t) { return TODO[t && t.status !== undefined ? t.status : t] || 'resting'; }
 
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
+  // priced: sessions with a cost figure. unknown: sessions whose agent reports no cost (costUnknown), shown as "unknown".
   function figures(list) {
-    var o = { sessions: 0, working: 0, waiting: 0, toolCalls: 0, tokens: 0, cost: 0, priced: 0, todosDone: 0, todosTotal: 0, lastEvent: 0 };
+    var o = { sessions: 0, working: 0, waiting: 0, toolCalls: 0, tokens: 0, cost: 0, priced: 0, unknown: 0, todosDone: 0, todosTotal: 0, lastEvent: 0 };
     (list || []).forEach(function (s) {
       o.sessions++;
       var k = status(s).key;
@@ -74,7 +75,8 @@
       if (k === 'waiting') o.waiting++;
       o.toolCalls += (s.calls || []).length;
       o.tokens += (s.usage && s.usage.tokens) || 0;
-      if (typeof s.cost === 'number') { o.cost += s.cost; o.priced++; }
+      if (s.costUnknown) o.unknown++;
+      else if (typeof s.cost === 'number') { o.cost += s.cost; o.priced++; }
       (s.todos || []).forEach(function (t) { o.todosTotal++; if (t.status === 'completed') o.todosDone++; });
       if ((s.lastEvent || 0) > o.lastEvent) o.lastEvent = s.lastEvent;
     });

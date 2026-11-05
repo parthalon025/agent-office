@@ -4,6 +4,8 @@
    import it for its side effect and read globalThis.OfficeFormat.
 
      money(n)        -> '$0.00', '<$0.01' (a cost above zero but under one cent), '$0.26'; a dash when n is not a number
+     cost(n, unknown) -> money(n), or 'unknown' when an agent reports no cost (session.costUnknown, or the count of such
+                        sessions in a room), never '$0.00'. A known part above zero keeps its figure: '$0.26 + unknown'.
      plural(n, one, many?) -> '1 turn', '2 turns' (many defaults to one + 's')
      folderName(p)   -> the last folder of a path
      shortPath(p)    -> the last two folders with a leading cut mark when the path is deeper than a drive and two
@@ -22,6 +24,10 @@
     if (typeof n !== 'number' || !isFinite(n)) return '–';
     if (n > 0 && n < 0.01) return '<$0.01';
     return '$' + n.toFixed(2);
+  }
+  function cost(n, unknown) {
+    if (!unknown) return money(n);
+    return typeof n === 'number' && isFinite(n) && n > 0 ? money(n) + ' + unknown' : 'unknown';
   }
   function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
   function trimmed(p) { var s = String(p == null ? '' : p); return s.length > 1 ? s.replace(/[\\/]+$/, '') : s; }
@@ -47,5 +53,5 @@
     var t = String(text == null ? '' : text), k = String(secret == null ? '' : secret);
     return k ? t.split(k).join(SECRET_MASK) : t;
   }
-  root.OfficeFormat = { money: money, plural: plural, folderName: folderName, shortPath: shortPath, hintPill: hintPill, maskSecret: maskSecret, SECRET_MASK: SECRET_MASK };
+  root.OfficeFormat = { money: money, cost: cost, plural: plural, folderName: folderName, shortPath: shortPath, hintPill: hintPill, maskSecret: maskSecret, SECRET_MASK: SECRET_MASK };
 })(typeof globalThis !== 'undefined' ? globalThis : window);
