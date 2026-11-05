@@ -163,7 +163,9 @@ export function createLocalTools(root, deps = {}) {
     const limitMs = Math.min(Math.max(Number(timeoutMs) || LIMITS.runTimeoutMs, 100), LIMITS.maxRunMs);
     const win = process.platform === 'win32';
     const shell = resolveExe(win ? 'cmd.exe' : 'sh'); // throws to the caller: run() answers "The tool failed"
-    const child = spawn(shell, win ? ['/d', '/s', '/c', cmd] : ['-c', cmd], {
+    // cmd /s takes the line after /c and strips its first and last quote, so the line goes in one more pair of quotes:
+    // a line that starts and ends with a quote ("C:\Program Files\x.exe" "a b") keeps its own.
+    const child = spawn(shell, win ? ['/d', '/s', '/c', `"${cmd}"`] : ['-c', cmd], {
       cwd: dir, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], detached: !win, windowsVerbatimArguments: win,
     });
     running.add(child);

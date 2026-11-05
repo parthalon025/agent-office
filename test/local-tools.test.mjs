@@ -103,6 +103,15 @@ test('Bash runs in the folder and reports the exit code', async () => {
   } finally { s.done(); }
 });
 
+test('Bash runs a command that starts and ends with a quote (a quoted program path)', async () => {
+  const s = scratch(); const t = createLocalTools(s.root);
+  try {
+    // cmd /s strips the first and last quote of the line it gets, so the office wraps the line in one more pair.
+    const r = await t.run('Bash', { command: `"${process.execPath}" -e "console.log(11)"` });
+    assert.equal(r.text, '11\n[exit 0]');
+  } finally { s.done(); }
+});
+
 test('Bash stops at the time limit and kills the whole tree', async () => {
   const s = scratch(); const killed = [];
   const t = createLocalTools(s.root, { kill: (pid) => { killed.push(pid); killTree(pid); } });

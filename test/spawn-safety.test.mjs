@@ -197,6 +197,7 @@ function sources() {
 test('no source starts a program by a bare name, through a shell, or with shell: true', () => {
   const files = sources();
   assert.ok(files.some((f) => path.basename(f) === 'server.mjs') && files.some((f) => path.basename(f) === 'git.mjs'));
+  for (const p of ['claude-code.mjs', 'local.mjs', 'local-tools.mjs', 'acp.mjs']) assert.ok(files.includes(path.join(ROOT, 'providers', p)), `providers/${p} is scanned`);
   const bad = [];
   for (const f of files) {
     const src = fs.readFileSync(f, 'utf8');
