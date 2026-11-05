@@ -378,11 +378,14 @@
             pick(prev && prev.asked[q.id])(stamp({ type: 'request', bot: bot0, id: q.id, text: q.text, tool: 'office_ask' }, q.t));
           });
           // what the session said (headless sessions only; a terminal session answers in its terminal).
-          // Restored replies fill the chat without speech bubbles, like restored tool calls.
+          // Restored replies fill the chat without speech bubbles, like restored tool calls. The replies of a bot this
+          // scene sees for the first time in a live pass are restored too (seeded, without at, like its error below): it
+          // may have said them live here before (a round trip through another building, a reopened session that
+          // carries its old replies), and a seeded event with at after the last visit would be recorded a second time (#58).
           (s.replies || []).forEach(function (r) {
             if (r.id <= k.replySeen) return;
             k.replySeen = r.id;
-            var e = pick(prev && r.id <= prev.replySeen), msg = stamp({ type: 'message', bot: bot0, text: r.text }, r.t);
+            var e = prev ? pick(r.id <= prev.replySeen) : (firstSight && !seedAll ? restore : emit), msg = stamp({ type: 'message', bot: bot0, text: r.text }, r.t);
             if (e !== out) msg.say = false;
             e(msg);
           });
