@@ -289,3 +289,24 @@ test('discardNew removes only a worktree createWorktree made in this call; a cop
     fs.rmSync(dir + '.worktrees', { recursive: true, force: true });
   }
 });
+
+// Review minor: layout read the base branches, then the branch list. When the list failed after the bases had been read,
+// live stayed null and live.has threw, so the whole layout failed. Now a room keeps the base its config names.
+test('layout: when the branch list cannot be read after the bases, the rooms still come back with the base their config names', async () => {
+  const dir = repo();
+  let agent = null;
+  try {
+    agent = await git.createWorktree(dir, 'based');
+    const broken = async () => { throw new Error('git for-each-ref timed out'); };
+    const list = await git.layout(dir, { readBranches: broken });
+    const room = list.find((w) => w.branch === agent.branch);
+    assert.ok(room, 'the layout is there');
+    assert.equal(room.base, 'main');
+    const noBases = await git.layout(dir, { readBases: broken });
+    assert.equal(noBases.find((w) => w.branch === agent.branch).base, undefined, 'bases unreadable: no base, and no throw');
+  } finally {
+    if (agent) await git.removeRoom(dir, agent.root, true).catch(() => {});
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(dir + '.worktrees', { recursive: true, force: true });
+  }
+});

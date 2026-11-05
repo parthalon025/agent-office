@@ -337,7 +337,8 @@ export async function createPr(cwd, branch, title) {
 // The office draws a repository as a building, a branch as a floor and a worktree as a room.
 
 /** The worktrees of a repository: each one's folder, branch, and whether it is the main folder. */
-export async function layout(repo) {
+// deps (readBases, readBranches) are for tests.
+export async function layout(repo, { readBases = bases, readBranches = branches } = {}) {
   const out = await git(['worktree', 'list', '--porcelain'], repo, 15000, ENGLISH); // relayout reads the error text
   const list = [];
   let cur = null;
@@ -347,10 +348,16 @@ export async function layout(repo) {
     else if (cur && line.startsWith('prunable')) cur.prunable = true;
     else if (cur && line === 'bare') cur.bare = true;
   }
+  // A base is reported only while its branch is there. When the branch list cannot be read (a timeout, a lock), the base the
+  // config names stays: a passing failure must not move a room to a floor of its own for one refresh. live null: unknown.
   let base = new Map(), live = null;
-  try { base = await bases(repo); if (base.size) live = new Set(await branches(repo, Infinity)); }
+  try { base = await readBases(repo); }
   catch (e) { console.warn(`Agent Office: could not read the base branches of ${repo}: ${e.message}`); }
-  for (const w of list) if (base.has(w.branch) && live.has(base.get(w.branch))) w.base = base.get(w.branch);
+  if (base.size) {
+    try { live = new Set(await readBranches(repo, Infinity)); }
+    catch (e) { console.warn(`Agent Office: could not read the branches of ${repo}, so the bases are not checked: ${e.message}`); }
+  }
+  for (const w of list) if (base.has(w.branch) && (!live || live.has(base.get(w.branch)))) w.base = base.get(w.branch);
   return list.filter((w) => !w.bare && !w.prunable);
 }
 
