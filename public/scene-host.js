@@ -65,7 +65,8 @@
    door) calls click() at once. A click on another screen looks at that one; a click on empty scene, Esc (the
    page) or Back flies back. The camera flies here only, and the engine does not reframe while an item is in focus: a
    goal it sets is held back, and a frame it cuts at once (stage.frame with now: a window resize with a HUD inset, a
-   theme rebuild) is undone in the next frame, before the engine draws (the host wraps stage.frame).
+   theme rebuild) is undone in the same call, or in the next frame when a rebuild took the item's mesh out of the scene
+   (the host wraps stage.frame). host.refit() is at once after a new canvas or frustum, so a resize never flies.
    fill: the share of the free part the plane fills (default 0.88). clear: after the landing the camera stands this
    far in front of the plane, so what stands closer to the viewer (a bot, its bubble, a desk) is clipped away.
    pin: a pinned screen (#89). Its look is its use: once the camera lands, the page lays a real DOM layer (chat, terminal,
