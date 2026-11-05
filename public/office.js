@@ -1713,6 +1713,8 @@
     // A scene gets a new one when the building changes, and when the adapter says it is stale: the DS has no
     // event that removes a floor or a room, so a removal mounts the building again.
     var fd = useState({ key: wantKey, repo: shown, view: view, mount: null, floor: null }), cur2 = fd[0], setCur2 = fd[1];
+    var floorMem = React.useRef(null), offFloor = React.useRef(null);
+    if (!floorMem.current) floorMem.current = window.OfficeBuilding.floorMemory();   // the floors of the page: which one a scene opens on, and the user's last pick, per building (#111)
     var stale = !!snap && !!cur2.mount && cur2.mount.stale();
     var needsMount = !!snap && view === 'office' && !cur2.mount && cur2.view === 'office';
     var mount = cur2.mount, def = mount ? mount.def : null;
@@ -1723,13 +1725,20 @@
     useEffect(function () {
       if (!fading) return undefined;
       var t = setTimeout(function () {
-        var next = view === 'office' && window.officeAdapter.latest() ? window.officeAdapter.mount(shown) : null;
-        // A rebuild of the same building keeps the floor the user looks at, if it still exists (#85). Floor ids are new
-        // for each mount, so the match is by branch. Another building or the city starts on the scene's default floor.
-        var floor = null;
-        if (next && cur2.mount && cur2.view === 'office' && cur2.repo === shown && hostRef.current) {
-          try { floor = window.OfficeBuilding.keepFloor(cur2.mount, hostRef.current.floorId(), next); } catch (x) { floor = null; }
+        var snapNow = window.officeAdapter.latest();
+        var next = view === 'office' && snapNow ? window.officeAdapter.mount(shown) : null;
+        // The floor on screen in the scene we leave (a rebuild, another building, the city). Floor ids are new for each
+        // mount, so every match is by branch. All rules of the choice are in OfficeBuilding.floorMemory (#85, #111).
+        var was = null;
+        if (cur2.mount && cur2.view === 'office' && hostRef.current) {
+          try { was = cur2.mount.floorBranch(hostRef.current.floorId()); } catch (x) { was = null; }
+          floorMem.current.see(cur2.repo, was);
         }
+        if (offFloor.current) { offFloor.current(); offFloor.current = null; }
+        // The new scene opens on the floor the memory names, always: the page never lets the DS pick its default floor.
+        var start = null;
+        if (next) { try { start = floorMem.current.start(next, snapNow, cur2.repo === shown ? was : null); } catch (x) { start = null; } }
+        var floor = start ? start.id : null;
         setCur2({ key: wantKey, repo: shown, view: view, mount: next, floor: floor });
       }, reduced() ? 0 : cssMs('duration-base', 240));
       return function () { clearTimeout(t); };
@@ -1928,6 +1937,12 @@
         if (hostRef.current) hostRef.current.dispose();
         var host = hostRef.current = window.OfficeSceneHost && st ? window.OfficeSceneHost.attach(o, { covers: sceneCovers }) : null;
         window.officeHost = host;   // the scene host (focus, flights), for the console and tests
+        // The floor the user looks at, for the memory of floors: a floor other than the one the page opened is a move (#111).
+        if (offFloor.current) { offFloor.current(); offFloor.current = null; }
+        if (host && mount) {
+          var seenRepo = cur2.repo, seenMount = mount;
+          offFloor.current = host.frame(function () { floorMem.current.see(seenRepo, seenMount.floorBranch(host.floorId())); });
+        }
         // A screen in focus: a look shows the look bar; a look, a look at another screen or a way back closes the panels.
         // The second step opens a panel through the board's or the terminal's onOpen.
         // A Security room screen keeps the look bar in focus: every click on it is a click on a cell, never a panel.
