@@ -1,5 +1,5 @@
 {
- "version": "x1.6.8",
+ "version": "x1.6.9",
  "events": {
   "status": {
    "desc": "A bot changes state. The bot walks to rest or back to its seat when needed.",
