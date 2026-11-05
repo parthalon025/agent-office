@@ -1,9 +1,23 @@
-<!-- @dsCard group="3D office" height=760 width=1360 -->
+<!-- @dsCard group="3D office" height=830 width=1360 -->
 <!doctype html>
-<html><head><meta charset="utf-8"><title>OfficeScene</title></head><body style="margin:0;background:var(--bg)">
+<html><head><meta charset="utf-8"><title>OfficeScene</title></head><body style="margin:0;background:var(--bg);font-family:var(--font-sans)">
 <div id="root"></div>
 <script>
-var A=window.AgentOffice,h=React.createElement;
-ReactDOM.createRoot(document.getElementById("root")).render(h(A.OfficeScene,{height:760}));
+var A=window.AgentOffice,h=React.createElement,R=React;
+var building={name:"Preview HQ",sessions:"agent",floors:[{key:"ops",name:"Ops",rooms:[{type:"team",name:"Team",bots:[{name:"Planner",role:"planner",shape:"capsule",orchestrator:true},{name:"Scout",role:"research",shape:"blob"}]},{type:"lab",name:"Lab",bots:[{name:"Builder",role:"coder",shape:"cone"}]}]}]};
+function term(b){return h("div",{className:"ao-mono",style:{fontSize:12,padding:12,color:"var(--ink)"}},"$ tail -f "+b.name.toLowerCase()+".log",h("div",{className:"ao-muted"},"ready"));}
+var extra=[{id:"terminal",label:"Terminal",icon:"terminal",after:"chat",render:term}];
+function Demo(){var a=R.useState(false),inbox=a[0],setInbox=a[1],c=R.useState(4),count=c[0],setCount=c[1],t=R.useState("chat"),tab=t[0],setTab=t[1],o=R.useRef(null),ti=R.useState(""),title=ti[0],setTitle=ti[1];
+ R.useEffect(function(){var id=setInterval(function(){setTitle(document.title);},400);return function(){clearInterval(id);};},[]);
+ var mono={className:"ao-mono",style:{color:"var(--ink)"}};
+ return h("div",null,
+  h("div",{className:"ao-panel",style:{display:"flex",gap:8,flexWrap:"wrap",alignItems:"center",padding:"8px 12px",margin:"0 0 6px"}},
+   h(A.Button,{icon:"waiting",onClick:function(){setInbox(!inbox);}},inbox?"Close decisions":"Open decisions"),
+   h(A.Button,{icon:"add",onClick:function(){setCount(count+1);}},"One more decision"),
+   h(A.Button,{onClick:function(){setCount(Math.max(0,count-1));}},"One less"),
+   h(A.Button,{icon:"terminal",onClick:function(){setTab("terminal");if(o.current)o.current.select("Scout");}},"Open Scout, Terminal tab"),
+   h("span",{className:"ao-muted",style:{fontSize:12}},"inbox: ",h("span",mono,String(inbox))," · waitingCount: ",h("span",mono,String(count))," · agentTab: ",h("span",mono,tab)," · title: ",h("span",mono,title))),
+  h(A.OfficeScene,{building:building,height:740,intro:false,inbox:inbox,onInbox:setInbox,waitingCount:count,extraTabs:extra,agentTab:tab,onTabChange:setTab,onReady:function(x){o.current=x;}}));}
+ReactDOM.createRoot(document.getElementById("root")).render(h(Demo));
 </script>
 </body></html>
