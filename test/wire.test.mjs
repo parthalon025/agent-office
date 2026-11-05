@@ -96,6 +96,17 @@ test('the snapshot carries the agent kinds once, and a patch never repeats them'
   assert.equal('kinds' in (p.set || {}), false, 'the kinds did not change: the patch leaves them out');
 });
 
+test('an agent that reports no cost reaches the page as costUnknown, so no surface shows $0.00 (#71, owner decision Q22)', () => {
+  const o = office(1, 0);
+  const s = [...o.tr.sessions.values()][0];
+  assert.equal(W.lean(o.state()).sessions[0].costUnknown, false);
+  s.costUnknown = true; // an ACP session (server.mjs openHeadless)
+  const l = W.lean(o.state()).sessions[0];
+  assert.equal(l.costUnknown, true);
+  // What the page shows from it: the desk line and the room figures (vocab.js), read from the lean session.
+  assert.equal(V.figures([l]).unknown, 1);
+});
+
 test('replies are capped per broadcast by characters, newest first, and the newest always goes', () => {
   const o = office(1, 0);
   const s = [...o.tr.sessions.values()][0];
@@ -281,7 +292,7 @@ test('the server: a whole snapshot on connect, then patches that add up to it; p
     assert.ok(fresh.snap.sessions.every((s) => s.calls.length === CALLS && s.calls.every((c) => c.ok === true)));
     assert.equal('sid' in fresh.snap.sessions[0], false, 'the snapshot is lean');
     assert.ok(fresh.snap.sessions.every((s) => s.provider === 'claude-code'), 'each session says its agent kind');
-    assert.deepEqual(fresh.snap.kinds.map((k) => [k.kind, k.label]), [['claude-code', 'Claude Code'], ['ollama', 'Ollama'], ['lmstudio', 'LM Studio']], 'the server sends its agent kinds');
+    assert.deepEqual(fresh.snap.kinds.map((k) => [k.kind, k.label]), [['claude-code', 'Claude Code'], ['ollama', 'Ollama'], ['lmstudio', 'LM Studio'], ['hermes', 'Hermes Agent'], ['dsh', 'DeepSeek Harness']], 'the server sends its agent kinds');
     // one message per broadcast window at most (100 ms), however many hooks come in
     const during = early.msgs.filter((x) => x.t >= t0 && x.t <= t1 + 150).length;
     assert.ok(during <= Math.ceil((t1 - t0) / 100) + 2, `${during} messages in ${t1 - t0} ms for ${N * CALLS * 2} hooks`);

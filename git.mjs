@@ -75,7 +75,8 @@ function findExe(name, env, win) {
   if (win) {
     for (const d of dirs) for (const x of ['.cmd', '.bat', '.ps1']) {
       const f = p.join(d, name + x);
-      if (isFile(f)) throw new Error(`${name} is installed as a script (${f}). The office starts programs without a shell, so it needs ${name}.exe on PATH.`);
+      // code and file: callers name the file in their own words without reading this message (providers' programPath).
+      if (isFile(f)) throw Object.assign(new Error(`${name} is installed as a script (${f}). The office starts programs without a shell, so it needs ${name}.exe on PATH.`), { code: 'SCRIPT_INSTALL', file: f });
     }
   }
   throw new Error(`${name} was not found on PATH.`);

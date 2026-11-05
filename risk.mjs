@@ -52,10 +52,13 @@ const SECRET_FILE = /^(\.env.*|.*\.(pem|key|pfx|p12)|id_(rsa|dsa|ecdsa|ed25519).
 const WIN = process.platform === 'win32';
 const norm = (p) => { const r = path.resolve(String(p)); return WIN ? r.toLowerCase() : r; };
 const parts = (p) => String(p).split(/[\\/]+/).filter(Boolean);
-// A part as Windows reads it: any case, no :stream suffix (.git::$INDEX_ALLOCATION), no trailing dots or spaces.
+// A path part as Windows opens it: no :stream suffix (.git::$INDEX_ALLOCATION), no trailing dots or spaces. One rule for the
+// rating (forms) and for the file key (fileKey).
+const winPart = (part) => part.replace(/:.*$/, '').replace(/[. ]+$/, '');
+// A part as Windows reads it: any case, and its winPart form.
 const forms = (part) => {
   const n = part.toLowerCase();
-  const w = n.replace(/:.*$/, '').replace(/[. ]+$/, '');
+  const w = winPart(n);
   return w && w !== n ? [n, w] : [n];
 };
 // What a list of path parts names: a secret, or settings that run code.
@@ -137,6 +140,24 @@ export function wideRoot(root) {
   if (realHome === undefined) realHome = realPath(home);
   const real = realPath(r);
   return !!(real && realHome && (inside(real, realHome) || path.parse(real).root === real));
+}
+
+/**
+ * One key per file, whatever the spelling: the file Windows would open. a.txt, A.TXT, a.txt., a.txt::$DATA, sub\..\a.txt,
+ * an 8.3 short name and a path through a junction all give one key (the real path of the file, or of its folder for a new
+ * file; lower case on Windows). A relative path is read against root. The ACP provider keeps a turn's declined files by it,
+ * so a declined edit cannot come back under another name.
+ */
+export function fileKey(root, p) {
+  let abs = path.resolve(String(root || ''), String(p ?? ''));
+  if (WIN) {
+    const [head, ...rest] = abs.split(/[\\/]+/);
+    abs = [head, ...rest.map(winPart)].join('\\');
+  }
+  try { abs = fs.realpathSync.native(abs); } catch {
+    try { abs = path.join(fs.realpathSync.native(path.dirname(abs)), path.basename(abs)); } catch { /* a new folder: the text form */ }
+  }
+  return WIN ? abs.toLowerCase() : abs;
 }
 
 /**

@@ -218,7 +218,8 @@
   }
   function ctxPct(s) { return s && s.ctxTokens && s.ctxWindow ? Math.min(100, Math.round(100 * s.ctxTokens / s.ctxWindow)) : null; }
   function fmtTok(n) { n = +n || 0; return n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k' : String(Math.round(n)); }
-  function money(c) { return window.OfficeFormat.money(c); }
+  // A session's spend: "unknown" when its agent reports no cost (an ACP agent), never $0.00 (format.js cost).
+  function money(c, unknown) { return window.OfficeFormat.cost(c, unknown); }
   function age(ms) { var m = Math.floor(Math.max(0, ms) / 60000); return m < 1 ? 'under 1 min' : m < 60 ? m + ' min' : Math.floor(m / 60) + ' h ' + (m % 60) + ' min'; }
   function failedCalls(calls) { return calls.filter(function (c) { return c.ok === false && !/^stopped$/i.test(str(c.err)); }).length; }
   // The stats monitor's rows. kind: the agent kind as a word (vocab.js kindWord), '' when unknown.
@@ -241,7 +242,7 @@
     else S.rows.push(['Agent', pre + (s.headless ? 'in the office' : 'in a terminal')], ['Model', model]);
     S.rows.push(['Context', pct == null ? '--' : pct + '%', 'bar', pct]);
     if (!todos.length) S.rows.push(['Tokens', u.tokens ? fmtTok(u.tokens) + (u.input ? DOT + Math.round(100 * (u.cached || 0) / u.input) + '% cached' : '') : '--']);
-    S.rows.push(['Spend', money(s.cost) + DOT + plural(+s.turns || 0, 'turn', 'turns')]);
+    S.rows.push(['Spend', money(s.cost, s.costUnknown) + DOT + plural(+s.turns || 0, 'turn', 'turns')]);
     if (!todos.length) S.rows.push(['Time', age(Date.now() - (+s.startedAt || Date.now()))], ['Tools', tools]);
     return S;
   }
@@ -252,7 +253,7 @@
     if (s.helper) return { left: 'Subagent', right: plural((s.calls || []).length, 'call', 'calls'), pct: null };
     var pct = ctxPct(s), right = [];
     if (pct != null) right.push('context ' + pct + '%');
-    if (typeof s.cost === 'number') right.push(money(s.cost));
+    if (s.costUnknown || typeof s.cost === 'number') right.push(window.OfficeFormat.costLabel(s.cost, s.costUnknown));
     return { left: s.git && s.git.branch ? s.git.branch : base(s.cwd), right: right.join(DOT), pct: pct };
   }
 

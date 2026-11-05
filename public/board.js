@@ -90,7 +90,8 @@
   // The room's numbers. Used when the page gives no stats(roomId).
   function statsFrom(info) { return window.OfficeVocab.figures(info.sessions || []); }
   function fmtTokens(n) { n = +n || 0; return n < 1000 ? String(Math.round(n)) : n < 1e6 ? (n / 1000).toFixed(n < 10000 ? 1 : 0) + 'k' : (n / 1e6).toFixed(1) + 'M'; }
-  function fmtCost(c) { return window.OfficeFormat.money(+c || 0); }
+  // unknown: the count of sessions whose agent reports no cost; they read "unknown", never $0.00 (format.js cost).
+  function fmtCost(c, unknown) { return window.OfficeFormat.cost(+c || 0, unknown); }
   function fmtAgo(t, now) {
     if (!t) return 'none yet';
     var s = Math.max(0, Math.round((now - t) / 1000));
@@ -280,7 +281,7 @@
       ['Needs you', String(s.waiting), s.waiting ? 'status-waiting' : null],
       ['Tool calls', String(s.toolCalls), null],
       ['Tokens', fmtTokens(s.tokens), null],
-      ['Cost', fmtCost(s.cost), null],
+      ['Cost', fmtCost(s.cost, s.unknown), null],
       ['To-dos done', s.todosTotal ? s.todosDone + ' / ' + s.todosTotal : 'none', null],
       ['Last event', ago, null]
     ];
@@ -555,7 +556,7 @@
       });
       statsList.forEach(function (s) {
         var v = statsOf(s.roomId), ago = fmtAgo(v.lastEvent, now);
-        var sig = skinVersion + K.look + [v.sessions, v.working, v.waiting, v.toolCalls, v.tokens, v.cost, v.todosDone, v.todosTotal, ago].join('|');
+        var sig = skinVersion + K.look + [v.sessions, v.working, v.waiting, v.toolCalls, v.tokens, v.cost, v.unknown, v.todosDone, v.todosTotal, ago].join('|');
         if (sig === s.sig) return;
         s.sig = sig; s.data = v;
         paintStats(s.canvas.getContext('2d'), s.canvas.width, s.canvas.height, v, ago, K.tok, K.f || {});

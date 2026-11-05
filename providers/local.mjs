@@ -240,6 +240,7 @@ export function createLocal(deps) {
     paid: false, // a model on this machine costs nothing: no spend limit
     canResume: false, // a local conversation lives in memory: Reopen starts a fresh session in the same folder
     needsModel: true, // the server has no default model the office knows: the user picks one of models()
+    gated: true, // the office runs every tool itself and asks first when riskOf is not low
 
     async readiness() {
       let ids;

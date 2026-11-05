@@ -255,6 +255,7 @@
     var er = useState(''), err = er[0], setErr = er[1];
     var bz = useState(''), busy = bz[0], setBusy = bz[1];
     var ak = useState(null), ask = ak[0], setAsk = ak[1];   // the session the user is about to forget
+    var rc = useState(null), runAsk = rc[0], setRunAsk = rc[1];   // { s, text }: its agent reports no cost, so ask before it runs
     function load() { api('/api/history').then(function (j) { setList(j.sessions); }, function (x) { setErr(x.message); }); }
     useEffect(load, []);
     useEffect(function () {
@@ -263,7 +264,15 @@
       return function () { clearTimeout(t); };
     }, [q]);
     function act(uid, fn) { setBusy(uid); setErr(''); fn().then(function () { setBusy(''); }, function (x) { setBusy(''); setErr(x.message); }); }
-    function reopen(uid) { act(uid, function () { return api('/api/reopen', { uid: uid }).then(function () { p.onClose(); }); }); }
+    // The server answers confirm: 'cost' for an agent that reports no cost: the user says yes once, then the same call runs it.
+    function reopen(s, confirmed) {
+      act(s.uid, function () {
+        return api('/api/reopen', { uid: s.uid, confirmCost: confirmed === true }).then(function () { setRunAsk(null); p.onClose(); }, function (x) {
+          if (x.body && x.body.confirm === 'cost' && !confirmed) { setRunAsk({ s: s, text: x.message }); return; }
+          throw x;
+        });
+      });
+    }
     function forget(uid) { act(uid, function () { return api('/api/history/forget', { uid: uid }).then(function () { setAsk(null); if (p.toast) p.toast({ tone: 'info', title: 'Session forgotten', text: 'It is gone from Past sessions.' }); load(); }); }); }
     if (ask) {
       return h(A.Dialog, { open: true, title: 'Forget ' + ask.name, onClose: function () { setAsk(null); setErr(''); }, actions: [
@@ -271,6 +280,16 @@
         h(A.Button, { key: 'f', variant: 'danger', icon: 'remove', loading: busy === ask.uid, onClick: function () { forget(ask.uid); } }, 'Forget session')] },
         h('div', { className: 'form' },
           h('p', { className: 'note' }, 'Removes this session from Past sessions, with its saved history. You cannot reopen it after that. Files in the folder stay.'),
+          err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
+    }
+    if (runAsk) {
+      var close = function () { setRunAsk(null); setErr(''); };
+      return h(A.Dialog, { open: true, title: 'Reopen ' + runAsk.s.name, onClose: close, actions: [
+        h(A.Button, { key: 'c', variant: 'quiet', onClick: close }, 'Cancel'),
+        h(A.Button, { key: 'r', variant: 'primary', icon: 'rollback', loading: busy === runAsk.s.uid, onClick: function () { reopen(runAsk.s, true); } }, 'Run it')] },
+        h('div', { className: 'form' },
+          h('p', { className: 'note' }, runAsk.text),
+          h('p', { className: 'note' }, 'The office shows its cost as unknown, and no spend limit can stop it.'),
           err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
     }
     var hit = {};
@@ -287,9 +306,9 @@
               h('div', { className: 'past-title' }, h('b', null, s.name), h(Tag, null, window.officeAdapter.kindWord(s)), s.branch ? h(Tag, null, s.branch) : null, s.model ? h(A.ModelBadge, { model: s.model }) : null),
               h('div', { className: 'past-sub mono', title: s.cwd }, F.shortPath(s.cwd)),
               hit[s.uid] ? h('div', { className: 'past-snip' }, h('em', null, hit[s.uid].kind + ': '), hit[s.uid].snippet) : (s.last ? h('div', { className: 'past-snip past-clip' }, s.last) : null),
-              h('div', { className: 'past-meta mono' }, ago(s.endedAt) + ' · ' + plural(s.turns || 0, 'turn') + ' · ' + money(s.cost))),
+              h('div', { className: 'past-meta mono' }, ago(s.endedAt) + ' · ' + plural(s.turns || 0, 'turn') + ' · ' + F.costLabel(s.cost, s.costUnknown))),
             h('div', { className: 'past-actions' },
-              h(A.Button, { variant: 'quiet', icon: 'rollback', loading: busy === s.uid, onClick: function () { reopen(s.uid); } }, 'Reopen'),
+              h(A.Button, { variant: 'quiet', icon: 'rollback', loading: busy === s.uid, onClick: function () { reopen(s); } }, 'Reopen'),
               h(A.Button, { variant: 'quiet', icon: 'trace', onClick: function () { p.onChanges(s.uid, s.name); } }, 'Changes'),
               h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setAsk(s); } }, 'Forget')));
         }))));
@@ -952,7 +971,7 @@
           h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onClose }, 'Back to the room'), h('span', { className: 'note' }, 'Esc also goes back.')),
           h('ul', { className: 'stats-list' },
             row('Working', String(v.working)), row('Needs you', String(v.waiting)), row('Tool calls', String(v.toolCalls)),
-            row('Tokens', String(v.tokens)), row('Cost', money(v.cost)), row('To do done', v.todosDone + ' of ' + v.todosTotal),
+            row('Tokens', String(v.tokens)), row('Cost', F.cost(v.cost, v.unknown)), row('To do done', v.todosDone + ' of ' + v.todosTotal),
             row('Last event', v.lastEvent ? ago(v.lastEvent) : 'none')))));
   }
 
@@ -1313,8 +1332,8 @@
     var snap = useSnapshot();
     var sess = p.sel ? window.officeAdapter.session(p.sel) : null;
     var live = snap ? snap.sessions.filter(function (s) { return s.status !== 'ended'; }) : [];
-    // spend of the sessions that are open now (closed ones are under Past)
-    var total = live.reduce(function (n, s) { return n + (typeof s.cost === 'number' ? s.cost : 0); }, 0);
+    // spend of the sessions that are open now (closed ones are under Past); "unknown" is part of it when an agent reports none
+    var spend = window.OfficeVocab.figures(live), total = F.cost(spend.cost, spend.unknown);
     function fail(x) { p.toast({ tone: 'error', title: sess ? sess.name : 'Office', text: x.message }); }
     function ctl(action, value) { api('/api/control', { uid: sess.uid, action: action, value: value }).catch(fail); }
     function stopTurn() { api('/api/interrupt', { uid: sess.uid }).catch(fail); }
@@ -1361,7 +1380,7 @@
                 options: p.buildings.map(function (b) { return { value: b.key, label: b.name + ' · ' + plural(b.sessions, 'session', 'sessions') + (b.waiting ? ' · ' + b.waiting + ' need you' : '') }; })
                   .concat(p.buildings.some(function (b) { return b.key === p.shown; }) ? [] : [{ value: p.shown, label: (p.shownName || 'This building') + ' · no sessions' }]) }) : null,
           p.needs ? h(A.Button, { variant: 'emphasis', icon: 'waiting', title: 'Every request that waits for you, in every building', onClick: p.onNeeds }, 'Needs you · ' + p.needs) : null,
-          live.length ? h('span', { className: 'strip-total mono' }, live.length + ' open · ' + money(total)) : null),
+          live.length ? h('span', { className: 'strip-total mono' }, live.length + ' open · ' + total) : null),
         h('div', { className: 'strip-group strip-nav' },
           p.view === 'city' ? h(A.Button, { variant: 'quiet', icon: 'floor', title: 'Go inside ' + (p.shownName || 'the building'), onClick: p.onOffice }, 'Go inside') : h(A.Button, { variant: 'quiet', icon: 'building', onClick: p.onCity }, p.needs ? 'City · ' + p.needs : 'City'),
           p.shown ? h(A.Button, { variant: 'quiet', icon: 'floor', onClick: p.onFloors }, 'Floors') : null,
@@ -1380,7 +1399,8 @@
                 h(A.Button, { variant: 'quiet', icon: 'trace', onClick: function () { setMore(false); p.onChanges(sess.uid, sess.name); } }, 'Changes'),
                 steer ? h(A.Button, { variant: 'quiet', icon: 'connector', onClick: function () { setMore(false); p.onExtensions(sess.uid, sess.name); } }, 'Extensions') : null,
                 ask ? h(A.Button, { variant: 'quiet', icon: 'approve', onClick: function () { setMore(false); always(); }, title: 'Approve and allow this from now on: ' + ask.always }, 'Always allow ' + clip(ask.always, 28)) : null,
-                sess.headless && (sess.cost || usage) ? h(A.CostMeter, { tokens: usage ? usage.tokens : 0, cost: sess.cost || 0, cached: usage && usage.input ? usage.cached / usage.input : undefined }) : null,
+                // The DS meter shows dollars only, so an agent that reports no cost gets none (it would read $0.00).
+                sess.headless && !sess.costUnknown && (sess.cost || usage) ? h(A.CostMeter, { tokens: usage ? usage.tokens : 0, cost: sess.cost || 0, cached: usage && usage.input ? usage.cached / usage.input : undefined }) : null,
                 sess.headless && steer ? h(A.Select, { id: 'c-model', label: 'Model', options: modelOpts, value: sess.model || '', onChange: function (v) { ctl('model', v); } }) : null,
                 sess.headless && steer ? h(A.Select, { id: 'c-mode', label: 'Permissions', options: modeOpts, value: sess.mode || '', onChange: function (v) { ctl('mode', v); } }) : null,
                 sess.headless && !steer ? h('p', { className: 'strip-more-note' }, window.officeAdapter.kindWord(sess) + ' · ' + modelWord(sess.model) + '. Open a new session to use another model.') : null) : null) : null),

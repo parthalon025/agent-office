@@ -74,8 +74,13 @@ test('room figures count once, with the same waiting rule', () => {
     mk({ status: 'working', pending: [{ id: 'p' }], calls: [1], usage: { tokens: 500 }, lastEvent: 20 }),
     mk({ turns: 1, error: { id: 1, text: 'x' }, cost: 0.5 }),
   ];
-  assert.deepEqual(V.figures(list), { sessions: 3, working: 1, waiting: 1, toolCalls: 3, tokens: 2000, cost: 0.75, priced: 2, todosDone: 1, todosTotal: 2, lastEvent: 20 });
+  assert.deepEqual(V.figures(list), { sessions: 3, working: 1, waiting: 1, toolCalls: 3, tokens: 2000, cost: 0.75, priced: 2, unknown: 0, todosDone: 1, todosTotal: 2, lastEvent: 20 });
   assert.equal(V.figures([]).sessions, 0);
+});
+
+test('room figures count the sessions whose agent reports no cost, apart from the priced ones', () => {
+  const f = V.figures([mk({ cost: 0.25 }), mk({ cost: null, costUnknown: true }), mk({ cost: null, costUnknown: true })]);
+  assert.deepEqual([f.cost, f.priced, f.unknown], [0.25, 1, 2]);
 });
 
 test('requests lists every permission prompt and question, oldest first', () => {

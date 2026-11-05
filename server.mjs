@@ -15,8 +15,9 @@ import { fileURLToPath } from 'node:url';
 import * as git from './git.mjs';
 import { slimPayload } from './payload.mjs';
 import { createTracker, clip } from './tracker.mjs';
-import { createRegistry, providerEvents, isPaid, spendLimitFor, DEFAULT_SPEND_LIMIT, DEFAULT_PROVIDER } from './providers/index.mjs';
+import { createRegistry, providerEvents, isPaid, isGated, supervisionOf, costOf, spendLimitFor, DEFAULT_SPEND_LIMIT, DEFAULT_PROVIDER } from './providers/index.mjs';
 import { createLocal } from './providers/local.mjs';
+import { createAcp, AGENTS as ACP_AGENTS } from './providers/acp.mjs';
 import { createClaudeCode, claudeVersion, MODEL_RE, MODES } from './providers/claude-code.mjs';
 import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, cleanRecent, recentChoices, securityRoomIdOf } from './place.mjs';
 import * as startup from './startup.mjs';
@@ -178,6 +179,7 @@ function recordHistory(s) {
   const rec = {
     uid: s.uid, sid: s.sid, provider: s.provider, name: s.name, cwd: s.cwd, model: s.model, mode: s.mode, cost: s.cost, turns: s.turns,
     startedAt: s.startedAt, endedAt: s.endedAt, worktree: s.worktree, replies: s.replies.slice(-40), prompt: s.prompt, budget: s.budget,
+    ...(s.costUnknown ? { costUnknown: true } : {}),
   };
   const past = reopening.get(s.uid);
   if (past) { reopening.delete(s.uid); history = history.filter((h) => h.uid !== past); }
@@ -185,6 +187,13 @@ function recordHistory(s) {
   if (i >= 0) history[i] = rec; else history.unshift(rec);
   history = history.slice(0, 60);
   saveHistory();
+}
+
+// The provider could not continue the past conversation and started a new one (events.fresh, before the sid). It is a new
+// session, as for an agent kind that cannot resume: the past record stays, and the old replies and cost are not its own.
+function freshReopen(s) {
+  if (!reopening.delete(s.uid)) return;
+  s.replies = []; s.replySeq = 0; s.costBase = 0; s.cost = null; s.turns = 0; s.prompt = '';
 }
 
 // The reopened session ended before init: the past record stays in Past sessions, and the session shows why.
@@ -267,10 +276,12 @@ function saveRule(body) {
 let ENFORCE = null;
 
 // ---------- providers: the agent tools behind the sessions (providers/) ----------
-// Every provider reports through the same events into the tracker: Claude Code, Ollama and LM Studio. Claude Code's hooks come in over
-// the hook routes below, and a permission decision goes back as the hook's answer (claude.answer gives the body).
-// A quiet answer (a low call a local agent asks about, allowed by default) changes nothing the page shows: no snapshot.
-const events = providerEvents({ tracker, onChange: () => broadcast(), hold: (r) => { holdRequest(r); if (!r.quiet) broadcast(); } });
+// Every provider reports through the same events into the tracker: Claude Code, Ollama, LM Studio and the ACP agents. Claude
+// Code's hooks come in over the hook routes below, and a permission decision goes back as the hook's answer (claude.answer
+// gives the body). The other providers raise their requests through events.permission; events.drop frees one their agent no
+// longer waits for (releaseHold with no decision); events.fresh says a reopen could not continue the conversation (freshReopen).
+// A quiet answer (a low call a provider asks about, allowed by default) changes nothing the page shows: no snapshot.
+const events = providerEvents({ tracker, onChange: () => broadcast(), hold: (r) => { holdRequest(r); if (!r.quiet) broadcast(); }, release: (id) => releaseHold(id, {}), fresh: freshReopen });
 const claude = createClaudeCode({ events, files: () => ({ settings: activeHooksFile(), mcp: MCP_FILE, launcher: path.join(ROOT, 'launch.ps1') }) });
 // The four office tools for agents the office runs itself (no MCP process): the same handlers the /mcp/* routes call.
 // They answer text or throw httpError. Function declarations are hoisted, so they are ready when a local agent calls one.
@@ -280,7 +291,9 @@ const officeTools = {
   room: async (s) => describeRoom(await roomOf(s)),
   roomUpdate: async (s, args) => updateRoom(await roomOf(s), args),
 };
-const providers = createRegistry([claude, createLocal({ events, kind: 'ollama', baseUrl: process.env.OFFICE_OLLAMA_URL, officeTools }), createLocal({ events, kind: 'lmstudio', baseUrl: process.env.OFFICE_LMSTUDIO_URL, officeTools })]);
+const providers = createRegistry([claude, createLocal({ events, kind: 'ollama', baseUrl: process.env.OFFICE_OLLAMA_URL, officeTools }), createLocal({ events, kind: 'lmstudio', baseUrl: process.env.OFFICE_LMSTUDIO_URL, officeTools }),
+  // ACP agents (providers/acp.mjs): Hermes Agent and DeepSeek Harness, one entry each in its AGENTS list.
+  ...Object.keys(ACP_AGENTS).map((kind) => createAcp({ events, kind }))]);
 const providerOf = (s) => providers.of(s);
 ENFORCE = enforcement(providers.list());
 // The agent kinds as the page offers and shows them (providers/index.mjs describe). Fixed while the server runs.
@@ -585,7 +598,8 @@ function workOf(x) {
 function figuresText(f) {
   const out = [plural(f.sessions, 'open session', 'open sessions'), `${f.working} working`, `${f.waiting} waiting for the user`,
     plural(f.toolCalls, 'recent tool call', 'recent tool calls'), `${f.tokens.toLocaleString('en-US')} tokens`];
-  if (f.priced) out.push(`${globalThis.OfficeFormat.money(f.cost)} spent`);
+  if (f.unknown) out.push(`${globalThis.OfficeFormat.costLabel(f.cost, f.unknown)} (an agent here reports no cost)`);
+  else if (f.priced) out.push(`${globalThis.OfficeFormat.money(f.cost)} spent`);
   if (f.todosTotal) out.push(`${f.todosDone} of ${f.todosTotal} plan steps done`);
   return out.join(', ') + '.';
 }
@@ -850,14 +864,19 @@ function openHeadless(provider, { cwd, name, prompt, worktree = null, budget = n
   // The last slash-command list came from a Claude Code init, so only a Claude Code session starts with it.
   const known = provider === claude ? persisted.commands : null;
   // startDir: the launch folder (the worktree when there is one). Requests are rated against it, never against a later cd.
+  // costUnknown: the agent reports no cost (ACP), so every surface shows "unknown", never $0.00.
+  // supervision: the label of an ungated agent (ADR 0001), for every surface that shows the session.
+  const costUnknown = costOf(provider) === 'unknown', supervision = supervisionOf(provider);
   const s = newSession({ uid: officeId, officeId, provider: provider.kind, name, cwd, startDir: cwd, launched: true, headless: true, status: 'starting', worktree, budget, scheduleId, model,
-    commands: known?.commands || [], skills: known?.skills || [] });
+    commands: known?.commands || [], skills: known?.skills || [], costUnknown, supervision });
   placeSession(s, true);
   if (prior) { s.replies = prior.replies || []; s.replySeq = s.replies.reduce((n, r) => Math.max(n, r.id || 0), 0); s.costBase = prior.cost || 0; s.cost = prior.cost || null; s.turns = prior.turns || 0; s.prompt = prior.prompt || ''; }
   provider.open(s, { model, permissionMode, budget, resume });
   if (!worktree) rememberDir(cwd); // a worktree folder is an implementation detail, not a place to start from
   addFeed(s, 'start', resume ? 'reopened in the office' : worktree ? `started in the office on branch ${worktree.branch}` : 'started in the office');
   if (asked && permissionMode !== asked) addFeed(s, 'start', `opened in ${permissionMode} permission mode, not ${asked}: the Security room has Ask rules`);
+  if (costUnknown) addFeed(s, 'start', `${provider.label} does not report cost. The office shows it as unknown, and no spend limit can stop it.`);
+  if (supervision) addFeed(s, 'start', `${provider.label}: ${supervision}. The feed says what it ran without asking.`);
   if (prompt) { s.prompt = prompt; writeUser(s, prompt); addFeed(s, 'prompt', clip(prompt, 100)); }
   broadcast();
   return s.uid;
@@ -876,6 +895,11 @@ async function openSession(opts) {
   const provider = providers.get(opts.provider);
   provider.check?.(opts); // unknown model or mode: refused before a worktree is made
   checkOpen(provider);    // the Agents screen of the Security room: also before a worktree is made
+  // An ungated agent needs a room of its own: in the office, without Use this folder, in a folder that is in git.
+  const wantsRoom = opts.where !== 'terminal' && opts.isolation !== 'same';
+  const loc = wantsRoom ? await git.locate(cwd) : null;
+  ownRoomOnly(provider, !!loc, 'opens only in a room of its own: clear Use this folder, in a folder that is in a git repository.');
+  confirmCost(provider, opts.confirmCost);
   const model = opts.model || null, permissionMode = opts.permissionMode || null;
   const prompt = String(opts.prompt || '').slice(0, 8000);
 
@@ -884,8 +908,8 @@ async function openSession(opts) {
     // Each agent gets its own room: a new worktree, unless the caller says isolation: 'same' ("Use this folder").
     // A folder outside git cannot get one; that session works in the folder, and its feed says so.
     let workdir = cwd, worktree = null, noRoom = false;
-    if (opts.isolation !== 'same') {
-      if (await git.locate(cwd)) {
+    if (wantsRoom) {
+      if (loc) {
         const wt = await git.createWorktree(cwd, name);
         workdir = wt.path; worktree = { root: wt.root, branch: wt.branch, repo: wt.repo, base: wt.base || null };
         // The building knows the new room before the bot sits in it (the room board reads its files at once).
@@ -893,8 +917,9 @@ async function openSession(opts) {
       } else noRoom = true;
     }
     if (worktree) rememberDir(cwd);
-    // A paid provider gets the default spend limit unless the caller sets one (0 clears it). A local provider has none (#33).
-    const budget = spendLimitFor({ paid: isPaid(provider), requested: opts.maxBudget, fallback: defaultSpend() });
+    // A paid provider gets the default spend limit unless the caller sets one (0 clears it). A local provider has none (#33),
+    // and neither has one whose cost is unknown: nothing could stop it at a limit.
+    const budget = spendLimitFor({ paid: isPaid(provider), cost: costOf(provider), requested: opts.maxBudget, fallback: defaultSpend() });
     const building = await buildingOfFolder(workdir, worktree);
     const uid = openHeadless(provider, { cwd: workdir, name, prompt, worktree, budget, scheduleId: opts.scheduleId || null, model, permissionMode, building });
     if (noRoom) { const s = sessions.get(uid); if (s) { addFeed(s, 'start', 'This folder is not in git, so the agent has no room of its own.'); broadcast(); } }
@@ -913,21 +938,47 @@ async function openSession(opts) {
   return s.uid;
 }
 
+// An agent that reports no cost (cost 'unknown') runs only after the user said yes for this session (owner decision Q22).
+// The answer is 409 with confirm: 'cost'; the caller asks the user and sends the same request again with confirmCost: true.
+// An ungated agent's label goes in the question too, so the yes is for what it does (ADR 0001).
+function confirmCost(provider, confirmed) {
+  if (costOf(provider) !== 'unknown' || confirmed === true) return;
+  const label = supervisionOf(provider);
+  const e = httpError(409, `This agent does not report cost. ${label ? label + '. ' : ''}Run it?`);
+  e.confirm = 'cost';
+  throw e;
+}
+
+// An ungated agent (ADR 0001) runs some tool calls without asking, so it runs only in a worktree the office made for it:
+// never in the user's own folder, never in a terminal window. ownRoom: this open has one. The answer is 409 before a worktree,
+// a session or the cost question.
+function ownRoomOnly(provider, ownRoom, rest) {
+  if (isGated(provider) || ownRoom) return;
+  throw httpError(409, `${provider.label} runs some tool calls without asking the office (${supervisionOf(provider)}), so it ${rest}`);
+}
+
 // A past session opens again with its own provider (providers.reopenPlan). A provider that can resume continues the
 // conversation (Claude Code --resume); another one starts a fresh session in the same folder, and the record stays.
 // The permission mode starts as the default (or what the Security room rules need).
-async function reopenSession(uid) {
-  const first = history.find((h) => h.uid === uid);
-  if (!first) throw httpError(404, 'That past session is gone.');
-  // The building for the rules, looked up before the checks: from the in-use check to reopening.set nothing waits,
-  // so a second reopen that comes meanwhile is refused (#54).
+async function reopenSession(uid, { confirmed = false } = {}) {
+  const check = () => {
+    const rec = history.find((h) => h.uid === uid);
+    if (!rec) throw httpError(404, 'That past session is gone.');
+    if (pastInUse().has(uid)) throw httpError(409, 'That session is open again. Close it first, or wait until it has started.');
+    if (!fs.existsSync(rec.cwd)) throw httpError(409, `Its folder is gone: ${rec.cwd}. It may have been a removed worktree.`);
+    return rec;
+  };
+  const first = check();
+  const provider = providers.get(first.provider);
+  checkOpen(provider);
+  ownRoomOnly(provider, !!first.worktree, 'reopens only in its own worktree. This past session ran in your folder: open a new session instead.');
+  confirmCost(provider, confirmed);
+  // The building for the rules, and what a provider learns at a handshake (an ACP agent: whether it can resume), are looked
+  // up before the last check: from that check to reopening.set nothing waits, so a second reopen that comes meanwhile is
+  // refused (#54).
   const building = await buildingOfFolder(first.cwd, first.worktree);
-  const rec = history.find((h) => h.uid === uid);
-  if (!rec) throw httpError(404, 'That past session is gone.');
-  if (pastInUse().has(uid)) throw httpError(409, 'That session is open again. Close it first, or wait until it has started.');
-  if (!fs.existsSync(rec.cwd)) throw httpError(409, `Its folder is gone: ${rec.cwd}. It may have been a removed worktree.`);
-  const plan = providers.reopenPlan(rec);
-  checkOpen(plan.provider);
+  if (provider.learn) await provider.learn();
+  const plan = providers.reopenPlan(check());
   const id = openHeadless(plan.provider, { ...plan.opts, building });
   if (plan.note) { const s = sessions.get(id); if (s) { addFeed(s, 'start', plan.note); broadcast(); } }
   if (!plan.fresh) reopening.set(id, uid); // the past record leaves history when the new session has started (recordHistory)
@@ -1043,7 +1094,7 @@ setInterval(() => { const now = Date.now(); for (const sch of persisted.schedule
 function pastSummary(h) {
   const last = h.replies?.length ? h.replies[h.replies.length - 1].text : '';
   // provider: the agent kind. A record from before providers has none: it is Claude Code's (as in providers.reopenPlan).
-  return { uid: h.uid, provider: h.provider || DEFAULT_PROVIDER, name: h.name, cwd: h.cwd, model: h.model, cost: h.cost, turns: h.turns, startedAt: h.startedAt, endedAt: h.endedAt,
+  return { uid: h.uid, provider: h.provider || DEFAULT_PROVIDER, name: h.name, cwd: h.cwd, model: h.model, cost: h.cost, costUnknown: h.costUnknown === true, turns: h.turns, startedAt: h.startedAt, endedAt: h.endedAt,
     branch: h.worktree?.branch || null, worktreeRoot: h.worktree?.root || null, last: clip(String(last).replace(/\s+/g, ' '), 140), firstAsk: clip(h.prompt || '', 140) };
 }
 function search(q) {
@@ -1128,7 +1179,7 @@ const fullSession = (s) => ({ ...s, place: s.placed ? roomPlace(s) : null });
 const snapshot = () => W.lean({
   sessions: [...sessions.values()].map(fullSession),
   plan,
-  figures: allFigures(),    // noteKey -> room figures (sessions, working, waiting, toolCalls, tokens, cost, todosDone, todosTotal, lastEvent)
+  figures: allFigures(),    // noteKey -> room figures (sessions, working, waiting, toolCalls, tokens, cost, priced, unknown, todosDone, todosTotal, lastEvent)
   notes: persisted.notes,   // noteKey -> { text, at, v, by? }: each room's notes board (v: version counter; a cleared board stays with text '' and at 0; by: the agent session that last wrote it)
   pins: persisted.pins,     // noteKey -> { text, by, at }: a short message an agent pinned on the room's blackboard
   repos: [...repos.entries()].map(([key, r]) => ({ key, ...r, securityRoomId: securityRoomIdOf(key), worktrees: r.worktrees.map((w) => ({ ...w, place: placeOfWorktree(r.path, w) })) })),
@@ -1285,7 +1336,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/message') return send(res, 200, { ok: true, ...sendMessage(String(body.uid), body.text, Array.isArray(body.attachments) ? body.attachments : []) });
     if (url.pathname === '/api/answer') { answer(String(body.id), body.allow === true, body.always === true); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/open') return send(res, 200, { uid: await openSession(body) });
-    if (url.pathname === '/api/reopen') return send(res, 200, { uid: await reopenSession(String(body.uid)) });
+    if (url.pathname === '/api/reopen') return send(res, 200, { uid: await reopenSession(String(body.uid), { confirmed: body.confirmCost === true }) });
     if (url.pathname === '/api/dismiss') { dismissError(String(body.uid)); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/interrupt') { doControl(String(body.uid), 'interrupt'); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/ext/list') return send(res, 200, await extList(extSession(body.uid)));
@@ -1318,7 +1369,8 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/close') { await closeSession(String(body.uid)); return send(res, 200, { ok: true }); }
     return send(res, 404, { error: 'Not found' });
   } catch (e) {
-    send(res, e.status || 500, { error: e.message });
+    // confirm: the request needs the user's yes first (confirmCost); the page asks and sends it again.
+    send(res, e.status || 500, { error: e.message, ...(e.confirm ? { confirm: e.confirm } : {}) });
   }
 });
 

@@ -23,6 +23,23 @@ test('money shows a dash when there is no figure', () => {
   assert.equal(F.money('3'), '\u2013');
 });
 
+test('cost says unknown for an agent that reports none, never $0.00; a known part keeps its figure', () => {
+  assert.equal(F.cost(null, true), 'unknown');
+  assert.equal(F.cost(0, true), 'unknown', 'a room of unknown and $0.00 is still unknown');
+  assert.equal(F.cost(0.26, true), '$0.26 + unknown', 'a room with priced and unpriced sessions');
+  assert.equal(F.cost(0.26, 2), '$0.26 + unknown', 'a count of unpriced sessions works too');
+  assert.equal(F.cost(0.26, false), '$0.26');
+  assert.equal(F.cost(0, 0), '$0.00');
+  assert.equal(F.cost(null), '–');
+});
+
+test('costLabel: the cost in a line of other facts, one wording for every surface', () => {
+  assert.equal(F.costLabel(null, true), 'cost unknown');
+  assert.equal(F.costLabel(0.26, 1), '$0.26 + cost unknown');
+  assert.equal(F.costLabel(0.26, false), '$0.26');
+  assert.equal(F.costLabel(undefined), '–', 'no figure: a dash, as money()');
+});
+
 test('plural counts with the right word', () => {
   assert.equal(F.plural(0, 'turn'), '0 turns');
   assert.equal(F.plural(1, 'turn'), '1 turn');

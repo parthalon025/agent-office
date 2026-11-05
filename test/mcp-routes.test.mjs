@@ -13,16 +13,17 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startFakeOpenAI } from './fixtures/fake-openai.mjs';
 import { pageFile, routeOf } from '../auth.mjs';
 import { officeFiles } from '../files.mjs';
+import { resolveExe } from '../git.mjs';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SKIP = process.platform !== 'win32' ? 'opening sessions is only implemented for Windows' : false;
 const PAST_UID = 'past-claude-1';
-let base, work, child, port, agentToken, pageToken, fake, log = '';
+let base, work, acpRepo, child, port, agentToken, pageToken, fake, log = '';
 
 const freePort = () => new Promise((resolve, reject) => {
   const s = net.createServer();
@@ -92,13 +93,30 @@ before(async () => {
   const bin = path.join(base, 'bin');
   fs.mkdirSync(bin);
   try { fs.linkSync(process.execPath, path.join(bin, 'claude.exe')); } catch { fs.copyFileSync(process.execPath, path.join(bin, 'claude.exe')); }
+  // A hermes.exe that is node.exe too: `hermes acp` in the session folder runs the file acp there, which loads the fake ACP
+  // agent (test/fixtures/fake-acp.mjs). No Hermes, no model.
+  try { fs.linkSync(process.execPath, path.join(bin, 'hermes.exe')); } catch { fs.copyFileSync(process.execPath, path.join(bin, 'hermes.exe')); }
+  const fakeAcp = path.join(SRC, 'test', 'fixtures', 'fake-acp.mjs');
+  fs.writeFileSync(path.join(work, 'acp'), `import(require('node:url').pathToFileURL(${JSON.stringify(fakeAcp)}).href);\n`);
+  // Hermes Agent is ungated (ADR 0001), so it opens only in a new worktree: a repository whose commit has the acp file, so the
+  // worktree has it too. The server's worktrees go under its own home folder (USERPROFILE below), never the user's.
+  acpRepo = path.join(base, 'acp-repo');
+  fs.mkdirSync(acpRepo);
+  fs.copyFileSync(path.join(work, 'acp'), path.join(acpRepo, 'acp'));
+  fs.writeFileSync(path.join(acpRepo, 'a.txt'), 'one\n');
+  const g = (...a) => execFileSync(resolveExe('git'), ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...a], { cwd: acpRepo, stdio: 'ignore' });
+  g('init', '-q'); g('add', '.'); g('commit', '-q', '-m', 'init');
+  fs.mkdirSync(path.join(base, 'home'));
   // A past Claude Code session the server loads at start (the past sessions file is read once, at start).
   fs.writeFileSync(own.history, JSON.stringify([{ uid: PAST_UID, sid: 'past-sid-1', provider: 'claude-code', name: 'past-claude', cwd: work, model: 'sonnet',
-    cost: 0.5, turns: 2, startedAt: 1000, endedAt: 2000, worktree: null, replies: [{ id: 1, text: 'earlier answer' }], prompt: 'earlier ask', budget: null }]));
+    cost: 0.5, turns: 2, startedAt: 1000, endedAt: 2000, worktree: null, replies: [{ id: 1, text: 'earlier answer' }], prompt: 'earlier ask', budget: null },
+  // A past Hermes session in the user's folder, from before Hermes was ungated: it does not reopen there.
+  { uid: 'past-hermes-1', sid: 'old-hermes', provider: 'hermes', name: 'past-hermes', cwd: work, model: null, cost: null, costUnknown: true, turns: 1,
+    startedAt: 1000, endedAt: 2000, worktree: null, replies: [], prompt: '', budget: null }]));
   // LM Studio points at a free port with nothing on it, so a real LM Studio on this machine is never asked.
   const noServer = `http://127.0.0.1:${await freePort()}/v1`;
   const env = { ...process.env, PATH: bin + path.delimiter + (process.env.PATH || process.env.Path || ''), OFFICE_PORT: String(port), OFFICE_HOOKS: 'command', OFFICE_OLLAMA_URL: fake.url, OFFICE_LMSTUDIO_URL: noServer, OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
-    OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local') };
+    OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local'), USERPROFILE: path.join(base, 'home') };
   child = spawn(process.execPath, ['server.mjs'], { cwd: copy, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env });
   child.stdout.on('data', (d) => { log += d; });
   child.stderr.on('data', (d) => { log += d; });
@@ -143,7 +161,11 @@ test('the local providers are registered, and an unknown agent kind is refused',
   assert.match(noModel.json.error, /Pick a model/);
   const info = await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
   const kinds = info.providers.map((p) => p.kind);
-  assert.deepEqual(kinds.sort(), ['claude-code', 'lmstudio', 'ollama']);
+  assert.deepEqual(kinds.sort(), ['claude-code', 'dsh', 'hermes', 'lmstudio', 'ollama']);
+  const dsh = info.providers.find((p) => p.kind === 'dsh');
+  assert.deepEqual([dsh.ready, dsh.cost, dsh.gated, dsh.paid], [false, 'unknown', true, true]);
+  // Not on the PATH, or only an npm install (dsh.cmd), which the office cannot start without a shell: not ready either way.
+  assert.match(dsh.needs[0], /dsh\.exe is not on the PATH|needs dsh\.exe\. It found only .*dsh\.cmd/);
   const ollama = info.providers.find((p) => p.kind === 'ollama');
   assert.equal(ollama.ready, true);
   assert.deepEqual(ollama.models.map((m) => m.id), ['fake-model']);
@@ -376,4 +398,67 @@ test('/api/open gives each agent a worktree on the base floor; isolation "same" 
   const full = await until(async () => { const f = await fullOf(e); return f && f.feed.some((x) => /not in git/.test(x.text)) ? f : null; }, 'the feed line of the agent outside git');
   assert.equal(full.session.worktree, null);
   for (const u of [a, b, c, d, e]) await call('/api/close', { uid: u });
+});
+
+// ---------- an ACP agent (#71): the stand-in hermes.exe runs the fake ACP agent ----------
+test('an ACP agent asks once before it runs: no cost report, so the open is refused until the user says yes', { skip: SKIP }, async () => {
+  const before = (await snapshot()).sessions.length;
+  const no = await call('/api/open', { cwd: acpRepo, name: 'hermes-ask', provider: 'hermes', where: 'office', isolation: 'worktree' });
+  assert.equal(no.status, 409);
+  assert.deepEqual(no.json, { error: 'This agent does not report cost. Partly supervised: file edits ask, commands do not. Run it?', confirm: 'cost' });
+  assert.equal((await snapshot()).sessions.length, before, 'no session, no worktree before the yes');
+  const model = await call('/api/open', { cwd: acpRepo, name: 'hermes-model', provider: 'hermes', isolation: 'worktree', model: 'opus', confirmCost: true });
+  assert.equal(model.status, 400, 'the agent picks its own model');
+});
+
+test('an ungated agent (ADR 0001) opens and reopens only in a new worktree of its own: not in the folder, not in a terminal', { skip: SKIP }, async () => {
+  const before = (await snapshot()).sessions.length;
+  // Use this folder, a terminal window and a folder outside git give it no room of its own (#69).
+  for (const body of [{ where: 'office', isolation: 'same' }, { where: 'terminal' }, { where: 'office', cwd: work }]) {
+    const r = await call('/api/open', { cwd: acpRepo, name: 'hermes-here', provider: 'hermes', confirmCost: true, ...body });
+    assert.equal(r.status, 409, JSON.stringify(body));
+    assert.equal(r.json.error, 'Hermes Agent runs some tool calls without asking the office (Partly supervised: file edits ask, commands do not), so it opens only in a room of its own: clear Use this folder, in a folder that is in a git repository.');
+    assert.equal(r.json.confirm, undefined, 'refused before the cost question');
+  }
+  assert.equal((await snapshot()).sessions.length, before);
+  const again = await call('/api/reopen', { uid: 'past-hermes-1', confirmCost: true });
+  assert.equal(again.status, 409);
+  assert.match(again.json.error, /so it reopens only in its own worktree/);
+});
+
+test('an ACP session: cost unknown and no spend limit, a held request answered from the office, and Reopen asks again', { skip: SKIP }, async () => {
+  const r = await call('/api/open', { cwd: acpRepo, name: 'hermes-1', provider: 'hermes', where: 'office', isolation: 'worktree', confirmCost: true, maxBudget: 5 });
+  assert.equal(r.status, 200, JSON.stringify(r.json));
+  const uid = r.json.uid;
+  const s = await until(async () => { const x = await sessionOf(uid); return x && x.sid === 'fake-sess-1' ? x : null; }, 'the ACP session to start');
+  assert.deepEqual([s.provider, s.costUnknown, s.cost, s.budget, s.status], ['hermes', true, null, null, 'idle']);
+  assert.equal(s.supervision, 'Partly supervised: file edits ask, commands do not');
+  assert.ok(s.worktree && s.cwd.toLowerCase().includes('acp-repo.worktrees'), 'a new worktree next to the repository (#69)');
+  const feed = (await fullOf(uid)).feed.map((f) => f.text);
+  const onPage = (await snapshot()).sessions.find((x) => x.uid === uid);
+  assert.equal(onPage.costUnknown, true, 'the page gets it, so it shows unknown, never $0.00');
+  assert.ok(feed.includes('Hermes Agent does not report cost. The office shows it as unknown, and no spend limit can stop it.'), feed.join('\n'));
+  assert.ok(feed.includes('Hermes Agent: Partly supervised: file edits ask, commands do not. The feed says what it ran without asking.'), feed.join('\n'));
+  // A request the agent raises goes to the Security room first (#70): an edit inside its worktree is Allow by default, so it
+  // is answered at once (allow once). A command is Ask by default: it waits in the office until the user answers there.
+  const options = [{ optionId: 'always', name: 'Always', kind: 'allow_always' }, { optionId: 'once', name: 'Allow', kind: 'allow_once' }, { optionId: 'no', name: 'Reject', kind: 'reject_once' }];
+  const steps = [{ ask: { toolCall: { toolCallId: 't1', title: 'Edit a', kind: 'edit', locations: [{ path: path.join(s.cwd, 'a.txt') }] }, options } },
+    { ask: { toolCall: { toolCallId: 't2', title: 'npm test', kind: 'execute', rawInput: { command: 'npm test' } }, options } }];
+  assert.equal((await call('/api/message', { uid, text: JSON.stringify(steps) })).status, 200);
+  const waiting = await until(async () => { const x = await sessionOf(uid); return x.pending.length ? x : null; }, 'the request to wait');
+  assert.deepEqual([waiting.pending.length, waiting.pending[0].tool], [1, 'Bash'], 'the edit did not wait');
+  assert.equal((await call('/api/answer', { id: waiting.pending[0].id, allow: true, always: true })).status, 200);
+  const done = await until(async () => { const x = await sessionOf(uid); return x.status === 'idle' && x.replies.length === 2 ? x : null; }, 'the turn to end');
+  assert.deepEqual(done.replies.map((x) => x.text), ['asked: selected once', 'asked: selected once'], 'allow once, never always');
+  assert.equal(done.cost, null, 'never $0.00');
+  // Past sessions keep the cost unknown, and Reopen asks again before it runs.
+  assert.equal((await call('/api/close', { uid })).status, 200);
+  const past = await until(async () => (await call('/api/history', {})).json.sessions.find((x) => x.uid === uid), 'the past record');
+  assert.deepEqual([past.costUnknown, past.cost], [true, null]);
+  const again = await call('/api/reopen', { uid });
+  assert.deepEqual([again.status, again.json.confirm], [409, 'cost']);
+  const yes = await call('/api/reopen', { uid, confirmCost: true });
+  assert.equal(yes.status, 200, JSON.stringify(yes.json));
+  await until(async () => { const x = await sessionOf(yes.json.uid); return x && x.sid ? x : null; }, 'the reopened session to start');
+  await call('/api/close', { uid: yes.json.uid });
 });

@@ -116,7 +116,12 @@ test('the snapshot carries the rules, what each agent kind enforces, and the Spe
   const s = await snapshot();
   assert.deepEqual(s.security.rules, { office: {}, buildings: {} });
   assert.equal(s.security.enforce['claude-code'].reason, '');
-  assert.match(s.security.enforce.hermes.reason, /no provider for this agent kind yet/);
+  // Hermes Agent (#71) is ungated: it runs commands and edits through its own tools, so no call row is enforced for it.
+  assert.equal(s.security.enforce.hermes.reason, '');
+  assert.match(s.security.enforce.hermes.rows.shell, /without asking the office/);
+  assert.equal(s.security.enforce.dsh.reason, '', 'dsh is gated: it asks the office before its tool calls');
+  assert.deepEqual(s.security.enforce.dsh.rows, {});
+  assert.match(s.security.enforce.openclaw.reason, /no provider for this agent kind yet/);
   assert.equal(s.security.spend.limit, 2);
   assert.match(s.security.spend.month, /^\d{4}-\d{2}$/);
   assert.deepEqual(s.security.spend.byColumn, {});
