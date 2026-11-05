@@ -103,7 +103,8 @@ async function callTool(name, args) {
     if (!question) throw new Error('office_ask needs a question.');
     return (await office('/mcp/ask', { question }, 11 * 60 * 1000)).text;
   }
-  // The room lookup may run git once (about 50 ms; git.locate gives up after 8 s).
+  // The room lookup may run git once (about 50 ms; git.locate gives up after 8 s,
+  // and a lookup in a room that is being removed waits for the removal first).
   if (name === 'office_room') return (await office('/mcp/room', {}, 15000)).text;
   if (name === 'office_room_update') {
     // Only the three room fields go to the server, so an argument can never stand in for office_id or pid.

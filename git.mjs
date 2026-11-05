@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { inside } from './risk.mjs';
 
 // ---------- programs ----------
 // On Windows a bare program name ('git') is looked up in the child's folder before PATH, unless the
@@ -101,7 +102,51 @@ export const GIT_HARDENING = ['-c', 'core.fsmonitor=false', '-c', `core.hooksPat
 const READ_ONLY = new Set(['status', 'diff', 'log', 'ls-files']);
 /** The full argument list for a git call: hardening, then --no-optional-locks for read-only commands, then the command. */
 export const gitArgs = (args) => [...GIT_HARDENING, ...(READ_ONLY.has(args[0]) ? ['--no-optional-locks'] : []), ...args];
-const git = (args, cwd, timeout, env) => run('git', gitArgs(args), cwd, timeout, env);
+
+// ---------- a folder and its removal take turns ----------
+// On Windows a folder cannot be deleted while a process has it as its current folder, and git makes the work tree its
+// current folder. `git worktree remove` tries again for about 70 ms, then fails: "failed to delete '<room>': Permission
+// denied". The office's own git calls in a room (a session's place lookups, which its last hooks start just before a close,
+// the changes view, a pull request push) must not be running then. So a removal (removeFolder) waits for the git calls
+// that run in the folder or below it, and a git call that starts there meanwhile waits until the removal is over: it then
+// finds the folder gone, or still there when the removal failed. The key is the folder in any spelling, as for perRepo.
+const folderKey = (p) => { const r = path.resolve(String(p || '')); return process.platform === 'win32' ? r.toLowerCase() : r; };
+const isBelow = (k, top) => inside(top, k); // the one folder-inside-folder check (risk.mjs)
+const gitCalls = new Map(); // folder key -> the git calls that run in it (their promises)
+const removals = new Map(); // folder key -> a promise that settles when the removal of that folder is over
+// Every program the office runs in a room goes through here (git, gh), or a removal cannot wait for it.
+function recorded(cmd, args, cwd, timeout, env) {
+  const k = folderKey(cwd);
+  for (const [top, over] of removals) if (isBelow(k, top)) return over.then(() => recorded(cmd, args, cwd, timeout, env));
+  // From the check to here nothing waits, so a removal that starts later sees this call.
+  const call = run(cmd, args, cwd, timeout, env);
+  const calls = gitCalls.get(k) || new Set();
+  gitCalls.set(k, calls.add(call));
+  const done = () => { calls.delete(call); if (!calls.size && gitCalls.get(k) === calls) gitCalls.delete(k); };
+  call.then(done, done);
+  return call;
+}
+const git = (args, cwd, timeout, env) => recorded('git', gitArgs(args), cwd, timeout, env);
+/**
+ * Runs fn, the removal of the folder `root`, once no git call of the office runs in it. One removal of a folder at a time.
+ * fn runs its git in `repo`, so `root` must not hold the repository: those calls would wait for this removal, which waits for fn.
+ */
+async function removeFolder(root, repo, fn) {
+  const k = folderKey(root);
+  if (isBelow(folderKey(repo), k)) throw new Error('The main folder of the repository cannot be removed.');
+  const before = removals.get(k);
+  let over;
+  const mine = new Promise((resolve) => { over = resolve; });
+  removals.set(k, mine); // at once: git calls that start in the folder from now on wait
+  try {
+    await before;
+    await Promise.allSettled([...gitCalls].filter(([f]) => isBelow(f, k)).flatMap(([, calls]) => [...calls]));
+    return await fn();
+  } finally {
+    if (removals.get(k) === mine) removals.delete(k);
+    over();
+  }
+}
 // Git words its errors in the user's language where it ships translations. Code that reads an error message asks for English.
 const ENGLISH = { LC_ALL: 'C', LANGUAGE: 'C' };
 
@@ -143,11 +188,15 @@ async function placeOrKeep(cwd, { exec = git, exists = fs.existsSync, wait = (ms
     const repo = path.basename(dir).toLowerCase() === '.git' ? path.dirname(dir) : dir;
     const out = { repo: path.normalize(repo), root: path.normalize(top), branch: branch === 'HEAD' ? 'detached' : branch };
     // A failed base read is not a reason to lose the location: the room sits on its own floor, and the log says why.
-    // A base branch that is gone (deleted, renamed) is no base either.
+    // A base branch that is gone (deleted, renamed) is no base either. A folder that is gone meanwhile (its room was
+    // removed between the calls) has no place: null, as when it was gone at the first call.
     try {
       const base = await baseOf(cwd, out.branch);
       if (base && await branchExists(cwd, base)) out.base = base;
-    } catch (e2) { console.warn(`Agent Office: could not read the base branch of ${out.branch}: ${e2.message}`); }
+    } catch (e2) {
+      if (!exists(cwd)) return null;
+      console.warn(`Agent Office: could not read the base branch of ${out.branch}: ${e2.message}`);
+    }
     return out;
   } catch (e) {
     if (!exists(cwd) || LASTING_GIT_FAILURE.test(String(e && e.message))) return null;
@@ -160,7 +209,8 @@ async function placeOrKeep(cwd, { exec = git, exists = fs.existsSync, wait = (ms
  * Where a folder sits in git: { repo, root, branch } and, for an agent worktree, `base` (the branch it was made from),
  * or null when it is not in a repository, the folder is gone, git refuses it (dubious ownership) or there is no git. A failure that is only passing (git passed its time limit on a
  * loaded machine, a lock) is tried again, `attempts` times in all, because null is an answer the office acts on (#98);
- * after the last try the answer is null too. `deps` (`exec`, `exists`, `wait`, `attempts`) are for tests.
+ * after the last try the answer is null too. A lookup in a room that is being removed waits for the removal first, then finds the
+ * folder gone (null), so it can take longer than its own tries. `deps` (`exec`, `exists`, `wait`, `attempts`) are for tests.
  */
 export async function locate(cwd, deps) {
   const g = await placeOrKeep(cwd, deps);
@@ -260,8 +310,7 @@ export function keyedQueue(keyOf = (k) => k) {
     return run;
   };
 }
-const repoKeyOf = (repo) => { const r = path.resolve(String(repo || '')); return process.platform === 'win32' ? r.toLowerCase() : r; };
-export const perRepo = keyedQueue(repoKeyOf);
+export const perRepo = keyedQueue(folderKey);
 
 export async function createWorktree(cwd, name) {
   // The main repository is common to all its worktrees, so it is the key of the queue.
@@ -349,7 +398,7 @@ export async function changes(cwd) {
 /** Removes a worktree folder. Refuses when it has uncommitted changes unless `force` is set. */
 export async function removeWorktree({ root, repo, branch }, force = false) {
   if (!root || !repo) throw new Error('This session has no worktree.');
-  await git(['worktree', 'remove', ...(force ? ['--force'] : []), root], repo, 60000)
+  await removeFolder(root, repo, () => git(['worktree', 'remove', ...(force ? ['--force'] : []), root], repo, 60000))
     .catch((e) => { throw new Error(/contains modified or untracked files|uncommitted/i.test(e.message) ? 'The worktree has uncommitted changes. Remove it anyway to discard them.' : e.message); });
   let branchKept = false;
   // A branch delete rewrites the repository config (its branch section): one config writer at a time (perRepo, M5).
@@ -384,7 +433,7 @@ export async function createPr(cwd, branch, title) {
     await git(['commit', '-m', `Agent Office: ${title}`], cwd);
   }
   await git(['push', '-u', 'origin', branch], cwd, 120000);
-  const url = (await run('gh', ['pr', 'create', '--fill', '--head', branch], cwd, 120000)).trim().split('\n').pop();
+  const url = (await recorded('gh', ['pr', 'create', '--fill', '--head', branch], cwd, 120000)).trim().split('\n').pop();
   return { url };
 }
 
@@ -516,14 +565,19 @@ export async function createRoom(repo, branch, roomName = '') {
   return { root, branch, shared: taken };
 }
 
-/** Removes a room (a worktree that is not the main folder). The branch, and so the floor, stays. */
+/** Removes a room (a worktree that is not the main folder). The branch, and so the floor, stays. The room takes no new git
+ *  call while it is removed (removeFolder). The request is checked before that turn starts. */
 export async function removeRoom(repo, root, force = false) {
+  if (!String(root || '').trim()) throw new Error('Name the room to remove.');
+  // Read and check the room first: a bad request must not make other git calls wait.
   const w = (await layout(repo)).find((x) => path.normalize(x.root).toLowerCase() === path.normalize(root).toLowerCase());
   if (!w) throw new Error('That room is gone already.');
   if (w.main) throw new Error('The main folder of the repository cannot be removed.');
-  await git(['worktree', 'remove', ...(force ? ['--force'] : []), w.root], repo, 60000)
-    .catch((e) => { throw new Error(/contains modified or untracked files|uncommitted/i.test(e.message) ? 'The room has uncommitted changes. Remove it anyway to discard them.' : e.message); });
-  return { removed: true };
+  return removeFolder(w.root, repo, async () => {
+    await git(['worktree', 'remove', ...(force ? ['--force'] : []), w.root], repo, 60000)
+      .catch((e) => { throw new Error(/contains modified or untracked files|uncommitted/i.test(e.message) ? 'The room has uncommitted changes. Remove it anyway to discard them.' : e.message); });
+    return { removed: true };
+  });
 }
 
 /** Deletes a floor: removes its rooms (not the main folder) and deletes the branch. */
