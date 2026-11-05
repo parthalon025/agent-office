@@ -722,3 +722,66 @@ test('#67: with no prices a turn says no dollars, so the session cost stays unkn
     assert.equal(st.s.cost, null);
   } finally { await st.provider.close(st.s); await st.done(); }
 });
+
+// ---------- review fixes (#24) ----------
+test('Foundry: off in the Security room is not ready and makes no call, also not to list the agents; models() is empty', async () => {
+  const fake = await startFakeFoundry({ script: [{ events: [] }] });
+  let off = 'Azure AI Foundry runs tool calls without asking the office. Turn on Cloud agent on the Agents screen of the Security room first.';
+  try {
+    const config = cloudConfig({ OFFICE_FOUNDRY_ENDPOINT: fake.url, OFFICE_FOUNDRY_TOKEN: TOKEN }, 'OFFICE_FOUNDRY');
+    const p = createFoundry({ events: {}, config, allowLoopback: true, blocked: () => off });
+    assert.deepEqual(await p.readiness(), { ready: false, configured: true, version: null, needs: [off] });
+    assert.deepEqual(await p.models(), []);
+    assert.equal(fake.calls.length, 0, 'no call while the kind is off');
+    off = null; // the user turns it on
+    assert.equal((await p.readiness()).ready, true);
+    assert.equal((await p.models()).length, 1);
+    assert.ok(fake.calls.length >= 2);
+    // Not configured still says the setup steps first, off or on.
+    const bare = createFoundry({ events: {}, config: cloudConfig({}, 'OFFICE_FOUNDRY'), fetch: noFetch, blocked: () => 'off' });
+    const r = await bare.readiness();
+    assert.equal(r.configured, false);
+    assert.notDeepEqual(r.needs, ['off']);
+  } finally { await fake.close(); }
+});
+
+test('Copilot Studio: off in the Security room is not ready, with the reason; turned on it is ready', async () => {
+  let off = 'Copilot Studio runs tool calls without asking the office. Turn on Cloud agent on the Agents screen of the Security room first.';
+  const config = cloudConfig({ OFFICE_COPILOTSTUDIO_ENDPOINT: 'https://acme.environment.api.powerplatform.com/copilotstudio/dataverse-backed/authenticated/agents/cr123_helper/conversations?api-version=2022-03-01-preview', OFFICE_COPILOTSTUDIO_TOKEN: TOKEN }, 'OFFICE_COPILOTSTUDIO');
+  const p = createCopilotStudio({ events: {}, config, fetch: noFetch, blocked: () => off });
+  assert.deepEqual(await p.readiness(), { ready: false, configured: true, version: null, needs: [off] });
+  assert.deepEqual(await p.models(), []);
+  off = null;
+  assert.equal((await p.readiness()).ready, true);
+});
+
+test('Foundry: an MCP server label can never be "office", and holds only safe characters', async () => {
+  const o = await foundry([{ events: [...start,
+    toolStep([{ id: 'c1', type: 'mcp', server_label: 'office', name: 'office_ask', arguments: '{}', output: 'o' }]),
+    toolStep([{ id: 'c2', type: 'mcp', server_label: 'Office', name: 'x', arguments: '{}', output: 'o' }]),
+    toolStep([{ id: 'c3', type: 'mcp', server_label: 'a__b c', name: 'x', arguments: '{}', output: 'o' }]),
+    said('done'), done()] }]);
+  try {
+    o.say(o.s, 'work');
+    await until(() => last(o.s) === 'done' && idle(o.s), 'the turn');
+    const by = Object.fromEntries(o.s.calls.map((c) => [c.id, c.name]));
+    assert.equal(by.c1, 'mcp__office-server__office_ask');
+    assert.equal(by.c2, 'mcp__office-server__x');
+    assert.equal(by.c3, 'mcp__a_b_c__x');
+    for (const n of Object.values(by)) assert.ok(!/^mcp__office__/.test(n), n);
+  } finally { await o.provider.close(o.s); await o.done(); }
+});
+
+test('Foundry: the ids of the service go into a request path as one segment each', async () => {
+  const fake = await startFakeFoundry({ script: [{ events: [...start, said('ok'), done()] }], threadId: 'a/../b?x=1' });
+  try {
+    const config = cloudConfig({ OFFICE_FOUNDRY_ENDPOINT: fake.url, OFFICE_FOUNDRY_TOKEN: TOKEN }, 'OFFICE_FOUNDRY');
+    const o = office((events) => createFoundry({ events, config, allowLoopback: true, stallMs: 2000, pollMs: 5 }), 'foundry');
+    const s = o.session();
+    o.say(s, 'hi');
+    await until(() => last(s) === 'ok' && idle(s), 'the reply');
+    const enc = encodeURIComponent('a/../b?x=1');
+    assert.deepEqual(fake.calls.map((c) => c.method + ' ' + c.path), ['POST /threads', `POST /threads/${enc}/messages`, `POST /threads/${enc}/runs`]);
+    await o.provider.close(s);
+  } finally { await fake.close(); }
+});

@@ -318,7 +318,7 @@ The office knows six kinds of session. A session **in the office** runs `claude 
 - **A turn fails with "The agent asked the office to run <function>".** The Foundry agent has a function tool. The office has no functions. Remove the tool from the agent.
 - **A turn fails with "The agent asks for a sign-in".** A Copilot Studio connector needs your own connection. Set it up in Copilot Studio. The office does not sign in.
 - **The office asks "This agent does not report cost" and shows the cost as unknown.** No prices are set (Foundry needs both). Set the price variables (see **Settings**) and start the office again, or set **Run without cost reports** to Allow for **Cloud agent** on the Agents screen.
-- **Open session says "Turn on Azure AI Foundry on the Agents screen of the Security room first".** Turn on **Cloud agent** there (see **Turn them on**).
+- **Open session says "Turn on Cloud agent on the Agents screen of the Security room first".** Agent kinds then shows Not ready with the same words, and the office makes no call. Turn on **Cloud agent** there (see **Turn them on**).
 
 ### Terminal sessions
 

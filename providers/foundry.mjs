@@ -26,6 +26,16 @@ const MCP_PARTLY = 'Only an MCP tool that a Foundry agent sets to ask for approv
 const clip = (t, n) => { const x = String(t ?? ''); return x.length > n ? x.slice(0, n - 1) + '…' : x; };
 const parse = (s) => { try { const j = JSON.parse(s); return j && typeof j === 'object' && !Array.isArray(j) ? j : {}; } catch { return {}; } };
 
+// The label of an MCP server as the service sends it, made safe for a tool name `mcp__<label>__<tool>`: only letters, digits, `_`
+// and `-`, no `__` inside, and never `office`: risk.mjs rates `mcp__office__*` as the office's own tool, not as MCP, so a service
+// that named its server "office" would slip past the Cloud agent MCP cell.
+function serverLabel(raw) {
+  const l = String(raw || '').replace(/[^A-Za-z0-9_-]/g, '_').replace(/_{2,}/g, '_').slice(0, 64) || 'server';
+  return l.toLowerCase() === 'office' ? 'office-server' : l;
+}
+// A service id goes into a request path as one segment, whatever it holds.
+const seg = encodeURIComponent;
+
 // One tool call of a run step as the office shows it: the tool name, a short input and, for a connected agent, the helper's name.
 function describeCall(tc) {
   const type = String(tc.type || 'tool');
@@ -36,7 +46,7 @@ function describeCall(tc) {
     const name = String(d.name || 'agent');
     return { tool: 'Agent', agent: name, input: { subagent_type: clip(name, 80), description: clip(parse(args).prompt || args, 200) } };
   }
-  const name = type === 'mcp' ? `mcp__${tc.server_label || d.server_label || 'server'}__${tc.name || d.name || 'tool'}`
+  const name = type === 'mcp' ? `mcp__${serverLabel(tc.server_label || d.server_label)}__${tc.name || d.name || 'tool'}`
     : type === 'function' || type === 'azure_function' ? String(d.name || type) : type;
   return { tool: name, agent: null, input: { description: clip(args, 200) } };
 }
@@ -51,6 +61,9 @@ function describeCall(tc) {
  */
 export function createFoundry(deps) {
   const { events, config = cloudConfig({}, 'OFFICE_FOUNDRY') } = deps;
+  // blocked(): why the Security room does not let this kind run now (its Agents screen: off until turned on), or null. Then the
+  // kind is not ready and the office makes no call, also not to list the agents. The server passes security.openRefusal.
+  const blocked = deps.blocked || (() => null);
   const doFetch = deps.fetch || globalThis.fetch;
   const stallMs = deps.stallMs || undefined;
   const pollMs = deps.pollMs || 1500;
@@ -164,14 +177,14 @@ export function createFoundry(deps) {
     const id = st.runId, thread = st.thread;
     st.runId = null;
     let run = null;
-    try { run = await jsonOf(await send(undefined, 'POST', `/threads/${thread}/runs/${id}/cancel`, {})); } catch { /* best effort */ }
+    try { run = await jsonOf(await send(undefined, 'POST', `/threads/${seg(thread)}/runs/${seg(id)}/cancel`, {})); } catch { /* best effort */ }
     void settle(st, thread, id, run);
   }
   async function settle(st, thread, id, run) {
     for (let i = 0; i < POLL_TRIES && !st.charged.has(id); i++) {
       if (run && ENDED.has(run.status)) { chargeRun(st, id, run.usage); return; }
       await new Promise((r) => setTimeout(r, i ? pollMs : 0));
-      try { run = await jsonOf(await send(undefined, 'GET', `/threads/${thread}/runs/${id}`)); } catch { run = null; }
+      try { run = await jsonOf(await send(undefined, 'GET', `/threads/${seg(thread)}/runs/${seg(id)}`)); } catch { run = null; }
     }
     if (run && ENDED.has(run.status)) chargeRun(st, id, run.usage);
   }
@@ -186,10 +199,10 @@ export function createFoundry(deps) {
         st.thread = String(t.id);
         events.feed(ctx.s, 'start', `Foundry thread ${st.thread}`);
       }
-      await hereSend('POST', `/threads/${st.thread}/messages`, { role: 'user', content: ctx.prompt });
+      await hereSend('POST', `/threads/${seg(st.thread)}/messages`, { role: 'user', content: ctx.prompt });
       ctx.stream({ type: 'stream_event', event: { type: 'message_start' } });
       const x = fresh();
-      let path = `/threads/${st.thread}/runs`, body = { assistant_id: st.agent, stream: true };
+      let path = `/threads/${seg(st.thread)}/runs`, body = { assistant_id: st.agent, stream: true };
       for (let hop = 0; ; hop++) {
         x.state = null;
         const r = await hereSend('POST', path, body, true);
@@ -210,7 +223,7 @@ export function createFoundry(deps) {
         const decisions = await Promise.all(calls.map((c) => ctx.ask(describeCall(c).tool, parse(c.arguments))));
         if (ctx.stopped()) return { last: '' };
         if (ctx.overBudget()) { await cancel(st); report(ctx, x); return { last: '', overBudget: true }; }
-        path = `/threads/${st.thread}/runs/${x.runId}/submit_tool_outputs`;
+        path = `/threads/${seg(st.thread)}/runs/${seg(x.runId)}/submit_tool_outputs`;
         body = { tool_approvals: calls.map((c, i) => ({ tool_call_id: c.id, approve: decisions[i] === true })), stream: true };
       }
       st.runId = null;
@@ -256,6 +269,8 @@ export function createFoundry(deps) {
     async readiness() {
       const c = setup();
       if (!c.ok) return { ready: false, configured: false, version: null, needs: c.needs };
+      const off = blocked();
+      if (off) return { ready: false, configured: true, version: null, needs: [off] };
       try {
         const list = await listAgents();
         if (!list.length) return { ready: false, configured: true, version: null, needs: ['The project has no agents. Make an agent in the Foundry portal.'] };
@@ -264,7 +279,7 @@ export function createFoundry(deps) {
     },
 
     async models() {
-      if (!setup().ok) return [];
+      if (!setup().ok || blocked()) return [];
       return listAgents();
     },
 

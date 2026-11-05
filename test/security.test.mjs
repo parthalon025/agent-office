@@ -362,7 +362,7 @@ test('M1: Hermes is ungated, so it is off until the user turns it on; the Agents
   assert.equal(S.na('ungated', 'hermes'), '', 'a cell, not a "Gated" note');
   assert.equal(S.na('ungated', 'dsh'), 'Gated', 'dsh asks the office before its tool calls');
   const hermes = { kind: 'hermes', label: 'Hermes Agent', gated: false, cost: 'unknown' };
-  assert.match(openRefusal(none(), hermes), /Turn on Hermes Agent on the Agents screen of the Security room/);
+  assert.match(openRefusal(none(), hermes), /Turn on Hermes on the Agents screen of the Security room/);
   assert.equal(status(() => setRule(none(), { scope: 'office', row: 'ungated', col: 'hermes', value: 'on' }))[0], 409, 'turning it on needs the painted Confirm');
   const on = setRule(none(), { scope: 'office', row: 'ungated', col: 'hermes', value: 'on', confirmed: true }).rules;
   assert.equal(openRefusal(on, hermes), null);
@@ -414,7 +414,7 @@ test('#24: the cloud kinds share the Cloud agent column: no file cells, off unti
   assert.throws(() => setRule(none(), { scope: 'office', row: 'secrets', col: 'cloud', value: 'deny' }), (e) => e.status === 400);
   // Off until the Agents screen turns it on; then it opens.
   const f = fd();
-  assert.match(openRefusal(none(), f), /Turn on Azure AI Foundry on the Agents screen of the Security room/);
+  assert.match(openRefusal(none(), f), /Turn on Cloud agent on the Agents screen of the Security room/);
   const on = setRule(none(), { scope: 'office', row: 'ungated', col: 'cloud', value: 'on', confirmed: true }).rules;
   assert.equal(openRefusal(on, f), null);
   assert.equal(openRefusal(on, cs()), null, 'one switch for both cloud kinds');

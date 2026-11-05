@@ -42,6 +42,8 @@ const needsSignIn = (a) => (a.attachments || []).some((x) => SIGN_IN.test(String
  */
 export function createCopilotStudio(deps) {
   const { events, config = cloudConfig({}, 'OFFICE_COPILOTSTUDIO') } = deps;
+  // blocked(): why the Security room does not let this kind run now (off until turned on), or null. Then it is not ready.
+  const blocked = deps.blocked || (() => null);
   const doFetch = deps.fetch || globalThis.fetch;
   const stallMs = deps.stallMs || undefined;
   // Copilot Studio reports neither tokens nor dollars: the office counts only the price per message the owner set.
@@ -190,6 +192,8 @@ export function createCopilotStudio(deps) {
     async readiness() {
       const c = setup();
       if (!c.ok) return { ready: false, configured: false, version: null, needs: c.needs };
+      const off = blocked();
+      if (off) return { ready: false, configured: true, version: null, needs: [off] };
       return { ready: true, configured: true, version: (AGENT_PATH.exec(c.url.pathname) || [])[1] || null, needs: [] };
     },
 

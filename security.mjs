@@ -182,7 +182,7 @@ export function openRefusal(rules, provider) {
   const col = S.columnOf(provider && provider.kind);
   if (!col) return null;
   if (provider.gated === false && S.applies('ungated', col) && S.valueOf(rules, null, 'ungated', col) !== 'on') {
-    return `${provider.label} runs tool calls without asking the office. Turn on ${provider.label} on the Agents screen of the Security room first.`;
+    return `${provider.label} runs tool calls without asking the office. Turn on ${S.columns.find((c) => c.id === col).label} on the Agents screen of the Security room first.`;
   }
   if (provider.cost === 'unknown' && S.applies('no-cost', col) && S.valueOf(rules, null, 'no-cost', col) === 'deny') {
     return `${provider.label} does not report cost, and the Security room denies agents without cost reports.`;

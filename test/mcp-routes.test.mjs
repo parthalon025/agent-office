@@ -489,7 +489,7 @@ test('Hermes is off until the Security room turns it on: the open is refused bef
   const before = (await snapshot()).sessions.length;
   const off = await call('/api/open', { cwd: acpRepo, name: 'hermes-off', provider: 'hermes', where: 'office', isolation: 'worktree', confirmCost: true });
   assert.equal(off.status, 409);
-  assert.match(off.json.error, /^Hermes Agent runs tool calls without asking the office\. Turn on Hermes Agent on the Agents screen/);
+  assert.match(off.json.error, /^Hermes Agent runs tool calls without asking the office\. Turn on Hermes on the Agents screen/);
   assert.equal((await snapshot()).sessions.length, before);
   const on = { scope: 'office', row: 'ungated', col: 'hermes', value: 'on' };
   assert.equal((await call('/api/security/set', on)).status, 409, 'turning it on loosens: the wall asks for the Confirm');

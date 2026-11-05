@@ -373,7 +373,8 @@ const providers = createRegistry([claude, ollama, lmstudio, agentFramework,
     cells: (s) => cellsOf(persisted.security, s ? buildingOfSession(s) : null, V.security.columnOf(kind)) })),
   // The Microsoft cloud kinds are off until the owner sets them up in the environment (README). Nothing here calls the network
   // or signs in. Like the ungated ACP agents, the Agents screen of the Security room keeps them off until it turns them on.
-  createFoundry({ events, config: CLOUD.foundry }), createCopilotStudio({ events, config: CLOUD.studio })]);
+  ...[['foundry', createFoundry, CLOUD.foundry], ['copilot-studio', createCopilotStudio, CLOUD.studio]].map(([kind, create, config]) => create({ events, config,
+    blocked: () => openRefusal(persisted.security, providers.get(kind)) }))]);
 const providerOf = (s) => providers.of(s);
 ENFORCE = enforcement(providers.list());
 // The agent kinds as the page offers and shows them (providers/index.mjs describe). Fixed while the server runs.
