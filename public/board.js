@@ -293,15 +293,26 @@
   }
 
   // ---------- hint pill (a sprite that fades in on hover) ----------
-  var HINT_W = 640, HINT_H = 140, HINT_FONT = 50, LOOK_HINT = 'Look closer';
+  var HINT_H = 140, HINT_FONT = 50, LOOK_HINT = 'Look closer', HINT_KEY = 'Ctrl+K', KEY_FONT = 34, KEY_H = 66;
+  // The pill names the next click and, in a key chip, the keyboard path (Ctrl+K opens the same tools). It is as wide as its words.
   function hintTex(text, tok, f) {
-    var cv = document.createElement('canvas'); cv.width = HINT_W; cv.height = HINT_H;
-    var c = cv.getContext('2d'), sans = f.sans || 'sans-serif';
-    c.fillStyle = tok.bubble || '#fff'; rr(c, 6, 10, 628, 116, 58); c.fill();
-    c.strokeStyle = tok.accent || tok.emphasis || '#2f6fe4'; c.lineWidth = 6; rr(c, 6, 10, 628, 116, 58); c.stroke();
-    c.fillStyle = tok['scene-dark'] || '#2b323b'; c.font = '600 ' + HINT_FONT + 'px ' + sans; c.textAlign = 'center'; c.textBaseline = 'middle';
-    c.fillText(text, 320, 70);
-    var t = new T.CanvasTexture(cv); t.encoding = T.sRGBEncoding; return t;
+    var cv = document.createElement('canvas'), c = cv.getContext('2d'), sans = f.sans || 'sans-serif', mono = f.mono || 'monospace';
+    var ink = tok['scene-dark'] || '#2b323b', face = tok.bubble || '#fff';
+    c.font = '600 ' + HINT_FONT + 'px ' + sans; var tw = c.measureText(text).width;
+    c.font = '500 ' + KEY_FONT + 'px ' + mono; var kw = c.measureText(HINT_KEY).width + 44;
+    var L = window.OfficeFormat.hintPill(tw, kw);
+    cv.width = L.w; cv.height = HINT_H;   // a resize clears the canvas and its font, so set both again below
+    c.fillStyle = face; rr(c, 6, 10, L.w - 12, 116, 58); c.fill();
+    c.strokeStyle = tok.accent || tok.emphasis || '#2f6fe4'; c.lineWidth = 6; rr(c, 6, 10, L.w - 12, 116, 58); c.stroke();
+    c.textBaseline = 'middle'; c.textAlign = 'left';
+    c.fillStyle = ink; c.font = '600 ' + HINT_FONT + 'px ' + sans; c.fillText(text, L.textX, 70);
+    // the key chip: like the DS .ao-kbd (a thin line, a thicker line below), in the pill's own ink
+    var ky = 70 - KEY_H / 2;
+    c.fillStyle = mix(face, ink, 0.1); rr(c, L.keyX, ky, L.keyW, KEY_H, 12); c.fill();
+    c.strokeStyle = mix(face, ink, 0.4); c.lineWidth = 4; rr(c, L.keyX, ky, L.keyW, KEY_H, 12); c.stroke();
+    c.fillStyle = mix(face, ink, 0.4); c.fillRect(L.keyX + 10, ky + KEY_H - 4, L.keyW - 20, 4);
+    c.fillStyle = ink; c.font = '500 ' + KEY_FONT + 'px ' + mono; c.textAlign = 'center'; c.fillText(HINT_KEY, L.keyX + L.keyW / 2, 69);
+    var t = new T.CanvasTexture(cv); t.encoding = T.sRGBEncoding; t.userData.w = L.w; return t;
   }
 
   // Attach boards to a mounted office.
@@ -609,7 +620,8 @@
       var wpp = (st.cam.top - st.cam.bottom) / (st.cam.zoom || 1) / (cv.clientHeight || 1);   // world units per CSS pixel
       if (!hintSize) hintSize = { px: cssNum('type-title-size', 14) * HINT_H / HINT_FONT, gap: cssNum('space-2', 8) };   // read once per theme, not per frame
       var hpx = hintSize.px, gap = hintSize.gap;
-      hintSprite.scale.set(hpx * HINT_W / HINT_H * wpp, hpx * wpp, 1);
+      var tw = (hintSprite.material.map && hintSprite.material.map.userData.w) || HINT_H * 4;   // the pill is as wide as its words
+      hintSprite.scale.set(hpx * tw / HINT_H * wpp, hpx * wpp, 1);
       var up = new T.Vector3(0, 1, 0).applyQuaternion(st.cam.quaternion);
       hintSprite.position.copy(hintPoint).addScaledVector(up, (hpx / 2 + gap) * wpp);
     }
