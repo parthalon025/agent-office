@@ -824,6 +824,7 @@ for (const plain of [false, true]) {
     assert.deepEqual(t.s.stage.ext, [10, 2.6, 8.2], 'the engine framed the floor at once (frameFloor(true))');
     assert.notEqual(t.s.stage.cam.zoom, 1, 'and the host undid the cut in the same call: zoom 1 is never drawn');
     near2(t.host.rect(), expectBox(1040, 760), 'host.rect in the same call');
+    near2(t.layers.at(-1).rect, expectBox(1040, 760), 'the layer listener has the new box in the same call (before the paint)');
     e.frame();
     assert.equal(t.host.flying(), false, 'no flight');
     assert.equal(t.host.layer().shown, true);
@@ -851,6 +852,7 @@ for (const plain of [false, true]) {
     assert.equal(t.host.flying(), false, 'a new canvas size: framed at once, no flight');
     e.observe(true);   // then the stage's ResizeObserver: the new frustum, and the engine's cut
     assert.equal(t.host.flying(), false);
+    near2(t.layers.at(-1).rect, expectBox(1180, 760), 'the listener has the box of the new frustum before the next frame');
     e.frame();
     near2(t.host.layer().rect, expectBox(1180, 760), 'page refit on a new canvas');
     // a still camera after that moves nothing, and a held goal stays held

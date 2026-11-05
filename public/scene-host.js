@@ -547,13 +547,16 @@
       flyTo(pose, cssNum('duration-camera', 600), null);
     }
     // The engine cut the camera while an item is in focus (stage.frame with now): back on the item at once, with no flight.
-    // Not while the item's mesh is out of the scene (a rebuild): the next frame does it, on the new mesh.
+    // Not while the item's mesh is out of the scene (a rebuild): the next frame does it, on the new mesh. The layer
+    // listeners hear the new box in the same call, so a pinned layer moves before the browser paints (a resize runs in the
+    // stage's ResizeObserver, after the frame that would tell them).
     function undoCut() {
       if (!cut) return;
       if (!foc) { cut = false; return; }
       if (!inScene(scene, foc.mesh)) return;
       cut = false;
       refit(true, true);
+      emitLayer();
     }
     // The camera is already where the pose puts it (within a millionth of the view).
     function posed(pose) {
@@ -717,7 +720,7 @@
       blur: function () { if (focusStep(focusS, { type: 'back' }).act === 'back') back(); },
       // a pinned layer is on the screen: frame it again at once, so the layer follows and does not hide for a flight. A new
       // canvas or frustum the host has not framed yet (the page asks right after a window resize): at once too, as sizeStep.
-      refit: function () { refit(!!(foc && (foc.spec.pin || (lastSize && sizeSig() !== lastSize)))); },
+      refit: function () { if (dead) return; refit(!!(foc && (foc.spec.pin || (lastSize && sizeSig() !== lastSize)))); try { emitLayer(); } catch (x) { /* the next frame tells it */ } },
       free: free,
       rect: rect,
       onFocus: function (fn) { return add(focusFns, fn); },
