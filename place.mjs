@@ -26,10 +26,14 @@ function dirForm(p) {
   const root = path.parse(n).root;
   return n.length > root.length ? n.replace(/[\\/]+$/, '') : n;
 }
-/** The recent-folders list with dir first. One form per folder, no duplicates in any case or slash style. */
+// An agent room folder is an implementation detail, never a place to start from: <repo>.worktrees/<name> and anything in it
+// (git.createWorktree, #69), and the .agent-office/worktrees folders of older runs. The folder that holds the rooms is plain.
+const ROOM_DIR = /[\\/][^\\/]+\.worktrees[\\/][^\\/]+|[\\/]\.agent-office[\\/]worktrees([\\/]|$)/i;
+const roomDir = (d) => ROOM_DIR.test(d);
+/** The recent-folders list with dir first. One form per folder, no duplicates in any case or slash style, no agent rooms. */
 export function addRecent(list, dir, max = 12) {
   const d = dirForm(dir);
-  if (!d) return cleanRecent(list, max);
+  if (!d || roomDir(d)) return cleanRecent(list, max);
   return [d, ...cleanRecent(list, max + 1).filter((x) => normPath(x) !== normPath(d))].slice(0, max);
 }
 /** An older list, rewritten in the one form, without duplicates (first one wins) and without empty entries. */
@@ -37,7 +41,7 @@ export function cleanRecent(list, max = 12) {
   const seen = new Set(), out = [];
   for (const x of Array.isArray(list) ? list : []) {
     const d = typeof x === 'string' ? dirForm(x) : '';
-    if (!d || seen.has(normPath(d))) continue;
+    if (!d || roomDir(d) || seen.has(normPath(d))) continue;
     seen.add(normPath(d)); out.push(d);
   }
   return out.slice(0, max);

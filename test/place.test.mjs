@@ -226,3 +226,17 @@ test('Security room id format is pinned', () => {
   // The page matches the room by this id; a change makes every scene stale once, nothing is lost.
   assert.equal(securityRoomIdOf('e:\\agent-office'), 's-e-agent-office-fe4d9e73');
 });
+
+// Review minor: agent rooms live in <repo>.worktrees (git.createWorktree, #69); the old filter knew only .agent-office/worktrees.
+// A worktree folder is an implementation detail, never a recent folder to start from.
+test('recent folders leave out agent room folders (<repo>.worktrees/<name>) and the old .agent-office/worktrees ones', () => {
+  const top = path.resolve('/pensiv'), holder = top + '.worktrees';
+  const room = path.join(holder, 'bot-1'), deep = path.join(room, 'src');
+  const old = path.join(top, '.agent-office', 'worktrees', 'x');
+  const upper = path.join(holder.toUpperCase(), 'Other'), lookalike = top + '.worktrees.notes';
+  assert.deepEqual(addRecent([top], room), [top], 'an agent room is not added');
+  assert.deepEqual(addRecent([], deep), [], 'nor a folder inside one');
+  assert.deepEqual(cleanRecent([top, room, old, upper, lookalike]), [top, lookalike]);
+  assert.deepEqual(recentChoices([room, top], deep), [top], 'the shown building in a room is no choice either');
+  assert.deepEqual(addRecent([], holder), [holder], 'the folder that holds the rooms is a plain folder');
+});

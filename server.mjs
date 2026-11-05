@@ -99,8 +99,8 @@ const ASK_TIMEOUT_MS = (Number(process.env.OFFICE_ASK_TIMEOUT_S) || 60) * 1000;
 // ---------- setup: hook settings ----------
 let persisted = { recent: [] };
 try { persisted = { ...persisted, ...JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) }; } catch { /* first run */ }
-// Drop folders that are gone, and worktree folders from older runs.
-persisted.recent = cleanRecent(persisted.recent).filter((d) => fs.existsSync(d) && !/[\\/]\.agent-office[\\/]worktrees/.test(d));
+// Drop folders that are gone. cleanRecent (place.mjs) drops agent room folders, also those of older runs.
+persisted.recent = cleanRecent(persisted.recent).filter((d) => fs.existsSync(d));
 const savePersisted = () => { try { fs.writeFileSync(STATE_FILE, JSON.stringify(persisted, null, 2)); } catch { /* ignore */ } };
 // The Security room rules (#70, security.mjs): office-wide, with per-building overrides. Saved in state.json, which is
 // written with writeSecret once at listen. costs: the Spend screen's ledger, dollars per agent kind per month.
