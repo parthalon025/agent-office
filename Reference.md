@@ -381,6 +381,8 @@ Layout breakpoints for the office HUD (container width).
 | `scene-bot-h` | `1.1` | Bot height. Desk top 0.95, seat 0.6. |
 | `scene-nav-pad` | `0.45` | Clearance between a walking bot and any object. The nav grid grows every obstacle by this value. |
 | `scene-nav-cell` | `0.25` | Cell size of the nav grid that bots path on. |
+| `scene-walk-speed` | `2.6` | Walk speed of a bot, in scene units a second. 29 units take about 11 s. |
+| `scene-walk-speed-ephemeral` | `5.2` | Walk speed of a temporary helper (an ephemeral bot), in and out. About twice the bot speed: 29 units take about 6 s. |
 
 ### light
 

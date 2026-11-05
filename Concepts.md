@@ -89,7 +89,7 @@ A harness that cannot wait for an answer (watch mode, trace) must not send `requ
 ## The scene
 
 - **Units.** 1 unit is about 0.5 m. Bot 1.1 high, desk 0.95, seat 0.6, wall 5.2, room depth 12, workstation pitch 4.6. The camera is isometric and frames its target box.
-- **Navigation.** Bots never walk through objects. The engine reads each mesh from 0.2 to 2.1 units high, grows it by `scene-nav-pad` and marks it on a grid of `scene-nav-cell` cells. Each walk is an A* path smoothed by line of sight.
+- **Navigation.** Bots never walk through objects. The engine reads each mesh from 0.2 to 2.1 units high, grows it by `scene-nav-pad` and marks it on a grid of `scene-nav-cell` cells. Each walk is an A* path smoothed by line of sight. A bot walks at `scene-walk-speed`; a temporary helper (`ephemeral`) walks at `scene-walk-speed-ephemeral`, in and out, so it reaches a far desk in a few seconds.
 - **Elevator and tower.** Each floor has a glass elevator. Floor changes ride it. The building view is a glass tower on a plaza with a roof sign, a beacon and a car at the current floor.
 - **Data you can see.** Tool calls are packets on the cable tray; agent talk across rooms is an envelope; the token meter fills with usage.
 - **Living bots.** Blink, sway and glance; a hop when finished; a slump on error.
