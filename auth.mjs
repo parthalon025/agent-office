@@ -16,8 +16,19 @@ import path from 'node:path';
 
 export const LAUNCH_TTL_MS = 5 * 60 * 1000;
 export const AGENT_TOKEN_RE = /^[0-9a-f]{48}$/;
-/** On every response: no page may show the office in a frame (clickjacking, M3). */
-export const SECURITY_HEADERS = { 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'" };
+/**
+ * The content security policy of every response (audit #27 M2, M3):
+ * - frame-ancestors 'none': no page may show the office in a frame (clickjacking).
+ * - script-src 'self': scripts come only from this server (React is vendored in public/vendor). No inline script,
+ *   no eval. The page and the DS bundle need neither.
+ * - style-src 'self' and font-src 'self': style sheets and fonts come only from this server (the fonts are vendored
+ *   too). React sets styles through the DOM, which a CSP allows.
+ * - object-src 'none' and base-uri 'self': no plugins, and no <base> that sends relative links elsewhere.
+ * Images stay open on purpose: an agent reply can show a remote image, but only after a click (DS RichText).
+ */
+export const CSP = "frame-ancestors 'none'; script-src 'self'; style-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'";
+/** On every response. */
+export const SECURITY_HEADERS = { 'x-frame-options': 'DENY', 'content-security-policy': CSP };
 export const NO_ACCESS = 'Open the office with its launch link. Run npm start to get a new link.';
 export const LINK_DEAD = 'This launch link does not work. It was used, or it is more than 5 minutes old. Run npm start to get a new link.';
 

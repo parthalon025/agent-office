@@ -26,8 +26,8 @@ Read four files. Do not guess a value, a prop or an event name.
 | # | File |
 | --- | --- |
 | 1 | `tokens.css` (generated from `tokens.json` by the build; one block per theme) |
-| 2 | `components/bundle.css` (imports the fonts) |
-| 3 | React 18 and ReactDOM 18 (only for React components) |
+| 2 | `components/bundle.css` (the fonts: in this copy the page loads them first from `public/vendor/fonts/fonts.css`; `bundle.css` imports none) |
+| 3 | React 18 and ReactDOM 18 (only for React components; this copy serves them from `public/vendor`) |
 | 4 | `components/lib/three.min.js` (three.js 0.147.0) |
 | 5 | `components/lib/three-orbit-controls.js` |
 | 6 | `components/lib/three-postprocessing.js` (without it, the office renders as quality `low`) |

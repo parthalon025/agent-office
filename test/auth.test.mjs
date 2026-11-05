@@ -171,7 +171,15 @@ test('cookies: the page cookie is HttpOnly, SameSite=Strict, for the whole site;
   assert.deepEqual(auth.cookieValues(undefined, 'a'), []);
   assert.deepEqual(Object.keys(auth.SECURITY_HEADERS).sort(), ['content-security-policy', 'x-frame-options']);
   assert.equal(auth.SECURITY_HEADERS['x-frame-options'], 'DENY');
-  assert.equal(auth.SECURITY_HEADERS['content-security-policy'], "frame-ancestors 'none'");
+  assert.equal(auth.SECURITY_HEADERS['content-security-policy'], auth.CSP);
+});
+
+test('CSP (M2, M3): no frames, scripts, style sheets and fonts from this server only, no plugins, no <base>; never unsafe-*', () => {
+  const dirs = Object.fromEntries(auth.CSP.split(';').map((d) => d.trim().split(/\s+/)).map(([k, ...v]) => [k, v.join(' ')]));
+  assert.deepEqual(dirs, {
+    'frame-ancestors': "'none'", 'script-src': "'self'", 'style-src': "'self'", 'font-src': "'self'", 'object-src': "'none'", 'base-uri': "'self'",
+  });
+  assert.doesNotMatch(auth.CSP, /unsafe|\*|https?:|data:|nonce-|sha\d+-/, 'no loophole: the page needs no inline code, eval or other site');
 });
 
 // ---------- files ----------
@@ -582,7 +590,7 @@ test('route matrix, launch code and owner-only files on a real server', { timeou
     const P = { 'content-type': 'application/json', 'x-office-token': page.token };
     const frame = (r, what) => {
       assert.equal(r.headers['x-frame-options'], 'DENY', what);
-      assert.equal(r.headers['content-security-policy'], "frame-ancestors 'none'", what);
+      assert.equal(r.headers['content-security-policy'], auth.CSP, what);
     };
 
     // GET / holds no token.

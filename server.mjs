@@ -974,14 +974,22 @@ function broadcast() {
 }
 setInterval(() => { for (const c of clients) c.write(': ping\n\n'); }, 20000).unref();
 
-// Static files: the page, its scripts, and the Agent Office DS runtime (tokens, bundle, three.js).
+// Static files: the page, its scripts, the Agent Office DS runtime (tokens, bundle, three.js), and the vendored React
+// and fonts (public/vendor/README.md: versions, sources, SHA-256). The page loads nothing from another site.
+// An exact-match allowlist: a request path is only a key, never part of a file path. The font names are read once
+// here from the vendored folder, and only plain names (a-z, 0-9, -) ending in .woff2 count.
 const MIME = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
+const FONT_FILES = fs.readdirSync(path.join(PUBLIC, 'vendor', 'fonts')).filter((f) => /^[a-z0-9-]+\.woff2$/.test(f));
 const STATIC_FILES = new Map([
   ['/office.js', 'public/office.js'], ['/scene-host.js', 'public/scene-host.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/vocab.js', 'public/vocab.js'], ['/format.js', 'public/format.js'], ['/wheel-gate.js', 'public/wheel-gate.js'], ['/building.js', 'public/building.js'], ['/toasts.js', 'public/toasts.js'], ['/tokens.css', 'tokens.css'],
   ['/components/bundle.css', 'components/bundle.css'], ['/components/bundle.js', 'components/bundle.js'],
   ['/components/lib/three.min.js', 'components/lib/three.min.js'],
   ['/components/lib/three-orbit-controls.js', 'components/lib/three-orbit-controls.js'],
   ['/components/lib/three-postprocessing.js', 'components/lib/three-postprocessing.js'],
+  ['/vendor/react.production.min.js', 'public/vendor/react.production.min.js'],
+  ['/vendor/react-dom.production.min.js', 'public/vendor/react-dom.production.min.js'],
+  ['/vendor/fonts/fonts.css', 'public/vendor/fonts/fonts.css'],
+  ...FONT_FILES.map((f) => [`/vendor/fonts/${f}`, `public/vendor/fonts/${f}`]),
 ]);
 
 const server = http.createServer(async (req, res) => {
