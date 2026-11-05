@@ -33,8 +33,9 @@
 //                                      features (ACP: one handshake). The office calls it before Reopen.
 //   gated                  (optional)  false when the agent runs tool calls without asking the office first (ADR 0001), also
 //                                      when only some of its calls are held. Without it the provider is gated: every tool call
-//                                      that is not low risk is held. true or false only. An ungated provider opens only in a new
-//                                      worktree (server.mjs), and its sessions carry its supervision label.
+//                                      goes to the office first (the Security room rules, then a hold). true or false only. An
+//                                      ungated provider opens only in a room of its own (server.mjs), and its sessions carry its
+//                                      supervision label.
 //   supervision            (optional)  the label of an ungated provider (gated: false), for example "Partly supervised: file
 //                                      edits ask, commands do not". Without it an ungated provider is "Unsupervised"
 //                                      (supervisionOf). A gated provider has none.
