@@ -292,12 +292,13 @@
         });
       }
       // The session leaves the scene (it moved, or the server forgot it): its helpers get no finish event from the
-      // tracker, so send them away here. A helper that already finished is not told twice (#95).
-      function dismissHelpers(k, emit) {
+      // tracker, so send them away here. A helper that already finished is not told twice (#95). why is the result text:
+      // a moved session keeps working, so its helpers are not "stopped"; they go on in the new room.
+      function dismissHelpers(k, emit, why) {
         Object.keys(k.helpers).forEach(function (call) {
           if (k.helpersDone[call]) return;
           k.helpersDone[call] = true;
-          emit({ type: 'subagent.done', bot: k.helpers[call], remove: true, result: 'Stopped before it finished' });
+          emit({ type: 'subagent.done', bot: k.helpers[call], remove: true, result: why });
         });
       }
       // seat: for a bot seated again, { prev, out }: the mirror of its old seat and the live emitter. A call (or a
@@ -358,7 +359,7 @@
           var pl = placeOf(s), k = known[s.uid], emit = base, prev = null, firstSight = false;
           // the session checked out another branch, or moved to another folder: seat it again
           if (k && !k.ended && k.place !== placeKey(pl)) {
-            dismissHelpers(k, emit);
+            dismissHelpers(k, emit, 'Moved with its session');
             emit({ type: 'bot.remove', bot: k.name }); delete taken[k.name]; delete known[s.uid];
             prev = k; k = null;
             emit = restore;   // the scene showed this bot and what its old seat lists (prev) already
@@ -451,7 +452,7 @@
         Object.keys(known).forEach(function (uid) {
           if (seen[uid]) return;
           var k = known[uid];
-          if (!k.ended) { dismissHelpers(k, base); base({ type: 'bot.remove', bot: k.name }); delete taken[k.name]; }
+          if (!k.ended) { dismissHelpers(k, base, 'Stopped before it finished'); base({ type: 'bot.remove', bot: k.name }); delete taken[k.name]; }
           delete known[uid];
         });
       }

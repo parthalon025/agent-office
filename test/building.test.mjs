@@ -255,11 +255,21 @@ test('a session that moves to another folder sends its open helpers away (#95)',
   await r.hook(taskDone('t2', 'general-purpose'));
   const [h1, h2] = of(m.ev, 'delegate').map((e) => e.spawn.name);
   const n = m.ev.length;
-  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'sid-1', cwd: 'C:\\work\\repo-feat' });
+  // A plain tool call from the other folder moves the session. A SessionStart would close every subagent
+  // ("The session restarted"), and then no helper would be open to move.
+  await r.hook({ hook_event_name: 'PreToolUse', session_id: 'sid-1', cwd: 'C:\\work\\repo-feat', tool_name: 'Read', tool_use_id: 'r1', tool_input: { file_path: 'a.txt' } });
   const after = m.ev.slice(n);
   assert.equal(helperDone(after, h1).length, 1, 'the open helper is told to leave');
   assert.equal(helperDone(after, h1)[0].remove, true);
+  assert.equal(helperDone(after, h1)[0].result, 'Moved with its session', 'the helper is not called stopped: its subagent runs on');
   assert.equal(helperDone(m.ev, h2).length, 1, 'a helper that was done is not told twice');
+  // the open helper sits down again in the new room, under a new name, and its later finish goes to that name
+  const again = of(after, 'delegate').map((e) => e.spawn.name);
+  assert.equal(again.length, 1, 'only the open helper comes back');
+  assert.notEqual(again[0], h1, 'the old name is still taken while that bot walks out');
+  await r.hook({ ...taskDone('t1', 'Explore'), cwd: 'C:\\work\\repo-feat' });
+  assert.equal(helperDone(m.ev, again[0]).length, 1, 'the finish goes to the new helper');
+  assert.equal(helperDone(m.ev, h1).length, 1, 'the old helper is not told again');
 });
 
 test('a session the server forgets sends its open helpers away (#95)', async () => {
