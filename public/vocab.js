@@ -18,6 +18,12 @@
                          kind is 'permission' (Approve or Decline) or 'question' (Yes or No; no risk value)
      alwaysOffer(s)   -> the first permission request that may offer "Always allow", or null. Never a question,
                          never a high-risk request, never one without a rule to save.
+     security         -> the Security room grid (#70), shared by its wall screens and the server's rules (security.mjs):
+                         screens [{ id, title, rows }], rows { id: { label, options, def, office?, only? } }, columns
+                         [{ id, label }] (agent kinds), columnOf(providerKind), options(row), valueOf(rules, building, row,
+                         col), sourceOf(...) ('building' | 'office' | 'default'), next(row, value), loosens(row, from, to),
+                         applies(row, col), na(row, col), word(value), key(row, col).
+                         rules: { office: { 'row|col': value }, buildings: { buildingKey: { 'row|col': value } } }.
 */
 (function (root) {
   'use strict';
@@ -102,5 +108,66 @@
     return requests(s).filter(function (r) { return r.kind === 'permission' && r.always && r.risk !== 'high'; })[0] || null;
   }
 
-  root.OfficeVocab = { requests: requests, alwaysOffer: alwaysOffer, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign };
+  // ---------- the Security room grid (#70) ----------
+  // Rows are action kinds (risk.mjs actionOf names the row of a tool call) and settings of the Agents screen; columns
+  // are agent kinds. A cell is Ask, Allow or Deny (a toggle is Off or On). Defaults copy riskOf: low (read or edit inside
+  // the worktree) is Allow, the rest is Ask. The two Secrets rows never offer Allow. The Agents rows are office-wide;
+  // every other row can have a per-building override. A rule the row does not offer is never used.
+  var SEC_COLUMNS = [{ id: 'claude-code', label: 'Claude Code' }, { id: 'hermes', label: 'Hermes' }, { id: 'dsh', label: 'dsh' },
+    { id: 'openclaw', label: 'OpenClaw' }, { id: 'local', label: 'Local model' }];
+  var SEC_KIND = { 'claude-code': 'claude-code', ollama: 'local', lmstudio: 'local', hermes: 'hermes', dsh: 'dsh', openclaw: 'openclaw' };
+  var RULE = ['ask', 'allow', 'deny'], ASK_DENY = ['ask', 'deny'], TOGGLE = ['off', 'on'];
+  var SEC_ROWS = {
+    'read-inside': { label: 'Read inside the worktree', options: RULE, def: 'allow' },
+    'edit-inside': { label: 'Edit inside the worktree', options: RULE, def: 'allow' },
+    'files-outside': { label: 'Read or edit outside it', options: RULE, def: 'ask' },
+    shell: { label: 'Shell commands', options: RULE, def: 'ask' },
+    web: { label: 'Web and network', options: RULE, def: 'ask' },
+    mcp: { label: 'MCP tools', options: RULE, def: 'ask' },
+    settings: { label: 'Settings files that run code', options: ASK_DENY, def: 'ask' },
+    secrets: { label: 'Secret files', options: ASK_DENY, def: 'ask' },
+    // Agents screen. Ungated agents run tool calls without asking the office (ADR 0001): off until the user turns them on.
+    ungated: { label: 'Turn on ungated agents', options: TOGGLE, def: 'off', office: true, only: ['openclaw'], na: 'Gated' },
+    // Paperclip's Claude Code runs go through the office hooks (#76).
+    supervise: { label: 'Paperclip: Supervise in office', options: TOGGLE, def: 'off', office: true, only: ['claude-code'], na: 'No Paperclip runs' },
+    // An agent that reports no cost: Ask (the office asks once per session), Allow (it runs without asking), Deny (it never runs).
+    'no-cost': { label: 'Run agents without cost reports', options: RULE, def: 'ask', office: true, only: ['hermes', 'dsh', 'openclaw'], na: { 'claude-code': 'Reports cost', local: 'Free' } }
+  };
+  var SEC_SCREENS = [
+    { id: 'files', title: 'Files', rows: ['read-inside', 'edit-inside', 'files-outside'] },
+    { id: 'commands', title: 'Commands', rows: ['shell'] },
+    { id: 'network', title: 'Network', rows: ['web', 'mcp'] },
+    { id: 'secrets', title: 'Secrets', rows: ['settings', 'secrets'] },
+    { id: 'agents', title: 'Agents', rows: ['ungated', 'supervise', 'no-cost'] },
+    { id: 'spend', title: 'Spend', rows: [] }
+  ];
+  var SEC_WORD = { ask: 'Ask', allow: 'Allow', deny: 'Deny', off: 'Off', on: 'On' };
+  function secKey(row, col) { return row + '|' + col; }
+  function secApplies(row, col) { var r = SEC_ROWS[row]; return !!r && (!r.only || r.only.indexOf(col) >= 0); }
+  function secOk(row, v) { return SEC_ROWS[row].options.indexOf(v) >= 0; }
+  // The rule of a cell and where it comes from: the building's override, the office-wide rule, or the default.
+  function secLook(rules, building, row, col) {
+    if (!secApplies(row, col)) return null;
+    var r = SEC_ROWS[row], k = secKey(row, col), b = rules && rules.buildings && building != null ? rules.buildings[building] : null;
+    if (!r.office && b && secOk(row, b[k])) return { value: b[k], source: 'building' };
+    var o = rules && rules.office;
+    if (o && secOk(row, o[k])) return { value: o[k], source: 'office' };
+    return { value: r.def, source: 'default' };
+  }
+  var security = {
+    screens: SEC_SCREENS, rows: SEC_ROWS, columns: SEC_COLUMNS, key: secKey, applies: secApplies,
+    columnOf: function (kind) { return SEC_KIND[kind || 'claude-code'] || null; },
+    options: function (row) { return SEC_ROWS[row] ? SEC_ROWS[row].options.slice() : []; },
+    valueOf: function (rules, building, row, col) { var x = secLook(rules, building, row, col); return x ? x.value : null; },
+    sourceOf: function (rules, building, row, col) { var x = secLook(rules, building, row, col); return x ? x.source : null; },
+    next: function (row, v) {
+      var o = SEC_ROWS[row].options, i = o.indexOf(v);
+      return o[((i < 0 ? o.indexOf(SEC_ROWS[row].def) : i) + 1) % o.length];
+    },
+    loosens: function (row, from, to) { return from !== to && (to === 'allow' || to === 'on'); },
+    na: function (row, col) { var n = SEC_ROWS[row] && SEC_ROWS[row].na; return secApplies(row, col) ? '' : (n && typeof n === 'object' ? n[col] || '' : n || ''); },
+    word: function (v) { return SEC_WORD[v] || ''; }
+  };
+
+  root.OfficeVocab = { requests: requests, alwaysOffer: alwaysOffer, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

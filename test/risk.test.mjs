@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { riskOf, inside, realInside } from '../risk.mjs';
+import { riskOf, actionOf, inside, realInside } from '../risk.mjs';
 import '../public/vocab.js';
 
 const V = globalThis.OfficeVocab;
@@ -233,4 +233,54 @@ test('Approve all low-risk and Always allow never take the protected, secret or 
   // A low request next to them is still the one the bulk action takes.
   const low = { id: 'ok', tool: 'Edit', risk: riskOf('Edit', { file_path: at('src', 'a.js') }, cwd), always: '', t: 99 };
   assert.deepEqual(V.requests({ status: 'waiting', pending: [...pending, low], questions: [] }).filter((r) => r.risk === 'low').map((r) => r.id), ['ok']);
+});
+
+// ---------- the action kind of a tool call: the Security room row it falls under (#70) ----------
+// One rule with riskOf: the two rows whose default is Allow (read or edit inside the worktree) are exactly the reads and
+// edits riskOf rates low. Everything the grid has no row for is 'other' and keeps today's rating.
+test('actionOf: each tool call has the Security room row it falls under', () => {
+  const kinds = [
+    ['Read inside', 'Read', { file_path: inFolder }, 'read-inside'],
+    ['Grep inside', 'Grep', { pattern: 'x', path: at('src') }, 'read-inside'],
+    ['Glob inside, relative', 'Glob', { pattern: 'src/**/*.js' }, 'read-inside'],
+    ['LS of the root', 'LS', { path: cwd }, 'read-inside'],
+    ['Edit inside', 'Edit', { file_path: inFolder }, 'edit-inside'],
+    ['Write inside, relative', 'Write', { file_path: 'src/new.js' }, 'edit-inside'],
+    ['NotebookEdit inside', 'NotebookEdit', { notebook_path: at('n.ipynb') }, 'edit-inside'],
+    ['Read outside', 'Read', { file_path: outFolder }, 'files-outside'],
+    ['Edit outside', 'Edit', { file_path: outFolder }, 'files-outside'],
+    ['Read with no path', 'Read', {}, 'files-outside'],
+    ['Glob that climbs out', 'Glob', { pattern: '../**/*' }, 'files-outside'],
+    ['Bash', 'Bash', { command: 'git status' }, 'shell'],
+    ['PowerShell delete', 'PowerShell', { command: 'Remove-Item x' }, 'shell'],
+    ['WebFetch', 'WebFetch', { url: 'https://x.test' }, 'web'],
+    ['WebSearch', 'WebSearch', { query: 'x' }, 'web'],
+    ['a connector tool', 'mcp__github__create_issue', {}, 'mcp'],
+    ['a browser connector', 'mcp__plugin_playwright_playwright__browser_click', {}, 'mcp'],
+    ['edit of .claude settings', 'Edit', { file_path: at('.claude', 'settings.json') }, 'settings'],
+    ['read of .git config inside', 'Read', { file_path: at('.git', 'config') }, 'settings'],
+    ['edit of .mcp.json', 'Write', { file_path: at('.mcp.json') }, 'settings'],
+    ['glob over dot names', 'Glob', { pattern: '.*' }, 'settings'],
+    ['read of .env inside', 'Read', { file_path: at('.env') }, 'secrets'],
+    ['read of an ssh key outside', 'Read', { file_path: path.join(home, '.ssh', 'id_ed25519') }, 'secrets'],
+    ['edit of a .pem inside', 'Edit', { file_path: at('certs', 'a.pem') }, 'secrets'],
+    ['grep for .env files', 'Grep', { pattern: 'KEY', glob: '.env*' }, 'secrets'],
+    ['the office tools are the office\'s own', 'mcp__office__office_ask', {}, 'other'],
+    ['TodoWrite', 'TodoWrite', { todos: [] }, 'other'],
+    ['Task', 'Task', { prompt: 'x' }, 'other'],
+    ['an unknown tool', 'Frobnicate', {}, 'other'],
+  ];
+  for (const [what, tool, input, want] of kinds) assert.equal(actionOf(tool, input, cwd), want, what);
+  assert.equal(actionOf('Read', { file_path: inFolder }, wtRoot), 'files-outside', 'a file outside the worktree root is outside');
+  assert.equal(actionOf('Read', { file_path: path.join(wtRoot, 'a.js') }, wtRoot), 'read-inside', 'a worktree in .claude/worktrees is still inside');
+});
+
+test('actionOf and riskOf use one rule: read-inside and edit-inside are the low reads and edits', () => {
+  const files = cases.filter(([, tool]) => ['Read', 'Grep', 'Glob', 'LS', 'NotebookRead', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit'].includes(tool));
+  assert.ok(files.length > 20, 'the shared cases cover many file calls');
+  for (const [what, tool, input, root] of files.map((c) => [c[0], c[1], c[2], c[4] === undefined ? cwd : c[4]])) {
+    const low = riskOf(tool, input, root) === 'low', a = actionOf(tool, input, root);
+    assert.equal(low, a === 'read-inside' || a === 'edit-inside', `${what}: ${a} vs ${riskOf(tool, input, root)}`);
+  }
+  for (const [what, tool, input] of cases.filter(([, tool]) => tool === 'Bash' || tool === 'PowerShell')) assert.equal(actionOf(tool, input, cwd), 'shell', what);
 });

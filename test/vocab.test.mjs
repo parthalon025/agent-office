@@ -105,3 +105,86 @@ test('always allow is offered for low and medium risk, never for high risk or a 
   assert.equal(V.alwaysOffer(mk({ pending: [p('a', 'high', 'Bash(rm:*)'), p('b', 'medium', 'Bash(ls:*)')] })).id, 'b');
   assert.equal(V.alwaysOffer(mk({ pending: [p('a', 'low', 'Read')] })).always, 'Read');
 });
+
+// ---------- the Security room grid (#70): one vocabulary for the wall screens and the server ----------
+const S = V.security;
+const RULES = (office = {}, buildings = {}) => ({ office, buildings });
+
+test('security: six screens on three walls, each with its rows; five agent kinds as columns', () => {
+  assert.deepEqual(S.screens.map((x) => x.title), ['Files', 'Commands', 'Network', 'Secrets', 'Agents', 'Spend']);
+  assert.deepEqual(S.screens.find((x) => x.id === 'files').rows, ['read-inside', 'edit-inside', 'files-outside']);
+  assert.deepEqual(S.screens.find((x) => x.id === 'secrets').rows, ['settings', 'secrets']);
+  assert.deepEqual(S.columns.map((c) => c.label), ['Claude Code', 'Hermes', 'dsh', 'OpenClaw', 'Local model']);
+  assert.equal(S.rows.shell.label, 'Shell commands');
+  assert.equal(S.rows['files-outside'].label, 'Read or edit outside it');
+});
+
+test('security: an agent kind is the column of its provider; the two local providers share one', () => {
+  assert.equal(S.columnOf('claude-code'), 'claude-code');
+  assert.equal(S.columnOf('ollama'), 'local');
+  assert.equal(S.columnOf('lmstudio'), 'local');
+  assert.equal(S.columnOf('hermes'), 'hermes');
+  assert.equal(S.columnOf(undefined), 'claude-code', 'a session first seen in a hook is Claude Code');
+  assert.equal(S.columnOf('something-new'), null);
+});
+
+test('security: defaults copy riskOf: reads and edits inside the worktree are Allow, the rest is Ask', () => {
+  const none = RULES();
+  for (const col of ['claude-code', 'local']) {
+    assert.equal(S.valueOf(none, '', 'read-inside', col), 'allow');
+    assert.equal(S.valueOf(none, '', 'edit-inside', col), 'allow');
+    for (const row of ['files-outside', 'shell', 'web', 'mcp', 'settings', 'secrets']) assert.equal(S.valueOf(none, '', row, col), 'ask', row);
+  }
+  assert.equal(S.valueOf(none, '', 'ungated', 'openclaw'), 'off', 'an ungated agent is off until the user turns it on');
+});
+
+test('security: a click cycles Ask, Allow, Deny; the Secrets rows offer only Ask and Deny', () => {
+  assert.equal(S.next('shell', 'ask'), 'allow');
+  assert.equal(S.next('shell', 'allow'), 'deny');
+  assert.equal(S.next('shell', 'deny'), 'ask');
+  assert.equal(S.next('secrets', 'ask'), 'deny');
+  assert.equal(S.next('secrets', 'deny'), 'ask');
+  assert.deepEqual(S.options('settings'), ['ask', 'deny']);
+  assert.equal(S.next('ungated', 'off'), 'on');
+});
+
+test('security: a loosening change is a change to Allow or On; Ask and Deny apply at once', () => {
+  assert.equal(S.loosens('shell', 'ask', 'allow'), true);
+  assert.equal(S.loosens('shell', 'deny', 'allow'), true);
+  assert.equal(S.loosens('shell', 'allow', 'deny'), false);
+  assert.equal(S.loosens('shell', 'deny', 'ask'), false);
+  assert.equal(S.loosens('ungated', 'off', 'on'), true);
+  assert.equal(S.loosens('supervise', 'off', 'on'), true);
+  assert.equal(S.loosens('shell', 'allow', 'allow'), false, 'no change is no loosening');
+});
+
+test('security: a building override wins over the office-wide rule; the Agents rows are office-wide only', () => {
+  const repo = 'c:/work/repo';
+  const r = RULES({ 'shell|claude-code': 'deny', 'ungated|openclaw': 'on' }, { [repo]: { 'shell|claude-code': 'allow', 'ungated|openclaw': 'off' } });
+  assert.equal(S.valueOf(r, repo, 'shell', 'claude-code'), 'allow');
+  assert.equal(S.sourceOf(r, repo, 'shell', 'claude-code'), 'building');
+  assert.equal(S.valueOf(r, 'c:/work/other', 'shell', 'claude-code'), 'deny');
+  assert.equal(S.sourceOf(r, 'c:/work/other', 'shell', 'claude-code'), 'office');
+  assert.equal(S.sourceOf(r, 'c:/work/other', 'web', 'claude-code'), 'default');
+  assert.equal(S.valueOf(r, repo, 'ungated', 'openclaw'), 'on', 'no building override on the Agents screen');
+  assert.equal(S.valueOf(r, null, 'shell', 'claude-code'), 'deny', 'no building known: the office-wide rule');
+});
+
+test('security: a stored value the row does not offer is never used (Secrets is never Allow)', () => {
+  const r = RULES({ 'secrets|claude-code': 'allow', 'shell|local': 'maybe' }, { b: { 'settings|local': 'allow' } });
+  assert.equal(S.valueOf(r, '', 'secrets', 'claude-code'), 'ask');
+  assert.equal(S.valueOf(r, '', 'shell', 'local'), 'ask');
+  assert.equal(S.valueOf(r, 'b', 'settings', 'local'), 'ask');
+});
+
+test('security: a row that is only for some agent kinds has no cell in the others', () => {
+  assert.equal(S.applies('ungated', 'openclaw'), true);
+  assert.equal(S.applies('ungated', 'claude-code'), false);
+  assert.equal(S.applies('supervise', 'claude-code'), true);
+  assert.equal(S.applies('supervise', 'local'), false);
+  assert.equal(S.applies('no-cost', 'hermes'), true);
+  assert.equal(S.applies('no-cost', 'claude-code'), false);
+  assert.equal(S.applies('shell', 'local'), true);
+  assert.equal(typeof S.na('ungated', 'claude-code'), 'string', 'a cell with no rule says why');
+  assert.deepEqual([S.word('ask'), S.word('allow'), S.word('deny'), S.word('off'), S.word('on')], ['Ask', 'Allow', 'Deny', 'Off', 'On']);
+});

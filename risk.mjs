@@ -1,7 +1,10 @@
-// How risky a tool call is, for the Approve card and the "Approve all low-risk" action.
+// How risky a tool call is, for the Approve card and the "Approve all low-risk" action, and which row of the Security
+// room grid it falls under (its action kind, #70).
 // An allowlist: only reads and edits inside the session's root folder are low, and never for a secret-looking
 // file or a settings file that runs code (.git, .claude, .mcp.json, .vscode, .idea). Every agent provider uses
 // this one rule, so a local model or a Copilot session is rated like Claude Code.
+// One classifier (rate) gives both answers, so the grid and riskOf never disagree: the rows read-inside and
+// edit-inside are exactly the reads and edits that are low.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -155,16 +158,21 @@ function globKinds(list) {
   return { secret: k.secret, runs: k.runs || dot };
 }
 
+// A rating: the risk and the action kind (a row of the Security room grid; 'other' has no row).
+const R = (risk, action) => ({ risk, action });
+// Where a read or an edit points, as a row: a secret wins over settings, settings over inside or outside.
+const fileAction = (secret, runs, isIn, inRow) => (secret ? 'secrets' : runs ? 'settings' : isIn ? inRow : 'files-outside');
+
 // Read, Grep, Glob, LS, NotebookRead: low only inside the root, and never for a secret or settings.
 function readRisk(name, a, root) {
   const file = name === 'Read' ? a.file_path : name === 'NotebookRead' ? a.notebook_path || a.file_path : a.path;
-  if (!file && (name === 'Read' || name === 'NotebookRead')) return 'medium';
+  if (!file && (name === 'Read' || name === 'NotebookRead')) return R('medium', 'files-outside');
   let base = file || root;
   let g = { secret: false, runs: false };
   const glob = name === 'Glob' ? a.pattern : name === 'Grep' ? a.glob : null;
   if (glob) {
     const s = String(glob);
-    if (parts(s).some((x) => forms(x).includes('..'))) return 'medium'; // a glob that climbs out of its folder
+    if (parts(s).some((x) => forms(x).includes('..'))) return R('medium', 'files-outside'); // a glob that climbs out of its folder
     if (path.isAbsolute(s)) {
       // An absolute glob searches below its folder part (up to the last slash before a wildcard), not below path.
       const w = s.search(/[*?[\]{}]/);
@@ -173,30 +181,51 @@ function readRisk(name, a, root) {
       g = globKinds(parts(s.slice(cut)));
     } else g = globKinds(parts(s));
   }
-  if (!base) return 'medium';
-  const w = place(root, base);
-  if (!w.inside) return w.secret || g.secret ? 'high' : 'medium';
-  return w.secret || w.runs || g.secret || g.runs ? 'medium' : 'low';
+  if (!base) return R('medium', 'files-outside');
+  const w = place(root, base), secret = w.secret || g.secret, runs = w.runs || g.runs;
+  const action = fileAction(secret, runs, w.inside, 'read-inside');
+  if (!w.inside) return R(secret ? 'high' : 'medium', action);
+  return R(secret || runs ? 'medium' : 'low', action);
 }
 
 // Edit, Write, MultiEdit, NotebookEdit: settings that run code are high anywhere; low only inside the root.
 function editRisk(file, root) {
-  if (!file) return 'medium';
-  const w = place(root, file);
-  if (w.runs) return 'high';
-  return w.inside && !w.secret ? 'low' : 'medium';
+  if (!file) return R('medium', 'files-outside');
+  const w = place(root, file), action = fileAction(w.secret, w.runs, w.inside, 'edit-inside');
+  if (w.runs) return R('high', action);
+  return R(w.inside && !w.secret ? 'low' : 'medium', action);
 }
 
 /**
  * 'low' | 'medium' | 'high' for a tool call. root is the session's root folder: the worktree or the folder it
  * started in. Relative paths are read against it.
  */
-export function riskOf(tool, input = {}, root = '') {
+export function riskOf(tool, input = {}, root = '') { return rate(tool, input, root).risk; }
+
+/**
+ * The action kind of a tool call: the row of the Security room grid it falls under (public/vocab.js has the names).
+ * 'read-inside', 'edit-inside', 'files-outside', 'shell', 'web', 'mcp', 'settings' (settings files that run code),
+ * 'secrets' (secret files), or 'other' (no row: the office's own tools, TodoWrite, Task and unknown tools).
+ * The same root rule as riskOf: read-inside and edit-inside are exactly the low reads and edits.
+ */
+export function actionOf(tool, input = {}, root = '') { return rate(tool, input, root).action; }
+
+// The office's own tools (office_inbox, office_ask, office_room, office_room_update) only talk to the office: no row.
+const OFFICE_TOOL = /^mcp__office__/;
+const WEB = new Set(['WebFetch', 'WebSearch']);
+/** Both at once, for a caller that needs the two (the Security room verdict): { risk, action }. */
+export function ratingOf(tool, input = {}, root = '') { return rate(tool, input, root); }
+
+/** The rating of one tool call: { risk, action }. riskOf and actionOf read it. */
+function rate(tool, input, root) {
   const name = String(tool || '');
   const a = input && typeof input === 'object' ? input : {};
-  if (SHELLS.has(name)) { const cmd = String(a.command || ''); return DANGER.some((re) => re.test(cmd)) ? 'high' : 'medium'; }
-  if (NO_FILES.has(name)) return 'low';
+  if (SHELLS.has(name)) { const cmd = String(a.command || ''); return R(DANGER.some((re) => re.test(cmd)) ? 'high' : 'medium', 'shell'); }
+  if (NO_FILES.has(name)) return R('low', WEB.has(name) ? 'web' : 'other');
   if (READS.has(name)) return readRisk(name, a, root);
   if (EDITS.has(name)) return editRisk(a.file_path || a.notebook_path, root);
-  return 'medium'; // unknown tools, connector (MCP) tools, WebFetch, Task and the rest need a look
+  // unknown tools, connector (MCP) tools, WebFetch, Task and the rest need a look
+  if (WEB.has(name)) return R('medium', 'web');
+  if (name.startsWith('mcp__') && !OFFICE_TOOL.test(name)) return R('medium', 'mcp');
+  return R('medium', 'other');
 }
