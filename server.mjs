@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 import * as git from './git.mjs';
 import { slimPayload } from './payload.mjs';
 import { createTracker, clip } from './tracker.mjs';
-import { createRegistry, providerEvents, isPaid, spendLimitFor, DEFAULT_SPEND_LIMIT } from './providers/index.mjs';
+import { createRegistry, providerEvents, isPaid, spendLimitFor, DEFAULT_SPEND_LIMIT, DEFAULT_PROVIDER } from './providers/index.mjs';
 import { createLocal } from './providers/local.mjs';
 import { createClaudeCode, claudeVersion, MODEL_RE, MODES } from './providers/claude-code.mjs';
 import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, cleanRecent, recentChoices } from './place.mjs';
@@ -197,7 +197,7 @@ const tracker = createTracker({
 const { sessions, feed, addFeed, newSession, placeSession, findSession, onHook, endSession } = tracker;
 
 // ---------- providers: the agent tools behind the sessions (providers/) ----------
-// Every provider reports through the same events into the tracker. Claude Code is the only one now. Its hooks come in over
+// Every provider reports through the same events into the tracker: Claude Code, Ollama and LM Studio. Claude Code's hooks come in over
 // the hook routes below, and a permission decision goes back as the hook's answer (claude.answer gives the body).
 const events = providerEvents({ tracker, onChange: () => broadcast(), hold: (r) => { holdRequest(r); broadcast(); } });
 const claude = createClaudeCode({ events, files: () => ({ settings: activeHooksFile(), mcp: MCP_FILE, launcher: path.join(ROOT, 'launch.ps1') }) });
@@ -211,6 +211,8 @@ const officeTools = {
 };
 const providers = createRegistry([claude, createLocal({ events, kind: 'ollama', baseUrl: process.env.OFFICE_OLLAMA_URL, officeTools }), createLocal({ events, kind: 'lmstudio', baseUrl: process.env.OFFICE_LMSTUDIO_URL, officeTools })]);
 const providerOf = (s) => providers.of(s);
+// The agent kinds as the page offers and shows them (providers/index.mjs describe). Fixed while the server runs.
+const KINDS = providers.kinds();
 
 const basename = (p) => (p ? p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : '');
 
@@ -773,7 +775,8 @@ function openHeadless(provider, { cwd, name, prompt, worktree = null, budget = n
 }
 
 // ---------- open / close ----------
-// opts.provider: the agent kind (default Claude Code). The Open dialog offers only Claude Code until #20.
+// opts.provider: the agent kind (default Claude Code). The Open dialog offers every kind (#20); a kind without openWindow
+// opens in the office only.
 async function openSession(opts) {
   if (process.platform !== 'win32') throw httpError(501, 'Opening sessions is only implemented for Windows.');
   const cwd = String(opts.cwd || '').trim();
@@ -929,7 +932,8 @@ setInterval(() => { const now = Date.now(); for (const sch of persisted.schedule
 // ---------- past sessions: list and search ----------
 function pastSummary(h) {
   const last = h.replies?.length ? h.replies[h.replies.length - 1].text : '';
-  return { uid: h.uid, name: h.name, cwd: h.cwd, model: h.model, cost: h.cost, turns: h.turns, startedAt: h.startedAt, endedAt: h.endedAt,
+  // provider: the agent kind. A record from before providers has none: it is Claude Code's (as in providers.reopenPlan).
+  return { uid: h.uid, provider: h.provider || DEFAULT_PROVIDER, name: h.name, cwd: h.cwd, model: h.model, cost: h.cost, turns: h.turns, startedAt: h.startedAt, endedAt: h.endedAt,
     branch: h.worktree?.branch || null, worktreeRoot: h.worktree?.root || null, last: clip(String(last).replace(/\s+/g, ' '), 140), firstAsk: clip(h.prompt || '', 140) };
 }
 function search(q) {
@@ -1018,6 +1022,7 @@ const snapshot = () => W.lean({
   notes: persisted.notes,   // noteKey -> { text, at, v, by? }: each room's notes board (v: version counter; a cleared board stays with text '' and at 0; by: the agent session that last wrote it)
   pins: persisted.pins,     // noteKey -> { text, by, at }: a short message an agent pinned on the room's blackboard
   repos: [...repos.entries()].map(([key, r]) => ({ key, ...r, worktrees: r.worktrees.map((w) => ({ ...w, place: placeOfWorktree(r.path, w) })) })),
+  kinds: KINDS,             // the agent kinds: the label of each session's kind, and the Open dialog's options before readiness comes
 });
 // A page gets the whole snapshot when it connects, then one patch per broadcast with only what changed (wire.js).
 // State changes within BROADCAST_MS go out as one patch, so a burst of hooks sends at most 10 messages a second.

@@ -2,7 +2,7 @@
    Each bot's desk monitor shows that bot's Claude Code session as a terminal: the last prompt, the
    tool calls with their outcome, and the reply as it streams, with a blinking cursor. A desk with two
    monitors (the coder desk) shows the terminal on the left and the session's stats on the right
-   (model, context, spend, time, to-do list). A desk with one monitor shows a stats line at the bottom.
+   (agent kind, model, context, spend, time, to-do list). A desk with one monitor shows a stats line at the bottom.
    At night a soft pool of screen light falls on the desk; it turns amber when the bot needs you and
    red after an error. A monitor takes two clicks (the scene host runs the steps): the first click flies
    the camera to it so the user can read the screen, a second click calls onOpen(uid, name), so the page
@@ -231,11 +231,14 @@
     var todos = (s.todos || []).filter(function (t) { return t && t.text; }), pct = ctxPct(s), u = s.usage || {};
     S.todos = todos.map(function (t) { return { text: oneLine(t.text), status: t.status }; });
     S.done = todos.filter(function (t) { return t.status === 'completed'; }).length;
+    // Agent: the kind (Claude Code, Ollama, ...) and where it runs, the word every list shows (vocab.js kindWord)
+    var a = window.officeAdapter, kind = a && a.kindWord ? a.kindWord(s) : '';
+    S.rows.push(['Agent', (kind ? kind + DOT : '') + (s.headless ? 'in the office' : 'in a terminal')]);
     S.rows.push(['Model', (shortModel(s.model) || 'default') + (s.mode ? DOT + (MODES[s.mode] || s.mode) : '')]);
     S.rows.push(['Context', pct == null ? '--' : pct + '%', 'bar', pct]);
     if (!todos.length) S.rows.push(['Tokens', u.tokens ? fmtTok(u.tokens) + (u.input ? DOT + Math.round(100 * (u.cached || 0) / u.input) + '% cached' : '') : '--']);
     S.rows.push(['Spend', money(s.cost) + DOT + plural(+s.turns || 0, 'turn', 'turns')]);
-    if (!todos.length) S.rows.push(['Time', age(Date.now() - (+s.startedAt || Date.now()))], ['Tools', tools], ['Runs in', s.headless ? 'the office' : 'a terminal']);
+    if (!todos.length) S.rows.push(['Time', age(Date.now() - (+s.startedAt || Date.now()))], ['Tools', tools]);
     return S;
   }
   function footOf(s) {

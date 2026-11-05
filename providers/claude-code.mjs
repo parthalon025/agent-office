@@ -16,7 +16,8 @@ import { providerError } from './index.mjs';
 export const MODEL_RE = /^(opus|sonnet|haiku|claude-[\w.-]+)$/;
 export const MODES = new Set(['default', 'acceptEdits', 'plan']);
 const MAX_ATTACH_CHARS = 9_000_000; // base64 characters across all attachments of one message
-// The page's Open dialog has its own copy of this list until it reads models() (#20).
+// The Open dialog reads this list through models() (GET /api/providers). The schedule form, the room's Add agent and the
+// dock's model switch still have their own copy (public/office.js MODELS).
 const MODELS = [
   { id: 'opus', label: 'Opus' }, { id: 'sonnet', label: 'Sonnet' }, { id: 'haiku', label: 'Haiku' }, { id: 'claude-fable-5-1', label: 'Fable' },
 ];
@@ -139,6 +140,7 @@ export function createClaudeCode(deps) {
     label: 'Claude Code',
     paid: true, // runs on the user's account: new sessions get the default spend limit
     canResume: true, // claude --resume continues a past conversation
+    modes: [...MODES], // the permission modes open() takes (--permission-mode)
 
     async readiness() {
       let version;

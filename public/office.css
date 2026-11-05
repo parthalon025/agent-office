@@ -52,6 +52,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .strip-more-set { display: flex; flex-direction: column; gap: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--line); }
 .strip-more-set .ao-select select { max-width: none; }
 .strip-more-h { color: var(--muted); font: var(--type-eyebrow-weight) var(--type-eyebrow-size)/var(--type-eyebrow-line) var(--font-sans); letter-spacing: var(--type-eyebrow-tracking); text-transform: uppercase; }
+.strip-more-note { margin: 0; max-width: 260px; color: var(--muted); font: var(--type-caption-weight) var(--type-caption-size)/var(--type-caption-line) var(--font-sans); }
 @media (max-width: 1359px) {
   /* the chat and the roster stop above the dock */
   /* important: chat-extras.js writes a saved bottom as an inline style */
@@ -351,6 +352,10 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .ao-dialog .ao-field .ao-select { display: flex; width: 100%; }
 .ao-dialog .ao-field .ao-select select { max-width: none; }
 .sess-tbl td, .sess-tbl th { white-space: nowrap; }
-.sess-tbl td:nth-child(2) { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.sess-tbl td:nth-child(3) { max-width: 220px; overflow: hidden; text-overflow: ellipsis; }   /* the folder */
+/* Agent kinds (#20): why a kind is not ready. The status color is the edge; the words stay ink (contrast rule). */
+.kind-need { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2) var(--space-3); background: var(--chip); border: 1px solid var(--line); border-left: 3px solid var(--status-waiting); border-radius: var(--radius-md); color: var(--ink); }
+.kind-need b { font-weight: var(--type-title-weight); }
+.kind-steps { margin: 0; padding-left: var(--space-4); color: var(--ink); font: var(--type-body-weight) var(--type-body-size)/var(--type-body-line) var(--font-sans); overflow-wrap: anywhere; }
 .sess-who, .sess-state { display: inline-flex; align-items: center; gap: var(--space-2); }
 .sess-who b { font-weight: var(--type-title-weight); }

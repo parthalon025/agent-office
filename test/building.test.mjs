@@ -59,7 +59,7 @@ function rig(over = {}) {
     const figures = {};
     for (const k of Object.keys(by)) figures[k] = V.figures(by[k]);
     return {
-      sessions, figures, notes: {}, pins: {}, plan: r.plan || null, now: r.t,
+      sessions, figures, notes: {}, pins: {}, plan: r.plan || null, now: r.t, kinds: over.kinds || [],
       repos: r.repos.map((p) => ({ key: normPath(p.path), path: p.path, name: p.path.split('\\').pop(), worktrees: p.worktrees.map((w) => ({ ...w, place: placeOfWorktree(p.path, w) })) })),
     };
   };
@@ -113,6 +113,22 @@ test('a scene mounted on an empty building gets a floor and a room when the firs
   assert.equal(of(m.ev, 'bot.add')[0].roomId, ru.room.id);
   assert.equal(of(m.ev, 'bot.add')[0].bot.status, 'resting');
   assert.equal(m.stale(), false, 'the spare room took the first session, so nothing is mounted again');
+});
+
+test('a bot names its agent kind on its card (platform), from the snapshot\'s kinds; the store gives the same word', async () => {
+  const kinds = [{ kind: 'claude-code', label: 'Claude Code' }, { kind: 'ollama', label: 'Ollama' }];
+  const r = rig({ wire: true, kinds });
+  await r.hook(fromHooks('turnWithEdit', REPO_A, 'cc-1')[0]);
+  const local = r.tracker.newSession({ uid: 'o-local', officeId: 'o-local', provider: 'ollama', name: 'local', cwd: REPO_A, startDir: REPO_A, launched: true, headless: true, status: 'starting' });
+  r.tracker.placeSession(local, true);
+  await new Promise((res) => setImmediate(res));
+  r.push();
+  const m = r.mount(KEY_A);
+  const cards = Object.fromEntries(of(m.ev, 'bot.add').map((e) => [e.bot.name, e.bot.platform]));
+  assert.deepEqual(cards, { repo: 'Claude Code', local: 'Ollama' });
+  assert.equal(r.store.kindWord(r.store.sessionByUid('o-local')), 'Ollama');
+  assert.deepEqual(r.store.kinds(), kinds);
+  assert.equal(B.createStore().kindWord({ provider: 'ollama' }), 'ollama', 'no snapshot yet: the kind id');
 });
 
 test('a turn with an edit: working, tool call without a bubble on replay, result, finished', async () => {

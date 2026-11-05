@@ -16,6 +16,8 @@
      session(botName)      the open session of a bot in the building that is on screen
      lookup(botName)       the commands and skills of that session
      botName(uid)          the scene name of a seated bot
+     kinds()               the agent kinds of the server (snapshot.kinds): label and the Open dialog's options
+     kindWord(s)           the agent kind of a session as a word (OfficeVocab.kindWord)
      mount(repo)           a new building adapter for one building (below)
 
    Building adapter (store.mount(repo)): made once per mounted scene. It owns the mirror of what the scene was
@@ -216,6 +218,9 @@
     store.colorOf = colorOf;
     store.buildingOf = function (s) { return s.place ? s.place.buildingKey : ''; };
     store.sessionByUid = function (uid) { return latest && latest.sessions.filter(function (x) { return x.uid === uid; })[0] || null; };
+    // The agent kinds the server runs (providers/index.mjs describe), and the kind of one session as a word (vocab.js).
+    store.kinds = function () { return (latest && latest.kinds) || []; };
+    store.kindWord = function (s) { return V.kindWord(s, store.kinds()); };
     // The building that is on screen: the one attached last.
     function current() { return attached.length ? attached[attached.length - 1] : null; }
     store.session = function (botName) { var m = current(); return m ? m.session(botName) : null; };
@@ -353,7 +358,8 @@
             firstSight = true;
             var name = uniqueName(s.name);
             k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: V.status(s).key, task: V.taskLine(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, model: s.model, ended: false, place: placeKey(pl), room: roomOf(pl, emit) };
-            var bot = withColor({ name: name, role: 'coder', shape: shapeOf(s.uid), status: k.status, task: k.task, platform: 'Claude Code', identity: s.cwd }, s.uid);
+            // platform: the agent kind on the bot's card (Claude Code, Ollama, ...), the same word every list shows (vocab.js)
+            var bot = withColor({ name: name, role: 'coder', shape: shapeOf(s.uid), status: k.status, task: k.task, platform: V.kindWord(s, snapshot.kinds), identity: s.cwd }, s.uid);
             if (s.skills && s.skills.length) bot.skills = s.skills.slice(0, 16);
             if (s.scheduleId) bot.triggers = [s.name];
             emit(stamp({ type: 'bot.add', roomId: k.room, bot: bot }, s.startedAt));

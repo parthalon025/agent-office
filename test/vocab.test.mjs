@@ -105,3 +105,13 @@ test('always allow is offered for low and medium risk, never for high risk or a 
   assert.equal(V.alwaysOffer(mk({ pending: [p('a', 'high', 'Bash(rm:*)'), p('b', 'medium', 'Bash(ls:*)')] })).id, 'b');
   assert.equal(V.alwaysOffer(mk({ pending: [p('a', 'low', 'Read')] })).always, 'Read');
 });
+
+test('the agent kind word: the label of the session\'s kind, from the snapshot\'s kinds', () => {
+  const kinds = [{ kind: 'claude-code', label: 'Claude Code' }, { kind: 'lmstudio', label: 'LM Studio' }];
+  assert.equal(V.kindWord(mk({ provider: 'lmstudio' }), kinds), 'LM Studio');
+  assert.equal(V.kindWord(mk({ provider: 'claude-code' }), kinds), 'Claude Code');
+  assert.equal(V.kindWord(mk({ provider: 'copilot' }), kinds), 'copilot', 'a kind the list does not know shows its id, never nothing');
+  assert.equal(V.kindWord(mk({ provider: 'ollama' })), 'ollama', 'no list yet');
+  assert.equal(V.kindWord(mk({}), kinds), '', 'no kind: no word');
+  assert.equal(V.kindWord(null, kinds), '');
+});

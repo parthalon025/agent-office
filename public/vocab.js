@@ -17,6 +17,8 @@
                          kind is 'permission' (Approve or Decline) or 'question' (Yes or No; no risk value)
      alwaysOffer(s)   -> the first permission request that may offer "Always allow", or null. Never a question,
                          never a high-risk request, never one without a rule to save.
+     kindWord(s, kinds) -> the agent kind of a session as a word ('Claude Code', 'Ollama'): the label of s.provider in
+                         kinds (the snapshot's kinds), else the kind id. '' when the session has no kind.
 */
 (function (root) {
   'use strict';
@@ -97,5 +99,12 @@
     return requests(s).filter(function (r) { return r.kind === 'permission' && r.always && r.risk !== 'high'; })[0] || null;
   }
 
-  root.OfficeVocab = { requests: requests, alwaysOffer: alwaysOffer, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures };
+  function kindWord(s, kinds) {
+    var id = s && s.provider;
+    if (!id) return '';
+    var k = (kinds || []).filter(function (x) { return x && x.kind === id; })[0];
+    return (k && k.label) || String(id);
+  }
+
+  root.OfficeVocab = { kindWord: kindWord, requests: requests, alwaysOffer: alwaysOffer, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

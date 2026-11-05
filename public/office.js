@@ -24,7 +24,8 @@
     var n = Number(t);
     return isFinite(n) ? n : t;
   }
-  var LIMIT_HINT = 'Claude Code stops at this limit. Clear the field for no limit.';
+  function limitHint(label) { return label + ' stops at this limit. Clear the field for no limit.'; }
+  var LIMIT_HINT = limitHint('Claude Code');   // schedules start Claude Code only
   var KIND = [{ value: 'every', label: 'Every N minutes' }, { value: 'daily', label: 'Every day at' }];
 
   // ---------- helpers ----------
@@ -92,10 +93,110 @@
   function Tag(p) { return h('span', { className: 'tag' }, p.children); }
   function Pair(a, b) { return h('div', { className: 'row' }, a, b); }
   function Busy(p) { return p.on ? h(A.Skeleton, { lines: p.lines || 3, label: 'Loading' }) : null; }
+  // Fields two to a row; a field that is null leaves no gap.
+  function Pairs(list) {
+    var f = list.filter(Boolean), out = [];
+    for (var i = 0; i < f.length; i += 2) out.push(f[i + 1] ? h('div', { key: i, className: 'row' }, f[i], f[i + 1]) : h('div', { key: i, className: 'row' }, f[i], h('span', null)));
+    return out;
+  }
+
+  // ---------- agent kinds (#20) ----------
+  // The kinds and their options come with the snapshot (officeAdapter.kinds(), from providers/index.mjs describe):
+  // label, paid (spend limit), terminal (Runs), modes (Permissions), needsModel, control (the dock's live changes).
+  // Readiness and models come from GET /api/providers, which asks each provider and can take a few seconds
+  // (Claude Code runs claude --version). Until it answers a kind is checking, and Claude Code offers the models in MODELS.
+  var DEFAULT_KIND = 'claude-code';
+  function kindOf(list, id) { return (list || []).filter(function (k) { return k.kind === (id || DEFAULT_KIND); })[0] || null; }
+  // on: false asks nothing yet (a room's list shows before its Add agent form).
+  function useKinds(on) {
+    var snap = useSnapshot();
+    var st = useState(null), status = st[0], setStatus = st[1];   // kind -> its /api/providers entry, or null while checking
+    var rd = useState(0), round = rd[0], setRound = rd[1];
+    var ask = on !== false;
+    useEffect(function () {
+      var live = true;
+      setStatus(null);
+      if (!ask) return undefined;
+      call('/api/providers').then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); }).then(function (j) {
+        if (!live) return;
+        var by = {};
+        (j.providers || []).forEach(function (x) { by[x.kind] = x; });
+        setStatus(by);
+      }, function () { if (live) setStatus({}); });
+      return function () { live = false; };
+    }, [round, ask]);
+    var list = ((snap && snap.kinds) || []).map(function (k) {
+      if (!status) return Object.assign({}, k, { checking: true, ready: false, version: null, needs: [], models: [] });
+      var r = status[k.kind] || { ready: false, version: null, models: [], needs: ['The office could not check ' + k.label + '. Check again.'] };
+      return Object.assign({}, k, { checking: false, ready: r.ready === true, version: r.version || null, needs: r.needs || [], models: r.models || [] });
+    });
+    return { list: list, checking: !status, recheck: function () { setRound(round + 1); } };
+  }
+  // The state of a kind as a DS status and a word.
+  function readyOf(k) {
+    if (!k || k.checking) return { key: 'resting', word: 'Checking' };
+    return k.ready ? { key: 'finished', word: 'Ready' } : { key: 'waiting', word: 'Not ready' };
+  }
+  // The model choices of a kind. A kind with a default model starts with Default. A local model has no default: one of its models.
+  function modelChoices(k) {
+    var ms = (k && k.models) || [];
+    if (!k || (!ms.length && k.kind === DEFAULT_KIND)) return MODELS;   // Claude Code before its answer, or no kinds yet
+    var opts = ms.map(function (m) { return { value: m.id, label: m.label || m.id }; });
+    if (!k.needsModel) return [{ value: '', label: 'Default' }].concat(opts);
+    return opts.length ? opts : [{ value: '', label: k.checking ? 'Looking for models' : 'No models' }];
+  }
+  function firstModel(k) { return k && k.needsModel && k.models && k.models.length ? k.models[0].id : ''; }
+  // A kind that needs a model and has none to pick cannot open a session.
+  function noModelFor(k) { return !!(k && k.needsModel && !(k.models || []).length); }
+  function kindNote(k, terminal) {
+    if (!k) return terminal ? 'Starts Claude Code in a new terminal window with the office hooks attached.' : 'Runs Claude Code inside the office. You talk to it in the chat and approve its steps here. It has no terminal window.';
+    if (terminal) return 'Starts ' + k.label + ' in a new terminal window with the office hooks attached.';
+    if (!k.paid) return 'Runs a model from ' + k.label + ' on this machine, inside the office. It reads and changes files in the folder and runs commands. Risky steps come to you for approval. It costs nothing.';
+    return 'Runs ' + k.label + ' inside the office. You talk to it in the chat and approve its steps here. It has no terminal window.';
+  }
+  // Why a kind is not ready, and what to do.
+  function KindNeeds(p) {
+    var k = p.kind, needs = k.needs && k.needs.length ? k.needs : ['It did not say what it needs.'];
+    return h('div', { className: 'kind-need', role: 'status' },
+      h('span', { className: 'sess-state' }, h(A.StatusDot, { status: 'waiting' }), h('b', null, k.label + ' is not ready')),
+      h('ul', { className: 'kind-steps' }, needs.map(function (n, i) { return h('li', { key: i }, n); })),
+      p.onRecheck ? h('div', { className: 'btn-row' }, h(A.Button, { variant: 'quiet', icon: 'retry', loading: !!p.checking, onClick: p.onRecheck }, 'Check again')) : null);
+  }
+  // The agent kind and its model, for Open session and a room's Add agent. p: { id, kinds (useKinds), kind, model, onKind(id), onModel(v) }
+  function KindFields(p) {
+    var K = p.kinds, k = kindOf(K.list, p.kind);
+    var opts = K.list.map(function (x) { return { value: x.kind, label: x.label + (x.checking || x.ready ? '' : ' · Not ready') }; });
+    var model = h(A.Select, { id: p.id + '-model', label: 'Model', options: modelChoices(k), value: p.model, disabled: noModelFor(k), onChange: p.onModel,
+      hint: k && k.needsModel && k.checking ? 'Asking ' + k.label + ' for its models.' : undefined });
+    return h(React.Fragment, null,
+      K.list.length > 1 ? Pair(h(A.Select, { id: p.id + '-kind', label: 'Agent', options: opts, value: k ? k.kind : '', onChange: p.onKind }), model) : model,
+      k && !k.checking && !k.ready ? h(KindNeeds, { kind: k, onRecheck: K.recheck }) : null);
+  }
+  // The form state a kind change gives: its first model, and only the options that kind takes.
+  function withKind(form, k, id) {
+    return Object.assign({}, form, { provider: id, model: firstModel(k),
+      where: k && !k.terminal ? 'office' : form.where,
+      permissionMode: k && form.permissionMode && k.modes.indexOf(form.permissionMode) < 0 ? '' : form.permissionMode });
+  }
+  // A local model's list comes later than the dialog: pick its first model when it arrives, or when the one picked is gone.
+  function useFirstModel(k, form, setForm) {
+    var ids = k && k.models ? k.models.map(function (m) { return m.id; }).join('|') : '';
+    useEffect(function () {
+      if (!k || !k.needsModel) return;
+      var ok = (k.models || []).some(function (m) { return m.id === form.model; });
+      if (!ok) setForm(function (f) { return Object.assign({}, f, { model: firstModel(k) }); });
+    }, [k ? k.kind : '', ids]);
+  }
 
   // ---------- open a session ----------
   function OpenDialog(p) {
-    var f = useState({ cwd: p.shownPath || p.recent[0] || '', name: '', where: 'office', isolation: 'same', model: '', permissionMode: '', maxBudget: limitText(p.spendLimit), prompt: '', template: '' }), form = f[0], setForm = f[1];
+    var f = useState({ cwd: p.shownPath || p.recent[0] || '', name: '', provider: p.kind || DEFAULT_KIND, where: 'office', isolation: 'same', model: '', permissionMode: '', maxBudget: limitText(p.spendLimit), prompt: '', template: '' }), form = f[0], setForm = f[1];
+    var K = useKinds(), k = kindOf(K.list, form.provider);
+    useFirstModel(k, form, setForm);
+    // The options of the kind (providers/index.mjs describe). Without kinds yet, the dialog offers what Claude Code takes.
+    var canWindow = !k || k.terminal, paid = !k || k.paid;
+    var modes = k ? MODES.filter(function (o) { return !o.value || k.modes.indexOf(o.value) >= 0; }) : MODES;
+    var hasModes = modes.length > 1;
     var b = useState(false), busy = b[0], setBusy = b[1];
     var e = useState(''), err = e[0], setErr = e[1];
     var sv = useState(null), saving = sv[0], setSaving = sv[1];
@@ -106,13 +207,16 @@
     }
     function submit() {
       setBusy(true); setErr('');
-      api('/api/open', Object.assign({}, form, { maxBudget: limitSent(form.maxBudget, p.spendLimit !== undefined) })).then(function () { setBusy(false); p.onClose(); }, function (x) { setBusy(false); setErr(x.message); });
+      // Only the options the kind takes go to the server: a local model has no spend limit, window or permission mode.
+      var body = Object.assign({}, form, { where: canWindow ? form.where : 'office', permissionMode: hasModes ? form.permissionMode : '', maxBudget: paid ? limitSent(form.maxBudget, p.spendLimit !== undefined) : undefined });
+      api('/api/open', body).then(function () { setBusy(false); p.onClose(); }, function (x) { setBusy(false); setErr(x.message); });
     }
     function saveTemplate() {
       api('/api/template/save', { name: saving, text: form.prompt }).then(function (t) { setSaving(null); p.onTemplates(); setForm(Object.assign({}, form, { template: t.id })); }, function (x) { setErr(x.message); });
     }
     function delTemplate() { api('/api/template/delete', { id: form.template }).then(function () { setForm(Object.assign({}, form, { template: '' })); p.onTemplates(); }, function (x) { setErr(x.message); }); }
-    var terminal = form.where === 'terminal';
+    var terminal = canWindow && form.where === 'terminal';
+    var blocked = noModelFor(k);
     // The server owns the folder rules (place.mjs recentChoices); until its answer comes, show the stored list.
     var fc = useState(null), fetched = fc[0], setFetched = fc[1];
     useEffect(function () {
@@ -125,21 +229,19 @@
       open: true, title: 'Open a session', onClose: p.onClose,
       actions: [
         h(A.Button, { key: 'c', variant: 'quiet', onClick: p.onClose }, 'Cancel'),
-        h(A.Button, { key: 'o', variant: saving === null ? 'primary' : 'quiet', icon: 'add', loading: busy, onClick: submit }, 'Open session')
+        h(A.Button, { key: 'o', variant: saving === null ? 'primary' : 'quiet', icon: 'add', loading: busy, disabled: blocked, onClick: submit }, 'Open session')
       ]
     }, h('div', { className: 'form' },
-      h('p', { className: 'note' }, terminal ? 'Starts Claude Code in a new terminal window with the office hooks attached.' : 'Runs Claude Code inside the office. You talk to it in the chat and approve its steps here. It has no terminal window.'),
+      h('p', { className: 'note' }, kindNote(k, terminal)),
       h(A.TextInput, { id: 'f-cwd', label: 'Folder', value: form.cwd, placeholder: 'E:\\pensiv', onChange: set('cwd'), error: err || undefined, hint: p.shownPath && form.cwd === p.shownPath ? 'The building you are looking at.' : undefined }),
       folders.length ? h('div', { className: 'chips', role: 'group', 'aria-label': 'Recent folders' }, folders.map(function (d) { return h(A.Button, { key: d, variant: 'quiet', icon: 'floor', title: d, onClick: function () { set('cwd')(d); } }, F.shortPath(d)); })) : null,
-      Pair(
-        h(A.TextInput, { id: 'f-name', label: 'Bot name (optional)', value: form.name, placeholder: 'Defaults to the folder name', onChange: set('name') }),
-        h(A.Select, { id: 'f-where', label: 'Runs', options: WHERE, value: form.where, onChange: set('where') })),
-      Pair(
-        h(A.Select, { id: 'f-isolation', label: 'Work in', options: ISOLATION, value: terminal ? 'same' : form.isolation, disabled: terminal, onChange: set('isolation'), hint: form.isolation === 'worktree' && !terminal ? 'A new branch in its own folder. Your main branch stays untouched.' : undefined }),
-        h(A.TextInput, { id: 'f-budget', label: 'Spend limit in USD', value: form.maxBudget, placeholder: 'No limit', disabled: terminal, onChange: set('maxBudget'), hint: terminal ? undefined : LIMIT_HINT })),
-      Pair(
-        h(A.Select, { id: 'f-model', label: 'Model', options: MODELS, value: form.model, onChange: set('model') }),
-        h(A.Select, { id: 'f-mode', label: 'Permissions', options: MODES, value: form.permissionMode, onChange: set('permissionMode') })),
+      h(KindFields, { id: 'f', kinds: K, kind: form.provider, model: form.model, onKind: function (id) { setForm(withKind(form, kindOf(K.list, id), id)); }, onModel: set('model') }),
+      Pairs([
+        h(A.TextInput, { key: 'n', id: 'f-name', label: 'Bot name (optional)', value: form.name, placeholder: 'Defaults to the folder name', onChange: set('name') }),
+        canWindow ? h(A.Select, { key: 'w', id: 'f-where', label: 'Runs', options: WHERE, value: form.where, onChange: set('where') }) : null,
+        h(A.Select, { key: 'i', id: 'f-isolation', label: 'Work in', options: ISOLATION, value: terminal ? 'same' : form.isolation, disabled: terminal, onChange: set('isolation'), hint: form.isolation === 'worktree' && !terminal ? 'A new branch in its own folder. Your main branch stays untouched.' : undefined }),
+        paid ? h(A.TextInput, { key: 'b', id: 'f-budget', label: 'Spend limit in USD', value: form.maxBudget, placeholder: 'No limit', disabled: terminal, onChange: set('maxBudget'), hint: terminal ? undefined : limitHint(k ? k.label : 'Claude Code') }) : null,
+        hasModes ? h(A.Select, { key: 'm', id: 'f-mode', label: 'Permissions', options: modes, value: form.permissionMode, onChange: set('permissionMode') }) : null]),
       p.templates.length ? h(A.Select, { id: 'f-template', label: 'Template', options: tpl, value: form.template, onChange: pickTemplate }) : null,
       h(Area, { id: 'f-prompt', label: 'First instruction (optional)', value: form.prompt, placeholder: 'Review the open PRs and list what blocks merge.', rows: 4, onChange: set('prompt') }),
       saving === null
@@ -189,7 +291,7 @@
         h('ul', { className: 'past' }, (shown || []).map(function (s) {
           return h('li', { key: s.uid, className: 'past-row' },
             h('div', { className: 'past-main' },
-              h('div', { className: 'past-title' }, h('b', null, s.name), s.branch ? h(Tag, null, s.branch) : null, s.model ? h(A.ModelBadge, { model: s.model }) : null),
+              h('div', { className: 'past-title' }, h('b', null, s.name), h(Tag, null, window.officeAdapter.kindWord(s)), s.branch ? h(Tag, null, s.branch) : null, s.model ? h(A.ModelBadge, { model: s.model }) : null),
               h('div', { className: 'past-sub mono', title: s.cwd }, F.shortPath(s.cwd)),
               hit[s.uid] ? h('div', { className: 'past-snip' }, h('em', null, hit[s.uid].kind + ': '), hit[s.uid].snippet) : (s.last ? h('div', { className: 'past-snip past-clip' }, s.last) : null),
               h('div', { className: 'past-meta mono' }, ago(s.endedAt) + ' · ' + plural(s.turns || 0, 'turn') + ' · ' + money(s.cost))),
@@ -401,6 +503,32 @@
           h('div', { className: 'btn-row' },
             h(A.Button, { variant: 'quiet', onClick: function () { setTokenShown(!tokenShown); } }, tokenShown ? 'Hide token' : 'Show token'),
             h(A.Button, { variant: 'quiet', icon: 'copy', onClick: function () { copy(token, 'The agent token', 'Click Show token, then select the token and copy it by hand.'); } }, 'Copy token'))) : null));
+  }
+
+  // ---------- agent kinds: each provider, whether it is ready, and what it needs (#20) ----------
+  function KindsDialog(p) {
+    var K = useKinds();
+    return h(A.Dialog, { open: true, title: 'Agent kinds', onClose: p.onClose, actions: [
+      h(A.Button, { key: 'r', variant: 'quiet', icon: 'retry', loading: K.checking, onClick: K.recheck }, 'Check again'),
+      h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
+      h('div', { className: 'form wide' },
+        h('p', { className: 'note' }, 'The agents the office can run. A kind that is not ready says what it needs. Local models run on this machine and cost nothing.'),
+        h(Busy, { on: !K.list.length }),
+        h('ul', { className: 'past' }, K.list.map(function (k) {
+          var r = readyOf(k);
+          var facts = [k.terminal ? 'Runs in the office or a terminal window' : 'Runs in the office', k.paid ? 'Spend limit applies' : 'No cost',
+            k.modes.length ? 'Permission modes' : null, k.needsModel ? 'You pick the model' : null].filter(Boolean).join(' · ');
+          var names = k.models.map(function (m) { return m.label || m.id; }).join(', ');
+          return h('li', { key: k.kind, className: 'past-row' },
+            h('div', { className: 'past-main' },
+              h('div', { className: 'past-title' }, h('b', null, k.label), h('span', { className: 'sess-state' }, h(A.StatusDot, { status: r.key }), r.word), k.version ? h(Tag, null, k.version) : null),
+              h('div', { className: 'past-meta' }, facts),
+              k.checking ? null : k.ready
+                ? (names ? h('div', { className: 'past-sub mono', title: names }, 'Models: ' + names) : null)
+                : h('ul', { className: 'kind-steps' }, (k.needs.length ? k.needs : ['It did not say what it needs.']).map(function (n, i) { return h('li', { key: i }, n); }))),
+            h('div', { className: 'past-actions' },
+              h(A.Button, { variant: 'quiet', icon: 'add', disabled: k.checking || noModelFor(k), onClick: function () { p.onOpen(k.kind); } }, 'Open session')));
+        }))));
   }
 
   // ---------- floors (branches) and rooms (worktrees) ----------
@@ -661,11 +789,12 @@
       h('div', { className: 'form wide' },
         h('p', { className: 'note' }, 'Every open session in every building. Broad access means the session can edit files without asking (Accept edits or a bypass mode).'),
         !agents.length ? h(A.EmptyState, { icon: 'session', compact: true, title: 'No open sessions', text: 'Open a session to see it here.' }) : h('div', { className: 'table-wrap ao-panel' }, h('table', { className: 'ao-tbl sess-tbl' },
-          h('thead', null, h('tr', null, ['Agent', 'Folder', 'State', 'Model', 'Access', 'Last event', ''].map(function (x, i) { return h('th', { key: i, scope: 'col' }, x); }))),
+          h('thead', null, h('tr', null, ['Agent', 'Kind', 'Folder', 'State', 'Model', 'Access', 'Last event', ''].map(function (x, i) { return h('th', { key: i, scope: 'col' }, x); }))),
           h('tbody', null, agents.map(function (s) {
             var st = window.OfficeVocab.status(s);
             return h('tr', { key: s.uid },
               h('td', null, h('span', { className: 'sess-who' }, h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: colorOf(s.uid), status: statusOf(s), size: 20 }), h('b', null, sceneName(s)))),
+              h('td', null, window.officeAdapter.kindWord(s)),
               h('td', { className: 'mono', title: s.cwd }, (s.git && s.git.branch ? s.git.branch + ' · ' : '') + F.folderName(s.cwd)),
               h('td', null, h('span', { className: 'sess-state' }, h(A.StatusDot, { status: st.key }), st.word)),
               h('td', null, h(A.ModelBadge, { model: s.model || 'default' })),
@@ -937,6 +1066,8 @@
     var er = useState(''), err = er[0], setErr = er[1];
     var cur = confirm ? list.filter(function (s) { return s.uid === confirm; })[0] : null;
     useEffect(function () { if (confirm && !cur) setConfirm(null); }, [confirm, !!cur]);
+    var K = useKinds(!!add), addKind = add ? kindOf(K.list, add.provider) : null;
+    useFirstModel(addKind, add || {}, function (fn) { setAdd(function (a) { return a ? fn(a) : a; }); });
     function closeSession() {
       setBusy(true);
       api('/api/close', { uid: cur.uid }).then(function () { setBusy(false); setConfirm(null); p.toast({ tone: 'success', title: cur.name, text: 'Session closed' }); }, function (x) { setBusy(false); setErr(x.message); });
@@ -945,7 +1076,7 @@
       var cwd = list.length && list[0].cwd ? list[0].cwd : place && place.path;
       if (!cwd) { setErr('This room has no folder yet.'); return; }
       setBusy(true); setErr('');
-      api('/api/open', { cwd: cwd, name: add.name.trim(), where: 'office', isolation: 'same', model: add.model, prompt: add.prompt })
+      api('/api/open', { cwd: cwd, name: add.name.trim(), provider: add.provider, where: 'office', isolation: 'same', model: add.model, prompt: add.prompt })
         .then(function () { setBusy(false); setAdd(null); p.toast({ tone: 'success', title: 'Office', text: 'Agent added' }); }, function (x) { setBusy(false); setErr(x.message); });
     }
     var title = 'Agents in ' + ((place && place.roomName) || 'this room');
@@ -958,24 +1089,23 @@
           err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
     }
     return h(A.Dialog, { key: add ? 'add' : 'list', open: true, title: title, onClose: p.onClose, actions: add
-      ? [h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setAdd(null); setErr(''); } }, 'Cancel'), h(A.Button, { key: 'a', variant: 'primary', icon: 'add', loading: busy, onClick: addAgent }, 'Add agent')]
+      ? [h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setAdd(null); setErr(''); } }, 'Cancel'), h(A.Button, { key: 'a', variant: 'primary', icon: 'add', loading: busy, disabled: noModelFor(addKind), onClick: addAgent }, 'Add agent')]
       : [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
       h('div', { className: 'form' },
         add ? h(React.Fragment, null,
           h('p', { className: 'note' }, 'The agent runs in the office, in the folder of this room.'),
-          Pair(
-            h(A.TextInput, { id: 'ra-name', label: 'Name (optional)', value: add.name, placeholder: 'Defaults to the folder name', onChange: function (v) { setAdd(Object.assign({}, add, { name: v })); } }),
-            h(A.Select, { id: 'ra-model', label: 'Model', options: MODELS, value: add.model, onChange: function (v) { setAdd(Object.assign({}, add, { model: v })); } })),
+          h(KindFields, { id: 'ra', kinds: K, kind: add.provider, model: add.model, onKind: function (id) { setAdd(withKind(add, kindOf(K.list, id), id)); }, onModel: function (v) { setAdd(Object.assign({}, add, { model: v })); } }),
+          h(A.TextInput, { id: 'ra-name', label: 'Name (optional)', value: add.name, placeholder: 'Defaults to the folder name', onChange: function (v) { setAdd(Object.assign({}, add, { name: v })); } }),
           h(Area, { id: 'ra-prompt', label: 'First instruction (optional)', value: add.prompt, rows: 4, placeholder: 'Review the open PRs and list what blocks merge.', onChange: function (v) { setAdd(Object.assign({}, add, { prompt: v })); } }),
           err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null)
         : h(React.Fragment, null,
           list.length ? h('ul', { className: 'agent-list' }, list.map(function (s) {
             return h('li', { key: s.uid, className: 'agent-row' },
               h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: colorOf(s.uid), status: statusOf(s), size: 28 }),
-              h('span', { className: 'agent-who' }, h('b', null, s.name), h('span', { className: 'agent-sub' }, window.OfficeVocab.status(s).word + ' · ' + modelWord(s.model))),
+              h('span', { className: 'agent-who' }, h('b', null, s.name), h('span', { className: 'agent-sub' }, window.OfficeVocab.status(s).word + ' · ' + window.officeAdapter.kindWord(s) + ' · ' + modelWord(s.model))),
               h(A.Button, { variant: 'quiet', icon: 'remove', onClick: function () { setErr(''); setConfirm(s.uid); } }, 'Close session'));
           })) : h(A.EmptyState, { icon: 'identity', compact: true, title: 'No agents here', text: 'Add an agent to start work in this room.' }),
-          h(A.AddButton, { label: 'Add an agent', onClick: function () { setErr(''); setAdd({ name: '', model: '', prompt: '' }); } }))));
+          h(A.AddButton, { label: 'Add an agent', onClick: function () { setErr(''); setAdd({ name: '', provider: DEFAULT_KIND, model: '', prompt: '' }); } }))));
   }
 
   // ---------- requests of one session: Approve, Decline, Yes and No ----------
@@ -1103,7 +1233,7 @@
       h('div', { className: 'term-head' },
         h(A.StatusDot, { status: s ? statusOf(s) : 'resting' }),
         h('b', { className: 'term-name' }, s ? s.name : p.name),
-        h('span', { className: 'term-model mono' }, s ? modelWord(s.model) : ''),
+        h('span', { className: 'term-model mono' }, s ? window.officeAdapter.kindWord(s) + ' · ' + modelWord(s.model) : ''),
         h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onClose }, 'Back')),
       h('div', { className: 'term-view', ref: vw, onScroll: onScroll, role: 'log', 'aria-live': 'off', tabIndex: 0 },
         h('span', { className: 'term-probe', ref: probe, 'aria-hidden': 'true' }, 'MMMMMMMMMM'),
@@ -1202,6 +1332,8 @@
     if (sess && sess.mode && !modeOpts.some(function (o) { return o.value === sess.mode; })) modeOpts.push({ value: sess.mode, label: sess.mode });
     var modelOpts = MODELS.slice(1);
     if (sess && sess.model && !modelOpts.some(function (o) { return o.value === sess.model; })) modelOpts.unshift({ value: sess.model, label: sess.model });
+    // Model, mode and connector changes are control requests: only a kind that takes them offers them (a local model does not).
+    var sk = sess ? kindOf(window.officeAdapter.kinds(), sess.provider) : null, steer = !sk || sk.control;
     var ctxPct = sess && sess.ctxTokens && sess.ctxWindow ? Math.round(100 * sess.ctxTokens / sess.ctxWindow) : null;
     var working = sess && (sess.status === 'working' || sess.status === 'waiting');
     var usage = sess && sess.usage && sess.usage.tokens ? sess.usage : null;
@@ -1232,16 +1364,18 @@
             more ? h('div', { className: 'strip-more', role: 'group', 'aria-label': 'More controls' },
               h(A.Button, { variant: 'quiet', icon: 'schedule', onClick: function () { setMore(false); p.onSchedules(); } }, 'Schedules'),
               h(A.Button, { variant: 'quiet', icon: 'terminal', title: 'Seat a session you started in a terminal', onClick: function () { setMore(false); p.onHooks(); } }, 'Attach sessions'),
+              h(A.Button, { variant: 'quiet', icon: 'bot', title: 'The agents the office can run, and what each needs', onClick: function () { setMore(false); p.onKinds(); } }, 'Agent kinds'),
               h(Tip, { text: 'A thin status bar for a second screen' }, h(A.Button, { variant: 'quiet', icon: 'zoom-out', onClick: function () { setMore(false); p.onCompact(); } }, 'Compact')),
               sess ? h('div', { className: 'strip-more-set' },
                 h('span', { className: 'strip-more-h' }, 'Actions for ' + sess.name),
                 h(A.Button, { variant: 'quiet', icon: 'terminal', onClick: function () { setMore(false); p.onTerminal(sess.uid, p.sel); } }, 'Open terminal'),
                 h(A.Button, { variant: 'quiet', icon: 'trace', onClick: function () { setMore(false); p.onChanges(sess.uid, sess.name); } }, 'Changes'),
-                h(A.Button, { variant: 'quiet', icon: 'connector', onClick: function () { setMore(false); p.onExtensions(sess.uid, sess.name); } }, 'Extensions'),
+                steer ? h(A.Button, { variant: 'quiet', icon: 'connector', onClick: function () { setMore(false); p.onExtensions(sess.uid, sess.name); } }, 'Extensions') : null,
                 ask ? h(A.Button, { variant: 'quiet', icon: 'approve', onClick: function () { setMore(false); always(); }, title: 'Approve and allow this from now on: ' + ask.always }, 'Always allow ' + clip(ask.always, 28)) : null,
                 sess.headless && (sess.cost || usage) ? h(A.CostMeter, { tokens: usage ? usage.tokens : 0, cost: sess.cost || 0, cached: usage && usage.input ? usage.cached / usage.input : undefined }) : null,
-                sess.headless ? h(A.Select, { id: 'c-model', label: 'Model', options: modelOpts, value: sess.model || '', onChange: function (v) { ctl('model', v); } }) : null,
-                sess.headless ? h(A.Select, { id: 'c-mode', label: 'Permissions', options: modeOpts, value: sess.mode || '', onChange: function (v) { ctl('mode', v); } }) : null) : null) : null),
+                sess.headless && steer ? h(A.Select, { id: 'c-model', label: 'Model', options: modelOpts, value: sess.model || '', onChange: function (v) { ctl('model', v); } }) : null,
+                sess.headless && steer ? h(A.Select, { id: 'c-mode', label: 'Permissions', options: modeOpts, value: sess.mode || '', onChange: function (v) { ctl('mode', v); } }) : null,
+                sess.headless && !steer ? h('p', { className: 'strip-more-note' }, window.officeAdapter.kindWord(sess) + ' · ' + modelWord(sess.model) + '. Open a new session to use another model.') : null) : null) : null),
           // The city HUD has its own Search actions button, so the dock shows this one in the office only.
           p.view === 'office' ? h(A.Button, { variant: 'quiet', icon: 'search', className: 'strip-search', title: 'Search actions, sessions and buildings', onClick: openPalette }, 'Search actions', h('kbd', { className: 'ao-kbd strip-kbd', 'aria-hidden': 'true' }, 'Ctrl+K')) : null),
         sess ? h('div', { className: 'strip-group strip-bot' },
@@ -1627,9 +1761,10 @@
     [['open', 'Open a session', 'add', function () { show('open'); }], ['sessions', 'All sessions', 'identity', function () { setDlg({ name: 'sessions' }); }],
      ['city', 'City view', 'building', function () { go('city'); }], ['office', 'Office view', 'floor', function () { go('office'); }], ['floors', 'Floors and rooms', 'floor', function () { setDlg({ name: 'floors' }); }],
      ['past', 'Past sessions', 'session', function () { show('past'); }], ['schedules', 'Schedules', 'schedule', function () { show('schedules'); }],
-     ['hooks', 'Attach sessions', 'terminal', function () { show('hooks'); }], ['compact', 'Compact view', 'zoom-out', function () { setAmbient(true); }]]
+     ['hooks', 'Attach sessions', 'terminal', function () { show('hooks'); }], ['kinds', 'Agent kinds', 'bot', function () { setDlg({ name: 'kinds' }); }], ['compact', 'Compact view', 'zoom-out', function () { setAmbient(true); }]]
       .forEach(function (a) { actions.push({ id: 'page-' + a[0], label: a[1], icon: a[2], group: 'Office', run: a[3] }); });
-    if (selSess) actions.push({ id: 'page-ext', label: 'Extensions of ' + selSess.name, icon: 'connector', group: 'Office', run: function () { extensions(selSess.uid, selSess.name); } });
+    var selKind = selSess ? kindOf(window.officeAdapter.kinds(), selSess.provider) : null;
+    if (selSess && (!selKind || selKind.control)) actions.push({ id: 'page-ext', label: 'Extensions of ' + selSess.name, icon: 'connector', group: 'Office', run: function () { extensions(selSess.uid, selSess.name); } });
     actions.push({ id: 'page-needs', label: needs.length ? 'Needs you (' + needs.length + ')' : 'Needs you', icon: 'waiting', group: 'Office', keywords: 'requests approve decline questions decisions', run: function () { setDlg({ name: 'needs' }); } });
     list.forEach(function (b) { if (b.key !== shown) actions.push({ id: 'page-b-' + b.key, label: 'Go to ' + b.name, icon: 'building', group: 'Buildings', keywords: 'building repository ' + b.name, run: function () { pick(b.key); } }); });
 
@@ -1658,8 +1793,9 @@
     return h(React.Fragment, null,
       h('div', { className: 'view' + (fading ? ' is-fading' : '') }, scene),
       ambient ? null : h(Controls, { sel: cur2.view === 'office' ? sel : null, syl: syl && cur2.view === 'office', buildings: list, shown: shown, shownName: (list.filter(function (b) { return b.key === shown; })[0] || def || {}).name, toast: toast, needs: needs.length, onNeeds: function () { setDlg({ name: 'needs' }); }, onBuilding: function (k) { pick(k); if (view === 'city') go('office'); }, onCity: function () { go('city'); }, onOffice: function () { introNext.current = true; go('office'); }, view: cur2.view, onSessions: function () { setDlg({ name: 'sessions' }); }, onCompact: function () { setAmbient(true); },
-        onFloors: function () { setDlg({ name: 'floors' }); }, onExtensions: extensions, onTerminal: openTerminal, onOpen: function () { show('open'); }, onPast: function () { show('past'); }, onSchedules: function () { show('schedules'); }, onHooks: function () { show('hooks'); }, onChanges: changes }),
-      d === 'open' ? h(OpenDialog, { shownPath: shownPath, spendLimit: info.spendLimit, recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
+        onFloors: function () { setDlg({ name: 'floors' }); }, onExtensions: extensions, onTerminal: openTerminal, onOpen: function () { show('open'); }, onPast: function () { show('past'); }, onSchedules: function () { show('schedules'); }, onHooks: function () { show('hooks'); }, onKinds: function () { setDlg({ name: 'kinds' }); }, onChanges: changes }),
+      d === 'open' ? h(OpenDialog, { shownPath: shownPath, kind: dlg.kind, spendLimit: info.spendLimit, recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
+      d === 'kinds' ? h(KindsDialog, { onOpen: function (kind) { refresh().then(function () { setDlg({ name: 'open', kind: kind }); }); }, onClose: close }) : null,
       d === 'past' ? h(PastDialog, { onClose: close, onChanges: changes, toast: toast }) : null,
       d === 'schedules' ? h(SchedulesDialog, { recent: info.recent, spendLimit: info.spendLimit, onInfo: setInfo, toast: toast, onClose: close }) : null,
       d === 'changes' ? h(ChangesDialog, { uid: dlg.uid, name: dlg.label, ended: dlg.ended, toast: toast, onClose: close }) : null,
