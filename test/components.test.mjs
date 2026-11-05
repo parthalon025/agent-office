@@ -173,8 +173,10 @@ test('office.js and office.css: on the desk screen the requests come first, and 
   assert.ok(head >= 0 && bar > head && tabs > bar, 'head, then the requests, then the tabs (DOM order is the reading and focus order)');
   assert.match(desk, /className: 'pin pin-desk' \+ \(small \? ' is-small' : ''\) \+ \(asks \? ' has-asks' : ''\)/, 'small and has-asks are React state');
   assert.doesNotMatch(js, /classList\.toggle\('is-small'/, 'no class set by hand: a render that changes className would drop it');
-  assert.match(css, /\.pin-desk\.is-small \.pin-head \{ flex-wrap: nowrap; \}/, 'the small head is one row');
+  assert.doesNotMatch(css, /\.pin-desk\.is-small \.pin-head \{ flex-wrap: nowrap; \}/, 'a head too narrow wraps, never clips Back');
   assert.match(css, /\.pin-desk\.is-small \.pin-head > \* \{ flex: none; \}/, 'its buttons keep their size; the name gives way');
+  assert.match(desk, /h\(Bezel, \{ inline: true, count: p\.waiting, onGo: p\.onGo, compact: small \}\)/, 'a small head shows the count, not the words');
+  assert.match(js, /p\.compact \? 'Needs you · ' \+ p\.count \+ '\. Go to the oldest request' : null/, 'the compact bezel keeps its whole name as its label');
   assert.match(css, /\.pin-desk\.is-small\.has-asks \.asks \{ flex: 1 1 auto; min-height: 0; max-height: none; border-bottom: 0; \}/, 'no cap on a small screen');
   assert.match(css, /\.pin-desk\.is-small\.has-asks \.ao-tabs \{ display: none; \}/, 'the tabs wait while a request is open');
   assert.match(js, /\.term-input, \.term-note, \.bezel, \.board-b > \.inline-actions,/, 'the toast stack keeps off the terminal note, the bezel and the room panel actions');

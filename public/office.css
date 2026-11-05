@@ -348,9 +348,9 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .pin.is-small .pin-head { gap: var(--space-1); padding: 2px var(--space-1); }
 .pin.is-small .pin-log, .pin.is-small .pin-body { padding: var(--space-1) var(--space-2); }
 .pin.is-small .ao-composer { padding: var(--space-1); }
-/* A small desk screen: the head is one row (Stop turn and Export show their icon), and while a request is open the requests take
-   the whole screen under the head, with no cap, and the tabs wait: Approve and Decline are always on the screen. */
-.pin-desk.is-small .pin-head { flex-wrap: nowrap; }
+/* A small desk screen: the head is one row (the bezel shows its icon and count, Stop turn and Export their icon; the buttons keep
+   their size and the name gives way; on a screen too narrow even for that the buttons wrap, never clip), and while a request is
+   open the requests take the whole screen under the head, with no cap, and the tabs wait: Approve and Decline stay on the screen. */
 .pin-desk.is-small .pin-head > * { flex: none; }
 .pin-desk.is-small .pin-head > .pin-name { flex: 1 1 0; }
 .pin-desk.is-small.has-asks .asks { flex: 1 1 auto; min-height: 0; max-height: none; border-bottom: 0; }

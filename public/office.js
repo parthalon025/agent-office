@@ -1411,12 +1411,13 @@
   }
   // The count of waiting requests on the bezel of the screen in focus. One tap goes to the oldest request (the page decides
   // where that is). inline: in the head of a pinned screen; else on the top right corner of the screen's frame.
+  // compact (a small pinned screen): the icon and the count, with the whole name as the label, so the head keeps one row.
   function Bezel(p) {
     var ref = React.useRef(null);
     usePinBox(p.inline ? null : p.host, ref, function (el, r) { el.style.setProperty('--pin-x', px(r.left + r.width)); el.style.setProperty('--pin-y', px(r.top)); });
     if (!(p.count > 0)) return null;
     return h('div', { ref: ref, className: 'bezel' + (p.inline ? ' is-inline' : ''), hidden: !p.inline && !p.shown },
-      h(A.Button, { variant: 'emphasis', icon: 'waiting', title: 'Go to the oldest request', onClick: p.onGo }, 'Needs you · ' + p.count));
+      h(A.Button, { variant: 'emphasis', icon: 'waiting', label: p.compact ? 'Needs you · ' + p.count + '. Go to the oldest request' : null, title: 'Go to the oldest request', onClick: p.onGo }, p.compact ? String(p.count) : 'Needs you · ' + p.count));
   }
   // Focus moves into a pinned screen when it shows, and back to where it was when it goes (the DS Definition of done).
   function usePinFocus(shown, find) {
@@ -1462,8 +1463,8 @@
   // The desk monitor of one session, pinned (#89): its chat, its terminal and the timeline of its tool calls, the open
   // requests (RequestBar, so an approval never hides behind the hidden HUD chat), Export, Stop turn and Back.
   // The requests come first, right under the head (review 89): no approval can hide. On a small screen the head takes one
-  // row (Stop turn and Export show their icon only), and while a request is open the bar takes the whole screen under the
-  // head and the tabs wait (has-asks), so Approve and Decline are always on the screen.
+  // row (the bezel shows its icon and count, Stop turn and Export their icon), and while a request is open the bar takes the
+  // whole screen under the head and the tabs wait (has-asks), so Approve and Decline are always on the screen.
   var DESK_TABS = [{ id: 'chat', label: 'Chat', icon: 'chat' }, { id: 'terminal', label: 'Terminal', icon: 'terminal' }, { id: 'timeline', label: 'Timeline', icon: 'trace' }];
   function DeskScreen(p) {
     var snap = useSnapshot();
@@ -1482,7 +1483,7 @@
         h(A.StatusDot, { status: s ? statusOf(s) : 'resting' }),
         h('b', { className: 'pin-name' }, p.name),   // the scene's name of the bot (unique in the building), as on its desk
         h('span', { className: 'pin-sub mono' }, s ? window.officeAdapter.kindWord(s) + ' · ' + modelWord(s.model) : ''),
-        h(Bezel, { inline: true, count: p.waiting, onGo: p.onGo }),
+        h(Bezel, { inline: true, count: p.waiting, onGo: p.onGo, compact: small }),
         s && s.headless && working ? act('pause', 'Stop turn', null, stop) : null,
         s ? act('copy', 'Export', 'Save this session as a Markdown file', function () { exportSession(s.uid, p.toast); }) : null,
         h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onBack }, 'Back')),
@@ -1503,7 +1504,7 @@
       h('section', { ref: ref, className: 'pin pin-changes' + (small ? ' is-small' : ''), hidden: !p.shown, 'aria-label': 'Changes in ' + (p.name || 'this session') },
         h('div', { className: 'pin-head' },
           h('b', { className: 'pin-name' }, 'Changes in ' + (p.name || 'this session')),
-          h(Bezel, { inline: true, count: p.waiting, onGo: p.onGo }),
+          h(Bezel, { inline: true, count: p.waiting, onGo: p.onGo, compact: small }),
           changesActions(c, p.ended),
           h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onBack }, 'Back')),
         h('div', { className: 'pin-body', tabIndex: -1 }, h(ChangesBody, { c: c }))),
