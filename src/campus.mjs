@@ -169,7 +169,8 @@ export function createCampus({ git, state, save, sessions, roomPlace, changed, a
   // Never take a room away from a session that works in it.
   function roomInUse(root) {
     const r = repoKey(root);
-    for (const s of live()) if (s.cwd) { const k = repoKey(s.cwd); if (k === r || k.startsWith(r.endsWith(path.sep) ? r : r + path.sep)) return s; }
+    const sep = '\\'; // repoKey is normPath, which follows Windows rules on every host (place.mjs), so its separator is a backslash, not path.sep
+    for (const s of live()) if (s.cwd) { const k = repoKey(s.cwd); if (k === r || k.startsWith(r.endsWith(sep) ? r : r + sep)) return s; }
     return null;
   }
   // The top of a worktree for the room board: each top-level folder with its file count. Only a worktree of a known repository.
