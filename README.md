@@ -66,6 +66,24 @@ The same office in three themes. Each theme shows the building (one floor per br
 ![The building in Sublevel](docs/img/sublevel-building-1360.png)
 ![A room in Sublevel](docs/img/sublevel-room-1360.png)
 
+**The city, the boards, a desk and a held request**
+
+The city shows every repository as a building. A beacon marks a building with a request.
+
+![The city in Day](docs/img/day-city-1360.png)
+
+The room blackboard shows what the agents do. Click a board once to look at it.
+
+![The room blackboard in Day](docs/img/day-boards-1360.png)
+
+Click a desk monitor twice to open the chat of its agent. A held request has Approve and Decline.
+
+![The desk screen in Day](docs/img/day-desk-1360.png)
+
+Needs you lists every held request of every building. Approve or decline it from the left column.
+
+![Needs you with a held request in Day](docs/img/day-needs-you-1360.png)
+
 ## Start it
 
 ```
