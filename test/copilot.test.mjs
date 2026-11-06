@@ -11,7 +11,7 @@ import path from 'node:path';
 import { spawn as realSpawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createTracker } from '../src/tracker.mjs';
-import { providerEvents, checkProvider, isPaid, isGated, supervisionOf, costOf, spendLimitFor, describe } from '../src/providers/index.mjs';
+import { providerEvents, checkProvider, spendLimitFor, describe, traitsOf } from '../src/providers/index.mjs';
 import { createAcp, AGENTS } from '../src/providers/acp.mjs';
 import { requestCall, argsCall, SESSION_ARGS, SELF_APPROVE } from '../src/providers/copilot.mjs';
 import { cleanRules, decide, openRefusal, costAsk, enforcement } from '../src/security.mjs';
@@ -102,8 +102,8 @@ test('the entry: one AGENTS entry of the ACP provider, paid with an unknown cost
   try {
     assert.ok(AGENTS.copilot, 'a new agent is a new entry, not a second ACP client');
     assert.equal(checkProvider(r.p), r.p);
-    assert.deepEqual([r.p.kind, r.p.label, isPaid(r.p), costOf(r.p), isGated(r.p)], ['copilot', 'Copilot CLI', true, 'unknown', false]);
-    assert.equal(supervisionOf(r.p), 'Partly supervised: edits and most commands ask, reads do not');
+    assert.deepEqual([r.p.kind, r.p.label, traitsOf(r.p).paid, traitsOf(r.p).cost, traitsOf(r.p).gated], ['copilot', 'Copilot CLI', true, 'unknown', false]);
+    assert.equal(traitsOf(r.p).supervision, 'Partly supervised: edits and most commands ask, reads do not');
     // Owner decision Q22: a kind without cost reports has no spend limit field (nothing could stop it), so no --max-ai-credits.
     assert.equal(spendLimitFor({ paid: true, cost: r.p.cost, requested: 5 }), null);
     assert.ok(!SESSION_ARGS.some((a) => /credit|^--allow|yolo|autopilot/i.test(a)), 'no switch that approves calls or sets a limit');

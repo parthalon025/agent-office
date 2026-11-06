@@ -10,7 +10,7 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { createTracker } from '../src/tracker.mjs';
 import { slimPayload } from '../src/payload.mjs';
-import { createRegistry, providerEvents, checkProvider, providerError, DEFAULT_PROVIDER, PROVIDER_METHODS, DEFAULT_SPEND_LIMIT, isPaid, isGated, supervisionOf, spendLimitFor, featuresOf } from '../src/providers/index.mjs';
+import { createRegistry, providerEvents, checkProvider, providerError, DEFAULT_PROVIDER, PROVIDER_METHODS, DEFAULT_SPEND_LIMIT, spendLimitFor, traitsOf } from '../src/providers/index.mjs';
 import { createLocal } from '../src/providers/local.mjs';
 import { createClaudeCode, claudeVersion, programPath, MODEL_RE } from '../src/providers/claude-code.mjs';
 import { resolveExe } from '../src/launch.mjs';
@@ -819,12 +819,12 @@ test('spend limit: a new paid session gets the default of $2, a local one gets n
   const ollama = createLocal({ events: {}, kind: 'ollama' });
   const lmstudio = createLocal({ events: {}, kind: 'lmstudio' });
   assert.equal(DEFAULT_SPEND_LIMIT, 2);
-  assert.equal(isPaid(claude), true);
-  assert.equal(isPaid(ollama), false);
-  assert.equal(isPaid(lmstudio), false);
-  assert.equal(spendLimitFor({ paid: isPaid(claude), requested: undefined }), 2);
-  assert.equal(spendLimitFor({ paid: isPaid(ollama), requested: undefined }), null);
-  assert.equal(spendLimitFor({ paid: isPaid(lmstudio), requested: 50 }), null, 'a local provider has no limit, even when one is asked for');
+  assert.equal(traitsOf(claude).paid, true);
+  assert.equal(traitsOf(ollama).paid, false);
+  assert.equal(traitsOf(lmstudio).paid, false);
+  assert.equal(spendLimitFor({ paid: traitsOf(claude).paid, requested: undefined }), 2);
+  assert.equal(spendLimitFor({ paid: traitsOf(ollama).paid, requested: undefined }), null);
+  assert.equal(spendLimitFor({ paid: traitsOf(lmstudio).paid, requested: 50 }), null, 'a local provider has no limit, even when one is asked for');
 });
 
 test('spend limit: the user can change it or clear it; a bad value falls back to the default', () => {
@@ -846,9 +846,9 @@ test('spend limit: the user can change it or clear it; a bad value falls back to
 
 test('gated: a provider holds every tool call unless it says gated: false; gated must be true or false', () => {
   const base = { kind: 'x', label: 'X', ...Object.fromEntries(PROVIDER_METHODS.map((m) => [m, () => {}])) };
-  assert.equal(isGated(base), true, 'a provider that does not say is gated');
-  assert.equal(isGated({ ...base, gated: true }), true);
-  assert.equal(isGated({ ...base, gated: false }), false);
+  assert.equal(traitsOf(base).gated, true, 'a provider that does not say is gated');
+  assert.equal(traitsOf({ ...base, gated: true }).gated, true);
+  assert.equal(traitsOf({ ...base, gated: false }).gated, false);
   assert.throws(() => checkProvider({ ...base, gated: 'yes' }), /gated/);
   assert.equal(createClaudeCode({ events: {}, files: () => ({}) }).gated, true);
   assert.equal(createLocal({ events: {}, kind: 'ollama' }).gated, true);
@@ -857,9 +857,9 @@ test('gated: a provider holds every tool call unless it says gated: false; gated
 test('supervision: an ungated provider has a label (ADR 0001), "Unsupervised" when it gives none; a gated one has none', async () => {
   const base = { kind: 'x', label: 'X', ...Object.fromEntries(PROVIDER_METHODS.map((m) => [m, () => {}])), readiness: async () => ({ ready: false, needs: [] }) };
   const partly = { ...base, kind: 'partly', gated: false, supervision: 'Partly supervised: file edits ask, commands do not' };
-  assert.equal(supervisionOf(partly), 'Partly supervised: file edits ask, commands do not');
-  assert.equal(supervisionOf({ ...base, gated: false }), 'Unsupervised');
-  assert.equal(supervisionOf(base), null);
+  assert.equal(traitsOf(partly).supervision, 'Partly supervised: file edits ask, commands do not');
+  assert.equal(traitsOf({ ...base, gated: false }).supervision, 'Unsupervised');
+  assert.equal(traitsOf(base).supervision, null);
   assert.throws(() => checkProvider({ ...base, supervision: 'Partly supervised' }), /supervision/, 'a gated provider has no label');
   assert.throws(() => checkProvider({ ...base, gated: false, supervision: 3 }), /supervision/);
   const rows = await createRegistry([base, partly]).status({ timeoutMs: 30 });
@@ -871,7 +871,7 @@ test('cost unknown: such a provider is paid, has no spend limit the office could
   assert.doesNotThrow(() => checkProvider({ ...base, cost: 'unknown' }));
   assert.throws(() => checkProvider({ ...base, cost: 'free' }), /cost/);
   assert.throws(() => checkProvider({ ...base, cost: 'unknown', paid: false }), /cost/);
-  assert.equal(isPaid({ ...base, cost: 'unknown' }), true);
+  assert.equal(traitsOf({ ...base, cost: 'unknown' }).paid, true);
   assert.equal(spendLimitFor({ paid: true, cost: 'unknown', requested: undefined }), null, 'no limit: nothing reports what it spent');
   assert.equal(spendLimitFor({ paid: true, cost: 'unknown', requested: 5 }), null);
   assert.equal(spendLimitFor({ paid: true, requested: undefined }), 2, 'a provider that reports cost keeps the default');
@@ -931,8 +931,8 @@ test('events.drop: the provider frees a request its agent no longer waits for, a
 
 test('spend limit: a provider that does not say it is free is paid; paid must be true or false', () => {
   const base = { kind: 'x', label: 'X', ...Object.fromEntries(PROVIDER_METHODS.map((m) => [m, () => {}])) };
-  assert.equal(isPaid(base), true);
-  assert.equal(isPaid({ ...base, paid: false }), false);
+  assert.equal(traitsOf(base).paid, true);
+  assert.equal(traitsOf({ ...base, paid: false }).paid, false);
   assert.doesNotThrow(() => checkProvider({ ...base, paid: true }));
   assert.throws(() => checkProvider({ ...base, paid: 'no' }), /paid/);
 });
@@ -956,17 +956,40 @@ test('contract: a provider other than Claude Code reports a subagent with agent_
   assert.equal(s.agents[0].done, true);
 });
 
-test('featuresOf: a copy of what the provider declares, read when asked (a getter), [] when it declares none (#72)', () => {
+test('traitsOf: one value per provider; the strict traits for a provider that says nothing, a missing one, and each kind of the registry (#171)', async () => {
+  const o = office();
+  const strict = { paid: true, gated: true, supervision: null, cost: 'reported', features: [] };
+  const plain = (p) => { const { preflight, ...rest } = traitsOf(p); assert.equal(typeof preflight, 'function'); return rest; };
+  assert.deepEqual(plain(createFake(o.events)), strict, 'the fake says nothing: paid, gated, cost reported');
+  assert.deepEqual(plain(null), strict);
+  assert.deepEqual(plain(undefined), strict);
+  assert.deepEqual(plain(createClaudeCode({ events: o.events, files: () => ({}) })), strict);
+  assert.deepEqual(plain(createLocal({ events: o.events, kind: 'ollama' })), { ...strict, paid: false });
+  assert.deepEqual(plain({ gated: false }), { ...strict, gated: false, supervision: 'Unsupervised' });
+  assert.deepEqual(plain({ gated: false, supervision: 'Partly supervised: x' }), { ...strict, gated: false, supervision: 'Partly supervised: x' });
+  assert.equal(traitsOf({ gated: true, supervision: 'x' }).supervision, null, 'a gated provider has no label');
+  assert.equal(traitsOf({ cost: 'unknown' }).cost, 'unknown');
+  assert.equal(await traitsOf(createFake(o.events)).preflight(), null, 'no check: null');
+  assert.equal(await traitsOf({ preflight: async () => 'Sign in first.' }).preflight(), 'Sign in first.');
+  assert.equal(await traitsOf({ preflight: async () => '' }).preflight(), null, 'an empty answer is no reason');
+  const reg = createRegistry([createFake(o.events), createLocal({ events: o.events, kind: 'lmstudio' })]);
+  for (const k of reg.kinds()) {
+    const t = traitsOf(reg.get(k.kind));
+    assert.deepEqual([k.paid, k.gated, k.supervision, k.cost], [t.paid, t.gated, t.supervision, t.cost], `${k.kind}: describe() reads the traits`);
+  }
+});
+
+test('traitsOf features: a copy of what the provider declares, read when asked (a getter), [] when it declares none (#72)', () => {
   let learned = false;
   const p = { get features() { return learned ? ['resume', 'skills'] : ['skills']; } };
-  assert.deepEqual(featuresOf(p), ['skills']);
+  assert.deepEqual(traitsOf(p).features, ['skills']);
   learned = true;
-  const f = featuresOf(p);
+  const f = traitsOf(p).features;
   assert.deepEqual(f, ['resume', 'skills']);
   f.push('x');
-  assert.deepEqual(featuresOf(p), ['resume', 'skills']);
-  assert.deepEqual(featuresOf({}), []);
-  assert.deepEqual(featuresOf(null), []);
+  assert.deepEqual(traitsOf(p).features, ['resume', 'skills']);
+  assert.deepEqual(traitsOf({}).features, []);
+  assert.deepEqual(traitsOf(null).features, []);
 });
 
 // #27 L2, L5, L7, L8.
