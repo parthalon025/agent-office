@@ -26,3 +26,11 @@ test('the stats monitor names the agent kind, and a to-do list keeps the rows it
   assert.equal(row(T.stats({ ...s, model: '', todos: [{ text: 'a' }] }, ''), 'Agent'), 'default', 'no kind and no model');
   assert.equal(T.stats(null).note, 'No session at this desk.');
 });
+
+test('desk trays (#93): the inbox tray holds queued office messages, the outbox tray holds what waits on the user', () => {
+  assert.deepEqual(T.trays(null), { inbox: 0, outbox: 0 });
+  assert.deepEqual(T.trays({}), { inbox: 0, outbox: 0 }, 'a session with no lists shows empty trays');
+  const s = { inbox: [{ text: 'a' }, { text: 'b' }], pending: [{ id: 'p' }], questions: [{ id: 'q' }, { id: 'r' }] };
+  assert.deepEqual(T.trays(s), { inbox: 2, outbox: 3 });
+  assert.deepEqual(T.trays({ ...s, pseudo: true }), { inbox: 0, outbox: 0 }, 'a helper has no session of its own');
+});

@@ -6,6 +6,7 @@
    In a dark theme (Night, Fluent Dark: stage.K.dark) a soft pool of screen light falls on the desk; it turns amber when the bot needs you and
    red after an error. A monitor is a pinned screen (#89): a click flies the camera to it, and once it lands the page lays
    the chat and the terminal of that session over the monitor (scene-host.js layer). open(uid) is the keyboard path.
+   Each desk also gets an inbox tray (queued office messages) and an outbox tray (requests and questions that wait on the user), the DS Parts.tray (#93).
    The engine builds the desks and walks the bots. This file only repaints the screens and adds the
    cursor and the light pool (decor, noNav). Colors and fonts come from the DS tokens (stage.K).
    Helpers (subagents) have no session of their own; their monitors show what the engine traced.
@@ -473,6 +474,13 @@
     return cur;
   }
 
+  // What the two desk trays hold (#93): the inbox tray, the office messages queued for the agent; the outbox tray, what the agent
+  // sent out that waits on the user (open requests and questions). A helper has no session of its own, so its trays stay empty.
+  function trays(s) {
+    if (!s || s.pseudo) return { inbox: 0, outbox: 0 };
+    return { inbox: (s.inbox || []).length, outbox: (s.pending || []).length + (s.questions || []).length };
+  }
+
   // ---------- the desks ----------
   var NOOP = { refresh: function () {}, dispose: function () {}, screens: function () { return []; } };
   function attach(office, o) {
@@ -627,7 +635,28 @@
         gm.userData.noNav = 1; gm.userData.officeTermDecor = 1;
         gm.castShadow = false; gm.receiveShadow = false; gm.renderOrder = 2; gm.visible = false;
         root.add(gm); e.glow = gm;
+        try { addTrays(e, root, wp, n, wsum); } catch (x2) { dropTrays(e); }
       } catch (x) { e.glow = null; }
+    }
+    // The DS inbox and outbox trays (Parts.tray) on the desk top, left and right of the screens. wp: the desk top under the screens,
+    // n: the way the screens face, wsum: their width. Their counts come from trays(s) in paint().
+    function addTrays(e, root, wp, n, wsum) {
+      var O = window.AgentOffice && window.AgentOffice.office, P = O && O.Parts;
+      if (!P || !P.tray) return;
+      var side = new T.Vector3(n.z, 0, -n.x), ry = Math.atan2(n.x, n.z), made = [];
+      [['inbox', -1], ['outbox', 1]].forEach(function (d) {
+        var q = wp.clone().addScaledVector(side, d[1] * (wsum / 2 + 0.45)).addScaledVector(n, -0.2);
+        var t = new T.Group(); t.position.copy(q); t.rotation.y = ry; t.userData.noNav = 1; t.userData.officeTermDecor = 1;
+        root.add(t);
+        var tray = P.tray(K, t, 0, 0, 0, d[0]);
+        tray.traverse(function (ob) { ob.userData.noNav = 1; ob.userData.officeTermDecor = 1; });
+        made.push({ kind: d[0], group: t, tray: tray });
+      });
+      e.trays = made;
+    }
+    function dropTrays(e) {
+      (e.trays || []).forEach(function (t) { if (t.group.parent) t.group.parent.remove(t.group); });
+      e.trays = null;
     }
 
     function patch(m, b, i, ss) {
@@ -666,6 +695,7 @@
         e.tex.dispose();
         if (e.cursor) { if (e.cursor.parent) e.cursor.parent.remove(e.cursor); e.cursor.geometry.dispose(); e.cursor.material.dispose(); }
         if (e.glow) { if (e.glow.parent) e.glow.parent.remove(e.glow); e.glow.geometry.dispose(); e.glow.material.dispose(); }
+        dropTrays(e);
       } catch (x) { /* it went with its floor */ }
     }
 
@@ -700,6 +730,7 @@
         e.glow.visible = e.glowA > 0;
         e.glow.material.color.set(info.key === 'waiting' ? p.wait : info.key === 'error' ? p.err : p.fg);
       }
+      if (e.trays) { var tc = trays(e.uid ? s : null); e.trays.forEach(function (t) { t.tray.userData.setCount(tc[t.kind]); }); }
       var v = viewOf(e, s, info), sig = JSON.stringify(v);
       if (!force && sig === e.sig) return;
       e.sig = sig;
@@ -817,6 +848,7 @@
         if (e.mesh.onBeforeRender === e.hook) delete e.mesh.onBeforeRender;
         if (e.cursor && e.cursor.parent) e.cursor.parent.remove(e.cursor);
         if (e.glow && e.glow.parent) e.glow.parent.remove(e.glow);
+        dropTrays(e);
       });
       entries = [];
       hover = null;
@@ -840,5 +872,5 @@
     };
   }
 
-  window.OfficeTerminal = { attach: attach, lines: lines, timeline: timeline, status: status, toolName: toolName, stats: statsOf };
+  window.OfficeTerminal = { attach: attach, lines: lines, timeline: timeline, status: status, toolName: toolName, stats: statsOf, trays: trays };
 })();
