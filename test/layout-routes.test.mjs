@@ -67,7 +67,7 @@ after(async () => {
     if (child) await child.stop();
     if (fake) await fake.close();
   } finally {
-    if (base) try { fs.rmSync(base, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* a temp folder may stay */ }
+    if (base) try { fs.rmSync(base, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }); } catch { /* a temp folder may stay */ }
   }
 });
 
