@@ -66,7 +66,7 @@ function rig(over = {}) {
   r.snap = () => {
     const sessions = [...r.tracker.sessions.values()].map((s) => {
       const place = s.placed ? placeOfSession(s.git, s.cwd) : null;
-      return { ...s, place, seat: place ? seatOf({ assigned: s.assignedRole, desk: s.deskRole, agentType: s.agentType }, shownFloors(recOf(place.buildingKey))) : null };
+      return { ...s, persona: over.persona ? over.persona(s) : undefined, place, seat: place ? seatOf({ assigned: s.assignedRole, desk: s.deskRole, agentType: s.agentType }, shownFloors(recOf(place.buildingKey))) : null };
     });
     const by = {};
     for (const s of sessions) if (s.status !== 'ended' && s.place) (by[s.place.noteKey] ||= []).push(s);
@@ -708,6 +708,25 @@ test('colorOf is one stable DS color per uid, and bots of one shape still get di
     const sameShape = uids.filter((u) => B.shapeOf(u) === B.shapeOf(uids[0]));
     assert.ok(new Set(sameShape.map(B.colorOf)).size > 3);
   } finally { if (prev === undefined) delete globalThis.AgentOffice; else globalThis.AgentOffice = prev; }
+});
+
+test('a persona look (#150) sets the bot shape and color, and a change of it seats the bot again', async () => {
+  let look = { name: 'repo', shape: 'tall', color: 2, accessory: 'hat' };
+  const r = rig({ repos: [{ path: REPO_A, worktrees: [{ branch: 'main', root: REPO_A }] }], persona: () => look });
+  r.push();
+  const m = r.mount(KEY_A);
+  await r.hook(HOOKS.turnWithEdit[0]);
+  const bot = of(m.ev, 'bot.add')[0].bot;
+  assert.equal(bot.shape, 'cone');
+  assert.equal(bot.color, globalThis.AgentOffice.BODY_COLORS[2]);
+  const n = of(m.ev, 'bot.add').length;
+  look = { ...look, accessory: 'glasses' };
+  r.push();
+  assert.equal(of(m.ev, 'bot.add').length, n, 'an accessory is not a seat');
+  look = { ...look, shape: 'wide' };
+  r.push();
+  assert.ok(of(m.ev, 'bot.add').length > n, 'a shape change seats the bot again');
+  assert.equal(of(m.ev, 'bot.add').at(-1).bot.shape, 'capsule');
 });
 
 test('requests: every open request and question of every building, oldest first, with the building named', async () => {
