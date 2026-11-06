@@ -270,6 +270,10 @@ export function createTracker(deps = {}) {
         addFeed(s, 'start', `sat down (${p.source || 'startup'})`);
         break;
       case 'UserPromptSubmit':
+        // The stream can end a turn that fails at once before this hook arrives (#188): the hook is that same turn, so it counts the turn
+        // and neither starts work again nor clears the error. Another prompt text is a new turn.
+        if (s.turnEnded && (p.prompt || '') === s.prompt) { s.turnEnded = false; s.turns += 1; s.promptAt = now(); out = deliver(s, ev); break; }
+        s.turnEnded = false;
         s.status = 'working'; s.prompt = p.prompt || ''; if (!s.firstPrompt) s.firstPrompt = s.prompt; s.note = ''; s.turns += 1; s.error = null; s.promptAt = now();
         out = deliver(s, ev);
         addFeed(s, 'prompt', clip(s.prompt, 140));
@@ -378,11 +382,11 @@ export function createTracker(deps = {}) {
   }
 
   // The user sent a message: a failure after this is an error again.
-  function userMessage(s, text) { s.interrupted = false; if (text !== undefined) { s.prompt = text; if (!s.firstPrompt) s.firstPrompt = text; } }
+  function userMessage(s, text) { s.interrupted = false; s.turnEnded = false; if (text !== undefined) { s.prompt = text; if (!s.firstPrompt) s.firstPrompt = text; } }
 
   // The office sent a new turn: working at once, and the last error is gone (no Finished between Error and Working).
   function startTurn(s, prompt) {
-    s.error = null; s.status = 'working'; s.prompt = prompt; if (!s.firstPrompt) s.firstPrompt = prompt;
+    s.turnEnded = false; s.error = null; s.status = 'working'; s.prompt = prompt; if (!s.firstPrompt) s.firstPrompt = prompt;
     addFeed(s, 'prompt', 'sent from the office: ' + clip(prompt, 100));
     changed();
   }
@@ -477,6 +481,7 @@ export function createTracker(deps = {}) {
       if (mu?.contextWindow) s.ctxWindow = mu.contextWindow;
       // The turn is over: show the bot at rest even when the stop hook did not run (a stopped turn, a spending limit).
       dropPending(s);
+      s.turnEnded = true;
       if (s.status === 'working' || s.status === 'waiting' || s.status === 'starting') { s.status = 'idle'; s.tool = null; }
       closeAll(s, s.interrupted ? 'Stopped' : 'The turn ended first.');
       const sub = String(m.subtype || '');
