@@ -14,7 +14,7 @@ import { fileURLToPath } from 'node:url';
 import * as auth from '../auth.mjs';
 import { resolveExe } from '../git.mjs';
 import { officeFiles } from '../files.mjs';
-import { startOffice, startOnFreePort } from './fixtures/office-server.mjs';
+import { startOffice, startOnFreePort, until } from './fixtures/office-server.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const win = process.platform === 'win32';
@@ -737,4 +737,370 @@ test('removeOwnPageFile removes the file only while it holds this office token (
     assert.equal(auth.removeOwnPageFile(f, 'mine'), false);
     assert.equal(auth.removeOwnPageFile(path.join(dir, 'none.json'), 'mine'), false);
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ---------- remote access: Cloudflare Access login, checked by the office (#133) ----------
+
+const { privateKey: RSA_PRIV, publicKey: RSA_PUB } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+const { privateKey: OTHER_PRIV } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+const b64u = (x) => Buffer.from(typeof x === 'string' ? x : JSON.stringify(x)).toString('base64url');
+const jwkOf = (pub, kid) => ({ ...pub.export({ format: 'jwk' }), kid, use: 'sig', alg: 'RS256' });
+const REMOTE_ENV = {
+  OFFICE_REMOTE_HOST: 'office.example.test', OFFICE_REMOTE_TEAM: 'owner.cloudflareaccess.com',
+  OFFICE_REMOTE_AUD: 'aud-tag-1', OFFICE_REMOTE_EMAILS: 'Owner@Example.test, second@example.test',
+};
+const NOW = 1_800_000_000_000; // ms
+/** A signed Access token. `over` changes claims; `head` changes the header; `key` signs with another key; `sig: false` breaks the signature. */
+function accessToken({ over = {}, head = {}, key = RSA_PRIV, sig = true, kid = 'k1' } = {}) {
+  const h = { alg: 'RS256', typ: 'JWT', kid, ...head };
+  const p = { iss: 'https://owner.cloudflareaccess.com', aud: ['aud-tag-1'], email: 'owner@example.test', iat: NOW / 1000 - 10, exp: NOW / 1000 + 3600, type: 'app', ...over };
+  for (const k of Object.keys(h)) if (h[k] === undefined) delete h[k];
+  for (const k of Object.keys(p)) if (p[k] === undefined) delete p[k];
+  const data = `${b64u(h)}.${b64u(p)}`;
+  const s = sig ? crypto.sign('RSA-SHA256', Buffer.from(data), key) : Buffer.from('not a signature');
+  return `${data}.${s.toString('base64url')}`;
+}
+const RPG = auth.newPageToken();
+const remoteOn = () => auth.remoteConfig(REMOTE_ENV, { port: 4317 });
+const staticKeys = (list = [jwkOf(RSA_PUB, 'k1')]) => auth.createAccessKeys({ url: 'https://owner.cloudflareaccess.com/cdn-cgi/access/certs', now: () => NOW, fetchJson: async () => ({ keys: list }) });
+
+test('remote settings: off until all four are set; a half setup names what is missing; only the configured port honors them', () => {
+  const off = auth.remoteConfig({}, { port: 4317 });
+  assert.equal(off.on, false);
+  assert.equal(off.state, 'off');
+  assert.deepEqual(off.missing, []);
+  const on = remoteOn();
+  assert.equal(on.on, true);
+  assert.equal(on.state, 'on');
+  assert.equal(on.host, 'office.example.test');
+  assert.equal(on.issuer, 'https://owner.cloudflareaccess.com');
+  assert.equal(on.certsUrl, 'https://owner.cloudflareaccess.com/cdn-cgi/access/certs');
+  assert.deepEqual(on.emails, ['owner@example.test', 'second@example.test']);
+  for (const name of ['OFFICE_REMOTE_HOST', 'OFFICE_REMOTE_TEAM', 'OFFICE_REMOTE_AUD', 'OFFICE_REMOTE_EMAILS']) {
+    const env = { ...REMOTE_ENV }; delete env[name];
+    const c = auth.remoteConfig(env, { port: 4317 });
+    assert.equal(c.on, false, name);
+    assert.equal(c.state, 'incomplete', name);
+    assert.deepEqual(c.missing, [name]);
+    assert.match(c.reason, new RegExp(name));
+    assert.equal(auth.remoteConfig({ ...env, [name]: '   ' }, { port: 4317 }).on, false, name + ' blank');
+  }
+  // Another port ignores the settings (the test offices and the branch offices), also a named branch office.
+  const other = auth.remoteConfig(REMOTE_ENV, { port: 4392 });
+  assert.equal(other.on, false);
+  assert.equal(other.state, 'off');
+  assert.equal(auth.remoteConfig({ ...REMOTE_ENV, OFFICE_REMOTE_PORT: '4392' }, { port: 4392 }).on, true);
+  assert.equal(auth.remoteConfig({ ...REMOTE_ENV, OFFICE_REMOTE_PORT: '4392' }, { port: 4392, branch: true }).on, false, 'a branch office is never remote');
+  assert.equal(auth.remoteConfig({ ...REMOTE_ENV, OFFICE_REMOTE_PORT: '4392' }, { port: 4317 }).on, false);
+  assert.equal(auth.remoteConfig({ ...REMOTE_ENV, OFFICE_REMOTE_PORT: '0' }, { port: 4317 }).state, 'incomplete', 'a port that is not a port');
+  // Odd values are not accepted.
+  const bad = (more) => auth.remoteConfig({ ...REMOTE_ENV, ...more }, { port: 4317 });
+  for (const more of [
+    { OFFICE_REMOTE_HOST: 'localhost' }, { OFFICE_REMOTE_HOST: '127.0.0.1' }, { OFFICE_REMOTE_HOST: 'office.example.test:4317' },
+    { OFFICE_REMOTE_HOST: 'https://office.example.test' }, { OFFICE_REMOTE_HOST: 'office' }, { OFFICE_REMOTE_HOST: 'a b.example.test' },
+    { OFFICE_REMOTE_TEAM: 'https://owner.cloudflareaccess.com' }, { OFFICE_REMOTE_TEAM: 'owner.cloudflareaccess.com/x' }, { OFFICE_REMOTE_TEAM: 'owner' },
+    { OFFICE_REMOTE_EMAILS: 'not-an-email' }, { OFFICE_REMOTE_EMAILS: '*@example.test' }, { OFFICE_REMOTE_EMAILS: ',' },
+    { OFFICE_REMOTE_CERTS_URL: 'http://evil.example/certs' }, { OFFICE_REMOTE_CERTS_URL: 'ftp://127.0.0.1/certs' },
+  ]) { const c = bad(more); assert.equal(c.on, false, JSON.stringify(more)); assert.equal(c.state, 'incomplete', JSON.stringify(more)); assert.ok(c.reason); }
+  assert.equal(bad({ OFFICE_REMOTE_CERTS_URL: 'http://127.0.0.1:9/certs' }).certsUrl, 'http://127.0.0.1:9/certs', 'loopback stand-in for tests');
+});
+
+test('verifyAccessToken: the one valid token passes, every other token fails', async () => {
+  const cfg = remoteOn();
+  const run = (token, keys = staticKeys(), now = NOW) => auth.verifyAccessToken(token, cfg, keys, () => now);
+  const good = await run(accessToken());
+  assert.equal(good.ok, true);
+  assert.equal(good.email, 'owner@example.test');
+  assert.equal(good.exp, NOW / 1000 + 3600);
+  assert.equal((await run(accessToken({ over: { email: 'OWNER@example.test' } }))).ok, true, 'email case');
+  assert.equal((await run(accessToken({ over: { email: 'second@example.test' } }))).ok, true, 'a second allowed email');
+  assert.equal((await run(accessToken({ over: { aud: 'aud-tag-1' } }))).ok, true, 'aud as text');
+  assert.equal((await run(accessToken({ over: { aud: ['other', 'aud-tag-1'] } }))).ok, true);
+  const no = async (what, token, keys) => { const r = await run(token, keys); assert.equal(r.ok, false, what); assert.ok(r.reason, what); assert.equal(r.email, undefined, what); };
+  await no('wrong audience', accessToken({ over: { aud: ['other'] } }));
+  await no('no audience', accessToken({ over: { aud: undefined } }));
+  await no('empty audience', accessToken({ over: { aud: [] } }));
+  await no('wrong issuer', accessToken({ over: { iss: 'https://evil.cloudflareaccess.com' } }));
+  await no('no issuer', accessToken({ over: { iss: undefined } }));
+  await no('email not allowed', accessToken({ over: { email: 'eve@example.test' } }));
+  await no('no email (a service token)', accessToken({ over: { email: undefined, common_name: 'abc.access' } }));
+  await no('email not text', accessToken({ over: { email: ['owner@example.test'] } }));
+  await no('expired', accessToken({ over: { exp: NOW / 1000 - 1 } }));
+  await no('expires now', accessToken({ over: { exp: NOW / 1000 } }));
+  await no('no expiry', accessToken({ over: { exp: undefined } }));
+  await no('expiry not a number', accessToken({ over: { exp: String(NOW / 1000 + 100) } }));
+  await no('not before is in the future', accessToken({ over: { nbf: NOW / 1000 + 600 } }));
+  await no('unknown key id', accessToken({ kid: 'nope' }));
+  await no('no key id', accessToken({ head: { kid: undefined } }));
+  await no('signed by another key', accessToken({ key: OTHER_PRIV }));
+  await no('broken signature', accessToken({ sig: false }));
+  await no('alg none', accessToken({ head: { alg: 'none' } }));
+  await no('alg HS256', accessToken({ head: { alg: 'HS256' } }));
+  await no('alg RS384', accessToken({ head: { alg: 'RS384' } }));
+  for (const bad of [undefined, null, '', 'a.b', 'a.b.c.d', 'x'.repeat(9000), 42, ['t'], '...', 'e30.e30.']) await no('shape ' + String(bad).slice(0, 12), bad);
+  const t = accessToken();
+  const [h, p, s] = t.split('.');
+  await no('payload changed after signing', `${h}.${b64u({ ...JSON.parse(Buffer.from(p, 'base64url')), email: 'eve@example.test' })}.${s}`);
+  await no('padding in the signature', `${h}.${p}.${s}=`);
+  await no('a cert list that cannot be read', t, auth.createAccessKeys({ url: 'x', now: () => NOW, fetchJson: async () => { throw new Error('offline'); } }));
+  await no('a cert list with no keys', t, staticKeys([]));
+  await no('a cert list that is not a list', t, auth.createAccessKeys({ url: 'x', now: () => NOW, fetchJson: async () => ({ keys: 'x' }) }));
+  await no('a key that is not RSA', t, staticKeys([{ kty: 'oct', k: 'AAAA', kid: 'k1' }]));
+  const small = crypto.generateKeyPairSync('rsa', { modulusLength: 1024 });
+  await no('a 1024 bit key', accessToken({ key: small.privateKey }), staticKeys([jwkOf(small.publicKey, 'k1')]));
+});
+
+test('Access keys: cached, read again on an unknown key id at most once a minute, replaced whole, fail closed', async () => {
+  let t = NOW, fetches = 0, doc = { keys: [jwkOf(RSA_PUB, 'k1')] }, fail = false;
+  const keys = auth.createAccessKeys({ url: 'u', now: () => t, fetchJson: async () => { fetches++; if (fail) throw new Error('offline'); return doc; } });
+  assert.ok(await keys.get('k1'));
+  assert.ok(await keys.get('k1'));
+  assert.equal(fetches, 1, 'a known key comes from the cache');
+  assert.equal(await keys.get('k2'), null);
+  assert.equal(fetches, 1, 'an unknown id inside the first minute does not fetch again');
+  t += 60000;
+  assert.equal(await keys.get('k2'), null);
+  assert.equal(fetches, 2, 'after a minute an unknown id fetches once');
+  for (let i = 0; i < 5; i++) await keys.get('k' + i + 'x');
+  assert.equal(fetches, 2, 'a flood of unknown ids fetches no more');
+  // A rotation: k1 goes, k2 comes. The old key is gone after the next read.
+  doc = { keys: [jwkOf(RSA_PUB, 'k2')] };
+  t += 60000;
+  assert.ok(await keys.get('k2'));
+  assert.equal(await keys.get('k1'), null, 'the list is replaced, not added to');
+  // A failed read keeps the cached keys for now, and an old cache is not trusted for ever.
+  fail = true;
+  t += 60000;
+  assert.equal(await keys.get('zz'), null);
+  assert.ok(await keys.get('k2'), 'cache still good after one failed read');
+  t += 3600000;
+  assert.equal(await keys.get('k2'), null, 'a cache older than an hour that cannot be read again is not trusted');
+  // Two reads at once share one fetch.
+  fetches = 0; fail = false; t += 60000;
+  const k2 = auth.createAccessKeys({ url: 'u', now: () => t, fetchJson: async () => { fetches++; await new Promise((r) => setTimeout(r, 20)); return doc; } });
+  const [a, b] = await Promise.all([k2.get('k2'), k2.get('k2')]);
+  assert.ok(a && b);
+  assert.equal(fetches, 1);
+});
+
+test('remote request gate: Host, Access login, route group, Origin and fetch site', async () => {
+  const cfg = remoteOn();
+  const keys = staticKeys();
+  const rsite = { port: 4317, agentToken: AG, pageToken: PG, isStatic: (p) => p === '/adapter.js', remote: { config: cfg, keys, pageToken: RPG }, now: () => NOW };
+  const R = 'office.example.test';
+  const go = (method, p, headers) => auth.gateRequest({ method, path: p, headers }, rsite);
+  const jwt = accessToken();
+  const A = (more = {}) => ({ host: R, 'cf-access-jwt-assertion': jwt, ...more });
+  const AJ = (more = {}) => A({ 'content-type': 'application/json', ...more });
+  const ck = { cookie: `${auth.cookieName(4317)}=${RPG}` };
+  const who = { email: 'owner@example.test', exp: NOW / 1000 + 3600 };
+  // Local requests go the local way.
+  assert.deepEqual(await go('GET', '/', { host: '127.0.0.1:4317' }), { ok: true, group: 'public' });
+  assert.equal((await go('GET', '/', { host: 'evil.example' })).status, 403);
+  // A remote request needs the Access login on every route, the public page too.
+  for (const [m, p] of [['GET', '/'], ['GET', '/adapter.js'], ['GET', '/events'], ['GET', '/api/info'], ['POST', '/remote/signin']]) {
+    const bare = { host: R, ...(m === 'POST' ? { 'content-type': 'application/json' } : {}), ...ck };
+    const r = await go(m, p, bare);
+    assert.equal(r.ok, false, `${m} ${p} with no Access login`);
+    assert.equal(r.status, 403, `${m} ${p}`);
+    assert.equal((await go(m, p, { ...bare, 'cf-access-jwt-assertion': accessToken({ over: { aud: ['x'] } }) })).status, 403);
+    assert.equal((await go(m, p, { ...bare, 'x-office-token': PG })).status, 403, 'the page token alone is not the Access login');
+  }
+  // A cookie named CF_Authorization is not the header: only Cf-Access-Jwt-Assertion counts.
+  assert.equal((await go('GET', '/', { host: R, cookie: `CF_Authorization=${jwt}` })).status, 403);
+  // With the login: public page and sign-in work; the page group also needs the page cookie.
+  assert.deepEqual(await go('GET', '/', A()), { ok: true, group: 'public' });
+  assert.deepEqual(await go('GET', '/adapter.js', A()), { ok: true, group: 'public' });
+  assert.deepEqual(await go('POST', '/remote/signin', AJ()), { ok: true, group: 'launch', remote: who });
+  assert.deepEqual(await go('GET', '/events', A(ck)), { ok: true, group: 'page', remote: who });
+  assert.equal((await go('GET', '/api/info', A())).status, 401, 'Access login but no page cookie');
+  assert.equal((await go('GET', '/api/info', A({ cookie: `${auth.cookieName(4317)}=${AG}` }))).status, 401);
+  assert.equal((await go('GET', '/api/info', A({ cookie: `${auth.cookieName(4317)}=${PG}` }))).status, 401, 'the local page token is not the remote one');
+  assert.equal((await go('POST', '/api/answer', AJ({ 'x-office-token': PG }))).status, 401);
+  assert.equal((await go('POST', '/api/answer', AJ({ 'x-office-token': RPG }))).ok, true, 'the remote page token in a header is fine with the login');
+  // The agent group never answers a remote request, with or without the agent token.
+  for (const p of ['/hook', '/hook/http', '/hook/permission', '/hook/openclaw', '/mcp/inbox', '/mcp/room/update']) {
+    const r = await go('POST', p, AJ({ 'x-office-token': AG }));
+    assert.equal(r.ok, false, p);
+    assert.equal(r.status, 403, p);
+    assert.equal((await go('POST', p, AJ())).status, 403, p + ' no token');
+  }
+  // The launch code is for the local page only; the remote sign-in is for the remote host only.
+  assert.equal((await go('POST', '/launch', AJ())).status, 404);
+  assert.equal((await go('POST', '/remote/signin', { host: '127.0.0.1:4317', 'content-type': 'application/json', 'cf-access-jwt-assertion': jwt })).status, 404, 'no sign-in on the local host');
+  assert.equal((await go('POST', '/remote/signin', { host: 'localhost:4317', 'content-type': 'application/json' })).status, 404);
+  assert.equal((await go('GET', '/remote/signin', A())).status, 404);
+  assert.equal((await go('POST', '/remote/signin', A({ 'content-type': 'text/plain' }))).status, 415);
+  // Origin: the remote origin only for the remote Host; the local origins are not the remote Host's.
+  assert.equal((await go('POST', '/api/answer', AJ({ ...ck, origin: `https://${R}` }))).ok, true);
+  for (const origin of ['https://evil.example', `http://${R}`, `https://${R}:443`, 'http://127.0.0.1:4317', 'null', `https://${R}/`]) assert.equal((await go('POST', '/api/answer', AJ({ ...ck, origin }))).status, 403, origin);
+  const local = { host: '127.0.0.1:4317', 'content-type': 'application/json', 'x-office-token': PG, origin: `https://${R}` };
+  assert.equal((await go('POST', '/api/answer', local)).status, 403, 'the remote origin is not accepted for a local Host');
+  assert.equal((await go('POST', '/api/answer', { ...local, 'cf-access-jwt-assertion': jwt })).status, 403);
+  for (const s of ['same-site', 'cross-site']) assert.equal((await go('GET', '/events', A({ ...ck, 'sec-fetch-site': s }))).status, 403, s);
+  assert.equal((await go('GET', '/events', A({ ...ck, 'sec-fetch-site': 'same-origin' }))).ok, true);
+  // Host in other spellings is not the remote host.
+  for (const host of [`${R}:4317`, `${R}.`, 'office.example.test.evil.example', `x.${R}`]) assert.equal((await go('GET', '/', { host, 'cf-access-jwt-assertion': jwt })).status, 403, host);
+  assert.equal((await go('GET', '/', { host: R.toUpperCase(), 'cf-access-jwt-assertion': jwt })).ok, true, 'host names are not case sensitive');
+  // Expired logins fail on the next request.
+  rsite.now = () => NOW + 3601 * 1000;
+  assert.equal((await go('GET', '/events', A(ck))).status, 403);
+  // Remote mode off: the same Host is just a wrong Host.
+  const offSite = { ...rsite, now: () => NOW, remote: { config: auth.remoteConfig({}, { port: 4317 }), keys } };
+  assert.equal((await auth.gateRequest({ method: 'GET', path: '/', headers: A() }, offSite)).status, 403);
+  assert.equal((await auth.gateRequest({ method: 'GET', path: '/', headers: A() }, { ...offSite, remote: undefined })).status, 403);
+  // The sync gate on its own never accepts a remote Host or the sign-in route.
+  assert.equal(auth.checkRequest({ method: 'GET', path: '/', headers: A() }, site).status, 403);
+  assert.equal(auth.checkRequest({ method: 'POST', path: '/remote/signin', headers: J() }, site).status, 404);
+});
+
+test('remote cookie: Secure, HttpOnly, SameSite=Strict, and it ends with the Access token', () => {
+  const exp = NOW / 1000 + 3600;
+  const c = auth.remoteCookie(4317, PG, exp, NOW);
+  assert.equal(c, `ao_4317=${PG}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=3600; Expires=${new Date(exp * 1000).toUTCString()}`);
+  assert.match(auth.remoteCookie(4392, PG, exp, NOW), /^ao_4392=/);
+  assert.match(auth.remoteCookie(4317, PG, NOW / 1000 + 5, NOW), /Max-Age=5;/);
+  assert.match(auth.remoteCookie(4317, PG, NOW / 1000 - 5, NOW), /Max-Age=0;/, 'a token that ended gives a cookie that ends at once');
+  assert.doesNotMatch(c, /Domain/i);
+  assert.equal(auth.pageCookie(4317, PG), `ao_4317=${PG}; Path=/; HttpOnly; SameSite=Strict`, 'the local cookie does not change');
+});
+
+test('routeOf: the remote sign-in is a launch route', () => {
+  assert.equal(auth.routeOf('POST', '/remote/signin'), 'launch');
+  assert.equal(auth.routeOf('GET', '/remote/signin'), 'launch');
+  assert.equal(auth.routeOf('POST', '/remote/signinx'), null);
+  assert.equal(auth.routeOf('POST', '/remote'), null);
+});
+
+/** A copy of the office in a temp folder, with a stand-in cert list on loopback. */
+function remoteRig(label) {
+  const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), label)));
+  const dir = path.join(tmp, 'office'), lad = path.join(tmp, 'local');
+  fs.mkdirSync(dir); fs.mkdirSync(lad);
+  for (const f of fs.readdirSync(ROOT)) if (f.endsWith('.mjs') || f === 'package.json') fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
+  for (const d of ['providers', 'public']) fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true });
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toLowerCase() !== 'path' && !k.startsWith('OFFICE_REMOTE')));
+  Object.assign(env, {
+    PATH: [path.dirname(process.execPath), ...(win ? [path.join(process.env.SystemRoot || 'C:\\Windows', 'System32')] : [])].join(path.delimiter),
+    OFFICE_OPEN: '0', OFFICE_HOOKS: 'command', LOCALAPPDATA: lad, APPDATA: path.join(tmp, 'roaming'), OFFICE_RATE_FILE: path.join(tmp, 'no-rate.json'),
+  });
+  return { tmp, dir, env };
+}
+const stopAll = async (list) => { for (const o of list) { if (!o) continue; o.child.kill(); await new Promise((r) => (o.child.exitCode !== null ? r() : o.child.once('exit', r))); } };
+
+test('remote access on a real server: Access login checked against a stand-in cert list, agent routes closed, cookie ends with the token', { timeout: 900000 }, async () => {
+  const { tmp, dir, env } = remoteRig('ao-remote-');
+  let certHits = 0, certsOk = true;
+  const certs = http.createServer((req, res) => {
+    certHits++;
+    if (!certsOk) { res.writeHead(500); return res.end('no'); }
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ keys: [jwkOf(RSA_PUB, 'k1')], public_cert: { kid: 'k1', cert: 'x' } }));
+  });
+  await new Promise((r) => certs.listen(0, '127.0.0.1', r));
+  const certsUrl = `http://127.0.0.1:${certs.address().port}/cdn-cgi/access/certs`;
+  const R = REMOTE_ENV.OFFICE_REMOTE_HOST;
+  const live = (over = {}) => accessToken({ over: { iat: Date.now() / 1000 - 5, exp: Date.now() / 1000 + 3600, ...over } });
+  const J2 = { 'content-type': 'application/json' };
+  let office = null, plain = null;
+  try {
+    // Settings for another port: the office ignores them (a branch or test office is never remote) and never reads the cert list.
+    const ignored = await startOnFreePort(dir, { ...env, ...REMOTE_ENV, OFFICE_REMOTE_CERTS_URL: certsUrl });
+    plain = ignored.office;
+    const pg0 = JSON.parse(fs.readFileSync(auth.pageFile(ignored.env, ignored.port), 'utf8')).token;
+    const info0 = await hit(ignored.port, 'GET', '/api/info', { headers: { 'x-office-token': pg0 } });
+    assert.equal(info0.json.remote.state, 'off');
+    assert.equal(info0.json.remote.host, undefined);
+    assert.equal((await hit(ignored.port, 'GET', '/', { host: R, headers: { 'cf-access-jwt-assertion': live() } })).status, 403);
+    assert.equal(certHits, 0, 'a remote-off office never reads the cert list');
+    await stopAll([plain]);
+    plain = null;
+
+    // Remote on, on the port the settings name.
+    const started = await startOnFreePort(dir, { ...env, ...REMOTE_ENV, OFFICE_REMOTE_CERTS_URL: certsUrl }, { envFor: (p) => ({ OFFICE_REMOTE_PORT: String(p) }) });
+    office = started.office;
+    const port = started.port;
+    const page = JSON.parse(fs.readFileSync(auth.pageFile(started.env, port), 'utf8'));
+    const agent = JSON.parse(fs.readFileSync(officeFiles(dir, port).token, 'utf8'));
+    assert.match(office.out(), new RegExp(`Remote access is on at https://${R.replace(/\./g, '\\.')}`));
+    // Local use is unchanged and shows the state.
+    const info = await hit(port, 'GET', '/api/info', { headers: { 'x-office-token': page.token } });
+    assert.equal(info.json.remote.state, 'on');
+    assert.equal(info.json.remote.host, R);
+    assert.equal(JSON.stringify(info.json.remote).includes('aud-tag-1'), false);
+    // Remote, no login.
+    for (const [m, p] of [['GET', '/'], ['GET', '/events'], ['GET', '/api/info'], ['POST', '/remote/signin'], ['POST', '/api/history']]) {
+      const r = await hit(port, m, p, { host: R, headers: { ...J2, 'x-office-token': page.token }, body: m === 'POST' ? {} : undefined });
+      assert.equal(r.status, 403, `${m} ${p}`);
+      assert.equal(r.headers['x-frame-options'], 'DENY');
+      assert.equal(r.headers['content-security-policy'], auth.CSP);
+    }
+    // Remote with a wrong login.
+    for (const bad of [live({ aud: ['x'] }), live({ email: 'eve@example.test' }), live({ exp: Date.now() / 1000 - 5 }), accessToken({ key: OTHER_PRIV }), 'junk']) {
+      assert.equal((await hit(port, 'GET', '/', { host: R, headers: { 'cf-access-jwt-assertion': bad } })).status, 403);
+    }
+    // The agent routes never answer remotely, even with the agent token and a good login.
+    for (const p of ['/hook', '/hook/http', '/hook/openclaw', '/mcp/inbox']) {
+      assert.equal((await hit(port, 'POST', p, { host: R, headers: { ...J2, 'cf-access-jwt-assertion': live(), 'x-office-token': agent.token }, body: {} })).status, 403, p);
+    }
+    // Remote with the login: the page loads, sign-in gives the cookie.
+    const home = await hit(port, 'GET', '/', { host: R, headers: { 'cf-access-jwt-assertion': live() } });
+    assert.equal(home.status, 200);
+    assert.ok(!home.text.includes(page.token));
+    assert.equal((await hit(port, 'GET', '/api/auth', { host: R, headers: { 'cf-access-jwt-assertion': live() } })).status, 401, 'login but no cookie');
+    const exp = Math.floor(Date.now() / 1000) + 600;
+    const signed = await hit(port, 'POST', '/remote/signin', { host: R, headers: { ...J2, 'cf-access-jwt-assertion': live({ exp }), origin: `https://${R}`, 'sec-fetch-site': 'same-origin' }, body: {} });
+    assert.equal(signed.status, 200);
+    const sc = String(signed.headers['set-cookie']);
+    assert.match(sc, new RegExp(`^ao_${port}=[0-9a-f]{64}; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=\\d+; Expires=`));
+    assert.ok(!sc.includes(page.token), 'the remote cookie is not the local page token');
+    const maxAge = Number(/Max-Age=(\d+)/.exec(sc)[1]);
+    assert.ok(maxAge <= 600 && maxAge >= 590, sc);
+    const jar = sc.split(';')[0];
+    assert.equal((await hit(port, 'GET', '/api/auth', { host: R, headers: { 'cf-access-jwt-assertion': live(), cookie: jar } })).status, 200);
+    assert.equal((await hit(port, 'GET', '/events', { host: R, headers: { 'cf-access-jwt-assertion': live(), cookie: jar } })).status, 200);
+    assert.equal((await hit(port, 'GET', '/api/auth', { host: R, headers: { cookie: jar } })).status, 403, 'a stolen cookie without the Access login opens nothing');
+    // The sign-in says who signed in (the feed line, and the log line the test can read: no route lists the office's own feed).
+    await until(() => /Remote sign-in: owner@example\.test/.test(office.out()), 'the sign-in log line', { ms: 5000, log: () => office.out() });
+    // The remote cookie opens nothing on the local host, and the local cookie opens nothing on the remote one.
+    assert.equal((await hit(port, 'GET', '/api/auth', { headers: { cookie: jar } })).status, 401);
+    assert.equal((await hit(port, 'GET', '/api/auth', { host: R, headers: { 'cf-access-jwt-assertion': live(), cookie: `ao_${port}=${page.token}` } })).status, 401);
+    // A remote request cannot use the local launch code, and the local host has no remote sign-in.
+    assert.equal((await hit(port, 'POST', '/launch', { host: R, headers: { ...J2, 'cf-access-jwt-assertion': live() }, body: { code: '0'.repeat(32) } })).status, 404);
+    assert.equal((await hit(port, 'POST', '/remote/signin', { headers: { ...J2, 'cf-access-jwt-assertion': live() }, body: {} })).status, 404);
+    // The cert list cannot be read: remote refuses an unknown key (fail closed); local is untouched.
+    certsOk = false;
+    assert.equal((await hit(port, 'GET', '/', { host: R, headers: { 'cf-access-jwt-assertion': accessToken({ kid: 'rotated', over: { iat: Date.now() / 1000, exp: Date.now() / 1000 + 3600 } }) } })).status, 403);
+    assert.equal((await hit(port, 'GET', '/api/auth', { headers: { 'x-office-token': page.token } })).status, 200);
+  } finally {
+    await stopAll([office, plain]);
+    await new Promise((r) => certs.close(r));
+    fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+  }
+});
+
+test('an incomplete remote setup is named in the start log and the info route, and the office runs without remote access', { timeout: 900000 }, async () => {
+  const { tmp, dir, env } = remoteRig('ao-remote2-');
+  let office = null;
+  try {
+    const half = { ...env, OFFICE_REMOTE_HOST: REMOTE_ENV.OFFICE_REMOTE_HOST, OFFICE_REMOTE_TEAM: REMOTE_ENV.OFFICE_REMOTE_TEAM };
+    const started = await startOnFreePort(dir, half, { envFor: (p) => ({ OFFICE_REMOTE_PORT: String(p) }) });
+    office = started.office;
+    assert.match(office.out(), /Remote access is off: .*OFFICE_REMOTE_AUD.*OFFICE_REMOTE_EMAILS/);
+    const page = JSON.parse(fs.readFileSync(auth.pageFile(started.env, started.port), 'utf8'));
+    const info = await hit(started.port, 'GET', '/api/info', { headers: { 'x-office-token': page.token } });
+    assert.equal(info.json.remote.state, 'incomplete');
+    assert.deepEqual(info.json.remote.missing, ['OFFICE_REMOTE_AUD', 'OFFICE_REMOTE_EMAILS']);
+    assert.equal((await hit(started.port, 'GET', '/', { host: REMOTE_ENV.OFFICE_REMOTE_HOST })).status, 403);
+    await stopAll([office]);
+    // No remote setting at all: silent and off.
+    const bare = await startOnFreePort(dir, env);
+    office = bare.office;
+    assert.doesNotMatch(office.out(), /Remote access/);
+    const pg = JSON.parse(fs.readFileSync(auth.pageFile(bare.env, bare.port), 'utf8'));
+    assert.equal((await hit(bare.port, 'GET', '/api/info', { headers: { 'x-office-token': pg.token } })).json.remote.state, 'off');
+  } finally {
+    await stopAll([office]);
+    fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+  }
 });

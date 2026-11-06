@@ -105,6 +105,13 @@ const AGENT_TOKEN = readToken(TOKEN_FILE) || OLD_PLAIN_TOKEN || auth.newAgentTok
 const PAGE_TOKEN = auth.newPageToken();
 const PAGE_FILE = auth.pageFile(process.env, PORT);
 const launchCodes = auth.createLaunchCodes();
+// Remote access (#133, ADR 0005): off unless the four OFFICE_REMOTE_* settings are set, and only on the port they name.
+// Access signs each request it lets through; the gate checks that token itself (auth.gateRequest). The server still
+// listens on 127.0.0.1 only: cloudflared on this PC forwards to it.
+const REMOTE = auth.remoteConfig(process.env, { port: PORT, branch: !!BRANCH_PORT });
+// The remote page token is separate from PAGE_TOKEN and new at each start: a remote cookie opens nothing on the local host.
+const REMOTE_PAGE_TOKEN = auth.newPageToken();
+const REMOTE_SITE = REMOTE.on ? { config: REMOTE, keys: auth.createAccessKeys({ url: REMOTE.certsUrl }), pageToken: REMOTE_PAGE_TOKEN } : null;
 // Files with a token, and settings files whose commands sessions run: only the user, SYSTEM and Administrators can
 // read them (auth.writeOwnerOnly). icacls sets the ACL; Windows PowerShell reads it back by SID (auth.ACL_SCRIPT,
 // about 0.2 s per file, only when a file is written).
@@ -1478,8 +1485,8 @@ const server = http.createServer(async (req, res) => {
     for (const [k, v] of Object.entries(auth.SECURITY_HEADERS)) res.setHeader(k, v);
     const url = new URL(req.url, `http://127.0.0.1:${PORT}`);
     // Host, Origin, Sec-Fetch-Site, JSON body and the token of the route group (auth.mjs checkRequest).
-    const gate = auth.checkRequest({ method: req.method, path: url.pathname, headers: req.headers },
-      { port: PORT, agentToken: AGENT_TOKEN, pageToken: PAGE_TOKEN, isStatic: (p) => STATIC_FILES.has(p) });
+    const gate = await auth.gateRequest({ method: req.method, path: url.pathname, headers: req.headers },
+      { port: PORT, agentToken: AGENT_TOKEN, pageToken: PAGE_TOKEN, isStatic: (p) => STATIC_FILES.has(p), remote: REMOTE_SITE });
     if (!gate.ok) return send(res, gate.status, { error: gate.error });
 
     if (gate.group === 'public') {
@@ -1488,6 +1495,15 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/favicon.ico') { res.writeHead(204); return res.end(); }
       const rel = STATIC_FILES.get(url.pathname);
       return send(res, 200, fs.readFileSync(path.join(ROOT, rel)), MIME[path.extname(rel)] || 'application/octet-stream');
+    }
+    if (gate.group === 'launch' && gate.remote) {
+      // Remote sign-in: the gate saw a valid Access login, so the page gets its cookie with no launch code. The cookie ends
+      // with the Access token. A feed line and a log line say who signed in.
+      res.setHeader('set-cookie', auth.remoteCookie(PORT, REMOTE_PAGE_TOKEN, gate.remote.exp, Date.now()));
+      addFeed({ uid: 'remote', name: 'Remote' }, 'start', `signed in from ${gate.remote.email}`);
+      console.log(`Remote sign-in: ${gate.remote.email}`);
+      broadcast();
+      return send(res, 200, { ok: true });
     }
     if (gate.group === 'launch') {
       // A launch code works once, for 5 minutes. The cookie is HttpOnly, so page scripts never see the token.
@@ -1519,6 +1535,7 @@ const server = http.createServer(async (req, res) => {
         agentToken: AGENT_TOKEN, // the Attach sessions dialog hides it until the user clicks Show (#60)
         launchCommand: `claude --settings "${activeHooksFile()}" --mcp-config "${MCP_FILE}"`,
         startup: startup.status(STARTUP_DIR, ROOT, PORT),
+        remote: auth.remoteInfo(REMOTE), // off, on with its address, or the setting that is missing (the Attach sessions dialog)
         hooksMode, claudeVersion: CLAUDE_VERSION, templates: persisted.templates, schedules: persisted.schedules, spendLimit: defaultSpend(),
       });
     }
@@ -1692,6 +1709,9 @@ server.listen(PORT, HOST, () => {
   const link = auth.launchUrl(PORT, launchCodes.mint());
   if (OLD_PLAIN_TOKEN) console.log(`Port ${PORT} reuses the agent token of the old .office-token, so settings made before this version keep working. This office keeps its own files from now on.`);
   if (BRANCH_PORT) console.log(`Branch "${BRANCH_PORT.name}" uses port ${PORT}.${BRANCH_PORT.busy.length ? ` Port ${BRANCH_PORT.busy.join(', ')} ${BRANCH_PORT.busy.length > 1 ? 'were' : 'was'} busy, so it took the next free port of its sequence.` : ''}`);
+  if (REMOTE.on) console.log(`Remote access is on at https://${REMOTE.host} for ${REMOTE.emails.join(', ')}. The office still listens on 127.0.0.1 only. Agent routes refuse remote requests.`);
+  else if (REMOTE.state === 'incomplete') console.log(`Remote access is off: ${REMOTE.reason}`);
+  // Before the line below: tests and tools wait for that line, so everything the start says comes first.
   console.log(`Agent Office is open: ${link}\nThe link works once, for 5 minutes. A reload keeps working. For a new link, run npm start again.`);
   console.log(`Hooks: ${hooksMode} (Claude Code ${CLAUDE_VERSION}). For outside sessions: claude --settings "${activeHooksFile()}" --mcp-config "${MCP_FILE}"`);
   openBrowser(link);

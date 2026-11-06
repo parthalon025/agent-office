@@ -18,7 +18,8 @@
    code (#n=<code>). The page takes the code out of the address bar and trades it for an HttpOnly cookie with
    POST /launch. Every later call and the event stream send the cookie by themselves, so a reload keeps working.
    Without a working cookie the page says so (officeAdapter.onAuth) and asks again every 5 s: a launch link opened
-   in another tab gives this tab the new cookie too. */
+   in another tab gives this tab the new cookie too. On the remote address (#133) the cookie comes from POST /remote/signin
+   instead: Cloudflare Access adds its login to every request, and the server checks it. */
 (function () {
   var problemFns = [];
   // The lean snapshot leaves out the oldest replies of a session with long replies (wire.js olderReplies). The store asks for
@@ -39,9 +40,19 @@
     authFns.forEach(function (fn) { fn(a); });
   }
   function answer(r) { return r.json().catch(function () { return {}; }); }
-  function check() {
-    return fetch('/api/auth').then(function (r) { return answer(r).then(function (j) { return r.ok ? { ok: true } : { ok: false, reason: j.error || 'No access.' }; }); },
+  function probe() {
+    return fetch('/api/auth').then(function (r) { return answer(r).then(function (j) { return r.ok ? { ok: true } : { ok: false, status: r.status, reason: j.error || 'No access.' }; }); },
       function () { return { ok: false, reason: 'The office server is not reachable.' }; });
+  }
+  // On the remote address (https; the local office is http) a page with no cookie asks for one with its Cloudflare Access
+  // login: POST /remote/signin, no code. The server checks the login itself. Without a valid login it answers 403, and the
+  // page says it has no access.
+  function check() {
+    return probe().then(function (a) {
+      if (a.ok || a.status !== 401 || location.protocol !== 'https:') return a;
+      return fetch('/remote/signin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+        .then(function (r) { return r.ok ? probe() : a; }, function () { return a; });
+    });
   }
   var code = /^#n=([0-9a-f]{32})$/.exec(location.hash);
   if (code) history.replaceState(null, '', location.pathname + location.search);   // the code works once; keep it out of history
