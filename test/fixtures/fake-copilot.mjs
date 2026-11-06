@@ -37,6 +37,8 @@ const REC = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(impo
 // The signed-in handshake recorded from 1.0.105 on 2026-11-06 (copilot-acp-signed-in.json), used by FAKE_COPILOT=recorded:
 // session/new lists the model "auto" twice and is followed by an available_commands_update.
 const SIGNED = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'copilot-acp-signed-in.json'), 'utf8'));
+// The prompt "Reply with the word ok." recorded the same way ({ dir: 'in' | 'out', msg } lines), replayed in recorded mode.
+const PROMPT = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'copilot-acp-prompt.json'), 'utf8'));
 const args = process.argv.slice(2);
 const mode = process.env.FAKE_COPILOT || 'ok';
 const delay = Number(process.env.FAKE_COPILOT_DELAY) || 0;
@@ -227,6 +229,16 @@ async function handle(m) {
       return reply({ sessionId: 'cs-1', models: { currentModelId: 'gpt-5.4', availableModels: [{ modelId: 'gpt-5.4', name: 'GPT-5.4' }, { modelId: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6' }] } });
     }
     case 'session/prompt':
+      if (mode === 'recorded') {
+        // The recorded round trip (copilot-acp-prompt.json): every update the real Copilot sent for the prompt, then its answer.
+        const at = PROMPT.findIndex((e) => e.dir === 'out' && e.msg.method === 'session/prompt');
+        for (const e of PROMPT.slice(at + 1)) {
+          if (e.dir !== 'in') break;
+          if (e.msg.id !== undefined) return reply(e.msg.result);
+          send({ method: e.msg.method, params: { ...e.msg.params, sessionId: p.sessionId } });
+        }
+        return fail(-32603, 'the recording has no answer');
+      }
       try { return reply(await turn(p.sessionId, p.prompt || [])); } catch (e) { return fail(e.code || -32603, e.message); }
     case 'session/cancel': {
       for (const [id, r] of asked) { asked.delete(id); r({ result: { outcome: { outcome: 'cancelled' } } }); }

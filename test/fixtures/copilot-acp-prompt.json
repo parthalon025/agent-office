@@ -1,0 +1,1733 @@
+[
+  {
+    "dir": "out",
+    "msg": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "method": "initialize",
+      "params": {
+        "protocolVersion": 1,
+        "clientCapabilities": {
+          "fs": {
+            "readTextFile": false,
+            "writeTextFile": false
+          },
+          "terminal": false
+        }
+      }
+    }
+  },
+  {
+    "dir": "in",
+    "msg": {
+      "jsonrpc": "2.0",
+      "id": 1,
+      "result": {
+        "protocolVersion": 1,
+        "agentCapabilities": {
+          "auth": {
+            "logout": {}
+          },
+          "loadSession": true,
+          "mcpCapabilities": {
+            "http": true,
+            "sse": true
+          },
+          "promptCapabilities": {
+            "image": true,
+            "audio": false,
+            "embeddedContext": true
+          },
+          "sessionCapabilities": {
+            "close": {},
+            "list": {}
+          }
+        },
+        "agentInfo": {
+          "name": "<REDACTED>",
+          "title": "Copilot",
+          "version": "1.0.105"
+        },
+        "authMethods": [
+          {
+            "id": "copilot-login",
+            "name": "<REDACTED>",
+            "description": "Run `copilot login` in the terminal",
+            "_meta": {
+              "terminal-auth": {
+                "command": "C:\\Users\\<USER>\\AppData\\Local\\GitHubCopilotCLI\\copilot.exe",
+                "args": [
+                  "login"
+                ],
+                "label": "Copilot Login"
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  {
+    "dir": "out",
+    "msg": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "method": "session/new",
+      "params": {
+        "cwd": "C:\\Users\\<USER>\\AppData\\Local\\Temp\\ao-cp-cwd-2tmyG9",
+        "mcpServers": []
+      }
+    }
+  },
+  {
+    "dir": "in",
+    "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "46963fbc-fb62-45ba-9695-08a24f561060",
+        "update": {
+          "sessionUpdate": "available_commands_update",
+          "availableCommands": [
+            {
+              "name": "<REDACTED>",
+              "description": "Allow file access to a directory and load its .github skills and agents as trusted configuration",
+              "input": {
+                "hint": "directory"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Enable all permissions",
+              "input": {
+                "hint": "[on|off|show]"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Switch between permission modes",
+              "input": {
+                "hint": "[default|allow-all|show]"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Toggle autopilot mode, or set an autopilot objective with an optional AI-credit limit (--max-ai-credits)",
+              "input": {
+                "hint": "[on|off|<objective>] [--max-ai-credits <N>]"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Summarize conversation history to reduce context window usage. Optionally provide focus instructions.",
+              "input": {
+                "hint": "focus instructions"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Trace code history with git blame and linked Copilot sessions",
+              "input": {
+                "hint": "text | pull request | commit"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Session history tools and insights",
+              "input": {
+                "hint": "standup|search|tips|cost-tips|improve|reindex"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Show context window token usage and visualization"
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Change working directory or show current directory",
+              "input": {
+                "hint": "directory"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Show loaded environment details (instructions, MCP servers, skills, agents, hooks, plugins, LSPs, extensions)"
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Schedule a recurring prompt or skill for this session",
+              "input": {
+                "hint": "<interval> <prompt>"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Schedule a one-shot prompt or skill for this session",
+              "input": {
+                "hint": "<delay> <prompt>"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Enable fleet mode for parallel subagent execution",
+              "input": {
+                "hint": "prompt"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Initialize Copilot instructions for this repository",
+              "input": {
+                "hint": ""
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Display allowed directories and exact session path grants"
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Manage MCP server configuration",
+              "input": {
+                "hint": ""
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Show memory status, or enable/disable memory across sessions",
+              "input": {
+                "hint": ""
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Select the AI model for this session (use 'auto' to let Copilot pick automatically). Use /config model to set the user default, '--repo'/'--local' to set the repo default, or 'plan'/'--plan' to set the plan-mode model.",
+              "input": {
+                "hint": "model"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Create an implementation plan before coding",
+              "input": {
+                "hint": "prompt"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Manage plugins and plugin marketplaces",
+              "input": {
+                "hint": ""
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Rename the current session",
+              "input": {
+                "hint": "name"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Run deep research investigation using GitHub search and web sources",
+              "input": {
+                "hint": "topic"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Show remote status or toggle remote control from GitHub web and mobile",
+              "input": {
+                "hint": ""
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Reset session tool and exact-path approvals"
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Run code review agent to analyze changes",
+              "input": {
+                "hint": "additional instructions"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Manage sandbox settings, including file path permissions, network permissions, and more",
+              "input": {
+                "hint": ""
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Analyze staged and unstaged changes for security vulnerabilities.",
+              "input": {
+                "hint": "additional instructions"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "View and manage sessions",
+              "input": {
+                "hint": ""
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Share the session via GitHub and get a shareable link",
+              "input": {
+                "hint": ""
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Manage skills for enhanced capabilities",
+              "input": {
+                "hint": ""
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Manage Copilot Subconscious memory consolidation",
+              "input": {
+                "hint": ""
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Display session usage metrics and statistics"
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Ask which skill or flow fits your situation. A router over the skills in this repo.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Use this skill to create Codex Automations.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "A Codex Canvas is a live React app that the user can open beside the chat. You MUST use a canvas when the agent produces a standalone analytical artifact — quantitative analyses, billing investigations, security audits, architecture reviews, data-heavy content, timelines, charts, tables, interactive explorations, repeatable tools, or any response that benefits from visual layout. Especially prefer a canvas when presenting results from MCP tools (Datadog, Databricks, Linear, Sentry, Slack, etc.) where the data is the deliverable — render it in a rich canvas rather than dumping it into a markdown table or code block. If you catch yourself about to write a markdown table, stop and use a canvas instead. You MUST also read this skill whenever you create, edit, or debug any .canvas.tsx file.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Hand the current conversation off to a fresh background agent that picks up the work immediately.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Clerk Backend REST API explorer and executor. Browse tags, inspect endpoint schemas, and execute authenticated requests. Use when listing users, managing organizations, or calling any Clerk API endpoint.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Operate the Clerk CLI (`clerk` binary) for authentication, user/org/session management, impersonation, local webhook testing, deploy verification, instance config, env keys, feature toggles, and any Clerk Backend, Platform, or Frontend API call. Use when the user mentions Clerk management tasks, \"list clerk users\", \"impersonate a user\", \"test webhooks locally\", \"enable orgs\", \"enable billing\", \"clerk env pull\", \"clerk doctor\", \"clerk deploy\", \"clerk api\", or any ad-hoc Clerk API request. Prefer the CLI over raw HTTP: it handles auth, key resolution, app/instance targeting, and formatting automatically.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Custom authentication flows and component appearance - hooks (useSignIn, useSignUp), themes, colors, fonts, CSS. Use for custom sign-in/sign-up flows, appearance styling, visual customization, branding.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Advanced Next.js patterns - middleware, Server Actions, caching with Clerk.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Clerk Organizations for B2B SaaS - create multi-tenant apps with org switching, role-based access, verified domains, and enterprise SSO. Use for team workspaces, RBAC, org-based routing, member management.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Add Clerk authentication to any project by following the official quickstart guides.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "E2E testing for Clerk apps. Use with Playwright or Cypress for auth flow tests.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Clerk webhooks for real-time events and data syncing. Verify with verifyWebhook from the framework-specific package. Handle user, session, organization, billing, and payment events. Build event-driven features like database sync, notifications, and integrations.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes — Standards (does the code follow this repo's documented coding standards?) and Spec (does the code match what the originating issue/spec asked for?). Runs both reviews in parallel sub-agents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes, or asks to \"review since X\".",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Shared vocabulary for designing deep modules. Use when the user wants to design or improve a module's interface, find deepening opportunities, decide where a seam goes, make code more testable or AI-navigable, or when another skill needs the deep-module vocabulary.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Create Codex hooks. Use when you want to create a hook, write hooks.json, add hook scripts, or automate behavior around agent events.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Create Codex rules for persistent AI guidance. Use when you want to create a rule, add coding standards, set up project conventions, configure file-specific patterns, create RULE.md files, or asks about .cursor/rules/ or AGENTS.md.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Create Codex Agent Skills. Use when authoring a new skill or asking about SKILL.md structure.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Create custom subagents for specialized AI tasks. Use when you want to create a new type of subagent, set up task-specific agents, configure code reviewers, debuggers, or domain-specific assistants with custom prompts.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Link this repository to a Vercel project and deploy it using the Vercel MCP tools.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Diagnosis loop for hard bugs and performance regressions. Use when the user says \"diagnose\"/\"debug this\", or reports something broken/throwing/failing/slow.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Build and sharpen a project's domain model. Use when the user wants to pin down domain terminology or a ubiquitous language, record an architectural decision, or when another skill needs to maintain the domain model.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Set up Claude Code hooks to block dangerous git commands (push, reset --hard, clean, branch -D, etc.) before they execute. Use when user wants to prevent destructive git operations, add git safety hooks, or block git push/reset in Claude Code.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "A relentless interview to sharpen a plan or design.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "A relentless interview to sharpen a plan or design, which also creates docs (ADR's and glossary) as we go.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Grill the user relentlessly about a plan, decision, or idea, as scenes they can answer. Use when the user wants to stress-test their thinking, or uses any 'grill' trigger phrases.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Compact the current conversation into a handoff document for another agent to pick up.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Implement a piece of work based on a spec or set of tickets.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Scan a codebase for deepening opportunities, present them as a visual HTML report, then grill through whichever one you pick.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Grill me about specs for the workflows I want to build, within this workspace.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Build, deploy, evaluate, optimize, fine-tune, and manage Microsoft Foundry agents, models, and resources end to end. USE FOR: foundry, azd ai agent, azd provision/deploy, hosted agent scaffold/develop/run/deploy/troubleshoot, prompt agent, managed harness agent, Copilot harness, voice agent, create/update/invoke/evaluate agent, add tool to agent, agent insights, batch/continuous eval, continuous monitoring, agent CI/CD, optimize/improve prompt, optimize agent instructions, Agent Optimizer, dataset curation from traces, deploy model, model fine-tuning (SFT/DPO/RFT), Foundry project, RBAC, role assignment, permissions, quota, capacity, region, deployment failure, AI Services, create Foundry resource, knowledge index, customize deployment, onboard, availability, training-data, grader, distillation, large file upload. DO NOT USE FOR: Azure Functions, App Service, general Azure deploy (use azure-deploy), general Azure prep (use azure-prepare).",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Migrate test files from `as` type assertions to @total-typescript/shoehorn. Use when user mentions shoehorn, wants to replace `as` in tests, or needs partial test data.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Convert 'Applied intelligently' Codex rules (.cursor/rules/*.mdc) and slash commands (.cursor/commands/*.md) to Agent Skills format (.cursor/skills/). Use when you want to migrate rules or commands to skills, convert .mdc rules to SKILL.md format, or consolidate commands into the skills directory.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Create a Codex-hosted repo for the current project and push it. Use when a project has no git remote yet and the user asks to create a repo on Codex, push the project to Codex, or set up a Codex-hosted remote; installs and signs in the origin CLI when needed.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Use /onboard for a focused Codex onboarding flow that learns basic preferences, picks a first goal, and routes the user to the right next action.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Install, sign in, update, or repair the origin CLI for repos hosted on Codex (origin.cursor.com). Use when the CLI is missing or outdated, git push/pull fails to authenticate against origin.cursor.com, or the user asks to set up, clone, or configure Codex-hosted repos.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Build a throwaway prototype to answer a design question. Use when the user wants to sanity-check whether a state model or logic feels right, or explore what a UI should look like.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Rename the current chat to match its focus. Use only when the user invokes /rename-chat. Optional text after the command steers the title.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Use when you need to resolve an in-progress git merge/rebase conflict.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Review code changes with Bugbot subagent.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Review code changes with Security Review subagent.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Create exercise directory structures with sections, problems, solutions, and explainers that pass linting. Use when user wants to scaffold exercises, create exercise stubs, or set up a new course section.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Guide users building apps, scripts, CI pipelines, or automations on top of the Codex SDK - TypeScript (`@cursor/sdk`) or Python (`cursor-sdk` / `cursor_sdk`). Use when the user mentions integrating, installing, or writing code against the Codex SDK; says `Agent.create`, `Agent.prompt`, `Agent.resume`, `agent.send`, `run.stream`, `run.messages`, `CursorAgentError`, `@cursor/sdk`, `cursor-sdk`, or `cursor_sdk`; asks to run Codex agents programmatically from a script, CI/CD pipeline, GitHub Action, backend service, or other code outside the Codex IDE; wants to pick between local and cloud runtime, configure MCP servers for an SDK agent, or handle streaming, cancellation, or errors; or is wiring Codex into an automation, bot, or REST `/v1/agents` migration. Use eagerly rather than answering from memory; the SDK surface evolves and this skill is the source of truth for the external packages.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Configure this repo for the engineering skills — set up its issue tracker, triage label vocabulary, and domain doc layout. Run once before first use of the other engineering skills.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Set up Husky pre-commit hooks with lint-staged (Prettier), type checking, and tests in the current repo. Use when user wants to add pre-commit hooks, set up Husky, configure lint-staged, or add commit-time formatting/typechecking/testing.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Wire dependency-cruiser into a TypeScript repo so each package is a deep module — implementation hidden in subfolders, reachable only through its entry-point files. User-invoked.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Runs the rest of a /shell request as a literal shell command. Use only when the user explicitly invokes /shell and wants the following text executed directly in the terminal.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Split current work into small reviewable PRs. Use when the user asks to split a chat, set of changes, branch, or PR.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Configure a custom status line in the CLI. Use when the user mentions status line, statusline, statusLine, CLI status bar, prompt footer customization, or wants to add session context above the prompt.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Test-driven development. Use when the user wants to build features or fix bugs test-first, mentions \"red-green-refactor\", or wants integration tests.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Teach the user a new skill or concept, within this workspace.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Turn a decision you can't fully answer into a questionnaire for someone else to fill in.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Turn the current conversation into a spec and publish it to the project issue tracker — no interview, just synthesis of what you've already discussed.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker — edges as text in one file per ticket locally, or native blocking links on a real tracker.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Move issues and external PRs through a state machine of triage roles — categorise, verify, grill if needed, and write agent-ready briefs.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "View and modify Codex CLI configuration settings in ~/.cursor/cli-config.json. Use when the user wants to change CLI settings, configure permissions, switch approval mode, enable vim mode, toggle display options, configure sandbox, or manage any CLI preferences.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Modify Codex/VSCode user settings in settings.json. Use when you want to change editor settings, preferences, configuration, themes, font size, tab size, format on save, auto save, keybindings, or any settings.json values.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Use /visualize for creating compact charts, diagrams, or other visuals inline as part of the conversation itself. It chooses among Markdown tables, Mermaid, inline HTML, and other supported in-transcript forms. Use Canvas for durable artifacts outside the transcript that users may revisit, refine, or share.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Stop. That last message did not land — re-pitch it.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Plan a huge chunk of work — more than one agent session can hold — as a shared map of decision tickets on your issue tracker, and resolve them one at a time until the way to the destination is clear.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Generate an interactive bash wizard that walks a human through steps only they can perform. Use when provisioning infrastructure, setting up credentials or CI secrets, walking an unfamiliar third-party dashboard, or running a one-off migration or cutover. Don't invoke this for steps the agent can perform itself.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Writing, exploit — assemble raw material into a journey of beats, grounding each term before a beat leans on it.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Writing documents for agents. Use when creating or editing skills, or modifying AGENTS.md or CLAUDE.md.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Writing, explore — mine raw fragments, no structure yet.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Writing, exploit — shape raw material into an article, paragraph by paragraph.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "dir": "in",
+    "msg": {
+      "jsonrpc": "2.0",
+      "id": 2,
+      "result": {
+        "models": {
+          "availableModels": [
+            {
+              "modelId": "auto",
+              "name": "<REDACTED>",
+              "description": "Let Copilot pick the best model"
+            },
+            {
+              "modelId": "auto",
+              "name": "<REDACTED>",
+              "description": "Auto",
+              "_meta": {
+                "copilotUsage": "1x",
+                "copilotEnablement": "enabled"
+              }
+            }
+          ],
+          "currentModelId": "auto"
+        },
+        "configOptions": [
+          {
+            "type": "select",
+            "id": "mode",
+            "name": "<REDACTED>",
+            "category": "mode",
+            "description": "Controls how Copilot responds: a conversational agent, planning multi-step work, or autonomous autopilot.",
+            "currentValue": "https://agentclientprotocol.com/protocol/session-modes#agent",
+            "options": [
+              {
+                "value": "https://agentclientprotocol.com/protocol/session-modes#agent",
+                "name": "<REDACTED>",
+                "description": "Default agent mode for conversational interactions"
+              },
+              {
+                "value": "https://agentclientprotocol.com/protocol/session-modes#plan",
+                "name": "<REDACTED>",
+                "description": "Plan mode for creating and executing multi-step plans"
+              },
+              {
+                "value": "https://agentclientprotocol.com/protocol/session-modes#autopilot",
+                "name": "<REDACTED>",
+                "description": "Autonomous mode that enables allow-all and runs until task completion without user interaction (experimental)"
+              }
+            ]
+          },
+          {
+            "type": "select",
+            "id": "model",
+            "name": "<REDACTED>",
+            "category": "model",
+            "description": "The AI model Copilot uses to generate responses.",
+            "currentValue": "auto",
+            "options": [
+              {
+                "value": "auto",
+                "name": "<REDACTED>",
+                "description": "Let Copilot pick the best model",
+                "_meta": null
+              },
+              {
+                "value": "auto",
+                "name": "<REDACTED>",
+                "description": "Auto",
+                "_meta": {
+                  "copilotUsage": "1x",
+                  "copilotEnablement": "enabled"
+                }
+              }
+            ]
+          },
+          {
+            "type": "select",
+            "id": "allow_all",
+            "name": "<REDACTED>",
+            "category": "permissions",
+            "description": "Controls whether Copilot prompts for approval before using tools, accessing paths, or fetching URLs.",
+            "currentValue": "off",
+            "options": [
+              {
+                "value": "on",
+                "name": "<REDACTED>",
+                "description": "Automatically approve all tool, path, and URL requests"
+              },
+              {
+                "value": "off",
+                "name": "<REDACTED>",
+                "description": "Require approval for tool, path, and URL requests"
+              }
+            ]
+          }
+        ],
+        "modes": {
+          "availableModes": [
+            {
+              "id": "https://agentclientprotocol.com/protocol/session-modes#agent",
+              "name": "<REDACTED>",
+              "description": "Default agent mode for conversational interactions"
+            },
+            {
+              "id": "https://agentclientprotocol.com/protocol/session-modes#plan",
+              "name": "<REDACTED>",
+              "description": "Plan mode for creating and executing multi-step plans"
+            },
+            {
+              "id": "https://agentclientprotocol.com/protocol/session-modes#autopilot",
+              "name": "<REDACTED>",
+              "description": "Autonomous mode that enables allow-all and runs until task completion without user interaction (experimental)"
+            }
+          ],
+          "currentModeId": "https://agentclientprotocol.com/protocol/session-modes#agent"
+        },
+        "sessionId": "46963fbc-fb62-45ba-9695-08a24f561060"
+      }
+    }
+  },
+  {
+    "dir": "out",
+    "msg": {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "method": "session/prompt",
+      "params": {
+        "sessionId": "46963fbc-fb62-45ba-9695-08a24f561060",
+        "prompt": [
+          {
+            "type": "text",
+            "text": "Reply with the word ok."
+          }
+        ]
+      }
+    }
+  },
+  {
+    "dir": "in",
+    "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "46963fbc-fb62-45ba-9695-08a24f561060",
+        "update": {
+          "sessionUpdate": "available_commands_update",
+          "availableCommands": [
+            {
+              "name": "<REDACTED>",
+              "description": "Allow file access to a directory and load its .github skills and agents as trusted configuration",
+              "input": {
+                "hint": "directory"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Enable all permissions",
+              "input": {
+                "hint": "[on|off|show]"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Switch between permission modes",
+              "input": {
+                "hint": "[default|allow-all|show]"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Toggle autopilot mode, or set an autopilot objective with an optional AI-credit limit (--max-ai-credits)",
+              "input": {
+                "hint": "[on|off|<objective>] [--max-ai-credits <N>]"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Summarize conversation history to reduce context window usage. Optionally provide focus instructions.",
+              "input": {
+                "hint": "focus instructions"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Trace code history with git blame and linked Copilot sessions",
+              "input": {
+                "hint": "text | pull request | commit"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Session history tools and insights",
+              "input": {
+                "hint": "standup|search|tips|cost-tips|improve|reindex"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Show context window token usage and visualization"
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Change working directory or show current directory",
+              "input": {
+                "hint": "directory"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Show loaded environment details (instructions, MCP servers, skills, agents, hooks, plugins, LSPs, extensions)"
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Schedule a recurring prompt or skill for this session",
+              "input": {
+                "hint": "<interval> <prompt>"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Schedule a one-shot prompt or skill for this session",
+              "input": {
+                "hint": "<delay> <prompt>"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Enable fleet mode for parallel subagent execution",
+              "input": {
+                "hint": "prompt"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Initialize Copilot instructions for this repository",
+              "input": {
+                "hint": ""
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Display allowed directories and exact session path grants"
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Manage MCP server configuration",
+              "input": {
+                "hint": ""
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Show memory status, or enable/disable memory across sessions",
+              "input": {
+                "hint": ""
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Select the AI model for this session (use 'auto' to let Copilot pick automatically). Use /config model to set the user default, '--repo'/'--local' to set the repo default, or 'plan'/'--plan' to set the plan-mode model.",
+              "input": {
+                "hint": "model"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Create an implementation plan before coding",
+              "input": {
+                "hint": "prompt"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Manage plugins and plugin marketplaces",
+              "input": {
+                "hint": ""
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Rename the current session",
+              "input": {
+                "hint": "name"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Run deep research investigation using GitHub search and web sources",
+              "input": {
+                "hint": "topic"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Show remote status or toggle remote control from GitHub web and mobile",
+              "input": {
+                "hint": ""
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Reset session tool and exact-path approvals"
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Run code review agent to analyze changes",
+              "input": {
+                "hint": "additional instructions"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Manage sandbox settings, including file path permissions, network permissions, and more",
+              "input": {
+                "hint": ""
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Analyze staged and unstaged changes for security vulnerabilities.",
+              "input": {
+                "hint": "additional instructions"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "View and manage sessions",
+              "input": {
+                "hint": ""
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Share the session via GitHub and get a shareable link",
+              "input": {
+                "hint": ""
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Manage skills for enhanced capabilities",
+              "input": {
+                "hint": ""
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Manage Copilot Subconscious memory consolidation",
+              "input": {
+                "hint": ""
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Display session usage metrics and statistics"
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Ask which skill or flow fits your situation. A router over the skills in this repo.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Use this skill to create Codex Automations.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "A Codex Canvas is a live React app that the user can open beside the chat. You MUST use a canvas when the agent produces a standalone analytical artifact — quantitative analyses, billing investigations, security audits, architecture reviews, data-heavy content, timelines, charts, tables, interactive explorations, repeatable tools, or any response that benefits from visual layout. Especially prefer a canvas when presenting results from MCP tools (Datadog, Databricks, Linear, Sentry, Slack, etc.) where the data is the deliverable — render it in a rich canvas rather than dumping it into a markdown table or code block. If you catch yourself about to write a markdown table, stop and use a canvas instead. You MUST also read this skill whenever you create, edit, or debug any .canvas.tsx file.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Hand the current conversation off to a fresh background agent that picks up the work immediately.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Clerk Backend REST API explorer and executor. Browse tags, inspect endpoint schemas, and execute authenticated requests. Use when listing users, managing organizations, or calling any Clerk API endpoint.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Operate the Clerk CLI (`clerk` binary) for authentication, user/org/session management, impersonation, local webhook testing, deploy verification, instance config, env keys, feature toggles, and any Clerk Backend, Platform, or Frontend API call. Use when the user mentions Clerk management tasks, \"list clerk users\", \"impersonate a user\", \"test webhooks locally\", \"enable orgs\", \"enable billing\", \"clerk env pull\", \"clerk doctor\", \"clerk deploy\", \"clerk api\", or any ad-hoc Clerk API request. Prefer the CLI over raw HTTP: it handles auth, key resolution, app/instance targeting, and formatting automatically.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Custom authentication flows and component appearance - hooks (useSignIn, useSignUp), themes, colors, fonts, CSS. Use for custom sign-in/sign-up flows, appearance styling, visual customization, branding.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Advanced Next.js patterns - middleware, Server Actions, caching with Clerk.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Clerk Organizations for B2B SaaS - create multi-tenant apps with org switching, role-based access, verified domains, and enterprise SSO. Use for team workspaces, RBAC, org-based routing, member management.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Add Clerk authentication to any project by following the official quickstart guides.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "E2E testing for Clerk apps. Use with Playwright or Cypress for auth flow tests.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Clerk webhooks for real-time events and data syncing. Verify with verifyWebhook from the framework-specific package. Handle user, session, organization, billing, and payment events. Build event-driven features like database sync, notifications, and integrations.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Review the changes since a fixed point (commit, branch, tag, or merge-base) along two axes — Standards (does the code follow this repo's documented coding standards?) and Spec (does the code match what the originating issue/spec asked for?). Runs both reviews in parallel sub-agents and reports them side by side. Use when the user wants to review a branch, a PR, work-in-progress changes, or asks to \"review since X\".",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Shared vocabulary for designing deep modules. Use when the user wants to design or improve a module's interface, find deepening opportunities, decide where a seam goes, make code more testable or AI-navigable, or when another skill needs the deep-module vocabulary.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Create Codex hooks. Use when you want to create a hook, write hooks.json, add hook scripts, or automate behavior around agent events.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Create Codex rules for persistent AI guidance. Use when you want to create a rule, add coding standards, set up project conventions, configure file-specific patterns, create RULE.md files, or asks about .cursor/rules/ or AGENTS.md.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Create Codex Agent Skills. Use when authoring a new skill or asking about SKILL.md structure.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Create custom subagents for specialized AI tasks. Use when you want to create a new type of subagent, set up task-specific agents, configure code reviewers, debuggers, or domain-specific assistants with custom prompts.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Link this repository to a Vercel project and deploy it using the Vercel MCP tools.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Diagnosis loop for hard bugs and performance regressions. Use when the user says \"diagnose\"/\"debug this\", or reports something broken/throwing/failing/slow.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Build and sharpen a project's domain model. Use when the user wants to pin down domain terminology or a ubiquitous language, record an architectural decision, or when another skill needs to maintain the domain model.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Set up Claude Code hooks to block dangerous git commands (push, reset --hard, clean, branch -D, etc.) before they execute. Use when user wants to prevent destructive git operations, add git safety hooks, or block git push/reset in Claude Code.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "A relentless interview to sharpen a plan or design.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "A relentless interview to sharpen a plan or design, which also creates docs (ADR's and glossary) as we go.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Grill the user relentlessly about a plan, decision, or idea, as scenes they can answer. Use when the user wants to stress-test their thinking, or uses any 'grill' trigger phrases.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Compact the current conversation into a handoff document for another agent to pick up.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Implement a piece of work based on a spec or set of tickets.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Scan a codebase for deepening opportunities, present them as a visual HTML report, then grill through whichever one you pick.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Grill me about specs for the workflows I want to build, within this workspace.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Build, deploy, evaluate, optimize, fine-tune, and manage Microsoft Foundry agents, models, and resources end to end. USE FOR: foundry, azd ai agent, azd provision/deploy, hosted agent scaffold/develop/run/deploy/troubleshoot, prompt agent, managed harness agent, Copilot harness, voice agent, create/update/invoke/evaluate agent, add tool to agent, agent insights, batch/continuous eval, continuous monitoring, agent CI/CD, optimize/improve prompt, optimize agent instructions, Agent Optimizer, dataset curation from traces, deploy model, model fine-tuning (SFT/DPO/RFT), Foundry project, RBAC, role assignment, permissions, quota, capacity, region, deployment failure, AI Services, create Foundry resource, knowledge index, customize deployment, onboard, availability, training-data, grader, distillation, large file upload. DO NOT USE FOR: Azure Functions, App Service, general Azure deploy (use azure-deploy), general Azure prep (use azure-prepare).",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Migrate test files from `as` type assertions to @total-typescript/shoehorn. Use when user mentions shoehorn, wants to replace `as` in tests, or needs partial test data.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Convert 'Applied intelligently' Codex rules (.cursor/rules/*.mdc) and slash commands (.cursor/commands/*.md) to Agent Skills format (.cursor/skills/). Use when you want to migrate rules or commands to skills, convert .mdc rules to SKILL.md format, or consolidate commands into the skills directory.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Create a Codex-hosted repo for the current project and push it. Use when a project has no git remote yet and the user asks to create a repo on Codex, push the project to Codex, or set up a Codex-hosted remote; installs and signs in the origin CLI when needed.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Use /onboard for a focused Codex onboarding flow that learns basic preferences, picks a first goal, and routes the user to the right next action.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Install, sign in, update, or repair the origin CLI for repos hosted on Codex (origin.cursor.com). Use when the CLI is missing or outdated, git push/pull fails to authenticate against origin.cursor.com, or the user asks to set up, clone, or configure Codex-hosted repos.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Build a throwaway prototype to answer a design question. Use when the user wants to sanity-check whether a state model or logic feels right, or explore what a UI should look like.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Rename the current chat to match its focus. Use only when the user invokes /rename-chat. Optional text after the command steers the title.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Use when you need to resolve an in-progress git merge/rebase conflict.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Review code changes with Bugbot subagent.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Review code changes with Security Review subagent.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Create exercise directory structures with sections, problems, solutions, and explainers that pass linting. Use when user wants to scaffold exercises, create exercise stubs, or set up a new course section.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Guide users building apps, scripts, CI pipelines, or automations on top of the Codex SDK - TypeScript (`@cursor/sdk`) or Python (`cursor-sdk` / `cursor_sdk`). Use when the user mentions integrating, installing, or writing code against the Codex SDK; says `Agent.create`, `Agent.prompt`, `Agent.resume`, `agent.send`, `run.stream`, `run.messages`, `CursorAgentError`, `@cursor/sdk`, `cursor-sdk`, or `cursor_sdk`; asks to run Codex agents programmatically from a script, CI/CD pipeline, GitHub Action, backend service, or other code outside the Codex IDE; wants to pick between local and cloud runtime, configure MCP servers for an SDK agent, or handle streaming, cancellation, or errors; or is wiring Codex into an automation, bot, or REST `/v1/agents` migration. Use eagerly rather than answering from memory; the SDK surface evolves and this skill is the source of truth for the external packages.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Configure this repo for the engineering skills — set up its issue tracker, triage label vocabulary, and domain doc layout. Run once before first use of the other engineering skills.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Set up Husky pre-commit hooks with lint-staged (Prettier), type checking, and tests in the current repo. Use when user wants to add pre-commit hooks, set up Husky, configure lint-staged, or add commit-time formatting/typechecking/testing.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Wire dependency-cruiser into a TypeScript repo so each package is a deep module — implementation hidden in subfolders, reachable only through its entry-point files. User-invoked.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Runs the rest of a /shell request as a literal shell command. Use only when the user explicitly invokes /shell and wants the following text executed directly in the terminal.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Split current work into small reviewable PRs. Use when the user asks to split a chat, set of changes, branch, or PR.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Configure a custom status line in the CLI. Use when the user mentions status line, statusline, statusLine, CLI status bar, prompt footer customization, or wants to add session context above the prompt.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Test-driven development. Use when the user wants to build features or fix bugs test-first, mentions \"red-green-refactor\", or wants integration tests.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Teach the user a new skill or concept, within this workspace.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Turn a decision you can't fully answer into a questionnaire for someone else to fill in.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Turn the current conversation into a spec and publish it to the project issue tracker — no interview, just synthesis of what you've already discussed.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Break a plan, spec, or the current conversation into a set of tracer-bullet tickets, each declaring its blocking edges, published to the configured tracker — edges as text in one file per ticket locally, or native blocking links on a real tracker.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Move issues and external PRs through a state machine of triage roles — categorise, verify, grill if needed, and write agent-ready briefs.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "View and modify Codex CLI configuration settings in ~/.cursor/cli-config.json. Use when the user wants to change CLI settings, configure permissions, switch approval mode, enable vim mode, toggle display options, configure sandbox, or manage any CLI preferences.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Modify Codex/VSCode user settings in settings.json. Use when you want to change editor settings, preferences, configuration, themes, font size, tab size, format on save, auto save, keybindings, or any settings.json values.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Use /visualize for creating compact charts, diagrams, or other visuals inline as part of the conversation itself. It chooses among Markdown tables, Mermaid, inline HTML, and other supported in-transcript forms. Use Canvas for durable artifacts outside the transcript that users may revisit, refine, or share.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Stop. That last message did not land — re-pitch it.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Plan a huge chunk of work — more than one agent session can hold — as a shared map of decision tickets on your issue tracker, and resolve them one at a time until the way to the destination is clear.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Generate an interactive bash wizard that walks a human through steps only they can perform. Use when provisioning infrastructure, setting up credentials or CI secrets, walking an unfamiliar third-party dashboard, or running a one-off migration or cutover. Don't invoke this for steps the agent can perform itself.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Writing, exploit — assemble raw material into a journey of beats, grounding each term before a beat leans on it.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Writing documents for agents. Use when creating or editing skills, or modifying AGENTS.md or CLAUDE.md.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Writing, explore — mine raw fragments, no structure yet.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            },
+            {
+              "name": "<REDACTED>",
+              "description": "Writing, exploit — shape raw material into an article, paragraph by paragraph.",
+              "input": {
+                "hint": "instructions for the skill"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "dir": "in",
+    "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "46963fbc-fb62-45ba-9695-08a24f561060",
+        "update": {
+          "sessionUpdate": "session_info_update",
+          "title": "Reply with the word ok.",
+          "updatedAt": "2026-11-06T17:26:47.876Z"
+        }
+      }
+    }
+  },
+  {
+    "dir": "in",
+    "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "46963fbc-fb62-45ba-9695-08a24f561060",
+        "update": {
+          "sessionUpdate": "config_option_update",
+          "configOptions": [
+            {
+              "type": "select",
+              "id": "mode",
+              "name": "<REDACTED>",
+              "category": "mode",
+              "description": "Controls how Copilot responds: a conversational agent, planning multi-step work, or autonomous autopilot.",
+              "currentValue": "https://agentclientprotocol.com/protocol/session-modes#agent",
+              "options": [
+                {
+                  "value": "https://agentclientprotocol.com/protocol/session-modes#agent",
+                  "name": "<REDACTED>",
+                  "description": "Default agent mode for conversational interactions"
+                },
+                {
+                  "value": "https://agentclientprotocol.com/protocol/session-modes#plan",
+                  "name": "<REDACTED>",
+                  "description": "Plan mode for creating and executing multi-step plans"
+                },
+                {
+                  "value": "https://agentclientprotocol.com/protocol/session-modes#autopilot",
+                  "name": "<REDACTED>",
+                  "description": "Autonomous mode that enables allow-all and runs until task completion without user interaction (experimental)"
+                }
+              ]
+            },
+            {
+              "type": "select",
+              "id": "model",
+              "name": "<REDACTED>",
+              "category": "model",
+              "description": "The AI model Copilot uses to generate responses.",
+              "currentValue": "auto",
+              "options": [
+                {
+                  "value": "auto",
+                  "name": "<REDACTED>",
+                  "description": "Let Copilot pick the best model",
+                  "_meta": null
+                },
+                {
+                  "value": "auto",
+                  "name": "<REDACTED>",
+                  "description": "Auto",
+                  "_meta": {
+                    "copilotUsage": "1x",
+                    "copilotEnablement": "enabled"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "select",
+              "id": "allow_all",
+              "name": "<REDACTED>",
+              "category": "permissions",
+              "description": "Controls whether Copilot prompts for approval before using tools, accessing paths, or fetching URLs.",
+              "currentValue": "off",
+              "options": [
+                {
+                  "value": "on",
+                  "name": "<REDACTED>",
+                  "description": "Automatically approve all tool, path, and URL requests"
+                },
+                {
+                  "value": "off",
+                  "name": "<REDACTED>",
+                  "description": "Require approval for tool, path, and URL requests"
+                }
+              ]
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "dir": "in",
+    "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "46963fbc-fb62-45ba-9695-08a24f561060",
+        "update": {
+          "sessionUpdate": "usage_update",
+          "used": 15259,
+          "size": 128000
+        }
+      }
+    }
+  },
+  {
+    "dir": "in",
+    "msg": {
+      "jsonrpc": "2.0",
+      "method": "session/update",
+      "params": {
+        "sessionId": "46963fbc-fb62-45ba-9695-08a24f561060",
+        "update": {
+          "sessionUpdate": "agent_message_chunk",
+          "content": {
+            "type": "text",
+            "text": "ok"
+          }
+        }
+      }
+    }
+  },
+  {
+    "dir": "in",
+    "msg": {
+      "jsonrpc": "2.0",
+      "id": 3,
+      "result": {
+        "stopReason": "end_turn",
+        "usage": {
+          "inputTokens": 14182,
+          "outputTokens": 5,
+          "totalTokens": 14187,
+          "thoughtTokens": 0,
+          "cachedReadTokens": 0,
+          "cachedWriteTokens": 0
+        }
+      }
+    }
+  },
+  {
+    "dir": "out",
+    "msg": {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "method": "session/close",
+      "params": {
+        "sessionId": "46963fbc-fb62-45ba-9695-08a24f561060"
+      }
+    }
+  },
+  {
+    "dir": "in",
+    "msg": {
+      "jsonrpc": "2.0",
+      "id": 4,
+      "result": {}
+    }
+  }
+]
