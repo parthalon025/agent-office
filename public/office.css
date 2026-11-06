@@ -2,7 +2,8 @@
    The 3D office and its HUD come from the design system; this file styles what the page adds:
    the control strip, the dialogs, the diff, and the chat grips and slash list. */
 /* The height of the dock plus a gap. office.js measures the dock and updates it; this is the value before that. */
-:root { --strip-clear: 200px; }
+:root { --strip-clear: 200px; --panel-w: min(420px, calc(100vw - 2 * var(--space-4))); }
+#office:has(.terminal-panel) { --panel-w: min(560px, calc(100vw - 2 * var(--space-4))); }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: var(--font-sans); }
 #office { height: 100vh; }
 /* The DS scene sets its height inline from the height prop. office.js renders it again when the window changes (#55). */
@@ -84,6 +85,8 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 /* One panel at a time: the terminal, board and stats panels take the right column. */
 /* hide the column but keep its box: the DS camera reads its left edge to frame the scene */
 #office.has-panel .ao-hud-right:not(.ao-hud-inbox) { visibility: hidden; pointer-events: none; }
+/* the DS tool column sits left of the open panel, not under it (issue 114); --panel-w is the one width the panels and this rule read */
+#office.has-panel .ao-hud-zoom { right: calc(var(--space-4) + var(--panel-w) + var(--space-2)); }
 /* A Security room screen in focus on a narrow screen (review M6): the floor list and the room card give the wall the view's
    height. The Decisions inbox stays, and the look bar shows the open requests (office.js LookBar asks). */
 @media (max-width: 820px) {
@@ -279,7 +282,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 }
 
 /* ---------- room board, read up close (board.js) ---------- */
-.board-panel { position: fixed; z-index: var(--z-sheet); right: var(--space-4); top: 68px; bottom: var(--strip-clear, 180px); width: min(420px, calc(100vw - 2 * var(--space-4))); display: flex; animation: page-in var(--duration-base) var(--ease-out) both; }
+.board-panel { position: fixed; z-index: var(--z-sheet); right: var(--space-4); top: 68px; bottom: var(--strip-clear, 180px); width: var(--panel-w); display: flex; animation: page-in var(--duration-base) var(--ease-out) both; }
 .board-panel > .ao-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .board-panel .ao-body { flex: 1; min-height: 0; overflow: auto; }
 .board-b { display: flex; flex-direction: column; gap: var(--space-2); }
@@ -321,7 +324,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 @media (max-width: 820px) { .agent-row { flex-wrap: wrap; } .agent-who { flex-basis: 50%; } }
 
 /* ---------- terminal panel: one session as a full terminal ---------- */
-.terminal-panel { position: fixed; z-index: var(--z-sheet); right: var(--space-4); top: 68px; bottom: var(--strip-clear, 180px); width: min(560px, calc(100vw - 2 * var(--space-4))); display: flex; flex-direction: column; background: var(--panel); backdrop-filter: blur(var(--blur-panel)); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-panel); overflow: hidden; animation: page-in var(--duration-base) var(--ease-out) both; }
+.terminal-panel { position: fixed; z-index: var(--z-sheet); right: var(--space-4); top: 68px; bottom: var(--strip-clear, 180px); width: var(--panel-w); display: flex; flex-direction: column; background: var(--panel); backdrop-filter: blur(var(--blur-panel)); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-panel); overflow: hidden; animation: page-in var(--duration-base) var(--ease-out) both; }
 .term-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--line); }
 .term-name { flex: 1 1 calc(var(--space-6) * 3); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--type-title-weight); }
 .term-model { color: var(--muted); }
