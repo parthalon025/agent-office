@@ -1,0 +1,127 @@
+/* Agent Office for Claude Code x0.2: the reception feature (#184, the page features of #168).
+   The weekly recap with Focus mode (#151), the Reception and the lobby tour (#92). One Module: its Interface is window.OfficePage.Reception = { Recap: RecapDialog, Reception: ReceptionDialog, TourCard: TourCard, tourSeen: tourSeen, setTourSeen: setTourSeen }.
+   Plain functions over the page core (window.OfficePage); office.js calls the Interface and holds none of the parts. */
+(function () {
+  'use strict';
+  var O = window.OfficePage;
+  var h = React.createElement, A = window.AgentOffice, useState = React.useState, useEffect = React.useEffect;
+  var Busy = O.Busy, F = O.F, call = O.call, client = O.client, money = O.money, useSnapshot = O.useSnapshot;
+
+  // ---------- weekly recap, while you were away, Focus mode (#151) ----------
+  var AWAY_KEY = 'ao_away_since';
+  function awaySince() { try { var v = Number(localStorage.getItem(AWAY_KEY)); return v > 0 ? v : Date.now() - 24 * 3600000; } catch (x) { return Date.now() - 24 * 3600000; } }
+  function awayMark() { try { localStorage.setItem(AWAY_KEY, String(Date.now())); } catch (x) { /* the list then starts 24 hours back */ } }
+  function RecapDialog(p) {
+    var ls = useState(null), r = ls[0], setR = ls[1];
+    var er = useState(''), err = er[0], setErr = er[1];
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var since = useState(awaySince)[0];
+    useEffect(function () { client.get('recap', { since: since }).then(setR, function (x) { setErr(x.message); }); }, []);
+    function close() { awayMark(); p.onClose(); }
+    function focus(on) { setBusy(true); client.settingsFocus({ on: on }).then(function () { setBusy(false); setR(Object.assign({}, r, { focus: on })); p.toast({ tone: 'info', title: on ? 'Focus mode is on' : 'Focus mode is off', text: on ? 'Sound, motion and rituals are off.' : 'Rituals are back.' }); }, function (x) { setBusy(false); setErr(x.message); }); }
+    var m = r && r.metrics;
+    function num(v, unit) { return v == null ? 'No data yet' : v + (unit || ''); }
+    function row(k, title, meta) { return h('li', { key: k, className: 'past-row' }, h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h('b', null, title)), meta ? h('div', { className: 'past-meta' }, meta) : null)); }
+    return h(A.Dialog, { open: true, title: 'Weekly recap', onClose: close, actions: [
+      h(A.Button, { key: 'f', variant: 'quiet', icon: 'sound-off', loading: busy, disabled: !r, onClick: function () { focus(!(r && r.focus)); } }, r && r.focus ? 'Turn off Focus mode' : 'Turn on Focus mode'),
+      h(A.Button, { key: 'd', variant: 'primary', onClick: close }, 'Done')] },
+      h('div', { className: 'form wide' },
+        h(Busy, { on: !r && !err }),
+        err ? h('p', { className: 'note', role: 'alert' }, err) : null,
+        r ? h('div', null,
+          h('p', { className: 'note' }, 'Last ' + r.days + ' days. Cost counts the sessions that started in this time.'),
+          h('ul', { className: 'past' },
+            row('ship', F.plural(r.shipped.length, 'change', 'changes') + ' shipped', r.shipped.slice(0, 5).map(function (x) { return '#' + x.number + ' ' + x.title; }).join(' · ')),
+            row('cost', money(r.cost) + ' spent'),
+            row('apm', 'Approvals per merge: ' + num(m.approvalsPerMerge), F.plural(m.approvals, 'approval', 'approvals') + ' for ' + F.plural(m.merges, 'merge', 'merges')),
+            row('mtm', 'Minutes from done to merged: ' + num(m.minutesToMerge)),
+            row('iph', 'Interruptions per hour: ' + num(m.interruptionsPerHour), F.plural(m.interruptions, 'answer', 'answers') + ' from you')),
+          r.best.length ? h('div', null, h('h3', null, 'Best moments'), h('ul', { className: 'past' }, r.best.map(function (b) { return row('b-' + b.name, b.name, b.text); }))) : null,
+          h('h3', null, 'While you were away'),
+          r.away.length ? h('ul', { className: 'past' }, r.away.map(function (a, i) { return row('a' + i, a.text, F.clock ? F.clock(a.t) : ''); })) : h('p', { className: 'note' }, 'Nothing happened since your last visit.')) : null));
+  }
+
+  // ---------- the Reception (#92): the archetype memo, the floors, the office's actions, the tour ----------
+  // The reception memo and the directory board in the lobby open it, and so does Ctrl+K. Each floor change is one call
+  // (the layout command). A rename shows in place; a switch, an added, hidden or moved floor builds the scene again.
+  function aName(n) { return (/^[AEIOU]/.test(String(n)) ? 'an ' : 'a ') + n; }
+  function ReceptionDialog(p) {
+    var snap = useSnapshot();
+    var lay = snap && snap.layouts && snap.layouts[p.repo], cat = (snap && snap.catalog) || { functions: [], archetypes: [] };
+    var bz = useState(''), busy = bz[0], setBusy = bz[1];
+    var er = useState(''), err = er[0], setErr = er[1];
+    var nm = useState({}), names = nm[0], setNames = nm[1];
+    var ar = useState(''), arch = ar[0], setArch = ar[1];
+    var ad = useState(''), add = ad[0], setAdd = ad[1];
+    function change(body, done) {
+      var key = body.action + ':' + (body.floor || body.archetype || '');
+      setBusy(key); setErr('');
+      client.layout(Object.assign({ building: p.repo }, body)).then(function () { setBusy(''); if (done) done(); }, function (x) { setBusy(''); setErr(x.message); });
+    }
+    if (!lay) return h(A.Dialog, { open: true, title: 'Reception', onClose: p.onClose, actions: [h(A.Button, { key: 'c', variant: 'quiet', onClick: p.onClose }, 'Close')] },
+      h(A.EmptyState, { icon: 'building', compact: true, title: 'No floors yet', text: 'The office has not read this building yet. Open a session in it first.' }));
+    var shown = lay.floors.filter(function (f) { return !f.hidden; });
+    var archOpts = cat.archetypes.map(function (a) { return { value: a.id, label: a.name }; });
+    var pick = arch || lay.archetype;
+    var addOpts = [{ value: '', label: 'Choose a floor' }].concat(cat.functions.filter(function (f) { return !shown.some(function (x) { return x.id === f.id; }); })
+      .map(function (f) { return { value: f.id, label: f.name + ' · ' + f.wingName }; }));
+    var fnFloors = lay.floors.filter(function (f) { return !f.fixed; });
+    return h(A.Dialog, {
+      open: true, title: 'Reception', onClose: p.onClose,
+      actions: [h(A.Button, { key: 't', variant: 'quiet', icon: 'chevron-right', onClick: function () { p.onClose(); p.onTour(); } }, 'Replay the tour'),
+        h(A.Button, { key: 'c', variant: 'primary', onClick: p.onClose }, 'Close')]
+    }, h('div', { className: 'form reception' },
+      h('h3', { className: 'reception-h' }, 'Memo'),
+      lay.confirmed
+        ? h('p', { className: 'note' }, 'This building is ' + aName(lay.archetypeName) + '. Its floors: ' + shown.map(function (f) { return f.name; }).join(', ') + '.')
+        : h('p', { className: 'note' }, 'The office thinks this building is ' + aName(lay.proposedName) + '. ' + lay.why + ' Confirm it once, or pick another kind.'),
+      lay.confirmed ? null : h('div', { className: 'inline-actions' },
+        h(A.Button, { variant: 'primary', icon: 'approve', loading: busy === 'confirm:', onClick: function () { change({ action: 'confirm' }); } }, 'Confirm ' + lay.proposedName)),
+      h('div', { className: 'reception-floor' },
+        h(A.Select, { id: 'r-arch', label: 'Kind of building', options: archOpts, value: pick, onChange: setArch }),
+        h(A.Button, { variant: 'quiet', disabled: pick === lay.archetype && lay.confirmed, loading: busy === 'switch:' + pick, onClick: function () { change({ action: 'switch', archetype: pick }); } }, 'Use these floors')),
+      h('p', { className: 'note' }, 'A new kind of building sets its floors. Rooms and notes stay. The scene is built again.'),
+      h('h3', { className: 'reception-h' }, 'Floors'),
+      err ? h('p', { className: 'note reception-err', role: 'alert' }, err) : null,
+      h('ul', { className: 'reception-floors' }, lay.floors.slice().reverse().map(function (f) {
+        var v = names[f.id] != null ? names[f.id] : f.name, i = fnFloors.indexOf(f);
+        return h('li', { key: f.id, className: 'reception-floor' + (f.hidden ? ' is-hidden' : '') },
+          h(A.TextInput, { id: 'r-n-' + f.id, label: (f.wingName ? f.wingName + ' wing' : 'Ground floor') + (f.hidden ? ' · hidden' : ''), value: v, onChange: function (t) { var n = Object.assign({}, names); n[f.id] = t; setNames(n); } }),
+          h('div', { className: 'inline-actions' },
+            h(A.Button, { variant: 'quiet', disabled: v.trim() === f.name, loading: busy === 'rename:' + f.id, onClick: function () { change({ action: 'rename', floor: f.id, name: v }, function () { var n = Object.assign({}, names); delete n[f.id]; setNames(n); }); } }, 'Rename'),
+            f.fixed ? null : h(A.Button, { variant: 'quiet', disabled: i >= fnFloors.length - 1, onClick: function () { change({ action: 'move', floor: f.id, by: 1 }); } }, 'Move up'),
+            f.fixed ? null : h(A.Button, { variant: 'quiet', disabled: i <= 0, onClick: function () { change({ action: 'move', floor: f.id, by: -1 }); } }, 'Move down'),
+            f.id === 'lobby' ? null : h(A.Button, { variant: 'quiet', onClick: function () { change({ action: f.hidden ? 'show' : 'hide', floor: f.id }); } }, f.hidden ? 'Show' : 'Hide')));
+      })),
+      h('div', { className: 'reception-floor' },
+        h(A.Select, { id: 'r-add', label: 'Add a floor', options: addOpts, value: add, onChange: setAdd }),
+        h(A.Button, { variant: 'quiet', icon: 'add', disabled: !add, loading: busy === 'add:' + add, onClick: function () { change({ action: 'add', floor: add }, function () { setAdd(''); }); } }, 'Add floor')),
+      h('h3', { className: 'reception-h' }, 'Office'),
+      h('div', { className: 'reception-actions' }, p.actions.map(function (x) {
+        return h(A.Button, { key: x.id, variant: 'quiet', icon: x.icon, onClick: function () { p.onClose(); x.run(); } }, x.label);
+      }))));
+  }
+
+  // The lobby tour: four stops (lobby.js tourSteps). It shows once per browser and replays from the Reception. Each stop flies
+  // the camera (lobby.js tour) where it can; the elevator stop marks the elevator panel. One button ends it: Skip the tour on the
+  // first stops, Done on the last (#92 review: the last stop had Close and Done, two buttons for one result).
+  function TourCard(p) {
+    var steps = window.OfficeLobby ? window.OfficeLobby.pure.tourSteps() : [];
+    var ix = useState(0), i = ix[0], setI = ix[1];
+    var step = steps[i];
+    useEffect(function () { if (step) p.onStep(step.key); }, [i]);
+    if (!step) return null;
+    var last = i === steps.length - 1;
+    return h('div', { className: 'tour-card', role: 'dialog', 'aria-label': 'Lobby tour', 'aria-live': 'polite' },
+      h('div', { className: 'tour-h' }, h('b', null, step.title), h('span', { className: 'mono tour-n' }, (i + 1) + ' of ' + steps.length)),
+      h('p', { className: 'note' }, step.text),
+      h('div', { className: 'inline-actions' },
+        last ? null : h(A.Button, { variant: 'quiet', onClick: p.onDone }, 'Skip the tour'),
+        i > 0 ? h(A.Button, { variant: 'quiet', onClick: function () { setI(i - 1); } }, 'Back') : null,
+        last ? h(A.Button, { variant: 'primary', onClick: p.onDone }, 'Done') : h(A.Button, { variant: 'primary', icon: 'chevron-right', onClick: function () { setI(i + 1); } }, 'Next')));
+  }
+  function tourSeen() { try { return localStorage.getItem('ao-tour') === '1'; } catch (x) { return false; } }
+  function setTourSeen() { try { localStorage.setItem('ao-tour', '1'); } catch (x) { /* private window */ } }
+
+  O.Reception = { Recap: RecapDialog, Reception: ReceptionDialog, TourCard: TourCard, tourSeen: tourSeen, setTourSeen: setTourSeen };
+})();
