@@ -22,7 +22,7 @@ import { createTracker, clip } from './tracker.mjs';
 import { createRegistry, providerEvents, isPaid, isGated, supervisionOf, costOf, spendLimitFor, featuresOf, DEFAULT_SPEND_LIMIT, DEFAULT_PROVIDER } from './providers/index.mjs';
 import { createLocal } from './providers/local.mjs';
 import { createAcp, AGENTS as ACP_AGENTS } from './providers/acp.mjs';
-import { gateRequest as openclawRequest, officeIdOf as openclawOfficeId } from './providers/openclaw.mjs';
+import { gateRequest as openclawRequest, officeIdOf as openclawOfficeId, probeGateway } from './providers/openclaw.mjs';
 import { createAgentFramework } from './providers/agent-framework.mjs';
 import { cloudConfig } from './providers/cloud.mjs';
 import { createFoundry } from './providers/foundry.mjs';
@@ -1677,6 +1677,13 @@ server.listen(PORT, HOST, () => {
   try {
     fs.mkdirSync(path.dirname(PAGE_FILE), { recursive: true });
     writeSecret(PAGE_FILE, JSON.stringify({ token: PAGE_TOKEN, port: PORT }));
+    // Only after the own file is written, so a second copy that failed above never removes one. A clean exit removes it
+    // (taskkill /F runs nothing, so the next start also sweeps the files of ports that nobody listens on, #126).
+    for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => process.exit(0));
+    process.once('exit', () => auth.removeOwnPageFile(PAGE_FILE, PAGE_TOKEN));
+    void auth.stalePageFiles({ file: PAGE_FILE, port: PORT, readdir: fs.promises.readdir, unlink: fs.promises.unlink,
+      isListening: (port) => probeGateway({ port }) })
+      .catch((e) => console.warn(`Could not sweep old page token files: ${e.message}`));
   } catch (e) { console.warn(`Could not save the page token for npm run probe and a second npm start: ${e.message}`); }
   const link = auth.launchUrl(PORT, launchCodes.mint());
   if (OLD_PLAIN_TOKEN) console.log(`Port ${PORT} reuses the agent token of the old .office-token, so settings made before this version keep working. This office keeps its own files from now on.`);

@@ -696,3 +696,45 @@ test('route matrix, launch code and owner-only files on a real server', { timeou
     fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   }
 });
+
+test('stalePageFiles removes only page files of ports with no listener (#126)', async () => {
+  const dir = path.join('C:\\L', 'AgentOffice');
+  const file = auth.pageFile({ LOCALAPPDATA: 'C:\\L' }, 4400);
+  const names = ['office-page-4317.json', 'office-page-4400.json', 'office-page-4401.json', 'office-page-4402.json',
+    'office-page-x.json', 'office-page-.json', 'office-page-44.json.bak', 'notes.json', 'office-page-99999999999999999999.json'];
+  const gone = [], probed = [];
+  const out = await auth.stalePageFiles({
+    file, port: 4400,
+    readdir: async (d) => { assert.equal(d, dir); return names; },
+    isListening: async (p) => { probed.push(p); return p === 4401; },
+    unlink: async (f) => { gone.push(path.basename(f)); },
+  });
+  assert.deepEqual(gone.sort(), ['office-page-4317.json', 'office-page-4402.json']);
+  assert.deepEqual(out.sort(), gone.sort());
+  assert.ok(!probed.includes(4400), 'the own port is not probed');
+});
+
+test('stalePageFiles never throws on a readdir, probe or unlink error (#126)', async () => {
+  const file = auth.pageFile({ LOCALAPPDATA: 'C:\\L' }, 4400);
+  assert.deepEqual(await auth.stalePageFiles({ file, port: 4400, readdir: async () => { throw new Error('no folder'); }, isListening: async () => false, unlink: async () => {} }), []);
+  const out = await auth.stalePageFiles({ file, port: 4400, readdir: async () => ['office-page-4401.json', 'office-page-4402.json'],
+    isListening: async () => false, unlink: async (f) => { if (f.includes('4401')) throw new Error('busy'); } });
+  assert.deepEqual(out, ['office-page-4402.json']);
+  assert.deepEqual(await auth.stalePageFiles({ file, port: 4400, readdir: async () => ['office-page-4401.json'], isListening: async () => { throw new Error('x'); }, unlink: async () => {} }), []);
+});
+
+test('removeOwnPageFile removes the file only while it holds this office token (#126)', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-pf-'));
+  try {
+    const f = path.join(dir, 'office-page-4400.json');
+    fs.writeFileSync(f, JSON.stringify({ token: 'mine', port: 4400 }));
+    assert.equal(auth.removeOwnPageFile(f, 'mine'), true);
+    assert.equal(fs.existsSync(f), false);
+    fs.writeFileSync(f, JSON.stringify({ token: 'newer', port: 4400 }));
+    assert.equal(auth.removeOwnPageFile(f, 'mine'), false);
+    assert.equal(fs.existsSync(f), true, 'a newer office on the port keeps its file');
+    fs.writeFileSync(f, 'not json');
+    assert.equal(auth.removeOwnPageFile(f, 'mine'), false);
+    assert.equal(auth.removeOwnPageFile(path.join(dir, 'none.json'), 'mine'), false);
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+});
