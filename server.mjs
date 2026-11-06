@@ -1985,7 +1985,7 @@ const server = http.createServer(async (req, res) => {
       if (pre) return send(res, 200, pre);
       if (body.hook_ppid && !body.office_id) {
         const s = findSession(body);
-        if (s && !s.pid) { const pid = await walkToClaude(body.hook_ppid); if (pid) { s.pid = pid; broadcast(); } }
+        if (s && !s.pid) { const pid = await walkToClaude(body.hook_ppid); if (pid) { s.pid = pid; git.processStart(pid).then((t) => { s.pidStart = t; }); broadcast(); } }
       }
       return send(res, 200, out || { ok: true });
     }

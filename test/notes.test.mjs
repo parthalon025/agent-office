@@ -328,3 +328,13 @@ test('the user save strips control and direction characters, and keeps tabs, lin
   assert.equal(r.text, 'abcde\ttab\nline \u{1F468}‍\u{1F469}');
   assert.equal(n.read(K).text, r.text);
 });
+
+test('L9 (#27): the number of boards is capped; an existing board still saves', async () => {
+  const { createNotes, MAX_BOARDS } = await import('../notes.mjs');
+  const n = createNotes({ notes: {}, pins: {} });
+  for (let i = 0; i < MAX_BOARDS; i++) n.save('k' + i, 'x');
+  assert.throws(() => n.save('one-too-many', 'x'), (e) => e.status === 413 && /boards/.test(e.message));
+  assert.throws(() => n.append('another', 'bot', 'x'), (e) => e.status === 413);
+  assert.equal(n.save('k0', 'y').text, 'y');
+  assert.equal(n.save('blank-new', '').version, 0);
+});
