@@ -580,6 +580,25 @@
           out({ type: 'message', bot: bot, text: text, format: 'plain' });
         });
       }
+      // Mail on the cable tray (#21): each mail of a goal of this building (snapshot plans[].mail, by agent name) is one message.agent.
+      // The DS picks the picture (turn, walk, or an envelope on the cable tray and the elevator). Mail the office already had at mount is
+      // marked told and never replayed. A name with no live bot here says nothing, and is told when its bot comes.
+      var mailTold = {};
+      function playMail(snapshot, out, seedAll) {
+        var byName = {};
+        snapshot.sessions.forEach(function (s) { var k = known[s.uid]; if (k && !k.ended) byName[s.name] = k.name; });
+        ((snapshot.plans && snapshot.plans.plans) || []).forEach(function (p) {
+          if (p.building !== repo) return;
+          (p.mail || []).forEach(function (x) {
+            var key = p.id + '|' + x.t + '|' + x.from + '|' + x.to + '|' + x.text;
+            if (mailTold[key]) return;
+            if (seedAll) { mailTold[key] = true; return; }
+            if (!byName[x.from] || !byName[x.to]) return;
+            mailTold[key] = true;
+            out({ type: 'message.agent', from: byName[x.from], to: byName[x.to], text: x.text, at: x.t });
+          });
+        });
+      }
       function apply(snapshot, out, seedAll) {
         var seen = {};
         var seeded = function (e) { e.seeded = true; out(e); };
@@ -726,6 +745,7 @@
           else if (task !== k.task) { k.task = task; emit({ type: 'status', bot: bot0, status: st, task: task, quiet: true }); }
         });
         playMoments(snapshot, out, seedAll);
+        playMail(snapshot, out, seedAll);
         // sessions the server forgot
         Object.keys(known).forEach(function (uid) {
           if (seen[uid]) return;

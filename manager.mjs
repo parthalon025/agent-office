@@ -459,7 +459,7 @@ export function officeSource(manager) {
     kind: 'office',
     list(building) {
       return manager.snapshot().filter((g) => !building || g.building === building).map((g) => ({
-        id: g.id, building: g.building, goal: g.goal, status: g.status, reason: g.reason, handoff: g.handoff || null,
+        id: g.id, building: g.building, goal: g.goal, status: g.status, reason: g.reason, handoff: g.handoff || null, mail: g.mail,
         steps: g.steps.map((s) => ({ id: s.id, title: s.text, state: s.status, owner: s.owner, cost: null, model: s.tier || '' })),
       }));
     },
@@ -478,7 +478,7 @@ export function createPlanBoard({ sources = [], onChange = () => {} } = {}) {
         let mapped;
         try {
           mapped = src.list(building).map((p) => ({
-            id: p.id, building: p.building, goal: p.goal, status: p.status || '', reason: p.reason || '', frozen: p.frozen === true, handoff: p.handoff || null, source: src.kind, sourceWord: P.sourceWord(src.kind),
+            id: p.id, building: p.building, goal: p.goal, status: p.status || '', reason: p.reason || '', frozen: p.frozen === true, handoff: p.handoff || null, mail: (p.mail || []).map((x) => ({ from: x.from, to: x.to, text: x.text, t: x.t })), source: src.kind, sourceWord: P.sourceWord(src.kind),
             steps: p.steps.map((s) => {
               const state = P.stepState(s.state);
               return { id: s.id, title: s.title, state, word: P.stepWord(state), owner: s.owner || '', cost: Number.isFinite(s.cost) ? s.cost : null,
