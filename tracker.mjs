@@ -29,8 +29,14 @@ export function makePreview(tool, input = {}) {
   try {
     if (tool === 'Bash') return cap(input.command, 1800);
     if (tool === 'Edit') return `${input.file_path}\n${lines(input.old_string, '-')}\n${lines(input.new_string, '+')}`;
-    if (tool === 'MultiEdit') return `${input.file_path}\n` + (input.edits || []).slice(0, 6).map((e) => `${lines(e.old_string, '-')}\n${lines(e.new_string, '+')}`).join('\n···\n');
-    if (tool === 'Write') return `${input.file_path} (new content)\n${lines(String(input.content ?? '').split('\n').slice(0, 40).join('\n'), '+')}`;
+    if (tool === 'MultiEdit') {
+      const all = input.edits || [], more = all.length - 6; // a cut preview says so (#27 L3)
+      return `${input.file_path}\n` + all.slice(0, 6).map((e) => `${lines(e.old_string, '-')}\n${lines(e.new_string, '+')}`).join('\n···\n') + (more > 0 ? `\n… (${more} more edits)` : '');
+    }
+    if (tool === 'Write') {
+      const all = String(input.content ?? '').split('\n'), more = all.length - 40;
+      return `${input.file_path} (new content)\n${lines(all.slice(0, 40).join('\n'), '+')}` + (more > 0 ? `\n… (${more} more lines)` : '');
+    }
     if (tool === 'NotebookEdit') return `${input.notebook_path || input.file_path}\n${lines(input.new_source, '+')}`;
     if (tool === 'WebFetch') return `${input.url}\n${cap(input.prompt, 300)}`;
     return cap(JSON.stringify(input, null, 1), 900);

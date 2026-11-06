@@ -583,7 +583,7 @@
     var c = p.c, data = c.data, result = c.result;
     return h(React.Fragment, null,
       c.err && !c.confirm ? h('p', { className: 'ao-err', role: 'alert' }, c.err) : null,
-      result && result.url ? h('p', { className: 'note' }, 'Pull request created: ', h('a', { href: result.url, target: '_blank', rel: 'noreferrer' }, result.url)) : null,
+      result && result.url ? h('p', { className: 'note' }, 'Pull request created: ', /^https:\/\//i.test(result.url) ? h('a', { href: result.url, target: '_blank', rel: 'noreferrer' }, result.url) : result.url) : null,
       result && result.removed ? h('p', { className: 'note' }, 'Worktree removed.' + (result.branchKept ? ' The branch was kept.' : '')) : null,
       h(Busy, { on: !data }),
       data ? h('div', { className: 'chg-head' },
