@@ -17,6 +17,7 @@
      todoStatus(t)    -> a DS plan step status
      figures(list)    -> the numbers of a room, from its open sessions
      agentsSign(n)    -> "N agents" for a room shared by 2 or more agents (top-level sessions; helpers do not count), else ''
+     plan             -> the Manager board words (#154): sourceWord(kind) 'Office' or 'Paperclip', stepState(state), stepWord(state)
      requests(s)      -> every open request of a session, oldest first: { id, kind, tool, text, detail, risk, always, t }
                          kind is 'permission' (Approve or Decline) or 'question' (Yes or No; no risk value)
      featuresOf(s)    -> the office features the session's agent kind declares (#72): [{ key, label }], in table order
@@ -93,6 +94,14 @@
   // state of a change that waits for the user's review (the paper flow, #93); no session status gives it yet. The words:
   var STATE_WORD = { error: 'Error', waiting: 'Needs you', review: 'Review ready', working: 'Working', finished: 'Finished', resting: 'Resting' };
   function stateWord(k) { return STATE_WORD[k] || ''; }
+  // The Manager board (#154): who plans a goal (the source) and the state of a plan step. Words are the board's only copy.
+  var PLAN_SOURCE = { office: 'Office', paperclip: 'Paperclip' };
+  var PLAN_STEP = { pending: 'Waiting', working: 'Working', finished: 'Done', error: 'Error' };
+  var plan = {
+    sourceWord: function (kind) { return PLAN_SOURCE[kind] || ''; },
+    stepState: function (state) { return PLAN_STEP[state] ? state : 'pending'; },
+    stepWord: function (state) { return PLAN_STEP[state] || PLAN_STEP.pending; }
+  };
   // The model lane of a session (#88): Haiku, Sonnet, Opus or Fable, from its model id; '' for another model.
   function laneOf(model) {
     var m = /\b(haiku|sonnet|opus|fable)\b/i.exec(String(model || '').replace(/[-_.]/g, ' '));
@@ -378,5 +387,5 @@
     return label + ' does not report cost, so the office shows it as unknown and no spend limit can stop it. Check the spend in its own account.';
   }
 
-  root.OfficeVocab = { stateWord: stateWord, laneOf: laneOf, limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform, hq: hq };
+  root.OfficeVocab = { stateWord: stateWord, laneOf: laneOf, limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform, hq: hq, plan: plan };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

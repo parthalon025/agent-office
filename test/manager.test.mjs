@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createManager, DEFAULT_LIMITS } from '../manager.mjs';
+import { createManager, createPlanBoard, officeSource, DEFAULT_LIMITS } from '../manager.mjs';
+import '../public/vocab.js';
 import { NOTES_MAX } from '../notes.mjs';
 
 // A world of two agents. dispatched lists what the Manager handed out; spend is per agent, in dollars.
@@ -426,4 +427,56 @@ test('one step is "1 step", not "1 steps"', async () => {
   const w = world({ plan: [{ text: 'only', role: 'analyst' }] });
   await w.m.submit('b1', 'g');
   assert.match(w.boards.at(-1).text, /Running\. 0 of 1 step done\./);
+});
+
+// Plan source seam (#154): the board reads one contract, whoever plans.
+function fakeSource(kind, plans) {
+  const s = { kind, plans, listeners: [], list: (b) => s.plans.filter((p) => !b || p.building === b), subscribe: (fn) => { s.listeners.push(fn); return () => { s.listeners = s.listeners.filter((f) => f !== fn); }; } };
+  return s;
+}
+
+test('a fake source flows to the board field with source and state words', () => {
+  const src = fakeSource('paperclip', [{ id: 'p1', building: 'b', goal: 'Ship it', steps: [{ id: 's1', title: 'Write', state: 'working', owner: 'Ann', cost: 0.5 }, { id: 's2', title: 'Test', state: 'error' }] }]);
+  const board = createPlanBoard({ sources: [src] });
+  const { plans, unreadable } = board.snapshot();
+  assert.deepEqual(unreadable, []);
+  assert.equal(plans.length, 1);
+  assert.equal(plans[0].source, 'paperclip');
+  assert.equal(plans[0].sourceWord, globalThis.OfficeVocab.plan.sourceWord('paperclip'));
+  assert.equal(plans[0].steps[0].word, 'Working');
+  assert.equal(plans[0].steps[1].word, 'Error');
+  assert.equal(plans[0].steps[0].cost, 0.5);
+  assert.equal(plans[0].steps[1].cost, null);
+});
+
+test('source changes reach the board listener, and a failing source is named unreadable', () => {
+  const good = fakeSource('office', []);
+  const bad = { kind: 'paperclip', list() { throw new Error('down'); } };
+  let n = 0;
+  const board = createPlanBoard({ sources: [good, bad], onChange: () => { n += 1; } });
+  good.plans.push({ id: 'g', building: 'b', goal: 'x', steps: [] });
+  good.listeners.forEach((f) => f());
+  assert.equal(n, 1);
+  const snap = board.snapshot();
+  assert.equal(snap.plans.length, 1);
+  assert.deepEqual(snap.unreadable, [{ source: 'paperclip', word: globalThis.OfficeVocab.plan.sourceWord('paperclip') }]);
+  board.close();
+  assert.equal(good.listeners.length, 0);
+});
+
+test('an unknown step state is shown as pending, never invented', () => {
+  const board = createPlanBoard({ sources: [fakeSource('office', [{ id: 'g', building: '', goal: 'x', steps: [{ id: 's', title: 't', state: 'weird' }] }])] });
+  assert.equal(board.snapshot().plans[0].steps[0].state, 'pending');
+});
+
+test('the office manager is one source of the same contract', async () => {
+  const w = world();
+  const board = createPlanBoard({ sources: [officeSource(w.m)] });
+  await w.m.submit('b', 'Fix it');
+  const p = board.snapshot().plans[0];
+  assert.equal(p.source, 'office');
+  assert.equal(p.goal, 'Fix it');
+  assert.equal(p.steps[0].state, 'working');
+  assert.equal(p.steps[0].owner, 'Scout');
+  assert.equal(p.steps[1].state, 'pending');
 });
