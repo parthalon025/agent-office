@@ -210,3 +210,11 @@ test('the stack is placed by office.js at every width: no width rule moves it, a
   const z = (sel) => /calc\(var\(--z-dialog\) \+ (\d+)\)/.exec(css.slice(css.indexOf(sel + ' {')))?.[1];
   assert.ok(Number(z('.ao-cmdk-o')) > Number(z('.page-toasts')), 'the Ctrl+K palette is above the toast stack');
 });
+
+test('the tool column follows the open panel by one shared width (#114)', () => {
+  const css = fs.readFileSync(new URL('../public/office.css', import.meta.url), 'utf8');
+  assert.match(css, /#office\.has-panel \.ao-hud-zoom \{[^}]*var\(--panel-w\)/);
+  for (const c of ['board-panel', 'terminal-panel']) {
+    assert.match(css, new RegExp('\\.' + c + ' \\{[^}]*width: var\\(--panel-w\\)'), c + ' reads the shared width');
+  }
+});
