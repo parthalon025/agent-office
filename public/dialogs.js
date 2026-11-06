@@ -38,7 +38,7 @@
     var f = useState({ cwd: p.folder || p.shownPath || p.recent[0] || '', name: '', provider: p.kind || DEFAULT_KIND, where: 'office', useFolder: false, model: '', permissionMode: '', maxBudget: limitText(p.spendLimit), prompt: '', template: '' }), form = f[0], setForm = f[1];
     var K = useKinds(), k = kindOf(K.list, form.provider);
     useFirstModel(k, form, setForm);
-    // The options of the kind (providers/index.mjs describe). Without kinds yet, the dialog offers what Claude Code takes.
+    // The options of the kind (src/providers/index.mjs describe). Without kinds yet, the dialog offers what Claude Code takes.
     // limited: the kind takes a spend limit (paid and it reports cost); a kind whose cost is unknown has none (review M2).
     var canWindow = !k || k.terminal, limited = KV.limitShown(k), costNote = KV.costNote(k);
     var modes = k ? MODES.filter(function (o) { return !o.value || k.modes.indexOf(o.value) >= 0; }) : MODES;

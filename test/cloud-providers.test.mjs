@@ -3,11 +3,11 @@
 // make no call. Run: npm test
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createTracker } from '../tracker.mjs';
-import { providerEvents, checkProvider, createRegistry } from '../providers/index.mjs';
-import { cloudConfig, checkEndpoint, readSse, explain } from '../providers/cloud.mjs';
-import { createFoundry, FOUNDRY_HOSTS } from '../providers/foundry.mjs';
-import { createCopilotStudio, STUDIO_HOSTS } from '../providers/copilot-studio.mjs';
+import { createTracker } from '../src/tracker.mjs';
+import { providerEvents, checkProvider, createRegistry } from '../src/providers/index.mjs';
+import { cloudConfig, checkEndpoint, readSse, explain } from '../src/providers/cloud.mjs';
+import { createFoundry, FOUNDRY_HOSTS } from '../src/providers/foundry.mjs';
+import { createCopilotStudio, STUDIO_HOSTS } from '../src/providers/copilot-studio.mjs';
 import { startFakeFoundry, startFakeCopilotStudio } from './fixtures/fake-azure.mjs';
 
 const TOKEN = 'tok_' + 'abcdef0123456789'.repeat(3);
@@ -489,7 +489,7 @@ test('cloudConfig takes the token settings out of the environment, so no process
 
 test('server.mjs reads the cloud settings before it can start any process', async () => {
   const fs = await import('node:fs');
-  const src = fs.readFileSync(new URL('../server.mjs', import.meta.url), 'utf8');
+  const src = fs.readFileSync(new URL('../src/server.mjs', import.meta.url), 'utf8');
   const read = src.indexOf("cloudConfig(process.env, 'OFFICE_FOUNDRY')");
   const read2 = src.indexOf("cloudConfig(process.env, 'OFFICE_COPILOTSTUDIO')");
   const firstStart = src.search(/\b(spawn|execFileSync|execFile|exec)\(/);
@@ -671,7 +671,7 @@ test('Copilot Studio: a message you send while the plan runs reaches the agent a
 // reports cost only from the prices the owner set; without them it is cost 'unknown' (owner decision Q22): the office asks
 // before it runs, shows "unknown", never $0.00, and sets no spend limit that could not stop it.
 test('#67: both cloud kinds are ungated, with a label that says what comes to the office', async () => {
-  const { isGated, supervisionOf } = await import('../providers/index.mjs');
+  const { isGated, supervisionOf } = await import('../src/providers/index.mjs');
   const f = createFoundry({ events: {}, config: cloudConfig({}, 'OFFICE_FOUNDRY'), fetch: noFetch });
   const c = createCopilotStudio({ events: {}, config: cloudConfig({}, 'OFFICE_COPILOTSTUDIO'), fetch: noFetch });
   assert.equal(isGated(f), false);
@@ -687,7 +687,7 @@ test('#67: both cloud kinds are ungated, with a label that says what comes to th
 });
 
 test('#67: a cloud kind reports cost only with its prices; without them its cost is unknown and no spend limit applies', async () => {
-  const { costOf, spendLimitFor, isPaid } = await import('../providers/index.mjs');
+  const { costOf, spendLimitFor, isPaid } = await import('../src/providers/index.mjs');
   const fd = (env) => createFoundry({ events: {}, config: cloudConfig(env, 'OFFICE_FOUNDRY'), fetch: noFetch });
   const cs = (env) => createCopilotStudio({ events: {}, config: cloudConfig(env, 'OFFICE_COPILOTSTUDIO'), fetch: noFetch });
   assert.equal(costOf(fd({})), 'unknown');

@@ -11,9 +11,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { pageFile } from '../auth.mjs';
-import { officeFiles } from '../files.mjs';
-import { startOnFreePort, until } from './fixtures/office-server.mjs';
+import { pageFile } from '../src/auth.mjs';
+import { officeFiles } from '../src/files.mjs';
+import { startOnFreePort, until, copyOffice } from './fixtures/office-server.mjs';
 import { startFakePaperclip, DEMO } from './fixtures/fake-paperclip.mjs';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -49,7 +49,7 @@ function runHook(payload, extraEnv = {}) {
   return new Promise((resolve, reject) => {
     const e = { ...process.env, ...extraEnv };
     for (const k of Object.keys(e)) if (k.startsWith('PAPERCLIP_') && !(k in extraEnv)) delete e[k];
-    const c = spawn(process.execPath, [path.join(copy, 'hook.mjs'), String(port)], { cwd: work, env: e, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+    const c = spawn(process.execPath, [path.join(copy, 'src', 'hook.mjs'), String(port)], { cwd: work, env: e, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
     let out = '';
     c.stdout.on('data', (d) => { out += d; });
     c.on('error', reject);
@@ -63,10 +63,7 @@ before(async () => {
   base = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-pc-'));
   copy = path.join(base, 'office'); work = path.join(base, 'work');
   for (const d of [copy, work, path.join(base, 'home')]) fs.mkdirSync(d);
-  for (const f of fs.readdirSync(SRC)) {
-    if (/\.(mjs|json|ps1)$/.test(f) && !/^(state|history)(-\d+)?\.json$/.test(f) && !f.startsWith('office-')) fs.copyFileSync(path.join(SRC, f), path.join(copy, f));
-  }
-  for (const d of ['providers', 'public']) fs.cpSync(path.join(SRC, d), path.join(copy, d), { recursive: true });
+  copyOffice(copy);
   pc = await startFakePaperclip();
   const started = await startOnFreePort(copy, { ...process.env, OFFICE_HOOKS: 'command', OFFICE_OPEN: '0', OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
     LOCALAPPDATA: path.join(base, 'local'), USERPROFILE: path.join(base, 'home'), HOME: path.join(base, 'home'), OFFICE_ASK_TIMEOUT_S: '1', OFFICE_PAPERCLIP_ASK_S: '4' });

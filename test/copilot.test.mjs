@@ -10,11 +10,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn as realSpawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { createTracker } from '../tracker.mjs';
-import { providerEvents, checkProvider, isPaid, isGated, supervisionOf, costOf, spendLimitFor, describe } from '../providers/index.mjs';
-import { createAcp, AGENTS } from '../providers/acp.mjs';
-import { requestCall, argsCall, SESSION_ARGS, SELF_APPROVE } from '../providers/copilot.mjs';
-import { cleanRules, decide, openRefusal, costAsk, enforcement } from '../security.mjs';
+import { createTracker } from '../src/tracker.mjs';
+import { providerEvents, checkProvider, isPaid, isGated, supervisionOf, costOf, spendLimitFor, describe } from '../src/providers/index.mjs';
+import { createAcp, AGENTS } from '../src/providers/acp.mjs';
+import { requestCall, argsCall, SESSION_ARGS, SELF_APPROVE } from '../src/providers/copilot.mjs';
+import { cleanRules, decide, openRefusal, costAsk, enforcement } from '../src/security.mjs';
 import '../public/vocab.js';
 
 const FAKE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-copilot.mjs');

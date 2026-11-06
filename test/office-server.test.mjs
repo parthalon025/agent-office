@@ -7,7 +7,7 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { startOffice, startOnFreePort, until } from './fixtures/office-server.mjs';
+import { startOffice, startOnFreePort, until, copyOffice } from './fixtures/office-server.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const win = process.platform === 'win32';
@@ -61,8 +61,7 @@ test('startOnFreePort: a port taken before the bind makes the server start again
   const blockers = [];
   let started = null;
   try {
-    for (const f of fs.readdirSync(ROOT)) if (f.endsWith('.mjs') || f === 'package.json') fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
-    for (const d of ['providers', 'public']) fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true });
+    copyOffice(dir);
     const lad = path.join(dir, 'local');
     fs.mkdirSync(lad);
     const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !['path', 'office_id', 'office_port'].includes(k.toLowerCase())));

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createNotes, merge3, scanNote, cleanPin, NOTES_MAX, PIN_MAX, AGENT_WRITE_MAX, NotesError } from '../notes.mjs';
+import { createNotes, merge3, scanNote, cleanPin, NOTES_MAX, PIN_MAX, AGENT_WRITE_MAX, NotesError } from '../src/notes.mjs';
 
 const K = 'repo|w-room-1234abcd';
 function make() {
@@ -330,7 +330,7 @@ test('the user save strips control and direction characters, and keeps tabs, lin
 });
 
 test('L9 (#27): the number of boards is capped; an existing board still saves', async () => {
-  const { createNotes, MAX_BOARDS } = await import('../notes.mjs');
+  const { createNotes, MAX_BOARDS } = await import('../src/notes.mjs');
   const n = createNotes({ notes: {}, pins: {} });
   for (let i = 0; i < MAX_BOARDS; i++) n.save('k' + i, 'x');
   assert.throws(() => n.save('one-too-many', 'x'), (e) => e.status === 413 && /boards/.test(e.message));

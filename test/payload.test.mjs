@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import '../public/vocab.js';
-import { describeTool, callKey, settles, slimPayload } from '../payload.mjs';
+import { describeTool, callKey, settles, slimPayload } from '../src/payload.mjs';
 
 const V = globalThis.OfficeVocab;
 const base = { status: 'waiting', turns: 1, pending: [], questions: [], calls: [], todos: [], usage: { tokens: 0 }, error: null, cost: null, lastEvent: 0, note: '', prompt: '', live: '', tool: null };

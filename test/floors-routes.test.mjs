@@ -11,10 +11,10 @@ import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startFakeOpenAI } from './fixtures/fake-openai.mjs';
-import { pageFile } from '../auth.mjs';
-import { startOnFreePort, until as untilTrue } from './fixtures/office-server.mjs';
-import { officeFiles } from '../files.mjs';
-import * as git from '../git.mjs';
+import { pageFile } from '../src/auth.mjs';
+import { startOnFreePort, until as untilTrue, copyOffice } from './fixtures/office-server.mjs';
+import { officeFiles } from '../src/files.mjs';
+import * as git from '../src/git.mjs';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SKIP = process.platform !== 'win32' ? 'opening sessions is only implemented for Windows' : false;
@@ -49,10 +49,7 @@ before(async () => {
   plain(rooms.ahead, 'add', '-A'); plain(rooms.ahead, 'commit', '-m', 'two');
   const copy = path.join(base, 'office');
   fs.mkdirSync(copy);
-  for (const f of fs.readdirSync(SRC)) {
-    if (/\.(mjs|json|ps1)$/.test(f) && !/^(state|history)(-\d+)?\.json$/.test(f) && !f.startsWith('office-')) fs.copyFileSync(path.join(SRC, f), path.join(copy, f));
-  }
-  for (const d of ['providers', 'public']) fs.cpSync(path.join(SRC, d), path.join(copy, d), { recursive: true });
+  copyOffice(copy);
   fake = await startFakeOpenAI({ script: [{ text: 'ok' }], models: ['fake-model'] });
   // The repo is a building before any session (a recent folder). The state file of an office on a free port has the port in its name.
   const env = { ...process.env, OFFICE_HOOKS: 'command', OFFICE_OLLAMA_URL: fake.url, OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),

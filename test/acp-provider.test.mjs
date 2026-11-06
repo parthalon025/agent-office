@@ -10,11 +10,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn as realSpawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { createTracker } from '../tracker.mjs';
-import { providerEvents, createRegistry, checkProvider, spendLimitFor, isPaid, isGated, supervisionOf } from '../providers/index.mjs';
-import { createAcp, AGENTS, commandLine } from '../providers/acp.mjs';
-import { createLocalTools } from '../providers/local-tools.mjs';
-import { decide, cleanRules } from '../security.mjs';
+import { createTracker } from '../src/tracker.mjs';
+import { providerEvents, createRegistry, checkProvider, spendLimitFor, isPaid, isGated, supervisionOf } from '../src/providers/index.mjs';
+import { createAcp, AGENTS, commandLine } from '../src/providers/acp.mjs';
+import { createLocalTools } from '../src/providers/local-tools.mjs';
+import { decide, cleanRules } from '../src/security.mjs';
 import '../public/vocab.js';
 
 // A fake OpenClaw config: path -> value. A path that is not there is unset. CLAW_OK: what an office session needs (#77):

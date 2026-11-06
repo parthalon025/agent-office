@@ -10,9 +10,9 @@
   "type": "module",
   "description": "A floor-plan dashboard for Claude Code sessions, fed by hooks. Open and close sessions from the office.",
   "scripts": {
-    "start": "node server.mjs",
-    "start:branch": "node -e \"process.env.OFFICE_PORT='branch';process.env.OFFICE_OPEN='0';import('./server.mjs')\"",
-    "probe": "node probe.mjs",
+    "start": "node src/server.mjs",
+    "start:branch": "node -e \"process.env.OFFICE_PORT='branch';process.env.OFFICE_OPEN='0';import('./src/server.mjs')\"",
+    "probe": "node src/probe.mjs",
     "smoke": "node test/smoke.mjs",
     "gate:jobs": "node test/core-jobs.mjs",
     "test": "node --import ./test/fixtures/temp-leaks.mjs --test \"test/*.test.mjs\""

@@ -8,11 +8,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { pageFile } from '../auth.mjs';
-import { startOnFreePort, until as untilTrue } from './fixtures/office-server.mjs';
-import { officeFiles } from '../files.mjs';
-import { normPath } from '../place.mjs';
-import * as git from '../git.mjs';
+import { pageFile } from '../src/auth.mjs';
+import { startOnFreePort, until as untilTrue, copyOffice } from './fixtures/office-server.mjs';
+import { officeFiles } from '../src/files.mjs';
+import { normPath } from '../src/place.mjs';
+import * as git from '../src/git.mjs';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SKIP = process.platform !== 'win32' ? 'the fake gh is a Windows .exe' : false;
@@ -49,10 +49,7 @@ before(async () => {
   plain(repo, 'add', '-A'); plain(repo, 'commit', '-m', 'one');
   copy = path.join(base, 'office');
   fs.mkdirSync(copy);
-  for (const f of fs.readdirSync(SRC)) {
-    if (/\.(mjs|json|ps1)$/.test(f) && !/^(state|history)(-\d+)?\.json$/.test(f) && !f.startsWith('office-')) fs.copyFileSync(path.join(SRC, f), path.join(copy, f));
-  }
-  for (const d of ['providers', 'public']) fs.cpSync(path.join(SRC, d), path.join(copy, d), { recursive: true });
+  copyOffice(copy);
   const bin = path.join(base, 'bin');
   fs.mkdirSync(bin);
   fs.copyFileSync(process.execPath, path.join(bin, 'gh.exe'));

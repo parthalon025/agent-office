@@ -2,7 +2,7 @@
 // realInside). GitHub's Windows runner has TEMP in C:\Users\RUNNER~1\AppData\Local\Temp, and git gives the long path, so
 // the office sees both spellings there. A volume can have 8.3 names off (fsutil 8dot3name), and then a folder has none.
 import { execFileSync } from 'node:child_process';
-import { resolveExe, helperCwd } from '../../git.mjs';
+import { resolveExe, helperCwd } from '../../src/git.mjs';
 
 /**
  * The 8.3 short spelling of an existing folder (cmd's %~s), or null: not Windows, the volume keeps no short name for it,

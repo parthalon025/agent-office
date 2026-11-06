@@ -26,7 +26,7 @@ export function entryContent(root, node) {
     '@echo off',
     'rem Starts Agent Office when you sign in. Delete this file, or use the office settings, to stop that.',
     'cd /d ' + q(root),
-    'start "Office" /min ' + q(node) + ' server.mjs',
+    'start "Office" /min ' + q(node) + ' src\\server.mjs',
     '',
   ].join('\r\n');
 }
@@ -79,6 +79,22 @@ export function enable(dir, root, node, port = DEFAULT_PORT) {
   fs.writeFileSync(entryPath(dir), entryContent(root, node));
   return state(dir);
 }
+/**
+ * Points an existing entry at the new place of the server (src/server.mjs; before the folder cleanup it was server.mjs in
+ * the office folder). Only an entry that still runs the old root server.mjs is rewritten, so a file the user edited
+ * by hand stays as it is. Never adds an entry. Throws nothing: a failed read or write leaves the entry as it was.
+ * Returns true when it rewrote the entry. The office that owns the entry (access) is the only one that may do it.
+ */
+export function migrate(dir, root, node, port = DEFAULT_PORT) {
+  if (!dir || !access(root, port).canChange) return false;
+  try {
+    const p = entryPath(dir);
+    if (!fs.existsSync(p) || !/"\s+server\.mjs\s*$/m.test(fs.readFileSync(p, 'utf8'))) return false;
+    fs.writeFileSync(p, entryContent(root, node));
+    return true;
+  } catch { return false; }
+}
+
 /** Removes the entry. Throws (status 403) when the office in folder root on port does not own it. */
 export function disable(dir, root = '', port = DEFAULT_PORT) {
   guard(root, port);

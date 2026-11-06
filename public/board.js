@@ -12,7 +12,7 @@
    The three screens take two clicks (the scene host runs the steps and flies the camera): the first click
    flies to the screen so the user can read it, a second click opens its input (o.onOpen). Esc, Back or a
    click on empty scene flies out again.
-   Also a chalk ledge, a marker tray, a warm lamp and two plants. The server's room description (server.mjs roomContents) lists it in words; keep the two in step.
+   Also a chalk ledge, a marker tray, a warm lamp and two plants. The server's room description (src/server.mjs roomContents) lists it in words; keep the two in step.
    Colors and fonts come from the DS tokens. The engine draws the room; this file repaints the board
    pictures and adds the decor. The engine builds walls 5.2 high with the
    room sign at 4.45, where the cable tray covers it, so the walls go up to WALL_H and the sign moves up.

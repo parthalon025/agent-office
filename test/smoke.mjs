@@ -4,12 +4,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import { resolveExe } from '../git.mjs';
-import { pageFile, routeOf } from '../auth.mjs';
-import { officeFiles, portArg } from '../files.mjs';
+import { resolveExe } from '../src/git.mjs';
+import { pageFile, routeOf } from '../src/auth.mjs';
+import { officeFiles, portArg, OFFICE_ROOT } from '../src/files.mjs';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
 // Usage: npm run smoke (the office of npm start), or npm run smoke -- <port> (an office on another port).
 // Two tokens (auth.mjs): the agent token from the token file of the port (files.mjs) for /hook* and /mcp/*, the page
 // token from the office's page file for /events and /api/*. Both are read before any session opens, so a wrong port
@@ -21,7 +19,7 @@ if (!asked) {
 }
 let cfg, page;
 try {
-  cfg = JSON.parse(fs.readFileSync(officeFiles(path.join(here, '..'), asked).token, 'utf8'));
+  cfg = JSON.parse(fs.readFileSync(officeFiles(OFFICE_ROOT, asked).token, 'utf8'));
   page = JSON.parse(fs.readFileSync(pageFile(process.env, cfg.port), 'utf8'));
 } catch {
   console.error(process.argv[2]

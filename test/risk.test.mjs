@@ -5,8 +5,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { riskOf, actionOf, inside, realInside, isProtectedPart, fileKey } from '../risk.mjs';
-import { officeFiles } from '../files.mjs';
+import { riskOf, actionOf, inside, realInside, isProtectedPart, fileKey } from '../src/risk.mjs';
+import { officeFiles } from '../src/files.mjs';
 import { shortOf } from './fixtures/short-name.mjs';
 import { FIXTURE_ROOT, OFFICE, holds } from './fixtures/fixture-root.mjs';
 import '../public/vocab.js';
@@ -467,7 +467,7 @@ test('files that run code at sign-in or in every shell are settings: the Startup
 });
 
 test('the office\'s own state.json and history.json are settings: the Security rules and schedules live there', () => {
-  const office = path.dirname(fileURLToPath(new URL('../risk.mjs', import.meta.url)));
+  const office = OFFICE;
   // an office on another port keeps state-<port>.json and history-<port>.json (files.mjs, #100)
   const other = officeFiles(office, 4392);
   for (const f of ['state.json', 'history.json', path.basename(other.state), path.basename(other.history)]) {
@@ -485,9 +485,9 @@ test('the office\'s own state.json and history.json are settings: the Security r
 // edits inside the worktree. A read stays as for any file (the code holds no secret). Markdown documents and the other
 // checkouts in .claude/worktrees are not the running office: they stay ordinary files.
 test('#120: an edit of the office\'s own code, hook or settings files is high, whatever the root', () => {
-  const office = path.dirname(fileURLToPath(new URL('../risk.mjs', import.meta.url)));
-  const code = ['hook.mjs', 'server.mjs', 'risk.mjs', 'security.mjs', 'mcp.mjs', 'launch.ps1', 'package.json', 'tokens.css',
-    path.join('public', 'vocab.js'), path.join('public', 'index.html'), path.join('providers', 'acp.mjs'), path.join('kit', 'check.py'),
+  const office = OFFICE;
+  const code = [path.join('src', 'hook.mjs'), path.join('src', 'server.mjs'), path.join('src', 'risk.mjs'), path.join('src', 'security.mjs'), path.join('src', 'mcp.mjs'), 'launch.ps1', 'package.json', 'tokens.css',
+    path.join('public', 'vocab.js'), path.join('public', 'index.html'), path.join('src', 'providers', 'acp.mjs'), path.join('kit', 'check.py'),
     'new-module.mjs', path.join('public', 'new.js')];
   for (const rel of code) {
     const f = path.join(office, rel);
@@ -507,7 +507,7 @@ test('#120: an edit of the office\'s own code, hook or settings files is high, w
     assert.equal(riskOf('Write', { file_path: path.join(office, 'hook.mjs:x.md') }, office), 'high', 'a stream that looks like a document');
   }
   // documents stay ordinary files
-  for (const rel of ['README.md', 'Changelog.md', path.join('docs', 'agents', 'domain.md')]) {
+  for (const rel of ['README.md', path.join('docs', 'design-system', 'Changelog.md'), path.join('docs', 'agents', 'domain.md')]) {
     assert.equal(riskOf('Edit', { file_path: path.join(office, rel) }, office), 'low', rel);
     assert.equal(actionOf('Edit', { file_path: path.join(office, rel) }, office), 'edit-inside', rel);
   }

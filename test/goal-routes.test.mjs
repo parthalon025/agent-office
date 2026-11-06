@@ -7,9 +7,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pageFile } from '../auth.mjs';
-import { officeFiles } from '../files.mjs';
-import { startOnFreePort, startOffice, until as untilLong } from './fixtures/office-server.mjs';
+import { pageFile } from '../src/auth.mjs';
+import { officeFiles } from '../src/files.mjs';
+import { startOnFreePort, startOffice, until as untilLong, copyOffice } from './fixtures/office-server.mjs';
 const until = (fn, what) => untilLong(fn, what, { ms: 20000, log: () => JSON.stringify(dump) });
 let dump = null;
 import { startFakePaperclip } from './fixtures/fake-paperclip.mjs';
@@ -61,10 +61,7 @@ before(async () => {
   base = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-goal-'));
   copy = path.join(base, 'office'); work = path.join(base, 'work');
   for (const d of [copy, work, path.join(base, 'home')]) fs.mkdirSync(d);
-  for (const f of fs.readdirSync(SRC)) {
-    if (/\.(mjs|json|ps1)$/.test(f) && !/^(state|history)(-\d+)?\.json$/.test(f) && !f.startsWith('office-')) fs.copyFileSync(path.join(SRC, f), path.join(copy, f));
-  }
-  for (const d of ['providers', 'public']) fs.cpSync(path.join(SRC, d), path.join(copy, d), { recursive: true });
+  copyOffice(copy);
   pc = await startFakePaperclip();
   boot = { ...process.env, OFFICE_HOOKS: 'command', OFFICE_OPEN: '0', OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
     LOCALAPPDATA: path.join(base, 'local'), USERPROFILE: path.join(base, 'home'), HOME: path.join(base, 'home') };

@@ -2,7 +2,7 @@
 // Pure: no I/O. Run: npm test
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { WINGS, FUNCTIONS, ARCHETYPES, detect, newRecord, cleanRecord, floorsOf, shownFloors, edit, layoutView, catalogView, floorOfKind, functionOf } from '../archetypes.mjs';
+import { WINGS, FUNCTIONS, ARCHETYPES, detect, newRecord, cleanRecord, floorsOf, shownFloors, edit, layoutView, catalogView, floorOfKind, functionOf } from '../src/archetypes.mjs';
 
 const ids = (floors) => floors.map((f) => f.id);
 

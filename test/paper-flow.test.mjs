@@ -2,8 +2,8 @@
 // folderAt, requests). Plain snapshots, no tracker, no DOM, no server, no paid call.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { normPath } from '../place.mjs';
-import { stageOf } from '../changes.mjs';
+import { normPath } from '../src/place.mjs';
+import { stageOf } from '../src/changes.mjs';
 import '../public/vocab.js';
 import '../public/wire.js';
 import '../public/building.js';

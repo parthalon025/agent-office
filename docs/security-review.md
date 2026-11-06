@@ -4,7 +4,7 @@ Read-only audit of main at 0fc02ec, then a fix pass on main at 371f7cf. This fil
 
 ## What was reviewed
 
-`server.mjs`, `tracker.mjs`, `git.mjs`, `place.mjs`, `notes.mjs`, `hook.mjs`, `payload.mjs`, `mcp.mjs`, `risk.mjs`, `launch.ps1`, `public/*.js`, `index.html` and the DS bundle sinks. Checked by reading the code and by probes on Node 22.18 (Windows). Sound at audit time: Host allowlist before any route, no CORS headers, a token on every route except the page and its static files, static files by exact-match map, bind to 127.0.0.1, argument lists for git (no shell), permission holds answered on their own response.
+`server.mjs`, `tracker.mjs`, `git.mjs`, `place.mjs`, `notes.mjs`, `hook.mjs`, `payload.mjs`, `mcp.mjs`, `risk.mjs` (all in `src/` since the folder cleanup; the findings below name them without the folder), `launch.ps1`, `public/*.js`, `index.html` and the DS bundle sinks. Checked by reading the code and by probes on Node 22.18 (Windows). Sound at audit time: Host allowlist before any route, no CORS headers, a token on every route except the page and its static files, static files by exact-match map, bind to 127.0.0.1, argument lists for git (no shell), permission holds answered on their own response.
 
 ## Findings
 

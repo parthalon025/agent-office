@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createSkills, SkillsError, SKILL_MAX } from '../skills.mjs';
+import { createSkills, SkillsError, SKILL_MAX } from '../src/skills.mjs';
 
 function rig() {
   const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-skills-')));

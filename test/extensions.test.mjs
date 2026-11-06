@@ -2,7 +2,7 @@
 // an option, so the scope stays local or project. Pure, offline.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { EXT_SCOPES, mcpAddArgs, mcpRemoveArgs, pluginArgs } from '../extensions.mjs';
+import { EXT_SCOPES, mcpAddArgs, mcpRemoveArgs, pluginArgs } from '../src/extensions.mjs';
 
 const refused = (fn, re) => assert.throws(fn, (e) => e.status === 400 && re.test(e.message));
 

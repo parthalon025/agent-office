@@ -1,7 +1,7 @@
 // Agent Office plugin for OpenClaw (#77). OpenClaw loads this folder into its Gateway; the office never loads it. It sends every
 // tool call of a session the office opened to the office hold and waits for the decision (gate.js). Install it on the PC that
 // runs the Gateway (README, "OpenClaw"):
-//   openclaw plugins install --link "<office folder>/integrations/openclaw-plugin" --force
+//   openclaw plugins install --link "<office folder>/src/integrations/openclaw-plugin" --force
 //   openclaw config set plugins.entries.agent-office.config.tokenFile "<office folder>/.office-token"
 //   openclaw plugins enable agent-office
 // A plain entry object, the shape definePluginEntry returns (src/plugin-sdk/plugin-entry.ts, v2026.10.10), so the plugin

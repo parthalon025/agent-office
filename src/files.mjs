@@ -8,8 +8,14 @@
 // per port already (auth.mjs pageFile).
 // Pure: names only, no I/O. Only node:path, so the command hook (one Node start per event) stays light.
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const DEFAULT_PORT = 4317;
+
+// The office folder: the repository root, one level above src/ (where this file is). The office keeps its runtime files
+// here (officeFiles), the page, DS and tokens are served from here, and risk.mjs rates edits of its code against it.
+// This is the one place that knows the layout: every other module imports it and never walks up from its own file.
+export const OFFICE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const isPort = (n) => Number.isInteger(n) && n > 0 && n < 65536;
 

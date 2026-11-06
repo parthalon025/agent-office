@@ -2,10 +2,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { createTracker } from '../tracker.mjs';
-import { slimPayload } from '../payload.mjs';
-import { createLocal } from '../providers/local.mjs';
-import { createExplainer, parseExplain, explainMessages, MAX_TEXT } from '../explain.mjs';
+import { createTracker } from '../src/tracker.mjs';
+import { slimPayload } from '../src/payload.mjs';
+import { createLocal } from '../src/providers/local.mjs';
+import { createExplainer, parseExplain, explainMessages, MAX_TEXT } from '../src/explain.mjs';
 import { startFakeOpenAI } from './fixtures/fake-openai.mjs';
 import '../public/vocab.js';
 

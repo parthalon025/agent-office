@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { startupDir, entryPath, entryContent, state, status, access, enable, disable, change, ENTRY_NAME } from '../startup.mjs';
+import { startupDir, entryPath, entryContent, state, status, access, enable, disable, change, migrate, ENTRY_NAME } from '../src/startup.mjs';
 
 test('startup folder is under APPDATA; unknown without it', () => {
   assert.equal(startupDir('C:\\Users\\a\\AppData\\Roaming'), 'C:\\Users\\a\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup');
@@ -14,7 +14,7 @@ test('startup folder is under APPDATA; unknown without it', () => {
 test('entry content: quoted title, quoted paths, CRLF, no kill', () => {
   const c = entryContent('E:\\agent office\\100%', 'C:\\Program Files\\nodejs\\node.exe');
   assert.match(c, /cd \/d "E:\\agent office\\100%%"/);
-  assert.match(c, /start "Office" \/min "C:\\Program Files\\nodejs\\node\.exe" server\.mjs/);
+  assert.match(c, /start "Office" \/min "C:\\Program Files\\nodejs\\node\.exe" src\\server\.mjs/);
   assert.ok(c.includes('\r\n') && !/[^\r]\n/.test(c));
   assert.doesNotMatch(c, /taskkill|\/IM/i);
 });
@@ -137,5 +137,39 @@ test('change: the owner gets the entry state with canChange true, another office
     assert.throws(() => change(dir, main, process.execPath, 4392, true), (e) => e.status === 403);
     assert.throws(() => change(dir, wt, process.execPath, 4317, true), (e) => e.status === 403);
     assert.deepEqual(fs.readdirSync(dir), []);
+  } finally { rm(dir, main, wt); }
+});
+
+// The folder cleanup moved the server to src/server.mjs. An entry that still starts the old root server.mjs is made again at the
+// next start of the owner office, so sign-in does not start a file that is gone.
+const OLD_ENTRY = ['@echo off', 'rem Starts Agent Office when you sign in.', 'cd /d "E:\\office"', 'start "Office" /min "C:\\node.exe" server.mjs', ''].join('\r\n');
+
+test('migrate: an entry for the old root server.mjs now starts src/server.mjs', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-startup-'));
+  const root = folder('main');
+  try {
+    fs.writeFileSync(path.join(dir, ENTRY_NAME), OLD_ENTRY);
+    assert.equal(migrate(dir, root, 'C:\\node.exe', 4317), true);
+    assert.equal(fs.readFileSync(path.join(dir, ENTRY_NAME), 'utf8'), entryContent(root, 'C:\\node.exe'));
+    assert.match(fs.readFileSync(path.join(dir, ENTRY_NAME), 'utf8'), /src\\server\.mjs/);
+    assert.equal(migrate(dir, root, 'C:\\node.exe', 4317), false, 'a current entry is left as it is');
+  } finally { rm(dir, root); }
+});
+
+test('migrate: adds no entry, and leaves a hand-edited entry, another port and a worktree alone', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-startup-'));
+  const main = folder('main'), wt = folder('worktree');
+  try {
+    assert.equal(migrate(dir, main, 'C:\\node.exe', 4317), false, 'no entry: none is made');
+    assert.deepEqual(fs.readdirSync(dir), []);
+    assert.equal(migrate('', main, 'C:\\node.exe', 4317), false, 'no Startup folder');
+    fs.writeFileSync(path.join(dir, ENTRY_NAME), OLD_ENTRY);
+    assert.equal(migrate(dir, main, 'C:\\node.exe', 4392), false, 'another port does not own the entry');
+    assert.equal(migrate(dir, wt, 'C:\\node.exe', 4317), false, 'a worktree does not own the entry');
+    assert.equal(fs.readFileSync(path.join(dir, ENTRY_NAME), 'utf8'), OLD_ENTRY);
+    const mine = '@echo off\r\nstart "Office" /min "D:\\tools\\node.exe" "D:\\mine\\run.mjs"\r\n';
+    fs.writeFileSync(path.join(dir, ENTRY_NAME), mine);
+    assert.equal(migrate(dir, main, 'C:\\node.exe', 4317), false, 'a hand-edited entry stays');
+    assert.equal(fs.readFileSync(path.join(dir, ENTRY_NAME), 'utf8'), mine);
   } finally { rm(dir, main, wt); }
 });

@@ -10,7 +10,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { OFFICE_ROOT } from './files.mjs';
 
 const READS = new Set(['Read', 'Grep', 'Glob', 'LS', 'NotebookRead']); // read-only tools that take a path
 const NO_FILES = new Set(['TodoWrite', 'WebSearch']);                  // read-only tools that touch no file
@@ -166,19 +166,18 @@ function resolveIn(root, abs) {
 // The office's own saved state (#70): state.json holds the Security room rules and the schedules (prompts the office runs),
 // history.json the past sessions; an office on another port has state-<port>.json and history-<port>.json (files.mjs).
 // A change to them changes what the office does at its next start, so they are settings that run code. Matched in the
-// office folder (this file's folder) only, not by name alone: another project's state.json is a plain file.
-const OFFICE_ROOT = path.dirname(fileURLToPath(import.meta.url));
+// office folder (files.mjs OFFICE_ROOT, the repository root) only, not by name alone: another project's state.json is a plain file.
 const OFFICE_DIR = norm(OFFICE_ROOT);
 const OWN_STATE = /^(state|history)(-\d+)?\.json$/i;
 const ownState = (p) => !!p && path.dirname(norm(p)) === OFFICE_DIR && OWN_STATE.test(path.basename(String(p)));
-// The office's own code, hook and settings files (#120): every file in the office folder or below it. hook.mjs is the command
-// hook each attached Claude Code session runs; server.mjs, launch.ps1, package.json, providers/ and public/ (vocab.js holds the
+// The office's own code, hook and settings files (#120): every file in the office folder or below it. src/hook.mjs is the command
+// hook each attached Claude Code session runs; src/ (server.mjs and the rest), launch.ps1, package.json and public/ (vocab.js holds the
 // Security defaults, the page answers requests) run at the next start or page load. So an edit there is settings that run
 // code, whatever the session root: also from a root inside the office, above it, in another repo, or through a link or a short
 // name. Two exceptions, which the office never runs: Markdown documents (by the name Windows opens: a.md., not a.mjs:x.md), and
 // the other checkouts in .claude/worktrees (a session there works on a copy, not on the running office; the office's own
 // .claude files stay settings by the RUNS rule). A read stays as for any file: the code holds no secret, and secret files
-// count by name. opts.office for tests; this file's folder by default. As text (8.3 short names spelled out) and after links.
+// count by name. opts.office for tests; the office folder by default. As text (8.3 short names spelled out) and after links.
 function ownCode(abs, real, opts) {
   const dir = (opts && opts.office) || OFFICE_ROOT;
   for (const [d, t] of [[longPath(dir), longPath(abs)], [realPath(dir), real]]) {

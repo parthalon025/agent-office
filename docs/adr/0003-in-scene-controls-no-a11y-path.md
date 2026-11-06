@@ -12,6 +12,6 @@ In-scene controls get no keyboard path and no screen reader mirror, now or later
 
 ## Consequences
 
-- `DS-README.md` Definition of done has an exception line for in-scene controls.
+- `docs/design-system/DS-README.md` Definition of done has an exception line for in-scene controls.
 - A user who cannot use a pointer cannot change Security room rules in the scene.
 - DOM controls (dialogs, the dock, the chat) keep the full Definition of done.

@@ -10,11 +10,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { load, DEFAULT_HOOK_MS } from './fixtures/fake-openclaw.mjs';
-import { OFFICE_KEY as PLUGIN_KEY, officeIdOf as pluginIdOf, ROUTE, WAIT_MS, HOOK_MS, createGate, hookLimit, waitFor } from '../integrations/openclaw-plugin/gate.js';
-import { OFFICE_KEY, officeKey, officeIdOf, gateRequest, PLUGIN_ID, PLUGIN_DIR } from '../providers/openclaw.mjs';
-import { routeOf } from '../auth.mjs';
+import { OFFICE_KEY as PLUGIN_KEY, officeIdOf as pluginIdOf, ROUTE, WAIT_MS, HOOK_MS, createGate, hookLimit, waitFor } from '../src/integrations/openclaw-plugin/gate.js';
+import { OFFICE_KEY, officeKey, officeIdOf, gateRequest, PLUGIN_ID, PLUGIN_DIR } from '../src/providers/openclaw.mjs';
+import { routeOf } from '../src/auth.mjs';
 
-const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'integrations', 'openclaw-plugin');
+const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'integrations', 'openclaw-plugin');
 const KEY = 'agent:main:agent-office:o1a2b3c4d';
 
 // A fake office: answer(body) gives { status, json } or a promise of it (or never settles). It records each request.

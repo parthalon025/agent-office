@@ -202,7 +202,7 @@ test('exportText: a secret in a call is masked in the Markdown', () => {
 });
 
 test('redactSecrets and the notes scan agree on the key shapes', async () => {
-  const { scanNote } = await import('../notes.mjs');
+  const { scanNote } = await import('../src/notes.mjs');
   for (const k of ['sk-abcdefghijklmnopqrstuvwxyz0123', 'AKIAABCDEFGHIJKLMNOP', 'ghp_' + 'a'.repeat(36), '-----BEGIN RSA PRIVATE KEY-----']) {
     assert.ok(scanNote(`value ${k}`), `the notes scan misses ${k}`);
     assert.equal(F.redactSecrets(`value ${k}`), `value ${F.SECRET_MASK}`, `redactSecrets misses ${k}`);

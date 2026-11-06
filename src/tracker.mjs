@@ -10,7 +10,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { riskOf } from './risk.mjs';
 import { describeTool, callKey, settles } from './payload.mjs';
-import './public/vocab.js'; // the waiting rule (isWaiting), shared with the page
+import '../public/vocab.js'; // the waiting rule (isWaiting), shared with the page
 
 const V = globalThis.OfficeVocab;
 

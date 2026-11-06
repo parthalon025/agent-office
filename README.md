@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/parthalon025/agent-office/actions/workflows/ci.yml/badge.svg)](https://github.com/parthalon025/agent-office/actions/workflows/ci.yml)
 
-Agent Office is a 3D office that shows your Claude Code sessions as bots at desks. You open a session, talk to it in a chat, approve its steps, read what it changed, and close it, all from one browser tab. No terminal is needed. It also runs local models, ACP agents, OpenClaw, Agent Framework teams and cloud agents, and one Security room sets what each of them may do. It runs on your PC only, with no dependencies. The interface is built on the Agent Office design system (x1.7.18), which lives in this folder (see [DS-README.md](DS-README.md)).
+Agent Office is a 3D office that shows your Claude Code sessions as bots at desks. You open a session, talk to it in a chat, approve its steps, read what it changed, and close it, all from one browser tab. No terminal is needed. It also runs local models, ACP agents, OpenClaw, Agent Framework teams and cloud agents, and one Security room sets what each of them may do. It runs on your PC only, with no dependencies. The interface is built on the Agent Office design system (x1.7.18), which lives in this folder (see [DS-README.md](docs/design-system/DS-README.md)).
 
 ## Screenshots
 
@@ -60,7 +60,7 @@ All the jobs, with every control, are in [Using the office](docs/using-the-offic
 | [Configuration](docs/configuration.md) | Every environment variable. |
 | [Troubleshooting](docs/troubleshooting.md) | Problems and fixes, by kind of session. |
 | [Development](docs/development.md) | Commands, tests, the core-jobs gate, branch ports, how it works and the file map. |
-| [DS-README.md](DS-README.md) | The design system: rules, recipes, reference and concepts. |
+| [DS-README.md](docs/design-system/DS-README.md) | The design system: rules, recipes, reference and concepts. |
 
 ## Contributing and license
 

@@ -42,7 +42,7 @@
 import crypto from 'node:crypto';
 import { DEFAULT_SPEND_LIMIT, spendLimitFor } from './providers/index.mjs';
 import { NOTES_MAX } from './notes.mjs';
-import './public/vocab.js';
+import '../public/vocab.js';
 
 export const DEFAULT_LIMITS = { maxSteps: 12, maxHops: 4, maxMessages: 30, maxAttempts: 3, boardMax: NOTES_MAX - 100 }; // boardMax: the board text must fit a notes board
 

@@ -11,10 +11,10 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import * as auth from '../auth.mjs';
-import { resolveExe } from '../git.mjs';
-import { officeFiles } from '../files.mjs';
-import { startOffice, startOnFreePort, until } from './fixtures/office-server.mjs';
+import * as auth from '../src/auth.mjs';
+import { resolveExe } from '../src/git.mjs';
+import { officeFiles } from '../src/files.mjs';
+import { startOffice, startOnFreePort, until, copyOffice } from './fixtures/office-server.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const win = process.platform === 'win32';
@@ -503,11 +503,11 @@ test('no token in the page source, no token from the URL, no plain token compare
     const src = read(f);
     assert.doesNotMatch(src, /office-token|x-office-token|[?&]t=/, f);
   }
-  const server = read('server.mjs');
+  const server = read('src/server.mjs');
   assert.doesNotMatch(server, /searchParams\.get\(\s*['"]t['"]\s*\)/);
   assert.doesNotMatch(server, /[!=]==?\s*(AGENT_TOKEN|PAGE_TOKEN)\b|\b(AGENT_TOKEN|PAGE_TOKEN)\s*[!=]==?/);
   assert.doesNotMatch(server, /__TOKEN__/);
-  assert.match(read('auth.mjs'), /crypto\.timingSafeEqual\(/);
+  assert.match(read('src/auth.mjs'), /crypto\.timingSafeEqual\(/);
 });
 
 // ---------- the real server ----------
@@ -536,8 +536,7 @@ test('route matrix, launch code and owner-only files on a real server', { timeou
   const dir = path.join(tmp, 'office'), lad = path.join(tmp, 'local');
   fs.mkdirSync(dir);
   fs.mkdirSync(lad);
-  for (const f of fs.readdirSync(ROOT)) if (f.endsWith('.mjs') || f === 'package.json') fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
-  for (const d of ['providers', 'public']) fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true });
+  copyOffice(dir);
   const baseEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toLowerCase() !== 'path'));
   Object.assign(baseEnv, {
     // No claude on PATH: no paid call and a fast start. Programs from System32 come by absolute path anyway.
@@ -977,8 +976,7 @@ function remoteRig(label) {
   const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), label)));
   const dir = path.join(tmp, 'office'), lad = path.join(tmp, 'local');
   fs.mkdirSync(dir); fs.mkdirSync(lad);
-  for (const f of fs.readdirSync(ROOT)) if (f.endsWith('.mjs') || f === 'package.json') fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
-  for (const d of ['providers', 'public']) fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true });
+  copyOffice(dir);
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toLowerCase() !== 'path' && !k.startsWith('OFFICE_REMOTE')));
   Object.assign(env, {
     PATH: [path.dirname(process.execPath), ...(win ? [path.join(process.env.SystemRoot || 'C:\\Windows', 'System32')] : [])].join(path.delimiter),

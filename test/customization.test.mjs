@@ -2,8 +2,8 @@
 // Run: node --test test/customization.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanPersona, personaOf, personaPrompt, STARTER_PERSONAS, STARTER_TEAMS, addStarters, setTeam, removeTeam, teamOf, cleanTeam, exportCustom, importCustom, setScreen } from '../personas.mjs';
-import { decide } from '../security.mjs';
+import { cleanPersona, personaOf, personaPrompt, STARTER_PERSONAS, STARTER_TEAMS, addStarters, setTeam, removeTeam, teamOf, cleanTeam, exportCustom, importCustom, setScreen } from '../src/personas.mjs';
+import { decide } from '../src/security.mjs';
 
 test('a persona also keeps role, model and agent kind, and drops anything else', () => {
   const p = cleanPersona({ name: 'Ada', role: 'Reviews diffs.', model: 'sonnet', kind: 'claude-code', permissions: 'allow', rules: { x: 1 } });

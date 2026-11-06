@@ -18,9 +18,9 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startOnFreePort } from './fixtures/office-server.mjs';
 import { launch, findBrowser } from './fixtures/cdp.mjs';
-import { officeFiles } from '../files.mjs';
-import { pageFile } from '../auth.mjs';
-import { resolveExe } from '../git.mjs';
+import { officeFiles } from '../src/files.mjs';
+import { pageFile } from '../src/auth.mjs';
+import { resolveExe } from '../src/git.mjs';
 
 // ---------- the one place the step limits are set ----------
 // Steps per job, at every width. Lower a limit when a job gets shorter. Raise one only with a reason in the commit.

@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import * as git from '../git.mjs';
+import * as git from '../src/git.mjs';
 
 const { resolveExe } = git;
 const win = process.platform === 'win32';
@@ -193,14 +193,14 @@ function sources() {
       return e.name.endsWith('.mjs') ? [p] : [];
     });
   };
-  return [...list(ROOT, false), ...list(path.join(ROOT, 'providers'), true), ...list(path.join(ROOT, 'test'), true)]
+  return [...list(ROOT, false), ...list(path.join(ROOT, 'src'), true), ...list(path.join(ROOT, 'test'), true)]
     .filter((f) => f !== fileURLToPath(import.meta.url)); // this file holds the check's own samples and the control
 }
 
 test('no source starts a program by a bare name, through a shell, or with shell: true', () => {
   const files = sources();
   assert.ok(files.some((f) => path.basename(f) === 'server.mjs') && files.some((f) => path.basename(f) === 'git.mjs'));
-  for (const p of ['claude-code.mjs', 'local.mjs', 'local-tools.mjs', 'acp.mjs']) assert.ok(files.includes(path.join(ROOT, 'providers', p)), `providers/${p} is scanned`);
+  for (const p of ['claude-code.mjs', 'local.mjs', 'local-tools.mjs', 'acp.mjs']) assert.ok(files.includes(path.join(ROOT, 'src', 'providers', p)), `src/providers/${p} is scanned`);
   const bad = [];
   for (const f of files) {
     const src = fs.readFileSync(f, 'utf8');
@@ -275,7 +275,7 @@ test('helperCwd is a folder that exists, outside the office folder and the temp 
 
 test('server, hook, MCP and probe set the guard as their first statement', () => {
   for (const name of ['server.mjs', 'hook.mjs', 'mcp.mjs', 'probe.mjs']) {
-    const first = fs.readFileSync(path.join(ROOT, name), 'utf8').split(/\r?\n/)
+    const first = fs.readFileSync(path.join(ROOT, 'src', name), 'utf8').split(/\r?\n/)
       .map((l) => l.trim()).find((l) => l && !l.startsWith('#!') && !l.startsWith('//'));
     assert.equal(first, `process.env.${GUARD} = '1';`, name);
   }

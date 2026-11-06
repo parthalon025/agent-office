@@ -6,7 +6,7 @@
 //
 // Pure: no I/O, no clock (the cue rule is read from public/vocab.js, which is shared with the page). The map is injected; the server saves it in state.json (persisted.personas).
 
-import './public/vocab.js';
+import '../public/vocab.js';
 
 export const NAME_MAX = 40;
 export const SHAPES = ['round', 'square', 'tall', 'wide'];

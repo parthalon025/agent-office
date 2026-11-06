@@ -11,18 +11,18 @@ import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import * as auth from '../auth.mjs';
-import { startOnFreePort } from './fixtures/office-server.mjs';
+import * as auth from '../src/auth.mjs';
+import { startOnFreePort, copyOffice } from './fixtures/office-server.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const win = process.platform === 'win32';
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 
-// The documents: README.md and every Markdown file directly in docs/ (the decision records have no pictures).
+// The documents: README.md, the community files, and every Markdown file directly in docs/ and docs/design-system/ (the decision records have no pictures).
 function docFiles() {
-  const out = ['README.md'];
-  for (const f of fs.readdirSync(path.join(ROOT, 'docs'))) if (f.endsWith('.md')) out.push('docs/' + f);
+  const out = ['README.md', 'CONTRIBUTING.md', 'SECURITY.md', 'CODE_OF_CONDUCT.md'];
+  for (const d of ['docs', 'docs/design-system']) for (const f of fs.readdirSync(path.join(ROOT, d))) if (f.endsWith('.md')) out.push(d + '/' + f);
   return out;
 }
 const slugOf = (h) => h.trim().toLowerCase().replace(/[`*_]/g, '').replace(/[^\p{L}\p{N} -]/gu, '').replace(/ /g, '-');
@@ -159,8 +159,7 @@ test('the server serves the vendored files with their type and pinned bytes, and
   const dir = path.join(tmp, 'office'), lad = path.join(tmp, 'local');
   fs.mkdirSync(dir);
   fs.mkdirSync(lad);
-  for (const f of fs.readdirSync(ROOT)) if (f.endsWith('.mjs') || f === 'package.json' || f === 'tokens.css') fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
-  for (const d of ['providers', 'public', 'components']) fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true });
+  copyOffice(dir, { components: true });
   const baseEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toLowerCase() !== 'path'));
   Object.assign(baseEnv, {
     PATH: [path.dirname(process.execPath), ...(win ? [path.join(process.env.SystemRoot || 'C:\\Windows', 'System32')] : [])].join(path.delimiter),
@@ -195,7 +194,7 @@ test('the server serves the vendored files with their type and pinned bytes, and
     for (const m of html.matchAll(/<(?:script|link)\b[^>]*\b(?:src|href)="([^"]*)"/g)) assert.equal((await get(port, m[1])).status, 200, m[1]);
     // The list is exact: no folder listing, no license or README file, no way out of the folder.
     for (const p of ['/vendor/', '/vendor', '/vendor/README.md', '/vendor/react-LICENSE.txt', '/vendor/fonts/', '/vendor/fonts/OFL-vt323.txt',
-      '/vendor/fonts/../../server.mjs', '/vendor/fonts/%2e%2e/%2e%2e/server.mjs', '/vendor/fonts/..%2f..%2fserver.mjs', '/vendor/fonts/fonts.css%00',
+      '/vendor/fonts/../../src/server.mjs', '/vendor/fonts/%2e%2e/%2e%2e/src/server.mjs', '/vendor/fonts/..%2f..%2fsrc%2fserver.mjs', '/src/server.mjs', '/vendor/fonts/fonts.css%00',
       '/vendor/fonts/VT323-LATIN.WOFF2', '/vendor//react.production.min.js', '/public/vendor/react.production.min.js', '/vendor/react.production.min.js/']) {
       const res = await get(port, p);
       assert.notEqual(res.status, 200, p);

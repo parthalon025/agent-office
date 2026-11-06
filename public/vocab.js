@@ -30,7 +30,7 @@
      kindsWord(list, kinds) -> the kinds of a list of sessions as one word ('Claude Code, Ollama'): each kind once,
                          in the order of kinds, a kind it does not know last. '' when no session has a kind.
    Agent kinds as the Open dialog, a room's Add agent and the Agent kinds view show them. A kind k is a snapshot kind
-   (providers/index.mjs describe) with its GET /api/providers answer: { checking, ready, models, needs, ... }.
+   (src/providers/index.mjs describe) with its GET /api/providers answer: { checking, ready, models, needs, ... }.
      kindState(k)     -> { key, word }: Checking (no answer yet), Ready, Not ready or Not configured (a cloud kind the user has not
                          set up), with a DS status key
      notConfigured(k) -> true when the kind answered and is not set up (Open session waits)
@@ -75,7 +75,7 @@
   function has(a) { return !!(a && a.length); }
   function oneLine(t) { return clip(String(t == null ? '' : t).replace(/\s+/g, ' ').trim(), 300); }
 
-  // What an agent kind has beyond the seam (#72), in the order the page shows it. A provider declares the keys (providers/index.mjs
+  // What an agent kind has beyond the seam (#72), in the order the page shows it. A provider declares the keys (src/providers/index.mjs
   // features); the resume and images keys are not office features and have no entry. The server puts the list on the session.
   var FEATURES = [
     ['skills', 'Skills'], ['memory', 'Memory'], ['fork', 'Fork'], ['reason', 'Reasons'], ['teams', 'Agent teams'], ['schedules', 'Scheduled tasks']
@@ -180,7 +180,7 @@
   }
   function todoStatus(t) { return TODO[t && t.status !== undefined ? t.status : t] || 'resting'; }
 
-  // Supervision (ADR 0001): an ungated agent carries a label. The server sets it on the session (providers/index.mjs
+  // Supervision (ADR 0001): an ungated agent carries a label. The server sets it on the session (src/providers/index.mjs
   // supervisionOf); the words come from the provider. This is the one place the page reads it.
   //   supervision(s)     the full label, '' for a gated agent. On the bot card, the desk terminal and the stats.
   //   supervisionHead(l) the words before the colon, for the one-line title bar of a desk monitor.
@@ -297,7 +297,7 @@
     return list.length > 1 && list.length === g.items.length ? list.map(function (r) { return { id: r.id, allow: allow === true }; }) : [];
   }
   // How long the office holds a request for the user: 15 minutes in a session that runs in the office, 60 s in a terminal session
-  // (server.mjs HEADLESS_ASK_MS and the terminal dialog). The approval paper shows the time left.
+  // (src/server.mjs HEADLESS_ASK_MS and the terminal dialog). The approval paper shows the time left.
   function holdMs(s) { return s && s.headless ? 15 * 60 * 1000 : 60 * 1000; }
   function alwaysOffer(s) {
     return requests(s).filter(function (r) { return r.kind === 'permission' && r.always && r.risk !== 'high'; })[0] || null;
@@ -309,7 +309,7 @@
   // ones (read or edit inside the worktree): the office answers a request only when the user set the cell to Allow or Deny
   // (owner decision pending, #67; Claude Code asks about such calls by itself today). One exception, `defs`: the local model
   // keeps what it did before the Security room, its reads and edits inside the worktree run with no question (they never were
-  // requests, providers/local.mjs). The two Secrets rows never offer Allow. The Agents rows are office-wide;
+  // requests, src/providers/local.mjs). The two Secrets rows never offer Allow. The Agents rows are office-wide;
   // every other row can have a per-building override. A rule the row does not offer is never used.
   // free: the kind runs on a model of this machine and costs nothing (the Spend screen says Free).
   var SEC_COLUMNS = [{ id: 'claude-code', label: 'Claude Code' }, { id: 'hermes', label: 'Hermes' }, { id: 'dsh', label: 'dsh' },
@@ -334,12 +334,12 @@
     settings: Object.assign({ label: 'Settings files that run code', options: ASK_DENY, def: 'ask' }, NO_FILES),
     secrets: Object.assign({ label: 'Secret files', options: ASK_DENY, def: 'ask' }, NO_FILES),
     // Agents screen. Ungated agents run tool calls without asking the office (ADR 0001): off until the user turns them on.
-    // only: the kinds whose provider is gated: false (providers/acp.mjs AGENTS, the cloud kinds); the others ask the office, so "Gated".
+    // only: the kinds whose provider is gated: false (src/providers/acp.mjs AGENTS, the cloud kinds); the others ask the office, so "Gated".
     ungated: { label: 'Turn on ungated agents', options: TOGGLE, def: 'off', office: true, only: ['hermes', 'copilot', 'cloud'], na: 'Gated' },
     // Paperclip agents are not an agent kind: the Agents screen lists them by name in its Paperclip part, each with its own
     // Supervise in office (#76, public/security.js), so no cell stands for all of them.
     // An agent that reports no cost: Ask (the office asks once per session), Allow (it runs without asking), Deny (it never runs).
-    // A cloud kind reports cost only from the prices the owner set (providers/cloud.mjs); without them it is such an agent.
+    // A cloud kind reports cost only from the prices the owner set (src/providers/cloud.mjs); without them it is such an agent.
     'no-cost': { label: 'Run without cost reports', options: RULE, def: 'ask', office: true, only: ['hermes', 'dsh', 'openclaw', 'copilot', 'cloud'], na: { 'claude-code': 'Reports cost', local: 'Free', 'agent-framework': 'Free' } }
   });
   var SEC_SCREENS = [
@@ -525,8 +525,8 @@
   }
 
   // The spend limit field of the Open dialog: a paid kind that reports cost (#33, Q22). A kind with cost 'unknown' has no
-  // limit (providers/index.mjs spendLimitFor gives null: nothing could stop it), so its form says why instead (review M2).
-  // A cloud kind (#24) reports cost only when the owner set its prices (providers/cloud.mjs): without them it is 'unknown'.
+  // limit (src/providers/index.mjs spendLimitFor gives null: nothing could stop it), so its form says why instead (review M2).
+  // A cloud kind (#24) reports cost only when the owner set its prices (src/providers/cloud.mjs): without them it is 'unknown'.
   function limitShown(k) { return !k || (k.paid !== false && k.cost !== 'unknown'); }
   function costNote(k) {
     if (!(k && k.paid !== false && k.cost === 'unknown')) return '';

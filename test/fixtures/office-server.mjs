@@ -8,10 +8,23 @@
 //   between. startOnFreePort() sees that (the server says "already running" or "is busy" and exits) and starts again
 //   on a new port. A copy of the office takes its file names from its port (files.mjs), so `prepare(port)` makes the
 //   files that depend on the port, once for each try.
+import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawn, execFile } from 'node:child_process';
-import { resolveExe, helperCwd } from '../../git.mjs';
+import { resolveExe, helperCwd } from '../../src/git.mjs';
+
+// The repository root, and the copy a test makes of the office layout: package.json, launch.ps1, src/ (every server module),
+// public/, and with `components` also tokens.css and components/ (what the static routes serve). The copy has the same layout
+// as the repository, so files.mjs OFFICE_ROOT is the copy's folder and the server writes its runtime files there, never in
+// the repository. Every test that runs a real server.mjs copy starts with this, so none keeps its own file list.
+export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+export function copyOffice(dest, { components = false, from = REPO_ROOT } = {}) {
+  fs.mkdirSync(dest, { recursive: true });
+  for (const f of ['package.json', 'launch.ps1', ...(components ? ['tokens.css'] : [])]) fs.copyFileSync(path.join(from, f), path.join(dest, f));
+  for (const d of ['src', 'public', ...(components ? ['components'] : [])]) fs.cpSync(path.join(from, d), path.join(dest, d), { recursive: true });
+}
 
 export const READY = /is open: /;
 // What a server prints when its port is taken (server.mjs, server.on('error')).
@@ -46,7 +59,7 @@ const killTree = (pid) => new Promise((resolve) => {
  * a busy port). It rejects when the server exits any other way or the ready line does not come in `ms`. A rejection for a
  * busy port has `busy: true`.  `script` is for a test that starts a stand-in instead of the server.
  */
-export function startOffice(dir, env, { ms = START_MS, script = path.join(dir, 'server.mjs'), execPath = process.execPath } = {}) {
+export function startOffice(dir, env, { ms = START_MS, script = path.join(dir, 'src', 'server.mjs'), execPath = process.execPath } = {}) {
   const child = spawn(execPath, [script], { cwd: dir, env: { OFFICE_EXPLAIN: 'off', ...env }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   // A child that cannot start gives `error` and no `exit`: exited settles with null then, so no caller waits for ever.
