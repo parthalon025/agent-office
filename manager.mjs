@@ -89,7 +89,7 @@ export function suggestSwitch({ errors = 0, model = '' } = {}) {
   return errors >= SWITCH_AFTER_ERRORS && !/opus/i.test(model) ? 'Switch to Opus?' : null;
 }
 
-const STATUS_TO_DS ={ pending: 'resting', working: 'working', finished: 'finished', error: 'error' };
+const STATUS_TO_DS = { pending: 'resting', working: 'working', finished: 'finished', error: 'error' };
 const MARK = { pending: '[ ]', working: '[~]', finished: '[x]', error: '[!]' };
 const WORD = { planning: 'Planning', 'awaiting-approval': 'Waiting for your approval', running: 'Running', finished: 'Done', blocked: 'Blocked', stopped: 'Stopped', failed: 'Failed', cancelled: 'Cancelled' };
 const GOAL_MAX = 2000; // a longer goal is refused (never planned from a cut text); the board shows 300
