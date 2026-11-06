@@ -332,6 +332,15 @@
             emit({ type: 'subagent.done', bot: hn, remove: true, result: a.ok ? 'Returned its result' : 'Stopped before it finished' });
           }
         });
+        // The tracker keeps only the last 20 agents: an open helper it cut is gone from the list and never shows
+        // as done, so send it away here, once (#116). The name stays taken (#94).
+        var listed = {};
+        (s.agents || []).forEach(function (a) { listed[a.call] = true; });
+        Object.keys(k.helpers).forEach(function (call) {
+          if (k.helpersDone[call] || listed[call]) return;
+          k.helpersDone[call] = true;
+          emit({ type: 'subagent.done', bot: k.helpers[call], remove: true, result: 'Stopped before it finished' });
+        });
       }
       // The session leaves the scene (it moved, or the server forgot it): its helpers get no finish event from the
       // tracker, so send them away here. A helper that already finished is not told twice (#95). why is the result text:
