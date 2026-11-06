@@ -1152,3 +1152,74 @@ test('DS controls: left rotates, middle and right pan', () => {
   const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'components', 'bundle.js'), 'utf8');
   assert.match(src, /mouseButtons\s*=\s*\{\s*LEFT:\s*T\.MOUSE\.ROTATE,\s*MIDDLE:\s*T\.MOUSE\.PAN,\s*RIGHT:\s*T\.MOUSE\.PAN\s*\}/);
 });
+
+// The shared screen lifecycle (#182), through a fake host and fake timers.
+function fakeHost() {
+  const h = { targets: [], rebuilds: [], frames: [], focuses: [], leaves: 0 };
+  const add = (list) => (fn) => { list.push(fn); return () => { const i = list.indexOf(fn); if (i >= 0) list.splice(i, 1); }; };
+  h.register = add(h.targets); h.onRebuild = add(h.rebuilds); h.frame = add(h.frames); h.onFocus = add(h.focuses);
+  h.leave = () => { h.leaves++; };
+  return h;
+}
+function fakeTimers() {
+  const t = { fns: new Map(), n: 0, ms: [] };
+  t.set = (fn, ms) => { t.fns.set(++t.n, fn); t.ms.push(ms); return t.n; };
+  t.clear = (id) => { t.fns.delete(id); };
+  t.fire = () => [...t.fns.values()].forEach((fn) => fn());
+  return t;
+}
+
+test('screenLifecycle registers the target, rebuild, frame and focus, and ticks every 1500 ms by default', () => {
+  const h = fakeHost(), t = fakeTimers(), seen = [];
+  P.screenLifecycle(h, { target: { name: 'x' }, rebuild: (w) => seen.push(['r', w]), frame: (dt) => seen.push(['f', dt]), focus: (f) => seen.push(['o', f]), tick: () => seen.push(['t']) }, t);
+  assert.equal(h.targets.length, 1); assert.equal(h.rebuilds.length, 1); assert.equal(h.frames.length, 1); assert.equal(h.focuses.length, 1);
+  assert.deepEqual(t.ms, [1500]);
+  h.rebuilds[0](['floor']); h.frames[0](0.1); h.focuses[0](null); t.fire();
+  assert.deepEqual(seen, [['r', ['floor']], ['f', 0.1], ['o', null], ['t']]);
+});
+
+test('screenLifecycle guards every callback: a throw never reaches the host or stops the timer', () => {
+  const h = fakeHost(), t = fakeTimers();
+  let ticks = 0;
+  P.screenLifecycle(h, { rebuild() { throw new Error('a'); }, frame() { throw new Error('b'); }, tick() { ticks++; throw new Error('c'); } }, t);
+  assert.doesNotThrow(() => { h.rebuilds[0]([]); h.frames[0](0, 0); t.fire(); t.fire(); });
+  assert.equal(ticks, 2);
+});
+
+test('screenLifecycle free takes everything off once, and leaves the host last', () => {
+  const h = fakeHost(), t = fakeTimers();
+  const free = P.screenLifecycle(h, { target: {}, rebuild() {}, frame() {}, focus() {}, tick() {} }, t);
+  free(); free();
+  assert.equal(h.targets.length + h.rebuilds.length + h.frames.length + h.focuses.length, 0);
+  assert.equal(t.fns.size, 0);
+  assert.equal(h.leaves, 1);
+});
+
+test('screenLifecycle frees itself and calls onGone when a tick finds the scene gone', () => {
+  const h = fakeHost(), t = fakeTimers();
+  let gone = false, told = 0, ticks = 0;
+  P.screenLifecycle(h, { target: {}, tick() { ticks++; }, gone: () => gone, onGone: () => { told++; } }, t);
+  t.fire(); assert.equal(ticks, 1);
+  gone = true; t.fire();
+  assert.equal(ticks, 1); assert.equal(told, 1); assert.equal(h.targets.length, 0); assert.equal(h.leaves, 1); assert.equal(t.fns.size, 0);
+});
+
+test('screenLifecycle honours spec.every', () => {
+  const t = fakeTimers();
+  P.screenLifecycle(fakeHost(), { tick() {}, every: 1000 }, t);
+  assert.deepEqual(t.ms, [1000]);
+});
+
+test('painted screens use host.screen, never their own register, rebuild listener or timer', () => {
+  const dir = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
+  for (const f of ['board', 'terminal', 'security', 'lobby', 'desk']) {
+    const src = readFileSync(join(dir, f + '.js'), 'utf8');
+    assert.match(src, /host\.screen\(/, f);
+    assert.doesNotMatch(src, /host\.register\(|host\.onRebuild\(|setInterval\(/, f);
+  }
+});
+
+test('host.screen passes timers that run unbound (a bare setInterval as a method throws Illegal invocation)', () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'public', 'scene-host.js'), 'utf8');
+  assert.doesNotMatch(src, /set:\s*setInterval/);
+});

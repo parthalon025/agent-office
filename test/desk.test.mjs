@@ -102,7 +102,7 @@ test('every in-scene action is in the Ctrl+K list', () => {
 test('the desk adapter keeps the rules: one raycaster, no pointer listener, no cursor write, no camera move (the host owns them)', () => {
   const src = fs.readFileSync(new URL('../public/desk.js', import.meta.url), 'utf8');
   assert.doesNotMatch(src, /new T\.Raycaster|addEventListener\(['"]pointer|addEventListener\(['"]mouse|\.style\.cursor|stage\.goal|ctl\.target/, 'only the scene host picks, sets the cursor and flies');
-  assert.match(src, /host\.register\(target\)/, 'its pick target is registered with the scene host');
+  assert.match(src, /host\.screen\(\{ target: target/, 'its pick target is registered with the scene host');
 });
 
 test('the page has no request bar and no open-session form on the desks any more', () => {

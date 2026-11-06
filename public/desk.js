@@ -313,7 +313,6 @@
       find: function (key) { var it = items.filter(function (x) { return keyOf(x) === key && host.inScene(x.mesh); })[0]; return it ? { item: it, mesh: it.mesh } : null; },
       anchors: function () { return []; }
     };
-    var offTarget = host.register(target);
 
     // One control pressed: through step() (the rules), then the page answers the hold.
     function press(it, ctl) {
@@ -347,8 +346,7 @@
       var it = items.filter(function (x) { return x.id === id; })[0];
       return !!it && host.show(target, it, !!open);
     }
-    var offRebuild = host.onRebuild(function () { try { refresh(); } catch (x) { /* the timer tries again */ } });
-    var offFrame = host.frame(function (dt) {
+    function paintFrame(dt) {
       if (dead) return;
       face();
       if (!hint) return;
@@ -356,13 +354,13 @@
       if (op !== hintOn) { op += (hintOn - op) * (st.rm ? 1 : Math.min(1, dt * 9)); if (Math.abs(hintOn - op) < 0.02) op = hintOn; hint.material.opacity = op; }
       hint.visible = op > 0 && !!hint.material.map;
       if (hint.visible) placeHint();
-    });
-    var timer = setInterval(function () { if (st.dead) { dispose(); return; } try { refresh(); } catch (x) { /* next time */ } }, 1000);
+    }
+    var free = host.screen({ target: target, rebuild: refresh, frame: paintFrame, tick: refresh, every: 1000, gone: function () { return st.dead; }, onGone: function () { dispose(); } });
     try { refresh(); } catch (x) { /* the first tick tries again */ }
 
     function dispose() {
       if (dead) return;
-      dead = true; clearInterval(timer); offTarget(); offRebuild(); offFrame(); host.leave();
+      dead = true; free();
       items.forEach(drop); items = [];
       if (hint) { if (hint.parent) hint.parent.remove(hint); if (hint.material.map) hint.material.map.dispose(); hint.material.dispose(); hint = null; }
     }

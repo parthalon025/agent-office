@@ -775,14 +775,13 @@
       find: function (key) { var it = items.filter(function (x) { return keyOf(x) === key && host.inScene(x.front); })[0]; return it ? { item: it, mesh: it.front } : null; },
       anchors: function () { return room ? [room.rg] : []; }
     };
-    var offTarget = host.register(target);
-    var offRebuild = host.onRebuild(function () { try { scan(); refresh(); } catch (x) { /* the timer tries again */ } });
-    var offFocus = host.onFocus(function (f) {
+    function rebuilt() { scan(); refresh(); }
+    function focused(f) {
       if (!f || f.kind !== 'security') { if (edit) { edit = null; } Object.keys(views).forEach(function (k) { views[k].pending = null; views[k].hover = null; }); }
       refresh();
-    });
+    }
     // glow: a screen under the pointer lights up a little (instant with reduced motion)
-    var offFrame = host.frame(function (dt) {
+    function glow(dt) {
       if (dead) return;
       var k = st.rm ? 1 : Math.min(1, dt * 10);
       items.forEach(function (it) {
@@ -790,7 +789,8 @@
         it.g += (it.tgt - it.g) * k; if (Math.abs(it.tgt - it.g) < 0.01) it.g = it.tgt;
         [it.front, it.back].forEach(function (m) { if (m) m.material.emissiveIntensity = 0.5 + 0.3 * it.g; });
       });
-    });
+    }
+    var free = host.screen({ target: target, rebuild: rebuilt, focus: focused, frame: glow, tick: rebuilt, gone: function () { return st.dead; }, onGone: function () { dispose(); } });
     // typing the Spend value: keys go to the wall only while it is being typed (Esc then cancels the typing, not the look)
     function onKey(e) {
       if (!edit || dead) return;
@@ -802,7 +802,6 @@
       apply(it, r);
     }
     window.addEventListener('keydown', onKey, true);
-    var timer = setInterval(function () { if (st.dead) { dispose(); return; } try { scan(); refresh(); } catch (x) { /* next time */ } }, 1500);
     try { scan(); } catch (x) { /* the first rebuild tries again */ }
 
     // The keyboard path to the room (Ctrl+K Permissions): show its floor, then look at a screen (Files by default).
@@ -831,9 +830,9 @@
 
     function dispose() {
       if (dead) return;
-      dead = true; clearInterval(timer);
+      dead = true;
       window.removeEventListener('keydown', onKey, true);
-      offTarget(); offRebuild(); offFocus(); offFrame(); offWant();
+      free(); offWant();
       drop();
     }
     return { open: open, refresh: refresh, dispose: dispose, roomShown: function () { return !!room; } };
