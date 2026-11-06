@@ -39,6 +39,7 @@ import { detect, newRecord, cleanRecord, edit as editLayout, layoutView, shownFl
 import * as startup from './startup.mjs';
 import { createManager, createPlanBoard, officeSource } from './manager.mjs';
 import { setPersona, removePersona, personaOf, personaPrompt, addStarters, addStarterTeams, setTeam, removeTeam, teamOf, exportCustom, importCustom, cleanPersonas, cleanTeams, cleanScreens, setScreen } from './personas.mjs';
+import { createHolds } from './holds.mjs';
 import { createNotes, scanNote, cleanPin, PIN_MAX, NOTES_MAX, AGENT_WRITE_MAX } from './notes.mjs';
 import { createSkills } from './skills.mjs';
 import { cleanTrust, record as recordTrust, patternOf, propose, grant as grantTrust, withdraw as withdrawTrust, cards as trustCards } from './trust.mjs';
@@ -449,7 +450,7 @@ function explainHeld(s, id) {
   let call;
   try { const R = globalThis.OfficeFormat.redactSecrets; call = { tool: r.tool, detail: R(r.detail), preview: R(r.preview) }; } catch { return; }
   explainer.explain(call).then((e) => {
-    if (e && holds.has(id)) { tracker.explainRequest(s.uid, id, e); broadcast(); }
+    if (e && holdQueue.has(id)) { tracker.explainRequest(s.uid, id, e); broadcast(); }
   }, () => {});
 }
 const providers = createRegistry([claude, ollama, lmstudio, agentFramework,
@@ -817,7 +818,7 @@ function sendMessage(uid, text, attachments = [], { answers = true } = {}) {
   if (attachments.length && !s.headless) throw httpError(400, 'Attachments work in sessions that run inside the office.');
   // A pending office_ask takes the next message as its answer.
   const q = s.questions[0];
-  if (answers && q && clean && holds.has(q.id)) { releaseHold(q.id, { text: clean }); addFeed(s, 'prompt', 'answered in the office: ' + clip(clean, 100)); return { answered: true }; }
+  if (answers && q && clean && holdQueue.has(q.id)) { releaseHold(q.id, { text: clean }); addFeed(s, 'prompt', 'answered in the office: ' + clip(clean, 100)); return { answered: true }; }
   if (s.headless && (s.status !== 'working' || attachments.length)) {
     writeUser(s, standupLine(s) + clean, attachments);
     tracker.startTurn(s, clean || '(attachment)');
@@ -833,25 +834,11 @@ function sendMessage(uid, text, attachments = [], { answers = true } = {}) {
 // ---------- held requests: permission prompts and office_ask questions wait for the user ----------
 // A hold ends with one decision: { allow, always } for a permission prompt, { text } for a question, {} for none (dropped,
 // timed out, or the turn ended). `reply` takes it to the agent: the hook's or office_ask's HTTP answer, or the provider.
-/** @type {Map<string, {uid: string, timer: NodeJS.Timeout, kind?: 'ask', suggestions?: object[], reply: (decision: object) => void}>} */
-const holds = new Map();
+// holds.mjs owns the queue, its timers and the release; this file gives it the tracker and the broadcast.
+const holdQueue = createHolds({ settle: (uid, id) => tracker.settle(uid, id), changed: () => broadcast() });
+const forget = (id) => holdQueue.forget(id);
+const releaseHold = (id, decision) => holdQueue.release(id, decision);
 
-// The call behind each held permission request (callOf), for the earned-trust ledger: kept until the hold ends.
-const heldCalls = new Map();
-function forget(id) {
-  const h = holds.get(id);
-  if (!h) return null;
-  holds.delete(id); heldCalls.delete(id); clearTimeout(h.timer);
-  tracker.settle(h.uid, id);
-  broadcast();
-  return h;
-}
-function releaseHold(id, decision) {
-  const h = forget(id);
-  if (!h) return false;
-  h.reply(decision || {});
-  return true;
-}
 // The answer of a hook or an office_ask call that waits on its HTTP request.
 function replyOn(res, body) {
   if (!res.writableEnded) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(body || {})); }
@@ -860,7 +847,7 @@ function replyOn(res, body) {
 // The user answered a held permission request on the page: it is evidence for earned trust (trust.mjs). Only a call the wall
 // has a cell for counts. A hold that timed out or went back to the terminal is no answer and is not recorded.
 function noteDecision(id, s, allow) {
-  const c = heldCalls.get(id);
+  const c = holdQueue.callOf(id);
   if (!c || !s || c.building == null) return;
   const r = ruleOf(c);
   if (!r.col || !r.row || !V.security.rows[r.row]) return;
@@ -873,8 +860,7 @@ function noteDecision(id, s, allow) {
 // auto: the Security room rules decided (tracker screen). Nothing is held: a hook gets the answer now, a provider on a
 // later tick (its permission() returns the request id first, the seam's timing rule).
 function holdRequest({ s, id, suggestions, auto, call }, res = null) {
-  if (call && !auto) heldCalls.set(id, callOf(s, call));
-  if (auto) {
+    if (auto) {
     const answer = () => providerOf(s).answer(s, { id, suggestions: [] }, auto);
     if (res) replyOn(res, answer()); else setImmediate(answer);
     return;
@@ -885,14 +871,14 @@ function holdRequest({ s, id, suggestions, auto, call }, res = null) {
   // company the office does not watch or while Paperclip is not connected: the company match is for its labels only.
   const paperclip = !s.headless && !!s.paperclip;
   const hold = s.headless ? HEADLESS_ASK_MS : paperclip ? PAPERCLIP_ASK_MS : ASK_TIMEOUT_MS;
-  const timer = setTimeout(() => {
-    // A Paperclip run gets a deny that says why (fail closed by the office's own answer, not by what print mode does with none).
-    if (!releaseHold(id, paperclip ? { allow: false, message: 'Agent Office got no answer in time, so this call is denied.' } : {})) return;
+  const after = () => {
     if (paperclip) { s.paperclipDenied = s.paperclip.run || true; addFeed(s, 'wait', 'question timed out, the office denied the call. Paperclip may still mark this run succeeded.'); }
     else addFeed(s, 'wait', s.headless ? `question timed out, ${providerOf(s).label} moved on` : 'question went back to the terminal');
-  }, hold);
+  };
+  // A Paperclip run gets a deny that says why (fail closed by the office's own answer, not by what print mode does with none).
+  const decision = paperclip ? { allow: false, message: 'Agent Office got no answer in time, so this call is denied.' } : {};
   const reply = (d) => { const body = providerOf(s).answer(s, { id, suggestions }, d); if (res) replyOn(res, body); };
-  holds.set(id, { uid: s.uid, timer, suggestions, reply });
+  holdQueue.add(id, { uid: s.uid, reply, suggestions, call: call ? callOf(s, call) : undefined, timeout: { ms: hold, decision, after } });
   explainHeld(s, id);
 }
 
@@ -959,8 +945,7 @@ function askUser(s, question) {
   const id = tracker.askQuestion(s, question);
   let resolve;
   const done = new Promise((r) => { resolve = r; });
-  const timer = setTimeout(() => releaseHold(id, { text: 'No answer from the office after 10 minutes. Continue without it, or ask in the terminal.' }), 10 * 60 * 1000);
-  holds.set(id, { uid: s.uid, timer, kind: 'ask', reply: (d) => resolve(d) });
+  holdQueue.add(id, { uid: s.uid, kind: 'ask', reply: (d) => resolve(d), timeout: { ms: 10 * 60 * 1000, decision: { text: 'No answer from the office after 10 minutes. Continue without it, or ask in the terminal.' } } });
   broadcast();
   return { id, done };
 }
@@ -1145,14 +1130,14 @@ function updateRoom(s, p) {
 }
 
 function answer(id, allow, always = false) {
-  const h = holds.get(id);
-  if (!h) throw httpError(409, 'That question was already answered or went back to the terminal.');
-  if (h.kind === 'ask') {
-    const s0 = sessions.get(h.uid);
+  if (!holdQueue.has(id)) throw httpError(409, 'That question was already answered or went back to the terminal.');
+  const uid = holdQueue.uidOf(id);
+  if (holdQueue.kindOf(id) === 'ask') {
+    const s0 = sessions.get(uid);
     if (s0) addFeed(s0, 'prompt', allow ? 'answered yes in the office' : 'answered no in the office');
     return void releaseHold(id, { text: allow ? 'Yes.' : 'No.' });
   }
-  const s = sessions.get(h.uid);
+  const s = sessions.get(uid);
   // The page never offers Always allow on a high-risk request; the server holds the same line (#27 L2).
   if (always && allow && s?.pending.find((r) => r.id === id)?.risk === 'high') throw httpError(400, 'A high-risk request cannot be always allowed.');
   if (s) addFeed(s, 'tool', allow ? (always ? 'approved and always allowed from the office' : 'approved from the office') : 'declined from the office');
