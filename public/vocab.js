@@ -17,7 +17,7 @@
      todoStatus(t)    -> a DS plan step status
      figures(list)    -> the numbers of a room, from its open sessions
      agentsSign(n)    -> "N agents" for a room shared by 2 or more agents (top-level sessions; helpers do not count), else ''
-     plan             -> the Manager board words (#154): sourceWord(kind) 'Office' or 'Paperclip', stepState(state), stepWord(state)
+     plan             -> the Manager board words (#154): sourceWord(kind) 'Office' or 'Paperclip', stepState(state), stepWord(state), notConnected, notConnectedReason(why)
      requests(s)      -> every open request of a session, oldest first: { id, kind, tool, text, detail, risk, always, t }
                          kind is 'permission' (Approve or Decline) or 'question' (Yes or No; no risk value)
      featuresOf(s)    -> the office features the session's agent kind declares (#72): [{ key, label }], in table order
@@ -103,11 +103,13 @@
   function stateWord(k) { return STATE_WORD[k] || ''; }
   // The Manager board (#154): who plans a goal (the source) and the state of a plan step. Words are the board's only copy.
   var PLAN_SOURCE = { office: 'Office', paperclip: 'Paperclip' };
-  var PLAN_STEP = { pending: 'Waiting', working: 'Working', finished: 'Done', error: 'Error' };
+  var PLAN_STEP = { pending: 'Waiting', working: 'Working', finished: 'Done', error: 'Error', unknown: 'Unknown' }; // unknown: a state the source has no word for (never done)
   var plan = {
     sourceWord: function (kind) { return PLAN_SOURCE[kind] || ''; },
     stepState: function (state) { return PLAN_STEP[state] ? state : 'pending'; },
-    stepWord: function (state) { return PLAN_STEP[state] || PLAN_STEP.pending; }
+    stepWord: function (state) { return PLAN_STEP[state] || PLAN_STEP.pending; },
+    notConnected: 'Not connected',
+    notConnectedReason: function (why) { return 'Not connected.' + (why ? ' ' + why : '') + ' The steps are the last ones read.'; }
   };
   // The model lane of a session (#88): Haiku, Sonnet, Opus or Fable, from its model id; '' for another model.
   function laneOf(model) {

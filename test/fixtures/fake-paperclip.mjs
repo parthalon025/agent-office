@@ -100,7 +100,7 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
       }
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/issues$/))) {
         const want = (u.searchParams.get('status') || '').split(',').map((s) => s.trim()).filter(Boolean);
-        return send(res, 200, st.issues.filter((i) => i.companyId === x[1] && (!want.length || want.includes(i.status))));
+        return send(res, 200, st.issues.filter((i) => i.companyId === x[1] && (seed.allIssues || !want.length || want.includes(i.status))));
       }
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/routines$/))) return send(res, 200, st.routines.filter((r) => r.companyId === x[1]));
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/projects$/))) return seed.noProjects ? send(res, 404, { error: 'Not found' }) : send(res, 200, st.projects.filter((r) => r.companyId === x[1]));
