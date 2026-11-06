@@ -319,8 +319,8 @@
       c.font = '600 46px ' + sans; c.fillText(title, 36, h * 0.24);
     } else { c.font = '600 62px ' + sans; c.fillText(title, 36, h / 2 + 3); }
     if (!shared) {
-      c.fillStyle = col('status-working'); rr(c, w - 150, 28, 114, h - 56, (h - 56) / 2); c.fill();
-      c.fillStyle = col('on-status', col('bubble')); c.font = '700 56px ' + mono; c.textAlign = 'center'; c.fillText(String(count), w - 93, h / 2 + 3);
+      c.fillStyle = col('status-working-text', col('status-working')); rr(c, w - 150, 28, 114, h - 56, (h - 56) / 2); c.fill();
+      c.fillStyle = col('bg', col('bubble')); c.font = '700 56px ' + mono; c.textAlign = 'center'; c.fillText(String(count), w - 93, h / 2 + 3);
     }
     c.textAlign = 'left';
   }

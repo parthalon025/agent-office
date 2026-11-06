@@ -304,7 +304,7 @@
     var t = K.tok || {};
     return {
       bg: t['scene-dark'], fg: t.bubble, ok: t['status-working'], wait: t['status-waiting'], err: t['status-error'],
-      accent: t.accent, onAccent: t['on-accent'], onStatus: t['on-status'],
+      accent: t.accent, onAccent: t['on-accent'],
       st: function (k) { return t['status-' + k] || t['status-resting']; }
     };
   }
@@ -362,8 +362,10 @@
     c.globalAlpha = 0.08; c.fillStyle = p.fg; rr(c, 10, y0, W - 20, hh, 10); c.fill();
     c.globalAlpha = 1; c.font = P.small;
     var ph = Math.min(hh - 6, 26), pw = c.measureText(v.word).width + 22, px = W - 18 - pw;
-    c.fillStyle = p.st(v.key); rr(c, px, cy - ph / 2, pw, ph, ph / 2); c.fill();
-    c.fillStyle = p.onStatus; c.fillText(v.word, px + 11, cy + 1);
+    // The pill is the status color mixed 55% into bubble, the word is scene-dark on it (4.5:1 in every theme, #118).
+    c.fillStyle = p.fg; rr(c, px, cy - ph / 2, pw, ph, ph / 2); c.fill();
+    c.globalAlpha = 0.55; c.fillStyle = p.st(v.key); rr(c, px, cy - ph / 2, pw, ph, ph / 2); c.fill();
+    c.globalAlpha = 1; c.fillStyle = p.bg; c.fillText(v.word, px + 11, cy + 1);
     var x = P.padX + 4, room = px - x - 14;
     c.font = P.head; ink(c, P, p.fg, 1);
     var nm = fit(c, v.name, room);

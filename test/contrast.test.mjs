@@ -206,3 +206,22 @@ test('Security room wall: every canvas text reads at 4.5:1 on the fill under it,
     }
   }
 });
+
+// #118: on-status could not reach 4.5:1 on all five status fills in any theme, so nothing is drawn with it. The three
+// places that did use it draw pairs the DS already checks.
+test('danger button: bg on status-error-text, 4.5:1', () => each((T, th) => {
+  atLeast('danger label', 4.5, T('bg'), T('status-error-text'), th);
+  const css = read('components/bundle.css');
+  assert.match(css, /\.ao-btn-danger\{background:var\(--status-error-text\);color:var\(--bg\)/);
+}));
+
+test('terminal status word: scene-dark on the status mixed into bubble (55%), 4.5:1', () => each((T, th) => {
+  for (const s of ['working', 'waiting', 'error', 'resting', 'finished']) atLeast('terminal word ' + s, 4.5, T('scene-dark'), mix(T('status-' + s), T('bubble'), 0.55), th);
+  const js = read('public/terminal.js');
+  assert.ok(!/on-status|onStatus/.test(js), 'terminal.js does not draw with on-status');
+}));
+
+test('door sign count: bg on status-working-text, 4.5:1', () => each((T, th) => {
+  atLeast('door count', 4.5, T('bg'), T('status-working-text'), th);
+  assert.ok(!/on-status/.test(read('public/board.js')), 'board.js does not draw with on-status');
+}));

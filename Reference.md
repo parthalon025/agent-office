@@ -236,7 +236,7 @@ Each README has the full props table. Types: `components/index.d.ts`.
 | `on-accent` | `#ffffff` | `#0d1420` | `#ffffff` | `#ffffff` | `#141414` | Text on accent. |
 | `emphasis` | `{accent}` | `{accent}` | `#b5302b` | `{accent}` | `{accent}` | The 10% color: alerts and the one key action in a decision (Approve on a request, unread counts, room alert beacons). In Day, Night, Fluent and Fluent Dark it equals accent; in Sublevel it is red. Never a fill larger than a button. |
 | `on-emphasis` | `{on-accent}` | `{on-accent}` | `#ffffff` | `{on-accent}` | `{on-accent}` | Text on emphasis. |
-| `on-status` | `#ffffff` | `#ffffff` | `#ffffff` | `#ffffff` | `#141414` | Text on a status fill (danger button, the status word on a desk terminal, the count on a door sign). Not the check in the finished bubble: that is a cut-out in bubble. |
+| `on-status` | `#ffffff` | `#ffffff` | `#ffffff` | `#ffffff` | `#141414` | Not used by the DS (agent-office #118): no one value reaches 4.5:1 on all five status fills in any theme. Draw a status word with status-*-text or status-*-on-bubble, or on a status-*-text fill with bg (danger button, door sign count). The desk terminal word is scene-dark on status-* mixed 55% into bubble. |
 | `bubble` | `#ffffff` | `#f2f5f8` | `#f6f8f5` | `#ffffff` | `#f5f5f5` | Fill of status bubbles and speech bubbles over bots, in 2D and 3D. Also the check mark cut out of the finished disk (3:1 or more on status-finished-on-bubble). |
 | `status-working` | `#1f9a58` | `#2fb36d` | `#1d8a5a` | `#107c10` | `#54b054` | Bot is working. Dot, bubble glyph, monitor glow. |
 | `status-waiting` | `#c27c17` | `#e3992f` | `#b07514` | `#d2560b` | `#faa06b` | Bot needs a human decision. Always shows in Waiting on me. |
