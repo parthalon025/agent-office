@@ -131,6 +131,16 @@ The `id` names the look: the engine reads `light-<id>-*` and `fx-*-<id>`. An unk
 
 A theme can be a variant of another: its id is `<family>-<variant>` (Fluent Dark is `fluent-dark`). `bundle.css` sets the look of the family once, on `[data-theme|="<family>"]`, which matches the family id and every `<family>-*` id. Each variant has its own colors in `tokens.css`.
 
+#### Shared assets
+
+A theme either has its own set of an asset or uses the default set. This table is the one list of that choice; `test/theme-contract.test.mjs` reads it, and a theme that is in neither column fails. A theme that shares the default set draws the bots, the mark and the wordmark of Day, in its own token colors.
+
+| Asset | Own set | Themes on the default set | Where |
+| --- | --- | --- | --- |
+| Office type pictures | every theme | none | `AgentOffice.THUMBS_BY_THEME[theme]`, one picture for each office type (`type-*` token) |
+| Bot portraits | `sublevel` | `light`, `dark`, `fluent`, `fluent-dark` | `AgentOffice.PORTRAITS`, `AgentOffice.PORTRAITS_SUBLEVEL` |
+| Logo mark and wordmark | `sublevel` | `light`, `dark`, `fluent`, `fluent-dark` | `AgentOffice.LOGO`, `AgentOffice.LOGO.sublevel` |
+
 ### Bot colors
 
 | Global | What it is | Use it when |
@@ -243,13 +253,13 @@ Each README has the full props table. Types: `components/index.d.ts`.
 | `status-error` | `#d1403b` | `#e5605b` | `#c23b36` | `#c50f1f` | `#dc626d` | Bot failed. Always shows in Waiting on me with Retry. |
 | `status-resting` | `#78818b` | `#8a939d` | `#788583` | `#7a7a7a` | `#858585` | Bot is idle in the lounge. |
 | `status-finished` | `#3b74e0` | `#5b93f5` | `#2f6bc8` | `#227ed4` | `#62abf5` | Bot finished a task; check bubble at the desk. |
-| `status-working-text` | `#197a46` | `#2fb36d` | `#18734b` | `#0e700e` | `#6cbf6c` | Text color for the working status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-working. |
+| `status-working-text` | `#197a46` | `#2fb36d` | `#18734b` | `#0e700e` | `{status-working}` | Text color for the working status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-working. |
 | `status-waiting-text` | `#945f12` | `#e3992f` | `#895b10` | `#a94409` | `#faa06b` | Text color for the waiting status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-waiting. |
 | `status-error-text` | `#c4332e` | `#e6645f` | `#b63733` | `#b10e1c` | `#ee8a93` | Text color for the error status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-error. |
-| `status-resting-text` | `#646b74` | `#8a939d` | `#5d6765` | `#5c5c5c` | `#a3a3a3` | Text color for the resting status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-resting. |
+| `status-resting-text` | `#646b74` | `#8a939d` | `#5d6765` | `#616161` | `#adadad` | Text color for the resting status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-resting. |
 | `status-finished-text` | `#2363dc` | `#5b93f5` | `#2c63ba` | `#115ea3` | `#62abf5` | Text color for the finished status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-finished. |
 | `status-working-on-bubble` | `#1b854c` | `#217e4d` | `#1b7f53` | `#107c10` | `#0e700e` | Text color for the working status on bubble (a light face in every theme). 4.5:1 or more. |
-| `status-waiting-on-bubble` | `#a46913` | `#9a6315` | `#996611` | `#bc4b09` | `#a94409` | Text color for the waiting status on bubble (a light face in every theme). 4.5:1 or more. |
+| `status-waiting-on-bubble` | `#a46913` | `#9a6315` | `#996611` | `#bc4b09` | `#bc4b09` | Text color for the waiting status on bubble (a light face in every theme). 4.5:1 or more. |
 | `status-error-on-bubble` | `#d1403b` | `#d42822` | `#c23b36` | `#c50f1f` | `#b10e1c` | Text color for the error status on bubble (a light face in every theme). 4.5:1 or more. |
 | `status-resting-on-bubble` | `#6e7780` | `#666f7a` | `#677371` | `#707070` | `#616161` | Text color for the resting status on bubble (a light face in every theme). 4.5:1 or more. |
 | `status-finished-on-bubble` | `#3771df` | `#1565f1` | `#2f6bc8` | `#0f6cbd` | `#115ea3` | Text color for the finished status on bubble (a light face in every theme). 4.5:1 or more. |
@@ -297,6 +307,66 @@ Each README has the full props table. Types: `components/index.d.ts`.
 | `type-*` | `chip` | 3:1 | Type dot, room icon and room floor stripe. |
 | `accent` | `bg` | 3:1 | Focus ring and the accent pill of a pressed control. |
 | `status-*` | any | not checked at 4.5:1 | Do not use it as text color. It is a fill and a dot. Use `status-*-text` or `status-*-on-bubble`. |
+
+#### Fluent 2 provenance
+
+The Fluent and Fluent Dark colors come from the open Fluent 2 design tokens (`@fluentui/tokens`, MIT license: `webLightTheme` for Fluent, `webDarkTheme` for Fluent Dark). The office does not import that package; the values are copied. Each cell names the Fluent 2 source token. "(matches)" means the DS value is the source value. "own" means the value differs: the cell names the nearest source token and the reason. `test/theme-contract.test.mjs` checks that every color token has a row and that every cell is one of these three forms.
+
+| Token | Fluent source (`webLightTheme`) | Fluent Dark source (`webDarkTheme`) |
+| --- | --- | --- |
+| `bg` | own: nearest `colorNeutralBackground3` #f5f5f5; scene art, no Fluent 2 counterpart | `colorNeutralBackground2` (matches) |
+| `panel` | own: translucent surface; no Fluent 2 token is translucent | own: translucent surface; no Fluent 2 token is translucent |
+| `chip` | `colorNeutralBackground5` (matches) | `colorNeutralBackground6` (matches) |
+| `line` | own: translucent surface; no Fluent 2 token is translucent | own: translucent surface; no Fluent 2 token is translucent |
+| `ink` | `colorNeutralForeground1` (matches) | `colorNeutralForeground1` (matches) |
+| `muted` | `colorNeutralForeground3` (matches) | `colorNeutralForeground3` (matches) |
+| `accent` | `colorBrandBackground` (matches) | own: nearest `colorBrandForegroundLink` #479ef5; scene art, no Fluent 2 counterpart |
+| `accent-text` | alias of `accent` | alias of `accent` |
+| `on-accent` | `colorNeutralForegroundOnBrand` (matches) | own: nearest `colorNeutralForegroundOnBrand` #ffffff; scene art, no Fluent 2 counterpart |
+| `emphasis` | alias of `accent` | alias of `accent` |
+| `on-emphasis` | alias of `on-accent` | alias of `on-accent` |
+| `on-status` | `colorNeutralForegroundOnBrand` (matches) | `colorNeutralBackground3` (matches) |
+| `bubble` | `colorNeutralBackground1` (matches) | own: nearest `colorNeutralForeground1` #ffffff; scene art, no Fluent 2 counterpart |
+| `status-working` | `colorStatusSuccessBackground3` (matches) | `colorStatusSuccessForeground1` (matches) |
+| `status-waiting` | own: nearest `colorPalettePumpkinBorderActive` #ca5010; status hue of the DS, nearest source shown | `colorStatusWarningForeground1` (matches) |
+| `status-error` | `colorStatusDangerBackground3` (matches) | `colorStatusDangerForeground1` (matches) |
+| `status-resting` | own: nearest `colorNeutralForeground4` #707070; status hue of the DS, nearest source shown | own: nearest `colorNeutralForeground4` #999999; status hue of the DS, nearest source shown |
+| `status-finished` | own: nearest `colorBrandBackground` #0f6cbd; status hue of the DS, nearest source shown | `colorBrandForeground2` (matches) |
+| `status-working-text` | `colorStatusSuccessForeground1` (matches) | alias of `status-working` |
+| `status-waiting-text` | own: nearest `colorStatusWarningForeground1` #bc4b09; moved from the source to pass 4.5:1 on chip and bg (source 4.25:1) | alias of `status-waiting` |
+| `status-error-text` | `colorStatusDangerForeground1` (matches) | own: nearest `colorStatusDangerForeground1` #dc626d; moved from the source to pass 4.5:1 on chip and bg (source 3.62:1) |
+| `status-resting-text` | `colorNeutralForeground3` (matches) | `colorNeutralForeground3` (matches) |
+| `status-finished-text` | `colorBrandForegroundLink` (matches) | alias of `status-finished` |
+| `status-working-on-bubble` | alias of `status-working` | `colorStatusSuccessForegroundInverted` (matches) |
+| `status-waiting-on-bubble` | `colorStatusWarningForeground1` (matches) | `colorStatusWarningForegroundInverted` (matches) |
+| `status-error-on-bubble` | alias of `status-error` | `colorStatusDangerForegroundInverted` (matches) |
+| `status-resting-on-bubble` | `colorNeutralForeground4` (matches) | own: nearest `colorNeutralForeground3` #adadad; moved from the source to pass 4.5:1 on bubble (source 2.06:1) |
+| `status-finished-on-bubble` | `colorBrandBackground` (matches) | `colorBrandBackground` (matches) |
+| `floor-ops` | own: nearest `colorNeutralForeground3` #616161; role color of the DS, nearest source shown | own: nearest `colorNeutralStencil1` #575757; role color of the DS, nearest source shown |
+| `floor-sales` | own: nearest `colorStatusWarningForeground1` #bc4b09; role color of the DS, nearest source shown | own: nearest `colorPalettePeachBackground2` #8f4e00; role color of the DS, nearest source shown |
+| `floor-research` | own: nearest `colorPaletteSeafoamForeground2` #00723b; role color of the DS, nearest source shown | own: nearest `colorPaletteSeafoamBackground2` #00723b; role color of the DS, nearest source shown |
+| `floor-content` | own: nearest `colorPaletteLavenderBorderActive` #7160e8; role color of the DS, nearest source shown | own: nearest `colorPaletteNavyBorderActive` #546fd2; role color of the DS, nearest source shown |
+| `floor-hq` | `colorPaletteBrownBorderActive` (matches) | own: nearest `colorPalettePeachBackground2` #8f4e00; role color of the DS, nearest source shown |
+| `on-floor` | `colorNeutralForegroundOnBrand` (matches) | `colorNeutralForeground1` (matches) |
+| `scrim` | own: nearest `colorStrokeFocus2` #000000; scene art, no Fluent 2 counterpart | `colorNeutralBackground5` (matches) |
+| `type-team` | `colorPaletteCornflowerBorderActive` (matches) | own: nearest `colorPaletteCornflowerBorderActive` #93a4f4; role color of the DS, nearest source shown |
+| `type-lab` | `colorPaletteTealBorderActive` (matches) | `colorPaletteTealBorderActive` (matches) |
+| `type-studio` | `colorPaletteBerryBackground3` (matches) | `colorPaletteBerryForeground1` (matches) |
+| `type-hq` | own: nearest `colorPaletteBrassBorderActive` #986f0b; role color of the DS, nearest source shown | `colorPaletteMarigoldForeground3` (matches) |
+| `type-security` | own: nearest `colorPaletteLilacBorderActive` #b146c2; role color of the DS, nearest source shown | own: nearest `colorPalettePurpleForeground2` #c6b1de; role color of the DS, nearest source shown |
+| `scene-floor` | own: nearest `colorNeutralBackground4` #f0f0f0; scene art, no Fluent 2 counterpart | `colorNeutralBackground2Selected` (matches) |
+| `scene-wall` | own: nearest `colorNeutralBackground6` #e6e6e6; scene art, no Fluent 2 counterpart | `colorNeutralBackground1` (matches) |
+| `scene-wood` | own: nearest `colorPaletteBrassBackground2` #e0cea2; scene art, no Fluent 2 counterpart | own: nearest `colorNeutralStroke1` #666666; scene art, no Fluent 2 counterpart |
+| `scene-chair` | own: nearest `colorPaletteAnchorBorderActive` #394146; scene art, no Fluent 2 counterpart | own: nearest `colorNeutralStroke2` #525252; scene art, no Fluent 2 counterpart |
+| `scene-rug` | own: nearest `colorPaletteCornflowerBorderActive` #4f6bed; scene art, no Fluent 2 counterpart | own: nearest `colorPaletteCornflowerBackground2` #2c3c85; scene art, no Fluent 2 counterpart |
+| `scene-wall-side` | own: nearest `colorNeutralStroke2` #e0e0e0; scene art, no Fluent 2 counterpart | `colorNeutralForeground1Static` (matches) |
+| `scene-slab` | `colorNeutralStroke1Pressed` (matches) | `colorNeutralBackground4Selected` (matches) |
+| `scene-rail` | `colorNeutralForegroundOnBrand` (matches) | `colorNeutralForegroundDisabled` (matches) |
+| `scene-sofa` | own: nearest `colorPaletteMinkBorderActive` #5d5a58; scene art, no Fluent 2 counterpart | own: nearest `colorPalettePlatinumBackground2` #3b4447; scene art, no Fluent 2 counterpart |
+| `scene-metal` | own: nearest `colorPaletteAnchorBackground2` #bcc3c7; scene art, no Fluent 2 counterpart | `colorNeutralStroke1Selected` (matches) |
+| `scene-dark` | `colorNeutralBackgroundInverted` (matches) | `colorNeutralBackground3` (matches) |
+| `scene-glass` | `colorBrandBackground2Hover` (matches) | own: nearest `colorPaletteCornflowerBackground2` #2c3c85; scene art, no Fluent 2 counterpart |
+| `scene-subagent` | own: nearest `colorPaletteDarkGreenBackground2` #9ad29a; scene art, no Fluent 2 counterpart | `colorNeutralStroke1Pressed` (matches) |
 
 ### spacing
 
@@ -483,6 +553,8 @@ The office top bar (brand, mode toggle, view toggle, status counts) keeps to the
 - `font-sublevel-mono`: "Chivo Mono", "IBM Plex Mono", ui-monospace, monospace
 - `font-fluent-sans`: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif (system faces: the office loads no font file for them)
 - `font-fluent-mono`: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace
+
+Without the Fluent faces: a machine that has no Segoe UI Variable falls back to Segoe UI, then to the system UI face (`system-ui`, and `-apple-system` on macOS), then to a generic sans-serif. A machine with no Cascadia Mono or Cascadia Code (Windows has Consolas, macOS and Linux do not) shows Consolas, then the system monospace face. The office loads no file for these faces, so the widths on such a machine differ from Windows 11. The layout does not depend on them.
 
 ## Icons
 

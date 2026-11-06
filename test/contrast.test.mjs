@@ -1,5 +1,5 @@
 // Readable in every theme: the text and ink pairs that the page and the 3D scripts draw, from tokens.json.
-// Each pair needs 4.5:1 (text) or 3:1 (a dot or another mark) in every theme of tokens.json (Day, Night, Sublevel, Fluent, Fluent Dark). The CSS checks pin the rules
+// Each pair needs 4.5:1 (text) or 3:1 (a dot or another mark) in every theme of tokens.json (the list is color.themes; test/theme-contract.test.mjs checks the rest of each theme). The CSS checks pin the rules
 // that use those pairs, so a later edit cannot put a status color back on text.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,8 +23,9 @@ const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) +
 function each(fn) { for (const th of TH) { const T = (n) => rgb(val(n, th)); fn(T, th, over(T('panel'), T('bg'))); } }
 function atLeast(label, min, a, b, th) { const r = ratio(a, b); assert.ok(r >= min, `${label} in ${th}: ${r.toFixed(3)} < ${min}`); }
 
-test('the pairs run in every theme: Day, Night, Sublevel, Fluent and Fluent Dark', () => {
-  assert.deepEqual(TH, ['light', 'dark', 'sublevel', 'fluent', 'fluent-dark']);
+test('the pairs run in every theme of tokens.json: not none, and Day, Night and Sublevel first (#131)', () => {
+  assert.ok(TH.length >= 3);
+  assert.deepEqual(TH.slice(0, 3), ['light', 'dark', 'sublevel']);
 });
 
 test('notes editor: ink and placeholder on the whiteboard face', () => each((T, th) => {

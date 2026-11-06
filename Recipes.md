@@ -118,11 +118,28 @@ Ask "status" to get a summary of all bots and running plans. When no bot fits a 
 
 Copy `kit/part.js`. Build meshes with `A.office.Parts` helpers inside a workstation builder, so the nav grid sees them and bots walk around them. Set `mesh.userData.noNav = 1` only on decor that bots may cross (rugs, lights, signs). Use `scene-*` tokens through `K.t(token)`.
 
-## Add a solution or a theme
+## Add a solution
 
 - **Solution:** `A.solutions[id] = { id, label, summary, building }`. Do not change the default templates.
-- **Theme:** give every color and shadow token a value, plus `light-<look>-*` and `fx-*-<look>`, and add the theme to `AgentOffice.MODES` (look id, `data-theme` value, label, its own icon, and `dark: true` for a dark scene) and to `LOOKS` in the engine, so the scene light, the mode controls and the palette know it. `dark: true` gives the scene lit windows, screen glow, desk light and the Night office type pictures; scene code reads `K.dark`, never the look name. A dark theme also joins the one `color-scheme:dark` rule in `bundle.css` (`[data-theme="dark"],[data-theme="fluent-dark"]`), so the browser draws scrollbars and check boxes dark; `test/ds-engine.test.mjs` checks that the rule lists exactly the `dark: true` themes. A theme with its own faces or corners adds `font-<theme>-*` or `radius-<theme>-*` tokens and sets them on `[data-theme="<theme>"]` in `bundle.css`, as Sublevel does. A variant of a theme (a dark mode of a light theme) takes the id `<theme>-<variant>` and shares the rules of its family through `[data-theme|="<theme>"]`, as Fluent and Fluent Dark do: give it its own colors, shadow, light and fx tokens, and do not copy the family rules. A window picture for the new look goes in `Parts.window`; without one, it shows the Day sky. Check ContrastCheck in the new theme; `test/contrast.test.mjs` runs every theme in `tokens.json`.
 - **Office type:** not supported without an engine change. Ask for a new version of the system.
+
+## Add a theme
+
+A theme is one contract. `test/theme-contract.test.mjs` reads the theme list from `tokens.json` and checks every part below for every theme, so a new theme is checked as soon as it is in `tokens.json`. A failure names the theme, the part and the file that owns it. Work down this list, in this order, until the suite passes. Do not add a theme to a test by hand.
+
+1. **Theme entry.** Add `{ "id", "name" }` to `color.themes` in `tokens.json`. The id is the `data-theme` value. A variant of a theme takes the id `<family>-<variant>` (Fluent Dark is `fluent-dark`).
+2. **Colors and shadow.** Give every color token and `shadow-panel` a value for the theme in `tokens.json`. An alias `{token}` must name a token that exists.
+3. **Light and effects.** Add `light-<look>-sky|sun|lamp` and `fx-bloom|threshold|exposure|fog|vignette-<look>` to `tokens.json`. A theme with its own faces or corners also adds `font-<family>-*` or `radius-<family>-*`, and `bundle.css` sets them on `[data-theme="<family>"]` (or `[data-theme|="<family>"]` for a family with variants), as Sublevel and Fluent do. Do not copy the family rules for a variant.
+4. **tokens.css.** Add a `[data-theme="<id>"]` block with the same values (`tokens.css` is edited by hand; the suite checks that it agrees with `tokens.json`). A dark theme joins the one `color-scheme:dark` rule in `bundle.css`.
+5. **Engine tables.** Add the look to `LOOKS` and `FX` in `components/bundle.js`, so the scene light and the effects are set. A window picture goes in `Parts.window`; without one, it shows the Day sky.
+6. **Mode.** Add an entry to `AgentOffice.MODES`: look id, `data-theme` value, label (the `tokens.json` name), its own icon, and `dark: true` for a dark scene. `dark` must match the `color-scheme` of the theme. `dark: true` gives the scene lit windows, screen glow and desk light; scene code reads `K.dark`, never the look name.
+7. **Icon.** Add the icon to `AO.ICONS`, `kit/schema.json` and `assets/Icons/<icon>.svg`, with the same drawing.
+8. **Office type pictures.** Add `AgentOffice.THUMBS_BY_THEME["<id>"]` with one picture for each office type, from `assets/Offices/<type>-<id>.svg`, or list the theme in Reference, Shared assets.
+9. **Portraits and logos.** Give the theme its own set, or list it in Reference, Shared assets under "Themes on the default set".
+10. **Contrast.** Run ContrastCheck in the theme. `test/contrast.test.mjs` runs every theme of `tokens.json`; do not add a theme id to it.
+11. **Reference.** Add a column for the theme to the color table (and its value to the shadow, light and fx tables), a row to Themes, and a row for each color token to the Fluent 2 provenance table if the theme is a Fluent variant. Say where a value comes from.
+12. **Docs.** Name the theme in the Definition of done (`DS-README.md`), in "Test your page" below and in the screenshot line of `CLAUDE.md`. Check the HUD mode control still fits: the suite computes the width of the control from the number of `MODES` entries.
+
 
 ## Add a component
 
