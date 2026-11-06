@@ -18,10 +18,10 @@ import { spawn, execFileSync } from 'node:child_process'; // execFileSync: icacl
 import * as git from './git.mjs';
 import * as launch from './launch.mjs';
 import * as branchPort from './branch-port.mjs';
-import { createReader as createPrReader, readyEntries, mergeArgs } from './changes.mjs';
+import { createCampus } from './campus.mjs';
 import { slimPayload, cleanIds as cleanPaperclipIds } from './payload.mjs';
 import { createHq } from './paperclip.mjs';
-import { mergeRecord, recap as recapOf, away as awayOf, MERGES_KEPT } from './rituals.mjs';
+import { recap as recapOf, away as awayOf, MERGES_KEPT } from './rituals.mjs';
 import { createTracker, clip } from './tracker.mjs';
 import { createAdmission } from './admission.mjs';
 import { createRegistry, providerEvents, traitsOf, spendLimitFor, DEFAULT_SPEND_LIMIT, DEFAULT_PROVIDER } from './providers/index.mjs';
@@ -34,10 +34,10 @@ import { cloudConfig } from './providers/cloud.mjs';
 import { createFoundry } from './providers/foundry.mjs';
 import { createCopilotStudio } from './providers/copilot-studio.mjs';
 import { createClaudeCode, claudeVersion, MODEL_RE, MODES } from './providers/claude-code.mjs';
-import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, securityRoomIdOf, seatOf } from './place.mjs';
+import { placeOfSession, adoptLegacy, normPath } from './place.mjs';
 import { addRecent, cleanRecent, recentChoices } from './recent.mjs';
-import { cleanRooms, settleRooms, viewRooms } from './rooms.mjs';
-import { detect, newRecord, cleanRecord, edit as editLayout, layoutView, shownFloors, catalogView, functionOf } from './archetypes.mjs';
+import { cleanRooms } from './rooms.mjs';
+import { cleanRecord, layoutView, catalogView, functionOf } from './archetypes.mjs';
 import * as startup from './startup.mjs';
 import { createManager, createPlanBoard, officeSource } from './manager.mjs';
 import { setPersona, removePersona, personaOf, personaPrompt, addStarters, addStarterTeams, setTeam, removeTeam, teamOf, exportCustom, importCustom, cleanPersonas, cleanTeams, cleanScreens, setScreen } from './personas.mjs';
@@ -528,232 +528,18 @@ async function superviseHq(body) {
   return r;
 }
 
-// ---------- buildings: repositories and their worktrees ----------
-// A repository is known when a session works in it or it is a recent folder. Its worktrees are
-// read with `git worktree list` when it is added, after each floor or room change, and every 30 s.
-const repos = new Map(); // lower-case repo path -> { path, name, worktrees }
-const repoKey = normPath; // the building key (place.mjs)
-function addRepo(repoPath) {
-  const k = repoKey(repoPath);
-  if (repos.has(k)) return;
-  repos.set(k, { path: path.normalize(repoPath), name: basename(repoPath), worktrees: [] });
-  layoutRecord(k, repoPath);
-  void refreshRepo(k);
-}
-// The file names at a folder's root and one level down (archetypes.mjs detect): names only, never contents. A folder that
-// cannot be read gives what could be read. Caps keep a huge folder cheap.
-function namesOf(dir) {
-  const out = [], skip = new Set(['.git', 'node_modules']);
-  let top = [];
-  try { top = fs.readdirSync(dir, { withFileTypes: true }).slice(0, 400); } catch { return out; }
-  for (const e of top) {
-    if (skip.has(e.name)) continue;
-    if (!e.isDirectory()) { out.push(e.name); continue; }
-    out.push(e.name + '/');
-    try { for (const c of fs.readdirSync(path.join(dir, e.name), { withFileTypes: true }).slice(0, 200)) out.push(e.name + '/' + c.name + (c.isDirectory() ? '/' : '')); } catch { /* unreadable: skip */ }
-  }
-  return out;
-}
-// The record of a building, made once from detection (Other folders: General, nothing to detect).
-function layoutRecord(key, dir) {
-  if (!persisted.layouts[key]) { persisted.layouts[key] = newRecord(key && dir ? detect(namesOf(dir)) : null); savePersisted(); }
-  return persisted.layouts[key];
-}
-// Where a session sits by role (place.mjs seatOf), among the floors its building shows.
-function seatOfSession(s) {
-  if (!s.placed) return null;
-  const pl = roomPlace(s);
-  return seatOf({ assigned: s.assignedRole, desk: s.deskRole, agentType: s.agentType }, shownFloors(layoutRecord(pl.buildingKey, pl.repoPath)));
-}
-// The live sessions as the room rules read them (rooms.mjs settleRooms, viewRooms), oldest first.
-function liveRooms() {
-  return [...sessions.values()].filter((s) => s.status !== 'ended' && s.placed).sort((a, b) => a.startedAt - b.startedAt)
-    .map((s) => ({ pl: roomPlace(s), seat: seatOfSession(s), goal: s.goal, firstPrompt: s.firstPrompt }));
-}
-// Rooms by task (git rooms only: a room outside git shows while its session lives): each room is on the floors where its agents
-// sit now and takes the best name its sessions offer (rooms.mjs settleRooms). Returns true when a record changed.
-function noteRooms() {
-  const r = settleRooms(persisted.rooms, liveRooms());
-  if (r.moved) { persisted.rooms = r.rooms; savePersisted(); }
-  return r.moved;
-}
-// Every room the page lays out: the records, and a live room outside git (named from its oldest session).
-function roomsView() { return viewRooms(persisted.rooms, liveRooms()); }
-// The layout of every building the page can show: each known repository, and Other folders when a session works there.
-function layoutsView() {
-  const out = {};
-  for (const [k, r] of repos.entries()) out[k] = layoutView(layoutRecord(k, r.path));
-  if ([...sessions.values()].some((s) => s.status !== 'ended' && s.placed && !roomPlace(s).buildingKey)) out[''] = layoutView(layoutRecord('', ''));
-  return out;
-}
-// A user change to the floors of a building (archetypes.mjs edit). 400 with the reason when it is not possible.
-function changeLayout(body) {
-  const key = String(body.building ?? '');
-  if (key && !repos.has(key)) throw httpError(404, 'The office does not know that building.');
-  let next;
-  try { next = editLayout(layoutRecord(key, key ? repos.get(key).path : ''), body); } catch (e) { throw httpError(400, e.message); }
-  persisted.layouts[key] = next; savePersisted(); broadcast();
-  return { ok: true, layout: layoutView(next) };
-}
-// Paper flow (#93): each building's pull requests from `gh`, read-only, on change events and every 60 s (the reader keeps a read for
-// 60 s). A failed read is "PR state unknown" in the snapshot, never old data. The 30 s repo loop below asks the reader again.
-const prReader = createPrReader({ run: git.ghRun });
-const prSeen = new Map(); // building key -> JSON of the last answer broadcast
-async function refreshChanges(k) {
-  const r = repos.get(k);
-  if (!r) return;
-  const got = await prReader.read(k, r.path);
-  const sig = JSON.stringify([got.ok, got.prs, got.mergedToday, readyFor(k, got.prs).map((e) => e.number)]);
-  if (prSeen.get(k) !== sig) { prSeen.set(k, sig); if (!got.ok) console.warn(`The office could not read the pull requests of ${r.name}: ${got.why}`); broadcast(); }
-}
-// The Ready to merge entries of a building. The Quality record: an Operations Hub building lists a change only when a reviewer session on
-// its Quality floor is linked to the change by its branch. The snapshot and the merge route use this one rule.
-function readyFor(k, prs) {
-  const r = repos.get(k);
-  const hub = !!r && layoutRecord(k, r.path).archetype === 'ops-hub';
-  const quality = new Set([...sessions.values()].filter((s) => s.status !== 'ended' && s.placed && roomPlace(s).buildingKey === k && seatOfSession(s)?.floor === 'quality').map((s) => roomPlace(s).branch).filter(Boolean));
-  return readyEntries(prs.map((p) => ({ ...p, repo: k })), { needQuality: hub, quality });
-}
-// What the snapshot carries: per building { ok, at, error?, mergedToday, prs, ready }. Not read yet means no entry (the page shows unknown).
-function changesView() {
-  const out = {};
-  for (const [k, r] of repos.entries()) {
-    const got = prReader.peek(k);
-    if (!got) continue;
-    const prs = got.prs.map((p) => ({ ...p, repo: k }));
-    out[k] = { ok: got.ok, at: got.at, error: got.error || null, mergedToday: got.mergedToday, prs, ready: readyFor(k, prs) };
-  }
-  return out;
-}
-// Merge a change (changes.mjs mergeArgs): only a change the office reads as ready now, and only after the user's confirm. Held like a fork:
-// 409 with confirm: 'merge' and the question until the same call comes with confirmed: true.
-async function mergeChange(body) {
-  const k = String(body.repo ?? ''), n = Number(body.number);
-  const r = repos.get(k);
-  if (!r) throw httpError(404, 'The office does not know that building.');
-  if (!Number.isInteger(n) || n < 1) throw httpError(400, 'Name the pull request number.');
-  prReader.invalidate(k);
-  const got = await prReader.read(k, r.path);
-  const p = got.ok ? got.prs.find((x) => x.number === n) : null;
-  if (!p) throw httpError(409, 'PR state unknown. Check again in a moment.');
-  if (p.state !== 'ready' || !readyFor(k, got.prs).some((e) => e.number === n)) throw httpError(409, `#${n} is not ready to merge. ${p.state === 'ready' ? 'It has no Quality record yet.' : `Its state is ${p.state}.`}`);
-  if (body.confirmed !== true) {
-    throw askFirst('merge', `Merge #${n} ${p.title} into ${p.base || 'main'}? This changes the repository on GitHub.`);
-  }
-  await git.mergePr(r.path, mergeArgs(n));
-  try { // the merge is done on GitHub: a failure to write the record must not read as a failed merge
-    const rec = mergeRecord(k, p, Date.now());
-    persisted.merges = [rec, ...persisted.merges.filter((m) => m.key !== rec.key)].slice(0, MERGES_KEPT); savePersisted();
-    addFeed({ uid: 'merge', name: r.name || 'Office' }, 'merge', `merged #${n} ${clip(p.title, 80)}`);
-  } catch (e) { console.warn(`The office could not record the merge of #${n}: ${e.message}`); }
-  prReader.invalidate(k); await refreshChanges(k);
-  return { ok: true };
-}
-async function refreshRepo(k) {
-  const r = repos.get(k);
-  if (!r) return;
-  void refreshChanges(k);
-  const done = await git.refreshEntry(r); // a failed `git worktree list` changes nothing; overlapping refreshes keep the newest answer
-  if (done === 'gone') { if (repos.get(k) === r) repos.delete(k); broadcast(); return; } // the folder is gone, or it is not a repository any more
-  if (done === 'changed') { r.worktrees.forEach((w) => adoptNotes(placeOfWorktree(r.path, w))); dropGoneRooms(k, r); broadcast(); }
-}
-// A worktree that is gone takes its room records with it: the room leaves the building (#92).
-function dropGoneRooms(k, r) {
-  const roots = new Set(r.worktrees.map((w) => repoKey(w.root)));
-  let gone = false;
-  for (const [nk, rec] of Object.entries(persisted.rooms)) if (rec.building === k && !roots.has(rec.root)) { delete persisted.rooms[nk]; gone = true; }
-  if (gone) savePersisted();
-}
-function knownRepo(p) {
-  const r = repos.get(repoKey(String(p || '')));
-  if (!r) throw httpError(404, 'The office does not know that repository.');
-  return r;
-}
-// Never take a room away from a session that works in it.
-function roomInUse(root) {
-  const r = repoKey(root);
-  for (const s of sessions.values()) if (s.status !== 'ended' && s.cwd) { const k = repoKey(s.cwd); if (k === r || k.startsWith(r.endsWith(path.sep) ? r : r + path.sep)) return s; }
-  return null;
-}
-// The top of a worktree for the room board: each top-level folder with its file count. Only folders
-// the office knows (a worktree of a known repository) can be listed. Cached for 30 s.
-const treeCache = new Map();
-async function repoTree(root) {
-  const k = repoKey(root || '-');
-  const known = [...repos.values()].some((r) => r.worktrees.some((w) => repoKey(w.root) === k));
-  if (!known) throw httpError(404, 'The office does not know that folder.');
-  const hit = treeCache.get(k);
-  if (hit && Date.now() - hit.t < 30000) return hit.v;
-  const files = await git.files(root);
-  const by = new Map();
-  for (const f of files) {
-    const i = f.indexOf('/');
-    const name = i < 0 ? f : f.slice(0, i);
-    const e = by.get(name) || { name, dir: i >= 0, files: 0 };
-    e.files += 1; by.set(name, e);
-  }
-  const v = { root, total: files.length, entries: [...by.values()].sort((a, b) => (b.dir - a.dir) || a.name.localeCompare(b.name)).slice(0, 60) };
-  treeCache.set(k, { t: Date.now(), v });
-  return v;
-}
-
-// Git refusals (branch exists, not merged, uncommitted changes) are the user's to fix: answer 409.
-// A room on a floor: a worktree of the branch, or an agent room whose base is that branch (it sits on that floor, #69).
-const onFloor = (w, branch) => w.branch === branch || (!!w.base && w.base === branch);
-async function floorAction(action, body) {
-  try { return await floorActionRaw(action, body); } catch (e) { throw e.status ? e : httpError(409, e.message); }
-}
-async function floorActionRaw(action, body) {
-  const r = knownRepo(body.repo);
-  const branch = String(body.branch || '').trim();
-  let out;
-  if (action === 'create-floor') out = await git.createFloor(r.path, branch, String(body.from || '').trim(), String(body.name || ''));
-  else if (action === 'create-room') out = await git.createRoom(r.path, branch, String(body.name || ''));
-  else if (action === 'remove-room') {
-    const s = roomInUse(String(body.root || ''));
-    if (s) throw httpError(409, `${s.name} works in this room. Close the session first.`);
-    out = await git.removeRoom(r.path, String(body.root || ''), body.force === true);
-  } else if (action === 'delete-floor') {
-    // git's list, not the 30 s copy; the floor's rooms are its worktrees and the agent rooms that sit on it (#69 base)
-    for (const w of (await git.layout(r.path)).filter((x) => onFloor(x, branch))) {
-      const s = roomInUse(w.root);
-      if (s) throw httpError(409, `${s.name} works on this floor. Close the session first.`);
-    }
-    out = await git.deleteFloor(r.path, branch, body.force === true);
-  } else if (action === 'cleanup-floors') {
-    // Only floors that are still unused and safe now, whatever the page sent. Never forced.
-    const safe = new Set((await git.staleFloors(r.path)).map((f) => f.branch));
-    const wts = await git.layout(r.path);
-    out = { deleted: [], skipped: [] };
-    for (const b of (Array.isArray(body.branches) ? body.branches : []).map(String)) {
-      const busy = wts.filter((w) => onFloor(w, b)).map((w) => roomInUse(w.root)).find(Boolean);
-      if (!safe.has(b) || busy) { out.skipped.push(b); continue; }
-      try { await git.deleteFloor(r.path, b, false); out.deleted.push(b); } catch { out.skipped.push(b); }
-    }
-  } else throw httpError(400, 'Unknown action.');
-  await refreshRepo(repoKey(r.path));
-  return out;
-}
-// Recent folders that are in git are buildings too, so they can get floors before any session runs. git.locateOrKeep
-// tries a passing failure 3 times; a folder that still got KEEP (git kept passing its time limit while the computer was
-// busy, as at sign-in) is asked again every 30 s. A folder that is gone, not in git or refused by git is not asked again.
-// A lookup that still runs is not started a second time.
-const unplacedRecent = new Set(persisted.recent);
-const placingRecent = new Set();
-const placeRecent = () => {
-  for (const d of unplacedRecent) {
-    if (placingRecent.has(d)) continue;
-    placingRecent.add(d);
-    git.locateOrKeep(d).then((g) => {
-      placingRecent.delete(d);
-      if (g === git.KEEP) return;
-      unplacedRecent.delete(d);
-      if (g) addRepo(g.repo);
-    });
-  }
-};
-placeRecent();
-setInterval(() => { for (const k of repos.keys()) void refreshRepo(k); placeRecent(); }, 30000).unref();
+// ---------- buildings: repositories and their worktrees (campus.mjs) ----------
+// A repository is known when a session works in it or it is a recent folder. The campus owns the buildings, layouts, room
+// records, change views, tree cache and floor actions; the server hands it the state slice, the live sessions and git.
+const repoKey = normPath;
+const campus = createCampus({
+  git, state: persisted, save: savePersisted, sessions: () => sessions.values(), roomPlace: (s) => roomPlace(s), changed: () => broadcast(),
+  adoptNotes: (pl) => adoptNotes(pl), feed: (s, k, t) => addFeed(s, k, t), fail: (st, m) => httpError(st, m), askFirst: (k, t) => askFirst(k, t),
+  recent: persisted.recent,
+});
+const { addRepo, refreshRepo, layoutRecord, seatOfSession, noteRooms, roomsView, layoutsView, changeLayout, changesStale,
+  changesView, mergeChange, repoTree, floorAction } = campus;
+campus.start();
 
 // Finds the claude process above a hook's parent, so the office can close sessions it did not launch.
 // The hook's parent shell dies right after the hook returns, so the walk has to happen while the hook
@@ -1800,7 +1586,7 @@ const snapshot = () => (W.lean({
   notes: persisted.notes,   // noteKey -> { text, at, v, by? }: each room's notes board (v: version counter; a cleared board stays with text '' and at 0; by: the agent session that last wrote it)
   screens: persisted.screens,   // room key -> the blackboard view the user chose (personas.mjs setScreen); a room with none shows Overview
   pins: persisted.pins,     // noteKey -> { text, by, at }: a short message an agent pinned on the room's blackboard
-  repos: [...repos.entries()].map(([key, r]) => ({ key, ...r, securityRoomId: securityRoomIdOf(key), worktrees: r.worktrees.map((w) => ({ ...w, place: placeOfWorktree(r.path, w) })) })),
+  repos: campus.reposView(),
   // The Security room (#70): the rules (office-wide and per building), why a cell is not enforced for an agent kind
   // (security.mjs enforcement), and the Spend screen (the default spend limit, cost per agent kind this month).
   security: { rules: persisted.security, enforce: ENFORCE, trust: trustView(), spend: { limit: defaultSpend(), ...costThisMonth(persisted.costs, Date.now()) } },
@@ -1991,13 +1777,9 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true, version: r.version, text: r.text, merged: r.merged });
     }
     if (url.pathname === '/api/tree') return send(res, 200, await repoTree(String(body.root || '')));
-    if (url.pathname === '/api/branches') return send(res, 200, { branches: await git.floorCandidates(knownRepo(body.repo).path) });
+    if (url.pathname === '/api/branches') return send(res, 200, await campus.branches(body.repo));
     if (url.pathname === '/api/floor/create') return send(res, 200, await floorAction('create-floor', body));
-    if (url.pathname === '/api/floor/stale') {
-      const r = knownRepo(body.repo);
-      const wts = await git.layout(r.path);
-      return send(res, 200, { floors: (await git.staleFloors(r.path)).filter((f) => !wts.some((w) => onFloor(w, f.branch) && roomInUse(w.root))) });
-    }
+    if (url.pathname === '/api/floor/stale') return send(res, 200, await campus.staleFloors(body.repo));
     if (url.pathname === '/api/floor/cleanup') return send(res, 200, await floorAction('cleanup-floors', body));
     if (url.pathname === '/api/floor/delete') return send(res, 200, await floorAction('delete-floor', body));
     if (url.pathname === '/api/room/create') return send(res, 200, await floorAction('create-room', body));
@@ -2042,7 +1824,7 @@ const server = http.createServer(async (req, res) => {
       const r = folderOf(String(body.uid));
       if (!r.worktree) throw httpError(409, 'Pull requests need a worktree session, so the changes stay off your main branch.');
       const out = await git.createPr(r.cwd, r.worktree.branch, r.name);
-      const bk = buildingOfSession(r); if (bk != null) { prReader.invalidate(bk); void refreshChanges(bk); }
+      const bk = buildingOfSession(r); if (bk != null) changesStale(bk);
       return send(res, 200, out);
     }
     if (url.pathname === '/api/merge') return send(res, 200, await mergeChange(body));
