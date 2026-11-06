@@ -69,15 +69,16 @@ export function startOffice(dir, env, { ms = START_MS, script = path.join(dir, '
 
 /**
  * Starts a copy of the office on a free port; if the port is taken meanwhile, tries again on a new one.
- * `env` is the environment without OFFICE_PORT; `prepare(port)` (optional, may be async) makes what depends on the port.
+ * `env` is the environment without OFFICE_PORT; `prepare(port)` (optional, may be async) makes what depends on the port;
+ * `envFor(port)` (optional) adds the environment that names the port (a setting that must equal it).
  * Returns { office, port, env } where office is the startOffice result and env has OFFICE_PORT.
  */
-export async function startOnFreePort(dir, env, { prepare, attempts = 6, ms = START_MS } = {}) {
+export async function startOnFreePort(dir, env, { prepare, envFor, attempts = 6, ms = START_MS } = {}) {
   let last = null;
   for (let i = 0; i < attempts; i++) {
     const port = await freePort();
     if (prepare) await prepare(port);
-    const withPort = { ...env, OFFICE_PORT: String(port) };
+    const withPort = { ...env, ...(envFor ? envFor(port) : {}), OFFICE_PORT: String(port) };
     const office = startOffice(dir, withPort, { ms });
     try {
       if ((await office.done) === 'open') return { office, port, env: withPort };
