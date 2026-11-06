@@ -226,3 +226,30 @@ test('door sign count: bg on status-working-text, 4.5:1', () => each((T, th) => 
   atLeast('door count', 4.5, T('bg'), T('status-working-text'), th);
   assert.ok(!/on-status/.test(read('public/board.js')), 'board.js does not draw with on-status');
 }));
+
+// #92 review: the lobby's painted faces (public/lobby.js FACES): the reception memo and the directory board are paper, the desk
+// nameplate is the reverse. Every text at 4.5:1 on its face, the lighter lines (a wing name, a nameplate's lane and cost) with the
+// alpha they are painted at; a directory state dot at 3:1 on the paper (its row also says the state in words). The paint code
+// takes every color from FACES, so these are the pairs on screen.
+test('lobby: the memo, the directory board and the nameplate read in every theme (lobby.js FACES)', async () => {
+  await import('../public/vocab.js'); await import('../public/format.js'); await import('../public/lobby.js');
+  const L = globalThis.OfficeLobby.pure, F = L.FACES;
+  each((T, th) => {
+    atLeast('memo text', 4.5, T(F.memo.ink), T(F.memo.face), th);
+    atLeast('memo band', 3, T(F.memo.band), T(F.memo.face), th);
+    atLeast('directory text', 4.5, T(F.directory.ink), T(F.directory.face), th);
+    atLeast('directory wing name', 4.5, mix(T(F.directory.ink), T(F.directory.face), F.directory.wingAlpha), T(F.directory.face), th);
+    const tok = Object.fromEntries(tokens.map((t) => [t.name, val(t.name, th)]));
+    for (const s of ['error', 'waiting', 'review', 'working', 'finished', 'resting']) atLeast('directory dot ' + s, 3, rgb(L.dotOf(tok, s)), T(F.directory.face), th);
+    atLeast('nameplate name', 4.5, T(F.plate.ink), T(F.plate.face), th);
+    atLeast('nameplate lane and cost', 4.5, mix(T(F.plate.ink), T(F.plate.face), F.plate.detailAlpha), T(F.plate.face), th);
+  });
+  // every color of the three paint functions comes from FACES (or dotOf), never a raw token name
+  const src = read('public/lobby.js');
+  for (const fn of ['paintMemo', 'paintDirectory', 'paintPlate']) {
+    const body = src.slice(src.indexOf('function ' + fn + '('), src.indexOf('\n    }\n', src.indexOf('function ' + fn + '(')));
+    assert.ok(body.length > 40, fn);
+    assert.doesNotMatch(body, /tok\[['"]|tok\.[a-z]|#[0-9a-f]{3}\b/i, fn + ' paints with FACES only');
+    assert.match(body, /FACES\.(memo|directory|plate)/, fn);
+  }
+});

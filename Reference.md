@@ -27,9 +27,9 @@ This repo copy is the DS source. Reference.md is kept by hand in step with `kit/
 | `trigger.run` | `job`, `bot?`, `next?` | A scheduled job or trigger runs. |
 | `model` | `bot`, `model`, `fallback?` | A bot changes model, or falls back to another model. |
 | `floor.add` | `floor` | Add a floor. |
-| `room.add` | `floorId`, `room` | Add a room to a floor. A room of type security has no bots and six wall screens that a page repaints; room.screens gives their six titles. |
+| `room.add` | `floorId`, `room` | Add a room to a floor. A room of type security has no bots and six wall screens that a page repaints; room.screens gives their six titles. A room of type lobby is a Reception: a reception desk with a memo and a directory board that a page repaints. room.note is the small print on the room sign; room.spare adds that many open desks (no bot, at most 6) of role room.spareRole, for a page to pick. |
 | `floor.update` | `floorId`, `floor` | Rename a floor (name, key). Nothing else on it changes. |
-| `room.update` | `roomId`, `room` | Rename a room, give it a new id, or change its type. Its bots stay and follow the new id. |
+| `room.update` | `roomId`, `room` | Rename a room, give it a new id, or change its type, note, spare or spareRole. Its bots stay and follow the new id. |
 | `bot.add` | `roomId`, `bot` (BotDef) | Add a bot to a room. BotDef fields are listed below. |
 | `bot.remove` | `bot` | Remove a bot. |
 

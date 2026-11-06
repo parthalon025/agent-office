@@ -4,14 +4,23 @@
 <div id="root"></div>
 <script>
 var A=window.AgentOffice,h=React.createElement,R=React;
-var building={name:"Preview HQ",sessions:"agent",floors:[{key:"ops",name:"Ops",rooms:[{type:"team",name:"Team",bots:[{name:"Planner",role:"planner",shape:"capsule",orchestrator:true},{name:"Scout",role:"research",shape:"blob"}]},{type:"lab",name:"Lab",bots:[{name:"Builder",role:"coder",shape:"cone"}]}]}]};
+/* A building with function floors (#92): the Lobby with the Reception (office type lobby: a reception desk with its memo, a directory
+   board, open desks) and a team room; Engineering with a lab; Support and Docs with a room of open desks only, so the elevator dims
+   them ("No agents here") and the room card says to click a desk. The wings mix (Support is Go to market, between Product and tech
+   floors): the elevator still has one header per wing. onWaiting puts Needs you in the top bar with waitingCount. */
+var spare=function(name){return {type:"lab",name:name||"Open desks",note:"No agents here. Click a desk to start one.",spare:2,spareRole:"coder",bots:[]};};
+var building={name:"Preview HQ",sessions:"agent",floors:[
+ {key:"ops",name:"Lobby",wingName:"",rooms:[{type:"lobby",name:"Reception",note:"Open desks for agents with no role",spare:2,bots:[]},{type:"team",name:"Team",note:"main · Shared workspace",bots:[{name:"Planner",role:"planner",shape:"capsule",orchestrator:true},{name:"Scout",role:"research",shape:"blob"}]}]},
+ {key:"research",name:"Engineering",wingName:"Product and tech",rooms:[{type:"lab",name:"#92 Function floors",note:"feat/92-function-floors · Private",spare:1,spareRole:"coder",bots:[{name:"Builder",role:"coder",shape:"cone"}]}]},
+ {key:"sales",name:"Support",wingName:"Go to market",rooms:[spare()]},
+ {key:"content",name:"Docs",wingName:"Product and tech",rooms:[spare()]}]};
 var shapes=["capsule","blob","cone"];
 function manyBuilding(){var bots=[];for(var i=1;i<=12;i++)bots.push({name:"Bot "+i,role:i===1?"planner":"coder",shape:shapes[i%3],orchestrator:i===1});
  var floors=[{key:"ops",name:"Ops",rooms:[{type:"team",name:"Team",bots:bots}]}];for(var f=2;f<=14;f++)floors.push({key:"f"+f,name:"Branch "+f,rooms:[{type:"lab",name:"Lab "+f,bots:[]}]});
  return {name:"Preview HQ, many floors",sessions:"agent",floors:floors};}
 function term(b){return h("div",{className:"ao-mono",style:{fontSize:12,padding:12,color:"var(--ink)"}},"$ tail -f "+b.name.toLowerCase()+".log",h("div",{className:"ao-muted"},"ready"));}
 var extra=[{id:"terminal",label:"Terminal",icon:"terminal",after:"chat",render:term}];
-function Demo(){var a=R.useState(false),inbox=a[0],setInbox=a[1],c=R.useState(4),count=c[0],setCount=c[1],t=R.useState("chat"),tab=t[0],setTab=t[1],m=R.useState(false),many=m[0],setMany=m[1],o=R.useRef(null),ti=R.useState(""),title=ti[0],setTitle=ti[1];
+function Demo(){var a=R.useState(false),inbox=a[0],setInbox=a[1],c=R.useState(4),count=c[0],setCount=c[1],t=R.useState("chat"),tab=t[0],setTab=t[1],m=R.useState(false),many=m[0],setMany=m[1],o=R.useRef(null),ti=R.useState(""),title=ti[0],setTitle=ti[1],g=R.useState(0),went=g[0],setWent=g[1];
  R.useEffect(function(){var id=setInterval(function(){setTitle(document.title);},400);return function(){clearInterval(id);};},[]);
  var mono={className:"ao-mono",style:{color:"var(--ink)"}};
  return h("div",null,
@@ -21,8 +30,8 @@ function Demo(){var a=R.useState(false),inbox=a[0],setInbox=a[1],c=R.useState(4)
    h(A.Button,{onClick:function(){setCount(Math.max(0,count-1));}},"One less"),
    h(A.Button,{icon:"floor",onClick:function(){setMany(!many);}},many?"Few floors, 3 bots":"14 floors, 12 bots"),
    h(A.Button,{icon:"terminal",onClick:function(){setTab("terminal");if(o.current)o.current.select("Scout");}},"Open Scout, Terminal tab"),
-   h("span",{className:"ao-muted",style:{fontSize:12}},"inbox: ",h("span",mono,String(inbox))," · waitingCount: ",h("span",mono,String(count))," · agentTab: ",h("span",mono,tab)," · title: ",h("span",mono,title))),
-  h(A.OfficeScene,{key:many?"many":"few",building:many?manyBuilding():building,height:740,intro:false,inbox:inbox,onInbox:setInbox,waitingCount:count,extraTabs:extra,agentTab:tab,onTabChange:setTab,onReady:function(x){o.current=x;}}));}
+   h("span",{className:"ao-muted",style:{fontSize:12}},"inbox: ",h("span",mono,String(inbox))," · waitingCount: ",h("span",mono,String(count))," · onWaiting calls: ",h("span",mono,String(went))," · agentTab: ",h("span",mono,tab)," · title: ",h("span",mono,title))),
+  h(A.OfficeScene,{key:many?"many":"few",building:many?manyBuilding():building,height:740,intro:false,inbox:inbox,onInbox:setInbox,waitingCount:count,onWaiting:function(){setWent(function(n){return n+1;});},floorsTitle:"Elevator",extraTabs:extra,agentTab:tab,onTabChange:setTab,onReady:function(x){o.current=x;}}));}
 ReactDOM.createRoot(document.getElementById("root")).render(h(Demo));
 </script>
 </body></html>

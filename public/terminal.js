@@ -826,6 +826,15 @@
       refresh: function () { if (self.dead) return; scan(); entries.forEach(function (e) { e.sig = ''; }); pass(); },
       open: open,
       dispose: dispose,
+      // Look at a session's monitor (step 1, no panel): uid's, or with no uid the first agent monitor on the shown floor (the
+      // lobby tour's monitor stop). True when the camera flies there.
+      look: function (uid) {
+        if (self.dead) return false;
+        try { scan(); } catch (x) { /* the list is still good */ }
+        var fg = host.shownFloor();
+        var e = entries.filter(function (x) { return x.uid && (uid ? x.uid === uid : true) && host.onShownFloor(x.mesh, fg); })[0];
+        return !!e && host.show(target, e, false);
+      },
       // the patched screens, for tests and the console
       screens: function () { return entries.map(function (e) { return { name: e.name, kind: e.kind, uid: e.uid, shown: shown(e.mesh), hover: e.hover }; }); }
     };
