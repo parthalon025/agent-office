@@ -4,8 +4,8 @@
 <div id="root"></div>
 <script>
 var A=window.AgentOffice,h=React.createElement,R=React;
-/* A building with function floors (#92): the Lobby with the Reception (office type lobby: a reception desk with its memo, a directory
-   board, open desks) and a team room; Engineering with a lab; Support and Docs with a room of open desks only, so the elevator dims
+/* A building with function floors (#92): the Lobby with the Reception (office type lobby: a reception desk with its memo, a ready tray
+   and a stamp, a directory board, a pipeline board, a cabinet, an archive box, open desks) and a team room; Engineering with a lab; Support and Docs with a room of open desks only, so the elevator dims
    them ("No agents here") and the room card says to click a desk. The wings mix (Support is Go to market, between Product and tech
    floors): the elevator still has one header per wing. onWaiting puts Needs you in the top bar with waitingCount. */
 var spare=function(name){return {type:"lab",name:name||"Open desks",note:"No agents here. Click a desk to start one.",spare:2,spareRole:"coder",bots:[]};};

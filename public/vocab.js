@@ -17,7 +17,7 @@
      todoStatus(t)    -> a DS plan step status
      figures(list)    -> the numbers of a room, from its open sessions
      agentsSign(n)    -> "N agents" for a room shared by 2 or more agents (top-level sessions; helpers do not count), else ''
-     plan             -> the Manager board words (#154): sourceWord(kind) 'Office' or 'Paperclip', stepState(state), stepWord(state)
+     plan             -> the Manager board words (#154): sourceWord(kind) 'Office' or 'Paperclip', stepState(state), stepWord(state), notConnected, notConnectedReason(why)
      requests(s)      -> every open request of a session, oldest first: { id, kind, tool, text, detail, risk, always, t }
                          kind is 'permission' (Approve or Decline) or 'question' (Yes or No; no risk value)
      featuresOf(s)    -> the office features the session's agent kind declares (#72): [{ key, label }], in table order
@@ -103,11 +103,13 @@
   function stateWord(k) { return STATE_WORD[k] || ''; }
   // The Manager board (#154): who plans a goal (the source) and the state of a plan step. Words are the board's only copy.
   var PLAN_SOURCE = { office: 'Office', paperclip: 'Paperclip' };
-  var PLAN_STEP = { pending: 'Waiting', working: 'Working', finished: 'Done', error: 'Error' };
+  var PLAN_STEP = { pending: 'Waiting', working: 'Working', finished: 'Done', error: 'Error', unknown: 'Unknown' }; // unknown: a state the source has no word for (never done)
   var plan = {
     sourceWord: function (kind) { return PLAN_SOURCE[kind] || ''; },
     stepState: function (state) { return PLAN_STEP[state] ? state : 'pending'; },
-    stepWord: function (state) { return PLAN_STEP[state] || PLAN_STEP.pending; }
+    stepWord: function (state) { return PLAN_STEP[state] || PLAN_STEP.pending; },
+    notConnected: 'Not connected',
+    notConnectedReason: function (why) { return 'Not connected.' + (why ? ' ' + why : '') + ' The steps are the last ones read.'; }
   };
   // The model lane of a session (#88): Haiku, Sonnet, Opus or Fable, from its model id; '' for another model.
   function laneOf(model) {
@@ -355,7 +357,34 @@
     LAYER_ORDER.forEach(function (l) { if (c && (c[l] || 0) > n) { n = c[l]; best = l; } });
     return best;
   }
-  var layers = { order: LAYER_ORDER, opens: layerOpens, surfaces: LAYER_SURFACES, surface: function (id) { return own(LAYER_SURFACES, id) ? LAYER_SURFACES[id] : null; },
+  // The Look layer of a room: its agents together. Intent is the newest agent's; steps and cost are sums.
+  function lookRoom(list) {
+    var l = list || [], steps = 0, done = 0, cost = 0, unknown = false, newest = null;
+    l.forEach(function (s) {
+      var t = s.todos || [];
+      steps += t.length; done += t.filter(function (x) { return x.status === 'completed'; }).length;
+      if (s.costUnknown) unknown = true; else if (typeof s.cost === 'number') cost += s.cost;
+      if (!newest || (s.lastEvent || 0) >= (newest.lastEvent || 0)) newest = s;
+    });
+    return { count: l.length, intent: newest ? look(newest).intent : '', progress: steps ? done + ' of ' + steps + (steps === 1 ? ' step' : ' steps') : '',
+      cost: unknown ? 'unknown' : l.some(function (s) { return typeof s.cost === 'number'; }) ? money(cost) : '' };
+  }
+  // Remembered layers come back from storage text: only known layers with whole counts are kept.
+  function parseMem(raw) {
+    var out = {}, m;
+    try { m = JSON.parse(raw); } catch (x) { return out; }
+    if (!m || typeof m !== 'object' || Array.isArray(m)) return out;
+    Object.keys(m).forEach(function (p) {
+      var c = m[p], k = {}, any = false;
+      if (p === '__proto__' || !c || typeof c !== 'object') return;
+      LAYER_ORDER.forEach(function (l) { if (own(c, l) && Number.isInteger(c[l]) && c[l] > 0) { k[l] = c[l]; any = true; } });
+      if (any) out[p] = k;
+    });
+    return out;
+  }
+  // A place used at Inspect or Deep opens there on the first tap; Glance and Look show the Look card first.
+  function opensAt(l) { return LAYER_ORDER.indexOf(l) >= LAYER_ORDER.indexOf('inspect'); }
+  var layers = { lookRoom: lookRoom, parse: parseMem, opensAt: opensAt, order: LAYER_ORDER, opens: layerOpens, surfaces: LAYER_SURFACES, surface: function (id) { return own(LAYER_SURFACES, id) ? LAYER_SURFACES[id] : null; },
     mood: mood, glance: glance, look: look, remember: remember, layerFor: layerFor };
 
   function kindWord(s, kinds) {

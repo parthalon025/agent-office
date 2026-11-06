@@ -654,3 +654,104 @@ test('round 4: the watcher fails closed on what it cannot read of a company: any
   await run((d) => { d.routines[0].env = { BASH_ENV: 'x' }; }, (s) => assert.equal(s.state, 'supervised', 'a routine of Grace is not a layer of Ada'));
   await run((d) => { delete d.routines[0].env; }, (s) => { assert.equal(s.state, 'partly'); assert.match(s.why, /routine env/); });
 });
+
+// Paperclip as a plan source (#155, spec #130): its tasks are plan steps, read-only, on the contract of manager.mjs (#154).
+import { createPlanBoard } from '../manager.mjs';
+
+test('plan source: tasks become steps with agent, state, budget and model; the board reads them through the contract', async () => {
+  const pc = await startFakePaperclip({ ...DEMO(), allIssues: true });
+  const ADA = 'a1000000-0000-4000-8000-000000000002', TASK = 'i1000000-0000-4000-8000-000000000012';
+  const company = DEMO().companies[0].id;
+  pc.state.issues.push({ id: 'i-x', companyId: company, identifier: 'ACM-14', title: 'Odd one', status: 'waiting_on_moon', assigneeAgentId: null });
+  pc.state.issues.push({ id: 'i-d', companyId: company, identifier: 'ACM-15', title: 'Shipped', status: 'done', assigneeAgentId: ADA });
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS, sessions: () => [{ uid: 'u7', paperclip: { task: TASK, run: 'r1' } }, { uid: 'u8', paperclip: { task: 'other' } }] });
+  const board = createPlanBoard({ sources: [hq.planSource] });
+  try {
+    assert.equal(hq.planSource.kind, 'paperclip');
+    assert.deepEqual(hq.planSource.list(), [], 'nothing before a connection');
+    await hq.connect({ url: pc.url });
+    await until(() => hq.state() === 'on', 'the events socket');
+    const { plans, unreadable } = board.snapshot();
+    assert.deepEqual(unreadable, []);
+    assert.equal(plans.length, 1);
+    assert.equal(plans[0].source, 'paperclip');
+    assert.equal(plans[0].sourceWord, 'Paperclip');
+    assert.equal(plans[0].frozen, false);
+    const by = Object.fromEntries(plans[0].steps.map((s) => [s.id, s]));
+    const s = by[TASK];
+    assert.deepEqual([s.title, s.state, s.owner, s.raw, s.model, s.budget, s.uid], ['ACM-12 Add a health route to the API', 'working', 'Ada', 'in_progress', 'haiku', { spent: 8.3, limit: 50 }, 'u7']);
+    assert.equal(by['i1000000-0000-4000-8000-000000000013'].state, 'pending', 'todo waits');
+    assert.equal(by['i-x'].state, 'unknown', 'an unknown state is neutral, with its raw name');
+    assert.equal(by['i-x'].raw, 'waiting_on_moon');
+    assert.equal(by['i-x'].word, 'Unknown');
+    assert.equal(s.skipped, false);
+  } finally { board.close(); hq.disconnect(); await pc.close(); }
+});
+
+test('plan source: a step whose agent run skipped the office says so', async () => {
+  const pc = await startFakePaperclip(DEMO(HOOKS));
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS });
+  try {
+    await hq.connect({ url: pc.url });
+    await until(() => hq.state() === 'on', 'the events socket');
+    const ADA = 'a1000000-0000-4000-8000-000000000002';
+    pc.emit('heartbeat.run.event', { runId: 'r9', agentId: ADA, eventType: 'adapter.invoke', payload: { command: 'claude', commandArgs: ['--print', '--dangerously-skip-permissions'], env: {} } });
+    await until(() => hq.planSource.list()[0].steps.some((s) => s.skipped), 'the skipped run');
+    const st = hq.planSource.list()[0].steps.find((x) => x.owner === 'Ada');
+    assert.equal(st.skipped, true);
+    assert.match(st.skippedWhy, /skips permissions/);
+  } finally { hq.disconnect(); await pc.close(); }
+});
+
+test('plan source: a lost connection freezes the steps as Not connected; no plan to show is unreadable', async () => {
+  const pc = await startFakePaperclip();
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS });
+  try {
+    await hq.connect({ url: pc.url });
+    await until(() => hq.state() === 'on', 'the events socket');
+    assert.equal(hq.planSource.list()[0].steps.length, 2, 'two open tasks');
+    assert.equal(hq.planSource.list()[0].frozen, false);
+    await pc.close();   // Paperclip goes away
+    await until(() => hq.state() === 'lost', 'the lost state');
+    const [p] = hq.planSource.list();
+    assert.equal(p.steps.length, 2, 'the last plan stays');
+    assert.equal(p.status, 'not-connected');
+    assert.equal(p.frozen, true);
+    assert.match(p.reason, /^Not connected\./);
+    assert.equal(createPlanBoard({ sources: [hq.planSource] }).snapshot().plans[0].frozen, true);
+    hq.disconnect();
+    assert.deepEqual(hq.planSource.list(), [], 'the user disconnected: no plan');
+  } finally { hq.disconnect(); }
+  const dead = createHq({ ...fast, hooksFile: () => HOOKS });
+  try {
+    await dead.connect({ url: 'http://127.0.0.1:9', keep: true, company: 'c' });
+    assert.throws(() => dead.planSource.list(), /could not be read/);
+    assert.deepEqual(createPlanBoard({ sources: [dead.planSource] }).snapshot().unreadable, [{ source: 'paperclip', word: 'Paperclip' }]);
+  } finally { dead.disconnect(); }
+});
+
+test('plan source: a task list that may be cut is unreadable, not a plan that looks whole', async () => {
+  const seed = DEMO();
+  for (let n = 0; n < 500; n++) seed.issues.push({ ...seed.issues[1], id: `bulk-${n}`, identifier: `ACM-${100 + n}` });
+  const pc = await startFakePaperclip(seed);
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS });
+  try {
+    await hq.connect({ url: pc.url });
+    assert.throws(() => hq.planSource.list(), /could not be read/);
+  } finally { hq.disconnect(); await pc.close(); }
+});
+
+test('plan source: while it runs, the office sends only GET and the WebSocket', async () => {
+  const pc = await startFakePaperclip();
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS });
+  const board = createPlanBoard({ sources: [hq.planSource] });
+  try {
+    await hq.connect({ url: pc.url });
+    await until(() => hq.state() === 'on', 'the events socket');
+    pc.emit('activity.logged', {});
+    await until(() => pc.requests.filter((r) => r.path.endsWith('/issues')).length >= 2, 'a second read');
+    board.snapshot();
+    assert.ok(pc.requests.length > 3);
+    for (const r of pc.requests) assert.ok(r.method === 'GET' || r.method === 'UPGRADE', `${r.method} ${r.path}`);
+  } finally { board.close(); hq.disconnect(); await pc.close(); }
+});

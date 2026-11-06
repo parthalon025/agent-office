@@ -264,6 +264,16 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 /* ---------- look bar: the camera looks at a screen (office.js LookBar; scene-host.js places the screen above it) ---------- */
 .look-bar { position: fixed; z-index: var(--z-hud); display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); background: var(--panel); backdrop-filter: blur(var(--blur-panel)); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-panel); animation: page-fade var(--duration-base) var(--ease-out) both; }
 @media (prefers-reduced-motion: reduce) { .look-bar { animation: none; } }
+/* the Look layer of a room (ADR 0006): one sentence, the figures, one row per agent */
+.look-card { flex: 1 0 100%; max-width: 100%; display: grid; gap: var(--space-1); padding: var(--space-1); }
+.look-card p { margin: 0; overflow-wrap: anywhere; }
+.look-intent { color: var(--ink); font-weight: 600; }
+.look-facts { color: var(--muted); }
+.look-agents { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); max-height: 30vh; overflow-y: auto; }
+.look-agent { all: unset; box-sizing: border-box; width: 100%; display: grid; gap: 2px; padding: var(--space-1) var(--space-2); border: 1px solid var(--line); border-radius: var(--radius-md); cursor: pointer; color: var(--ink); }
+.look-agent span { color: var(--muted); overflow-wrap: anywhere; }
+.look-agent:hover { background: var(--chip); }
+.look-agent:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ---------- notes board, written on in place ---------- */
 .notes-edit { position: fixed; z-index: var(--z-sheet); display: flex; flex-direction: column; animation: page-fade var(--duration-base) var(--ease-out) both; }

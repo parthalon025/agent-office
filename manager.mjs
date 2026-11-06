@@ -26,8 +26,10 @@
 //
 //   { kind, list(building?), subscribe?(fn) }
 //   kind                  'office' | 'paperclip'   who plans: the word is OfficeVocab.plan.sourceWord(kind)
-//   list(building?)       -> [{ id, building, goal, status?, reason?, steps: [{ id, title, state, owner?, cost? }] }]
+//   list(building?)       -> [{ id, building, goal, status?, reason?, frozen?, steps: [{ id, title, state, owner?, cost?, ...extra }] }]
 //                            state is pending, working, finished or error (OfficeVocab.plan.stepWord); owner is the agent's name; cost is dollars or null.
+//                            A source may add per step: raw (its own state name), model, budget { spent, limit }, uid (the agent's desk), skipped and skippedWhy (a run that skipped
+//                            the office). frozen: the plan is the last one read and the source is not connected (status 'not-connected'); the board never shows it as current.
 //                            list may throw when the plan cannot be read: the board then names the source as unreadable (never a stale plan).
 //   subscribe(fn)         -> unsubscribe()          optional: fn() is called after every change of the plan
 //
@@ -245,6 +247,42 @@ export function createManager(deps = {}) {
 
     get(goalId) { return goals.get(goalId) || null; },
 
+    /** The agents that hold a running step now (the server finishes a step when its agent's turn ends). */
+    workingAgents() { const out = []; for (const g of goals.values()) for (const s of g.steps) if (s.status === 'working' && s.agentId) out.push(s.agentId); return out; },
+
+    /** Plain data of every goal for the state file (#156). restore() takes it back. */
+    export() {
+      return [...goals.values()].map((g) => ({
+        id: g.id, building: g.building, goal: g.goal, status: g.status, reason: g.reason, approveFirst: g.approveFirst, spendLimit: g.spendLimit,
+        messages: g.messages, createdAt: g.createdAt, updatedAt: g.updatedAt, baseline: [...g.baseline],
+        steps: g.steps.map((s) => ({ id: s.id, text: s.text, role: s.role, room: s.room, bot: s.bot, status: s.status, owner: s.owner, result: s.result, attempts: s.attempts })),
+      }));
+    },
+
+    /** Load saved goals at the office start. The agent of a running step is gone, so that step is an error step and the goal waits for retry
+     *  or stop; a plan that was still being made failed. A record that does not fit is dropped. Nothing is dispatched here. */
+    restore(list) {
+      for (const r of Array.isArray(list) ? list : []) {
+        if (!r || typeof r !== 'object' || typeof r.id !== 'string' || !Array.isArray(r.steps) || typeof r.goal !== 'string' || goals.has(r.id)) continue;
+        const st = (v, ok, d) => (ok.includes(v) ? v : d);
+        const g = {
+          id: r.id, building: String(r.building || ''), goal: r.goal, status: st(r.status, Object.keys(WORD), 'failed'), reason: String(r.reason || ''),
+          approveFirst: r.approveFirst === true, spendLimit: Number.isFinite(r.spendLimit) && r.spendLimit >= 0 ? r.spendLimit : 0,
+          messages: Number.isInteger(r.messages) ? r.messages : 0, baseline: new Map((Array.isArray(r.baseline) ? r.baseline : []).filter((e) => Array.isArray(e) && Number.isFinite(e[1]))),
+          lastBoard: '', waitingFor: '', pumping: false, createdAt: Number(r.createdAt) || now(), updatedAt: Number(r.updatedAt) || now(),
+          steps: r.steps.filter((s) => s && typeof s.id === 'string' && typeof s.text === 'string').slice(0, limits.maxSteps).map((s) => ({
+            id: s.id, text: s.text, role: String(s.role || ''), room: String(s.room || ''), bot: String(s.bot || ''), status: st(s.status, Object.keys(MARK), 'pending'),
+            owner: String(s.owner || ''), agentId: '', result: String(s.result || ''), attempts: Number.isInteger(s.attempts) ? s.attempts : 0,
+          })),
+        };
+        if (g.status === 'planning') { g.status = 'failed'; g.reason = 'The office restarted before the plan was ready.'; }
+        const ran = g.steps.filter((s) => s.status === 'working');
+        for (const s of ran) { s.status = 'error'; s.result = 'The office restarted while this step ran.'; }
+        if (ran.length) { g.status = 'blocked'; g.reason = `The office restarted. Retry or stop: ${ran[0].text}`; }
+        goals.set(g.id, g);
+      }
+    },
+
     /** Call fn after every change of any goal. Returns the function that stops it. */
     subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
 
@@ -300,8 +338,12 @@ export function createPlanBoard({ sources = [], onChange = () => {} } = {}) {
         let mapped;
         try {
           mapped = src.list(building).map((p) => ({
-            id: p.id, building: p.building, goal: p.goal, status: p.status || '', reason: p.reason || '', source: src.kind, sourceWord: P.sourceWord(src.kind),
-            steps: p.steps.map((s) => { const state = P.stepState(s.state); return { id: s.id, title: s.title, state, word: P.stepWord(state), owner: s.owner || '', cost: Number.isFinite(s.cost) ? s.cost : null }; }),
+            id: p.id, building: p.building, goal: p.goal, status: p.status || '', reason: p.reason || '', frozen: p.frozen === true, source: src.kind, sourceWord: P.sourceWord(src.kind),
+            steps: p.steps.map((s) => {
+              const state = P.stepState(s.state);
+              return { id: s.id, title: s.title, state, word: P.stepWord(state), owner: s.owner || '', cost: Number.isFinite(s.cost) ? s.cost : null,
+                raw: s.raw || '', model: s.model || '', budget: s.budget || null, uid: s.uid || '', skipped: s.skipped === true, skippedWhy: s.skippedWhy || '' };
+            }),
           }));
         } catch { unreadable.push({ source: src.kind, word: P.sourceWord(src.kind) }); continue; }
         plans.push(...mapped);

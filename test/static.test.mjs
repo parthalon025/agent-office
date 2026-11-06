@@ -19,6 +19,15 @@ const win = process.platform === 'win32';
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 
+test('README screenshots: every image exists; the city, boards, desk and Needs you shots are shown (#32)', () => {
+  const md = read('README.md');
+  const imgs = [...md.matchAll(/!\[[^\]]*\]\((docs\/img\/[^)]+)\)/g)].map((m) => m[1]);
+  for (const f of imgs) assert.ok(fs.existsSync(path.join(ROOT, f)), `${f} is missing`);
+  for (const n of ['day-city-1360', 'day-boards-1360', 'day-desk-1360', 'day-needs-you-1360']) {
+    assert.ok(imgs.some((f) => f.includes(n)), `README shows no ${n}`);
+  }
+});
+
 // The pinned bytes. public/vendor/README.md has the same values and the steps to update them.
 const REACT = {
   '/vendor/react.production.min.js': { file: 'public/vendor/react.production.min.js', sha: 'd949f1c3687aedadcedac85261865f29b17cd273997e7f6b2bfc53b2f9d4c4dd', license: 'react.production.min.js' },

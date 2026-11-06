@@ -419,7 +419,8 @@ export function createHq(deps = {}) {
   const doFetch = deps.fetch || globalThis.fetch;
   const Ws = deps.WebSocket || globalThis.WebSocket;
   const hooksFile = deps.hooksFile || (() => '');
-  const changed = () => deps.onChange?.();
+  const subs = new Set();   // plan source listeners
+  const changed = () => { deps.onChange?.(); for (const fn of [...subs]) { try { fn(); } catch { /* a listener never stops the watcher */ } } };
   const feed = (t, kind = 'tool') => deps.onFeed?.(t, kind);
   const setTimer = deps.setTimer || ((fn, n) => { const t = setTimeout(fn, n); t.unref?.(); return t; });
   const clearTimer = deps.clearTimer || clearTimeout;
@@ -683,5 +684,34 @@ export function createHq(deps = {}) {
     } finally { conn.busy.delete(id); changed(); }
   }
 
-  return { connect, disconnect, supervise, view, labelOf, held, state: () => (c ? c.state : 'off') };
+  // ---------- the plan source (#155, contract in manager.mjs) ----------
+  // Read only: it maps what the watcher already holds (GET and the WebSocket), and sends nothing. A Paperclip task is a step.
+  const STEP_STATE = { backlog: 'pending', todo: 'pending', in_progress: 'working', in_review: 'working', blocked: 'error', done: 'finished' };
+  const P = () => globalThis.OfficeVocab.plan;
+  function planList() {
+    if (!c) return [];
+    const lost = c.state === 'lost';
+    if (!d) { if (lost) throw httpError(502, 'The Paperclip plan could not be read.'); return []; }
+    // A list that may be cut, or one that failed, is no plan: it is named unreadable (never a plan that looks whole).
+    if (!lost && d.unread.some((u) => /^issues/.test(u))) throw httpError(502, 'The Paperclip plan could not be read.');
+    const sessions = deps.sessions ? list(deps.sessions()) : [];
+    const steps = d.issues.filter((i) => i && i.id).map((i) => {
+      const a = i.assigneeAgentId ? d.agents.get(i.assigneeAgentId) : null;
+      const known = Object.hasOwn(STEP_STATE, i.status);
+      const sess = sessions.find((x) => x && x.paperclip && x.paperclip.task === i.id);
+      const last = a ? d.last.get(a.id) : null;
+      const skipped = !!(last && last.ok === false);
+      const model = a && typeof obj(a.adapterConfig).model === 'string' ? text(a.adapterConfig.model, 60) : '';
+      return {
+        id: i.id, title: [text(i.identifier, 30), text(i.title, 100)].filter(Boolean).join(' ') || 'Task', state: known ? STEP_STATE[i.status] : 'unknown', raw: text(i.status, 40),
+        owner: a ? text(a.name, 60) : '', cost: null, model, budget: a ? { spent: cents(a.spentMonthlyCents), limit: cents(a.budgetMonthlyCents) } : null,
+        uid: sess ? String(sess.uid) : '', skipped, skippedWhy: skipped ? text(last.why, 200) : '',
+      };
+    });
+    const name = text(d.company.name, 80) || 'Paperclip';
+    return [{ id: `paperclip:${c.companyId}`, building: deps.building ? deps.building() : '', goal: `${name} tasks`, status: lost ? 'not-connected' : '', reason: lost ? P().notConnectedReason(c.error) : '', frozen: lost, steps }];
+  }
+  const planSource = { kind: 'paperclip', list: planList, subscribe(fn) { subs.add(fn); return () => subs.delete(fn); } };
+
+  return { connect, disconnect, supervise, view, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
 }

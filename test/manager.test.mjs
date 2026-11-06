@@ -480,3 +480,32 @@ test('the office manager is one source of the same contract', async () => {
   assert.equal(p.steps[0].owner, 'Scout');
   assert.equal(p.steps[1].state, 'pending');
 });
+
+// ---- saved goals (#156): export, restore, the working agents ----
+test('export and restore give the same board after a restart; a step that was running is an error step to retry', async () => {
+  const w = world();
+  const id = await w.m.submit('b', 'Fix it', { approveFirst: false });
+  assert.deepEqual(w.m.workingAgents(), ['a1']);
+  const saved = JSON.parse(JSON.stringify(w.m.export()));
+  const w2 = world();
+  w2.m.restore(saved);
+  const g = w2.m.snapshot().find((x) => x.id === id);
+  assert.equal(g.status, 'blocked');
+  assert.match(g.reason, /office restarted/i);
+  assert.deepEqual(g.steps.map((s) => s.status), ['error', 'pending']);
+  assert.deepEqual(w2.m.workingAgents(), []);
+  const r = await w2.m.retry(id, g.steps[0].id);
+  assert.equal(r.ok, true);
+  assert.equal(w2.dispatched.length, 1);
+});
+
+test('restore keeps a held plan held; bad records are dropped', async () => {
+  const w = world();
+  const held = await w.m.submit('b', 'Wait for me', { approveFirst: true });
+  const w2 = world();
+  w2.m.restore(JSON.parse(JSON.stringify(w.m.export())).concat([null, { id: 5 }, { id: 'x', steps: 'no' }]));
+  assert.equal(w2.m.snapshot().length, 1);
+  assert.equal(w2.m.snapshot()[0].status, 'awaiting-approval');
+  assert.equal(await w2.m.approve(held), true);
+  assert.equal(w2.dispatched.length, 1);
+});

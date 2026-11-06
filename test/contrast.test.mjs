@@ -235,16 +235,19 @@ test('lobby: the memo, the directory board and the nameplate read in every theme
     atLeast('directory wing name', 4.5, mix(T(F.directory.ink), T(F.directory.face), F.directory.wingAlpha), T(F.directory.face), th);
     const tok = Object.fromEntries(tokens.map((t) => [t.name, val(t.name, th)]));
     for (const s of ['error', 'waiting', 'review', 'working', 'finished', 'resting']) atLeast('directory dot ' + s, 3, rgb(L.dotOf(tok, s)), T(F.directory.face), th);
+    atLeast('pipeline text', 4.5, T(F.pipeline.ink), T(F.pipeline.face), th);
+    atLeast('pipeline No data and foot', 4.5, mix(T(F.pipeline.ink), T(F.pipeline.face), F.pipeline.mutedAlpha), T(F.pipeline.face), th);
+    atLeast('pipeline bar', 3, mix(T(F.pipeline.ink), T(F.pipeline.face), F.pipeline.barAlpha), T(F.pipeline.face), th);
     atLeast('nameplate name', 4.5, T(F.plate.ink), T(F.plate.face), th);
     atLeast('nameplate lane and cost', 4.5, mix(T(F.plate.ink), T(F.plate.face), F.plate.detailAlpha), T(F.plate.face), th);
   });
   // every color of the three paint functions comes from FACES (or dotOf), never a raw token name
   const src = read('public/lobby.js');
-  for (const fn of ['paintMemo', 'paintDirectory', 'paintPlate']) {
+  for (const fn of ['paintMemo', 'paintDirectory', 'paintPipeline', 'paintPlate']) {
     const body = src.slice(src.indexOf('function ' + fn + '('), src.indexOf('\n    }\n', src.indexOf('function ' + fn + '(')));
     assert.ok(body.length > 40, fn);
     assert.doesNotMatch(body, /tok\[['"]|tok\.[a-z]|#[0-9a-f]{3}\b/i, fn + ' paints with FACES only');
-    assert.match(body, /FACES\.(memo|directory|plate)/, fn);
+    assert.match(body, /FACES\.(memo|directory|pipeline|plate)/, fn);
   }
 });
 
