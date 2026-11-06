@@ -1,0 +1,62 @@
+// The page features of #184 (schedules, extensions, hq, characters, reception): each public/<name>.js runs in a VM with the DS
+// bundle, the vendored React and a page core of stand-ins, and is tested through its Interface on window.OfficePage.
+// Changes (#183) has its own test file. No DOM, no browser, no server.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import { loadBundle } from './fixtures/ds-bundle.mjs';
+
+const src = (f) => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8');
+
+function load(file) {
+  const { sb } = loadBundle();
+  const Stub = () => null;
+  const store = {};
+  sb.localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
+  vm.runInContext(src('public/vocab.js'), sb, { filename: 'vocab.js' });
+  // Every name the feature reads from the page core is a stand-in; the Interface is what the feature puts back.
+  sb.OfficePage = new Proxy({}, { get: (t, k) => (k in t ? t[k] : Stub), has: () => true });
+  vm.runInContext(src('public/' + file), sb, { filename: file });
+  return { O: sb.OfficePage, store };
+}
+
+const SHAPES = {
+  'schedules.js': ['Schedules', ['Dialog']],
+  'extensions.js': ['Extensions', ['Dialog']],
+  'hq.js': ['Hq', ['Hq', 'Manager', 'Trust']],
+  'characters.js': ['Characters', ['Dialog']],
+  'reception.js': ['Reception', ['Recap', 'Reception', 'TourCard', 'setTourSeen', 'tourSeen']],
+};
+
+for (const [file, [name, keys]] of Object.entries(SHAPES)) {
+  test(`${file}: the Interface is OfficePage.${name} with ${keys.join(', ')}`, () => {
+    const { O } = load(file);
+    const I = O[name];
+    assert.deepEqual(Object.keys(I).sort(), keys);
+    for (const k of keys) assert.equal(typeof I[k], 'function', k);
+  });
+}
+
+test('the old flat names are gone from the page core, so a caller must use the Interface', () => {
+  const { O } = load('hq.js');
+  assert.equal(Object.prototype.hasOwnProperty.call(O, 'ManagerDialog'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(O, 'HqDialog'), false);
+});
+
+test('the lobby tour mark is kept in the browser storage under one key', () => {
+  const { O, store } = load('reception.js');
+  assert.equal(O.Reception.tourSeen(), false);
+  O.Reception.setTourSeen();
+  assert.equal(store['ao-tour'], '1');
+  assert.equal(O.Reception.tourSeen(), true);
+});
+
+test('the page files load in an order where each feature file comes after page-core.js and before office.js', () => {
+  const html = src('public/index.html');
+  const at = (f) => html.indexOf(`/${f}"`);
+  for (const f of Object.keys(SHAPES)) {
+    assert.ok(at('page-core.js') < at(f) && at(f) < at('office.js'), f);
+  }
+  assert.equal(html.includes('dialogs-extra.js'), false);
+});

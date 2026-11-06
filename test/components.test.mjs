@@ -38,9 +38,9 @@ const office = readFileSync(join(pub, 'office.js'), 'utf8').replace(/\r\n/g, '\n
 // #1 story 26: office.js is split by concern into page files that share window.OfficePage. A rule about one part reads the file
 // that holds it; a rule that holds for the whole page (a name that must not come back, a count) reads all of them.
 const page = (f) => readFileSync(join(pub, f), 'utf8').replace(/\r\n/g, '\n');
-const PAGE_FILES = ['page-core.js', 'dialogs.js', 'dialogs-extra.js', 'panels.js', 'changes.js', 'needs.js', 'office.js'];
+const PAGE_FILES = ['page-core.js', 'dialogs.js', 'schedules.js', 'extensions.js', 'hq.js', 'characters.js', 'reception.js', 'panels.js', 'changes.js', 'needs.js', 'office.js'];
 const pageAll = PAGE_FILES.map(page).join('\n');
-const core = page('page-core.js'), panels = page('panels.js'), changesJs = page('changes.js'), extra = page('dialogs-extra.js');
+const core = page('page-core.js'), panels = page('panels.js'), changesJs = page('changes.js'), extra = page('reception.js');
 
 test('the page files load in order before chat-extras.js, and the server serves each one (#1 story 26)', () => {
   const html = readFileSync(join(pub, 'index.html'), 'utf8');

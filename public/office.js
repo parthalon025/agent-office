@@ -1,7 +1,7 @@
 /* Agent Office for Claude Code x0.2: page script.
    Mounts the DS office: the city, the App (scene mount, toasts, Ctrl+K page commands, the wiring of the dialogs and the pinned
    screens (#89) laid over the 3D scene). The parts it wires are in the other page files, which load first and share their names
-   on window.OfficePage: page-core.js (helpers, kinds), dialogs.js and dialogs-extra.js (the dialogs), panels.js (board, stats,
+   on window.OfficePage: page-core.js (helpers, kinds), dialogs.js (the session dialogs), the feature files (changes, schedules, extensions, hq, characters, reception), panels.js (board, stats,
    notes, Look and the pinned screens), needs.js (Needs you, paper flow, the phone list). Split out of this file in #1 story 26.
    There is no dock (#92): the office's actions are in the scene (open desks, the reception memo, the elevator) and in Ctrl+K. */
 (function () {
@@ -10,17 +10,17 @@
   var h = React.createElement, A = window.AgentOffice, useState = React.useState, useEffect = React.useEffect,
       useMemo = React.useMemo;
   var Bezel = O.Bezel, BoardPanel = O.BoardPanel, Changes = O.Changes,
-      DEFAULT_KIND = O.DEFAULT_KIND, DeskScreen = O.DeskScreen, ExtensionsDialog = O.ExtensionsDialog, F = O.F,
-      FloorsDialog = O.FloorsDialog, FlowDialog = O.FlowDialog, HooksDialog = O.HooksDialog, HqDialog = O.HqDialog,
+      DEFAULT_KIND = O.DEFAULT_KIND, DeskScreen = O.DeskScreen, ExtensionsDialog = O.Extensions.Dialog, F = O.F,
+      FloorsDialog = O.FloorsDialog, FlowDialog = O.FlowDialog, HooksDialog = O.HooksDialog, HqDialog = O.Hq.Hq,
       KindsDialog = O.KindsDialog, LOOK_ICON = O.LOOK_ICON, LookBar = O.LookBar, MODELS = O.MODELS, MODES = O.MODES,
-      ManagerDialog = O.ManagerDialog, NeedsDialog = O.NeedsDialog, NoteScreen = O.NoteScreen, NotesEditor = O.NotesEditor,
-      OpenDialog = O.OpenDialog, PHONE_MAX = O.PHONE_MAX, PastDialog = O.PastDialog, PersonasDialog = O.PersonasDialog,
-      PhoneView = O.PhoneView, RecapDialog = O.RecapDialog, ReceptionDialog = O.ReceptionDialog, RoomDialog = O.RoomDialog,
-      SchedulesDialog = O.SchedulesDialog, SessionsDialog = O.SessionsDialog, StatsPanel = O.StatsPanel,
-      TourCard = O.TourCard, TrustDialog = O.TrustDialog, WANT_MS = O.WANT_MS, client = O.client, clip = O.clip, cssMs = O.cssMs,
+      ManagerDialog = O.Hq.Manager, NeedsDialog = O.NeedsDialog, NoteScreen = O.NoteScreen, NotesEditor = O.NotesEditor,
+      OpenDialog = O.OpenDialog, PHONE_MAX = O.PHONE_MAX, PastDialog = O.PastDialog, PersonasDialog = O.Characters.Dialog,
+      PhoneView = O.PhoneView, RecapDialog = O.Reception.Recap, ReceptionDialog = O.Reception.Reception, RoomDialog = O.RoomDialog,
+      SchedulesDialog = O.Schedules.Dialog, SessionsDialog = O.SessionsDialog, StatsPanel = O.StatsPanel,
+      TourCard = O.Reception.TourCard, TrustDialog = O.Hq.Trust, WANT_MS = O.WANT_MS, client = O.client, clip = O.clip, cssMs = O.cssMs,
       getInfo = O.getInfo, kindOf = O.kindOf, layerMemory = O.layerMemory, noteLayer = O.noteLayer,
       openPalette = O.openPalette, plural = O.plural, reduced = O.reduced, resetText = O.resetText,
-      sceneCovers = O.sceneCovers, sceneName = O.sceneName, setTourSeen = O.setTourSeen, tourSeen = O.tourSeen,
+      sceneCovers = O.sceneCovers, sceneName = O.sceneName, setTourSeen = O.Reception.setTourSeen, tourSeen = O.Reception.tourSeen,
       useChatBot = O.useChatBot, useSnapshot = O.useSnapshot;
 
   // ---------- the city: every repository as a building ----------
