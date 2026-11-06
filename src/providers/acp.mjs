@@ -28,11 +28,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn as realSpawn, execFile as realExecFile } from 'node:child_process';
 import { resolveExe, killTree } from '../launch.mjs';
-import { fileKey, riskOf } from '../risk.mjs';
 import { clip } from '../tracker.mjs';
 import { providerError } from './index.mjs';
 import { createLocalTools } from './local-tools.mjs';
 import { createAsks } from './asks.mjs';
+import { channel, within, rpcError, textOf, isAuth, REFUSED } from './acp-rpc.mjs';
+import { createFiles } from './acp-files.mjs';
+import { createPolicy } from './acp-policy.mjs';
 import { GATEWAY_HOST, DEFAULT_GATEWAY_PORT, MIN_VERSION, PLUGIN_ID, gatewayPort, probeGateway, versionAtLeast, wantedConfig, checkConfig, configReader, officeKey, toolCall } from './openclaw.mjs';
 import * as COPILOT from './copilot.mjs';
 
@@ -137,117 +139,13 @@ const PROBE_TTL_MS = 60_000;     // what a probe learned is good for this long
 const READY_WAIT_MS = 12_000;    // one readiness answer waits this long (under the 15 s of registry.status); a probe that runs
                                  // on (spec.probeMs) is "still starting", and the next answer waits for the same probe
 const CANCEL_MS = 10_000;        // after session/cancel, the turn ends here even when the agent never answers
-const TERMINAL_MS = 10 * 60_000; // the longest an agent's terminal runs
-const MAX_LINE = 8_000_000;      // characters of one JSON-RPC line; more is dropped
 const MAX_ATTACH_CHARS = 9_000_000;
 const STOP_WORDS = {
   max_tokens: 'The agent reached its token limit.',
   max_turn_requests: 'The agent used all the steps of one turn.',
   refusal: 'The agent refused to go on.',
 };
-// ACP tool kinds as the tool names risk.mjs, payload.mjs and vocab.js know.
-const KIND_TOOL = { read: 'Read', edit: 'Edit', delete: 'Delete', move: 'Move', search: 'Grep', execute: 'Bash', fetch: 'WebFetch', think: 'Think', switch_mode: 'SwitchMode' };
-const EDIT_KINDS = new Set(['edit', 'delete', 'move']);
-// JSON with the keys of every object sorted, so two values that differ only in key order give one text (undefined stays undefined).
-const stable = (v) => JSON.stringify(v, (k, x) => (x && typeof x === 'object' && !Array.isArray(x) ? Object.fromEntries(Object.keys(x).sort().map((key) => [key, x[key]])) : x));
 
-const textOf = (e) => String((e && e.message) || e || 'unknown error');
-// ACP auth_required: -32000 "Authentication required" (recorded from Copilot CLI 1.0.105). -32000 alone is JSON-RPC's generic
-// server error (a rate limit, a quota), so the text decides.
-const isAuth = (e) => /\bauthentication required\b/i.test(textOf(e));
-function rpcError(code, message) { const e = new Error(message); e.code = code; return e; }
-const REFUSED = -32000; // the office said no (a path outside the root, a declined call)
-
-const WIN = process.platform === 'win32';
-const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,100}$/;
-// cmd.exe has no way to keep these as plain text inside quotes: it ignores \" when it tracks quotes (so a quote in an
-// argument ends the quoted part, and & | < > after it run as commands), it expands %NAME% and !NAME! inside quotes, and a
-// line break ends the command. sh in single quotes keeps everything but NUL.
-const CMD_UNQUOTABLE = /["%!\r\n\0]/;
-// One argument as the shell reads it: cmd.exe on Windows (local-tools runs cmd /d /s /c), sh elsewhere. An argument the
-// shell would read as more than text is refused: the agent can put that text in the command, where the user reads it as is.
-function quoteArg(a) {
-  const s = String(a);
-  if (WIN ? CMD_UNQUOTABLE.test(s) : s.includes('\0')) {
-    throw rpcError(-32602, `The office cannot pass the argument ${clip(JSON.stringify(s), 60)} as plain text to the shell. Put that text in the command.`);
-  }
-  // Trailing backslashes are doubled so they do not escape the closing quote for the program (C runtime rules).
-  if (WIN) return s && !/[\s&|<>^()%!,;=]/.test(s) ? s : '"' + s.replace(/(\\+)$/, '$1$1') + '"';
-  return s && /^[\w@%+=:,./-]+$/.test(s) ? s : "'" + s.replace(/'/g, "'\\''") + "'";
-}
-/**
- * The one command line of an ACP terminal/create: command, then its args quoted, after the variables it sets. The user
- * approves this text and the office runs this text, so no variable hides from the approval. A variable name that is not a
- * plain name, a value with a quote or a line break (on Windows also % or !), or an argument the shell cannot take as plain
- * text (quoteArg) is refused.
- */
-export function commandLine({ command, args = [], env = [] } = {}) {
-  const cmd = String(command ?? '').trim();
-  if (!cmd) throw rpcError(-32602, 'command is empty.');
-  const sets = (Array.isArray(env) ? env : []).map((e) => {
-    const name = String(e?.name ?? ''), value = String(e?.value ?? '');
-    if (!ENV_NAME.test(name) || (WIN ? CMD_UNQUOTABLE : /[\r\n"\0]/).test(value)) {
-      throw rpcError(-32602, `The office does not set the variable ${clip(name, 40)} that way. Use a plain name and a value without quotes${WIN ? ', % or !' : ''}.`);
-    }
-    return WIN ? `set "${name}=${value}" && ` : `${name}=${quoteArg(value)} `;
-  });
-  return sets.join('') + [cmd, ...(Array.isArray(args) ? args : []).map(quoteArg)].join(' ');
-}
-
-/**
- * A JSON-RPC 2.0 channel on a child's stdio, one message per line. onRequest(method, params) answers with a value or a
- * promise (an error becomes the error answer); onNotify(method, params) gets notifications.
- */
-function channel(child, { onRequest, onNotify }) {
-  let next = 1, buf = '';
-  const waiting = new Map();
-  const write = (m) => { if (child.stdin && child.stdin.writable) child.stdin.write(JSON.stringify({ jsonrpc: '2.0', ...m }) + '\n'); };
-  function take(line) {
-    let m;
-    try { m = JSON.parse(line); } catch { return; }
-    if (!m || typeof m !== 'object') return;
-    if (typeof m.method === 'string' && m.id !== undefined && m.id !== null) {
-      // At once, not on a later tick: a notification on the next line (a change to the call this request asks about) must
-      // find the request already held. Messages are handled in the order the agent sent them.
-      let r;
-      try { r = onRequest(m.method, m.params || {}, m.id); } catch (e) { r = Promise.reject(e); }
-      Promise.resolve(r).then(
-        (result) => write({ id: m.id, result: result ?? null }),
-        (e) => write({ id: m.id, error: { code: Number.isInteger(e.code) ? e.code : -32603, message: textOf(e) } }));
-    } else if (typeof m.method === 'string') onNotify(m.method, m.params || {});
-    else if (m.id !== undefined) {
-      const w = waiting.get(m.id);
-      if (!w) return;
-      waiting.delete(m.id);
-      if (m.error) w.reject(rpcError(m.error.code, String(m.error.message || 'The agent answered with an error.')));
-      else w.resolve(m.result);
-    }
-  }
-  child.stdout.setEncoding('utf8');
-  child.stdout.on('data', (d) => {
-    buf += d;
-    let i;
-    while ((i = buf.indexOf('\n')) >= 0) { const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (line) take(line); }
-    if (buf.length > MAX_LINE) buf = '';
-  });
-  child.stdin?.on?.('error', () => {});
-  return {
-    request(method, params) {
-      const id = next++;
-      return new Promise((resolve, reject) => { waiting.set(id, { resolve, reject }); write({ id, method, params }); });
-    },
-    notify(method, params) { write({ method, params }); },
-    /** Every request that waits fails: the agent is gone. */
-    fail(why) { for (const w of waiting.values()) w.reject(new Error(why)); waiting.clear(); },
-  };
-}
-
-// A promise that rejects with `why` after ms.
-function within(p, ms, why, setTimer, clearTimer) {
-  let t;
-  const late = new Promise((_r, reject) => { t = setTimer(() => reject(new Error(why)), ms); });
-  return Promise.race([p, late]).finally(() => clearTimer(t));
-}
 
 /**
  * @param {object} deps
@@ -461,323 +359,18 @@ export function createAcp(deps) {
     emit(st, () => events.stream(s, { type: 'stream_event', event: { type: 'content_block_delta', delta: { type: 'text_delta', text: t } } }));
   }
 
-  // ----- tool calls -----
-  // An ACP tool call as the tool name and input that the tracker, risk.mjs and payload.mjs know. A call keeps what it learned
-  // in st.calls, because an update brings only the fields that changed. The kind picks the name; a kind the office does not
-  // know is 'Tool', so riskOf rates it medium whatever name the agent gives it.
-  function track(st, tc = {}) {
-    const id = typeof tc.toolCallId === 'string' && tc.toolCallId ? tc.toolCallId : null;
-    if (!id) return null;
-    // held: request id -> what its card showed (frozen). approved: what the card showed when the user approved it.
-    const c = st.calls.get(id) || { id, kind: 'other', title: '', path: null, raw: {}, opened: false, done: false, asked: false, served: false, held: new Map(), approved: null };
-    if (typeof tc.kind === 'string') c.kind = tc.kind;
-    if (typeof tc.title === 'string' && tc.title) c.title = clip(tc.title, 300);
-    if (tc.rawInput && typeof tc.rawInput === 'object' && !Array.isArray(tc.rawInput)) c.raw = tc.rawInput;
-    const loc = Array.isArray(tc.locations) ? tc.locations.find((l) => l && typeof l.path === 'string' && l.path) : null;
-    if (loc) c.path = loc.path;
-    if (Array.isArray(tc.content) && tc.content.some((x) => x && x.type === 'terminal' && st.terminalIds.has(x.terminalId))) c.served = true;
-    const raw = c.raw, str = (v) => (typeof v === 'string' && v ? v : undefined);
-    c.tool_name = KIND_TOOL[c.kind] || 'Tool';
-    const file = c.path || str(raw.file_path) || str(raw.path) || str(raw.filePath);
-    const command = Array.isArray(raw.command) ? raw.command.map(String).join(' ') : str(raw.command);
-    const input = c.tool_name === 'Bash' ? { command: command || c.title }
-      : c.tool_name === 'Grep' ? { pattern: str(raw.pattern) || str(raw.query) || c.title, path: file }
-      : c.tool_name === 'WebFetch' ? { url: str(raw.url) || c.title }
-      : KIND_TOOL[c.kind] && c.kind !== 'think' && c.kind !== 'switch_mode' ? { file_path: file }
-      : { description: c.title };
-    c.tool_input = Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined));
-    // An agent whose requests carry its own request body (spec.callOf: Copilot CLI) is rated and shown by that body. Once a call
-    // had one, the body names it: a later update with the tool's own arguments keeps the card the user saw.
-    const req = spec.callOf && tc.rawInput ? spec.callOf(tc.rawInput) : null;
-    if (req) { c.req = req; c.args = null; }
-    if (c.req) {
-      c.kind = c.req.kind;
-      c.tool_name = c.req.tool_name;
-      c.tool_input = { ...c.req.tool_input };
-      if (c.tool_input.command === '') c.tool_input.command = c.title;
-      if (c.tool_input.file_path === '') c.tool_input.file_path = c.path || '';
-      // #125: what the call does now is its own arguments after the request body (spec.argsOf, in the card's shape), so
-      // recheck sees a change. An update that does not say keeps the last that did; a new request body clears them. A file
-      // that is the same file spelled another way (case, slashes, a relative path) keeps the card's spelling: no change.
-      const args = !req && spec.argsOf && (tc.rawInput || loc) ? spec.argsOf({ tool_name: c.tool_name, tool_input: c.tool_input }, tc.rawInput || {}, loc && loc.path) : null;
-      if (args) {
-        const was = c.tool_input.file_path, now = args.tool_input.file_path;
-        if (was && now && norm(st, was) === norm(st, now)) args.tool_input.file_path = was;
-        c.args = args;
-      }
-    }
-    st.calls.set(id, c);
-    return c;
-  }
-  // What the user sees of a call: its tool and input. A request is answered for this, never for what the call says later.
-  // Keys in any order, at any depth, are the same input: the same MCP arguments sent in another order are no change (#125).
-  const sigOf = (c) => stable([c.tool_name, c.tool_input]);
-  // A call in a few words: its command, file, address or pattern. A call that only its arguments name (an MCP tool) is the
-  // tool and the arguments that are not what the user saw (was), so a feed line says what changed.
-  const what = (c, was) => {
-    const t = c.tool_input;
-    const named = t.command || (t.file_path && path.basename(String(t.file_path))) || t.url || t.pattern;
-    if (named) return clip(String(named), 100);
-    const before = (was && was.tool_input) || {};
-    const keys = [...new Set([...Object.keys(t), ...Object.keys(before)])].filter((k) => k !== 'description' && stable(t[k]) !== stable(before[k]));
-    if (keys.length) return clip(`${c.tool_name} (${keys.map((k) => `${k}: ${clip(stable(t[k]) ?? 'none', 40)}`).join(', ')})`, 100);
-    return clip(String(c.title || c.tool_name), 100);
-  };
-  // The agent changed a call after the user saw it. While a request for it waits, that request is declined at once (the
-  // user cannot approve what the card no longer shows), and the files of both forms ask first for the rest of the turn.
-  // After an approval, the feed says so: the agent runs its own tool with the new input, which the office cannot stop.
-  // What the call says now is its card, or for an agent with request bodies its own later arguments (c.args, #125).
-  function recheck(s, st, c) {
-    const now = c.args || c, sig = sigOf(now);
-    for (const [id, shown] of [...c.held]) {
-      if (shown.sig === sig) continue;
-      if (now.tool_input.file_path && EDIT_KINDS.has(c.kind)) st.askFirst.add(norm(st, now.tool_input.file_path));
-      withdraw(s, st, id, `${label} changed the call while it waited for your answer, so the office declined it: ${what(now, shown)}`);
-    }
-    if (c.approved && !c.approved.told && c.approved.sig !== sig) {
-      c.approved.told = true;
-      const line = `${label} changed the call after you approved it: ${what(now, c.approved)}`;
-      emit(st, () => events.feed(s, 'wait', line));
-    }
-  }
-  function openCall(s, st, c) {
-    if (c.opened) return;
-    c.opened = true;
-    hook(s, st, { hook_event_name: 'PreToolUse', tool_name: c.tool_name, tool_use_id: c.id, tool_input: c.tool_input });
-  }
-  function endCall(s, st, c, u) {
-    if (c.done) return;
-    c.done = true;
-    // The agent finished a call the user has not answered yet: it did not wait (Hermes stops after its own time).
-    for (const id of [...c.held.keys()]) withdraw(s, st, id, `${label} moved on without your answer.`);
-    // What the user approved for this call is used up: a later command or write with the same text asks again.
-    for (const [key, callId] of [...st.grants]) if (callId === c.id) st.grants.delete(key);
-    // What the call did: its card, or for an agent with request bodies its own last arguments (c.args, #125), so an approved
-    // edit that moved to a file the user declined is named. The hooks below keep the card, which the PreToolUse carried.
-    const did = c.args || c, input = did.tool_input;
-    const file = input.file_path ? norm(st, input.file_path) : null;
-    const gated = st.gated.get(c.id);
-    st.gated.delete(c.id);
-    // spec.plugin: every call of the session goes to the office through the plugin before it runs (gate). A call that ran
-    // without the office's yes means the plugin did not hold it: not loaded, a Gateway not restarted after the plugin was
-    // turned on, or another call id. Nothing else stops OpenClaw's calls, so the session ends with an Error that says so.
-    // A failed call the office never got may have run too: OpenClaw reports "failed" for every tool result that is an error
-    // (src/acp/translator.agent-events.ts), so a push that ran and then exited 1 is "failed". Only a result OpenClaw marks as
-    // blocked before the tool ran (rawOutput.details.status "blocked": agent-tools.before-tool-call.wrapper.ts
-    // buildBlockedToolResult, also the plugin's own denials) did not run. Its text is never trusted: a command can print anything.
-    const before = blockedBefore(u);
-    if (spec.plugin && u.status === 'completed' && !before && !c.served && !(file && st.wrote.has(file)) && !(gated && gated.allow)) {
-      gateFailed(s, st, c, gated);
-    } else if (spec.plugin && u.status === 'failed' && !before && !c.served && !gated) {
-      gateFailed(s, st, c, null, true);
-    } else if (spec.plugin) {
-      // held by the office: nothing to say
-    } else if (u.status === 'completed' && EDIT_KINDS.has(c.kind) && file && st.denied.has(file)) {
-      // Hermes #31682: an edit the user declined can come back through another of the agent's own tools. The office cannot
-      // stop the agent's own tools, so it says so when one reports that file changed.
-      emit(st, () => events.feed(s, 'wait', `${label} changed ${path.basename(String(input.file_path))} after you declined that edit.`));
-    } else if (u.status === 'completed' && !c.asked && !c.served) {
-      if (c.kind === 'execute') emit(st, () => events.feed(s, 'wait', `${label} ran a command without asking the office: ${clip(input.command || c.title, 100)}`));
-      else if (EDIT_KINDS.has(c.kind) && !(file && st.wrote.has(file))) {
-        emit(st, () => events.feed(s, 'wait', `${label} changed ${path.basename(String(input.file_path || c.title))} without asking the office.`));
-      } else if (c.kind === 'read' || c.kind === 'search') {
-        // A read the office cannot stop: the feed names it when it is not low risk (a secret, a settings file, outside the root).
-        const risk = riskOf(did.tool_name, input, st.root);
-        if (risk !== 'low') emit(st, () => events.feed(s, 'wait', `${label} read ${clip(String((input.file_path && path.basename(String(input.file_path))) || input.pattern || c.title), 100)} without asking the office (risk ${risk}).`));
-      }
-    }
-    const said = (Array.isArray(u.content) ? u.content : []).map((x) => (x?.type === 'content' && x.content?.type === 'text' ? x.content.text : '')).find(Boolean);
-    const base = { tool_name: c.tool_name, tool_use_id: c.id, tool_input: c.tool_input };
-    if (u.status === 'completed') hook(s, st, { hook_event_name: 'PostToolUse', ...base });
-    else hook(s, st, { hook_event_name: 'PostToolUseFailure', ...base, error: clip(String(said || 'Failed'), 240), is_interrupt: st.interrupted });
-  }
-
-  // OpenClaw marked the call's result as blocked before the tool ran (agent-tools.before-tool-call.wrapper.ts buildBlockedToolResult:
-  // details.status "blocked"). The text of the result is not read: a command can print anything.
-  function blockedBefore(u) {
-    const d = u && u.rawOutput && typeof u.rawOutput === 'object' ? u.rawOutput.details : null;
-    return !!(d && typeof d === 'object' && d.status === 'blocked');
-  }
-  // The plugin did not hold a call that ran (spec.plugin). The turn ends with an Error naming the plugin, and the agent stops:
-  // its next calls would not be held either.
-  function gateFailed(s, st, c, gated, failed = false) {
-    if (st.closed || st.gateFail) return;
-    const why = !gated ? 'the office never got it' : gated.pending ? 'before the office answered' : 'the office had declined it';
-    const ran = failed
-      ? `${label} reports a failed ${c.tool_name} ${what(c)} that the office never got. It may have run without the office's yes.`
-      : `${label} ran ${c.tool_name} ${what(c)} without the office's yes (${why}).`;
-    st.gateFail = `${ran} The ${PLUGIN_ID} plugin did not hold this call: it is not loaded, the Gateway was not restarted after openclaw plugins enable ${PLUGIN_ID}, or ${label} gave the call another id. The office stopped the session.`;
-    emit(st, () => events.feed(s, 'wait', st.gateFail));
-    try { st.rpc.notify('session/cancel', { sessionId: st.sid }); } catch { /* the agent is gone */ }
-    if (st.endCancel) st.endCancel({ stopReason: 'cancelled' });
-    setImmediate(() => { if (!st.dead && st.child.pid) killTree(st.child.pid, execFile); }); // the exit ends the session
-  }
-
   // ----- approvals -----
-  const CANCELLED = { outcome: { outcome: 'cancelled' } };
-  const pick = (o) => ({ outcome: { outcome: 'selected', optionId: o.optionId } });
-  const norm = (st, p) => fileKey(st.root, p);
   // Ask the office and wait: providers/asks.mjs (the Security room rules answer at once, else the user; withdraw, cancel all).
   // done(verdict, why) gets 'allow', 'deny', 'cancel' or 'withdraw', and why the office refused (a Deny rule). A request of
   // the agent that is withdrawn gets reject once, never cancelled: in ACP that means the turn was cancelled.
   const asks = createAsks({ events, setTimer, clearTimer });
   const { withdraw } = asks;
-
-  // The reason the agent gives for a request (dsh asks again with one), only for an agent kind that declares 'reason'. ACP names no
-  // field for it: it is read from `reason` or `_meta.reason` of the request or its tool call. Not checked against a real dsh yet.
-  function reasonOf(params) {
-    if (!spec.features.includes('reason')) return null;
-    for (const o of [params, params.toolCall]) {
-      const v = o && (typeof o.reason === 'string' ? o.reason : o._meta && typeof o._meta.reason === 'string' ? o._meta.reason : null);
-      if (v && v.trim()) return v;
-    }
-    return null;
-  }
-
-  // session/request_permission: held like any request. The answer is allow once or reject once, never an always option.
-  // It is the answer to what the card showed: a frozen copy of the call (shown) gives the grant and the declined file.
-  function onPermission(s, st, params) {
-    const c = track(st, params.toolCall);
-    if (!c) throw rpcError(-32602, 'The request names no tool call.');
-    recheck(s, st, c); // a second request for a call that changed: the first one goes
-    openCall(s, st, c);
-    c.asked = true;
-    const options = (Array.isArray(params.options) ? params.options : []).filter((o) => o && typeof o.optionId === 'string');
-    const once = options.find((o) => o.kind === 'allow_once'), no = options.find((o) => o.kind === 'reject_once');
-    if (!once && options.some((o) => o.kind === 'allow_always')) {
-      emit(st, () => events.feed(s, 'wait', `${label} offers only Always allow for ${c.tool_name} ${c.title}. The office never gives a lasting allow, so Approve declines.`.replace(/\s+\./, '.')));
-    }
-    if (st.closed || st.interrupted || st.gateFail) return CANCELLED;
-    // spec.plugin: the office already answered this call when the plugin sent it (gate). OpenClaw's own exec approval for the
-    // same call gets a no at once, and a yes only for the command the office approved: that request shows the command that
-    // will run, which another plugin may have changed after the office's yes. Another command, or a paired device, is held again.
-    const g0 = st.gated.get(c.id), g = g0 && !g0.pending ? g0 : null; // a call the office has not answered yet is held as usual
-    if (g && !g.allow) return no ? pick(no) : CANCELLED;
-    if (g && g.allow) {
-      // The approval carries only the command and the host (OpenClaw src/acp/permission-relay.ts), so env, workdir and elevated
-      // cannot be compared here; a host the user approved by name must be the same.
-      const host = c.raw && typeof c.raw.host === 'string' ? c.raw.host.trim() : '';
-      const ran = String(c.tool_input.command || '').trim();
-      const moved = !!(g.host && host && host !== g.host);
-      if (c.tool_name === 'Bash' && g.command !== null && ran === g.command && host !== 'node' && !moved) return once ? pick(once) : CANCELLED;
-      const why = host === 'node' ? 'on a paired device' : moved ? `on another host (${host}) than the one you approved (${g.host})` : 'another command than the one you approved';
-      emit(st, () => events.feed(s, 'wait', `${label} asks to run ${why}: ${clip(ran || c.title, 100)}`));
-    }
-    const shown = { kind: c.kind, tool_name: c.tool_name, tool_input: { ...c.tool_input }, sig: sigOf(c), told: false };
-    shown.file = EDIT_KINDS.has(c.kind) && shown.tool_input.file_path ? norm(st, shown.tool_input.file_path) : null;
-    return new Promise((resolve) => {
-      let id = null;
-      id = asks.hold(s, st, { tool_name: shown.tool_name, tool_input: shown.tool_input, ask_reason: reasonOf(params) }, (v) => {
-        if (id) c.held.delete(id);
-        if (v === 'allow' && once) { grant(st, shown, c.id); c.approved = shown; resolve(pick(once)); }
-        else if (v === 'cancel') resolve(CANCELLED);
-        else if (v === 'withdraw' || v === 'allow') {
-          // Not the user's no (the agent moved on or changed the call, or offered only Always allow): no refusal, but a
-          // write of that file through the office asks first for the rest of the turn.
-          if (shown.file) st.askFirst.add(shown.file);
-          resolve(no ? pick(no) : CANCELLED);
-        } else if (!no) resolve(CANCELLED);
-        else {
-          // A declined edit: that file is refused for the rest of the turn. One that names no file makes every write ask.
-          if (shown.file) st.denied.add(shown.file);
-          else if (EDIT_KINDS.has(shown.kind)) st.deniedVague = true;
-          resolve(pick(no));
-        }
-      }, {
-        // Hermes issue #63302: its edit approval stops after a fixed time (a command approval follows its own setting). When
-        // the agent reports the call as failed first, endCall frees the hold the same way.
-        ...(spec.askTimeoutMs && EDIT_KINDS.has(c.kind) ? { timeoutMs: spec.askTimeoutMs, onTimeout: (rid) => withdraw(s, st, rid, `${label} waits ${Math.round(spec.askTimeoutMs / 1000)} s for an answer to an edit. It moved on without yours.`) } : {}),
-        firm: false,
-      });
-      if (!id) return;
-      c.held.set(id, shown);
-    });
-  }
-  // An approved call lets the office serve that same command or that same file's write once, without a second prompt, until
-  // that call ends (endCall). The keys come from what the card showed.
-  function grant(st, shown, callId) {
-    if (shown.tool_name === 'Bash' && shown.tool_input.command) st.grants.set('Bash\n' + shown.tool_input.command, callId);
-    if (shown.file) st.grants.set('Write\n' + shown.file, callId);
-  }
-
-  // ----- what the office serves: files and terminals (local-tools.mjs, limited to the root) -----
-  // A call the office runs for the agent is refused when its path is outside the root (before anyone is asked), and runs at once
-  // when the user just approved that same call. Every other call goes to the office like a local agent's (#70): the Security
-  // room rules decide (by default every call is held until the user answers; a cell the user set to Allow or Deny answers it), else it is held. So
-  // this file keeps no approval rule of its own. Returns { ok, why }: why the office refused, for the agent.
-  function allowed(s, st, toolName, input) {
-    const file = toolName === 'Write' ? norm(st, input.file_path) : null;
-    // The user declined an edit of a file the office could not name, or a request for this file went unanswered: the user
-    // answers this write (firm), whatever an Allow rule says.
-    const strict = toolName === 'Write' && (st.deniedVague || st.askFirst.has(file));
-    const key = toolName === 'Bash' ? 'Bash\n' + input.command : 'Write\n' + file;
-    if ((toolName === 'Bash' || toolName === 'Write') && st.grants.delete(key)) return Promise.resolve({ ok: true });
-    if (st.closed || st.interrupted) return Promise.resolve({ ok: false });
-    return new Promise((resolve) => { asks.hold(s, st, { tool_name: toolName, tool_input: input, ask_reason: null }, (v, why) => resolve({ ok: v === 'allow', why }), { firm: strict }); });
-  }
-  const declined = (why) => rpcError(REFUSED, why || 'Declined from Agent Office.');
-  const short = (p) => clip(String(p), 120);
-
-  async function serveRead(s, st, p) {
-    const input = { file_path: String(p.path || '') };
-    const no = st.tools.guard('Read', input);
-    if (no) { emit(st, () => events.feed(s, 'tool', `refused a read outside the worktree: ${short(input.file_path)}`)); throw rpcError(REFUSED, no); }
-    const a = await allowed(s, st, 'Read', input);
-    if (!a.ok) throw declined(a.why);
-    const r = st.tools.readText(input.file_path, { line: p.line, limit: p.limit });
-    if (!r.ok) throw rpcError(REFUSED, r.text);
-    return { content: r.text };
-  }
-
-  async function serveWrite(s, st, p) {
-    if (typeof p.content !== 'string') throw rpcError(-32602, 'content must be text.');
-    const input = { file_path: String(p.path || ''), content: p.content };
-    const no = st.tools.guard('Write', input);
-    if (no) { emit(st, () => events.feed(s, 'tool', `refused a write outside the worktree: ${short(input.file_path)}`)); throw rpcError(REFUSED, no); }
-    // Hermes issue #31682: an edit the user declined can come back through another write tool. Not through the office.
-    if (st.denied.has(norm(st, input.file_path))) {
-      emit(st, () => events.feed(s, 'tool', `refused a write to ${path.basename(input.file_path)}: you declined that edit in this turn`));
-      throw rpcError(REFUSED, 'You declined the edit of this file in this turn. The office does not write it another way.');
-    }
-    const a = await allowed(s, st, 'Write', input);
-    if (!a.ok) throw declined(a.why);
-    const r = await st.tools.run('Write', input);
-    if (!r.ok) throw rpcError(REFUSED, r.text);
-    st.wrote.add(norm(st, input.file_path));
-    emit(st, () => events.feed(s, 'tool', `Write ${path.basename(input.file_path)} (the office wrote it for the agent)`));
-    return {};
-  }
-
-  // terminal/create: the command line the user sees is the line that runs, variables included. Every command goes to the office
-  // (the Shell commands rule: Ask by default holds it) unless the user just approved that same line in a request.
-  async function serveTerminal(s, st, p) {
-    const line = commandLine(p);
-    const cwd = p.cwd ? String(p.cwd) : st.root;
-    const no = st.tools.guard('LS', { path: cwd });
-    if (no) { emit(st, () => events.feed(s, 'tool', `refused a command outside the worktree: ${short(cwd)}`)); throw rpcError(REFUSED, no); }
-    const a = await allowed(s, st, 'Bash', { command: line });
-    if (!a.ok || st.closed) throw declined(a.why);
-    let h;
-    try {
-      h = st.tools.start(line, { cwd, timeoutMs: TERMINAL_MS, keep: 'end', limitBytes: Number(p.outputByteLimit) > 0 ? Number(p.outputByteLimit) : undefined });
-    } catch (e) { throw rpcError(REFUSED, textOf(e)); }
-    const id = 'term_' + makeId();
-    st.terminals.set(id, h);
-    st.terminalIds.add(id);
-    emit(st, () => events.feed(s, 'tool', `Bash ${clip(line, 100)} (the office runs it for the agent)`));
-    return { terminalId: id };
-  }
-  function terminalOf(st, p) {
-    const h = st.terminals.get(String(p.terminalId));
-    if (!h) throw rpcError(-32602, 'Unknown terminal.');
-    return h;
-  }
-  const TERMINAL = {
-    'terminal/output': (st, p) => { const h = terminalOf(st, p), x = h.exit(); return { output: h.output(), truncated: h.truncated(), ...(x ? { exitStatus: x } : {}) }; },
-    'terminal/wait_for_exit': async (st, p) => { const r = await terminalOf(st, p).done; return { exitCode: r.exitCode, signal: r.signal }; },
-    'terminal/kill': (st, p) => { terminalOf(st, p).kill(); return {}; },
-    'terminal/release': (st, p) => { terminalOf(st, p).kill(); st.terminals.delete(String(p.terminalId)); return {}; },
-  };
+  // The permission policy (acp-policy.mjs) and the file and terminal service (acp-files.mjs) share the session state `st`.
+  const { track, recheck, openCall, endCall, onPermission } = createPolicy({
+    spec, label, events, emit, hook, asks,
+    killChild: (st) => { if (!st.dead && st.child.pid) killTree(st.child.pid, execFile); }, // the exit ends the session
+  });
+  const files = createFiles({ events, asks, emit, makeId });
 
   function onUpdate(s, st, params) {
     if (st.closed) return; // a line that comes in while the agent stops: nothing after close (seam timing rule 2)
@@ -876,10 +469,7 @@ export function createAcp(deps) {
     if (params.sessionId !== st.sid) throw rpcError(-32602, 'Unknown session.');
     flushText(s, st); // what the agent said before a request shows with it (a request may wait for the user)
     if (method === 'session/request_permission') return onPermission(s, st, params);
-    if (method === 'fs/read_text_file') return serveRead(s, st, params);
-    if (method === 'fs/write_text_file') return serveWrite(s, st, params);
-    if (method === 'terminal/create') return serveTerminal(s, st, params);
-    if (TERMINAL[method]) return TERMINAL[method](st, params);
+    if (files.handles(method)) return files.serve(s, st, method, params);
     throw rpcError(-32601, `Method not found: ${method}`);
   }
 
