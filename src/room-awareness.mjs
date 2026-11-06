@@ -4,7 +4,7 @@
 import { clip } from './tracker.mjs';
 import { cleanPin, PIN_MAX, NOTES_MAX, AGENT_WRITE_MAX } from './notes.mjs';
 import { httpError } from './office-core.mjs';
-import '../public/vocab.js'; // the session vocabulary (globalThis.OfficeVocab)
+import './vocab.mjs'; // the session vocabulary (globalThis.OfficeVocab, all topic files)
 import '../public/format.js'; // money and plurals (globalThis.OfficeFormat)
 
 const V = globalThis.OfficeVocab;
