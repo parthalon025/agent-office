@@ -84,6 +84,8 @@ test('grant and withdraw: withdraw restores the cell the user had, an unset cell
   const w = withdraw(g.rules, g.trust, p.id);
   assert.equal(w.rules.buildings[B], undefined, 'the override is gone: the default applies again');
   assert.equal(w.trust.grants.length, 0);
+  const again = { ...g.trust, ledger: many(6) };
+  assert.equal(propose(again.ledger, w.rules, { dismissed: w.trust.dismissed }).length, 0, 'a withdrawn grant is not proposed again');
   const asked = setRule(none, { scope: 'building', building: B, row: 'shell', col: 'claude-code', value: 'ask' }).rules;
   const g2 = grant(asked, t0, p, 100, true);
   assert.equal(g2.trust.grants[0].from, 'ask');

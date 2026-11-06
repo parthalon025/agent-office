@@ -856,7 +856,7 @@ function noteDecision(id, s, allow) {
   if (!c || !s || c.building == null) return;
   const r = ruleOf(c);
   if (!r.col || !r.row || !V.security.rows[r.row]) return;
-  persisted.trust = recordTrust(persisted.trust, { at: Date.now(), col: r.col, building: c.building ?? '', row: r.row, pattern: patternOf(c.tool, c.input), allow, risk: r.risk });
+  persisted.trust = recordTrust(persisted.trust, { at: Date.now(), col: r.col, building: c.building, row: r.row, pattern: patternOf(c.tool, c.input), allow, risk: r.risk });
   savePersisted();
 }
 

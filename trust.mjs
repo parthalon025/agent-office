@@ -111,10 +111,13 @@ export function withdraw(rules, trust, id) {
   const g = t.grants.find((x) => x.id === id);
   if (!g) throw trustError(404, 'No such grant.');
   const grants = t.grants.filter((x) => x.id !== id);
+  // The streak that earned the grant stays in the ledger, so the same proposal must not come straight back: it is dismissed
+  // until a decline in the cell (record) resets it.
+  const dismissed = { ...t.dismissed, [id]: g.at };
   const still = S.sourceOf(rules, g.building, g.row, g.col) === 'building' && S.valueOf(rules, g.building, g.row, g.col) === 'allow';
-  if (!still) return { rules, trust: { ...t, grants } };
+  if (!still) return { rules, trust: { ...t, grants, dismissed } };
   const r = setRule(rules, { scope: 'building', building: g.building, row: g.row, col: g.col, value: g.from, confirmed: true });
-  return { rules: r.rules, from: r.from, to: r.to, trust: { ...t, grants } };
+  return { rules: r.rules, from: r.from, to: r.to, trust: { ...t, grants, dismissed } };
 }
 
 /** The trust card of each agent kind that has any history. runs: [{ col, failed }] (past and live sessions). */
