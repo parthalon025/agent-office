@@ -504,7 +504,7 @@ test('no token in the page source, no token from the URL, no plain token compare
     assert.doesNotMatch(src, /office-token|x-office-token|[?&]t=/, f);
   }
   const server = ['src/server.mjs', 'src/office.mjs', 'src/office-core.mjs'].map(read).join('\n');
-  assert.doesNotMatch(server, /searchParams\.get\(\s*['"]t['"]\s*\)/);
+  assert.doesNotMatch(server, /(searchParams|query)\.get\(\s*['"]t['"]\s*\)/);   // handlers read query (#185)
   assert.doesNotMatch(server, /[!=]==?\s*(AGENT_TOKEN|PAGE_TOKEN)\b|\b(AGENT_TOKEN|PAGE_TOKEN)\s*[!=]==?/);
   assert.doesNotMatch(server, /__TOKEN__/);
   assert.match(read('src/auth.mjs'), /crypto\.timingSafeEqual\(/);
