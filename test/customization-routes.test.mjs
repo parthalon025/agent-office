@@ -49,7 +49,8 @@ test('starters add the three personas and one team, once; the user can add a tea
   assert.equal((await call('/api/team/start', { team: 'nobody', cwd: base })).status, 404);
   const none = (await call('/api/team/start', { team: 'pair', cwd: path.join(base, 'missing') })).json;
   assert.equal(none.ok, false);
-  assert.ok(none.started.every((m) => /Folder not found/.test(m.error)), 'each member reports its own error');
+  // Off Windows, opening a session is refused before the folder check, so only the folder message is Windows-only.
+  assert.ok(none.started.length === 2 && none.started.every((m) => m.error && (process.platform !== 'win32' || /Folder not found/.test(m.error))), 'each member reports its own error');
   assert.equal((await call('/api/open', { persona: 'nobody', cwd: base })).status, 404);
 });
 
