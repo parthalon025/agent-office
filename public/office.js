@@ -1443,6 +1443,27 @@
       return cs.visibility !== 'hidden' && cs.display !== 'none';
     }).map(function (el) { return el.getBoundingClientRect(); });
   }
+  // The remembered layer per place (ADR 0006, #145): a count per layer, kept in this browser. A place used at Inspect opens
+  // there on the first tap. A place with no history opens at Glance and shows its Look card first.
+  var layerMem = (function () { try { return window.OfficeVocab.layers.parse(localStorage.getItem('ao-layers')); } catch (x) { return {}; } })();
+  function noteLayer(place, layer) {
+    if (!place) return;
+    layerMem = window.OfficeVocab.layers.remember(layerMem, place, layer);
+    try { localStorage.setItem('ao-layers', JSON.stringify(layerMem)); } catch (x) { /* private window */ }
+  }
+  // The Look layer of a room: one sentence, steps and cost for the room, then one row per agent. A row opens that agent (Inspect).
+  function LookCard(p) {
+    var L = window.OfficeVocab.layers, r = L.lookRoom(p.agents), list = p.agents || [];
+    if (!list.length) return null;
+    return h('div', { className: 'look-card' },
+      h('p', { className: 'look-intent' }, r.intent),
+      h('p', { className: 'look-facts mono' }, [list.length + (list.length === 1 ? ' agent' : ' agents'), r.progress, r.cost].filter(Boolean).join(' · ')),
+      list.length > 1 ? h('ul', { className: 'look-agents' }, list.map(function (s) {
+        var l = L.look(s);
+        return h('li', { key: s.uid }, h('button', { type: 'button', className: 'look-agent', onClick: function () { p.onInspect(s); } },
+          h('b', null, s.name || 'Agent'), h('span', null, [clip(l.intent, 60), l.progress, l.cost].filter(Boolean).join(' · '))));
+      })) : null);
+  }
   var LOOK_ICON = { board: 'plan', notes: 'memory', stats: 'cost', terminal: 'terminal', desk: 'add', lobby: 'building' };
   // While the camera looks at a screen: back to the room, or the screen's second step (the same as a second click).
   // It sits at the bottom of the free part of the view, and the screen is framed above it.
@@ -1471,6 +1492,7 @@
     useEffect(function () { if (pos) p.onPlaced(); }, [pos]);
     // A screen with no second step (a Security room screen: its cells take the clicks) has the Back button only.
     return h('div', { ref: ref, className: 'look-bar', role: 'group', 'aria-label': 'Screen in view', style: pos ? { left: pos.left, top: pos.top } : { visibility: 'hidden' } },
+      p.agents ? h(LookCard, { agents: p.agents, onInspect: p.onInspect }) : null,
       h(NeedsButton, { count: askCount(asks), onGo: p.onGo }),
       h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onBack }, 'Back to the room'),
       p.verb ? h(A.Button, { variant: 'quiet', icon: p.icon, onClick: p.onOpen }, p.verb) : null);
@@ -1578,6 +1600,7 @@
         h(Bezel, { inline: true, count: p.waiting, onGo: p.onGo, compact: small }),
         s && s.headless && working ? act('pause', 'Stop turn', null, stop) : null,
         s ? act('copy', 'Export', 'Save this session as a Markdown file', function () { exportSession(s.uid, p.toast); }) : null,
+        p.onRules ? act('security', 'Rules', 'Open the Security room: the rules behind this agent', p.onRules) : null,
         h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onBack }, 'Back')),
       h(A.Tabs, { label: 'Desk screen', tabs: DESK_TABS, value: tab, onChange: p.onTab, render: function (id) {
         if (id === 'chat') return h(ChatTab, { office: p.office, bot: p.bot, name: p.name });
@@ -2049,6 +2072,7 @@
     // event that removes a floor or a room, so a removal mounts the building again.
     var fd = useState({ key: wantKey, repo: shown, view: view, mount: null, floor: null }), cur2 = fd[0], setCur2 = fd[1];
     var floorMem = React.useRef(null), offFloor = React.useRef(null);
+    var visitRef = React.useRef(null);   // the place and deepest layer of the screen visit in progress (noteLayer)
     if (!floorMem.current) floorMem.current = window.OfficeBuilding.floorMemory();   // the floors of the page: which one a scene opens on, and the user's last pick, per building (#111)
     var stale = !!snap && !!cur2.mount && cur2.mount.stale();
     var needsMount = !!snap && view === 'office' && !cur2.mount && cur2.view === 'office';
@@ -2321,6 +2345,14 @@
         // no look bar: its layer is the screen, with its own Back. A desk in focus selects its bot (the dock's actions for it).
         // A Security room screen keeps the look bar in focus: every click on it is a click on a cell, never a panel.
         if (host) host.onFocus(function (f) {
+          // The layer used here is remembered per place; a place used at Inspect or deeper opens on the first tap.
+          var Ly = window.OfficeVocab.layers, rid = f && f.item && f.item.roomId, fs = f && f.kind === 'terminal' && f.item && f.item.uid ? window.officeAdapter.sessionByUid(f.item.uid) : null;
+          var place = rid || (fs && fs.place && fs.place.roomId);
+          // Only the deepest layer a visit reached counts, when the visit ends: a look that went on to Inspect is not also a Look.
+          var at = f && place ? (f.kind === 'security' ? 'deep' : f.open || f.pin ? 'inspect' : 'look') : '';
+          if (at) { var v = visitRef.current; if (v && v.place !== place) noteLayer(v.place, v.at); visitRef.current = v && v.place === place && Ly.order.indexOf(v.at) >= Ly.order.indexOf(at) ? v : { place: place, at: at }; }
+          else if (!f && visitRef.current) { noteLayer(visitRef.current.place, visitRef.current.at); visitRef.current = null; }
+          if (f && !f.open && !f.pin && rid && f.kind !== 'security' && Ly.opensAt(Ly.layerFor(layerMem, rid))) setTimeout(function () { if (hostRef.current && hostRef.current.focused()) hostRef.current.open(); }, 0);
           setLook(f && !f.pin && (!f.open || f.kind === 'security') ? f : null);
           if (!f || !f.open) setBoard(null);
           if (!f || f.kind !== 'changes') setChg(null);
@@ -2585,7 +2617,8 @@
       // The pinned screens (#89): the desk monitor in focus shows the chat and terminal of its session, the room's wall
       // screen its changes. They mount with the look (hidden while the camera flies) and show once it lands.
       deskUid && hostRef.current ? h(DeskScreen, { key: 'desk-' + deskUid, uid: deskUid, bot: layer.item.name, name: sceneName({ uid: deskUid, name: layer.item.name }), host: hostRef.current, office: officeRef.current,
-        shown: layer.shown, tab: deskTab, onTab: setDeskTab, waiting: layer.waiting, onGo: goOldest, toast: toast, onBack: blurScene }) : null,
+        shown: layer.shown, tab: deskTab, onTab: setDeskTab, waiting: layer.waiting, onGo: goOldest, toast: toast, onBack: blurScene,
+        onRules: function () { var d2 = window.officeAdapter.sessionByUid(deskUid); if (d2 && d2.place) noteLayer(d2.place.roomId, 'deep'); blurScene(); setTimeout(function () { if (securityRef.current && !securityRef.current.open('files')) toast({ tone: 'info', title: 'Permissions', text: 'This building shows no Security room yet.' }); }, 0); } }) : null,
       pinned && layer.kind === 'changes' && chg && hostRef.current ? h(ChangesScreen, { key: 'chg-' + chg.uid, uid: chg.uid, name: chg.name, ended: chg.ended, host: hostRef.current,
         shown: layer.shown, waiting: layer.waiting, onGo: goOldest, toast: toast, onBack: blurScene }) : null,
       pinned && layer.kind === 'note' && layer.item && layer.item.data && hostRef.current ? h(NoteScreen, { key: 'note-' + layer.item.id, note: layer.item.data, host: hostRef.current,
@@ -2597,7 +2630,7 @@
       board && boardRef.current && board.kind === 'notes' ? h(NotesEditor, { key: board.id, noteKey: noteKey(board.id), text: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).text || '', version: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).v || 0, toast: toast,
         rect: function () { return hostRef.current ? hostRef.current.rect() : null; }, flying: function () { return hostRef.current ? hostRef.current.flying() : false; },
         onClose: function () { if (boardRef.current) boardRef.current.refresh(); blurScene(); } }) : null,
-      look && !board && hostRef.current ? h(LookBar, { key: look.key, verb: look.verb, icon: LOOK_ICON[look.kind] || 'zoom-in', toast: toast, layout: secLook,
+      look && !board && hostRef.current ? h(LookBar, { key: look.key, verb: look.verb, agents: look.item && look.item.roomId && look.kind !== 'security' && mount ? roomAndSel(look.item.roomId) : null, onInspect: goTo, icon: LOOK_ICON[look.kind] || 'zoom-in', toast: toast, layout: secLook,
         onGo: goOldest, asks: secLook && snap ? (snap.sessions || []).filter(function (s) { return window.OfficeVocab.requests(s).length > 0; }) : [],
         free: function (el) { return hostRef.current ? hostRef.current.free(sceneCovers(el)) : null; },
         onPlaced: function () { if (hostRef.current) hostRef.current.refit(); },

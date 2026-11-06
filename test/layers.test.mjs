@@ -56,3 +56,26 @@ test('layers: a place remembers the layer used most', () => {
   assert.deepEqual(L.remember(m, 'b1', 'bogus'), m);
   assert.equal(L.layerFor(L.remember({}, '__proto__', 'deep'), 'constructor'), 'glance');
 });
+
+test('layers: Look of a room sums its agents', () => {
+  const a = mk({ prompt: 'Fix login', todos: [{ status: 'completed' }, { status: 'pending' }], cost: 0.4, lastEvent: 5 });
+  const b = mk({ prompt: 'Write docs', todos: [{ status: 'pending' }], cost: 0.1, lastEvent: 9 });
+  const r = L.lookRoom([a, b]);
+  assert.deepEqual([r.count, r.progress, r.cost, r.intent], [2, '1 of 3 steps', '$0.50', 'Write docs']);
+  assert.deepEqual(L.lookRoom([]), { count: 0, intent: '', progress: '', cost: '' });
+  assert.equal(L.lookRoom([a, mk({ costUnknown: true })]).cost, 'unknown');
+});
+
+test('layers: the remembered layer is read from storage text, never trusted', () => {
+  assert.deepEqual(L.parse('{"r1":{"look":2,"bogus":1,"inspect":"x"}}'), { r1: { look: 2 } });
+  assert.deepEqual(L.parse('not json'), {});
+  assert.deepEqual(L.parse('[1]'), {});
+  assert.deepEqual(L.parse('{"__proto__":{"look":1}}'), {});
+});
+
+test('layers: a place opens straight at the remembered layer past Look', () => {
+  assert.equal(L.opensAt('glance'), false);
+  assert.equal(L.opensAt('look'), false);
+  assert.equal(L.opensAt('inspect'), true);
+  assert.equal(L.opensAt('deep'), true);
+});
