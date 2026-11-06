@@ -21,7 +21,7 @@ import { slimPayload, cleanIds as cleanPaperclipIds } from './payload.mjs';
 import { createHq } from './paperclip.mjs';
 import { mergeRecord, recap as recapOf, away as awayOf, MERGES_KEPT } from './rituals.mjs';
 import { createTracker, clip } from './tracker.mjs';
-import { createRegistry, providerEvents, isPaid, isGated, supervisionOf, costOf, spendLimitFor, featuresOf, DEFAULT_SPEND_LIMIT, DEFAULT_PROVIDER } from './providers/index.mjs';
+import { createRegistry, providerEvents, traitsOf, spendLimitFor, DEFAULT_SPEND_LIMIT, DEFAULT_PROVIDER } from './providers/index.mjs';
 import { createLocal } from './providers/local.mjs';
 import { createExplainer } from './explain.mjs';
 import { createAcp, AGENTS as ACP_AGENTS } from './providers/acp.mjs';
@@ -1301,7 +1301,7 @@ function openHeadless(provider, { cwd, name, prompt, worktree = null, budget = n
   // startDir: the launch folder (the worktree when there is one). Requests are rated against it, never against a later cd.
   // costUnknown: the agent reports no cost (ACP), so every surface shows "unknown", never $0.00.
   // supervision: the label of an ungated agent (ADR 0001), for every surface that shows the session.
-  const costUnknown = costOf(provider) === 'unknown', supervision = supervisionOf(provider);
+  const costUnknown = traitsOf(provider).cost === 'unknown', supervision = traitsOf(provider).supervision;
   const s = newSession({ uid: officeId, officeId, provider: provider.kind, name, cwd, startDir: cwd, launched: true, headless: true, status: 'starting', worktree, budget, scheduleId, model,
     commands: known?.commands || [], skills: known?.skills || [], costUnknown, supervision, deskRole });
   placeSession(s, true);
@@ -1366,7 +1366,7 @@ async function openSession(opts) {
     if (worktree) rememberDir(cwd);
     // A paid provider gets the default spend limit unless the caller sets one (0 clears it). A local provider has none (#33),
     // and neither has one whose cost is unknown: nothing could stop it at a limit.
-    const budget = spendLimitFor({ paid: isPaid(provider), cost: costOf(provider), requested: opts.maxBudget, fallback: defaultSpend() });
+    const budget = spendLimitFor({ paid: traitsOf(provider).paid, cost: traitsOf(provider).cost, requested: opts.maxBudget, fallback: defaultSpend() });
     const building = await buildingOfFolder(workdir, worktree);
     const uid = openHeadless(provider, { cwd: workdir, name, prompt, worktree, budget, scheduleId: opts.scheduleId || null, model, permissionMode, building, deskRole: role });
     if (noRoom) { const s = sessions.get(uid); if (s) { addFeed(s, 'start', 'This folder is not in git, so the agent has no room of its own.'); broadcast(); } }
@@ -1394,12 +1394,12 @@ async function openSession(opts) {
 // #77), before the cost question, so that question never comes for an agent
 // that would not start. 409 without confirm, before a worktree or a session.
 async function preflight(provider) {
-  const why = typeof provider.preflight === 'function' ? await provider.preflight() : null;
+  const why = await traitsOf(provider).preflight();
   if (why) throw httpError(409, `${provider.label} cannot start: ${why}`);
 }
 function confirmCost(provider, confirmed) {
   if (confirmed === true || !costAsk(persisted.security, provider)) return;
-  const label = supervisionOf(provider);
+  const label = traitsOf(provider).supervision;
   // A normal question, not an error (review minor): 200 { confirm: 'cost', question } and no uid, so the page logs no failed
   // request each time it asks. The route's catch sends it (e.question).
   const e = httpError(200, `This agent does not report cost. ${label ? label + '. ' : ''}Run it?`);
@@ -1411,8 +1411,8 @@ function confirmCost(provider, confirmed) {
 // never in the user's own folder, never in a terminal window. ownRoom: this open has one. The answer is 409 before a worktree,
 // a session or the cost question.
 function ownRoomOnly(provider, ownRoom, rest) {
-  if (isGated(provider) || ownRoom) return;
-  throw httpError(409, `${provider.label} runs some tool calls without asking the office (${supervisionOf(provider)}), so it ${rest}`);
+  if (traitsOf(provider).gated || ownRoom) return;
+  throw httpError(409, `${provider.label} runs some tool calls without asking the office (${traitsOf(provider).supervision}), so it ${rest}`);
 }
 
 // A past session opens again with its own provider (providers.reopenPlan). A provider that can resume continues the
@@ -1425,7 +1425,7 @@ async function reopenSession(uid, { confirmed = false } = {}) {
     if (pastInUse().has(uid)) throw httpError(409, 'That session is open again. Close it first, or wait until it has started.');
     // Its room was removed (Remove in Changes): its folder is now the main folder, where it never worked. Reopen would continue
     // it there, on the user's branch, so the office says so and opens nothing. Fork (a new worktree) stays possible.
-    if (rec.roomGone) throw httpError(409, `Its room was removed (branch ${rec.roomGone.branch}). Reopen would run it in your main folder, so the office does not reopen it. Open a new session${featuresOf(providers.get(rec.provider)).includes('fork') ? ', or fork it into a new worktree' : ''}.`);
+    if (rec.roomGone) throw httpError(409, `Its room was removed (branch ${rec.roomGone.branch}). Reopen would run it in your main folder, so the office does not reopen it. Open a new session${traitsOf(providers.get(rec.provider)).features.includes('fork') ? ', or fork it into a new worktree' : ''}.`);
     if (!fs.existsSync(rec.cwd)) throw httpError(409, `Its folder is gone: ${rec.cwd}. It may have been a removed worktree.`);
     return rec;
   };
@@ -1458,12 +1458,12 @@ async function forkSession(uid, { confirmed = false } = {}) {
   checkOpen(provider); // the Agents screen of the Security room, before the question and the worktree
   await preflight(provider);
   if (provider.learn) await provider.learn();
-  if (!featuresOf(provider).includes('fork')) throw httpError(409, `${provider.label} cannot fork a session.`);
+  if (!traitsOf(provider).features.includes('fork')) throw httpError(409, `${provider.label} cannot fork a session.`);
   if (!rec.sid) throw httpError(409, 'That session never started, so there is nothing to fork.');
   const from = rec.worktree?.repo && fs.existsSync(rec.worktree.repo) ? rec.worktree.repo : rec.cwd;
   if (!from || !fs.existsSync(from)) throw httpError(409, `Its folder is gone: ${rec.cwd}.`);
   if (confirmed !== true) {
-    const e = httpError(409, `Fork ${rec.name} into a new worktree? The copy gets the conversation so far and its own branch. The files start from the current commit of the main folder, not from the changes of the old session. ${costOf(provider) === 'unknown' ? `${provider.label} does not report cost, so the office shows it as unknown and no spend limit can stop it.` : ''}`.trim());
+    const e = httpError(409, `Fork ${rec.name} into a new worktree? The copy gets the conversation so far and its own branch. The files start from the current commit of the main folder, not from the changes of the old session. ${traitsOf(provider).cost === 'unknown' ? `${provider.label} does not report cost, so the office shows it as unknown and no spend limit can stop it.` : ''}`.trim());
     e.confirm = 'fork';
     throw e;
   }
@@ -1472,7 +1472,7 @@ async function forkSession(uid, { confirmed = false } = {}) {
   // An agent room of its own (#69): on the floor of the branch it was made from, known to the building before the bot sits.
   const wt = await git.createWorktree(from, name);
   rememberDir(from);
-  const budget = spendLimitFor({ paid: isPaid(provider), cost: costOf(provider), requested: undefined, fallback: defaultSpend() });
+  const budget = spendLimitFor({ paid: traitsOf(provider).paid, cost: traitsOf(provider).cost, requested: undefined, fallback: defaultSpend() });
   const worktree = { root: wt.root, branch: wt.branch, repo: wt.repo, base: wt.base || null };
   try {
     addRepo(wt.repo); await refreshRepo(repoKey(wt.repo));
@@ -1527,7 +1527,7 @@ async function probeHttp() {
 // planner (one planner per building): a goal is refused (409, confirm: 'goal') until the same call comes with confirmed: true.
 const planLines = async (goal) => String(goal).split(/\r?\n/).map((l) => l.replace(/^\s*(?:[-*]|\d+[.)])\s+/, '').trim()).filter(Boolean).map((text) => ({ text }));
 const goalAgents = (building) => [...sessions.values()].filter((s) => s.status !== 'ended' && buildingOfSession(s) === building).map((s) => {
-  let paid = true; try { paid = isPaid(providers.of(s)); } catch { /* a kind that left: count it as paid */ }
+  let paid = true; try { paid = traitsOf(providers.of(s)).paid; } catch { /* a kind that left: count it as paid */ }
   return { id: s.uid, name: s.name, role: s.deskRole || '', room: '', free: s.status === 'idle' && !s.error, paid, tiers: tiersOf(s, paid) };
 });
 // The model ladder (#74, manager.mjs): a free agent is the local tier, a Claude Code agent takes the three Claude tiers. Another paid kind
@@ -1635,7 +1635,7 @@ function saveSchedule(x) {
     id: persisted.schedules.find((y) => y.id === x.id)?.id || newId(), name, prompt, cwd, kind, every, at, provider: provider.kind,
     model, permissionMode: MODES.has(x.permissionMode) && modes.includes(x.permissionMode) ? x.permissionMode : '',
     // A new one without a limit gets the default; 0 is "no limit" and stays 0. A free kind, or one whose cost is unknown, has none.
-    isolation: x.isolation === 'worktree' ? 'worktree' : 'same', maxBudget: spendLimitFor({ paid: isPaid(provider), cost: costOf(provider), requested: x.maxBudget, fallback: defaultSpend() }) ?? 0,
+    isolation: x.isolation === 'worktree' ? 'worktree' : 'same', maxBudget: spendLimitFor({ paid: traitsOf(provider).paid, cost: traitsOf(provider).cost, requested: x.maxBudget, fallback: defaultSpend() }) ?? 0,
     enabled: x.enabled !== false, lastRun: Date.now(),
   };
   const i = persisted.schedules.findIndex((y) => y.id === rec.id);
@@ -1708,7 +1708,7 @@ function exportSession(uid) {
 // outside the worktree, so they are held until the user says yes (409 with confirm: 'skill', then the same call with confirmed: true).
 function skillsOf(kind) {
   const provider = providers.get(kind ? String(kind) : undefined);
-  const dir = featuresOf(provider).includes('skills') && typeof provider.skillsDir === 'function' ? provider.skillsDir() : null;
+  const dir = traitsOf(provider).features.includes('skills') && typeof provider.skillsDir === 'function' ? provider.skillsDir() : null;
   if (!dir) throw httpError(404, `${provider.label} has no skills the office can show.`);
   return { provider, skills: createSkills({ dir }) };
 }
@@ -1835,7 +1835,7 @@ setInterval(readPlan, 15000).unref();
 // One session with all its data and its place: GET /api/session (full data on request; the snapshot is lean).
 // agent and features: the agent kind's name and what it has beyond the seam (#72), read now because an ACP agent says some of it at its
 // handshake. The page shows a feature only when the kind declares it (vocab.js featuresOf).
-const kindInfo = (s) => { try { const p = providers.of(s); return { agent: p.label, features: featuresOf(p) }; } catch { return { agent: '', features: [] }; } };
+const kindInfo = (s) => { try { const p = providers.of(s); return { agent: p.label, features: traitsOf(p).features }; } catch { return { agent: '', features: [] }; } };
 // hq: a Paperclip run's label (its agent, role, company, task and budget, #76), while the office watches that company.
 const fullSession = (s) => ({ ...s, ...kindInfo(s), persona: personaOf(persisted.personas, s.name), place: s.placed ? roomPlace(s) : null, seat: seatOfSession(s), hq: s.paperclip ? hq.labelOf(s.paperclip) : null });
 const CATALOG = catalogView();

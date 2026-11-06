@@ -40,7 +40,7 @@
 //                                      supervision label.
 //   supervision            (optional)  the label of an ungated provider (gated: false), for example "Partly supervised: file
 //                                      edits and risky commands ask". Without it an ungated provider is "Unsupervised"
-//                                      (supervisionOf). A gated provider has none.
+//                                      (traitsOf). A gated provider has none.
 //   preflight() -> Promise (optional)  why the agent would not start now (text), or null, from a check that needs no
 //                                      session (OpenClaw: its Gateway config). The office asks it before the cost question
 //                                      and before a worktree, and answers 409 with that text.
@@ -105,16 +105,28 @@ export const PROVIDER_METHODS = ['readiness', 'models', 'open', 'message', 'answ
 // changes or clears it. A local provider costs nothing and has no limit. Settings can change the default (server.mjs).
 export const DEFAULT_SPEND_LIMIT = 2;
 export const MAX_SPEND_LIMIT = 1000;
-/** True unless the provider says paid: false. A provider that does not say is treated as paid, so it is never left without a limit. */
-export const isPaid = (p) => !p || p.paid !== false;
-/** True unless the provider says gated: false (ADR 0001). A provider that does not say holds every call that is not low risk. */
-export const isGated = (p) => !p || p.gated !== false;
-/** The label of an ungated provider (ADR 0001): its own, else 'Unsupervised'. null for a gated one. */
-export const supervisionOf = (p) => (isGated(p) ? null : typeof p.supervision === 'string' && p.supervision ? p.supervision : 'Unsupervised');
-/** The provider's cost word: 'unknown' when its agent reports no cost, else 'reported'. */
-export const costOf = (p) => (p && p.cost === 'unknown' ? 'unknown' : 'reported');
-/** A copy of the feature names the provider declares now (#72). A getter is read at this call: an ACP agent says some at its handshake. */
-export const featuresOf = (p) => (p && Array.isArray(p.features) ? [...p.features] : []);
+/**
+ * The traits of one provider: the one value the Security room and the start checks read (ADR 0001), so no caller knows which
+ * optional field a provider leaves out. Read at each call, because a getter (an ACP agent's features) answers after its handshake.
+ *   paid         true unless the provider says paid: false (so a provider that does not say is never left without a spend limit)
+ *   gated        true unless the provider says gated: false (a gated provider holds every call that is not low risk)
+ *   supervision  the label of an ungated provider (its own, else 'Unsupervised'); null for a gated one
+ *   cost         'unknown' when its agent reports no cost, else 'reported'
+ *   features     a copy of the feature names it declares now (#72)
+ *   preflight()  why it would not start now (text), or null; a provider with no check gives null
+ * A missing provider has the strict traits: paid, gated, cost reported, no features.
+ */
+export function traitsOf(p) {
+  const gated = !p || p.gated !== false;
+  return {
+    paid: !p || p.paid !== false,
+    gated,
+    supervision: gated ? null : typeof p.supervision === 'string' && p.supervision ? p.supervision : 'Unsupervised',
+    cost: p && p.cost === 'unknown' ? 'unknown' : 'reported',
+    features: p && Array.isArray(p.features) ? [...p.features] : [],
+    preflight: async () => (p && typeof p.preflight === 'function' ? (await p.preflight()) || null : null),
+  };
+}
 const FEATURE_RE = /^[a-z][a-z0-9-]{0,30}$/;
 /**
  * The spend limit of a new session in dollars, or null for no limit.
@@ -223,8 +235,9 @@ function settled(p, ms, fallback) {
  * owner's cloud account), modelLabel (the pick is not called Model).
  */
 export function describe(p) {
-  return { kind: p.kind, label: p.label, paid: isPaid(p), terminal: typeof p.openWindow === 'function', modes: Array.isArray(p.modes) ? [...p.modes] : [],
-    needsModel: p.needsModel === true, control: typeof p.control === 'function', gated: isGated(p), supervision: supervisionOf(p), cost: costOf(p),
+  const tr = traitsOf(p);
+  return { kind: p.kind, label: p.label, paid: tr.paid, terminal: typeof p.openWindow === 'function', modes: Array.isArray(p.modes) ? [...p.modes] : [],
+    needsModel: p.needsModel === true, control: typeof p.control === 'function', gated: tr.gated, supervision: tr.supervision, cost: tr.cost,
     team: p.team === true,
     ...(p.cloud === true ? { cloud: true } : {}), ...(p.modelLabel ? { modelLabel: p.modelLabel } : {}) };
 }
@@ -279,7 +292,7 @@ export function createRegistry(list, { now = Date.now, statusTtlMs = STATUS_KEEP
           (e) => ({ ready: false, version: null, needs: [`The office could not check ${p.label}: ${e.message}`] }));
         const models = r.ready ? await settled(() => p.models(), timeoutMs, () => []) : [];
         return { ...describe(p), ready: r.ready === true, configured: r.configured !== false, version: r.version || null, needs: Array.isArray(r.needs) ? r.needs : [], models,
-          canResume: p.canResume === true, features: featuresOf(p) };
+          canResume: p.canResume === true, features: traitsOf(p).features };
       }));
     },
     /**

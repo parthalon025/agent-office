@@ -11,7 +11,7 @@ import path from 'node:path';
 import { spawn as realSpawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createTracker } from '../src/tracker.mjs';
-import { providerEvents, createRegistry, checkProvider, spendLimitFor, isPaid, isGated, supervisionOf } from '../src/providers/index.mjs';
+import { providerEvents, createRegistry, checkProvider, spendLimitFor, traitsOf } from '../src/providers/index.mjs';
 import { createAcp, AGENTS, commandLine } from '../src/providers/acp.mjs';
 import { createLocalTools } from '../src/providers/local-tools.mjs';
 import { decide, cleanRules } from '../src/security.mjs';
@@ -120,7 +120,7 @@ test('open: the agent by its absolute path, the handshake offers files and termi
   const s = r.session();
   try {
     assert.equal(checkProvider(r.p), r.p);
-    assert.deepEqual([r.p.kind, r.p.label, isPaid(r.p), r.p.cost, r.p.canResume], ['hermes', 'Hermes Agent', true, 'unknown', false]);
+    assert.deepEqual([r.p.kind, r.p.label, traitsOf(r.p).paid, r.p.cost, r.p.canResume], ['hermes', 'Hermes Agent', true, 'unknown', false]);
     r.p.open(s, {});
     assert.equal(s.sid, null, 'nothing is reported inside open (seam timing rule 1)');
     await until(() => s.sid, 'the session id');
@@ -144,10 +144,10 @@ test('gating is per agent (ADR 0001): Hermes runs commands itself, so it is part
     // danger patterns (acp_adapter/server.py; upstream issue #139074). Its edits ask in its default mode.
     // Review M1 (acp_adapter/edit_approval.py, tools/approval.py DANGEROUS_PATTERNS, read 2026-11-05): every edit asks in its
     // default mode, and a command asks only when it matches a danger pattern; the office holds every such request.
-    assert.deepEqual([r.p.gated, isGated(r.p), supervisionOf(r.p)], [false, false, 'Partly supervised: file edits and risky commands ask']);
+    assert.deepEqual([r.p.gated, traitsOf(r.p).gated, traitsOf(r.p).supervision], [false, false, 'Partly supervised: file edits and risky commands ask']);
     assert.match(r.p.partly.shell, /rates dangerous come to the office/, 'the shell row is partly enforced, not "Not enforced"');
     assert.deepEqual([AGENTS.hermes.gated, AGENTS.dsh.gated], [false, true]);
-    assert.deepEqual([d.p.gated, supervisionOf(d.p)], [true, null]);
+    assert.deepEqual([d.p.gated, traitsOf(d.p).supervision], [true, null]);
     assert.doesNotThrow(() => checkProvider(r.p));
     assert.doesNotThrow(() => checkProvider(d.p));
   } finally { fs.rmSync(r.base, { recursive: true, force: true }); fs.rmSync(d.base, { recursive: true, force: true }); }
@@ -162,7 +162,7 @@ test('a text turn: live text, the reply, at rest after; the cost stays unknown, 
     assert.deepEqual(r.replies(s), ['echo: hi there']);
     assert.deepEqual([s.status, s.error, s.cost, s.turns], ['idle', null, null, 1]);
     assert.deepEqual(r.sent('session/prompt').map((m) => m.params), [{ sessionId: 'fake-sess-1', prompt: [{ type: 'text', text: 'hi there' }] }]);
-    assert.equal(spendLimitFor({ paid: isPaid(r.p), cost: r.p.cost, requested: undefined }), null, 'no spend limit the office could not keep');
+    assert.equal(spendLimitFor({ paid: traitsOf(r.p).paid, cost: r.p.cost, requested: undefined }), null, 'no spend limit the office could not keep');
   } finally { await r.done(s); }
 });
 
@@ -931,7 +931,7 @@ test('openclaw: a gated kind with no supervision label and its own program', () 
   const r = rig({ kind: 'openclaw' });
   try {
     assert.doesNotThrow(() => checkProvider(r.p));
-    assert.deepEqual([r.p.kind, r.p.label, r.p.gated, isGated(r.p), supervisionOf(r.p), isPaid(r.p), r.p.cost], ['openclaw', 'OpenClaw', true, true, null, true, 'unknown']);
+    assert.deepEqual([r.p.kind, r.p.label, r.p.gated, traitsOf(r.p).gated, traitsOf(r.p).supervision, traitsOf(r.p).paid, r.p.cost], ['openclaw', 'OpenClaw', true, true, null, true, 'unknown']);
     assert.deepEqual([AGENTS.openclaw.program, AGENTS.openclaw.args, AGENTS.openclaw.plugin], ['openclaw', ['acp'], true]);
     assert.equal(r.p.enforces, undefined, 'the office decides every call: no row is left to its config');
   } finally { fs.rmSync(r.base, { recursive: true, force: true }); }

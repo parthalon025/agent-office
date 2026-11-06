@@ -671,15 +671,15 @@ test('Copilot Studio: a message you send while the plan runs reaches the agent a
 // reports cost only from the prices the owner set; without them it is cost 'unknown' (owner decision Q22): the office asks
 // before it runs, shows "unknown", never $0.00, and sets no spend limit that could not stop it.
 test('#67: both cloud kinds are ungated, with a label that says what comes to the office', async () => {
-  const { isGated, supervisionOf } = await import('../src/providers/index.mjs');
+  const { traitsOf } = await import('../src/providers/index.mjs');
   const f = createFoundry({ events: {}, config: cloudConfig({}, 'OFFICE_FOUNDRY'), fetch: noFetch });
   const c = createCopilotStudio({ events: {}, config: cloudConfig({}, 'OFFICE_COPILOTSTUDIO'), fetch: noFetch });
-  assert.equal(isGated(f), false);
-  assert.equal(isGated(c), false);
-  assert.equal(supervisionOf(f), 'Partly supervised: only MCP approvals ask');
-  assert.equal(supervisionOf(c), 'Unsupervised: its tools run in the cloud');
+  assert.equal(traitsOf(f).gated, false);
+  assert.equal(traitsOf(c).gated, false);
+  assert.equal(traitsOf(f).supervision, 'Partly supervised: only MCP approvals ask');
+  assert.equal(traitsOf(c).supervision, 'Unsupervised: its tools run in the cloud');
   const k = createRegistry([f, c]).kinds();
-  assert.deepEqual(k.map((x) => [x.kind, x.gated, x.supervision]), [['foundry', false, supervisionOf(f)], ['copilot-studio', false, supervisionOf(c)]]);
+  assert.deepEqual(k.map((x) => [x.kind, x.gated, x.supervision]), [['foundry', false, traitsOf(f).supervision], ['copilot-studio', false, traitsOf(c).supervision]]);
   // The Security room: an MCP approval Foundry asks for is the MCP row; its other tools never reach the office (partly).
   assert.deepEqual(f.enforces || [], []);
   assert.match(f.partly.mcp, /Only an MCP tool that a Foundry agent sets to ask/);
@@ -687,19 +687,19 @@ test('#67: both cloud kinds are ungated, with a label that says what comes to th
 });
 
 test('#67: a cloud kind reports cost only with its prices; without them its cost is unknown and no spend limit applies', async () => {
-  const { costOf, spendLimitFor, isPaid } = await import('../src/providers/index.mjs');
+  const { spendLimitFor, traitsOf } = await import('../src/providers/index.mjs');
   const fd = (env) => createFoundry({ events: {}, config: cloudConfig(env, 'OFFICE_FOUNDRY'), fetch: noFetch });
   const cs = (env) => createCopilotStudio({ events: {}, config: cloudConfig(env, 'OFFICE_COPILOTSTUDIO'), fetch: noFetch });
-  assert.equal(costOf(fd({})), 'unknown');
-  assert.equal(costOf(fd({ OFFICE_FOUNDRY_PRICE_IN: '2' })), 'unknown', 'one price is not enough: the other tokens would count as free');
-  assert.equal(costOf(fd({ OFFICE_FOUNDRY_PRICE_IN: '2', OFFICE_FOUNDRY_PRICE_OUT: '8' })), 'reported');
-  assert.equal(costOf(cs({})), 'unknown');
-  assert.equal(costOf(cs({ OFFICE_COPILOTSTUDIO_PRICE_MESSAGE: '0.01' })), 'reported');
+  assert.equal(traitsOf(fd({})).cost, 'unknown');
+  assert.equal(traitsOf(fd({ OFFICE_FOUNDRY_PRICE_IN: '2' })).cost, 'unknown', 'one price is not enough: the other tokens would count as free');
+  assert.equal(traitsOf(fd({ OFFICE_FOUNDRY_PRICE_IN: '2', OFFICE_FOUNDRY_PRICE_OUT: '8' })).cost, 'reported');
+  assert.equal(traitsOf(cs({})).cost, 'unknown');
+  assert.equal(traitsOf(cs({ OFFICE_COPILOTSTUDIO_PRICE_MESSAGE: '0.01' })).cost, 'reported');
   for (const p of [fd({}), cs({})]) {
     assert.doesNotThrow(() => checkProvider(p));
-    assert.equal(spendLimitFor({ paid: isPaid(p), cost: costOf(p), requested: 5 }), null, p.kind);
+    assert.equal(spendLimitFor({ paid: traitsOf(p).paid, cost: traitsOf(p).cost, requested: 5 }), null, p.kind);
   }
-  assert.equal(spendLimitFor({ paid: true, cost: costOf(cs({ OFFICE_COPILOTSTUDIO_PRICE_MESSAGE: '0.01' })), requested: 5 }), 5);
+  assert.equal(spendLimitFor({ paid: true, cost: traitsOf(cs({ OFFICE_COPILOTSTUDIO_PRICE_MESSAGE: '0.01' })).cost, requested: 5 }), 5);
   assert.deepEqual(createRegistry([fd({}), cs({ OFFICE_COPILOTSTUDIO_PRICE_MESSAGE: '1' })]).kinds().map((k) => k.cost), ['unknown', 'reported']);
 });
 

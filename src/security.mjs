@@ -24,6 +24,7 @@
 // The rules apply only while the office runs: a stopped office answers no hook, and Claude Code then decides alone.
 import { ratingOf, wideRoot } from './risk.mjs';
 import '../public/vocab.js';
+import { traitsOf } from './providers/index.mjs';
 
 const S = globalThis.OfficeVocab.security;
 const COLS = new Set(S.columns.map((c) => c.id));
@@ -185,10 +186,10 @@ export function permissionModeFor(rules, building, requested) {
 export function openRefusal(rules, provider) {
   const col = S.columnOf(provider && provider.kind);
   if (!col) return null;
-  if (provider.gated === false && S.applies('ungated', col) && S.valueOf(rules, null, 'ungated', col) !== 'on') {
+  if (!traitsOf(provider).gated && S.applies('ungated', col) && S.valueOf(rules, null, 'ungated', col) !== 'on') {
     return `${provider.label} runs tool calls without asking the office. Turn on ${S.columns.find((c) => c.id === col).label} on the Agents screen of the Security room first.`;
   }
-  if (provider.cost === 'unknown' && S.applies('no-cost', col) && S.valueOf(rules, null, 'no-cost', col) === 'deny') {
+  if (traitsOf(provider).cost === 'unknown' && S.applies('no-cost', col) && S.valueOf(rules, null, 'no-cost', col) === 'deny') {
     return `${provider.label} does not report cost, and the Security room denies agents without cost reports.`;
   }
   return null;
@@ -201,7 +202,7 @@ export function openRefusal(rules, provider) {
  * no such cell asks. provider: { kind, cost? }.
  */
 export function costAsk(rules, provider) {
-  if (!provider || provider.cost !== 'unknown') return false;
+  if (!provider || traitsOf(provider).cost !== 'unknown') return false;
   const col = S.columnOf(provider.kind);
   if (!col || !S.applies('no-cost', col)) return true;
   return S.valueOf(rules, null, 'no-cost', col) !== 'allow';
@@ -241,7 +242,7 @@ export function enforcement(providers, policies = {}) {
     const read = list.map((p) => own(policies, p.kind) && policies[p.kind]).find((x) => x && x.config);
     if (!list.length) reason = NOT_SET_UP;
     else if (read) Object.assign(rows, policyRows(read));
-    else if (list.some((p) => p.gated === false)) {
+    else if (list.some((p) => !traitsOf(p).gated)) {
       // enforces: rows the agent's own config or its requests carry. unenforced: a reason of its own for a row that is not.
       // partly: rows where only some calls reach the office (the other calls run without asking), enforced for those.
       const takes = new Set(list.flatMap((p) => (Array.isArray(p.enforces) ? p.enforces : [])));
@@ -249,7 +250,7 @@ export function enforcement(providers, policies = {}) {
       for (const [row, reason] of Object.entries(Object.assign({}, ...list.map((p) => p.partly || {})))) if (S.rows[row] && S.applies(row, c.id) && !takes.has(row)) partly[row] = reason;
       for (const row of CALL_ROWS) if (S.applies(row, c.id) && !takes.has(row) && !own(partly, row)) rows[row] = own(why, row) ? why[row] : UNGATED;
     }
-    const reports = list.length > 0 && list.every((p) => p.paid !== false && p.cost !== 'unknown');
+    const reports = list.length > 0 && list.every((p) => traitsOf(p).paid && traitsOf(p).cost !== 'unknown');
     if (reports && S.applies('no-cost', c.id)) rows['no-cost'] = REPORTS;
     const asks = {}, unset = {};
     if (c.id === 'claude-code') for (const row of CALL_ROWS) if (CLAUDE_ASKS.has(row)) asks[row] = CLAUDE_DECIDES; else unset[row] = CLAUDE_UNSET;
