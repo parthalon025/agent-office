@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import '../public/format.js';
 import '../public/vocab.js';
+import '../public/screen-kit.js';
 import '../public/lobby.js';
 import '../public/scene-host.js';
 

@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import '../public/vocab.js';
 import '../public/format.js';
+import '../public/screen-kit.js';
 import '../public/security.js';
 import { enforcement } from '../src/security.mjs';
 import { AGENTS } from '../src/providers/acp.mjs';

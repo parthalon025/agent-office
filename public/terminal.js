@@ -46,32 +46,8 @@
       .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '');
   }
   function oneLine(t) { return clean(t).replace(/\s+/g, ' ').trim(); }
-  function clipCols(t, n) { t = str(t); if (n <= 0) return ''; return t.length > n ? (n > 3 ? t.slice(0, n - 3) + '...' : t.slice(0, n)) : t; }
+  var Kit = window.OfficeScreenKit, wrapCols = Kit.wrapCols, clipCols = Kit.clipCols;
   function more(t, n) { t = str(t).replace(/\s+$/, ''); return t.length + 4 <= n ? t + ' ...' : t.slice(0, Math.max(0, n - 3)) + '...'; }
-  // Word wrap to a column count. first and rest are the prefixes of the first and the next rows;
-  // the leading spaces of the text stay on every row. A word longer than a row breaks.
-  function wrapCols(text, cols, first, rest) {
-    first = first || ''; rest = rest == null ? first : rest;
-    var lead = (str(text).match(/^ */) || [''])[0].slice(0, 12);
-    var words = str(text).trim().split(/\s+/), out = [];
-    var pre = rest + lead, line = first + lead, empty = true;
-    if (pre.length > cols - 4) pre = '';
-    if (line.length > cols - 4) line = first.length <= cols - 4 ? first : '';
-    for (var i = 0; i < words.length; i++) {
-      var w = words[i];
-      if (!w) continue;
-      var sep = empty ? '' : ' ';
-      if (line.length + sep.length + w.length <= cols) { line += sep + w; empty = false; continue; }
-      if (!empty) { out.push(line); line = pre; empty = true; }
-      while (line.length + w.length > cols) {
-        var room = Math.max(1, cols - line.length);
-        out.push(line + w.slice(0, room)); w = w.slice(room); line = pre;
-      }
-      if (w) { line += w; empty = false; }
-    }
-    if (!empty || !out.length) out.push(line);
-    return out;
-  }
   // Agents write Markdown. A terminal shows it as plain text: no marks, code indented.
   function md(text) {
     var out = [], fence = false;
@@ -312,27 +288,15 @@
       st: function (k) { return t['status-' + k] || t['status-resting']; }
     };
   }
-  function rr(c, x, y, w, h, r) {
-    r = Math.max(0, Math.min(r, w / 2, h / 2));
-    c.beginPath(); c.moveTo(x + r, y);
-    c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
-    c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
-  }
-  function fit(c, t, w) {
-    t = str(t);
-    if (w <= 0) return '';
-    if (c.measureText(t).width <= w) return t;
-    while (t.length > 1 && c.measureText(t + '...').width > w) t = t.slice(0, -1);
-    return t + '...';
-  }
+  function clipPx(c, t, w) { return w <= 0 ? '' : Kit.clip(c, str(t), w, '...'); }
   function ink(c, P, color, a) { c.fillStyle = color; c.globalAlpha = a; c.shadowColor = color; c.shadowBlur = P.glow; }
   function toneColor(p, tone) { return tone === 'prompt' || tone === 'ok' ? p.ok : tone === 'err' ? p.err : p.fg; }
   function toneAlpha(tone) { return tone === 'out' ? 0.82 : tone === 'muted' ? 0.5 : tone === 'tool' ? 0.95 : 1; }
   function meterColor(p, pct) { return pct >= 90 ? p.err : pct >= 70 ? p.wait : p.ok; }
   function meter(c, x, y, w, h, pct, p) {
     c.shadowBlur = 0;
-    c.globalAlpha = 0.14; c.fillStyle = p.fg; rr(c, x, y, w, h, h / 2); c.fill();
-    c.globalAlpha = 1; c.fillStyle = meterColor(p, pct); rr(c, x, y, Math.max(h, w * Math.min(100, pct) / 100), h, h / 2); c.fill();
+    c.globalAlpha = 0.14; c.fillStyle = p.fg; Kit.rr(c, x, y, w, h, h / 2); c.fill();
+    c.globalAlpha = 1; c.fillStyle = meterColor(p, pct); Kit.rr(c, x, y, Math.max(h, w * Math.min(100, pct) / 100), h, h / 2); c.fill();
   }
 
   // The glass: a deep ground from the screen token, darker at the edges, soft scan lines, and a faint
@@ -363,19 +327,19 @@
   function paintHead(c, W, v, P, p) {
     var y0 = 10, hh = P.headH - 16, cy = y0 + hh / 2;
     c.save(); c.textBaseline = 'middle';
-    c.globalAlpha = 0.08; c.fillStyle = p.fg; rr(c, 10, y0, W - 20, hh, 10); c.fill();
+    c.globalAlpha = 0.08; c.fillStyle = p.fg; Kit.rr(c, 10, y0, W - 20, hh, 10); c.fill();
     c.globalAlpha = 1; c.font = P.small;
     var ph = Math.min(hh - 6, 26), pw = c.measureText(v.word).width + 22, px = W - 18 - pw;
     // The pill is the status color mixed 55% into bubble, the word is scene-dark on it (4.5:1 in every theme, #118).
-    c.fillStyle = p.fg; rr(c, px, cy - ph / 2, pw, ph, ph / 2); c.fill();
-    c.globalAlpha = 0.55; c.fillStyle = p.st(v.key); rr(c, px, cy - ph / 2, pw, ph, ph / 2); c.fill();
+    c.fillStyle = p.fg; Kit.rr(c, px, cy - ph / 2, pw, ph, ph / 2); c.fill();
+    c.globalAlpha = 0.55; c.fillStyle = p.st(v.key); Kit.rr(c, px, cy - ph / 2, pw, ph, ph / 2); c.fill();
     c.globalAlpha = 1; c.fillStyle = p.bg; c.fillText(v.word, px + 11, cy + 1);
     var x = P.padX + 4, room = px - x - 14;
     c.font = P.head; ink(c, P, p.fg, 1);
-    var nm = fit(c, v.name, room);
+    var nm = clipPx(c, v.name, room);
     c.fillText(nm, x, cy + 1);
     var nw = c.measureText(nm).width;
-    if (v.sub && room - nw > 48) { c.font = P.small; ink(c, P, p.fg, 0.55); c.fillText(fit(c, v.sub, room - nw - 14), x + nw + 14, cy + 1); }
+    if (v.sub && room - nw > 48) { c.font = P.small; ink(c, P, p.fg, 0.55); c.fillText(clipPx(c, v.sub, room - nw - 14), x + nw + 14, cy + 1); }
     c.restore();
   }
   // The rows. Returns where the cursor goes, in canvas pixels.
@@ -414,7 +378,7 @@
     c.font = P.small; c.textBaseline = 'middle'; c.globalAlpha = 0.55;
     var rw = f.right ? c.measureText(f.right).width : 0;
     if (f.right) { c.textAlign = 'right'; c.fillText(f.right, W - P.padX, y); c.textAlign = 'left'; }
-    if (f.left) c.fillText(fit(c, f.left, W - 2 * P.padX - rw - 16), P.padX, y);
+    if (f.left) c.fillText(clipPx(c, f.left, W - 2 * P.padX - rw - 16), P.padX, y);
     if (f.pct != null) meter(c, P.padX, H - 8, W - 2 * P.padX, 3, f.pct, p);
     c.restore();
   }
@@ -428,9 +392,9 @@
       if (r[2] === 'bar') {
         var bw = Math.max(40, W - P.padX - vx - P.cw * 5 - 10);
         if (r[3] != null) meter(c, vx, cy - 5, bw, 10, r[3], p);
-        else { c.globalAlpha = 0.14; c.fillStyle = p.fg; rr(c, vx, cy - 5, bw, 10, 5); c.fill(); }
+        else { c.globalAlpha = 0.14; c.fillStyle = p.fg; Kit.rr(c, vx, cy - 5, bw, 10, 5); c.fill(); }
         ink(c, P, r[3] != null ? meterColor(p, r[3]) : p.fg, r[3] != null ? 1 : 0.5); c.fillText(r[1], vx + bw + 10, cy);
-      } else { ink(c, P, p.fg, 0.92); c.fillText(fit(c, r[1], W - P.padX - vx), vx, cy); }
+      } else { ink(c, P, p.fg, 0.92); c.fillText(clipPx(c, r[1], W - P.padX - vx), vx, cy); }
     }
     var td = S.todos || [];
     if (td.length && left > 1) {
@@ -451,10 +415,10 @@
   // Hover: a focus ring in the action color and a badge that says what a click does (look closer, or open).
   function paintHover(c, W, H, P, p, label) {
     c.save();
-    c.strokeStyle = p.accent; c.lineWidth = 6; rr(c, 5, 5, W - 10, H - 10, 15); c.stroke();
+    c.strokeStyle = p.accent; c.lineWidth = 6; Kit.rr(c, 5, 5, W - 10, H - 10, 15); c.stroke();
     c.font = P.small; c.textBaseline = 'middle';
     var bh = 30, bw = c.measureText(label).width + 28, bx = W - 16 - bw, by = H - (P.footH || 0) - bh - 12;
-    c.fillStyle = p.accent; rr(c, bx, by, bw, bh, bh / 2); c.fill();
+    c.fillStyle = p.accent; Kit.rr(c, bx, by, bw, bh, bh / 2); c.fill();
     c.fillStyle = p.onAccent; c.fillText(label, bx + 14, by + bh / 2 + 1);
     c.restore();
   }
@@ -464,7 +428,7 @@
     c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1; c.shadowBlur = 0;
     c.clearRect(0, 0, W, H);
     c.save();
-    rr(c, 2, 2, W - 4, H - 4, 18); c.clip();   // rounded glass; the corners stay dark
+    Kit.rr(c, 2, 2, W - 4, H - 4, 18); c.clip();   // rounded glass; the corners stay dark
     paintGround(c, W, H, p, v.key);
     paintHead(c, W, v, P, p);
     if (v.k === 'term') { cur = paintLines(c, v, P, p); paintFoot(c, W, H, v, P, p); }

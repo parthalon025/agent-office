@@ -20,7 +20,7 @@
    It never moves a bot. Colors come from DS tokens (K.tok). */
 (function (root) {
   'use strict';
-  var V = root.OfficeVocab, F = root.OfficeFormat;
+  var V = root.OfficeVocab, F = root.OfficeFormat, Kit = root.OfficeScreenKit;
 
   // ---------- pure ----------
   // The lobby tour: four stops, once per browser, replayed from the Reception. key: what the camera looks at.
@@ -120,19 +120,6 @@
     var desks = [], boards = [], plates = [], props = [];   // { mesh, ... } of the shown floor; a desk also has its monitor (screen) when it has one
     var paintedSig = {};
 
-    function newTex(w, h) {
-      var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
-      var tex = new T.CanvasTexture(cv); tex.encoding = T.sRGBEncoding; tex.anisotropy = 4;
-      return { canvas: cv, tex: tex };
-    }
-    function font(px, weight, mono) { var f = K.f || {}; return (weight || 500) + ' ' + px + 'px ' + (mono ? f.mono || 'monospace' : f.sans || 'sans-serif'); }
-    function wrap(c, text, max) {
-      var out = [], line = '';
-      String(text || '').split(/\s+/).forEach(function (wd) { var t = line ? line + ' ' + wd : wd; if (line && c.measureText(t).width > max) { out.push(line); line = wd; } else line = t; });
-      if (line) out.push(line);
-      return out.map(function (t) { return fit(c, t, max); });
-    }
-    function fit(c, text, max) { var t = String(text || ''); if (c.measureText(t).width <= max) return t; while (t.length > 1 && c.measureText(t + '…').width > max) t = t.slice(0, -1); return t + '…'; }
 
     // ----- paint -----
     // The faces and inks are FACES (pure, checked for contrast): paper for the memo and the directory, the reverse for a nameplate.
@@ -142,24 +129,24 @@
       c.fillStyle = tok[F0.band]; c.fillRect(0, 0, w, 14);
       c.strokeStyle = tok[F0.ink]; c.lineWidth = 6; c.strokeRect(3, 3, w - 6, h - 6);
       c.fillStyle = tok[F0.ink]; c.textBaseline = 'top';
-      c.font = font(46, 600); c.fillText(fit(c, m.title, w - 64), 32, 40);
-      c.font = font(30, 500);
+      c.font = Kit.font(K, 46, 600); c.fillText(Kit.clip(c, m.title, w - 64), 32, 40);
+      c.font = Kit.font(K, 30, 500);
       var y = 112;
-      m.lines.forEach(function (l) { wrap(c, l, w - 64).forEach(function (t) { if (y < h - 40) c.fillText(t, 32, y); y += 40; }); y += 6; });
+      m.lines.forEach(function (l) { Kit.wrap(c, l, w - 64, { clip: '…' }).forEach(function (t) { if (y < h - 40) c.fillText(t, 32, y); y += 40; }); y += 6; });
     }
     function paintDirectory(c, w, h, rows) {
       var tok = K.tok, F0 = FACES.directory, ink = tok[F0.ink];
       c.fillStyle = tok[F0.face]; c.fillRect(0, 0, w, h);
       c.strokeStyle = ink; c.lineWidth = 14; c.strokeRect(7, 7, w - 14, h - 14);   // a frame, so the light board reads on a light wall
       c.fillStyle = ink; c.textBaseline = 'top';
-      c.font = font(44, 600); c.fillText('Directory', 32, 26);
+      c.font = Kit.font(K, 44, 600); c.fillText('Directory', 32, 26);
       var y = 92, wing = null, lh = Math.max(26, Math.min(40, Math.floor((h - 110) / Math.max(1, rows.length * 1.35))));
       rows.forEach(function (r) {
         if (y > h - lh) return;
-        if (r.wing && r.wing !== wing) { wing = r.wing; c.globalAlpha = F0.wingAlpha; c.font = font(Math.round(lh * 0.62), 600); c.fillText(r.wing.toUpperCase(), 32, y); c.globalAlpha = 1; y += Math.round(lh * 0.8); }
+        if (r.wing && r.wing !== wing) { wing = r.wing; c.globalAlpha = F0.wingAlpha; c.font = Kit.font(K, Math.round(lh * 0.62), 600); c.fillText(r.wing.toUpperCase(), 32, y); c.globalAlpha = 1; y += Math.round(lh * 0.8); }
         if (r.state) { c.fillStyle = dotOf(tok, r.state); c.beginPath(); c.arc(44, y + lh * 0.42, lh * 0.22, 0, 7); c.fill(); }
-        c.fillStyle = ink; c.font = font(Math.round(lh * 0.75), 600); c.fillText(fit(c, r.id + '  ' + r.name, w * 0.42), 70, y);
-        c.font = font(Math.round(lh * 0.66), 400); c.fillText(fit(c, r.line, w * 0.5), w * 0.47, y + 2);
+        c.fillStyle = ink; c.font = Kit.font(K, Math.round(lh * 0.75), 600); c.fillText(Kit.clip(c, r.id + '  ' + r.name, w * 0.42), 70, y);
+        c.font = Kit.font(K, Math.round(lh * 0.66), 400); c.fillText(Kit.clip(c, r.line, w * 0.5), w * 0.47, y + 2);
         y += lh;
       });
     }
@@ -172,27 +159,27 @@
       c.fillStyle = tok[F0.face]; c.fillRect(0, 0, w, h);
       c.strokeStyle = ink; c.lineWidth = 14; c.strokeRect(7, 7, w - 14, h - 14);
       c.fillStyle = ink; c.textBaseline = 'top';
-      c.font = font(44, 600); c.fillText('Pipeline', 32, 26);
+      c.font = Kit.font(K, 44, 600); c.fillText('Pipeline', 32, 26);
       var top = 92, foot = p.foot ? 44 : 0, lh = Math.max(24, Math.floor((h - top - foot - 24) / p.rows.length)), max = Math.max(1, p.rows.reduce(function (m, r) { return Math.max(m, r.count); }, 1));
       p.rows.forEach(function (r, i) {
         var y = top + i * lh, none = r.text === 'No data';
-        c.globalAlpha = none ? F0.mutedAlpha : 1; c.font = font(Math.round(lh * 0.6), 600); c.fillText(r.name, 32, y);
-        if (none) { c.font = font(Math.round(lh * 0.5), 500, true); c.fillText(r.text, 280, y + 2); }
+        c.globalAlpha = none ? F0.mutedAlpha : 1; c.font = Kit.font(K, Math.round(lh * 0.6), 600); c.fillText(r.name, 32, y);
+        if (none) { c.font = Kit.font(K, Math.round(lh * 0.5), 500, true); c.fillText(r.text, 280, y + 2); }
         else {
           c.globalAlpha = F0.barAlpha; var bw = Math.round((w - 400) * r.count / max);
           if (bw > 0) c.fillRect(280, y + lh * 0.12, bw, lh * 0.5);
-          c.globalAlpha = 1; c.font = font(Math.round(lh * 0.55), 600, true); c.fillText(r.text, 290 + bw, y);
+          c.globalAlpha = 1; c.font = Kit.font(K, Math.round(lh * 0.55), 600, true); c.fillText(r.text, 290 + bw, y);
         }
         c.globalAlpha = 1;
       });
-      if (p.foot) { c.globalAlpha = F0.mutedAlpha; c.font = font(26, 500); c.fillText(fit(c, p.foot, w - 64), 32, h - 56); c.globalAlpha = 1; }
+      if (p.foot) { c.globalAlpha = F0.mutedAlpha; c.font = Kit.font(K, 26, 500); c.fillText(Kit.clip(c, p.foot, w - 64), 32, h - 56); c.globalAlpha = 1; }
     }
     function paintPlate(c, w, h, p, box, sz) {
       var tok = K.tok, F0 = FACES.plate, k = PLATE_K, pad = PLATE_PAD * k;
       c.fillStyle = tok[F0.face]; c.fillRect(0, 0, w, h);
       c.fillStyle = tok[F0.ink]; c.textBaseline = 'middle';
-      c.font = font(sz.body * k, 600); c.fillText(fit(c, p.name, w - 2 * pad), pad, box.nameY * k);
-      if (p.detail) { c.globalAlpha = F0.detailAlpha; c.font = font(sz.caption * k, 500, true); c.fillText(fit(c, p.detail, w - 2 * pad), pad, box.detailY * k); c.globalAlpha = 1; }
+      c.font = Kit.font(K, sz.body * k, 600); c.fillText(Kit.clip(c, p.name, w - 2 * pad), pad, box.nameY * k);
+      if (p.detail) { c.globalAlpha = F0.detailAlpha; c.font = Kit.font(K, sz.caption * k, 500, true); c.fillText(Kit.clip(c, p.detail, w - 2 * pad), pad, box.detailY * k); c.globalAlpha = 1; }
     }
     function repaint(b, sig, draw) {
       if (paintedSig[b.id] === sig && b.tex.image === b.canvas) return;
@@ -203,7 +190,7 @@
 
     // ----- scan the shown floor: open desks, the memo and the directory, the bots' desks -----
     function adopt(mesh, w, h, kind, roomId) {
-      var t = newTex(w, h), mt = mesh.material;
+      var t = Kit.newTex(w, h), mt = mesh.material;
       if (mt.map && mt.map !== t.tex) mt.map.dispose();
       mt.map = t.tex; if (mt.emissiveMap !== undefined) { mt.emissiveMap = t.tex; mt.emissive = new T.Color(0xffffff); mt.emissiveIntensity = 0.25; }
       mt.needsUpdate = true;
@@ -237,7 +224,7 @@
       bots.forEach(function (b) {
         var g = host.floorOf(b.g);
         if (!g || g !== fg || plates.some(function (p) { return p.bot === b.name; })) return;
-        var t = newTex(8, 8);
+        var t = Kit.newTex(8, 8);
         var m = new T.Sprite(new T.SpriteMaterial({ map: t.tex, transparent: true, depthTest: false, depthWrite: false }));
         m.material.fog = false; m.material.toneMapped = false; m.renderOrder = 900; m.layers.set(1);   // like the hint: no bloom, no light on it
         m.userData.noNav = 1; m.name = 'nameplate'; m.center.set(0, 0);   // its lower left corner at the desk's right edge
@@ -276,11 +263,11 @@
         var pl = plateLines(p.bot, o.session ? o.session(p.bot) : null), sig = JSON.stringify(pl) + sz.body + '/' + sz.caption;
         if (paintedSig[p.id] === sig && p.tex.image === p.canvas) return;
         var c0 = p.canvas.getContext('2d');
-        c0.font = font(sz.body, 600); var nw = c0.measureText(pl.name).width;
-        c0.font = font(sz.caption, 500, true); var dw = pl.detail ? c0.measureText(pl.detail).width : 0;
+        c0.font = Kit.font(K, sz.body, 600); var nw = c0.measureText(pl.name).width;
+        c0.font = Kit.font(K, sz.caption, 500, true); var dw = pl.detail ? c0.measureText(pl.detail).width : 0;
         var box = plateBox(nw, dw, sz.body, sz.caption, PLATE_PAD, PLATE_MAX), W = Math.round(box.w * PLATE_K), H = Math.round(box.h * PLATE_K);
         if (p.canvas.width !== W || p.canvas.height !== H) {   // a new size needs a new texture: the old one was sent at its old size
-          var nt = newTex(W, H); p.tex.dispose(); p.tex = nt.tex; p.canvas = nt.canvas; p.mesh.material.map = nt.tex; p.mesh.material.needsUpdate = true;
+          var nt = Kit.newTex(W, H); p.tex.dispose(); p.tex = nt.tex; p.canvas = nt.canvas; p.mesh.material.map = nt.tex; p.mesh.material.needsUpdate = true;
         }
         p.box = box;
         paintedSig[p.id] = sig;

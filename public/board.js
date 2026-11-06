@@ -107,29 +107,8 @@
   }
 
   // ---------- drawing helpers (canvas; colors come from tokens) ----------
-  function mix(a, b, t) { try { return '#' + new T.Color(a).lerp(new T.Color(b), t).getHexString(); } catch (e) { return a; } }
-  function rr(c, x, y, w, h, r) {
-    r = Math.min(r, w / 2, h / 2);
-    c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
-  }
-  function clipW(c, text, maxW) {
-    text = String(text || '');
-    if (c.measureText(text).width <= maxW) return text;
-    while (text.length > 1 && c.measureText(text + '…').width > maxW) text = text.slice(0, -1);
-    return text + '…';
-  }
-  function wrap(c, text, maxW) {
-    var out = [];
-    String(text).split(/\n/).forEach(function (para) {
-      var line = '';
-      para.split(/\s+/).forEach(function (w) {
-        var t = line ? line + ' ' + w : w;
-        if (c.measureText(t).width > maxW && line) { out.push(line); line = w; } else line = t;
-      });
-      out.push(line);
-    });
-    return out;
-  }
+  var Kit = window.OfficeScreenKit, mix = Kit.mix, rr = Kit.rr, clipW = Kit.clip;
+  var WRAP = { para: true };
   function seeded(seed) { var s = seed; return function () { s = (s * 9301 + 49297) % 233280; return s / 233280; }; }
 
   // ---------- the blackboard: slate, wood frame, chalk ----------
@@ -172,7 +151,7 @@
     // pinned note from an agent: a paper card, so the text is dark in every theme (ink is light in the dark themes)
     if (d.pin) {
       c.font = '500 24px ' + sans;
-      var pw = W2 - 88, lines = wrap(c, 'Note from ' + d.pin.by + ': ' + d.pin.text, pw);
+      var pw = W2 - 88, lines = Kit.wrap(c, 'Note from ' + d.pin.by + ': ' + d.pin.text, pw, WRAP);
       var msg = lines.slice(0, 2).map(function (l, i) { return clipW(c, i === 1 && lines.length > 2 ? l + '…' : l, pw); }), ch = 26 + msg.length * 30;
       // in a dark theme the composer blooms a lit white card and the text washes out: a shade darker keeps it sharp
       c.fillStyle = dark ? mix(col('bubble'), slate, 0.3) : col('bubble'); c.globalAlpha = 0.96; rr(c, X0, y, W2, ch, 12); c.fill(); c.globalAlpha = 1;
@@ -283,7 +262,7 @@
     c.stroke(); c.globalAlpha = 1;
     if (!String(text || '').trim()) { c.fillStyle = mix(col('scene-dark'), face, 0.4); c.font = '500 30px ' + sans; c.fillText('Click to write a reminder.', 52, 128); return; }
     c.fillStyle = ink; c.font = '500 32px ' + sans;
-    wrap(c, text, w - 120).slice(0, 10).forEach(function (l, i) { c.globalAlpha = 0.95; c.fillText(l, 52, 124 + i * 40); c.globalAlpha = 0.25; c.fillText(l, 52.7, 124.6 + i * 40); c.globalAlpha = 1; });
+    Kit.wrap(c, text, w - 120, WRAP).slice(0, 10).forEach(function (l, i) { c.globalAlpha = 0.95; c.fillText(l, 52, 124 + i * 40); c.globalAlpha = 0.25; c.fillText(l, 52.7, 124.6 + i * 40); c.globalAlpha = 1; });
   }
 
   // ---------- the stats display ----------
@@ -407,11 +386,6 @@
     // The lamp light: no token names a lamp color, so take a warm tint from the tokens.
     function warm() { return new T.Color(tk('status-waiting')).lerp(new T.Color(tk('bubble')), 0.55); }
     function noNav(obj) { obj.traverse(function (m) { m.userData.noNav = 1; }); return obj; }
-    function newTex(w, h) {
-      var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
-      var tex = new T.CanvasTexture(cv); tex.encoding = T.sRGBEncoding; tex.anisotropy = 4;
-      return { canvas: cv, tex: tex };
-    }
     function plane(w, h, tex, emissive, name) {
       var m = new T.Mesh(new T.PlaneGeometry(w, h), new T.MeshStandardMaterial({ map: tex, roughness: 1, alphaTest: 0.5, emissive: new T.Color(0xffffff), emissiveMap: tex, emissiveIntensity: emissive }));
       m.userData.noNav = 1; m.castShadow = false; m.name = name || '';
@@ -471,7 +445,7 @@
       var added = [], items = [], raised = raiseRoom(rg);   // raised: [mesh, y, scale y] to put back on dispose
 
       // the blackboard: the engine's board gets our picture (its own picture is freed)
-      var t = newTex(1024, 640), mt = m.material;
+      var t = Kit.newTex(1024, 640), mt = m.material;
       var orig = { map: mt.map, emissive: mt.emissive ? mt.emissive.clone() : null, emissiveMap: mt.emissiveMap, ei: mt.emissiveIntensity };
       if (orig.map && orig.map !== t.tex) orig.map.dispose();
       mt.map = t.tex; mt.emissive = new T.Color(0xffffff); mt.emissiveMap = t.tex; mt.emissiveIntensity = 0.55; mt.needsUpdate = true;
@@ -488,7 +462,7 @@
       noNav(ledge);
 
       // the whiteboard left of the blackboard, on the same wall, clear of the engine's clock
-      var wt = newTex(800, 560);
+      var wt = Kit.newTex(800, 560);
       var nm = plane(3.2, 2.24, wt.tex, 0.22, 'notes');
       nm.position.set(m.position.x - 3.9, m.position.y, m.position.z + 0.005);
       rg.add(nm); added.push(nm);
@@ -508,7 +482,7 @@
       var lw = new T.Group(); lw.position.set(leftX + 0.02, 0, 0); lw.rotation.y = Math.PI / 2; rg.add(lw); added.push(lw);   // local x runs along the wall, toward the back
       // stats display: above the front plant on a solid wall; under the rail of a 3-high glass divider
       var solid = rg.children.some(isSideWall);
-      var sw = 1.5, sh = 1.95, s = newTex(520, Math.round(520 * sh / sw));
+      var sw = 1.5, sh = 1.95, s = Kit.newTex(520, Math.round(520 * sh / sw));
       var sm = plane(sw, sh, s.tex, 0.6, 'stats'); sm.position.set(-4.9, solid ? 2.7 : 1.95, 0.03); lw.add(sm);
       var sd = { kind: 'stats', mesh: sm, roomId: id, tex: s.tex, canvas: s.canvas, sig: null, mat: sm.material, base: 0.6, hov: 0.95, g: 0, tgt: 0, hit: [sm], hint: 'Show room stats', own: [sm.material] };
       sm.userData.item = sd; statsList.push(sd); items.push(sd);
@@ -527,7 +501,7 @@
       box(DW - 0.4, 0.8, 0.02, leafMat, (DW - 0.04) / 2, 0.6, 0.045, pivot).castShadow = false;
       box(DW - 0.4, 0.7, 0.02, leafMat, (DW - 0.04) / 2, 1.5, 0.045, pivot).castShadow = false;
       var knob = new T.Mesh(new T.SphereGeometry(0.065, 12, 10), themed('scene-metal')); knob.position.set(DW - 0.2, 1.0, 0.1); knob.userData.noNav = 1; pivot.add(knob);
-      var sg = newTex(600, 180), sgm = plane(1.1, 0.33, sg.tex, 0.85, 'doorsign'); sgm.position.set(0, y0 + DH + 0.38, 0.02); dg.add(sgm); hit.push(sgm);
+      var sg = Kit.newTex(600, 180), sgm = plane(1.1, 0.33, sg.tex, 0.85, 'doorsign'); sgm.position.set(0, y0 + DH + 0.38, 0.02); dg.add(sgm); hit.push(sgm);
       // a still ring round the doorway: with reduced motion it says "someone came or left" in place of the swing and the glow
       var ringMat = new T.MeshBasicMaterial({ color: new T.Color(tk('status-working')) }), ring = new T.Group(); ring.visible = false; dg.add(ring);
       [[0, y0 + DH + 0.3, DW + 0.5, 0.08], [0, y0 - 0.02, DW + 0.5, 0.08]].forEach(function (r) { box(r[2], r[3], 0.04, ringMat, r[0], r[1], 0.12, ring).castShadow = false; });

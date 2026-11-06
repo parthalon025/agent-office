@@ -164,7 +164,7 @@ test('the City label draws on bg, not a bubble', () => {
 // the table the page paints with (OfficeSecurity.pure.TONES, resolved by toneColors as THREE.Color.lerp does in three r147:
 // sRGB, legacy color management), so a new tone or a new pair cannot slip past.
 test('Security room wall: every canvas text reads at 4.5:1 on the fill under it, in every theme', async () => {
-  await import('../public/vocab.js'); await import('../public/format.js'); await import('../public/security.js');
+  await import('../public/vocab.js'); await import('../public/format.js'); await import('../public/screen-kit.js'); await import('../public/security.js');
   const P = globalThis.OfficeSecurity.pure;
   const NS = { reason: 'The office has no provider for this agent kind yet. The rule applies when it has one.', rows: {} };
   const enforce = { 'claude-code': { reason: '', rows: {}, asks: { shell: 'The agent asks only when its own allow rules and permission mode say so.' }, unset: { 'read-inside': 'The agent decides until you click the cell: then the office makes it ask.' } },
@@ -226,7 +226,7 @@ test('door sign count: bg on status-working-text, 4.5:1', () => each((T, th) => 
 // alpha they are painted at; a directory state dot at 3:1 on the paper (its row also says the state in words). The paint code
 // takes every color from FACES, so these are the pairs on screen.
 test('lobby: the memo, the directory board and the nameplate read in every theme (lobby.js FACES)', async () => {
-  await import('../public/vocab.js'); await import('../public/format.js'); await import('../public/lobby.js');
+  await import('../public/vocab.js'); await import('../public/format.js'); await import('../public/screen-kit.js'); await import('../public/lobby.js');
   const L = globalThis.OfficeLobby.pure, F = L.FACES;
   each((T, th) => {
     atLeast('memo text', 4.5, T(F.memo.ink), T(F.memo.face), th);
@@ -254,7 +254,7 @@ test('lobby: the memo, the directory board and the nameplate read in every theme
 // #90: the desk objects' painted faces (public/desk.js FACES): the approval paper, its Approve stamp, the question note and the
 // pause key. Every text at 4.5:1 on its face, the bands (the strip on top of a paper) at 3:1.
 test('desk: the approval paper, the stamps, the question note and the pause key read in every theme (desk.js FACES)', async () => {
-  await import('../public/scene-host.js'); await import('../public/desk.js');
+  await import('../public/scene-host.js'); await import('../public/screen-kit.js'); await import('../public/desk.js');
   const F = globalThis.OfficeDesk.pure.FACES;
   each((T, th) => {
     atLeast('paper text', 4.5, T(F.paper.ink), T(F.paper.face), th);
