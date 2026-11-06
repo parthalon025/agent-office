@@ -1,4 +1,4 @@
-// Rituals on a real server.mjs run from a throwaway copy (#151): the recap and away route, Focus mode, and the stand-up line at an
+// Rituals through the office core, in process (#151): the recap and away route, Focus mode, and the stand-up line at an
 // agent's first turn of the day (a fake local model records the prompt). Windows only (sessions open through /api/open).
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -6,27 +6,22 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { startFakeOpenAI } from './fixtures/fake-openai.mjs';
-import { pageFile } from '../src/auth.mjs';
-import { startOnFreePort, until as untilTrue, copyOffice } from './fixtures/office-server.mjs';
-import { officeFiles } from '../src/files.mjs';
+import { startInProcess, removeTree } from './fixtures/office-inproc.mjs';
+import { until as untilTrue } from './fixtures/office-server.mjs';
 import { normPath } from '../src/place.mjs';
 import * as git from '../src/git.mjs';
 import * as launch from '../src/launch.mjs';
 
-const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SKIP = process.platform !== 'win32' ? 'opening sessions is only implemented for Windows' : false;
 const GIT = launch.resolveExe('git');
 const IDENT = ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false'];
 const plain = (cwd, ...a) => execFileSync(GIT, [...IDENT, ...a], { cwd, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-let base, repo, child, port, pageToken, fake, copy;
+let base, repo, rig, fake;
 
-const until = (fn, what) => untilTrue(fn, what, { log: () => child?.out() });
-const call = (route, body) => fetch(`http://127.0.0.1:${port}${route}`, {
-  method: 'POST', headers: { 'content-type': 'application/json', 'x-office-token': pageToken }, body: JSON.stringify(body || {}),
-}).then(async (r) => ({ status: r.status, json: await r.json().catch(() => ({})) }));
-const get = (route) => fetch(`http://127.0.0.1:${port}${route}`, { headers: { 'x-office-token': pageToken } }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => ({})) }));
+const until = (fn, what) => untilTrue(fn, what, { ms: 30000 });
+const call = (route, body) => rig.call(route, body || {});
+const get = (route) => rig.call(route);
 const userTexts = () => fake.requests.map((q) => String([...q.messages].reverse().find((m) => m.role === 'user')?.content || ''));
 
 before(async () => {
@@ -37,25 +32,17 @@ before(async () => {
   plain(repo, 'init', '-b', 'main');
   fs.writeFileSync(path.join(repo, 'a.txt'), 'a');
   plain(repo, 'add', '-A'); plain(repo, 'commit', '-m', 'one');
-  copy = path.join(base, 'office');
-  fs.mkdirSync(copy);
-  copyOffice(copy);
   fake = await startFakeOpenAI({ script: [{ text: 'ok' }], models: ['fake-model'] });
-  const env = { ...process.env, OFFICE_HOOKS: 'command', OFFICE_OLLAMA_URL: fake.url, OFFICE_RATE_FILE: path.join(base, 'no-rate.json'),
-    OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local') };
   const merges = [{ key: `${normPath(repo)}#4`, repo: normPath(repo), number: 4, title: 'Add the thing', head: 'agent/x', at: Date.now() - 3600000 }];
-  const started = await startOnFreePort(copy, env, { prepare: (p) => fs.writeFileSync(officeFiles(copy, p).state, JSON.stringify({ recent: [repo], merges })) });
-  child = started.office;
-  port = started.port;
-  pageToken = JSON.parse(fs.readFileSync(pageFile(started.env, port), 'utf8')).token;
+  rig = await startInProcess({ dir: base, env: { OFFICE_OLLAMA_URL: fake.url }, state: { recent: [repo], merges } });
   await until(async () => (await call('/api/branches', { repo })).status === 200, 'the repository to be known');
 });
 after(async () => {
   try {
-    if (child) await child.stop();
+    if (rig) rig.stop();
     if (fake) await fake.close();
   } finally {
-    if (base) try { fs.rmSync(base, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }); } catch { /* a temp folder may stay */ }
+    if (base) await removeTree(base);
   }
 });
 

@@ -48,7 +48,7 @@ test('the page files load in order before chat-extras.js, and the server serves 
   at.forEach((n, i) => assert.ok(n >= 0, PAGE_FILES[i] + ' is in index.html'));
   assert.deepEqual([...at].sort((a, b) => a - b), at, 'dependencies load first: the core, the dialogs, the panels, needs, and office.js last');
   assert.ok(at[at.length - 1] < html.indexOf('<script src="/chat-extras.js"></script>'));
-  const server = readFileSync(join(pub, '..', 'src', 'server.mjs'), 'utf8');
+  const server = readFileSync(join(pub, '..', 'src', 'office-core.mjs'), 'utf8');
   for (const f of PAGE_FILES) assert.ok(server.includes("['/" + f + "', 'public/" + f + "']"), f + ' is in STATIC_FILES');
 });
 test('office.js: the scene height follows the window, and no CSS overrides the DS height (#55)', () => {
