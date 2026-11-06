@@ -1213,7 +1213,7 @@
     return h('aside', { className: 'board-panel', 'aria-label': 'Board of ' + d.room },
       h(A.Panel, { title: d.room + (d.branch ? ' · ' + d.branch : ''), count: plural(d.sessions.length, 'session', 'sessions') },
         h('div', { className: 'board-b' },
-          (p.sessions || []).map(function (x) { return h(RequestBar, { key: x.uid, session: x, showName: true, toast: p.toast }); }),
+          h(NeedsButton, { count: askCount(p.sessions), onGo: p.onGo }),
           h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onClose }, 'Back to the room'), h('span', { className: 'note' }, 'Esc also goes back.')),
           d.pin ? h('p', { className: 'note board-pin' }, 'Note from ' + d.pin.by + ': ' + d.pin.text) : null,
           d.todos.length ? h(A.PlanCard, { title: 'To do', goal: d.goal ? clip(d.goal, 120) : undefined, steps: d.todos.map(function (t, i) { return { id: 't' + i, text: t.text, status: window.OfficeVocab.todoStatus(t) }; }) })
@@ -1241,7 +1241,7 @@
     return h('aside', { className: 'board-panel', 'aria-label': 'Stats of ' + ((info.place && info.place.roomName) || 'this room') },
       h(A.Panel, { title: ((info.place && info.place.roomName) || 'Room') + ' · stats', count: plural(v.sessions, 'session', 'sessions') },
         h('div', { className: 'board-b' },
-          (info.sessions || []).concat(p.extra || []).map(function (x) { return h(RequestBar, { key: x.uid, session: x, showName: true, toast: p.toast }); }),
+          h(NeedsButton, { count: askCount((info.sessions || []).concat(p.extra || [])), onGo: p.onGo }),
           h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onClose }, 'Back to the room'), h('span', { className: 'note' }, 'Esc also goes back.')),
           h('ul', { className: 'stats-list' },
             row('Working', String(v.working)), row('Needs you', String(v.waiting)), row('Tool calls', String(v.toolCalls)),
@@ -1424,31 +1424,13 @@
           h(A.AddButton, { label: 'Add an agent', onClick: function () { setErr(''); setAdd({ name: '', provider: DEFAULT_KIND, model: '', prompt: '' }); } }))));
   }
 
-  // ---------- requests of one session: Approve, Decline, Yes and No ----------
-  // The desk screen (pinned) and the room panels show this bar. They hide the DS chat (one panel at a time), so the
-  // answer must never need the chat. It uses the same answer route as the DS card (/api/answer).
-  function RequestBar(p) {
-    var an = useState(''), answering = an[0], setAnswering = an[1];   // the request being answered
-    var s = p.session, reqs = window.OfficeVocab.requests(s), who = s ? s.name : p.name;
-    if (!reqs.length) return null;
-    function answerReq(r, allow, always) {
-      setAnswering(r.id);
-      api('/api/answer', { id: r.id, allow: allow, always: !!always }).then(function () {
-        setAnswering('');
-        if (always && p.toast) p.toast({ tone: 'success', title: who, text: 'Allowed from now on: ' + r.always });
-      }, function (x) { setAnswering(''); if (p.toast) p.toast({ tone: 'error', title: who, text: x.message }); });
-    }
-    return h('div', { className: 'asks', role: 'group', 'aria-label': 'Requests of ' + who },
-      reqs.map(function (r) {
-        var q = r.kind === 'question', busyR = answering === r.id;
-        return h('div', { key: r.id, className: 'ask' + (r.risk === 'high' ? ' is-high' : ''), role: 'group', 'aria-label': q ? 'Question' : 'Request' },
-          h('div', { className: 'ask-t' }, r.risk ? h(A.RiskBadge, { risk: r.risk }) : null, p.showName ? h('b', null, who) : null, h('span', { className: 'ask-x' }, r.text)),
-          r.reason ? h('p', { className: 'ask-why' }, h('em', null, 'Reason: '), r.reason) : null,
-          h('div', { className: 'ask-a' },
-            h(A.Button, { variant: 'emphasis', icon: 'approve', loading: busyR, onClick: function () { answerReq(r, true, false); } }, q ? 'Yes' : 'Approve'),
-            h(A.Button, { variant: 'quiet', icon: 'decline', disabled: busyR, onClick: function () { answerReq(r, false, false); } }, q ? 'No' : 'Decline'),
-            !q && r.always && r.risk !== 'high' ? h(A.Button, { variant: 'quiet', disabled: busyR, title: 'Approve and allow this from now on: ' + r.always, onClick: function () { answerReq(r, true, true); } }, 'Always allow') : null));
-      }));
+  // ---------- requests: the paper and the note on the desk (#90, desk.js) ----------
+  // A request is answered on the desk, in the scene: a permission request is a paper with Approve and Decline stamps, a question is a
+  // note with a text field. The panels and the look bar carry one button, which goes to the oldest request.
+  function askCount(list) { var n = 0; (list || []).forEach(function (x) { n += window.OfficeVocab.requests(x).length; }); return n; }
+  function NeedsButton(p) {
+    if (!(p.count > 0)) return null;
+    return h('div', { className: 'needs-go' }, h(A.Button, { variant: 'emphasis', icon: 'waiting', onClick: p.onGo }, 'Needs you · ' + p.count + '. Go to the request'));
   }
 
   // ---------- a screen in the room, looked at up close (scene-host.js focus) ----------
@@ -1469,7 +1451,7 @@
   function LookBar(p) {
     var ref = React.useRef(null);
     var ps = useState(null), pos = ps[0], setPos = ps[1];
-    var asks = p.asks || [], askKey = asks.map(function (s) { return s.uid + ':' + window.OfficeVocab.requests(s).length; }).join('|');
+    var asks = p.asks || [], askKey = String(askCount(asks));
     var placeRef = React.useRef(null);
     React.useLayoutEffect(function () {
       function place() {
@@ -1489,7 +1471,7 @@
     useEffect(function () { if (pos) p.onPlaced(); }, [pos]);
     // A screen with no second step (a Security room screen: its cells take the clicks) has the Back button only.
     return h('div', { ref: ref, className: 'look-bar', role: 'group', 'aria-label': 'Screen in view', style: pos ? { left: pos.left, top: pos.top } : { visibility: 'hidden' } },
-      asks.map(function (s) { return h(RequestBar, { key: s.uid, session: s, showName: true, toast: p.toast }); }),
+      h(NeedsButton, { count: askCount(asks), onGo: p.onGo }),
       h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onBack }, 'Back to the room'),
       p.verb ? h(A.Button, { variant: 'quiet', icon: p.icon, onClick: p.onOpen }, p.verb) : null);
   }
@@ -1573,25 +1555,22 @@
         h(A.Composer, { id: 'pin-chat-input', placeholder: 'Message ' + p.name, label: 'Message ' + p.name, onSend: send, attach: true })));
   }
 
-  // The desk monitor of one session, pinned (#89): its chat, its terminal and the timeline of its tool calls, the open
-  // requests (RequestBar, so an approval never hides behind the hidden HUD chat), Export, Stop turn and Back.
-  // The requests come first, right under the head (review 89): no approval can hide. On a small screen the head takes one
-  // row (the bezel shows its icon and count, Stop turn and Export their icon), and while a request is open the bar takes the
-  // whole screen under the head and the tabs wait (has-asks), so Approve and Decline are always on the screen.
+  // The desk monitor of one session, pinned (#89): its chat, its terminal and the timeline of its tool calls, Export, Stop turn
+  // and Back. The requests are on the desk (the paper and the note, desk.js); the bezel count in the head goes to the oldest one.
+  // On a small screen the head takes one row (the bezel shows its icon and count, Stop turn and Export their icon).
   var DESK_TABS = [{ id: 'chat', label: 'Chat', icon: 'chat' }, { id: 'terminal', label: 'Terminal', icon: 'terminal' }, { id: 'timeline', label: 'Timeline', icon: 'trace' }];
   function DeskScreen(p) {
     var snap = useSnapshot(), kinds = useKinds();
     var s = snap ? snap.sessions.filter(function (x) { return x.uid === p.uid; })[0] : null;
     var ref = React.useRef(null);
     var small = usePinBox(p.host, ref, putBox);
-    usePinFocus(p.shown, function () { var el = ref.current; return el && (el.querySelector('.asks button') || el.querySelector('#pin-chat-input, .term-field') || el.querySelector('.ao-tab[aria-selected="true"]')); });
+    usePinFocus(p.shown, function () { var el = ref.current; return el && (el.querySelector('#pin-chat-input, .term-field') || el.querySelector('.ao-tab[aria-selected="true"]')); });
     var working = s && (s.status === 'working' || s.status === 'waiting');
-    var asks = window.OfficeVocab.requests(s).length > 0;
     function stop() { api('/api/interrupt', { uid: s.uid }).catch(function (x) { p.toast({ tone: 'error', title: s.name, text: x.message }); }); }
     var tab = p.tab || 'chat';
     // small: the button shows its icon, and its name is its label (and its tooltip)
     function act(icon, text, title, onClick) { return h(A.Button, { variant: 'quiet', icon: icon, label: small ? text : null, title: small ? (title || text) : title, onClick: onClick }, small ? null : text); }
-    return h('section', { ref: ref, className: 'pin pin-desk' + (small ? ' is-small' : '') + (asks ? ' has-asks' : ''), hidden: !p.shown, 'aria-label': 'Desk screen of ' + p.name },
+    return h('section', { ref: ref, className: 'pin pin-desk' + (small ? ' is-small' : ''), hidden: !p.shown, 'aria-label': 'Desk screen of ' + p.name },
       h('div', { className: 'pin-head' },
         h(A.StatusDot, { status: s ? statusOf(s) : 'resting' }),
         h('b', { className: 'pin-name' }, p.name),   // the scene's name of the bot (unique in the building), as on its desk
@@ -1600,7 +1579,6 @@
         s && s.headless && working ? act('pause', 'Stop turn', null, stop) : null,
         s ? act('copy', 'Export', 'Save this session as a Markdown file', function () { exportSession(s.uid, p.toast); }) : null,
         h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onBack }, 'Back')),
-      h(RequestBar, { session: s, name: p.name, toast: p.toast }),
       h(A.Tabs, { label: 'Desk screen', tabs: DESK_TABS, value: tab, onChange: p.onTab, render: function (id) {
         if (id === 'chat') return h(ChatTab, { office: p.office, bot: p.bot, name: p.name });
         return h(TermTab, { s: s, name: p.name, toast: p.toast, timeline: id === 'timeline' });
@@ -1622,6 +1600,31 @@
           h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onBack }, 'Back')),
         h('div', { className: 'pin-body', tabIndex: -1 }, h(ChangesBody, { c: c }))),
       h(ChangesConfirm, { c: c }));
+  }
+
+  // The question note of a desk, pinned (#90): the question and a text field over the note in the scene. The answer goes to the
+  // agent as its next message (the server gives a pending question the next message, /api/message).
+  function NoteScreen(p) {
+    var ref = React.useRef(null), tx = useState(''), text = tx[0], setText = tx[1], bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var small = usePinBox(p.host, ref, putBox);
+    usePinFocus(p.shown, function () { var el = ref.current; return el && el.querySelector('#pin-note-input'); });
+    function send(t) {
+      var v = String(t == null ? text : t).trim();
+      if (!v || busy) return;
+      setBusy(true);
+      api('/api/message', { uid: p.note.uid, text: v }).then(function () { setBusy(false); setText(''); p.onBack(); }, function (x) { setBusy(false); p.toast({ tone: 'error', title: p.note.bot, text: x.message }); });
+    }
+    return h('section', { ref: ref, className: 'pin pin-note' + (small ? ' is-small' : ''), hidden: !p.shown, 'aria-label': 'Question from ' + p.note.bot },
+      h('div', { className: 'pin-head' },
+        h('b', { className: 'pin-name' }, p.note.bot + ' asks'),
+        h(Bezel, { inline: true, count: p.waiting, onGo: p.onGo, compact: small }),
+        h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onBack }, 'Back')),
+      h('div', { className: 'pin-body note-body', tabIndex: -1 },
+        h('p', { className: 'note-q' }, p.note.text),
+        h('div', { className: 'note-field' }, h(A.Composer, { id: 'pin-note-input', placeholder: 'Type your answer', label: 'Answer to ' + p.note.bot, onSend: send })),
+        h('div', { className: 'inline-actions' },
+          h(A.Button, { variant: 'quiet', disabled: busy, onClick: function () { send('Yes.'); } }, 'Answer yes'),
+          h(A.Button, { variant: 'quiet', disabled: busy, onClick: function () { send('No.'); } }, 'Answer no'))));
   }
 
   // ---------- one session as a full terminal (the Terminal and Timeline tabs of the desk screen) ----------
@@ -1873,7 +1876,7 @@
     // pinned screens, the board, stats and notes panels, the welcome card. A new box goes in one of the two lists.
     // It measures again when a box appears, goes or changes size (ResizeObserver), when a toast comes or goes, when
     // --strip-clear changes, on resize, and when a box scrolls. With no free band the stack waits out of sight (is-off) and its clocks wait.
-    var KEEP = '.ao-hud-top, .ao-hud-left, .ao-hud-zoom, .ao-hud-inbox, .ao-hud-cast, .tour-card, .asks, .pin-head, .pin .ao-tablist, .pin-input, .term-input, .term-note, .bezel, .board-b > .inline-actions, .look-bar, .city-hud, .city-zoom, .ao-hud-chat .ao-chat-h, .ao-hud-chat .ao-tablist, .ao-hud-chat .ao-act, .ao-hud-chat .ao-chips, .ao-hud-chat .ao-composer';
+    var KEEP = '.ao-hud-top, .ao-hud-left, .ao-hud-zoom, .ao-hud-inbox, .ao-hud-cast, .tour-card, .needs-go, .pin-head, .pin .ao-tablist, .pin-input, .term-input, .term-note, .bezel, .board-b > .inline-actions, .look-bar, .city-hud, .city-zoom, .ao-hud-chat .ao-chat-h, .ao-hud-chat .ao-tablist, .ao-hud-chat .ao-act, .ao-hud-chat .ao-chips, .ao-hud-chat .ao-composer';
     var AVOID = '.ao-hud > *, .board-panel, .pin, .notes-edit, .welcome';
     var placeRef = React.useRef(null);
     useEffect(function () {
@@ -2037,6 +2040,8 @@
     // the lobby and the desks (lobby.js): open desks, the reception memo, the directory board, the nameplates (#92)
     var lobbyRef = React.useRef(null);
     useEffect(function () { if (lobbyRef.current) lobbyRef.current.refresh(); }, [snap]);
+    var deskRef = React.useRef(null);   // the desk objects: approval papers, question notes, pause keys (desk.js, #90)
+    useEffect(function () { if (deskRef.current) deskRef.current.refresh(); }, [snap]);
     // the screen the camera looks at (step 1 of a screen: scene-host.js focus), or null
     var lk = useState(null), look = lk[0], setLook = lk[1];
     // The pinned layer of the screen in focus (scene-host.js layer, #89): its screen, state and waiting count, not its box
@@ -2077,13 +2082,21 @@
     // Needs you (the scene's top bar, the city panel, the bezel count of a screen in focus): one tap goes to the oldest open request
     // of every building (needs is officeAdapter.requests, oldest first, the count of the one Notifier), at the desk screen of its
     // session (#89), where the request shows with Approve and Decline.
-    function goOldest() { var r = needs[0]; if (r) openDesk(r.uid, 'chat'); }
+    // The oldest request: the camera looks at its paper or note on the desk. When that desk is not on screen yet, the scene goes
+    // there (its monitor) and the next press finds the paper.
+    function goOldest() {
+      var r = needs[0];
+      if (!r) return;
+      if (deskRef.current && r.id && cur2.view === 'office' && deskRef.current.show(r.id, false)) return;
+      openDesk(r.uid, 'chat');
+    }
     function noteKey(roomId) { return mount ? mount.noteKey(roomId) : ''; }   // the server's key for the room (place.mjs)
     useEffect(function () { return function () {
       if (boardRef.current) { boardRef.current.dispose(); boardRef.current = null; }
       if (terminalRef.current) { terminalRef.current.dispose(); terminalRef.current = null; }
       if (securityRef.current) { securityRef.current.dispose(); securityRef.current = null; }
       if (lobbyRef.current) { lobbyRef.current.dispose(); lobbyRef.current = null; }
+      if (deskRef.current) { deskRef.current.dispose(); deskRef.current = null; }
       if (hostRef.current) { hostRef.current.dispose(); hostRef.current = null; }
       setBoard(null); setLook(null); setLayer(null); setChg(null);
     }; }, [sceneKey, cur2.view]);
@@ -2124,7 +2137,7 @@
       });
     }, [snap]);
     // One panel at a time: while a pinned screen (the desk chat and terminal, the room's changes), the board or the stats panel
-    // is open, the DS right column (chat or roster) is hidden. The pinned screens show the open requests (RequestBar, bezel).
+    // is open, the DS right column (chat or roster) is hidden. The pinned screens show the open requests as the bezel count.
     var pinned = !!(layer && layer.pin);
     var deskUid = pinned && layer.kind === 'terminal' && layer.item ? layer.item.uid : null;
     var panelOpen = pinned || !!(board && (board.kind === 'board' || board.kind === 'stats'));
@@ -2286,7 +2299,7 @@
             states: function () { return lobMount.rollup().floors; },
             agents: function () { return lobMount.agentsByFloor(); },
             session: function (botName) { return lobMount.session(botName); },
-            onDesk: function (roomId) { deskOpen(roomId); },
+            onDesk: function (roomId) { deskStart(roomId); },
             // the tour's monitor stop: an agent's monitor on the floor first (terminal.js look), else an open desk's
             monitor: function () { return !!(terminalRef.current && terminalRef.current.look && terminalRef.current.look()); },
             onReception: function (part) { if (part === 'directory') openPalette(); else setDlg({ name: 'reception' }); }
@@ -2300,6 +2313,22 @@
             // a click on the monitor in focus outside its layer: the desk screen shows its chat
             onOpen: function () { setDeskTab('chat'); }
           });
+        }
+        if (st && host && window.OfficeDesk) {
+          var deskMount = mount;
+          if (deskRef.current) deskRef.current.dispose();
+          deskRef.current = window.OfficeDesk.attach(o, {
+            host: host,
+            targets: function () { return deskMount.deskTargets(latestSnap.current); },
+            sessions: function () { return ((latestSnap.current && latestSnap.current.sessions) || []).filter(function (x) { return deskMount.botName(x.uid); }).map(function (x) { return Object.assign({}, x, { botName: deskMount.botName(x.uid) }); }); },
+            onAnswer: function (paper, act) {
+              api('/api/answer', { id: paper.id, allow: act.allow, always: !!act.always }).then(function () {
+                if (act.always) toast({ tone: 'success', title: paper.bot, text: 'Allowed from now on: ' + paper.always });
+              }, function (x) { toast({ tone: 'error', title: paper.bot, text: x.message }); });
+            },
+            onPause: function (uid) { api('/api/interrupt', { uid: uid }).catch(function (x) { toast({ tone: 'error', title: 'Pause', text: x.message }); }); }
+          });
+          window.officeDesk = deskRef.current;   // the desk objects, for the console and tests
         }
         if (!st || !host || !window.OfficeCity) return;
         window.OfficeCity.cameraFeel(st);
@@ -2330,10 +2359,15 @@
     var shownPath = shownRepo ? shownRepo.path : '';
     // An open desk (#92): the Open dialog starts the agent with the desk's floor as its role, in the room's folder
     // (the building's folder for a room of open desks). Phase 2 (#90) starts it at the desk with no dialog.
-    function deskOpen(roomId) {
-      var fn = mount ? mount.roomFloor(roomId) : null, fl = mount && fn ? mount.floors().filter(function (f) { return f.key === fn; })[0] : null;
-      var pl = mount ? mount.roomInfo(roomId).place : null;
-      refresh().then(function () { setDlg({ name: 'open', role: fn, roleName: fl ? fl.name : '', folder: (pl && pl.path) || shownPath }); });
+    // The second click on an open desk (#90): an agent of the default kind starts at once, in that room's workspace, with the role
+    // of the floor. There is no form: Open session in Ctrl+K keeps the form for another kind, model or folder. A kind that asks
+    // the cost question (not the default one) is not started from a desk.
+    function deskStart(roomId) {
+      var fn = mount ? mount.roomFloor(roomId) : null, pl = mount ? mount.roomInfo(roomId).place : null;
+      var cwd = (pl && pl.path) || shownPath || ((info && info.recent) || [])[0] || '';
+      api('/api/open', { cwd: cwd, provider: DEFAULT_KIND, where: 'office', isolation: 'same', role: fn || undefined }).then(function () {}, function (x) {
+        toast({ tone: 'error', title: 'Start agent', text: x.message });
+      });
     }
     // The lobby tour: once per browser, on the Lobby of the first building shown; Replay from the Reception or Ctrl+K.
     var tr = useState(false), touring = tr[0], setTouring = tr[1];
@@ -2434,11 +2468,22 @@
           tools.forEach(function (k) { out.push({ id: 'page-room-' + id + '-' + k[0], label: k[1] + rn, icon: k[2], group: 'Rooms', keywords: 'room ' + k[3], run: function () { b.open(id, k[0]); } }); });
         });
       }
-      // an open desk on each floor of the building on screen: the keyboard path of a click on an empty desk (#92)
-      if (mount && cur2.view === 'office' && mount.repo === shown) mount.floors().forEach(function (f) {
-        out.push({ id: 'page-desk-' + f.key, label: 'Start an agent on ' + f.name, icon: 'add', group: 'Floors', keywords: 'desk open start agent role floor ' + f.name + ' ' + f.wingName,
-          run: function () { var rid = mount.spareRoomOf(f.key); if (rid) deskOpen(rid); else refresh().then(function () { setDlg({ name: 'open', role: f.key, roleName: f.name, folder: shownPath }); }); } });
-      });
+      // The desk objects of the building on screen (#90, desk.js ACTIONS): an open desk on each floor, the approval papers, the
+      // question notes and the pause keys. Each is the keyboard path of the same click, through the same rules (high risk: Approve,
+      // then Confirm).
+      if (mount && cur2.view === 'office' && mount.repo === shown && window.OfficeDesk && sn) {
+        var dt = mount.deskTargets(sn), dk = deskRef.current;
+        dt.empty.forEach(function (e) { var f = mount.floors().filter(function (x) { return x.key === e.floorKey; })[0]; e.name = f ? f.name : e.floorKey; e.wing = f ? f.wingName : ''; });
+        var dsess = (sn.sessions || []).filter(function (x) { return x.status !== 'ended' && mount.botName(x.uid); }).map(function (x) { return Object.assign({}, x, { botName: mount.botName(x.uid) }); });
+        window.OfficeDesk.pure.paletteActions(dt, dk ? dk.stages() : {}, dsess).forEach(function (a) {
+          var icon = a.action === 'desk-start' ? 'add' : a.action === 'paper-decline' ? 'decline' : a.action === 'pause' ? 'pause' : a.action === 'note-answer' ? 'chat' : 'approve';
+          out.push({ id: 'page-desk-' + a.id, label: a.label, icon: icon, group: a.action === 'desk-start' ? 'Floors' : 'Needs you', keywords: 'desk paper stamp question note pause agent start role floor ' + (a.ref && a.ref.wing || ''),
+            run: function () {
+              if (a.action === 'desk-start') return deskStart(a.ref.roomId);
+              if (!dk || !dk.act(a.action, a.ref.id || a.ref.uid)) toast({ tone: 'info', title: 'Desk', text: 'That request is not on this floor. Use Needs you to go there.' });
+            } });
+        });
+      }
       ((sn && sn.sessions) || []).filter(function (s) { return s.status !== 'ended'; }).forEach(function (s) {
         var where = ((s.place && s.place.building) || '') + (s.place && s.place.room ? ' · ' + s.place.room : ''), kw = 'session ' + where, nm = sceneName(s);
         // the dock's per-agent actions (#92): Always allow, the model and the permission mode
@@ -2477,15 +2522,17 @@
         shown: layer.shown, tab: deskTab, onTab: setDeskTab, waiting: layer.waiting, onGo: goOldest, toast: toast, onBack: blurScene }) : null,
       pinned && layer.kind === 'changes' && chg && hostRef.current ? h(ChangesScreen, { key: 'chg-' + chg.uid, uid: chg.uid, name: chg.name, ended: chg.ended, host: hostRef.current,
         shown: layer.shown, waiting: layer.waiting, onGo: goOldest, toast: toast, onBack: blurScene }) : null,
+      pinned && layer.kind === 'note' && layer.item && layer.item.data && hostRef.current ? h(NoteScreen, { key: 'note-' + layer.item.id, note: layer.item.data, host: hostRef.current,
+        shown: layer.shown, waiting: layer.waiting, onGo: goOldest, toast: toast, onBack: blurScene }) : null,
       // The bezel count of a screen in focus that is not pinned (a board, the notes, the stats, a Security screen).
       layer && !pinned && hostRef.current ? h(Bezel, { host: hostRef.current, shown: layer.shown, count: layer.waiting, onGo: goOldest }) : null,
-      board && boardRef.current && board.kind === 'board' ? h(BoardPanel, { data: boardRef.current.dataOf(board.id), sessions: roomAndSel(board.id), toast: toast, onClose: closeBoard }) : null,
-      board && boardRef.current && board.kind === 'stats' && mount ? h(StatsPanel, { mount: mount, extra: roomAndSel(board.id, true), toast: toast, roomId: board.id, onClose: closeBoard }) : null,
+      board && boardRef.current && board.kind === 'board' ? h(BoardPanel, { data: boardRef.current.dataOf(board.id), sessions: roomAndSel(board.id), onGo: goOldest, toast: toast, onClose: closeBoard }) : null,
+      board && boardRef.current && board.kind === 'stats' && mount ? h(StatsPanel, { mount: mount, extra: roomAndSel(board.id, true), onGo: goOldest, toast: toast, roomId: board.id, onClose: closeBoard }) : null,
       board && boardRef.current && board.kind === 'notes' ? h(NotesEditor, { key: board.id, noteKey: noteKey(board.id), text: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).text || '', version: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).v || 0, toast: toast,
         rect: function () { return hostRef.current ? hostRef.current.rect() : null; }, flying: function () { return hostRef.current ? hostRef.current.flying() : false; },
         onClose: function () { if (boardRef.current) boardRef.current.refresh(); blurScene(); } }) : null,
       look && !board && hostRef.current ? h(LookBar, { key: look.key, verb: look.verb, icon: LOOK_ICON[look.kind] || 'zoom-in', toast: toast, layout: secLook,
-        asks: secLook && snap ? (snap.sessions || []).filter(function (s) { return window.OfficeVocab.requests(s).length > 0; }) : [],
+        onGo: goOldest, asks: secLook && snap ? (snap.sessions || []).filter(function (s) { return window.OfficeVocab.requests(s).length > 0; }) : [],
         free: function (el) { return hostRef.current ? hostRef.current.free(sceneCovers(el)) : null; },
         onPlaced: function () { if (hostRef.current) hostRef.current.refit(); },
         onBack: blurScene, onOpen: function () { if (hostRef.current) hostRef.current.open(); } }) : null,

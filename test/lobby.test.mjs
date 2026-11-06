@@ -81,7 +81,9 @@ test('every lobby object has a Ctrl+K action: an open desk on each floor, the Re
   const verbs = /var VERB = \{ desk: '([^']+)', memo: '([^']+)', directory: '([^']+)', monitor: '([^']+)' \};/.exec(lobby);
   assert.ok(verbs, 'the in-scene verbs');
   assert.deepEqual(verbs.slice(1), ['Start an agent here', 'Open the Reception', 'Search the office', 'Start an agent here']);
-  assert.match(office, /id: 'page-desk-' \+ f\.key, label: 'Start an agent on ' \+ f\.name/, 'desk: Start an agent on <floor>');
+  // an open desk on each floor moved into desk.js (#90): one list of the scene's actions, which test/desk.test.mjs checks
+  assert.match(office, /OfficeDesk\.pure\.paletteActions\(dt,/, 'desk: Start an agent on <floor>');
+  assert.match(fs.readFileSync(new URL('../public/desk.js', import.meta.url), 'utf8'), /'Start an agent on ' \+ \(e\.name/, 'desk: Start an agent on <floor>');
   assert.match(office, /\['reception', 'Reception: floors and the kind of building', 'building'/, 'memo: the Reception');
   assert.match(office, /\['tour', 'Replay the lobby tour', 'chevron-right'/);
   assert.match(office, /onReception: function \(part\) \{ if \(part === 'directory'\) openPalette\(\);/, 'the directory opens the search, which is Ctrl+K itself');
