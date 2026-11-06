@@ -95,7 +95,7 @@ test('with no settings a kind says Not configured with the steps, and makes no c
   assert.equal(r.configured, false);
   assert.match(r.needs.join('\n'), /OFFICE_FOUNDRY_ENDPOINT/);
   assert.match(r.needs.join('\n'), /OFFICE_FOUNDRY_TOKEN_FILE/);
-  assert.match(r.needs.join('\n'), /README/);
+  assert.match(r.needs.join('\n'), /docs\/agents\.md/);
   assert.deepEqual(await f.models(), []);
   assert.throws(() => f.check({}), (e) => e.status === 409 && /not configured/i.test(e.message));
   assert.throws(() => f.check({ model: 'asst_1' }), (e) => e.status === 409);

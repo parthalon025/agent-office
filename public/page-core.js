@@ -30,8 +30,8 @@
     return isFinite(n) ? n : t;
   }
   function limitHint(label, cloud) {
-    // A cloud service reports no dollars. The office counts the prices the owner sets in the environment (README).
-    return label + (cloud ? ' stops at this limit, counted from the prices you set (see the README). With no prices set, nothing is counted. Clear the field for no limit.' : ' stops at this limit. Clear the field for no limit.');
+    // A cloud service reports no dollars. The office counts the prices the owner sets in the environment (docs/agents.md).
+    return label + (cloud ? ' stops at this limit, counted from the prices you set (see docs/configuration.md). With no prices set, nothing is counted. Clear the field for no limit.' : ' stops at this limit. Clear the field for no limit.');
   }
   var KIND = [{ value: 'every', label: 'Every N minutes' }, { value: 'daily', label: 'Every day at' }];
 

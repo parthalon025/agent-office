@@ -55,8 +55,8 @@
   /** What the Attach sessions dialog says about remote access (#133): on with the address, a setting that is missing or wrong, or off. */
   function remoteNote(r) {
     if (r && r.state === 'on') return 'Remote access is on. Open the office at https://' + r.host + '. Cloudflare Access signs you in, and the office checks that login on every request.';
-    if (r && r.state === 'incomplete') return 'Remote access is off. A setting is not right: ' + (r.reason || 'check the OFFICE_REMOTE settings.') + ' See the README.';
-    return 'Remote access is off. The README says how to turn it on.';
+    if (r && r.state === 'incomplete') return 'Remote access is off. A setting is not right: ' + (r.reason || 'check the OFFICE_REMOTE settings.') + ' See docs/remote-access.md.';
+    return 'Remote access is off. docs/remote-access.md says how to turn it on.';
   }
   /** The empty text of the clean-up dialog. kept = how many floors the user left out with Keep this floor. */
   function cleanupEmpty(kept) {

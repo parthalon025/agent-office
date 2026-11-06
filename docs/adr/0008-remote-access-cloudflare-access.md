@@ -13,7 +13,7 @@ Options:
 
 ## Decision
 
-Option A. Tailscale stays a valid alternative (the README says so). The decision has five parts.
+Option A. Tailscale stays a valid alternative (docs/remote-access.md says so). The decision has five parts.
 
 - The tunnel is outside the office. cloudflared on the PC forwards to 127.0.0.1. The office keeps binding 127.0.0.1 only. It does not start, install or configure cloudflared or the Access application.
 - The office does not trust the tunnel. A request whose Host is the remote host must carry `Cf-Access-Jwt-Assertion`, an RS256 token signed by a key of the team's certificate list (`https://<team>/cdn-cgi/access/certs`), with the team issuer, the application audience tag, a current expiry and an allowed email. Verification uses `node:crypto` only (`auth.mjs`: `verifyAccessToken`). Anything else is refused before any route runs, so a leaked tunnel address or a wrong Access policy does not open the agents.
@@ -23,7 +23,7 @@ Option A. Tailscale stays a valid alternative (the README says so). The decision
 
 ## Consequences
 
-- The owner does the Cloudflare steps once (tunnel, DNS route, Access application and policy, the four settings). The README walks through them.
+- The owner does the Cloudflare steps once (tunnel, DNS route, Access application and policy, the four settings). docs/remote-access.md walks through them.
 - The page token is reachable from a remote page (as for any page). The agent token is shown only in the Attach sessions dialog, and it opens nothing remotely.
 - The office verifies one issuer, one audience and a short list of emails. There are no teams, roles or shared access.
 - The rules apply only while the office runs, as for every other check.

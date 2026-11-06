@@ -531,7 +531,7 @@
   function costNote(k) {
     if (!(k && k.paid !== false && k.cost === 'unknown')) return '';
     var label = k.label || 'This agent';
-    if (k.cloud) return label + ' reports no dollars, and no prices are set, so the office shows its cost as unknown and no spend limit can stop it. Set the prices to count it (see the README), or check the spend in your Azure account.';
+    if (k.cloud) return label + ' reports no dollars, and no prices are set, so the office shows its cost as unknown and no spend limit can stop it. Set the prices to count it (see docs/configuration.md), or check the spend in your Azure account.';
     return label + ' does not report cost, so the office shows it as unknown and no spend limit can stop it. Check the spend in its own account.';
   }
 

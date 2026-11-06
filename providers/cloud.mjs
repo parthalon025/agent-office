@@ -78,7 +78,7 @@ export function checkEndpoint(raw, { suffixes, allowLoopback = false }) {
  * or { ok: false, needs } where needs are the steps for the user, in plain words, only for what is missing or wrong.
  * @param {object} config cloudConfig() of the kind.
  * @param {object} o { prefix, hosts (allowed host suffixes), allowLoopback, endpointHelp (what the endpoint looks like),
- *   tokenHelp (what the token is for), validate(url) -> problem text or '' (a check of the path), readme (the README section) }
+ *   tokenHelp (what the token is for), validate(url) -> problem text or '' (a check of the path), readme (the section of docs/agents.md) }
  */
 export function cloudSetup(config, { prefix, hosts, allowLoopback = false, endpointHelp, tokenHelp, validate = () => '', readme }) {
   const needs = [];
@@ -98,7 +98,7 @@ export function cloudSetup(config, { prefix, hosts, allowLoopback = false, endpo
   }
   if (needs.length) {
     if (!url) needs.push(`Restart the office after you set ${prefix}_ENDPOINT. A new token in the token file needs no restart.`);
-    needs.push(`The README section "${readme}" has the steps.`);
+    needs.push(`The section "${readme}" of docs/agents.md has the steps.`);
     return { ok: false, needs };
   }
   return { ok: true, url, token };

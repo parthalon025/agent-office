@@ -455,7 +455,7 @@ const providers = createRegistry([claude, ollama, lmstudio, agentFramework,
   // turned on, a no-cost Deny). One rule source. tokenFile: the OpenClaw plugin must read this office's token (#77).
   ...Object.keys(ACP_AGENTS).map((kind) => createAcp({ events, kind, tokenFile: TOKEN_FILE,
     blocked: () => openRefusal(persisted.security, providers.get(kind)) })),
-  // The Microsoft cloud kinds are off until the owner sets them up in the environment (README). Nothing here calls the network
+  // The Microsoft cloud kinds are off until the owner sets them up in the environment (docs/agents.md). Nothing here calls the network
   // or signs in. Like the ungated ACP agents, the Agents screen of the Security room keeps them off until it turns them on.
   ...[['foundry', createFoundry, CLOUD.foundry], ['copilot-studio', createCopilotStudio, CLOUD.studio]].map(([kind, create, config]) => create({ events, config,
     blocked: () => openRefusal(persisted.security, providers.get(kind)) }))]);
