@@ -67,7 +67,7 @@
   function isBrowser(c) { return /playwright|__browser_/i.test(c.name); }
 
   // What a room board shows, from the sessions in the room. pin: { text, by } or null.
-  function boardData(info, tree, pin, goals) {
+  function boardData(info, tree, pin, goals, view) {
     var ss = info.sessions || [], calls = [];
     ss.forEach(function (s) { (s.calls || []).forEach(function (c) { calls.push(Object.assign({ who: s.name }, c)); }); });
     calls.sort(function (a, b) { return a.t - b.t; });
@@ -75,6 +75,7 @@
     var touched = {};
     calls.forEach(function (c) { if (c.file) { var top = c.file.split('/')[0]; touched[top] = (touched[top] || 0) + 1; } });
     return {
+      columns: window.OfficeVocab.wall.columnsOf(view).join(','),   // the columns the user chose for this wall screen (#152), in order
       room: info.place ? info.place.roomName : 'Room',
       branch: info.place ? info.place.branch : '',
       sessions: ss.map(function (s) { return { name: s.name, status: window.OfficeVocab.status(s).key, task: s.prompt || '' }; }),
@@ -225,10 +226,12 @@
       y += 82;
     }
     // three columns
-    var cw = (W2 - 2 * 26) / 3, top = y + 6, rows = Math.max(1, Math.floor((h - F - 22 - (top + 32)) / 31));
-    var cols = [X0, X0 + cw + 26, X0 + 2 * (cw + 26)];
+    var shown = (d.columns || 'browser,recent,repo').split(','), cw = (W2 - (shown.length - 1) * 26) / shown.length, top = y + 6, rows = Math.max(1, Math.floor((h - F - 22 - (top + 32)) / 31));
+    var colX = function (id) { return X0 + shown.indexOf(id) * (cw + 26); };
     var head = function (t, x) { c.font = '600 17px ' + sans; say(t.toUpperCase(), x, top, dim); };
-    head('Browser steps', cols[0]); head('Last steps', cols[1]); head('Repository' + (d.tree && !d.tree.note ? ' · ' + d.tree.total + ' files' : ''), cols[2]);
+    if (shown.indexOf('browser') >= 0) head('Browser steps', colX('browser'));
+    if (shown.indexOf('recent') >= 0) head('Last steps', colX('recent'));
+    if (shown.indexOf('repo') >= 0) head('Repository' + (d.tree && !d.tree.note ? ' · ' + d.tree.total + ' files' : ''), colX('repo'));
     var empty = function (t, x) { c.font = '400 21px ' + sans; say(t, x, top + 32, dim); };
     var step = function (x, i, status, word, detail) {
       var yy = top + 32 + i * 31, cap = Math.round(cw * 0.55);
@@ -238,19 +241,23 @@
       c.font = '400 18px ' + mono; say(clipW(c, detail, cw - 26 - ww - 12), x + 26 + ww + 10, yy + 2, dim);
     };
     var st = function (c2) { return c2.ok === null ? 'working' : c2.ok ? 'finished' : 'error'; };
-    if (!d.browser.length) empty('No browser steps yet', cols[0]);
-    d.browser.slice(-rows).forEach(function (b, i) { step(cols[0], i, st(b), toolWord(b.name), b.detail || ''); });
-    if (!d.recent.length) empty('No steps yet', cols[1]);
-    d.recent.slice(-rows).forEach(function (b, i) { step(cols[1], i, st(b), toolWord(b.name), b.file || b.detail || ''); });
-    var ents = d.tree ? d.tree.entries.filter(function (e) { return e.dir; }).slice(0, rows) : [];
-    if (!ents.length) empty(d.tree ? d.tree.note || 'Only files at the top' : 'Loading', cols[2]);
+    if (shown.indexOf('browser') >= 0) {
+      if (!d.browser.length) empty('No browser steps yet', colX('browser'));
+      d.browser.slice(-rows).forEach(function (b, i) { step(colX('browser'), i, st(b), toolWord(b.name), b.detail || ''); });
+    }
+    if (shown.indexOf('recent') >= 0) {
+      if (!d.recent.length) empty('No steps yet', colX('recent'));
+      d.recent.slice(-rows).forEach(function (b, i) { step(colX('recent'), i, st(b), toolWord(b.name), b.file || b.detail || ''); });
+    }
+    var ents = shown.indexOf('repo') >= 0 && d.tree ? d.tree.entries.filter(function (e) { return e.dir; }).slice(0, rows) : [];
+    if (shown.indexOf('repo') >= 0 && !ents.length) empty(d.tree ? d.tree.note || 'Only files at the top' : 'Loading', colX('repo'));
     ents.forEach(function (e, i) {
       var yy = top + 32 + i * 31, hot = d.touched[e.name];
       c.font = (hot ? '600 ' : '400 ') + '20px ' + mono;
       var nm = clipW(c, e.name + '/', cw * 0.55);
-      say(nm, cols[2], yy, hot ? tone('working') : chalk);
+      say(nm, colX('repo'), yy, hot ? tone('working') : chalk);
       c.font = '400 18px ' + mono; c.textAlign = 'right';
-      say(e.files + (hot ? ' · ' + hot + ' touched' : ''), cols[2] + cw, yy + 2, dim); c.textAlign = 'left';
+      say(e.files + (hot ? ' · ' + hot + ' touched' : ''), colX('repo') + cw, yy + 2, dim); c.textAlign = 'left';
     });
   }
 
@@ -577,7 +584,7 @@
             if (pr && pr.then) pr.then(function (t) { trees[root] = t; refresh(); }, function () { trees[root] = { total: 0, entries: [], note: 'No file list' }; refresh(); });
           }
         }
-        var d = boardData(info, root ? trees[root] : null, o.pin ? o.pin(bd.roomId) : null, o.goals ? o.goals(bd.roomId, info.place ? info.place.repo : '') : null);
+        var d = boardData(info, root ? trees[root] : null, o.pin ? o.pin(bd.roomId) : null, o.goals ? o.goals(bd.roomId, info.place ? info.place.repo : '') : null, o.view ? o.view(bd.roomId) : '');
         var sig = skinVersion + K.look + JSON.stringify(d);
         if (sig === bd.sig) return;
         bd.sig = sig; bd.data = d;

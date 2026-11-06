@@ -36,7 +36,7 @@ import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, clea
 import { detect, newRecord, cleanRecord, edit as editLayout, layoutView, shownFloors, catalogView, functionOf } from './archetypes.mjs';
 import * as startup from './startup.mjs';
 import { createManager, createPlanBoard, officeSource } from './manager.mjs';
-import { setPersona, removePersona, personaOf, personaPrompt, addStarters, addStarterTeams, setTeam, removeTeam, teamOf, exportCustom, importCustom, cleanPersonas, cleanTeams, cleanScreens } from './personas.mjs';
+import { setPersona, removePersona, personaOf, personaPrompt, addStarters, addStarterTeams, setTeam, removeTeam, teamOf, exportCustom, importCustom, cleanPersonas, cleanTeams, cleanScreens, setScreen } from './personas.mjs';
 import { createNotes, scanNote, cleanPin, PIN_MAX, NOTES_MAX, AGENT_WRITE_MAX } from './notes.mjs';
 import { createSkills } from './skills.mjs';
 import { cleanTrust, record as recordTrust, patternOf, propose, grant as grantTrust, withdraw as withdrawTrust, cards as trustCards } from './trust.mjs';
@@ -1846,6 +1846,7 @@ const snapshot = () => (W.lean({
   plan,
   figures: allFigures(),    // noteKey -> room figures (sessions, working, waiting, toolCalls, tokens, cost, priced, unknown, todosDone, todosTotal, lastEvent)
   notes: persisted.notes,   // noteKey -> { text, at, v, by? }: each room's notes board (v: version counter; a cleared board stays with text '' and at 0; by: the agent session that last wrote it)
+  screens: persisted.screens,   // room key -> the blackboard view the user chose (personas.mjs setScreen); a room with none shows Overview
   pins: persisted.pins,     // noteKey -> { text, by, at }: a short message an agent pinned on the room's blackboard
   repos: [...repos.entries()].map(([key, r]) => ({ key, ...r, securityRoomId: securityRoomIdOf(key), worktrees: r.worktrees.map((w) => ({ ...w, place: placeOfWorktree(r.path, w) })) })),
   // The Security room (#70): the rules (office-wide and per building), why a cell is not enforced for an agent kind
@@ -1973,7 +1974,7 @@ const server = http.createServer(async (req, res) => {
       const hist = [...live, ...history.filter((h) => !sessions.has(h.uid))];
       return send(res, 200, { ...recapOf({ feed, merges: persisted.merges, history: hist, now }), away: awayOf({ feed, since, now }), focus: persisted.focus });
     }
-    if (req.method === 'GET' && url.pathname === '/api/personas') return send(res, 200, { personas: persisted.personas, teams: persisted.teams });
+    if (req.method === 'GET' && url.pathname === '/api/personas') return send(res, 200, { personas: persisted.personas, teams: persisted.teams, screens: persisted.screens });
     if (req.method === 'GET' && url.pathname === '/api/custom/export') return send(res, 200, exportCustom(persisted));
     if (req.method !== 'POST') return send(res, 404, { error: 'Not found' });
 
@@ -2025,6 +2026,7 @@ const server = http.createServer(async (req, res) => {
       savePersisted(); broadcast();
       return send(res, 200, { ok: true, personas: Object.keys(c.personas).length, teams: Object.keys(c.teams).length, screens: Object.keys(c.screens).length, layouts: Object.keys(c.layouts).length });
     }
+    if (url.pathname === '/api/screen/set') { setScreen(persisted.screens, String(body.key ?? ''), body.view); savePersisted(); broadcast(); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/persona/delete') { removePersona(persisted.personas, String(body.name || '')); savePersisted(); broadcast(); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/notes/save') {
       // the notes board of a room: the user's own reminders, kept in state.json

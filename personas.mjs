@@ -130,6 +130,15 @@ const cleanTeams = (raw) => cleanMap(raw, (v) => cleanTeam(v));
 const cleanScreens = (raw) => cleanMap(raw, (v) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, 40) : null));
 export { cleanPersonas, cleanTeams, cleanScreens };
 
+/** The wall screen of a room (#152): which blackboard view it shows. Saved by room key; Overview is the default and clears the entry. */
+export function setScreen(map, key, view) {
+  const k = keyOf(key);
+  if (!k || BAD_KEYS.has(k)) { const e = new Error('Pick a room first.'); e.status = 400; throw e; }
+  if (!globalThis.OfficeVocab.wall.isView(view)) { const e = new Error('This wall screen has no such view.'); e.status = 400; throw e; }
+  if (view === 'overview') delete map[k]; else map[k] = view;
+  return view;
+}
+
 /** The state's customization as one JSON-safe object. Nothing else of the state goes in. */
 export function exportCustom(state) {
   const st = state && typeof state === 'object' ? state : {};
