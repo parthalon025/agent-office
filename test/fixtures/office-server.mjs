@@ -40,10 +40,11 @@ export async function until(fn, what, { ms = START_MS, log = () => '', step = 50
  * a busy port). It rejects when the server exits any other way or the ready line does not come in `ms`. A rejection for a
  * busy port has `busy: true`.  `script` is for a test that starts a stand-in instead of the server.
  */
-export function startOffice(dir, env, { ms = START_MS, script = path.join(dir, 'server.mjs') } = {}) {
-  const child = spawn(process.execPath, [script], { cwd: dir, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+export function startOffice(dir, env, { ms = START_MS, script = path.join(dir, 'server.mjs'), execPath = process.execPath } = {}) {
+  const child = spawn(execPath, [script], { cwd: dir, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
-  const exited = new Promise((r) => child.once('exit', r));
+  // A child that cannot start gives `error` and no `exit`: exited settles with null then, so no caller waits for ever.
+  const exited = new Promise((r) => { child.once('exit', r); child.once('error', () => r(null)); });
   const done = new Promise((resolve, reject) => {
     const t = setTimeout(() => { child.kill(); reject(new Error(`the office did not say it is open in ${ms} ms:\n${out}`)); }, ms);
     const onData = (d) => { out += d; if (READY.test(out)) { clearTimeout(t); resolve('open'); } };
@@ -62,7 +63,7 @@ export function startOffice(dir, env, { ms = START_MS, script = path.join(dir, '
   return {
     child, done, exited, out: () => out,
     /** Stops this child by its own pid, never by image name. */
-    async stop() { if (child.exitCode === null && child.signalCode === null) { child.kill(); await exited; } },
+    async stop() { if (child.pid && child.exitCode === null && child.signalCode === null) { child.kill(); await exited; } },
   };
 }
 
@@ -88,4 +89,31 @@ export async function startOnFreePort(dir, env, { prepare, attempts = 6, ms = ST
     }
   }
   throw new Error(`no free port after ${attempts} tries. ${last?.message || ''}`);
+}
+
+// Ports a test holds. closeHeld() closes every one that is still open, so a failed or timed-out test never leaves a
+// listening socket that keeps the test process alive (#122). Closing twice is harmless.
+const held = new Set();
+export const holdPort = (port) => new Promise((resolve, reject) => {
+  const s = net.createServer();
+  s.once('error', reject);
+  s.listen(port, '127.0.0.1', () => { held.add(s); resolve(s); });
+});
+export const hold = (s) => { held.add(s); return s; };
+export const close = (s) => new Promise((r) => { if (!s.listening) return r(); s.close(() => r()); });
+export const closeHeld = async () => { const all = [...held]; held.clear(); for (const s of all) await close(s); };
+
+/** listening: the office said it is open. Else its exit code (null: it never ran, or was killed at the limit `ms`). */
+export async function settle(o, ms = START_MS + 30000) {
+  let timer;
+  const limit = new Promise((r) => { timer = setTimeout(() => { o.child.kill(); r('limit'); }, ms); });
+  try {
+    const listening = await Promise.race([o.done.then(() => true, () => false), limit]);
+    if (listening === 'limit') throw new Error(`the office did not settle in ${ms} ms:
+${o.out()}`);
+    const code = listening ? null : await Promise.race([o.exited, limit]);
+    if (code === 'limit') throw new Error(`the office did not stop in ${ms} ms:
+${o.out()}`);
+    return { listening, code };
+  } finally { clearTimeout(timer); }
 }
