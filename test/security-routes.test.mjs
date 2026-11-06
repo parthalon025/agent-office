@@ -11,10 +11,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pageFile } from '../auth.mjs';
-import { officeFiles } from '../files.mjs';
+import { pageFile } from '../src/auth.mjs';
+import { officeFiles } from '../src/files.mjs';
 import { shortOf } from './fixtures/short-name.mjs';
-import { startOnFreePort, until as waitUntil, START_MS } from './fixtures/office-server.mjs';
+import { startOnFreePort, until as waitUntil, START_MS, copyOffice } from './fixtures/office-server.mjs';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // shortRepo: the 8.3 short spelling of repo, or null when the volume keeps none (base is not made real on purpose: on
@@ -70,16 +70,13 @@ before(async () => {
   repo = path.join(base, 'repo');
   for (const d of [work, copy, home, repo]) fs.mkdirSync(d);
   // a git repository: a terminal session there is in a worktree (its main checkout)
-  const { resolveExe } = await import('../git.mjs');
+  const { resolveExe } = await import('../src/git.mjs');
   const { execFileSync } = await import('node:child_process');
   const g = (...a) => execFileSync(resolveExe('git'), ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8', windowsHide: true });
   g('init', '-q', '-b', 'main'); fs.writeFileSync(path.join(repo, 'a.txt'), 'a\n'); g('add', '-A'); g('commit', '-q', '-m', 'init');
   fs.mkdirSync(path.join(repo, 'src')); fs.writeFileSync(path.join(repo, 'src', 'b.txt'), 'b\n');
   shortRepo = shortOf(fs.realpathSync.native(repo));
-  for (const f of fs.readdirSync(SRC)) {
-    if (/\.(mjs|json|ps1)$/.test(f) && !/^(state|history)(-\d+)?\.json$/.test(f) && !f.startsWith('office-')) fs.copyFileSync(path.join(SRC, f), path.join(copy, f));
-  }
-  for (const d of ['providers', 'public']) fs.cpSync(path.join(SRC, d), path.join(copy, d), { recursive: true });
+  copyOffice(copy);
   const env = { ...process.env, OFFICE_HOOKS: 'command', OFFICE_RATE_FILE: path.join(base, 'no-rate.json'), OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local'), USERPROFILE: home, HOME: home };
   // Ready is the server's own "is open" line, after it wrote its files; a busy port starts again on a new one.
   const started = await startOnFreePort(copy, env);

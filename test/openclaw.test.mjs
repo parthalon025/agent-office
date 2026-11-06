@@ -7,9 +7,9 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { gatewayPort, probeGateway, versionAtLeast, wantedConfig, checkConfig, configReader, toolCall, patchFiles, pathsOf, hookLimit, HOOK_LIMIT_MS, PLUGIN_DIR } from '../providers/openclaw.mjs';
-import { hookLimit as pluginHookLimit, HOOK_MS as PLUGIN_HOOK_MS } from '../integrations/openclaw-plugin/gate.js';
-import { riskOf, actionOf } from '../risk.mjs';
+import { gatewayPort, probeGateway, versionAtLeast, wantedConfig, checkConfig, configReader, toolCall, patchFiles, pathsOf, hookLimit, HOOK_LIMIT_MS, PLUGIN_DIR } from '../src/providers/openclaw.mjs';
+import { hookLimit as pluginHookLimit, HOOK_MS as PLUGIN_HOOK_MS } from '../src/integrations/openclaw-plugin/gate.js';
+import { riskOf, actionOf } from '../src/risk.mjs';
 
 const listen = (srv) => new Promise((resolve) => srv.listen(0, '127.0.0.1', () => resolve(srv.address().port)));
 

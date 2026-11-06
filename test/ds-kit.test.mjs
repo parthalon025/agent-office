@@ -231,14 +231,14 @@ test('the DS CSS uses the scrim token for the overlay', () => {
 
 test('the scrim usage text names the dialog and the command palette, and no doc says "welcome card"', () => {
   const t = tokens.find((x) => x.name === 'scrim');
-  for (const [file, text] of [['tokens.json', t.usage], ['Reference.md', read('Reference.md')], ['Changelog.md', read('Changelog.md')]]) {
+  for (const [file, text] of [['tokens.json', t.usage], ['Reference.md', read('docs/design-system/Reference.md')], ['Changelog.md', read('docs/design-system/Changelog.md')]]) {
     assert.ok(!/veil behind a dialog or (a|the) welcome card/i.test(text), `${file} does not claim a welcome card uses the scrim`);
   }
   assert.match(t.usage, /dialog or the command palette/);
 });
 
 test('the checker docs say that a name ending in "-" is checked by its prefix', () => {
-  for (const f of ['DS-README.md', 'Recipes.md']) {
+  for (const f of ['docs/design-system/DS-README.md', 'docs/design-system/Recipes.md']) {
     assert.match(read(f), /checked by its prefix: a name that ends in "-"/, `${f} explains the prefix rule`);
   }
 });
@@ -251,11 +251,11 @@ test('the DS files say they are edited by hand: no header or doc claims a genera
   const assets = read('components/bundle.js').split('\n').find((l) => l.includes('asset strings'));
   assert.ok(assets, 'the asset block has a header');
   assert.match(assets, new RegExp(`Agent Office DS ${stamp} - asset strings\\. Edited by hand`), 'asset block header');
-  for (const f of ['tokens.css', 'components/bundle.js', 'DS-README.md', 'Reference.md', 'Recipes.md', 'Concepts.md']) {
+  for (const f of ['tokens.css', 'components/bundle.js', 'docs/design-system/DS-README.md', 'docs/design-system/Reference.md', 'docs/design-system/Recipes.md', 'docs/design-system/Concepts.md']) {
     assert.ok(!/gen_assets\.py|build\.py|Do not edit/.test(read(f)), `${f} names no generator and does not say "Do not edit"`);
   }
-  assert.ok(!/Reference \(generated\)/.test(read('DS-README.md')), 'DS-README does not call Reference generated');
-  assert.ok(!/`tokens\.css` \(generated/.test(read('DS-README.md')), 'DS-README does not call tokens.css generated');
+  assert.ok(!/Reference \(generated\)/.test(read('docs/design-system/DS-README.md')), 'DS-README does not call Reference generated');
+  assert.ok(!/`tokens\.css` \(generated/.test(read('docs/design-system/DS-README.md')), 'DS-README does not call tokens.css generated');
 });
 
 test('bundle.js defines ModeToggle once, with an icon on every mode; the types and docs list the same modes (#87)', () => {
@@ -272,7 +272,7 @@ test('bundle.js defines ModeToggle once, with an icon on every mode; the types a
   assert.match(read('components/index.d.ts'), /interface ModeToggleProps \{[^}]*options\?: \{ id: string; label: string; icon\?: string \}\[\]/, 'index.d.ts: options take an icon');
   assert.match(read('components/ModeToggle/README.md'), /\| `options` \| no \| `\{ id: string; label: string; icon\?: string \}\[\]` \|/, 'component README: options take an icon');
   const list = new RegExp(`${themes.map((t) => t.name).join(', ')}\\)? and Tour`);
-  for (const f of ['Reference.md', 'components/ModeToggle/README.md']) {
+  for (const f of ['docs/design-system/Reference.md', 'components/ModeToggle/README.md']) {
     assert.match(read(f), list, `${f} lists ${themes.map((t) => t.name).join(', ')} and Tour`);
   }
 });

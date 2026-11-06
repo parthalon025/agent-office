@@ -1,0 +1,49 @@
+name: Bug report
+description: The office does something wrong.
+labels: [needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report a security problem here. Use the [private report form](https://github.com/parthalon025/agent-office/security/advisories/new).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Say what you did, what you saw and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to repeat it
+      placeholder: |
+        1. Run npm start.
+        2. Open a session in ...
+        3. Click ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Office version
+      description: The output of `git rev-parse --short HEAD`, or the page version in the title.
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Windows, Node.js and Claude Code versions
+      placeholder: Windows 11, Node 22.18, Claude Code 2.1.317
+    validations:
+      required: true
+  - type: dropdown
+    id: agent
+    attributes:
+      label: Agent kind
+      options: [Claude Code, Local model, ACP agent, OpenClaw, Agent Framework, Cloud agent, Not about an agent]
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output and screenshots
+      description: Paste the server output. Remove tokens and private paths first.

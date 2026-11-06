@@ -3,7 +3,7 @@
 // call, no real Paperclip. Run: node --test test/paperclip.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { checkUrl, supervisionOf, supervisePatch, argsWhy, configWhy, runCheck, runIds, cleanIds, createHq, roleLabel, DEFAULT_URL } from '../paperclip.mjs';
+import { checkUrl, supervisionOf, supervisePatch, argsWhy, configWhy, runCheck, runIds, cleanIds, createHq, roleLabel, DEFAULT_URL } from '../src/paperclip.mjs';
 import { startFakePaperclip, DEMO } from './fixtures/fake-paperclip.mjs';
 import { until } from './fixtures/office-server.mjs';
 
@@ -656,7 +656,7 @@ test('round 4: the watcher fails closed on what it cannot read of a company: any
 });
 
 // Paperclip as a plan source (#155, spec #130): its tasks are plan steps, read-only, on the contract of manager.mjs (#154).
-import { createPlanBoard } from '../manager.mjs';
+import { createPlanBoard } from '../src/manager.mjs';
 
 test('plan source: tasks become steps with agent, state, budget and model; the board reads them through the contract', async () => {
   const pc = await startFakePaperclip({ ...DEMO(), allIssues: true });

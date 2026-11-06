@@ -5,11 +5,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createTracker } from '../tracker.mjs';
-import { providerEvents, checkProvider } from '../providers/index.mjs';
-import { createLocal, KINDS, MAX_ROUNDS } from '../providers/local.mjs';
-import { createLocalTools } from '../providers/local-tools.mjs';
-import { cleanRules, setRule, decide } from '../security.mjs';
+import { createTracker } from '../src/tracker.mjs';
+import { providerEvents, checkProvider } from '../src/providers/index.mjs';
+import { createLocal, KINDS, MAX_ROUNDS } from '../src/providers/local.mjs';
+import { createLocalTools } from '../src/providers/local-tools.mjs';
+import { cleanRules, setRule, decide } from '../src/security.mjs';
 import { startFakeOpenAI } from './fixtures/fake-openai.mjs';
 
 const SLEEP = 'node -e "setTimeout(()=>{},60000)"';

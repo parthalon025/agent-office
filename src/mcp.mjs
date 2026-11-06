@@ -19,13 +19,10 @@
 // First statement: Windows never looks for a program in the current folder (git.mjs resolveExe has the reason).
 process.env.NoDefaultCurrentDirectoryInExePath = '1';
 import fs from 'node:fs';
-import path from 'node:path';
 import readline from 'node:readline';
-import { fileURLToPath } from 'node:url';
-import { officeFiles, portArg } from './files.mjs';
+import { officeFiles, portArg, OFFICE_ROOT } from './files.mjs';
 import { httpPost } from './post.mjs';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
 const PORT = portArg(process.argv[2]);
 const PIN_MAX = 140; // the server checks it too (server.mjs PIN_MAX)
 const INSTRUCTIONS =
@@ -92,7 +89,7 @@ const ROOM_FIELDS = ['notes_append', 'notes_replace', 'pin'];
 function config() {
   if (!PORT) return null;
   let cfg;
-  try { cfg = JSON.parse(fs.readFileSync(officeFiles(here, PORT).token, 'utf8')); } catch { return null; }
+  try { cfg = JSON.parse(fs.readFileSync(officeFiles(OFFICE_ROOT, PORT).token, 'utf8')); } catch { return null; }
   // With a port argument, the token file must name that port.
   if (process.argv[2] !== undefined && process.argv[2] !== '' && cfg.port !== PORT) throw new Error(`The token file of port ${PORT} names port ${cfg.port}. Start the office on port ${PORT} again.`);
   return cfg;

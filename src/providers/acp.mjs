@@ -77,7 +77,7 @@ export const AGENTS = {
   },
   // OpenClaw (#73, #77, ADR 0001). `openclaw acp` is a bridge to a Gateway that already runs on loopback (providers/openclaw.mjs);
   // the office never starts or stops that Gateway. Its own approvals cover shell commands only, so the office holds every call
-  // another way: the Agent Office plugin (integrations/openclaw-plugin) runs in the Gateway, and its before_tool_call handler
+  // another way: the Agent Office plugin (src/integrations/openclaw-plugin) runs in the Gateway, and its before_tool_call handler
   // sends every tool call of an office session to POST /hook/openclaw (gate() below) and waits; no answer means deny. The office
   // marks its sessions by the Gateway session key it gives session/new (openclaw.mjs officeKey). So the agent is gated, and a
   // session starts only when the Gateway config loads that plugin for this office (gateCheck; the office only reads it).

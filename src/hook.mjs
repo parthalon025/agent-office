@@ -5,13 +5,10 @@
 // First statement: Windows never looks for a program in the current folder (git.mjs resolveExe has the reason).
 process.env.NoDefaultCurrentDirectoryInExePath = '1';
 import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { slimPayload, runIds } from './payload.mjs';
-import { officeFiles, portArg } from './files.mjs';
+import { officeFiles, portArg, OFFICE_ROOT } from './files.mjs';
 import { httpPost } from './post.mjs';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
 
 let raw = '';
 for await (const chunk of process.stdin) raw += chunk;
@@ -23,7 +20,7 @@ try { payload = JSON.parse(raw); } catch { process.exit(0); }
 const port = portArg(process.argv[2]);
 if (!port) process.exit(0);
 let cfg;
-try { cfg = JSON.parse(fs.readFileSync(officeFiles(here, port).token, 'utf8')); } catch { process.exit(0); }
+try { cfg = JSON.parse(fs.readFileSync(officeFiles(OFFICE_ROOT, port).token, 'utf8')); } catch { process.exit(0); }
 // With a port argument, the token file must name that port. A file that names another port is not this office's: say nothing.
 if (process.argv[2] !== undefined && process.argv[2] !== '' && cfg.port !== port) process.exit(0);
 

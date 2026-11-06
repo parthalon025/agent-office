@@ -13,7 +13,7 @@ const read = (f) => fs.readFileSync(new URL(f, root), 'utf8').replace(/\r\n/g, '
 const J = JSON.parse(read('tokens.json'));
 const SKINS = J.color.themes;
 const css = read('tokens.css'), bundleCss = read('components/bundle.css'), bundleJs = read('components/bundle.js');
-const reference = read('Reference.md');
+const reference = read('docs/design-system/Reference.md');
 
 // The DS bundle in a Node VM with the vendored React (as test/rich.test.mjs does): the skin parts are its public exports.
 const sb = { console, URL };
@@ -378,7 +378,7 @@ for (const [index, skin] of SKINS.entries()) {
       }
     });
 
-    part('11. Reference column', 'Reference.md', (ok) => {
+    part('11. Reference column', 'docs/design-system/Reference.md', (ok) => {
       // every per-theme table has a column for the skin, with the value of tokens.json in each row
       const lines = reference.split('\n');
       const tables = [];
@@ -411,9 +411,9 @@ for (const [index, skin] of SKINS.entries()) {
       for (const n of [`light-${look}-sky`, `fx-bloom-${look}`]) ok(lines.some((l) => l.startsWith(`| \`${n}\` |`)), `the ${n} row`);
     });
 
-    part('12. screenshot lists', 'DS-README.md, Recipes.md, CLAUDE.md', (ok) => {
+    part('12. screenshot lists', 'docs/design-system/DS-README.md, Recipes.md, CLAUDE.md', (ok) => {
       const line = (f, re) => read(f).split('\n').find((l) => re.test(l)) || '';
-      for (const [f, re] of [['DS-README.md', /^- \[ \] Screenshots in /], ['Recipes.md', /^1\. Screenshots: /], ['CLAUDE.md', /then look at screenshots in /]]) {
+      for (const [f, re] of [['docs/design-system/DS-README.md', /^- \[ \] Screenshots in /], ['docs/design-system/Recipes.md', /^1\. Screenshots: /], ['CLAUDE.md', /then look at screenshots in /]]) {
         const l = line(f, re);
         ok(l, `${f}: no screenshot line`);
         ok(new RegExp(`(^|[^A-Za-z])${skin.name}([^A-Za-z]|$)`).test(l.replace(new RegExp(SKINS.filter((s) => s.name !== skin.name && s.name.includes(skin.name)).map((s) => s.name).join('|') || '^$', 'g'), '')), `${f}: the screenshot line does not name ${skin.name}`);

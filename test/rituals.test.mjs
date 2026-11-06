@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import '../public/vocab.js';
-import { metrics, recap, away, mergeRecord } from '../rituals.mjs';
+import { metrics, recap, away, mergeRecord } from '../src/rituals.mjs';
 
 const R = globalThis.OfficeVocab.rituals;
 const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR;

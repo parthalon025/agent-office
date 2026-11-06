@@ -10,10 +10,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import * as git from '../git.mjs';
-import { officeFiles } from '../files.mjs';
-import { pageFile } from '../auth.mjs';
-import { startOffice, settle, holdPort, hold, close, closeHeld } from './fixtures/office-server.mjs';
+import * as git from '../src/git.mjs';
+import { officeFiles } from '../src/files.mjs';
+import { pageFile } from '../src/auth.mjs';
+import { startOffice, settle, holdPort, hold, close, closeHeld, copyOffice } from './fixtures/office-server.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const win = process.platform === 'win32';
@@ -150,8 +150,7 @@ test('OFFICE_PORT=branch: the office takes the first free port of its sequence, 
   const dir = path.join(tmp, 'office'), lad = path.join(tmp, 'local');
   fs.mkdirSync(dir);
   fs.mkdirSync(lad);
-  for (const f of fs.readdirSync(ROOT)) if (f.endsWith('.mjs') || f === 'package.json') fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
-  for (const d of ['providers', 'public']) fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true });
+  copyOffice(dir);
   const branch = await freeName();
   const seq = git.branchPorts(branch);
   sh(['init', '-b', branch], dir);

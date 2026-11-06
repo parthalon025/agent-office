@@ -8,12 +8,12 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { fileURLToPath } from 'node:url';
-import * as auth from '../auth.mjs';
-import { officeFiles } from '../files.mjs';
-import { startOnFreePort } from './fixtures/office-server.mjs';
-import { createTracker, MAX_CALLS } from '../tracker.mjs';
-import { slimPayload } from '../payload.mjs';
-import { placeOfSession } from '../place.mjs';
+import * as auth from '../src/auth.mjs';
+import { officeFiles } from '../src/files.mjs';
+import { startOnFreePort, copyOffice } from './fixtures/office-server.mjs';
+import { createTracker, MAX_CALLS } from '../src/tracker.mjs';
+import { slimPayload } from '../src/payload.mjs';
+import { placeOfSession } from '../src/place.mjs';
 import '../public/vocab.js';
 import '../public/wire.js';
 
@@ -247,8 +247,7 @@ test('the server: a whole snapshot on connect, then patches that add up to it; p
   const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-wire-')));
   const dir = path.join(tmp, 'office'), lad = path.join(tmp, 'local');
   fs.mkdirSync(dir); fs.mkdirSync(lad);
-  for (const f of fs.readdirSync(ROOT)) if (f.endsWith('.mjs') || f === 'package.json') fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
-  for (const d of ['providers', 'public']) fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true });
+  copyOffice(dir);
   const baseEnv = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toLowerCase() !== 'path'));
   Object.assign(baseEnv, {
     PATH: [path.dirname(process.execPath), ...(process.platform === 'win32' ? [path.join(process.env.SystemRoot || 'C:\\Windows', 'System32')] : [])].join(path.delimiter),

@@ -5,10 +5,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { createTracker } from '../tracker.mjs';
-import { slimPayload } from '../payload.mjs';
-import { placeOfSession, placeOfWorktree, normPath, securityRoomIdOf, seatOf, settleRooms, viewRooms } from '../place.mjs';
-import { newRecord, shownFloors, layoutView, edit as editLayout } from '../archetypes.mjs';
+import { createTracker } from '../src/tracker.mjs';
+import { slimPayload } from '../src/payload.mjs';
+import { placeOfSession, placeOfWorktree, normPath, securityRoomIdOf, seatOf, settleRooms, viewRooms } from '../src/place.mjs';
+import { newRecord, shownFloors, layoutView, edit as editLayout } from '../src/archetypes.mjs';
 import '../public/vocab.js';
 import '../public/wire.js';
 import '../public/building.js';

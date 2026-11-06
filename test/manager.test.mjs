@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createManager, createPlanBoard, officeSource, DEFAULT_LIMITS, LADDER, NO_CHANGE_CALLS, ladderStart, stageSignal, stepUp, suggestSwitch } from '../manager.mjs';
+import { createManager, createPlanBoard, officeSource, DEFAULT_LIMITS, LADDER, NO_CHANGE_CALLS, ladderStart, stageSignal, stepUp, suggestSwitch } from '../src/manager.mjs';
 import '../public/vocab.js';
-import { NOTES_MAX } from '../notes.mjs';
+import { NOTES_MAX } from '../src/notes.mjs';
 
 // A world of two agents. dispatched lists what the Manager handed out; spend is per agent, in dollars.
 function world(over = {}) {

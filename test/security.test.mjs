@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import os from 'node:os';
 import path from 'node:path';
 import { FIXTURE_ROOT, OFFICE, holds } from './fixtures/fixture-root.mjs';
-import { cleanRules, setRule, decide, permissionModeFor, openRefusal, costAsk, enforcement, preToolDecision, addCost, costThisMonth } from '../security.mjs';
+import { cleanRules, setRule, decide, permissionModeFor, openRefusal, costAsk, enforcement, preToolDecision, addCost, costThisMonth } from '../src/security.mjs';
 
 const WIN = process.platform === 'win32';
 const root = FIXTURE_ROOT; // outside the office folder, wherever the checkout is (#127)
@@ -388,9 +388,9 @@ test('Agent Framework: its own column decides its calls; a default Ask holds a l
 // this machine, so the file rows have no cell for them. Their tools run in the cloud without the office (ungated, ADR 0001):
 // off until turned on, every call cell Not enforced except MCP, where a Foundry tool set to ask comes to the office (Partly).
 test('#24: the cloud kinds share the Cloud agent column: no file cells, off until turned on, cost asked without prices', async () => {
-  const { createFoundry } = await import('../providers/foundry.mjs');
-  const { createCopilotStudio } = await import('../providers/copilot-studio.mjs');
-  const { cloudConfig } = await import('../providers/cloud.mjs');
+  const { createFoundry } = await import('../src/providers/foundry.mjs');
+  const { createCopilotStudio } = await import('../src/providers/copilot-studio.mjs');
+  const { cloudConfig } = await import('../src/providers/cloud.mjs');
   const S = globalThis.OfficeVocab.security;
   const fd = (env = {}) => createFoundry({ events: {}, config: cloudConfig(env, 'OFFICE_FOUNDRY') });
   const cs = (env = {}) => createCopilotStudio({ events: {}, config: cloudConfig(env, 'OFFICE_COPILOTSTUDIO') });

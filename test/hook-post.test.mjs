@@ -10,8 +10,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { httpPost } from '../post.mjs';
-import { officeFiles } from '../files.mjs';
+import { httpPost } from '../src/post.mjs';
+import { officeFiles } from '../src/files.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const HOLD_MS = 1200; // longer than the stand-in's 400 ms headers timeout
@@ -24,7 +24,7 @@ const listen = (handler) => new Promise((resolve) => {
 /** Runs a copy of hook.mjs against a token file for `port`. Resolves { code, out }. */
 function runHook(dir, port, event, env = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [path.join(dir, 'hook.mjs'), String(port)], {
+    const child = spawn(process.execPath, [path.join(dir, 'src', 'hook.mjs'), String(port)], {
       cwd: dir, env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'],
     });
     let out = '';
@@ -38,8 +38,9 @@ function runHook(dir, port, event, env = {}) {
 function rig(t, port) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hook-post-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(dir, 'src'));
   for (const f of ['hook.mjs', 'payload.mjs', 'files.mjs', 'post.mjs']) {
-    if (fs.existsSync(path.join(ROOT, f))) fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
+    if (fs.existsSync(path.join(ROOT, 'src', f))) fs.copyFileSync(path.join(ROOT, 'src', f), path.join(dir, 'src', f));
   }
   fs.writeFileSync(officeFiles(dir, port).token, JSON.stringify({ token: 'tok', port }));
   const preload = path.join(dir, 'fetch-timeout.cjs');
@@ -118,7 +119,7 @@ test('httpPost: waits past the headers limit, caps the answer, ends on the calle
 
 test('hook.mjs and mcp.mjs post through post.mjs, not fetch', () => {
   for (const f of ['hook.mjs', 'mcp.mjs']) {
-    const src = fs.readFileSync(path.join(ROOT, f), 'utf8');
+    const src = fs.readFileSync(path.join(ROOT, 'src', f), 'utf8');
     assert.match(src, /from '\.\/post\.mjs'/, f);
     assert.doesNotMatch(src, /\bfetch\(/, f);
   }

@@ -11,11 +11,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import * as auth from '../auth.mjs';
-import * as startup from '../startup.mjs';
-import { officeFiles, portArg, portArgs, DEFAULT_PORT } from '../files.mjs';
-import { startOffice, startOnFreePort } from './fixtures/office-server.mjs';
-import * as git from '../git.mjs';
+import * as auth from '../src/auth.mjs';
+import * as startup from '../src/startup.mjs';
+import { officeFiles, portArg, portArgs, DEFAULT_PORT } from '../src/files.mjs';
+import { startOffice, startOnFreePort, copyOffice } from './fixtures/office-server.mjs';
+import * as git from '../src/git.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const win = process.platform === 'win32';
@@ -63,14 +63,16 @@ async function fakeOffice() {
 
 test('hook.mjs and mcp.mjs read the token file of the port in their first argument', { timeout: 60000 }, async () => {
   const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-files-')));
-  for (const f of ['hook.mjs', 'mcp.mjs', 'payload.mjs', 'files.mjs', 'post.mjs']) fs.copyFileSync(path.join(ROOT, f), path.join(tmp, f));
+  // The same layout as the repository: the modules in src/, and files.mjs finds the office folder one level above them.
+  fs.mkdirSync(path.join(tmp, 'src'));
+  for (const f of ['hook.mjs', 'mcp.mjs', 'payload.mjs', 'files.mjs', 'post.mjs']) fs.copyFileSync(path.join(ROOT, 'src', f), path.join(tmp, 'src', f));
   const plain = await fakeOffice(), other = await fakeOffice();
   try {
     // The default office's file names port `plain`; the file of port `other` names port `other`.
     fs.writeFileSync(officeFiles(tmp).token, JSON.stringify({ token: 'plain-token', port: plain.port }));
     fs.writeFileSync(officeFiles(tmp, other.port).token, JSON.stringify({ token: 'other-token', port: other.port }));
     const run = (script, args, input) => new Promise((resolve, reject) => {
-      const c = spawn(process.execPath, [path.join(tmp, script), ...args], { cwd: tmp, env: cleanEnv(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+      const c = spawn(process.execPath, [path.join(tmp, 'src', script), ...args], { cwd: tmp, env: cleanEnv(), windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
       let out = '';
       c.stdout.on('data', (d) => {
         out += d;
@@ -120,12 +122,6 @@ test('hook.mjs and mcp.mjs read the token file of the port in their first argume
     fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   }
 });
-
-function copyOffice(dir) {
-  fs.mkdirSync(dir, { recursive: true });
-  for (const f of fs.readdirSync(ROOT)) if (f.endsWith('.mjs') || f === 'package.json') fs.copyFileSync(path.join(ROOT, f), path.join(dir, f));
-  for (const d of ['providers', 'public']) fs.cpSync(path.join(ROOT, d), path.join(dir, d), { recursive: true });
-}
 
 // The test's own environment without OFFICE_ID (this test may run inside an office session) and with a short PATH:
 // no claude, so no paid call and a fast start. Programs from System32 come by absolute path anyway.
@@ -399,7 +395,7 @@ test('an office on another port keeps the token of an older .office-token that n
     // A session with the old settings still reaches the office: hook.mjs with no argument reads .office-token.
     o = startOffice(dir, env);
     await o.done;
-    const hook = spawn(process.execPath, [path.join(dir, 'hook.mjs')], { cwd: work, env: cleanEnv(), windowsHide: true, stdio: ['pipe', 'ignore', 'ignore'] });
+    const hook = spawn(process.execPath, [path.join(dir, 'src', 'hook.mjs')], { cwd: work, env: cleanEnv(), windowsHide: true, stdio: ['pipe', 'ignore', 'ignore'] });
     const code = await new Promise((r) => { hook.on('exit', r); hook.stdin.end(JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: 'old', cwd: work, prompt: 'Go.' })); });
     assert.equal(code, 0);
     assert.ok((await sessionNames(port, env)).includes('old-settings'), 'the old settings reached the office');

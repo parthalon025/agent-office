@@ -4,8 +4,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createTracker, MAX_CALLS } from '../tracker.mjs';
-import { slimPayload } from '../payload.mjs';
+import { createTracker, MAX_CALLS } from '../src/tracker.mjs';
+import { slimPayload } from '../src/payload.mjs';
 
 const load = (f) => JSON.parse(fs.readFileSync(new URL('./fixtures/' + f, import.meta.url), 'utf8'));
 const HOOKS = load('hooks.json'), STREAM = load('stream.json');
@@ -868,7 +868,7 @@ test('a permission request keeps the reason the agent gave, trimmed; a request w
 
 // #27 L3: a cut preview says so.
 test('makePreview says how much a Write or MultiEdit preview left out', async () => {
-  const { makePreview } = await import('../tracker.mjs');
+  const { makePreview } = await import('../src/tracker.mjs');
   const big = Array.from({ length: 55 }, (_, i) => 'line ' + i).join('\n');
   assert.match(makePreview('Write', { file_path: 'a.txt', content: big }), /15 more lines/);
   assert.doesNotMatch(makePreview('Write', { file_path: 'a.txt', content: 'one\ntwo' }), /more line/);

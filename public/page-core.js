@@ -147,7 +147,7 @@
   }
 
   // ---------- agent kinds (#20) ----------
-  // The kinds and their options come with the snapshot (officeAdapter.kinds(), from providers/index.mjs describe):
+  // The kinds and their options come with the snapshot (officeAdapter.kinds(), from src/providers/index.mjs describe):
   // label, paid (spend limit), terminal (Runs), modes (Permissions), needsModel, control (the dock's live changes).
   // Readiness and models come from GET /api/providers, which asks each provider and can take a few seconds
   // (Claude Code runs claude --version). Until it answers a kind is checking, and Claude Code offers the fallback models in MODELS. One shared answer feeds every place that shows a model.

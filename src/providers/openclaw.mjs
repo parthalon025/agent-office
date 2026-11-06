@@ -59,7 +59,7 @@ export function versionAtLeast(v, min = MIN_VERSION) {
 }
 
 // ---------- the Agent Office plugin (#77): every tool call of an office session goes to the office ----------
-// OpenClaw loads integrations/openclaw-plugin into its Gateway. Its before_tool_call handler sends each tool call of a session the
+// OpenClaw loads src/integrations/openclaw-plugin into its Gateway. Its before_tool_call handler sends each tool call of a session the
 // office opened to POST /hook/openclaw and waits for the decision; no answer means deny. The office marks its sessions by the
 // Gateway session key it gives session/new (`_meta.sessionKey`): "agent-office:<uid>". The Gateway may put "agent:<id>:" in
 // front, so the rule reads the end of the key. The plugin keeps the same rule (gate.js OFFICE_KEY; the tests compare the two).
@@ -287,7 +287,7 @@ const listOf = (r) => (r.state === 'set' && Array.isArray(r.value) ? r.value.map
  *   enabled, and its tokenFile this office's: then the plugin is loaded and asks this office about every tool call.
  *   warn (not a precondition, carries no row): plugins.entries.agent-office.hooks gives OpenClaw's wait for the plugin's
  *   answer no shorter limit than the 600 s the plugin asks for. A shorter one only denies sooner: the plugin ends its own wait
- *   before it (integrations/openclaw-plugin/gate.js hookLimit), so the card goes with the call.
+ *   before it (src/integrations/openclaw-plugin/gate.js hookLimit), so the card goes with the call.
  * No gap: the office decides every call (the Security room rules, then a hold).
  */
 export function wantedConfig({ tokenFile = null } = {}) {

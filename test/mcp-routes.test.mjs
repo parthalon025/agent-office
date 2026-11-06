@@ -16,11 +16,11 @@ import net from 'node:net';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { startFakeOpenAI } from './fixtures/fake-openai.mjs';
-import { pageFile, routeOf } from '../auth.mjs';
-import { officeFiles } from '../files.mjs';
+import { pageFile, routeOf } from '../src/auth.mjs';
+import { officeFiles } from '../src/files.mjs';
 import { load as loadPlugin } from './fixtures/fake-openclaw.mjs';
-import { resolveExe } from '../git.mjs';
-import { startOnFreePort, freePort, until as untilTrue } from './fixtures/office-server.mjs';
+import { resolveExe } from '../src/git.mjs';
+import { startOnFreePort, freePort, until as untilTrue, copyOffice } from './fixtures/office-server.mjs';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SKIP = process.platform !== 'win32' ? 'opening sessions is only implemented for Windows' : false;
@@ -72,10 +72,7 @@ before(async () => {
   work = path.join(base, 'work');
   fs.mkdirSync(work);
   fs.mkdirSync(copy);
-  for (const f of fs.readdirSync(SRC)) {
-    if (/\.(mjs|json|ps1)$/.test(f) && !/^(state|history)(-\d+)?\.json$/.test(f) && !f.startsWith('office-')) fs.copyFileSync(path.join(SRC, f), path.join(copy, f));
-  }
-  for (const d of ['providers', 'public']) fs.cpSync(path.join(SRC, d), path.join(copy, d), { recursive: true });
+  copyOffice(copy);
   fake = await startFakeOpenAI({ script: [{ text: 'ok' }], models: ['fake-model'] });
   // A claude.exe that fails before init: node.exe under that name. It answers the headless flags with "bad option" and exits
   // at once, so Reopen of a Claude Code record starts a process that never reaches init. No Claude Code, no paid call.
@@ -474,7 +471,7 @@ test('a live reopen swaps the past record for its own as soon as it has a sid', 
 
 // ---------- agent rooms (#69): POST /api/open makes a room for each agent ----------
 test('/api/open gives each agent a worktree on the base floor; isolation "same" and a folder outside git work in the folder', { skip: SKIP }, async () => {
-  const { resolveExe } = await import('../git.mjs');
+  const { resolveExe } = await import('../src/git.mjs');
   const { execFileSync } = await import('node:child_process');
   const repo = path.join(base, 'rooms-repo');
   fs.mkdirSync(repo);
@@ -511,7 +508,7 @@ test('/api/open gives each agent a worktree on the base floor; isolation "same" 
 // Review minor: Remove room rewrote the past record to the main folder, so Reopen ran the agent in the user's own folder on
 // its branch (and a Claude Code resume would not find its conversation there). Reopen now says the room is gone, and opens nothing.
 test('Reopen of a session whose room was removed says the room is gone and opens nothing in the main folder', { skip: SKIP }, async () => {
-  const { resolveExe } = await import('../git.mjs');
+  const { resolveExe } = await import('../src/git.mjs');
   const { execFileSync } = await import('node:child_process');
   const repo = path.join(base, 'gone-repo');
   fs.mkdirSync(repo);
@@ -539,7 +536,7 @@ test('Reopen of a session whose room was removed says the room is gone and opens
 
 // Review M5: agent rooms opened at once in one repository each write the repository config; they are made one at a time.
 test('agents opened at once in one repository all get a room of their own on the base floor', { skip: SKIP }, async () => {
-  const { resolveExe } = await import('../git.mjs');
+  const { resolveExe } = await import('../src/git.mjs');
   const { execFileSync } = await import('node:child_process');
   const repo = path.join(base, 'busy-repo');
   fs.mkdirSync(repo);
@@ -802,7 +799,7 @@ test('OpenClaw (#77): gated through the office plugin; a file edit the plugin se
   assert.ok(feed.includes('OpenClaw config: workspace-only is on, and the agent-office plugin sends every tool call to the office.'), feed.join(' | '));
 
   // The plugin, loaded by the stand-in plugin host, as the Gateway would run it for a file edit of this session.
-  const host = await loadPlugin(path.join(SRC, 'integrations', 'openclaw-plugin'), { config: { tokenFile: clawToken } });
+  const host = await loadPlugin(path.join(SRC, 'src', 'integrations', 'openclaw-plugin'), { config: { tokenFile: clawToken } });
   const ctx = { sessionKey: `agent:main:agent-office:${r.json.uid}`, sessionId: 'gw-1', agentId: 'main', toolName: 'edit' };
   const edit = host.beforeToolCall({ toolName: 'edit', params: { path: 'README.md', old_string: 'a', new_string: 'b' }, toolCallId: 'tc-1' }, ctx);
   const held = await until(async () => { const x = await sessionOf(r.json.uid); return x && x.pending.length === 1 ? x : null; }, 'the edit to be held in the office');

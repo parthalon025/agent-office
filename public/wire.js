@@ -78,7 +78,7 @@
       pins: state.pins || {},
       screens: state.screens || {},
       repos: state.repos || [],
-      kinds: state.kinds || [],   // the agent kinds (providers/index.mjs kinds): fixed while the server runs, so no patch repeats them
+      kinds: state.kinds || [],   // the agent kinds (src/providers/index.mjs kinds): fixed while the server runs, so no patch repeats them
       security: state.security || null,  // the Security room (#70): rules, what is enforced, the Spend screen
       plans: state.plans || { plans: [], unreadable: [] }, // Manager board (#154, #156)
       hq: state.hq || null,              // Paperclip HQ (#76, paperclip.mjs view): null until the user connects it

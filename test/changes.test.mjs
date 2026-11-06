@@ -2,7 +2,7 @@
 // Ready to merge tray, and the reader that asks `gh` (read-only) and never shows old data as live. A fake runner stands for gh.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { stateOf, checksOf, stageOf, viewPrs, readyEntries, pipelineOf, createReader, readArgs, mergeArgs } from '../changes.mjs';
+import { stateOf, checksOf, stageOf, viewPrs, readyEntries, pipelineOf, createReader, readArgs, mergeArgs } from '../src/changes.mjs';
 
 const pr = (o) => ({ number: 1, title: 'T', state: 'OPEN', isDraft: false, headRefName: 'feat/x', baseRefName: 'main', mergeable: 'MERGEABLE', reviewDecision: '', statusCheckRollup: [], additions: 3, deletions: 1, changedFiles: 2, url: 'u', ...o });
 const ok = { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' };

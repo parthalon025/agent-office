@@ -1,0 +1,7 @@
+# The office has no npm dependencies. Only the GitHub Actions in the workflows are kept current.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

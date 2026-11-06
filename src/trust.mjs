@@ -12,7 +12,7 @@
 // building for that kind: the pattern is the evidence, and the text says so. Never proposed: the Secrets rows (settings,
 // secrets), the Agents rows, a cell that is already Allow or Deny, a streak with a decline or a high-risk call in it.
 import { setRule } from './security.mjs';
-import './public/vocab.js';
+import '../public/vocab.js';
 
 const S = globalThis.OfficeVocab.security;
 const own = S.own;

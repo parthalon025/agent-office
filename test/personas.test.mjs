@@ -2,8 +2,8 @@
 // Pure: no I/O. Run: node --test test/personas.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { STYLES, SHAPES, ACCESSORIES, cleanPersona, setPersona, removePersona, personaOf, stylePrompt, bodyCue } from '../personas.mjs';
-import { decide, permissionModeFor } from '../security.mjs';
+import { STYLES, SHAPES, ACCESSORIES, cleanPersona, setPersona, removePersona, personaOf, stylePrompt, bodyCue } from '../src/personas.mjs';
+import { decide, permissionModeFor } from '../src/security.mjs';
 
 test('cleanPersona keeps only known fields and drops the rest', () => {
   const p = cleanPersona({ name: '  Ada  ', style: 'chatty', shape: SHAPES[0], accessory: ACCESSORIES[0], color: 3, permissions: 'allow', evil: 1 });

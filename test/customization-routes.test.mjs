@@ -7,8 +7,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { pageFile } from '../auth.mjs';
-import { startOnFreePort } from './fixtures/office-server.mjs';
+import { pageFile } from '../src/auth.mjs';
+import { startOnFreePort, copyOffice } from './fixtures/office-server.mjs';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let base, office, port, pageToken;
@@ -22,10 +22,7 @@ before(async () => {
   base = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-cus-'));
   const copy = path.join(base, 'office'), home = path.join(base, 'home');
   for (const d of [copy, home]) fs.mkdirSync(d);
-  for (const f of fs.readdirSync(SRC)) {
-    if (/\.(mjs|json|ps1)$/.test(f) && !/^(state|history)(-\d+)?\.json$/.test(f) && !f.startsWith('office-')) fs.copyFileSync(path.join(SRC, f), path.join(copy, f));
-  }
-  for (const d of ['providers', 'public']) fs.cpSync(path.join(SRC, d), path.join(copy, d), { recursive: true });
+  copyOffice(copy);
   const env = { ...process.env, OFFICE_HOOKS: 'command', OFFICE_RATE_FILE: path.join(base, 'no-rate.json'), OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local'), USERPROFILE: home, HOME: home };
   const started = await startOnFreePort(copy, env);
   ({ office, port } = started);

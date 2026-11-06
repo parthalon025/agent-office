@@ -5,11 +5,11 @@ import assert from 'node:assert/strict';
 import '../public/vocab.js';
 import '../public/format.js';
 import '../public/security.js';
-import { enforcement } from '../security.mjs';
-import { AGENTS } from '../providers/acp.mjs';
-import { createFoundry } from '../providers/foundry.mjs';
-import { createCopilotStudio } from '../providers/copilot-studio.mjs';
-import { cloudConfig } from '../providers/cloud.mjs';
+import { enforcement } from '../src/security.mjs';
+import { AGENTS } from '../src/providers/acp.mjs';
+import { createFoundry } from '../src/providers/foundry.mjs';
+import { createCopilotStudio } from '../src/providers/copilot-studio.mjs';
+import { cloudConfig } from '../src/providers/cloud.mjs';
 
 const P = globalThis.OfficeSecurity.pure;
 const SET = '/api/security/set';

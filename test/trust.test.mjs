@@ -2,8 +2,8 @@
 // Run: node --test test/trust.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanRules, setRule } from '../security.mjs';
-import { patternOf, record, cleanTrust, propose, cards, grant, withdraw, MIN_APPROVALS, LEDGER_MAX } from '../trust.mjs';
+import { cleanRules, setRule } from '../src/security.mjs';
+import { patternOf, record, cleanTrust, propose, cards, grant, withdraw, MIN_APPROVALS, LEDGER_MAX } from '../src/trust.mjs';
 
 const B = 'e:/work/app';
 const d = (over = {}) => ({ at: 1, col: 'claude-code', building: B, row: 'shell', pattern: 'npm test', allow: true, risk: 'medium', ...over });

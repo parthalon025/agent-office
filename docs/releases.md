@@ -1,6 +1,6 @@
 # Releases
 
-Changes to the Agent Office page and server. The design system has its own list in [Changelog.md](Changelog.md).
+Changes to the Agent Office page and server. The design system has its own list in [Changelog.md](design-system/Changelog.md).
 Versions keep the `x` prefix.
 
 ## x0.2 (not released yet)
@@ -30,6 +30,7 @@ Versions keep the `x` prefix.
 
 ### Changed
 
+- The folder is tidy. Every server module is in `src/` (`src/server.mjs`, `src/hook.mjs`, `src/mcp.mjs`, `src/probe.mjs` and the rest, with `src/providers/` and `src/integrations/`). The design system documents are in `docs/design-system/`. The office keeps its runtime files in the repository root as before. `npm start`, `npm run start:branch` and `npm run probe` use the new paths, and the settings files that the office writes at start name `src/hook.mjs` and `src/mcp.mjs`. The Start with Windows entry is rewritten at the next start of the office on port 4317. Restart the office after you update. If you attached the OpenClaw plugin, install it again from `src/integrations/openclaw-plugin`. A Claude Code session that you attached by hand keeps the old settings file until you start it again with the new one.
 - The server owns where a session sits: building, floor, room id and notes key. The page reads them.
 - One status word per state on every surface. A failed turn reads as Error until you dismiss it or the next turn starts.
 - The room's waiting count is the same on the stats display, the stats panel, the room dialog and in what agents read.

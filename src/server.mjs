@@ -15,7 +15,6 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process'; // execFileSync: icacls for writeSecret
-import { fileURLToPath } from 'node:url';
 import * as git from './git.mjs';
 import { createReader as createPrReader, readyEntries, mergeArgs } from './changes.mjs';
 import { slimPayload, cleanIds as cleanPaperclipIds } from './payload.mjs';
@@ -44,14 +43,14 @@ import { cleanRules, setRule, ruleOf, decide, preToolDecision, permissionModeFor
 import { realInside } from './risk.mjs';
 import { mcpAddArgs, mcpRemoveArgs, pluginArgs } from './extensions.mjs';
 import * as auth from './auth.mjs';
-import { officeFiles, portArgs, DEFAULT_PORT } from './files.mjs';
-import './public/format.js'; // money, plurals and short paths, shared with the page (globalThis.OfficeFormat)
-import './public/vocab.js'; // session vocabulary, shared with the page (globalThis.OfficeVocab)
-import './public/wire.js'; // the /events wire format: lean snapshot and patches, shared with the page (globalThis.OfficeWire)
+import { officeFiles, portArgs, DEFAULT_PORT, OFFICE_ROOT } from './files.mjs';
+import '../public/format.js'; // money, plurals and short paths, shared with the page (globalThis.OfficeFormat)
+import '../public/vocab.js'; // session vocabulary, shared with the page (globalThis.OfficeVocab)
+import '../public/wire.js'; // the /events wire format: lean snapshot and patches, shared with the page (globalThis.OfficeWire)
 const V = globalThis.OfficeVocab;
 const W = globalThis.OfficeWire;
 
-const ROOT = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = OFFICE_ROOT; // the repository root: runtime files, public/, components/, tokens.css, launch.ps1 (the code is in src/)
 const PUBLIC = path.join(ROOT, 'public');
 // OFFICE_PORT=branch: a port of this checkout's branch (git.branchPorts), so each worktree has its own. The first free
 // port of the name's fixed sequence is taken, and the start message says which one (#106). An office of this checkout on
@@ -183,7 +182,7 @@ const NODE = process.execPath.replace(/\\/g, '/');
 // The hook may wait as long as the longest hold below; the server decides when to give up.
 const askSeconds = 1000;
 // On a port other than the default, the port follows as an argument, so hook.mjs reads this office's token file.
-const hookCommand = [`"${NODE}" "${path.join(ROOT, 'hook.mjs').replace(/\\/g, '/')}"`, ...portArgs(PORT)].join(' ');
+const hookCommand = [`"${NODE}" "${path.join(ROOT, 'src', 'hook.mjs').replace(/\\/g, '/')}"`, ...portArgs(PORT)].join(' ');
 // The office tools are safe to pre-allow: they only talk to this server, and office_room_update
 // changes only the caller's own room boards (notes and blackboard pin in state.json).
 const PERMISSIONS = { allow: ['mcp__office__office_inbox', 'mcp__office__office_ask', 'mcp__office__office_room', 'mcp__office__office_room_update', 'mcp__office__office_mail'] };
@@ -218,7 +217,7 @@ const CLAUDE_VERSION = claudeVersion();
 const httpProven = () => persisted.httpHooks?.ok === true && persisted.httpHooks.version === CLAUDE_VERSION;
 let hooksMode = process.env.OFFICE_HOOKS === 'command' ? 'command' : (process.env.OFFICE_HOOKS === 'http' || httpProven() ? 'http' : 'command');
 const activeHooksFile = () => (hooksMode === 'http' ? HOOKS_HTTP_FILE : HOOKS_CMD_FILE);
-const mcpConfig = { mcpServers: { office: { command: process.execPath.replace(/\\/g, '/'), args: [path.join(ROOT, 'mcp.mjs').replace(/\\/g, '/'), ...portArgs(PORT)] } } };
+const mcpConfig = { mcpServers: { office: { command: process.execPath.replace(/\\/g, '/'), args: [path.join(ROOT, 'src', 'mcp.mjs').replace(/\\/g, '/'), ...portArgs(PORT)] } } };
 
 // ---------- past sessions ----------
 // Sessions that run inside the office are saved, so a restart or a closed session can be reopened
@@ -1774,7 +1773,7 @@ function send(res, status, body, type = 'application/json') {
   res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
 }
-// OpenClaw (#77): the Agent Office plugin in the OpenClaw Gateway (integrations/openclaw-plugin) sends each tool call of an
+// OpenClaw (#77): the Agent Office plugin in the OpenClaw Gateway (src/integrations/openclaw-plugin) sends each tool call of an
 // office session here (agent token) and waits. The session is the live OpenClaw session whose Gateway key the plugin names;
 // its provider holds the call like every request (gate: the Security room rules, then the user). The answer is
 // { decision: 'allow' } or { decision: 'deny', reason }; the plugin denies on any other answer and on no answer. When the
@@ -2176,6 +2175,8 @@ server.listen(PORT, HOST, () => {
   // After listen, so a second copy that exits on EADDRINUSE never rewrites them.
   writeSecret(STATE_FILE, JSON.stringify(persisted, null, 2));
   writeSecret(HISTORY_FILE, JSON.stringify(history));
+  // An entry that starts the office at sign-in and still names the old root server.mjs now names src/server.mjs (only the owner office may).
+  if (startup.migrate(STARTUP_DIR, ROOT, process.execPath, PORT)) console.log('The Start with Windows entry now points at src/server.mjs.');
   // What an ungated agent's own config carries, for the Security room wall (read-only; nothing is read while it is off).
   void refreshEnforce();
   // Paperclip HQ (#76): the connection the user made before, again (a Paperclip that is not up yet is tried again later).

@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import '../public/vocab.js';
-import { SHAPES, COLORS, ACCESSORIES, STYLES, bodyCue } from '../personas.mjs';
+import { SHAPES, COLORS, ACCESSORIES, STYLES, bodyCue } from '../src/personas.mjs';
 
 const P = globalThis.OfficeVocab.persona;
 

@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { placeOfSession, placeOfWorktree, legacyNoteKey, legacyRoomId, roomIdOf, normPath, adoptLegacy, addRecent, cleanRecent, recentChoices, OTHER_NAME, OTHER_FLOOR, securityRoomIdOf, isSecurityRoom } from '../place.mjs';
-import { seatOf, roomTitle, betterTitle, linkedIssue, cleanRooms, settleRooms, viewRooms } from '../place.mjs';
-import { shownFloors, newRecord, edit } from '../archetypes.mjs';
-import * as git from '../git.mjs';
+import { placeOfSession, placeOfWorktree, legacyNoteKey, legacyRoomId, roomIdOf, normPath, adoptLegacy, addRecent, cleanRecent, recentChoices, OTHER_NAME, OTHER_FLOOR, securityRoomIdOf, isSecurityRoom } from '../src/place.mjs';
+import { seatOf, roomTitle, betterTitle, linkedIssue, cleanRooms, settleRooms, viewRooms } from '../src/place.mjs';
+import { shownFloors, newRecord, edit } from '../src/archetypes.mjs';
+import * as git from '../src/git.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';

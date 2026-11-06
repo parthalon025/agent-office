@@ -406,7 +406,7 @@
     store.colorOf = colorOf;
     store.buildingOf = function (s) { return s.place ? s.place.buildingKey : ''; };
     store.sessionByUid = function (uid) { return latest && latest.sessions.filter(function (x) { return x.uid === uid; })[0] || null; };
-    // The agent kinds the server runs (providers/index.mjs describe), and the kind of one session as a word (vocab.js).
+    // The agent kinds the server runs (src/providers/index.mjs describe), and the kind of one session as a word (vocab.js).
     store.kinds = function () { return (latest && latest.kinds) || []; };
     store.kindWord = function (s) { return V.kindWord(s, store.kinds()); };
     // The building that is on screen: the one attached last.

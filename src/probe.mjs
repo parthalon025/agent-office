@@ -5,12 +5,9 @@
 // First statement: Windows never looks for a program in the current folder (git.mjs resolveExe has the reason).
 process.env.NoDefaultCurrentDirectoryInExePath = '1';
 import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { pageFile } from './auth.mjs';
-import { officeFiles, portArg } from './files.mjs';
+import { officeFiles, portArg, OFFICE_ROOT } from './files.mjs';
 
-const here = path.dirname(fileURLToPath(import.meta.url));
 // The token file of the port (files.mjs) names the port of the running office. /api/probe-http is a page route, so the
 // call carries the page token, which the office keeps outside this folder for the user's own tools (auth.mjs pageFile).
 const asked = portArg(process.argv[2]);
@@ -20,7 +17,7 @@ if (!asked) {
 }
 let page;
 try {
-  const { port } = JSON.parse(fs.readFileSync(officeFiles(here, asked).token, 'utf8'));
+  const { port } = JSON.parse(fs.readFileSync(officeFiles(OFFICE_ROOT, asked).token, 'utf8'));
   page = JSON.parse(fs.readFileSync(pageFile(process.env, port), 'utf8'));
 } catch {
   console.error(process.argv[2]

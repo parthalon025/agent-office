@@ -3,8 +3,8 @@
 // one fails this test until a new ADR allows it. No server, no Claude Code, nothing is paid for. Run: node --test test/goal-handoff.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHq } from '../paperclip.mjs';
-import { createManager } from '../manager.mjs';
+import { createHq } from '../src/paperclip.mjs';
+import { createManager } from '../src/manager.mjs';
 import { startFakePaperclip, DEMO } from './fixtures/fake-paperclip.mjs';
 import { until } from './fixtures/office-server.mjs';
 
@@ -56,7 +56,7 @@ test('a handoff posts one task per step with the exact body, and the goal moves 
 });
 
 test('the plan board carries the handoff record of a goal, so the page can show Handoff failed and Retry (#159)', async () => {
-  const { createPlanBoard, officeSource } = await import('../manager.mjs');
+  const { createPlanBoard, officeSource } = await import('../src/manager.mjs');
   const r = await rig();
   try {
     await until(() => r.hq.state() === 'on', 'the events socket');
