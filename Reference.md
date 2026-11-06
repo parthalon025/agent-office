@@ -232,6 +232,7 @@ Each README has the full props table. Types: `components/index.d.ts`.
 | `ink` | `#18212b` | `#e6ebf0` | `#102a33` | `#242424` | `#ffffff` | Primary text on bg, panel and chip. |
 | `muted` | `#5f6b78` | `#8e9aa7` | `#4d6660` | `#616161` | `#adadad` | Secondary text: task lines, timestamps, counts. 4.6:1 or more on bg, panel and chip. |
 | `accent` | `#2f6fe4` | `#6c9dff` | `#1f6f8b` | `#0f6cbd` | `#4aa0f6` | Primary action (Approve, Retry), focus ring, routine markers. |
+| `accent-text` | `#2363dc` | `{accent}` | `{accent}` | `{accent}` | `{accent}` | Accent as text on bg, card and chip (4.5:1; Sublevel on bg is 4.47:1, not pinned). Fills, the focus ring and the 3D scene keep `accent`. |
 | `on-accent` | `#ffffff` | `#0d1420` | `#ffffff` | `#ffffff` | `#141414` | Text on accent. |
 | `emphasis` | `{accent}` | `{accent}` | `#b5302b` | `{accent}` | `{accent}` | The 10% color: alerts and the one key action in a decision (Approve on a request, unread counts, room alert beacons). In Day, Night, Fluent and Fluent Dark it equals accent; in Sublevel it is red. Never a fill larger than a button. |
 | `on-emphasis` | `{on-accent}` | `{on-accent}` | `#ffffff` | `{on-accent}` | `{on-accent}` | Text on emphasis. |
@@ -289,7 +290,7 @@ Each README has the full props table. Types: `components/index.d.ts`.
 | `status-*-text` | `bg`, card, `chip` | 4.5:1 | A status word on a theme surface. |
 | `status-*-on-bubble` | `bubble` | 4.5:1 | A status word on a bubble or a whiteboard face. |
 | `on-accent` | `accent` | 4.5:1 | Label of a primary button. |
-| `accent` | `chip` | 4.5:1 | Accent text on a selected row: the More link of a decision card, a ghost button. Day is 4.21:1 (agent-office #117): the test holds Day as a known failure until that is fixed. |
+| `accent-text` | `chip` | 4.5:1 | Accent text on a selected row: the More link of a decision card, a ghost button. Raw `accent` is 4.21:1 on chip in Day. |
 | `bubble` | `status-finished-on-bubble` | 3:1 | The check mark cut out of the finished disk (StatusBubble and the 3D bubble). |
 | `on-floor` | every `floor-*` | 4.9:1 | Floor header text. |
 | `status-*` | card, `chip` | 3:1 | Status dot, next to a word. |

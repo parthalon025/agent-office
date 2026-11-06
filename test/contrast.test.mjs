@@ -58,12 +58,27 @@ test('on-accent on accent: 4.5:1; on-floor on every floor-* fill: 4.9:1', () => 
 }));
 
 // Accent is text in the DS too: the More link of a decision card sits on chip when the card is selected or focused
-// (.ao-dec-more, .ao-dec.is-sel), and a ghost button can sit on a chip row. Day is 4.21:1, an older gap (#117): it is
-// held as a known failure, so this test fails once Day passes and the exception must go.
-test('accent text on chip: 4.5:1 (Day: known gap, agent-office #117)', () => each((T, th) => {
-  if (th === 'light') { assert.ok(ratio(T('accent'), T('chip')) < 4.5, 'Day passes now: remove the Day exception (#117)'); return; }
-  atLeast('accent on chip', 4.5, T('accent'), T('chip'), th);
+// (.ao-dec-more, .ao-dec.is-sel), and a ghost button can sit on a chip row. Raw accent is 4.21:1 on chip in Day, so text
+// takes accent-text (#117); accent stays the fill, the focus ring and the 3D scene color.
+test('accent-text on chip: 4.5:1 in every theme', () => each((T, th) => {
+  atLeast('accent-text on chip', 4.5, T('accent-text'), T('chip'), th);
 }));
+
+test('accent-text on card and bg: 4.5:1 in Day, Night, Fluent and Fluent Dark', () => each((T, th, panel) => {
+  if (th === 'sublevel') return;   // accent on bg is 4.47:1 there: not pinned (#117)
+  atLeast('accent-text on bg', 4.5, T('accent-text'), T('bg'), th);
+  atLeast('accent-text on card', 4.5, T('accent-text'), panel, th);
+}));
+
+test('accent text rules use accent-text, never raw accent', () => {
+  const css = read('components/bundle.css');
+  const rule = (sel) => { const i = css.indexOf(sel + '{'); assert.ok(i >= 0, sel); return css.slice(i, css.indexOf('}', i)); };
+  for (const sel of ['.ao-dec-more', '.ao-btn-ghost', '.ao-hud-zoom button[aria-pressed="true"]', '.ao-toast-info .ao-toast-i', '.ao-cmdk-o-i[aria-selected="true"] .ao-cmdk-ic', '.ao-cmdk-o-i.is-ask .ao-cmdk-ic', '.ao-notify-b[aria-pressed="true"] .ao-icon']) {
+    const r = rule(sel);
+    assert.match(r, /(^|[;{])color:var\(--accent-text\)/, sel + ' colors text with accent-text');
+    assert.ok(!/(^|[;{ ])color:var\(--accent\)/.test(r), sel + ' uses raw accent as text');
+  }
+});
 
 // The check mark of the finished bubble is a cut-out of the bubble face, drawn in bubble on the status-finished-on-bubble
 // disk (StatusBubble and Kit.prototype.bubble). It is a glyph: 3:1. on-status is for text on a raw status fill and is
