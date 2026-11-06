@@ -731,7 +731,7 @@ export function createHq(deps = {}) {
   async function handoffGoal(goal, done = {}) {
     const conn = c;
     if (!conn || !d || conn.state === 'choose' || !conn.companyId) throw httpError(409, 'Paperclip is not connected.');
-    const written = { ...done };
+    const written = { ...done }, name = text(d.company.name, 80) || 'Paperclip';
     const id = encodeURIComponent(conn.companyId);
     try {
       const co = obj(await call(conn, `/api/companies/${id}`));
@@ -750,7 +750,7 @@ export function createHq(deps = {}) {
       }
     } catch (e) { throw Object.assign(e, { written }); }
     refetchSoon(conn);
-    return { written, company: text(d.company.name, 80) || 'Paperclip' };
+    return { written, company: name };
   }
 
   return { connect, disconnect, supervise, handoffGoal, handoffTasks, view, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
