@@ -24,9 +24,9 @@ import { resolveExe } from '../git.mjs';
 
 // ---------- the one place the step limits are set ----------
 // Steps per job, at every width. Lower a limit when a job gets shorter. Raise one only with a reason in the commit.
-export const LIMITS = { start: 3, approve: 2, read: 3, discard: 5, find: 3 };
+export const LIMITS = { start: 3, approve: 2, read: 3, discard: 5, find: 3, approveAfterDesk: 5 };
 export const WIDTHS = [1360, 400];
-export const JOBS = ['start', 'approve', 'read', 'discard', 'find'];
+export const JOBS = ['start', 'approve', 'approveAfterDesk', 'read', 'discard', 'find'];
 
 /**
  * results: [{ job, width, steps, ok, why? }]. Returns one line for every run that fails: the goal did not show, or the
@@ -45,7 +45,9 @@ export function verdict(results, limits = LIMITS) {
 }
 
 // ---------- page helpers (strings run in the page) ----------
-const VIS = 'e.getBoundingClientRect().width>0&&e.getBoundingClientRect().height>0';
+// Visible = has a box AND is what a click at its middle reaches (#162: at 400 px the phone list covers the scene, whose buttons
+// keep a box under it; a box off screen counts, the click scrolls to it; a real click on one of those lands on the list and does nothing).
+const VIS = '(()=>{const r=e.getBoundingClientRect();if(!(r.width>0&&r.height>0))return false;if(r.bottom<0||r.top>innerHeight||r.right<0||r.left>innerWidth)return true;const t=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return !!t&&(t===e||e.contains(t))})()';
 const LABEL = '(e.getAttribute("aria-label")||e.textContent).trim()';
 const ITEMS = 'document.querySelectorAll("button,[role=option],[role=menuitem]")';
 /** Expression for the first visible control whose label starts with `text` (`last`: the last one, the top dialog's). */
@@ -134,16 +136,17 @@ export async function run({ shots = true } = {}) {
 
     let held = null, answered = false;   // the held approval of the approve job
     const poll = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn()) return true; await sleep(100); } return false; };
+    const approveJob = {};
     const jobs = {
       start: {
         before: async () => {},
         steps: [palette, entry('Open a session')],
         goal: `(()=>{const b=${control('Open session', { exact: true })};return !!b&&!b.disabled&&!!document.querySelector(".ao-dialog,[role=dialog]")})()`,
       },
-      approve: {
+      approve: Object.assign(approveJob, {
         before: async () => {
           answered = false;
-          held = hook({ hook_event_name: 'PermissionRequest', session_id: 'gate-live', tool_name: 'Bash', tool_input: { command: 'npm test' } }).then((r) => r.json()).then((j) => { answered = true; return j; });
+          held = hook({ hook_event_name: 'PermissionRequest', session_id: 'gate-live', tool_name: 'Bash', tool_input: { command: 'npm test' } }).then((r) => r.json()).then((j) => { answered = true; return j; }).catch(() => null);
           await sleep(500);
         },
         steps: [
@@ -153,6 +156,16 @@ export async function run({ shots = true } = {}) {
         goal: null,   // the hook answer, below
         extra: async () => { const a = await Promise.race([held, sleep(8000).then(() => null)]); return !!a && JSON.stringify(a).includes('allow'); },
         waitFor: (ms) => poll(async () => answered, ms),
+      }),
+      // #162: a desk screen was opened and closed, then Approve in the Needs you list must still answer the request.
+      approveAfterDesk: {
+        before: async () => approveJob.before(),
+        steps: [palette, entry('Terminal of'),
+          { label: 'Back', run: async () => { await p.waitFor(seen('Back'), 15000, 'Back'); const ok = await p.click(control('Back')); await sleep(1500); return ok; } },
+          ...approveJob.steps],
+        goal: null,
+        extra: (...a) => approveJob.extra(...a),
+        waitFor: (ms) => approveJob.waitFor(ms),
       },
       read: {
         before: async () => {},
