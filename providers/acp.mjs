@@ -1225,14 +1225,16 @@ export function createAcp(deps) {
       if (!st) return Promise.resolve();
       st.closed = true;
       cancelAsks(st);
-      st.tools.stop();
+      const stopped = st.tools.stop();
       st.rpc.fail('The session closed.');
       if (st.endCancel) st.endCancel({ stopReason: 'cancelled' });
-      if (st.dead || !st.child.pid) return Promise.resolve();
-      return new Promise((resolve) => {
+      // The agent process and its commands both end before this resolves.
+      if (st.dead || !st.child.pid) return Promise.resolve(stopped);
+      const exited = new Promise((resolve) => {
         st.child.once('exit', () => resolve());
         killTree(st.child.pid, (file, args, opts, cb) => execFile(file, args, opts, (...a) => { cb(...a); setTimer(resolve, 2000); }));
       });
+      return Promise.all([exited, stopped]).then(() => undefined);
     },
   };
 }

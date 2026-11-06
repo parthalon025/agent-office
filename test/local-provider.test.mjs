@@ -8,6 +8,7 @@ import path from 'node:path';
 import { createTracker } from '../tracker.mjs';
 import { providerEvents, checkProvider } from '../providers/index.mjs';
 import { createLocal, KINDS, MAX_ROUNDS } from '../providers/local.mjs';
+import { createLocalTools } from '../providers/local-tools.mjs';
 import { cleanRules, setRule, decide } from '../security.mjs';
 import { startFakeOpenAI } from './fixtures/fake-openai.mjs';
 
@@ -25,7 +26,7 @@ async function until(fn, what, ms = 30000) {
 // rules: the Security room rules (security.mjs); the tracker checks them before a hold, as the server's tracker does,
 // and a decision is answered at once on a later tick (the server's holdRequest). worktree: the session works in its own
 // git worktree, as an office session in a repository does (the server's callOf reads s.worktree); false: a folder outside git.
-async function rig(script, { models, kind = 'lmstudio', stallMs, officeTools, rules = cleanRules(null), worktree = true } = {}) {
+async function rig(script, { models, kind = 'lmstudio', stallMs, officeTools, makeTools, rules = cleanRules(null), worktree = true } = {}) {
   const fake = await startFakeOpenAI({ script, models });
   const base = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-local-'));
   const cwd = path.join(base, 'work');
@@ -47,7 +48,7 @@ async function rig(script, { models, kind = 'lmstudio', stallMs, officeTools, ru
     o.holds.delete(id); o.tracker.settle(h.s.uid, id); o.provider.answer(h.s, { id, suggestions: h.suggestions }, d || {});
     return true;
   };
-  o.provider = createLocal({ events: o.events, kind, baseUrl: fake.url, stallMs, officeTools });
+  o.provider = createLocal({ events: o.events, kind, baseUrl: fake.url, stallMs, officeTools, makeTools });
   o.session = () => o.tracker.newSession({ uid: 'o1', officeId: 'o1', name: 'bot', cwd, headless: true, status: 'starting', provider: kind, worktree: worktree ? { root: cwd, branch: 'agent/bot-1', repo: cwd } : null });
   // What the server does for a user message: the provider call, then the tracker marks the turn.
   o.say = (s, text) => { o.provider.message(s, { text }); o.tracker.startTurn(s, text); };
@@ -313,6 +314,22 @@ test('after close nothing is reported, and a message is refused', async () => {
     assert.equal(s.pending.length, 0);
     assert.throws(() => o.provider.message(s, { text: 'x' }), (e) => e.status === 409);
   } finally { await o.done(); }
+});
+
+test('close does not resolve while a command still runs (#123)', async () => {
+  let release; const gate = new Promise((x) => { release = x; });
+  const o = await rig([{ text: 'x' }], { makeTools: (root) => ({ ...createLocalTools(root), stop: () => gate }) });
+  try {
+    const s = o.session();
+    o.provider.open(s, { model: 'm' });
+    let closed = false;
+    const p = o.provider.close(s).then(() => { closed = true; });
+    await new Promise((x) => setTimeout(x, 200));
+    assert.equal(closed, false, 'its command has not ended');
+    release();
+    await p;
+    assert.equal(closed, true);
+  } finally { release(); await o.done(); }
 });
 
 test('attachments are refused, because local agents take text only', async () => {
