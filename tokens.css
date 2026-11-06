@@ -1,4 +1,4 @@
-/* Agent Office DS x1.7.6: tokens.css. Edited by hand. Keep it in step with tokens.json (test/ds-kit.test.mjs checks every token). */
+/* Agent Office DS x1.7.7: tokens.css. Edited by hand. Keep it in step with tokens.json (test/ds-kit.test.mjs checks every token). */
 :root, [data-theme="light"] {
   color-scheme: light;
   --bg: #e9edf1;
@@ -276,7 +276,7 @@
   --status-working: #1d8a5a;
   --status-waiting: #b07514;
   --status-error: #c23b36;
-  --status-resting: #7f8c8a;
+  --status-resting: #788583;
   --status-finished: #2f6bc8;
   --status-working-text: #18734b;
   --status-waiting-text: #895b10;

@@ -1,6 +1,6 @@
 # CLAUDE.md: Agent Office for Claude Code
 
-A browser office for Claude Code sessions: bots at desks, a chat per bot, approvals, diffs, schedules. Node ES modules, no dependencies, Windows first. User docs are in `README.md`. The UI is the Agent Office design system (DS x1.7.6), documented in `DS-README.md`, `Recipes.md`, `Reference.md`, `Concepts.md`.
+A browser office for Claude Code sessions: bots at desks, a chat per bot, approvals, diffs, schedules. Node ES modules, no dependencies, Windows first. User docs are in `README.md`. The UI is the Agent Office design system (DS x1.7.7), documented in `DS-README.md`, `Recipes.md`, `Reference.md`, `Concepts.md`.
 
 ## UI rules (the DS is law for anything visual)
 
@@ -8,7 +8,7 @@ Read `DS-README.md`, `Recipes.md` and `Reference.md` before you change the UI, a
 
 - Use DS tokens for every color, size and duration. No literal colors. Use the DS icon set and DS components (`Button`, `Dialog`, `Select`, `TextInput`, `EmptyState`, ...). No emoji.
 - Write copy in Simplified Technical English: short sentences, active voice, buttons say the result. No "Oops", "Sorry", exclamation marks, "please".
-- Keep the `x` version prefix (page `x0.1`, DS `x1.7.6`) in titles.
+- Keep the `x` version prefix (page `x0.1`, DS `x1.7.7`) in titles.
 - The DS lives in this repo and its owner may change it. DS changes go in `components/`, `kit/`, the tokens and the DS docs, with a Changelog row and the DS Definition of done (`DS-README.md`). Page code still uses only DS APIs: no DOM patching of DS internals.
 - Never move bots yourself. The scene changes only from adapter events.
 - Before you finish a UI change: `python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/wheel-gate.js public/vocab.js public/scene-host.js public/building.js public/format.js public/toasts.js public/wire.js public/security.js components/bundle.css components/bundle.js kit/page.html`, then look at screenshots in Day, Night, Sublevel, Fluent and Fluent Dark at 1360, 1100 and 400 px.

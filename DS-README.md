@@ -1,4 +1,4 @@
-# Agent Office DS x1.7.6 (design system README)
+# Agent Office DS x1.7.7 (design system README)
 
 Agent Office is **the control room for any agent harness**. A harness (Claude Code, Hermes Agent, Copilot Studio, the Claude or OpenAI Agents SDK, a local model in LM Studio with an agent loop) runs the agents. Agent Office shows what they do and lets people steer them. Each agent is a bot. Bots sit in rooms, rooms sit on floors, floors stack into a building.
 
@@ -70,7 +70,7 @@ Start from `kit/page.html` and `kit/adapter.js`. The starter page runs the mock 
 - Change the scene only with adapter events. Never move bots with your own code; the engine walks them around objects.
 - Map risky steps (dangerous tools, spend, publishing) to `request` events.
 - Respect `prefers-reduced-motion`. Keep the HUD keyboard path complete.
-- Keep the x version prefix (x1.7.6) until the design is a SKU: in file names, titles, scene signs and the changelog.
+- Keep the x version prefix (x1.7.7) until the design is a SKU: in file names, titles, scene signs and the changelog.
 
 ## Definition of done
 
@@ -80,6 +80,6 @@ Use visual inspection: take screenshots and look at them.
 - [ ] Screenshots in all five themes (Day, Night, Sublevel, Fluent and Fluent Dark), at 1360, 1100 and 400 px, with `quality: "low"` and with reduced motion.
 - [ ] Bots walk around objects: send `status: "resting"` to a room, then `"working"`, and look while they walk.
 - [ ] Approve, decline, chat and broadcast send commands; the scene changes only after the adapter replies.
-- [ ] ContrastCheck passes in each theme, apart from the known gaps that have an issue: `status-resting` on `chip` in Sublevel (agent-office #115) and `accent` on `chip` in Day (#117). Focus is visible on every control.
+- [ ] ContrastCheck passes in each theme, apart from the known gaps that have an issue: `accent` on `chip` in Day (#117). Focus is visible on every control.
 - [ ] Every new state (loading, empty, error, long text) has a preview. The changelog row is updated.
 - Exception: in-scene controls have no keyboard or screen reader path (owner decision, 2026-11-04, ADR 0003 in `docs/adr/`).

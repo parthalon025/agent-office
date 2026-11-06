@@ -42,9 +42,12 @@ test('status words: ink on the panel, the chip and the page', () => each((T, th,
   for (const bg of [['panel', panel], ['chip', T('chip')], ['bg', T('bg')]]) atLeast('ink on ' + bg[0], 4.5, T('ink'), bg[1], th);
 }));
 
-test('status dots next to the words read at 3:1 on the panel', () => each((T, th, panel) => {
-  for (const s of ['working', 'waiting', 'error', 'resting', 'finished']) atLeast('dot ' + s, 3, T('status-' + s), panel, th);
-  atLeast('dot emphasis', 3, T('emphasis'), panel, th);
+// A dot also sits on a chip (status chips, inbox rows), and ContrastCheck checks it there (agent-office #115).
+test('status dots next to the words read at 3:1 on the panel and on chip', () => each((T, th, panel) => {
+  for (const [name, bg] of [['panel', panel], ['chip', T('chip')]]) {
+    for (const s of ['working', 'waiting', 'error', 'resting', 'finished']) atLeast(`dot ${s} on ${name}`, 3, T('status-' + s), bg, th);
+    atLeast('dot emphasis on ' + name, 3, T('emphasis'), bg, th);
+  }
 }));
 
 // The other pairs of the ContrastCheck card (components/ContrastCheck/preview.html): the label of a primary button, the

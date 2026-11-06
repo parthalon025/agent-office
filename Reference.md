@@ -240,7 +240,7 @@ Each README has the full props table. Types: `components/index.d.ts`.
 | `status-working` | `#1f9a58` | `#2fb36d` | `#1d8a5a` | `#107c10` | `#54b054` | Bot is working. Dot, bubble glyph, monitor glow. |
 | `status-waiting` | `#c27c17` | `#e3992f` | `#b07514` | `#d2560b` | `#faa06b` | Bot needs a human decision. Always shows in Waiting on me. |
 | `status-error` | `#d1403b` | `#e5605b` | `#c23b36` | `#c50f1f` | `#dc626d` | Bot failed. Always shows in Waiting on me with Retry. |
-| `status-resting` | `#78818b` | `#8a939d` | `#7f8c8a` | `#7a7a7a` | `#858585` | Bot is idle in the lounge. |
+| `status-resting` | `#78818b` | `#8a939d` | `#788583` | `#7a7a7a` | `#858585` | Bot is idle in the lounge. |
 | `status-finished` | `#3b74e0` | `#5b93f5` | `#2f6bc8` | `#227ed4` | `#62abf5` | Bot finished a task; check bubble at the desk. |
 | `status-working-text` | `#197a46` | `#2fb36d` | `#18734b` | `#0e700e` | `#6cbf6c` | Text color for the working status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-working. |
 | `status-waiting-text` | `#945f12` | `#e3992f` | `#895b10` | `#a94409` | `#faa06b` | Text color for the waiting status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-waiting. |
@@ -292,7 +292,7 @@ Each README has the full props table. Types: `components/index.d.ts`.
 | `accent` | `chip` | 4.5:1 | Accent text on a selected row: the More link of a decision card, a ghost button. Day is 4.21:1 (agent-office #117): the test holds Day as a known failure until that is fixed. |
 | `bubble` | `status-finished-on-bubble` | 3:1 | The check mark cut out of the finished disk (StatusBubble and the 3D bubble). |
 | `on-floor` | every `floor-*` | 4.9:1 | Floor header text. |
-| `status-*` | card | 3:1 | Status dot, next to a word. |
+| `status-*` | card, `chip` | 3:1 | Status dot, next to a word. |
 | `type-*` | `chip` | 3:1 | Type dot, room icon and room floor stripe. |
 | `accent` | `bg` | 3:1 | Focus ring and the accent pill of a pressed control. |
 | `status-*` | any | not checked at 4.5:1 | Do not use it as text color. It is a fill and a dot. Use `status-*-text` or `status-*-on-bubble`. |
