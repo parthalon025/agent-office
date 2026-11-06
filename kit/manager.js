@@ -1,4 +1,4 @@
-/* Agent Office kit x1.7.13: reference Manager (a small orchestrator).
+/* Agent Office kit x1.7.14: reference Manager (a small orchestrator).
    Use it only when your platform has no orchestrator of its own. It runs in the page, wraps your adapter,
    and turns one request to the Manager into a plan, delegations and assign commands to your agents.
 

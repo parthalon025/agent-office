@@ -1,5 +1,5 @@
 {
- "version": "x1.7.13",
+ "version": "x1.7.14",
  "events": {
   "status": {
    "desc": "A bot changes state. The bot walks to rest or back to its seat when needed.",
@@ -578,6 +578,7 @@
   "attach",
   "bell",
   "bot",
+  "branch",
   "broadcast",
   "browser",
   "building",
@@ -589,6 +590,7 @@
   "close",
   "code-run",
   "computer-use",
+  "conflict",
   "connector",
   "copy",
   "cost",
@@ -611,11 +613,13 @@
   "lab",
   "mcp",
   "memory",
+  "merge",
   "model",
   "more",
   "night",
   "pause",
   "plan",
+  "pull-request",
   "remove",
   "resting",
   "resume",

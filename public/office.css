@@ -368,3 +368,12 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .kind-steps { margin: 0; padding-left: var(--space-4); color: var(--ink); font: var(--type-body-weight) var(--type-body-size)/var(--type-body-line) var(--font-sans); overflow-wrap: anywhere; }
 .sess-who, .sess-state { display: inline-flex; align-items: center; gap: var(--space-2); }
 .sess-who b { font-weight: var(--type-title-weight); }
+.flow { display: flex; flex-direction: column; gap: var(--space-4); }
+.flow-b { display: flex; flex-direction: column; gap: var(--space-2); }
+.flow-stages { display: grid; grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.flow-stage { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: var(--space-1) var(--space-2); background: var(--chip); border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--ink); }
+.flow-stage.is-unknown { border-style: dashed; color: var(--muted); }
+.flow-n { font-weight: var(--type-title-weight); }
+.flow-w { color: var(--muted); font-size: var(--type-eyebrow-size); text-transform: uppercase; letter-spacing: var(--type-eyebrow-tracking); }
+.flow-card .past-title { align-items: flex-start; }
+.past-sub a { color: var(--accent-text); }

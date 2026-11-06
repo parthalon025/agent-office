@@ -17,6 +17,7 @@ import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process'; // execFileSync: icacls for writeSecret
 import { fileURLToPath } from 'node:url';
 import * as git from './git.mjs';
+import { createReader as createPrReader, readyEntries, mergeArgs } from './changes.mjs';
 import { slimPayload, cleanIds as cleanPaperclipIds } from './payload.mjs';
 import { createHq } from './paperclip.mjs';
 import { createTracker, clip } from './tracker.mjs';
@@ -525,9 +526,61 @@ function changeLayout(body) {
   persisted.layouts[key] = next; savePersisted(); broadcast();
   return { ok: true, layout: layoutView(next) };
 }
+// Paper flow (#93): each building's pull requests from `gh`, read-only, on change events and every 60 s (the reader keeps a read for
+// 60 s). A failed read is "PR state unknown" in the snapshot, never old data. The 30 s repo loop below asks the reader again.
+const prReader = createPrReader({ run: git.ghRun });
+const prSeen = new Map(); // building key -> JSON of the last answer broadcast
+async function refreshChanges(k) {
+  const r = repos.get(k);
+  if (!r) return;
+  const got = await prReader.read(k, r.path);
+  const sig = JSON.stringify([got.ok, got.prs, got.mergedToday, readyFor(k, got.prs).map((e) => e.number)]);
+  if (prSeen.get(k) !== sig) { prSeen.set(k, sig); if (!got.ok) console.warn(`The office could not read the pull requests of ${r.name}: ${got.why}`); broadcast(); }
+}
+// The Ready to merge entries of a building. The Quality record: an Operations Hub building lists a change only when a reviewer session on
+// its Quality floor is linked to the change by its branch. The snapshot and the merge route use this one rule.
+function readyFor(k, prs) {
+  const r = repos.get(k);
+  const hub = !!r && layoutRecord(k, r.path).archetype === 'ops-hub';
+  const quality = new Set([...sessions.values()].filter((s) => s.status !== 'ended' && s.placed && roomPlace(s).buildingKey === k && seatOfSession(s)?.floor === 'quality').map((s) => roomPlace(s).branch).filter(Boolean));
+  return readyEntries(prs.map((p) => ({ ...p, repo: k })), { needQuality: hub, quality });
+}
+// What the snapshot carries: per building { ok, at, error?, mergedToday, prs, ready }. Not read yet means no entry (the page shows unknown).
+function changesView() {
+  const out = {};
+  for (const [k, r] of repos.entries()) {
+    const got = prReader.peek(k);
+    if (!got) continue;
+    const prs = got.prs.map((p) => ({ ...p, repo: k }));
+    out[k] = { ok: got.ok, at: got.at, error: got.error || null, mergedToday: got.mergedToday, prs, ready: readyFor(k, prs) };
+  }
+  return out;
+}
+// Merge a change (changes.mjs mergeArgs): only a change the office reads as ready now, and only after the user's confirm. Held like a fork:
+// 409 with confirm: 'merge' and the question until the same call comes with confirmed: true.
+async function mergeChange(body) {
+  const k = String(body.repo ?? ''), n = Number(body.number);
+  const r = repos.get(k);
+  if (!r) throw httpError(404, 'The office does not know that building.');
+  if (!Number.isInteger(n) || n < 1) throw httpError(400, 'Name the pull request number.');
+  prReader.invalidate(k);
+  const got = await prReader.read(k, r.path);
+  const p = got.ok ? got.prs.find((x) => x.number === n) : null;
+  if (!p) throw httpError(409, 'PR state unknown. Check again in a moment.');
+  if (p.state !== 'ready' || !readyFor(k, got.prs).some((e) => e.number === n)) throw httpError(409, `#${n} is not ready to merge. ${p.state === 'ready' ? 'It has no Quality record yet.' : `Its state is ${p.state}.`}`);
+  if (body.confirmed !== true) {
+    const e = httpError(409, `Merge #${n} ${p.title} into ${p.base || 'main'}? This changes the repository on GitHub.`);
+    e.confirm = 'merge';
+    throw e;
+  }
+  await git.mergePr(r.path, mergeArgs(n));
+  prReader.invalidate(k); await refreshChanges(k);
+  return { ok: true };
+}
 async function refreshRepo(k) {
   const r = repos.get(k);
   if (!r) return;
+  void refreshChanges(k);
   const done = await git.refreshEntry(r); // a failed `git worktree list` changes nothing; overlapping refreshes keep the newest answer
   if (done === 'gone') { if (repos.get(k) === r) repos.delete(k); broadcast(); return; } // the folder is gone, or it is not a repository any more
   if (done === 'changed') { r.worktrees.forEach((w) => adoptNotes(placeOfWorktree(r.path, w))); dropGoneRooms(k, r); broadcast(); }
@@ -1597,6 +1650,7 @@ const snapshot = () => (W.lean({
   hq: hq.view(),            // Paperclip HQ (#76): null until connected; company, budget, agents (role, task, supervision, run), routines
   // Function floors (#92): each building's floors (archetypes.mjs layoutView), each room's floors and name, and the catalog
   layouts: layoutsView(), rooms: roomsView(), catalog: CATALOG,
+  changes: changesView(),   // paper flow (#93): building key -> { ok, at, error, mergedToday, prs, ready } from gh
 }));
 // A page gets the whole snapshot when it connects, then one patch per broadcast with only what changed (wire.js).
 // State changes within BROADCAST_MS go out as one patch, so a burst of hooks sends at most 10 messages a second.
@@ -1793,8 +1847,11 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/pr') {
       const r = folderOf(String(body.uid));
       if (!r.worktree) throw httpError(409, 'Pull requests need a worktree session, so the changes stay off your main branch.');
-      return send(res, 200, await git.createPr(r.cwd, r.worktree.branch, r.name));
+      const out = await git.createPr(r.cwd, r.worktree.branch, r.name);
+      const bk = buildingOfSession(r); if (bk != null) { prReader.invalidate(bk); void refreshChanges(bk); }
+      return send(res, 200, out);
     }
+    if (url.pathname === '/api/merge') return send(res, 200, await mergeChange(body));
     if (url.pathname === '/api/settings/spend') { const r = saveSpendLimit(body); broadcast(); return send(res, 200, r); }
     // One Security room rule from the wall: { scope: 'office' | 'building', building, row, col, value, confirmed } (security.mjs setRule).
     if (url.pathname === '/api/security/set') return send(res, 200, saveRule(body));

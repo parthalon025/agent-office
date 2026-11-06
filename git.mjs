@@ -462,6 +462,18 @@ export async function createPr(cwd, branch, title) {
   return { url };
 }
 
+/** One read-only `gh` call in a repository folder (changes.mjs readArgs: `pr list`). Argument list only, recorded like every room program. */
+export function ghRun(args, cwd) {
+  if (args[0] !== 'pr' || args[1] !== 'list') throw new Error('ghRun only lists pull requests.');
+  return recorded('gh', args, cwd, 30000, { ...process.env, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' });
+}
+/** Merges a pull request with `gh` (changes.mjs mergeArgs). Only called after the user's confirm. */
+export async function mergePr(cwd, args) {
+  if (args[0] !== 'pr' || args[1] !== 'merge') throw new Error('mergePr only merges pull requests.');
+  await recorded('gh', args, cwd, 120000, { ...process.env, GH_PROMPT_DISABLED: '1', NO_COLOR: '1' });
+  return { ok: true };
+}
+
 // ---------- floors (branches) and rooms (worktrees) ----------
 // The office draws a repository as a building, a branch as a floor and a worktree as a room.
 
