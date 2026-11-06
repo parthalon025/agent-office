@@ -135,6 +135,55 @@ test('stop() kills a command that still runs', async () => {
   } finally { s.done(); }
 });
 
+test('stop() does not settle until the kill and the child close are done (#123)', async () => {
+  const s = scratch(); let release; const gate = new Promise((r) => { release = r; });
+  const t = createLocalTools(s.root, { kill: async (pid) => { await gate; await killTree(pid); } });
+  try {
+    const h = t.start(SLEEP);
+    await new Promise((r) => setTimeout(r, 200));
+    let settled = false;
+    const p = t.stop().then(() => { settled = true; });
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(settled, false, 'kill still runs');
+    release();
+    await p;
+    assert.ok(h.exit(), 'the child had closed when stop() settled');
+  } finally { s.done(); }
+});
+
+test('stop() settles after the time limit when a child never closes (#123)', async () => {
+  const s = scratch(); const seen = [];
+  const t = createLocalTools(s.root, { kill: (pid) => { seen.push(pid); }, stopWaitMs: 300 });
+  let h;
+  try {
+    h = t.start(SLEEP);
+    await new Promise((r) => setTimeout(r, 200));
+    const t0 = Date.now();
+    await t.stop();
+    const took = Date.now() - t0;
+    assert.ok(took >= 250 && took < 3000, 'waited about the limit: ' + took);
+  } finally { await killTree(seen[0]); await h.done; s.done(); }
+});
+
+test('stop() with no running command settles at once (#123)', async () => {
+  const s = scratch(); const t = createLocalTools(s.root);
+  try {
+    const t0 = Date.now();
+    await t.stop();
+    assert.ok(Date.now() - t0 < 100);
+  } finally { s.done(); }
+});
+
+test('a real command, then stop(), then the folder can be removed (#123)', async () => {
+  const s = scratch(); const t = createLocalTools(s.root);
+  try {
+    t.start(SLEEP);
+    await new Promise((r) => setTimeout(r, 300));
+    await t.stop();
+    fs.rmSync(s.root, { recursive: true }); // EBUSY while a process keeps the folder
+  } finally { s.done(); }
+});
+
 test('the fake OpenAI server streams text, tool calls and usage, and lists models', async () => {
   const fake = await startFakeOpenAI({ script: [{ toolCalls: [{ name: 'Read', args: { file_path: 'a.txt' } }] }, { text: 'done' }], models: ['m1', 'm2'] });
   try {

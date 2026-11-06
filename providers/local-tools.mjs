@@ -51,9 +51,15 @@ function lastBytes(s, n) {
 
 /** Kill a process and its children. Windows: taskkill /T by PID (a shell's children outlive a plain kill). */
 export function killTree(pid, run = execFile) {
-  if (!pid) return;
-  if (process.platform === 'win32') run(resolveExe('taskkill'), ['/PID', String(pid), '/T', '/F'], { cwd: helperCwd(), windowsHide: true }, () => {});
-  else { try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } } }
+  if (!pid) return Promise.resolve();
+  if (process.platform === 'win32') {
+    return new Promise((resolve) => {
+      try { run(resolveExe('taskkill'), ['/PID', String(pid), '/T', '/F'], { cwd: helperCwd(), windowsHide: true }, () => resolve()); }
+      catch { resolve(); }
+    });
+  }
+  try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } }
+  return Promise.resolve();
 }
 
 /**
@@ -65,6 +71,8 @@ export function createLocalTools(root, deps = {}) {
   if (!root || !path.isAbsolute(root)) throw new Error('createLocalTools needs an absolute folder');
   const kill = deps.kill || killTree;
   const running = new Set();
+  const waits = new WeakMap(); // child -> promise that settles when it has closed
+  const stopWaitMs = deps.stopWaitMs ?? 2000;
 
   /** The absolute path of a target inside the folder, or a refusal. Checks the text path, then every link on the way (realInside). */
   function safe(p, { mustExist = false } = {}) {
@@ -180,6 +188,7 @@ export function createLocalTools(root, deps = {}) {
     child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
     child.stdout.on('data', add); child.stderr.on('data', add);
     const timer = setTimeout(() => { timedOut = true; kill(child.pid); }, limitMs);
+    waits.set(child, new Promise((r) => { child.once('close', r); child.once('error', r); }));
     const done = new Promise((resolve) => {
       let ended = false;
       const end = (exitCode, signal, error) => {
@@ -263,7 +272,16 @@ export function createLocalTools(root, deps = {}) {
         return { ok: false, text: `The tool failed: ${e.code || e.message}` };
       }
     },
-    /** Kill every command that still runs (interrupt and close). */
-    stop() { for (const c of running) kill(c.pid); },
+    /** Kills every running command. Settles when each is killed and closed, or after stopWaitMs (a child that left the tree). */
+    stop() {
+      const all = [...running].map((c) => {
+        let k; try { k = kill(c.pid); } catch { k = null; }
+        return Promise.all([k, waits.get(c)]);
+      });
+      if (!all.length) return Promise.resolve();
+      let timer;
+      const limit = new Promise((r) => { timer = setTimeout(r, stopWaitMs); timer.unref?.(); });
+      return Promise.race([Promise.all(all), limit]).finally(() => clearTimeout(timer));
+    },
   };
 }

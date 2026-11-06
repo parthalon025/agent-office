@@ -732,6 +732,21 @@ test('check: the agent picks its own model, and runs with the office approvals o
   } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
 });
 
+test('close does not resolve while a terminal command still runs (#123)', async () => {
+  let release; const gate = new Promise((x) => { release = x; });
+  const r = rig({ makeTools: (root) => ({ ...createLocalTools(root), stop: () => gate }) });
+  const s = await started(r, r.session());
+  try {
+    let closed = false;
+    const p = r.p.close(s).then(() => { closed = true; });
+    await new Promise((x) => setTimeout(x, 400));
+    assert.equal(closed, false, 'its command has not ended');
+    release();
+    await p;
+    assert.equal(closed, true);
+  } finally { release(); await r.done(); }
+});
+
 test('close: the agent stops, nothing is reported after, and a message is refused', async () => {
   const r = rig();
   const s = await started(r, r.session());

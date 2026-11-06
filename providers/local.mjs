@@ -322,16 +322,16 @@ export function createLocal(deps) {
       st.waiting.clear();
     },
 
-    close(s) {
+    // Resolves when its running commands have ended (a room cannot be removed while one holds it as its folder).
+    async close(s) {
       const st = agents.get(s.uid);
       agents.delete(s.uid);
-      if (st) {
-        st.closed = true;
-        st.tools.stop();
-        if (st.abort) st.abort.abort();
-        for (const resolve of st.waiting.values()) resolve({ allow: false });
-      }
-      return Promise.resolve();
+      if (!st) return;
+      st.closed = true;
+      const stopped = st.tools.stop();
+      if (st.abort) st.abort.abort();
+      for (const resolve of st.waiting.values()) resolve({ allow: false });
+      await stopped;
     },
   };
 }

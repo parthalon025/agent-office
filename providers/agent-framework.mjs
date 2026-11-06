@@ -485,14 +485,14 @@ export function createAgentFramework(deps) {
       if (!st) return Promise.resolve();
       send(st, { type: 'close' });
       st.closed = true;
-      st.tools.stop();
+      const stopped = st.tools.stop();
       for (const resolve of st.waiting.values()) resolve({ allow: false });
       st.waiting.clear();
       try { st.child.stdin.end(); } catch { /* gone */ }
       // The runner ends on close. One that does not is killed, process tree and all.
       const timer = setTimeout(() => { if (st.child.exitCode === null) kill(st.child.pid); }, CLOSE_MS);
       timer.unref?.();
-      return Promise.resolve();
+      return Promise.resolve(stopped);
     },
   };
 }
