@@ -6,11 +6,7 @@ function Panel(p){return h("section",{className:cx("ao-panel",p.className),style
 function StatusDot(p){return h("i",{className:"ao-dot ao-s-"+(p.status||"working"),role:"img","aria-label":LBL[p.status||"working"]})}
 function Button(p){var v=p.variant||"quiet";return h("button",{type:"button",className:cx("ao-btn",v==="primary"&&"ao-btn-primary"),onClick:p.onClick,disabled:p.disabled},p.children)}
 function StatusCounts(p){var c=p.counts||{};return h("div",{className:"ao-panel ao-counts","aria-live":"polite"},["working","waiting","error","resting"].map(function(k){return h("span",{key:k},h(StatusDot,{status:k}),h("b",null,c[k]||0),k==="error"?"errors":k)}))}
-function FloorList(p){return h(Panel,{title:"Floors",count:(p.floors||[]).length,flush:true},h("div",{style:{paddingBottom:6}},(p.floors||[]).map(function(f){return h("button",{key:f.id,className:"ao-row","aria-current":String(f.id===p.current),onClick:function(){p.onSelect&&p.onSelect(f.id)}},
- h("span",{className:"ao-fnum"},f.id),h("span",null,h("div",{style:{fontWeight:500}},f.name),h("div",{className:"ao-pips"},(f.statuses||[]).map(function(s,i){return h("i",{key:i,style:{background:"var(--status-"+s+")"}})}))),
- h("span",{className:"ao-mono ao-muted"},(f.statuses||[]).filter(function(s){return s==="working"}).length+"/"+(f.statuses||[]).length))})))}
 function FloorHeader(p){return h("div",{className:"ao-fh",style:{background:"var(--floor-"+(p.floor||"research")+")"}},h("div",{className:"ao-fh-row"},h("span",null,p.name),h("span",{className:"ao-mono"},"Floor "+p.number+" · "+p.bots+(p.bots===1?" bot":" bots"))),h("div",{className:"ao-fh-big"},p.working,h("small",null,"working")))}
-function BotRow(p){return h("button",{type:"button",className:"ao-bot",role:"option","aria-selected":String(!!p.selected),onClick:p.onClick},h("span",{className:"ao-av",style:{background:p.color||"#3b6fe0"}},h(StatusDot,{status:p.status})),h("span",{style:{minWidth:0}},h("div",{className:"ao-bot-n"},p.name),h("div",{className:"ao-bot-s"},LBL[p.status||"working"]+" · "+p.task)))}
 function ApprovalItem(p){var err=p.status==="error";return h("div",{className:"ao-item"},h(StatusDot,{status:err?"error":"waiting"}),h("div",{style:{minWidth:0,flex:1}},h("div",null,h("b",{style:{fontWeight:500}},p.name)," ",p.floor!=null&&h("span",{className:"ao-mono ao-muted",style:{fontSize:10}},"F"+p.floor)),h("div",{className:"ao-muted",style:{fontSize:11}},p.ask),
  h("div",{className:"ao-act"},h(window.AgentOffice.Button||Button,{variant:"emphasis",onClick:p.onApprove},err?"Retry":"Approve"),h(Button,{onClick:p.onDecline},err?"Dismiss":"Decline"))))}
 function ActivityLog(p){var e=p.entries||[];return h(Panel,{title:"Activity",count:e.length},h("div",{className:"ao-log"},e.length?e.map(function(x,i){return h("div",{key:i},h("span",{className:"ao-mono ao-muted"},x.time),h("span",null,h("b",{style:{fontWeight:500}},x.name),h("span",{className:"ao-muted"}," · "+x.text)))}):h("div",{className:"ao-muted"},"No activity yet")))}
@@ -28,7 +24,7 @@ function StatusBubble(p){var s=p.status||"working",col="var(--status-"+s+"-on-bu
  else if(s==="error")g=h("svg",{viewBox:"0 0 22 22"},h("path",{d:"M6 6l10 10M16 6L6 16",style:{stroke:col},strokeWidth:2.6,strokeLinecap:"round"}));
  else g=h("span",{style:{color:col}},s==="waiting"?"!":"zz");
  return h("span",{className:"ao-bubble",style:{color:col},role:"img","aria-label":LBL[s]},g)}
-var NS={Panel:Panel,StatusDot:StatusDot,Button:Button,StatusCounts:StatusCounts,FloorList:FloorList,FloorHeader:FloorHeader,BotRow:BotRow,ApprovalItem:ApprovalItem,ActivityLog:ActivityLog,UsageMeter:UsageMeter,money:money,StatusBubble:StatusBubble};
+var NS={Panel:Panel,StatusDot:StatusDot,Button:Button,StatusCounts:StatusCounts,FloorHeader:FloorHeader,ApprovalItem:ApprovalItem,ActivityLog:ActivityLog,UsageMeter:UsageMeter,money:money,StatusBubble:StatusBubble};
 window.AgentOffice=Object.assign(window.AgentOffice||{},NS);})();
 
 /* Agent Office DS x1.7.5 - asset strings. Edited by hand, in step with assets/ (no generator in this repo). */
@@ -259,10 +255,8 @@ function RoomList(p){var st=R.useState(false),pick=st[0],setPick=st[1],box=R.use
    p.onAddBot&&h("button",{type:"button",className:"ao-iconbtn","aria-label":"Add a bot to "+r.name,title:"Add bot",onClick:function(){p.onAddBot(r.id);}},h(Icon,{name:"bot",size:15})));})),
   p.onAddRoom&&h("div",{className:"ao-addrow"},pick?h("div",{className:"ao-typepick",role:"group","aria-label":"Room type"},Object.keys(TYPE_LBL).map(function(t){return h("button",{key:t,type:"button",onClick:function(){setPick(false);p.onAddRoom(t);}},h("span",{style:{color:"var(--type-"+t+")"}},h(Icon,{name:t,size:16})),TYPE_LBL[t]);}),h("button",{type:"button",className:"ao-muted",onClick:function(){setPick(false);}},"Cancel"))
    :h(AddButton,{onClick:function(){setPick(true);}},"Add room")));}
-function BotRow(p){return h("button",{type:"button",className:"ao-bot",role:"option","aria-selected":String(!!p.selected),onClick:p.onClick},h(BotAvatar,{shape:p.shape,color:p.color,status:p.status,size:26}),
- h("span",{style:{minWidth:0,flex:1}},h("div",{className:"ao-bot-n"},p.name,p.role&&h("span",{className:"ao-bot-role"},h(Icon,{name:"role-"+p.role,size:12,label:ROLE_LBL[p.role]}))),h("div",{className:"ao-bot-s"},LBL[p.status||"working"]+" · "+p.task)));}
 function OfficeTypeCard(p){var t=p.type||"team",th=useTheme(p),TB=AO.THUMBS_BY_THEME||{},md=(AO.MODES||[]).filter(function(m){return m.theme===th;})[0],set=TB[th]||(md&&md.dark&&TB.dark)||AO.THUMBS||{};return h("div",{className:"ao-panel ao-typecard"},h("div",{className:"ao-typecard-img",dangerouslySetInnerHTML:{__html:set[t]||""}}),h("div",{className:"ao-typecard-b"},h(OfficeTypeBadge,{type:t}),h("div",{className:"ao-muted",style:{fontSize:12,marginTop:4}},p.note)));}
-Object.assign(AO,{Icon:Icon,Logo:Logo,BotAvatar:BotAvatar,OfficeTypeBadge:OfficeTypeBadge,RoleBadge:RoleBadge,AddButton:AddButton,ViewToggle:ViewToggle,FloorList:FloorList,RoomList:RoomList,BotRow:BotRow,OfficeTypeCard:OfficeTypeCard});
+Object.assign(AO,{Icon:Icon,Logo:Logo,BotAvatar:BotAvatar,OfficeTypeBadge:OfficeTypeBadge,RoleBadge:RoleBadge,AddButton:AddButton,ViewToggle:ViewToggle,FloorList:FloorList,RoomList:RoomList,OfficeTypeCard:OfficeTypeCard});
 })();
 
 /* x1.5 rich chat: safe Markdown, attachments and an image viewer. No HTML is parsed or injected: every node is a React element or a text node. */
