@@ -48,6 +48,7 @@ import { resolveExe, helperCwd, killTree } from '../launch.mjs';
 import { clip } from '../tracker.mjs';
 import { providerError } from './index.mjs';
 import { createToolGate, noteOf, OFFICE_TOOLS } from './local.mjs';
+import { createAsks } from './asks.mjs';
 import { createLocalTools, TOOL_DEFINITIONS } from './local-tools.mjs';
 
 export const KIND = 'agent-framework';
@@ -165,6 +166,7 @@ export function createAgentFramework(deps) {
   const kill = deps.kill || ((pid) => killTree(pid));
   const makeTools = deps.makeTools || ((root) => createLocalTools(root));
   const runner = deps.runner || RUNNER;
+  const asks = createAsks({ events });
   const gate = createToolGate({ events, office: deps.officeTools || null });
   /** @type {Map<string, object>} uid -> the team state of an open session */
   const teams = new Map();
@@ -287,8 +289,7 @@ export function createAgentFramework(deps) {
     if (!st.failure) {
       st.failure = `The team used all ${MAX_STEPS} steps of one turn.`;
       st.tools.stop();
-      for (const resolve of st.waiting.values()) resolve({ allow: false });
-      st.waiting.clear();
+      asks.cancelAll(st);
       send(st, { type: 'stop' });
     }
     return false;
@@ -333,8 +334,7 @@ export function createAgentFramework(deps) {
   }
   function onTurnEnd(s, st, m) {
     flush(s, st);
-    for (const resolve of st.waiting.values()) resolve({ allow: false });
-    st.waiting.clear();
+    asks.cancelAll(st);
     if (st.closed) return;
     // The step limit stops the run like Stop does, but the turn failed: that reason comes first.
     const failure = st.failure || (m.error ? String(m.error) : null);
@@ -375,7 +375,7 @@ export function createAgentFramework(deps) {
     teams.delete(s.uid);
     st.closed = true; // nothing more from this runner
     st.tools.stop();
-    for (const resolve of st.waiting.values()) resolve({ allow: false });
+    asks.cancelAll(st);
     if (st.busy) events.stream(s, { type: 'result', subtype: 'success', is_error: true, result: `Agent Framework stopped: ${clip(why, 300)}`, total_cost_usd: 0 });
     else events.reply(s, `Agent Framework stopped: ${clip(why, 400)}`);
     events.end(s, 'the team stopped');
@@ -425,7 +425,7 @@ export function createAgentFramework(deps) {
       const st = {
         child, team, names: new Set(team.agents.map((a) => a.name)), tools: makeTools(s.cwd),
         busy: false, closed: false, ended: false, interrupted: false, failure: null, fatal: null, version: null, steps: 0,
-        queue: [], waiting: new Map(), deleg: new Map(), resp: null, last: '', seq: 0,
+        queue: [], asks: new Map(), deleg: new Map(), resp: null, last: '', seq: 0,
         window: (typeof target.server.windowOf === 'function' && target.server.windowOf(target.id)) || null,
       };
       teams.set(s.uid, st);
@@ -464,10 +464,7 @@ export function createAgentFramework(deps) {
     // No decision ({}) declines.
     answer(s, request, d = {}) {
       const st = teams.get(s.uid);
-      const resolve = st && st.waiting.get(request?.id);
-      if (!resolve) return;
-      st.waiting.delete(request.id);
-      resolve({ allow: d.allow === true, message: typeof d.message === 'string' ? d.message : '' });
+      if (st) asks.answer(st, request?.id, d);
     },
 
     // The runner stops the run and answers with turn_end { stopped }; the result line follows from that.
@@ -477,8 +474,7 @@ export function createAgentFramework(deps) {
       st.interrupted = true;
       st.queue.length = 0;
       st.tools.stop();
-      for (const resolve of st.waiting.values()) resolve({ allow: false });
-      st.waiting.clear();
+      asks.cancelAll(st);
       send(st, { type: 'stop' });
     },
 
@@ -489,8 +485,7 @@ export function createAgentFramework(deps) {
       send(st, { type: 'close' });
       st.closed = true;
       const stopped = st.tools.stop();
-      for (const resolve of st.waiting.values()) resolve({ allow: false });
-      st.waiting.clear();
+      asks.cancelAll(st);
       try { st.child.stdin.end(); } catch { /* gone */ }
       // The runner ends on close. One that does not is killed, process tree and all.
       const timer = setTimeout(() => { if (st.child.exitCode === null) kill(st.child.pid); }, CLOSE_MS);

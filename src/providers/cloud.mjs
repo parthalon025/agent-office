@@ -15,6 +15,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { providerError } from './index.mjs';
+import { createAsks } from './asks.mjs';
 
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '[::1]', '::1']);
 const TOKEN_RE = /^[A-Za-z0-9._~+/=-]{16,8000}$/; // a JWT or an opaque token: no space, no line break, so it cannot split a header
@@ -235,14 +236,11 @@ export function createRemoteAgents({ events, label, makeId = () => crypto.random
   // Every report goes through emit(): after close, nothing more is reported (the seam's timing rule 2).
   const emit = (st, fn) => (st.closed ? undefined : fn());
   const noteOf = (back) => back?.hookSpecificOutput?.additionalContext || '';
+  const asks = createAsks({ events });
 
-  function ask(st, s, tool, input) {
-    return new Promise((resolve) => {
-      if (st.closed || st.interrupted) return resolve(false);
-      const id = events.permission(s, { tool_name: tool, tool_input: input, permission_suggestions: [] });
-      if (!id) return resolve(false);
-      st.waiting.set(id, resolve);
-    });
+  async function ask(st, s, tool, input) {
+    if (st.closed || st.interrupted) return false;
+    return (await asks.wait(s, st, { tool_name: tool, tool_input: input })).allow;
   }
 
   // Money the session spent, from the prices the owner set. A provider may call it after a turn ended (the tokens of a stopped
@@ -300,8 +298,7 @@ export function createRemoteAgents({ events, label, makeId = () => crypto.random
   }
 
   function finish(s, st, last, failure, over) {
-    for (const resolve of st.waiting.values()) resolve(false);
-    st.waiting.clear();
+    asks.cancelAll(st);
     if (st.closed) { st.busy = false; return; }
     // The next queued message keeps the session busy, so a message that comes in with the result below waits behind it.
     const next = st.queue.shift();
@@ -316,7 +313,7 @@ export function createRemoteAgents({ events, label, makeId = () => crypto.random
 
   return {
     open(s, o = {}) {
-      const st = { busy: false, closed: false, interrupted: false, abort: null, queue: [], notes: [], waiting: new Map(), cost: 0, budget: o.budget > 0 ? Number(o.budget) : null, ...newState(s, o) };
+      const st = { busy: false, closed: false, interrupted: false, abort: null, queue: [], notes: [], asks: new Map(), cost: 0, budget: o.budget > 0 ? Number(o.budget) : null, ...newState(s, o) };
       agents.set(s.uid, st);
       return st;
     },
@@ -333,18 +330,14 @@ export function createRemoteAgents({ events, label, makeId = () => crypto.random
     // The user's decision on a request this provider raised. No decision ({}) declines.
     answer(s, request, d = {}) {
       const st = agents.get(s.uid);
-      const resolve = st && st.waiting.get(request?.id);
-      if (!resolve) return;
-      st.waiting.delete(request.id);
-      resolve(d.allow === true);
+      if (st) asks.answer(st, request?.id, d);
     },
     interrupt(s) {
       const st = agents.get(s.uid);
       if (!st || !st.busy) return;
       st.interrupted = true;
       st.queue.length = 0;
-      for (const resolve of st.waiting.values()) resolve(false);
-      st.waiting.clear();
+      asks.cancelAll(st);
       if (st.abort) st.abort.abort(new Error('interrupted'));
       try { onStop(s, st); } catch { /* best effort */ }
     },
@@ -354,7 +347,7 @@ export function createRemoteAgents({ events, label, makeId = () => crypto.random
       if (st) {
         st.closed = true;
         if (st.abort) st.abort.abort(new Error('closed'));
-        for (const resolve of st.waiting.values()) resolve(false);
+        asks.cancelAll(st);
         try { onStop(s, st); } catch { /* best effort */ }
       }
       return Promise.resolve();

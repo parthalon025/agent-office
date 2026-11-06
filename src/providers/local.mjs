@@ -12,6 +12,7 @@
 import crypto from 'node:crypto';
 import { providerError } from './index.mjs';
 import { createLocalTools } from './local-tools.mjs';
+import { createAsks } from './asks.mjs';
 
 export const KINDS = {
   ollama: { label: 'Ollama', baseUrl: 'http://127.0.0.1:11434/v1', needs: ['Start Ollama and pull a model: ollama pull <model>.'] },
@@ -49,7 +50,7 @@ export const noteOf = (back) => back?.hookSpecificOutput?.additionalContext || '
  * own; the tool inside the worktree (st.tools, providers/local-tools.mjs); then PostToolUse or PostToolUseFailure.
  * The office tools (office_inbox, office_ask, office_room, office_room_update) need no approval: they are the office's own.
  *
- * st: the agent state of a session: { closed, interrupted, waiting: Map(request id -> resolve), tools }. The provider's
+ * st: the agent state of a session: { closed, interrupted, asks: Map(request id -> ask, providers/asks.mjs), tools }. The provider's
  *   answer() resolves a waiting request with { allow, message } (message: why the office refused, for the model). A close
  *   or an interrupt resolves every waiting request as { allow: false } (the provider does it), so a call never hangs.
  * c: { id, name, input (an object; null when the model sent arguments that are not JSON), agentId (a team member, or none) }
@@ -61,13 +62,8 @@ export function createToolGate({ events, office = null }) {
 
   // Ask the office and wait: { allow, message }. The office checks the Security room rules first (Allow and Deny answer at
   // once, on a later tick), else it holds the request for the user and calls the provider's answer(), which resolves it.
-  function ask(st, s, name, input, agentId) {
-    return new Promise((resolve) => {
-      const id = events.permission(s, { tool_name: name, tool_input: input, permission_suggestions: [], ...(agentId ? { agent_id: agentId } : {}) });
-      if (!id) return resolve({ allow: false });
-      st.waiting.set(id, resolve);
-    });
-  }
+  const asks = createAsks({ events });
+  const ask = (st, s, name, input, agentId) => asks.wait(s, st, { tool_name: name, tool_input: input, ...(agentId ? { agent_id: agentId } : {}) });
 
   async function call(s, st, c) {
     const input = c.input;
@@ -136,6 +132,7 @@ export function createLocal(deps) {
   const spec = KINDS[deps.kind];
   if (!spec) throw new Error(`Unknown local kind: ${deps.kind}`);
   const events = deps.events;
+  const asks = createAsks({ events });
   const baseUrl = String(deps.baseUrl || spec.baseUrl).replace(/\/+$/, '');
   if (!LOOPBACK.has(new URL(baseUrl).hostname)) throw new Error('A local model provider talks to this machine only.');
   const doFetch = deps.fetch || globalThis.fetch;
@@ -264,8 +261,7 @@ export function createLocal(deps) {
 
   function finishTurn(s, st, last, failure) {
     st.busy = false;
-    for (const resolve of st.waiting.values()) resolve({ allow: false });
-    st.waiting.clear();
+    asks.cancelAll(st);
     if (st.closed) return;
     if (st.interrupted) {
       events.stream(s, { type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Stopped', total_cost_usd: 0 });
@@ -310,7 +306,7 @@ export function createLocal(deps) {
       this.check(o);
       const st = {
         model: o.model, messages: [{ role: 'system', content: SYSTEM(s.cwd) }], tools: makeTools(s.cwd),
-        busy: false, closed: false, interrupted: false, abort: null, queue: [], waiting: new Map(),
+        busy: false, closed: false, interrupted: false, abort: null, queue: [], asks: new Map(),
       };
       agents.set(s.uid, st);
       // The session shows its model like a Claude Code session does, on a later tick (seam rule 1).
@@ -330,10 +326,7 @@ export function createLocal(deps) {
     // No decision ({}) declines.
     answer(s, request, d = {}) {
       const st = agents.get(s.uid);
-      const resolve = st && st.waiting.get(request?.id);
-      if (!resolve) return;
-      st.waiting.delete(request.id);
-      resolve({ allow: d.allow === true, message: typeof d.message === 'string' ? d.message : '' });
+      if (st) asks.answer(st, request?.id, d);
     },
 
     interrupt(s) {
@@ -343,8 +336,7 @@ export function createLocal(deps) {
       st.queue.length = 0;
       st.tools.stop();
       if (st.abort) st.abort.abort();
-      for (const resolve of st.waiting.values()) resolve({ allow: false });
-      st.waiting.clear();
+      asks.cancelAll(st);
     },
 
     // Resolves when its running commands have ended (a room cannot be removed while one holds it as its folder).
@@ -355,7 +347,7 @@ export function createLocal(deps) {
       st.closed = true;
       const stopped = st.tools.stop();
       if (st.abort) st.abort.abort();
-      for (const resolve of st.waiting.values()) resolve({ allow: false });
+      asks.cancelAll(st);
       await stopped;
     },
   };
