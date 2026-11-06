@@ -457,11 +457,11 @@ function claudeRig(over = {}) {
 test('claude-code open: the stream-json command with the office hooks, MCP server, model, mode, resume and budget', () => {
   const r = claudeRig();
   const s = r.o.session();
-  r.p.open(s, { model: 'haiku', permissionMode: 'default', resume: 'sid-0', budget: 1 });
+  r.p.open(s, { model: 'haiku', permissionMode: 'default', resume: '0b7d8a52-5b0c-4a53-9e3a-0f6c1c2d3e4f', budget: 1 });
   const { file, args, opts } = r.spawned[0];
   assert.equal(file, 'C:/bin/claude', 'an absolute path, never a bare name');
   assert.deepEqual(args, ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
-    '--settings', FILES.settings, '--mcp-config', FILES.mcp, '--model', 'haiku', '--permission-mode', 'default', '--resume', 'sid-0', '--max-budget-usd', '1']);
+    '--settings', FILES.settings, '--mcp-config', FILES.mcp, '--model', 'haiku', '--permission-mode', 'default', '--resume', '0b7d8a52-5b0c-4a53-9e3a-0f6c1c2d3e4f', '--max-budget-usd', '1']);
   assert.deepEqual([opts.cwd, opts.windowsHide, opts.stdio, opts.env.OFFICE_ID, opts.env.PATH], [REPO, true, ['pipe', 'pipe', 'pipe'], 'o1', 'C:/bin']);
   assert.equal(s.pid, 4242);
   const r2 = claudeRig();
@@ -592,7 +592,7 @@ test('claude-code answer: the PermissionRequest hook body for allow, always allo
   const sug = [{ type: 'addRules', behavior: 'allow', rules: [{ toolName: 'Bash', ruleContent: 'git push:*' }] }];
   const out = (decision) => ({ hookSpecificOutput: { hookEventName: 'PermissionRequest', decision } });
   assert.deepEqual(p.answer(null, { id: 'p1', suggestions: sug }, { allow: true, always: false }), out({ behavior: 'allow' }));
-  assert.deepEqual(p.answer(null, { id: 'p1', suggestions: sug }, { allow: true, always: true }), out({ behavior: 'allow', updatedPermissions: sug }));
+  assert.deepEqual(p.answer(null, { id: 'p1', suggestions: sug }, { allow: true, always: true }), out({ behavior: 'allow', updatedPermissions: sug.map((x) => ({ ...x, destination: 'localSettings' })) }));
   assert.deepEqual(p.answer(null, { id: 'p1', suggestions: [] }, { allow: true, always: true }), out({ behavior: 'allow' }), 'always with no rule offered');
   assert.deepEqual(p.answer(null, { id: 'p1', suggestions: sug }, { allow: false, always: true }), out({ behavior: 'deny', message: 'Declined from Agent Office.' }));
   assert.deepEqual(p.answer(null, { id: 'p1' }, {}), {}, 'no decision: Claude Code decides');
@@ -678,7 +678,7 @@ test('claude-code openWindow: cmd.exe and PowerShell by full path, the options i
   assert.deepEqual(args, ['/d', '/s', '/c', 'start "Office" /wait "C:/bin/powershell.exe" -NoLogo -NoExit -ExecutionPolicy Bypass -File "C:/office/launch.ps1"']);
   assert.deepEqual([opts.windowsVerbatimArguments, opts.cwd, opts.stdio, opts.env.OFFICE_ID, opts.env.OFFICE_TITLE], [true, REPO, 'ignore', 'o1', 'Office - my bot']);
   assert.equal(opts.env.OFFICE_CLAUDE, 'C:/bin/claude', 'launch.ps1 runs claude from this full path');
-  assert.deepEqual(JSON.parse(opts.env.OFFICE_ARGS), ['--settings', FILES.settings, '--mcp-config', FILES.mcp, '--model', 'opus', 'Fix it']);
+  assert.deepEqual(JSON.parse(opts.env.OFFICE_ARGS), ['--settings', FILES.settings, '--mcp-config', FILES.mcp, '--model', 'opus', '--', 'Fix it']);
   assert.equal(child.unrefed, true);
   assert.equal(s.pid, 4242);
   child.emit('exit', 0);
@@ -964,4 +964,37 @@ test('featuresOf: a copy of what the provider declares, read when asked (a gette
   assert.deepEqual(featuresOf(p), ['resume', 'skills']);
   assert.deepEqual(featuresOf({}), []);
   assert.deepEqual(featuresOf(null), []);
+});
+
+// #27 L2, L5, L7, L8.
+test('claude-code answer: always allow keeps only the project-local destination', () => {
+  const p = claudeRig().p;
+  const rule = { type: 'addRules', behavior: 'allow', rules: [{ toolName: 'Bash', ruleContent: 'git push:*' }] };
+  const body = p.answer(null, { id: 'p1', suggestions: [{ ...rule, destination: 'userSettings' }, { ...rule }] }, { allow: true, always: true });
+  assert.deepEqual(body.hookSpecificOutput.decision.updatedPermissions.map((x) => x.destination), ['localSettings', 'localSettings']);
+});
+
+test('claude-code open and check: a resume id that is not a UUID is refused, so it never becomes a flag', () => {
+  const r = claudeRig();
+  const s = r.o.session({ name: 'x' });
+  for (const bad of ['--dangerously-skip-permissions', 'sid-0']) {
+    assert.throws(() => r.p.open(s, { resume: bad }), /session id/i, bad);
+    assert.throws(() => r.p.check({ resume: bad }), /session id/i, bad);
+  }
+  assert.equal(r.spawned.length, 0);
+  r.p.open(s, { resume: '0b7d8a52-5b0c-4a53-9e3a-0f6c1c2d3e4f' });
+  assert.equal(r.spawned.length, 1);
+});
+
+test('claude-code openWindow: the prompt comes after "--", so it is never an option', () => {
+  const r = claudeRig();
+  r.p.openWindow(r.o.session({ name: 'w', headless: false }), { prompt: '--dangerously-skip-permissions' });
+  const a = JSON.parse(r.spawned[0].opts.env.OFFICE_ARGS);
+  assert.deepEqual(a.slice(-2), ['--', '--dangerously-skip-permissions']);
+});
+
+test('launch.ps1 clears OFFICE_ID when claude returns, so a later session in the window is not attached to this one', () => {
+  const ps = fs.readFileSync(new URL('../launch.ps1', import.meta.url), 'utf8');
+  assert.match(ps, /Remove-Item\s+Env:OFFICE_ID/);
+  assert.ok(ps.indexOf('Remove-Item Env:OFFICE_ID') > ps.indexOf('& $env:OFFICE_CLAUDE'), 'after claude runs');
 });

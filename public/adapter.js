@@ -113,11 +113,11 @@
         return uids.length ? post('/api/interrupt', { uid: uids[0] }) : Promise.resolve({ ok: false, reason: 'No open session.' });
       case 'resume':
         uids = uidsOf(cmd);
-        return uids.length ? sendAll(uids, { text: 'Continue.' }) : Promise.resolve({ ok: false, reason: 'No open session.' });
+        return uids.length ? sendAll(uids, { text: 'Continue.', answers: false }) : Promise.resolve({ ok: false, reason: 'No open session.' });
       case 'retry': {
         uids = uidsOf(cmd);
         var last = uids.length && sessionOf(uids[0]);
-        return last && last.prompt ? sendAll(uids, { text: last.prompt }) : Promise.resolve({ ok: false, reason: 'Nothing to run again.' });
+        return last && last.prompt ? sendAll(uids, { text: last.prompt, answers: false }) : Promise.resolve({ ok: false, reason: 'Nothing to run again.' });
       }
       case 'dismiss': {   // the server clears the error; the next snapshot moves every surface off Error
         var du = uidsOf(cmd)[0];

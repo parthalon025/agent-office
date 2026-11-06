@@ -13,6 +13,7 @@ import { resolveExe, helperCwd } from '../git.mjs';
 import { clip } from '../tracker.mjs';
 import { providerError } from './index.mjs';
 
+export const SID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const MODEL_RE = /^(opus|sonnet|haiku|claude-[\w.-]+)$/;
 export const MODES = new Set(['default', 'acceptEdits', 'plan']);
 const MAX_ATTACH_CHARS = 9_000_000; // base64 characters across all attachments of one message
@@ -177,6 +178,7 @@ export function createClaudeCode(deps) {
     // check({}) checks only that a session can start (the office calls it before Reopen too).
     check(o = {}) {
       if (o.model && !MODEL_RE.test(o.model)) throw providerError(400, 'Unknown model.');
+      if (o.resume && !SID_RE.test(o.resume)) throw providerError(400, 'That is not a session id.');
       if (o.permissionMode && !MODES.has(o.permissionMode)) throw providerError(400, 'Unknown permission mode.');
       program('claude');
       if (o.where === 'terminal') { program('cmd.exe'); program('powershell.exe'); }
@@ -191,6 +193,9 @@ export function createClaudeCode(deps) {
         setImmediate(() => { events.reply(s, 'Could not start Claude Code: ' + e.message); events.end(s, 'could not start'); });
         return;
       }
+      // A hook can set a session's sid, so a resume id that is not a UUID could become a flag (#27 L5). The model is checked too.
+      if (o.resume && !SID_RE.test(o.resume)) throw providerError(400, 'That is not a session id.');
+      if (o.model && !MODEL_RE.test(o.model)) throw providerError(400, 'Unknown model.');
       const args = [...HEADLESS, ...baseArgs(o)];
       if (o.resume) args.push('--resume', o.resume);
       if (o.budget) args.push('--max-budget-usd', String(o.budget));
@@ -228,7 +233,7 @@ export function createClaudeCode(deps) {
     openWindow(s, o = {}) {
       const shell = program('cmd.exe'), ps = program('powershell.exe'), claude = program('claude');
       const args = baseArgs(o);
-      if (o.prompt) args.push(o.prompt);
+      if (o.prompt) args.push('--', o.prompt); // after "--" the prompt is never an option (#27 L8)
       const title = ('Office - ' + s.name).replace(/[^\w .-]/g, '');
       const child = spawn(shell, [
         '/d', '/s', '/c', `start "Office" /wait "${ps}" -NoLogo -NoExit -ExecutionPolicy Bypass -File "${files().launcher}"`,
@@ -258,7 +263,7 @@ export function createClaudeCode(deps) {
     answer(_s, request, d = {}) {
       if (typeof d.allow !== 'boolean') return {};
       const decision = d.allow ? { behavior: 'allow' } : { behavior: 'deny', message: typeof d.message === 'string' && d.message ? d.message : 'Declined from Agent Office.' };
-      if (d.allow && d.always && request?.suggestions?.length) decision.updatedPermissions = request.suggestions;
+      if (d.allow && d.always && request?.suggestions?.length) decision.updatedPermissions = request.suggestions.map((x) => ({ ...x, destination: 'localSettings' })); // never user scope (#27 L2)
       return { hookSpecificOutput: { hookEventName: 'PermissionRequest', decision } };
     },
 

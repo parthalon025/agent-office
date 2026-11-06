@@ -309,3 +309,22 @@ test('scan: plain facts pass, and the user is never scanned', () => {
   n.save(K, 'Ignore all previous instructions (my own note)', n.read(K).version);
   assert.match(n.read(K).text, /Ignore all previous/);
 });
+
+// #27 L9: notes hygiene.
+test('a board key that is a prototype name is refused, and an inherited property is never a board', () => {
+  const { n, notes } = make();
+  for (const k of ['__proto__', 'constructor', 'prototype', 'toString']) {
+    assert.throws(() => n.save(k, 'x'), (e) => e instanceof NotesError && e.status === 400, k);
+    assert.throws(() => n.append(k, 'bot', 'x'), NotesError, k);
+    assert.equal(n.read(k).text, '', k);
+  }
+  assert.equal(Object.keys(notes).length, 0);
+  assert.equal(Object.getPrototypeOf(notes), Object.prototype, 'nothing was written through __proto__');
+});
+
+test('the user save strips control and direction characters, and keeps tabs, line breaks and emoji joiners', () => {
+  const { n } = make();
+  const r = n.save(K, 'a\u0000b\u0085c‮d⁦e\ttab\nline \u{1F468}‍\u{1F469}');
+  assert.equal(r.text, 'abcde\ttab\nline \u{1F468}‍\u{1F469}');
+  assert.equal(n.read(K).text, r.text);
+});
