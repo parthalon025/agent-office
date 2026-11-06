@@ -147,7 +147,7 @@ test('the explanation is added text: the request keeps its raw command, and answ
   assert.equal(decisionOf(await out).behavior, 'deny');
 });
 
-test('office_ask is held until the page answers it: yes and no are the text of the answer, and the hold is gone', async () => {
+test('office_ask is held until the page answers it: yes and no are the text of the answer, and the hold is gone', { skip: process.platform !== 'win32' && 'opening sessions is only implemented for Windows' }, async () => {
   const opened = await page('/api/open', { cwd: work, name: 'asker', provider: 'ollama', model: 'fake-model', where: 'office', isolation: 'same' });
   assert.equal(opened.status, 200, opened.text);
   const uid = opened.json.uid;
@@ -161,7 +161,7 @@ test('office_ask is held until the page answers it: yes and no are the text of t
   }
 });
 
-test('office_ask: a request the agent closed frees the question', async () => {
+test('office_ask: a request the agent closed frees the question', { skip: process.platform !== 'win32' && 'opening sessions is only implemented for Windows' }, async () => {
   const uid = (await snapshot()).sessions.find((x) => x.name === 'asker').uid;
   const ctl = new AbortController();
   const asked = agent('/mcp/ask', { office_id: uid, question: 'Still there?' }, ctl.signal);
