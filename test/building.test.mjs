@@ -1466,3 +1466,20 @@ test('floor memory: a floor the page chose is not a pick; a floor the user moved
   mem.see(KEY_B, 'feat/z');                  // a building the page never opened records no move
   assert.equal(mem.picked(KEY_B), null);
 });
+
+test('a helper cut from the 20-entry agent list while open still leaves, once (#116)', async () => {
+  const r = rig();
+  const m = r.mount(KEY_A);
+  await r.hook(HOOKS.turnWithEdit[0]);
+  for (let i = 1; i <= 22; i++) await r.hook(task('c' + i, 'Explore'));
+  const names = of(m.ev, 'delegate').map((e) => e.spawn.name);
+  assert.equal(names.length, 22);
+  await r.hook({ hook_event_name: 'Stop', session_id: 'sid-1', cwd: REPO_A });   // closeAll cuts c1 and c2
+  for (const n of names) assert.equal(helperDone(m.ev, n).length, 1, `${n} left once`);
+  assert.equal(helperDone(m.ev, names[0])[0].remove, true);
+  assert.equal(helperDone(m.ev, names[0])[0].result, 'Stopped before it finished');
+  await r.hook(task('c23', 'Explore'));   // a later snapshot
+  for (const n of names) assert.equal(helperDone(m.ev, n).length, 1, `${n} is not told twice`);
+  const h = of(m.ev, 'delegate').map((e) => e.spawn.name)[22];
+  assert.equal(helperDone(m.ev, h).length, 0, 'a helper still listed and open stays');
+});
