@@ -47,6 +47,7 @@ import * as auth from './auth.mjs';
 import { officeFiles, portArgs, DEFAULT_PORT, OFFICE_ROOT } from './files.mjs';
 import '../public/format.js'; // money, plurals and short paths, shared with the page (globalThis.OfficeFormat)
 import '../public/vocab.js'; // session vocabulary, shared with the page (globalThis.OfficeVocab)
+import '../public/ask.js'; // the ask-first protocol, shared with the page (globalThis.OfficeAsk)
 import '../public/wire.js'; // the /events wire format: lean snapshot and patches, shared with the page (globalThis.OfficeWire)
 const V = globalThis.OfficeVocab;
 const W = globalThis.OfficeWire;
@@ -513,7 +514,7 @@ async function handoffGoalHq(body) {
   if (!company) throw httpError(409, 'Paperclip is not connected, so there is no company to hand this goal to.');
   const g = manager.get(String(body.id || ''));
   if (!g) throw httpError(404, 'No such goal.');
-  if (body.confirmed !== true) throw Object.assign(httpError(409, `Create ${g.steps.length} tasks in ${company.name || 'Paperclip'}? The office writes these tasks and nothing else. It never assigns, changes or deletes a task.`), { confirm: 'handoff', tasks: hq.handoffTasks(g).map((t) => ({ step: t.step, title: t.title, description: t.description })) });
+  if (body.confirmed !== true) throw askFirst('handoff', `Create ${g.steps.length} tasks in ${company.name || 'Paperclip'}? The office writes these tasks and nothing else. It never assigns, changes or deletes a task.`, { tasks: hq.handoffTasks(g).map((t) => ({ step: t.step, title: t.title, description: t.description })) });
   const r = await manager.handoff(g.id, (goal, written) => hq.handoffGoal(goal, written));
   broadcast();
   if (!r.ok) throw httpError(r.status, r.reason);
@@ -637,9 +638,7 @@ async function mergeChange(body) {
   if (!p) throw httpError(409, 'PR state unknown. Check again in a moment.');
   if (p.state !== 'ready' || !readyFor(k, got.prs).some((e) => e.number === n)) throw httpError(409, `#${n} is not ready to merge. ${p.state === 'ready' ? 'It has no Quality record yet.' : `Its state is ${p.state}.`}`);
   if (body.confirmed !== true) {
-    const e = httpError(409, `Merge #${n} ${p.title} into ${p.base || 'main'}? This changes the repository on GitHub.`);
-    e.confirm = 'merge';
-    throw e;
+    throw askFirst('merge', `Merge #${n} ${p.title} into ${p.base || 'main'}? This changes the repository on GitHub.`);
   }
   await git.mergePr(r.path, mergeArgs(n));
   try { // the merge is done on GitHub: a failure to write the record must not read as a failed merge
@@ -1402,10 +1401,8 @@ function confirmCost(provider, confirmed) {
   if (confirmed === true || !costAsk(persisted.security, provider)) return;
   const label = traitsOf(provider).supervision;
   // A normal question, not an error (review minor): 200 { confirm: 'cost', question } and no uid, so the page logs no failed
-  // request each time it asks. The route's catch sends it (e.question).
-  const e = httpError(200, `This agent does not report cost. ${label ? label + '. ' : ''}Run it?`);
-  e.confirm = 'cost'; e.question = true;
-  throw e;
+  // request each time it asks (ask.js).
+  throw askFirst('cost', `This agent does not report cost. ${label ? label + '. ' : ''}Run it?`);
 }
 
 // An ungated agent (ADR 0001) runs some tool calls without asking, so it runs only in a worktree the office made for it:
@@ -1464,9 +1461,7 @@ async function forkSession(uid, { confirmed = false } = {}) {
   const from = rec.worktree?.repo && fs.existsSync(rec.worktree.repo) ? rec.worktree.repo : rec.cwd;
   if (!from || !fs.existsSync(from)) throw httpError(409, `Its folder is gone: ${rec.cwd}.`);
   if (confirmed !== true) {
-    const e = httpError(409, `Fork ${rec.name} into a new worktree? The copy gets the conversation so far and its own branch. The files start from the current commit of the main folder, not from the changes of the old session. ${traitsOf(provider).cost === 'unknown' ? `${provider.label} does not report cost, so the office shows it as unknown and no spend limit can stop it.` : ''}`.trim());
-    e.confirm = 'fork';
-    throw e;
+    throw askFirst('fork', `Fork ${rec.name} into a new worktree? The copy gets the conversation so far and its own branch. The files start from the current commit of the main folder, not from the changes of the old session. ${traitsOf(provider).cost === 'unknown' ? `${provider.label} does not report cost, so the office shows it as unknown and no spend limit can stop it.` : ''}`.trim());
   }
   provider.check?.({});
   const name = `${rec.name} fork`.slice(0, 40);
@@ -1583,7 +1578,7 @@ function goalTick() {
 function startGoal(body) {
   const building = String(body.building || '');
   const company = persisted.paperclip?.company || hq.view()?.company;
-  if (company && body.confirmed !== true) throw Object.assign(httpError(409, 'A Paperclip company is connected, so Paperclip plans the work. Start an office goal anyway? Two planners then assign work at once.'), { confirm: 'goal' });
+  if (company && body.confirmed !== true) throw askFirst('goal', 'A Paperclip company is connected, so Paperclip plans the work. Start an office goal anyway? Two planners then assign work at once.');
   const limit = body.spendLimit == null ? defaultSpend() : Number(body.spendLimit);
   if (!Number.isFinite(limit) || limit < 0) throw httpError(400, 'The spend limit must be a number of dollars, 0 or more.');
   return manager.submit(building, body.goal, { approveFirst: body.approveFirst !== false, spendLimit: limit })
@@ -1720,11 +1715,9 @@ function skillAction(action, body) {
   if (action === 'read') return skills.read(name);
   skills.read(name); // 400 or 404 before the question
   if (body.confirmed !== true) {
-    const e = httpError(409, action === 'delete'
+    throw askFirst('skill', action === 'delete'
       ? `Delete the skill ${name}? ${provider.label} loses it for good. Its folder is removed.`
       : `Save your changes to the skill ${name}? ${provider.label} follows this skill in later sessions.`);
-    e.confirm = 'skill';
-    throw e;
   }
   return action === 'delete' ? skills.remove(name) : skills.save(name, String(body.text ?? ''));
 }
@@ -1770,6 +1763,8 @@ setInterval(() => {
 // ---------- http ----------
 const STARTUP_DIR = startup.startupDir(process.env.APPDATA); // Windows sign-in entry; see startup.mjs
 function httpError(status, message) { const e = new Error(message); e.status = status; return e; }
+// A call that needs the user's yes first (ask.js): the route's catch sends e.answer; the page asks and sends the call again.
+function askFirst(kind, text, extra) { const a = OfficeAsk.answer(kind, text, extra); return Object.assign(httpError(a.status, text), { answer: a }); }
 function send(res, status, body, type = 'application/json') {
   res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
@@ -1894,7 +1889,7 @@ setInterval(() => { for (const c of clients) c.write(': ping\n\n'); }, 20000).un
 const MIME = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
 const FONT_FILES = fs.readdirSync(path.join(PUBLIC, 'vendor', 'fonts')).filter((f) => /^[a-z0-9-]+\.woff2$/.test(f));
 const STATIC_FILES = new Map([
-  ['/page-core.js', 'public/page-core.js'], ['/dialogs.js', 'public/dialogs.js'], ['/dialogs-extra.js', 'public/dialogs-extra.js'], ['/panels.js', 'public/panels.js'], ['/needs.js', 'public/needs.js'], ['/office.js', 'public/office.js'], ['/scene-host.js', 'public/scene-host.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/persona.js', 'public/persona.js'], ['/lobby.js', 'public/lobby.js'], ['/desk.js', 'public/desk.js'], ['/security.js', 'public/security.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/vocab.js', 'public/vocab.js'], ['/wire.js', 'public/wire.js'], ['/format.js', 'public/format.js'], ['/wheel-gate.js', 'public/wheel-gate.js'], ['/building.js', 'public/building.js'], ['/toasts.js', 'public/toasts.js'], ['/tokens.css', 'tokens.css'],
+  ['/page-core.js', 'public/page-core.js'], ['/dialogs.js', 'public/dialogs.js'], ['/dialogs-extra.js', 'public/dialogs-extra.js'], ['/panels.js', 'public/panels.js'], ['/needs.js', 'public/needs.js'], ['/office.js', 'public/office.js'], ['/scene-host.js', 'public/scene-host.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/persona.js', 'public/persona.js'], ['/lobby.js', 'public/lobby.js'], ['/desk.js', 'public/desk.js'], ['/security.js', 'public/security.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/vocab.js', 'public/vocab.js'], ['/ask.js', 'public/ask.js'], ['/wire.js', 'public/wire.js'], ['/format.js', 'public/format.js'], ['/wheel-gate.js', 'public/wheel-gate.js'], ['/building.js', 'public/building.js'], ['/toasts.js', 'public/toasts.js'], ['/tokens.css', 'tokens.css'],
   ['/components/bundle.css', 'components/bundle.css'], ['/components/bundle.js', 'components/bundle.js'],
   ['/components/lib/three.min.js', 'components/lib/three.min.js'],
   ['/components/lib/three-orbit-controls.js', 'components/lib/three-orbit-controls.js'],
@@ -2121,10 +2116,9 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/close') { await closeSession(String(body.uid)); return send(res, 200, { ok: true }); }
     return send(res, 404, { error: 'Not found' });
   } catch (e) {
-    // confirm: the request needs the user's yes first; the page asks and sends it again. The cost question (confirmCost) is a
-    // normal answer, 200 { confirm, question }; the fork and skill questions are still 409 { error, confirm }.
-    if (e.question) send(res, 200, { confirm: e.confirm, question: e.message });
-    else send(res, e.status || 500, { error: e.message, ...(e.confirm ? { confirm: e.confirm } : {}), ...(e.tasks ? { tasks: e.tasks } : {}) });
+    // ask-first (ask.js): the request needs the user's yes first; the page asks and sends it again.
+    if (e.answer) send(res, e.answer.status, e.answer.body);
+    else send(res, e.status || 500, { error: e.message });
   }
 });
 

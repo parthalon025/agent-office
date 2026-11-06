@@ -27,7 +27,8 @@
         setBusy(''); setAsk(null); p.toast({ tone: 'success', title: 'Handed to Paperclip', text: g.goal });
       }, function (x) {
         setBusy('');
-        if (x.body && x.body.confirm === 'handoff' && !confirmed) { setAsk({ g: g, text: x.message, tasks: x.body.tasks || [] }); return; }
+        var q = window.OfficeAsk.asked(x, 'handoff', confirmed);
+        if (q) { setAsk({ g: g, text: q.text, tasks: q.body.tasks || [] }); return; }
         setAsk(null); p.toast({ tone: 'error', title: 'Handoff failed', text: x.message });
       });
     }

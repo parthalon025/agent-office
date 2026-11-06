@@ -138,7 +138,8 @@
         load();
       }, function (x) {
         setBusy('');
-        if (x.body && x.body.confirm === 'skill' && !confirmed) { setAsk({ action: action, name: name, text: text, question: x.message }); return; }
+        var q = window.OfficeAsk.asked(x, 'skill', confirmed);
+        if (q) { setAsk({ action: action, name: name, text: text, question: q.text }); return; }
         setErr(x.message);
       });
     }
@@ -211,7 +212,8 @@
         return api('/api/fork', { uid: s.uid, confirmed: confirmed === true }).then(function () {
           setForkAsk(null); if (p.toast) p.toast({ tone: 'success', title: s.name, text: 'Forked into a new worktree' }); p.onClose();
         }, function (x) {
-          if (x.body && x.body.confirm === 'fork' && !confirmed) { setForkAsk({ s: s, text: x.message }); return; }
+          var q = window.OfficeAsk.asked(x, 'fork', confirmed);
+          if (q) { setForkAsk({ s: s, text: q.text }); return; }
           throw x;
         });
       });
@@ -361,7 +363,7 @@
   // The confirm dialog of a pull request or a worktree removal, or null. Push, pull request and removal always ask here.
   function ChangesConfirm(p) {
     var c = p.c, wt = c.wt;
-    if (c.confirm === 'pr') {
+    if (c.confirm === window.OfficeAsk.local('pr')) {
       return h(A.Dialog, { open: true, title: 'Create a pull request', onClose: function () { c.setConfirm(null); }, actions: [
         h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { c.setConfirm(null); } }, 'Cancel'),
         h(A.Button, { key: 'p', variant: 'primary', icon: 'send', loading: c.busy, onClick: c.pr }, 'Create pull request')] },
@@ -370,7 +372,7 @@
           h('pre', { className: 'code' }, '1. git add -A and git commit\n2. git push -u origin ' + (wt ? wt.branch : '') + '\n3. gh pr create --fill'),
           c.err ? h('p', { className: 'ao-err', role: 'alert' }, c.err) : null));
     }
-    if (c.confirm === 'rm') {
+    if (c.confirm === window.OfficeAsk.local('rm')) {
       var dirty = /uncommitted/i.test(c.err);
       return h(A.Dialog, { open: true, title: 'Remove the worktree', onClose: function () { c.setConfirm(null); c.setErr(''); }, actions: [
         h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { c.setConfirm(null); c.setErr(''); } }, 'Keep it'),
@@ -386,8 +388,8 @@
     var data = c.data, wt = c.wt;
     return [
       h(A.Button, { key: 'rf', variant: 'quiet', icon: 'retry', onClick: c.load }, 'Refresh'),
-      wt ? h(A.Button, { key: 'rm', variant: 'quiet', icon: 'remove', disabled: !ended, title: ended ? '' : 'Close the session first', onClick: function () { c.setConfirm('rm'); } }, 'Remove worktree') : null,
-      wt ? h(A.Button, { key: 'pr', variant: 'primary', icon: 'send', disabled: !data || (!data.files.length && !data.ahead), onClick: function () { c.setConfirm('pr'); } }, 'Create pull request') : null];
+      wt ? h(A.Button, { key: 'rm', variant: 'quiet', icon: 'remove', disabled: !ended, title: ended ? '' : 'Close the session first', onClick: function () { c.setConfirm(window.OfficeAsk.local('rm')); } }, 'Remove worktree') : null,
+      wt ? h(A.Button, { key: 'pr', variant: 'primary', icon: 'send', disabled: !data || (!data.files.length && !data.ahead), onClick: function () { c.setConfirm(window.OfficeAsk.local('pr')); } }, 'Create pull request') : null];
   }
   function ChangesBody(p) {
     var c = p.c, data = c.data, result = c.result;

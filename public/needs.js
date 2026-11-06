@@ -19,7 +19,8 @@
         setBusy(''); setAsk(null); toast({ tone: 'success', title: 'Merged #' + r.number, text: r.title || '' });
       }, function (x) {
         setBusy('');
-        if (x.body && x.body.confirm === 'merge' && !confirmed) { setAsk({ r: r, text: x.message }); return; }
+        var q = window.OfficeAsk.asked(x, 'merge', confirmed);
+        if (q) { setAsk({ r: r, text: q.text }); return; }
         if (confirmed) setErr(x.message); else { setAsk(null); toast({ tone: 'error', title: 'Merge #' + r.number, text: x.message }); }
       });
     }
