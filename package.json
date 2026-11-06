@@ -9,6 +9,7 @@
     "start:branch": "node -e \"process.env.OFFICE_PORT='branch';process.env.OFFICE_OPEN='0';import('./server.mjs')\"",
     "probe": "node probe.mjs",
     "smoke": "node test/smoke.mjs",
+    "gate:jobs": "node test/core-jobs.mjs",
     "test": "node --import ./test/fixtures/temp-leaks.mjs --test \"test/*.test.mjs\""
   },
   "engines": { "node": ">=22" }
