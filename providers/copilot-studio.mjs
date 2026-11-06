@@ -2,7 +2,7 @@
 // OFF until the owner configures it: no endpoint or no token means "Not configured", and the office makes no call. The office never
 // signs in. If the agent asks for a sign-in (a connector that needs the user's own connection), the turn stops with words; the
 // office does not complete the sign-in. The owner sets OFFICE_COPILOTSTUDIO_ENDPOINT (the agent's connection string from
-// Copilot Studio) and a token they made (providers/cloud.mjs cloudConfig; README "Azure AI Foundry and Copilot Studio agents").
+// Copilot Studio) and a token they made (providers/cloud.mjs cloudConfig; docs/agents.md "Azure AI Foundry and Copilot Studio agents").
 //
 // What one message does: start a conversation (once per session; the agent greets nobody), send the text as an activity, and read
 // the activities that come back as an event stream. Messages become replies. The plan events of generative orchestration become
@@ -179,7 +179,7 @@ export function createCopilotStudio(deps) {
   return {
     kind: 'copilot-studio',
     label: 'Copilot Studio',
-    paid: true,        // it costs money in the owner's account; the spend limit counts the price per message the owner sets (README)
+    paid: true,        // it costs money in the owner's account; the spend limit counts the price per message the owner sets (docs/agents.md)
     ...(priced ? {} : { cost: 'unknown' }), // no price: the office asks before it runs and shows "unknown" (Q22)
     cloud: true,       // it runs in the cloud, not on this machine
     // Every step (knowledge, connectors, topics, connected agents) runs in the cloud: nothing comes to the office (ADR 0001).

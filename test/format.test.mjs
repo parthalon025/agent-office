@@ -106,8 +106,8 @@ test('cleanupNote says what the clean-up did, and is an error when a floor was s
 
 test('remoteNote says whether remote access is on, off or set up wrong (#133)', () => {
   assert.equal(F.remoteNote({ state: 'on', host: 'office.example.com' }), 'Remote access is on. Open the office at https://office.example.com. Cloudflare Access signs you in, and the office checks that login on every request.');
-  assert.equal(F.remoteNote({ state: 'incomplete', missing: ['OFFICE_REMOTE_AUD'], reason: 'missing OFFICE_REMOTE_AUD.' }), 'Remote access is off. A setting is not right: missing OFFICE_REMOTE_AUD. See the README.');
-  assert.equal(F.remoteNote({ state: 'off' }), 'Remote access is off. The README says how to turn it on.');
+  assert.equal(F.remoteNote({ state: 'incomplete', missing: ['OFFICE_REMOTE_AUD'], reason: 'missing OFFICE_REMOTE_AUD.' }), 'Remote access is off. A setting is not right: missing OFFICE_REMOTE_AUD. See docs/remote-access.md.');
+  assert.equal(F.remoteNote({ state: 'off' }), 'Remote access is off. docs/remote-access.md says how to turn it on.');
   assert.equal(F.remoteNote(undefined), F.remoteNote({ state: 'off' }));
   assert.doesNotMatch(F.remoteNote({ state: 'on', host: 'h.example.com' }), /!|please|oops|sorry/i);
 });

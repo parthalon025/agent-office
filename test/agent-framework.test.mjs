@@ -361,8 +361,8 @@ test(`a team turn has at most ${MAX_STEPS} steps (tool calls and hand-offs); the
   child.say({ type: 'tool', id: 'n1', agent: 'lead', name: 'Read', input: { file_path: 'a.txt' } });
   await until(() => child.lines().some((m) => m.type === 'tool_result' && m.id === 'n1'), 'the answer to n1');
   assert.equal(o.ran.length, MAX_STEPS);
-  const readme = fs.readFileSync(path.join(HERE, '..', 'README.md'), 'utf8');
-  assert.ok(readme.includes(`at most ${MAX_STEPS} steps`) && readme.includes(`all ${MAX_STEPS} steps of one turn`), 'the README says the same limit');
+  const docs = (f) => fs.readFileSync(path.join(HERE, '..', 'docs', f), 'utf8');
+  assert.ok(docs('agents.md').includes(`at most ${MAX_STEPS} steps`) && docs('troubleshooting.md').includes(`all ${MAX_STEPS} steps of one turn`), 'the docs say the same limit');
   o.done();
 });
 

@@ -1,7 +1,7 @@
 // Azure AI Foundry provider (#24): an agent of the Foundry Agent Service behind the provider seam (providers/index.mjs).
 // OFF until the owner configures it: no endpoint or no token means "Not configured", and the office makes no call. The office never
 // signs in and never makes an Azure resource of its own accord. The owner sets OFFICE_FOUNDRY_ENDPOINT and a token they made
-// (providers/cloud.mjs cloudConfig; README "Azure AI Foundry and Copilot Studio agents").
+// (providers/cloud.mjs cloudConfig; docs/agents.md "Azure AI Foundry and Copilot Studio agents").
 //
 // What one message does: make a thread (once per session), add the message, start a run of the chosen agent as an event stream,
 // and map the stream into the tracker's vocabulary: text, tool calls (code interpreter, file search, Bing, functions, MCP),
@@ -255,7 +255,7 @@ export function createFoundry(deps) {
   return {
     kind: 'foundry',
     label: 'Azure AI Foundry',
-    paid: true,        // it costs money in the owner's account; the spend limit counts it when the prices are set (README)
+    paid: true,        // it costs money in the owner's account; the spend limit counts it when the prices are set (docs/agents.md)
     ...(priced ? {} : { cost: 'unknown' }), // no prices: the office asks before it runs and shows "unknown" (Q22)
     cloud: true,       // it runs in the cloud, not on this machine
     // Its tools run in the cloud without the office (ADR 0001). Only an MCP approval the run asks for comes here.

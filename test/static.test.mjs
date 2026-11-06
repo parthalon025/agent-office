@@ -19,12 +19,52 @@ const win = process.platform === 'win32';
 const read = (f) => fs.readFileSync(path.join(ROOT, f), 'utf8');
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 
-test('README screenshots: every image exists; the city, boards, desk and Needs you shots are shown (#32)', () => {
-  const md = read('README.md');
-  const imgs = [...md.matchAll(/!\[[^\]]*\]\((docs\/img\/[^)]+)\)/g)].map((m) => m[1]);
-  for (const f of imgs) assert.ok(fs.existsSync(path.join(ROOT, f)), `${f} is missing`);
+// The documents: README.md and every Markdown file directly in docs/ (the decision records have no pictures).
+function docFiles() {
+  const out = ['README.md'];
+  for (const f of fs.readdirSync(path.join(ROOT, 'docs'))) if (f.endsWith('.md')) out.push('docs/' + f);
+  return out;
+}
+const slugOf = (h) => h.trim().toLowerCase().replace(/[`*_]/g, '').replace(/[^\p{L}\p{N} -]/gu, '').replace(/ /g, '-');
+const IMG = /^!\[([^\]]*)\]\(([^)]+)\)\s*$/;
+
+test('documents: every image exists, has alt text and a caption line; the city, boards, desk and Needs you shots are shown (#32)', () => {
+  const shown = [];
+  for (const doc of docFiles()) {
+    const lines = read(doc).split(/\r?\n/);
+    lines.forEach((line, i) => {
+      const m = IMG.exec(line);
+      if (!m) return;
+      const [, alt, rel] = m;
+      const file = path.posix.join(path.posix.dirname(doc), rel);
+      assert.ok(fs.existsSync(path.join(ROOT, file)), `${doc}:${i + 1}: ${file} is missing`);
+      assert.ok(alt.trim().length >= 10, `${doc}:${i + 1}: ${rel} has no real alt text`);
+      let j = i + 1;
+      while (j < lines.length && !lines[j].trim()) j++;
+      const cap = (lines[j] || '').trim();
+      assert.ok(cap && !IMG.test(cap) && !/^(#|```|\||[-*] |\d+\. )/.test(cap) && /[.!?]$/.test(cap), `${doc}:${i + 1}: ${rel} has no caption sentence under it`);
+      shown.push(file);
+    });
+  }
   for (const n of ['day-city-1360', 'day-boards-1360', 'day-desk-1360', 'day-needs-you-1360']) {
-    assert.ok(imgs.some((f) => f.includes(n)), `README shows no ${n}`);
+    assert.ok(shown.some((f) => f.includes(n)), `the documents show no ${n}`);
+  }
+});
+
+test('documents: every relative link resolves, also its heading anchor', () => {
+  for (const doc of docFiles()) {
+    const text = read(doc).replace(/```[\s\S]*?```/g, '');
+    for (const m of text.matchAll(/(?<!!)\[[^\]]*\]\(([^)\s]+)\)/g)) {
+      const href = m[1];
+      if (/^[a-z]+:/i.test(href)) continue;
+      const [rel, anchor] = href.split('#');
+      const file = rel ? path.posix.join(path.posix.dirname(doc), rel) : doc;
+      assert.ok(fs.existsSync(path.join(ROOT, file)), `${doc}: ${href} points to a missing file`);
+      if (anchor && file.endsWith('.md')) {
+        const slugs = read(file).replace(/```[\s\S]*?```/g, '').split(/\r?\n/).filter((l) => /^#{1,6} /.test(l)).map((l) => slugOf(l.replace(/^#+ /, '')));
+        assert.ok(slugs.includes(anchor), `${doc}: ${href} has no such heading`);
+      }
+    }
   }
 });
 
