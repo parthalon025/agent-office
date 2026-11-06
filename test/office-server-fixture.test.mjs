@@ -43,3 +43,20 @@ test('settle: a stuck child fails at the limit, and closeHeld closes every held 
     await within(o.exited, 5000);
   } finally { await closeHeld(); fs.rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('stop: ends the whole process tree by pid and waits for it (#161)', { timeout: 30000, skip: process.platform !== 'win32' }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-fx-'));
+  try {
+    const pidFile = path.join(dir, 'child.pid');
+    const script = path.join(import.meta.dirname, 'fixtures', 'tree-parent.mjs');
+    const o = startOffice(dir, { ...process.env, TREE_PID_FILE: pidFile }, { script, ms: 20000 });
+    await o.done;
+    const kid = Number(fs.readFileSync(pidFile, 'utf8'));
+    const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    assert.equal(alive(kid), true);
+    await o.stop();
+    // Windows can report a process for a few ms after its exit; a live one stays for the whole wait.
+    for (let i = 0; i < 20 && alive(kid); i++) await new Promise((r) => setTimeout(r, 100));
+    assert.equal(alive(kid), false, 'the child of the office must be gone after stop()');
+  } finally { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }); }
+});

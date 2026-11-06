@@ -10,7 +10,8 @@
 //   files that depend on the port, once for each try.
 import net from 'node:net';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
+import { resolveExe, helperCwd } from '../../git.mjs';
 
 export const READY = /is open: /;
 // What a server prints when its port is taken (server.mjs, server.on('error')).
@@ -33,6 +34,11 @@ export async function until(fn, what, { ms = START_MS, log = () => '', step = 50
     await new Promise((r) => setTimeout(r, step));
   }
 }
+
+// Ends a process and its children by pid. A pid that is already gone is no failure.
+const killTree = (pid) => new Promise((resolve) => {
+  execFile(resolveExe('taskkill'), ['/PID', String(pid), '/T', '/F'], { cwd: helperCwd(), windowsHide: true }, () => resolve());
+});
 
 /**
  * Starts server.mjs in `dir` and returns { child, done, exited, out, stop }.
@@ -62,8 +68,17 @@ export function startOffice(dir, env, { ms = START_MS, script = path.join(dir, '
   done.catch(() => {});
   return {
     child, done, exited, out: () => out,
-    /** Stops this child by its own pid, never by image name. */
-    async stop() { if (child.pid && child.exitCode === null && child.signalCode === null) { child.kill(); await exited; } },
+    /**
+     * Stops this child and everything it started, by pid, never by image name (#161). On Windows that is
+     * `taskkill /PID <pid> /T /F`: child.kill() ends only the server, so a git it started could still hold a folder.
+     * Waits for taskkill and for the server to exit.
+     */
+    async stop() {
+      if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
+      if (process.platform === 'win32') await killTree(child.pid);
+      child.kill();
+      await exited;
+    },
   };
 }
 
