@@ -42,7 +42,54 @@ import { NOTES_MAX } from './notes.mjs';
 import './public/vocab.js';
 
 export const DEFAULT_LIMITS = { maxSteps: 12, maxHops: 4, maxMessages: 30, maxAttempts: 3, boardMax: NOTES_MAX - 100 }; // boardMax: the board text must fit a notes board
-const STATUS_TO_DS = { pending: 'resting', working: 'working', finished: 'finished', error: 'error' };
+
+// Model ladder (#74, spec #67 Q12, Q13, Q21). Pure rules: the caller passes the calls, the tiers that are ready and the spend.
+// It applies only to manager steps, and only while Paperclip is not connected. Fable is never on the ladder. A live chat is never
+// switched: suggestSwitch only words a suggestion.
+export const LADDER = ['local', 'haiku', 'sonnet', 'opus'];
+export const NO_CHANGE_CALLS = 8; // calls with no file change before a step goes up
+export const SWITCH_AFTER_ERRORS = 3; // a live chat is only offered "Switch to Opus?" after this many errors
+const FAIL_RUN = 2, REPEAT_RUN = 3;
+
+/** The tier a step starts on: the lowest ladder tier that is ready (Fable is ignored). Nothing ready: Haiku. */
+export function ladderStart(ready = []) {
+  const set = new Set(ready);
+  return LADDER.find((t) => set.has(t)) || 'haiku';
+}
+
+/** The stage signal in a step's calls (oldest first, `{ key, ok, changed }`), or null: 'failed-twice', 'repeat', 'no-change'. */
+export function stageSignal(calls = []) {
+  const n = calls.length;
+  if (n >= FAIL_RUN && calls.slice(-FAIL_RUN).every((c) => c.ok === false)) return 'failed-twice';
+  if (n >= REPEAT_RUN && calls.slice(-REPEAT_RUN).every((c) => c.key === calls[n - 1].key)) return 'repeat';
+  if (n >= NO_CHANGE_CALLS && !calls.some((c) => c.changed)) return 'no-change';
+  return null;
+}
+
+/**
+ * One step up on a signal. { tier, signal, spent, limit, paidAsked, paperclip } -> { action, tier, reason }.
+ * action: 'up' (go to `tier`), 'ask' (the next tier is the goal's first paid one: ask the user, then call again with paidAsked), 'stop' (the spend
+ * limit is reached: spendLimitFor says what the limit is; limit 0 or null is none) or 'stay'.
+ */
+export function stepUp({ tier, signal, spent = 0, limit = 0, paidAsked = false, paperclip = false } = {}) {
+  const stay = (reason) => ({ action: 'stay', tier, reason });
+  if (paperclip) return stay('Paperclip is connected.');
+  if (!signal) return stay('');
+  const i = LADDER.indexOf(tier);
+  if (i < 0 || i === LADDER.length - 1) return stay('Already on the top tier.');
+  const next = LADDER[i + 1];
+  const cap = spendLimitFor({ paid: next !== 'local', requested: limit, fallback: 0 });
+  if (cap && spent >= cap) return { action: 'stop', tier, reason: 'Spend limit reached' };
+  if (next !== 'local' && !paidAsked) return { action: 'ask', tier: next, reason: 'This step needs a paid model. Run it?' };
+  return { action: 'up', tier: next, reason: signal };
+}
+
+/** The suggestion for a live chat the user opened (it keeps its model): text after repeated errors, else null. */
+export function suggestSwitch({ errors = 0, model = '' } = {}) {
+  return errors >= SWITCH_AFTER_ERRORS && !/opus/i.test(model) ? 'Switch to Opus?' : null;
+}
+
+const STATUS_TO_DS ={ pending: 'resting', working: 'working', finished: 'finished', error: 'error' };
 const MARK = { pending: '[ ]', working: '[~]', finished: '[x]', error: '[!]' };
 const WORD = { planning: 'Planning', 'awaiting-approval': 'Waiting for your approval', running: 'Running', finished: 'Done', blocked: 'Blocked', stopped: 'Stopped', failed: 'Failed', cancelled: 'Cancelled' };
 const GOAL_MAX = 2000; // a longer goal is refused (never planned from a cut text); the board shows 300

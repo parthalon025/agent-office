@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createManager, createPlanBoard, officeSource, DEFAULT_LIMITS } from '../manager.mjs';
+import { createManager, createPlanBoard, officeSource, DEFAULT_LIMITS, LADDER, NO_CHANGE_CALLS, ladderStart, stageSignal, stepUp, suggestSwitch } from '../manager.mjs';
 import '../public/vocab.js';
 import { NOTES_MAX } from '../notes.mjs';
 
@@ -508,4 +508,58 @@ test('restore keeps a held plan held; bad records are dropped', async () => {
   assert.equal(w2.m.snapshot()[0].status, 'awaiting-approval');
   assert.equal(await w2.m.approve(held), true);
   assert.equal(w2.dispatched.length, 1);
+});
+
+// ---- Model ladder (#74): pure rule, no paid call ----
+const call = (key, ok = true, changed = false) => ({ key, ok, changed });
+
+test('the ladder is local, Haiku, Sonnet, Opus and never has Fable', () => {
+  assert.deepEqual(LADDER, ['local', 'haiku', 'sonnet', 'opus']);
+  assert.ok(!LADDER.includes('fable'));
+});
+
+test('a step starts on the lowest ready tier; no local model starts at Haiku', () => {
+  assert.equal(ladderStart(['local', 'haiku']), 'local');
+  assert.equal(ladderStart(['haiku', 'sonnet', 'opus']), 'haiku');
+  assert.equal(ladderStart([]), 'haiku');
+  assert.equal(ladderStart(['fable', 'opus']), 'opus');
+});
+
+test('stage signals: two failed calls in a row, the same call three times, no file change after N calls', () => {
+  assert.equal(stageSignal([call('a', false), call('b', false)]), 'failed-twice');
+  assert.equal(stageSignal([call('a', false), call('b'), call('c', false)]), null);
+  assert.equal(stageSignal([call('x'), call('x'), call('x')]), 'repeat');
+  assert.equal(stageSignal([call('x'), call('y'), call('x')]), null);
+  const many = (n, changed) => Array.from({ length: n }, (_, i) => call('k' + i, true, changed && i === 0));
+  assert.equal(stageSignal(many(NO_CHANGE_CALLS, false)), 'no-change');
+  assert.equal(stageSignal(many(NO_CHANGE_CALLS - 1, false)), null);
+  assert.equal(stageSignal(many(NO_CHANGE_CALLS, true)), null);
+  assert.equal(NO_CHANGE_CALLS, 8);
+});
+
+test('a signal steps up one tier; no signal, the top tier and a connected Paperclip stay', () => {
+  const base = { tier: 'local', signal: 'repeat', spent: 0, limit: 2, paidAsked: false };
+  assert.equal(stepUp({ ...base, tier: 'haiku', paidAsked: true }).tier, 'sonnet');
+  assert.equal(stepUp({ ...base, tier: 'sonnet', paidAsked: true }).tier, 'opus');
+  assert.equal(stepUp({ ...base, tier: 'opus', paidAsked: true }).action, 'stay');
+  assert.equal(stepUp({ ...base, signal: null }).action, 'stay');
+  assert.equal(stepUp({ ...base, paperclip: true }).action, 'stay');
+});
+
+test('the first paid step of a goal asks the user, once', () => {
+  const r = stepUp({ tier: 'local', signal: 'failed-twice', spent: 0, limit: 2, paidAsked: false });
+  assert.equal(r.action, 'ask'); assert.equal(r.tier, 'haiku');
+  assert.equal(stepUp({ tier: 'local', signal: 'failed-twice', spent: 0, limit: 2, paidAsked: true }).action, 'up');
+});
+
+test('the spend limit stops a step up, and no limit never stops one', () => {
+  const r = stepUp({ tier: 'haiku', signal: 'repeat', spent: 2, limit: 2, paidAsked: true });
+  assert.equal(r.action, 'stop'); assert.equal(r.tier, 'haiku');
+  assert.equal(stepUp({ tier: 'haiku', signal: 'repeat', spent: 99, limit: 0, paidAsked: true }).action, 'up');
+});
+
+test('a live chat only gets a suggestion after repeated errors, never a switch', () => {
+  assert.equal(suggestSwitch({ errors: 2 }), null);
+  assert.equal(suggestSwitch({ errors: 3 }), 'Switch to Opus?');
+  assert.equal(suggestSwitch({ errors: 5, model: 'opus' }), null);
 });
