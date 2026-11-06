@@ -176,11 +176,11 @@
       byBranch[pl.branch][pl.root] = pl;
     });
     order.sort(function (a, b) { return (/^(main|master|trunk)$/.test(b) ? 1 : 0) - (/^(main|master|trunk)$/.test(a) ? 1 : 0); });
-    var map = {}, nextId = 1, keys = {};
+    var map = {}, nextId = 1, keys = {}, roomPlaces = {};
     var floors = order.map(function (br) {
       var f = map[br] = { id: nextId++, rooms: {} };
       var rooms = Object.keys(byBranch[br]).map(function (rootKey) {
-        var r = roomDef(byBranch[br][rootKey]); f.rooms[rootKey] = r.id; keys[r.id] = byBranch[br][rootKey].noteKey;
+        var r = roomDef(byBranch[br][rootKey]); f.rooms[rootKey] = r.id; keys[r.id] = byBranch[br][rootKey].noteKey; roomPlaces[r.id] = byBranch[br][rootKey];
         if (withBots) r.bots = bots[rootKey] || [];
         return r;
       });
@@ -193,7 +193,7 @@
     var mine = places.filter(function (pl) { return pl.repo === repo && pl.securityRoomId; })[0];
     var sec = (rp && rp.securityRoomId) || (mine && mine.securityRoomId) || null;
     if (sec) floors[0].rooms.unshift(securityDef(sec));
-    return { def: { name: name || (repo ? base(repo) : OTHER), sessions: 'agent', floors: floors }, floors: map, nextId: nextId, keys: keys, empty: empty, security: sec };
+    return { def: { name: name || (repo ? base(repo) : OTHER), sessions: 'agent', floors: floors }, floors: map, nextId: nextId, keys: keys, places: roomPlaces, empty: empty, security: sec };
   }
 
   function createStore(opts) {
@@ -274,7 +274,7 @@
 
     store.mount = function (repo) {
       var d = describe(repo, latest, false);
-      function freshLayout() { return { floors: JSON.parse(JSON.stringify(d.floors)), nextId: d.nextId, keys: Object.assign({}, d.keys), spare: d.empty }; }
+      function freshLayout() { return { floors: JSON.parse(JSON.stringify(d.floors)), nextId: d.nextId, keys: Object.assign({}, d.keys), places: Object.assign({}, d.places), spare: d.empty }; }
       var layout = freshLayout();
       // Rooms that were a worktree of this building. Only a worktree that goes makes the scene stale: a room a
       // session made stays on screen, empty, when the session ends, and the next session in that folder uses it.
@@ -295,7 +295,7 @@
         var f = layout.floors[pl.branch];
         if (!f) {
           var r = roomDef(pl);
-          layout.keys[r.id] = pl.noteKey;
+          layout.keys[r.id] = pl.noteKey; layout.places[r.id] = pl;
           if (layout.spare) {   // the empty building's spare floor and room become this floor and room
             layout.spare = false;
             f = layout.floors[pl.branch] = { id: 1, rooms: {} };
@@ -311,7 +311,7 @@
         }
         if (!f.rooms[pl.root]) {
           var r2 = roomDef(pl);
-          layout.keys[r2.id] = pl.noteKey;
+          layout.keys[r2.id] = pl.noteKey; layout.places[r2.id] = pl;
           f.rooms[pl.root] = r2.id;
           emit({ type: 'room.add', floorId: f.id, room: r2 });
         }
@@ -589,6 +589,9 @@
         if (m.roomsShown().some(function (k) { return !nowRooms[k] && wtSeen[k]; })) return true;
         return false;
       };
+      // The empty building's spare room has no place and no notes key: it holds no board, notes or room tools until a session or worktree takes it.
+      m.spare = function () { return !!layout.spare; };
+      m.usable = function (roomId, snap) { return !!m.noteKey(roomId, snap); };
       // The open sessions in one room of this building, and that room's place.
       m.roomInfo = function (roomId, snap) {
         var s = snap || latest, out = { sessions: [], place: null };
@@ -596,6 +599,7 @@
         if (!out.place) {
           var rp = repoOf(s, repo);
           (rp ? rp.worktrees : []).forEach(function (w) { var pl = fromPlace(w.place); if (pl.roomId === roomId) out.place = pl; });
+          if (!out.place) out.place = layout.places[roomId] || null;   // a room a session made, empty now: the layout remembers its place
         }
         return out;
       };

@@ -426,7 +426,7 @@
     function scan() {
       prune();
       // the host matches the shown floor's room groups to the DS rooms by order
-      host.rooms().forEach(function (x) { if (x.room.type === 'lab') decorate(x.rg, x.room.id); });
+      host.rooms().forEach(function (x) { if (x.room.type === 'lab' && (!o.usable || o.usable(x.room.id))) decorate(x.rg, x.room.id); });
       // a door pulse that came while its floor was being rebuilt
       Object.keys(pending).forEach(function (id) {
         var p = pending[id];
