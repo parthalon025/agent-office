@@ -5,7 +5,7 @@ import { LIMITS, WIDTHS, JOBS, verdict } from './core-jobs.mjs';
 
 test('every job has an integer step limit, and the widths are 1360 and 400', () => {
   assert.deepEqual(WIDTHS, [1360, 400]);
-  assert.deepEqual(JOBS.slice().sort(), ['approve', 'discard', 'find', 'read', 'start']);
+  assert.deepEqual(JOBS.slice().sort(), ['approve', 'approveAfterDesk', 'discard', 'find', 'read', 'start']);
   for (const j of JOBS) assert.ok(Number.isInteger(LIMITS[j]) && LIMITS[j] > 0, j);
 });
 
