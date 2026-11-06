@@ -1012,3 +1012,24 @@ test('bezelAt: the corner of the screen, kept inside the free part of the view',
   assert.deepEqual(P.bezelAt({ left: 200, top: 10, width: 300, height: 200 }, free, 20), { x: 500, y: 70 }, 'top edge cut: half the bezel below the free top');
   assert.deepEqual(P.bezelAt({ left: 200, top: 120, width: 300, height: 200 }, null, 20), { x: 500, y: 120 }, 'no free part: the corner');
 });
+
+// ---------- the hit area of a control on a plane (#90): at least 44 px after the focus, whatever its drawn size ----------
+test('hitBox: a control smaller than the least size is padded to it around its centre; a larger one keeps its size', () => {
+  const plane = { w: 400, h: 300 };
+  const small = P.hitBox({ x: 0.1, y: 0.1, w: 0.05, h: 0.05 }, plane, 44);   // 20 x 15 px drawn
+  assert.ok(small.width >= 44 && small.height >= 44, 'at least 44 px each way');
+  assert.equal(small.left + small.width / 2, (0.1 + 0.025) * 400, 'around the same centre (x)');
+  assert.equal(small.top + small.height / 2, (1 - 0.1 - 0.025) * 300, 'around the same centre (y, from the top)');
+  const big = P.hitBox({ x: 0, y: 0, w: 0.5, h: 0.4 }, plane, 44);
+  assert.deepEqual([big.width, big.height], [200, 120], 'a large control keeps its size');
+});
+
+test('hitAt: the control under the point, padded; the nearest centre wins where padded boxes overlap; nothing outside', () => {
+  const ctl = [{ id: 'a', rect: { x: 0.05, y: 0.06, w: 0.1, h: 0.1 } }, { id: 'b', rect: { x: 0.2, y: 0.06, w: 0.1, h: 0.1 } }];
+  const plane = { w: 300, h: 200 };   // each control is 30 x 20 px drawn
+  assert.equal(P.hitAt(ctl, { x: 0.16, y: 0.11 }, plane, 44), 'a', 'inside a padded box, nearer to a');
+  assert.equal(P.hitAt(ctl, { x: 0.25, y: 0.11 }, plane, 44), 'b');
+  assert.equal(P.hitAt(ctl, { x: 0.9, y: 0.9 }, plane, 44), null, 'far from every control');
+  assert.equal(P.hitAt(ctl, null, plane, 44), null);
+  assert.equal(P.hitAt(ctl, { x: 0.1, y: 0.1 }, { w: 0, h: 0 }, 44), null, 'a plane with no size has no point');
+});

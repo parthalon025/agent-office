@@ -719,6 +719,24 @@
         var ids = Object.keys(f.rooms).map(function (r) { return f.rooms[r]; });
         return ids[0] || null;
       };
+      // The desk objects of this building (#90), from a snapshot: a paper for each permission request and a note for each question
+      // of a seated agent, and the open desks of each floor. A paper: { uid, bot, id, tool, text, reason, risk, high, always, t, until }.
+      // A high-risk paper has no always (never offered). until: when the office stops holding it (vocab holdMs). A note: { uid, bot,
+      // id, text, t, until }. An open desk entry: { floorId, floorKey, name, wing, roomId, role }, the room whose open desk starts an agent.
+      m.deskTargets = function (snap) {
+        var s = snap || latest, out = { papers: [], notes: [], empty: [] };
+        live(s).forEach(function (x) {
+          var k = known[x.uid];
+          if (!k || k.ended) return;
+          V.requests(x).forEach(function (r) {
+            var until = r.t ? r.t + V.holdMs(x) : 0, base = { uid: x.uid, bot: k.name, id: r.id, text: r.text, t: r.t, until: until };
+            if (r.kind === 'question') out.notes.push(base);
+            else out.papers.push(Object.assign(base, { tool: r.tool, reason: r.reason, risk: r.risk || 'low', high: r.risk === 'high', always: r.risk === 'high' ? null : r.always }));
+          });
+        });
+        m.floors().forEach(function (f) { var rid = m.spareRoomOf(f.key); if (rid) out.empty.push({ floorId: f.id, floorKey: f.key, name: f.name, wing: f.wingName, roomId: rid, role: f.role }); });
+        return out;
+      };
       // The worst state of the desks of this building, its floors and its rooms (vocab.js worst): the room doors, the elevator
       // buttons and the city windows. { building, floors: { floorId: state }, rooms: { roomId: state } }; null where no desk is.
       m.rollup = function () {

@@ -21,6 +21,7 @@
                          kind is 'permission' (Approve or Decline) or 'question' (Yes or No; no risk value)
      featuresOf(s)    -> the office features the session's agent kind declares (#72): [{ key, label }], in table order
      hasFeature(s, k) -> true when the agent kind declares feature k. The page shows a feature only then, never a greyed-out control.
+     holdMs(s)        -> how long the office holds a request of this session (ms)
      alwaysOffer(s)   -> the first permission request that may offer "Always allow", or null. Never a question,
                          never a high-risk request, never one without a rule to save.
      kindWord(s, kinds) -> the agent kind of a session as a word ('Claude Code', 'Ollama'): the label of s.provider in
@@ -213,6 +214,9 @@
     out.sort(function (a, b) { return a.t - b.t || a.i - b.i; });
     return out.map(function (r) { delete r.i; return r; });
   }
+  // How long the office holds a request for the user: 15 minutes in a session that runs in the office, 60 s in a terminal session
+  // (server.mjs HEADLESS_ASK_MS and the terminal dialog). The approval paper shows the time left.
+  function holdMs(s) { return s && s.headless ? 15 * 60 * 1000 : 60 * 1000; }
   function alwaysOffer(s) {
     return requests(s).filter(function (r) { return r.kind === 'permission' && r.always && r.risk !== 'high'; })[0] || null;
   }
@@ -378,5 +382,5 @@
     return label + ' does not report cost, so the office shows it as unknown and no spend limit can stop it. Check the spend in its own account.';
   }
 
-  root.OfficeVocab = { stateWord: stateWord, laneOf: laneOf, limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform, hq: hq };
+  root.OfficeVocab = { stateWord: stateWord, laneOf: laneOf, limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, holdMs: holdMs, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform, hq: hq };
 })(typeof globalThis !== 'undefined' ? globalThis : window);
