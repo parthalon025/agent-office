@@ -355,7 +355,34 @@
     LAYER_ORDER.forEach(function (l) { if (c && (c[l] || 0) > n) { n = c[l]; best = l; } });
     return best;
   }
-  var layers = { order: LAYER_ORDER, opens: layerOpens, surfaces: LAYER_SURFACES, surface: function (id) { return own(LAYER_SURFACES, id) ? LAYER_SURFACES[id] : null; },
+  // The Look layer of a room: its agents together. Intent is the newest agent's; steps and cost are sums.
+  function lookRoom(list) {
+    var l = list || [], steps = 0, done = 0, cost = 0, unknown = false, newest = null;
+    l.forEach(function (s) {
+      var t = s.todos || [];
+      steps += t.length; done += t.filter(function (x) { return x.status === 'completed'; }).length;
+      if (s.costUnknown) unknown = true; else if (typeof s.cost === 'number') cost += s.cost;
+      if (!newest || (s.lastEvent || 0) >= (newest.lastEvent || 0)) newest = s;
+    });
+    return { count: l.length, intent: newest ? look(newest).intent : '', progress: steps ? done + ' of ' + steps + (steps === 1 ? ' step' : ' steps') : '',
+      cost: unknown ? 'unknown' : l.some(function (s) { return typeof s.cost === 'number'; }) ? money(cost) : '' };
+  }
+  // Remembered layers come back from storage text: only known layers with whole counts are kept.
+  function parseMem(raw) {
+    var out = {}, m;
+    try { m = JSON.parse(raw); } catch (x) { return out; }
+    if (!m || typeof m !== 'object' || Array.isArray(m)) return out;
+    Object.keys(m).forEach(function (p) {
+      var c = m[p], k = {}, any = false;
+      if (p === '__proto__' || !c || typeof c !== 'object') return;
+      LAYER_ORDER.forEach(function (l) { if (own(c, l) && Number.isInteger(c[l]) && c[l] > 0) { k[l] = c[l]; any = true; } });
+      if (any) out[p] = k;
+    });
+    return out;
+  }
+  // A place used at Inspect or Deep opens there on the first tap; Glance and Look show the Look card first.
+  function opensAt(l) { return LAYER_ORDER.indexOf(l) >= LAYER_ORDER.indexOf('inspect'); }
+  var layers = { lookRoom: lookRoom, parse: parseMem, opensAt: opensAt, order: LAYER_ORDER, opens: layerOpens, surfaces: LAYER_SURFACES, surface: function (id) { return own(LAYER_SURFACES, id) ? LAYER_SURFACES[id] : null; },
     mood: mood, glance: glance, look: look, remember: remember, layerFor: layerFor };
 
   function kindWord(s, kinds) {
