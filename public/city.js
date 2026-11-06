@@ -1,4 +1,4 @@
-/* Agent Office for Claude Code x0.1: the city.
+/* Agent Office for Claude Code x0.2: the city.
    Every git repository is a building on one plaza: a floor per branch, a pip per session, a beacon
    when a session needs you. Built on the DS stage (AgentOffice.office.Stage), so lights, theme, post
    effects and every color come from the DS tokens. Drag to turn, scroll or pinch to zoom, click a
@@ -235,7 +235,7 @@
       var r = Math.floor(i / cols), c = i % cols;
       return [(c - (cols - 1) / 2) * PITCH, (r - (Math.ceil(slots.length / cols) - 1) / 2) * PITCH];
     }
-    // the page version is in the title ("Agent Office x0.1"); no second copy of it lives in the code
+    // the page version is in the title ("Agent Office x0.2"); no second copy of it lives in the code
     function pageVersion() {
       var m = /x\d+(?:\.\d+)*/.exec(typeof document !== 'undefined' ? document.title : '');
       return m ? m[0] : '';
@@ -251,7 +251,7 @@
         g.strokeStyle = tok['line'] || tok['muted']; g.lineWidth = 3; g.stroke();
         g.textBaseline = 'middle'; g.fillStyle = tok['ink']; g.font = '600 62px ' + (f.sans || 'sans-serif');
         g.fillText(name.length > 15 ? name.slice(0, 14) + '…' : name, 32, 62);
-        // the page version (x0.1, from the title) sits small and right-aligned on the count line; the counts shrink to leave it room
+        // the page version (x0.2, from the title) sits small and right-aligned on the count line; the counts shrink to leave it room
         var mono = f.mono || 'monospace', ver = pageVersion(), vw = 0;
         g.fillStyle = tok['muted'];
         if (ver) { g.font = '500 26px ' + mono; vw = g.measureText(ver).width + 16; }
@@ -262,7 +262,8 @@
       });
     }
     function setSign(b) {
-      var sub = b.floors.length + (b.floors.length === 1 ? ' floor' : ' floors') + ' · ' + b.data.sessions + (b.data.sessions === 1 ? ' session' : ' sessions');
+      // sub: a building's own count line (the Paperclip HQ: its agents and budget, #76), else floors and sessions
+      var sub = b.data.sub || b.floors.length + (b.floors.length === 1 ? ' floor' : ' floors') + ' · ' + b.data.sessions + (b.data.sessions === 1 ? ' session' : ' sessions');
       var key = b.data.name + '|' + sub + '|' + K.look;
       if (b.signKey === key) return;
       b.signKey = key;
@@ -295,7 +296,9 @@
     }
     function placeRoof(b, animate) {
       var y = b.floors.length * FLOOR_H;
-      var set = function (v) { b.roof.position.y = v + 0.15; b.sign.position.y = v + 1.9; b.beacon.position.y = v + 0.65; };
+      // the HQ's penthouse and mast stand on the roof, so its sign and beacon sit above them
+      var top = b.crown ? 2.1 : 0;
+      var set = function (v) { b.roof.position.y = v + 0.15; if (b.crown) b.crown.position.y = v + 0.3; b.sign.position.y = v + 1.9 + top; b.beacon.position.y = v + 0.65 + top; };
       if (animate) tween(s, cssMs('duration-floor', 450), b.roof.position.y, y, set); else set(y);
     }
     function syncPips(b) {
@@ -322,6 +325,20 @@
       });
     }
 
+    // The Paperclip HQ (#76) is told apart from the repositories by its top: a penthouse in the HQ floor color with a glass
+    // band, and a mast with a light. Not a repository: it has one floor, its pips are Paperclip agents, a click opens its dialog.
+    function crown(key, body) {
+      var c = new T.Group();
+      var house = X.mesh(X.box(BW * 0.62, 1.1, BD * 0.62), mat('floor-hq'), 0, 0.55, 0, c);
+      var band = X.mesh(X.box(BW * 0.64, 0.34, BD * 0.64), mat('scene-glass', { transparent: true, opacity: 0.5, roughness: 0.06, depthWrite: false }), 0, 0.72, 0, c);
+      band.castShadow = false;
+      var mast = X.mesh(X.cyl(0.05, 0.07, 1.4), mat('scene-metal'), BW * 0.18, 1.8, -BD * 0.18, c);
+      var tip = X.mesh(X.sph(0.12, 12, 8), mat('emphasis'), BW * 0.18, 2.55, -BD * 0.18, c);
+      tip.castShadow = false;
+      [house, band, mast, tip].forEach(function (m) { m.userData.city = key; });
+      body.add(c);
+      return c;
+    }
     function addBuilding(d) {
       var slot = slots.indexOf(null);
       if (slot < 0) { slot = slots.length; slots.push(d.key); } else slots[slot] = d.key;
@@ -338,7 +355,7 @@
       var beacon = X.mesh(X.sph(0.32, 16, 12), mat('emphasis'), 0, 0, 0, body);
       beacon.visible = false; beacon.castShadow = false;
       world.add(g);
-      var b = items[d.key] = { key: d.key, g: g, body: body, roof: roof, sign: sign, beacon: beacon, floors: [], pips: {}, slot: slot, data: d, signKey: '' };
+      var b = items[d.key] = { key: d.key, g: g, body: body, roof: roof, sign: sign, beacon: beacon, floors: [], pips: {}, slot: slot, data: d, signKey: '', crown: d.hq ? crown(d.key, body) : null };
       var xz = slotXZ(slot);
       g.position.set(xz[0], 0, xz[1]);
       // rise out of the plaza

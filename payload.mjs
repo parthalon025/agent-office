@@ -44,6 +44,20 @@ export function slimPayload(b, officeId = null) {
   };
 }
 
+// The ids of a Paperclip run (#76): Paperclip starts Claude Code with PAPERCLIP_AGENT_ID, PAPERCLIP_COMPANY_ID,
+// PAPERCLIP_RUN_ID and PAPERCLIP_TASK_ID (adapter-utils buildPaperclipEnv, claude-local execute.ts), and a command hook
+// inherits them, so hook.mjs sends them as `paperclip`. HTTP hooks have no environment and carry none. The office only
+// matches them against the company it watches (paperclip.mjs labelOf): they are never shown or put in a path.
+const PAPERCLIP_ID = /^[A-Za-z0-9_-]{1,80}$/;
+/** { agent, company, run?, task? } checked: plain ids only, and an agent with its company; else null. */
+export function cleanIds(x) {
+  const o = x && typeof x === 'object' ? x : {}, out = {};
+  for (const k of ['agent', 'company', 'run', 'task']) if (typeof o[k] === 'string' && PAPERCLIP_ID.test(o[k])) out[k] = o[k];
+  return out.agent && out.company ? out : null;
+}
+/** The ids from a PAPERCLIP_* environment, or null when it is not a Paperclip run. */
+export const runIds = (env) => cleanIds({ agent: env?.PAPERCLIP_AGENT_ID, company: env?.PAPERCLIP_COMPANY_ID, run: env?.PAPERCLIP_RUN_ID, task: env?.PAPERCLIP_TASK_ID });
+
 // One-line label for a tool call, shared by the tracker's calls, task line and requests.
 const basename = (v) => (v ? v.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : '');
 const short = (s, n) => (s && s.length > n ? s.slice(0, n - 1) + '…' : s || '');

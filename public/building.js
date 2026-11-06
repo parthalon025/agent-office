@@ -1,4 +1,4 @@
-/* Agent Office for Claude Code x0.1: snapshot store and building adapters.
+/* Agent Office for Claude Code x0.2: snapshot store and building adapters.
    Two parts, no DOM, no EventSource, no network, no timers of its own (they are injected). The page loads it as a
    script (window.OfficeBuilding). The tests import it for its side effect and read globalThis.OfficeBuilding.
 
@@ -67,6 +67,10 @@
     return v.length ? v[Math.floor(hash(String(uid)) / SHAPES.length) % v.length] : undefined;
   }
   function withColor(bot, uid) { var c = colorOf(uid); if (c) bot.color = c; return bot; }
+  // A Paperclip run (#76, s.hq from the server): the card's owner line is its company and its Paperclip agent. cardOf is what
+  // the card shows that only bot.add sets (the owner and the role in the platform line), to seat the bot again on a change.
+  function ownerOf(s) { return s && s.hq ? s.hq.company + ' (' + s.hq.agent + ')' : ''; }
+  function cardOf(s) { return s && s.hq ? ownerOf(s) + '|' + s.hq.role : ''; }
   function clip(t, n) { t = String(t || ''); return t.length > n ? t.slice(0, n - 1) + '…' : t; }
   function base(p) { return String(p || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() || ''; }
   // A subagent's type picks its role: the workstation and the icon.
@@ -176,11 +180,11 @@
       byBranch[pl.branch][pl.root] = pl;
     });
     order.sort(function (a, b) { return (/^(main|master|trunk)$/.test(b) ? 1 : 0) - (/^(main|master|trunk)$/.test(a) ? 1 : 0); });
-    var map = {}, nextId = 1, keys = {};
+    var map = {}, nextId = 1, keys = {}, roomPlaces = {};
     var floors = order.map(function (br) {
       var f = map[br] = { id: nextId++, rooms: {} };
       var rooms = Object.keys(byBranch[br]).map(function (rootKey) {
-        var r = roomDef(byBranch[br][rootKey]); f.rooms[rootKey] = r.id; keys[r.id] = byBranch[br][rootKey].noteKey;
+        var r = roomDef(byBranch[br][rootKey]); f.rooms[rootKey] = r.id; keys[r.id] = byBranch[br][rootKey].noteKey; roomPlaces[r.id] = byBranch[br][rootKey];
         if (withBots) r.bots = bots[rootKey] || [];
         return r;
       });
@@ -193,7 +197,7 @@
     var mine = places.filter(function (pl) { return pl.repo === repo && pl.securityRoomId; })[0];
     var sec = (rp && rp.securityRoomId) || (mine && mine.securityRoomId) || null;
     if (sec) floors[0].rooms.unshift(securityDef(sec));
-    return { def: { name: name || (repo ? base(repo) : OTHER), sessions: 'agent', floors: floors }, floors: map, nextId: nextId, keys: keys, empty: empty, security: sec };
+    return { def: { name: name || (repo ? base(repo) : OTHER), sessions: 'agent', floors: floors }, floors: map, nextId: nextId, keys: keys, places: roomPlaces, empty: empty, security: sec };
   }
 
   function createStore(opts) {
@@ -274,7 +278,7 @@
 
     store.mount = function (repo) {
       var d = describe(repo, latest, false);
-      function freshLayout() { return { floors: JSON.parse(JSON.stringify(d.floors)), nextId: d.nextId, keys: Object.assign({}, d.keys), spare: d.empty }; }
+      function freshLayout() { return { floors: JSON.parse(JSON.stringify(d.floors)), nextId: d.nextId, keys: Object.assign({}, d.keys), places: Object.assign({}, d.places), spare: d.empty }; }
       var layout = freshLayout();
       // Rooms that were a worktree of this building. Only a worktree that goes makes the scene stale: a room a
       // session made stays on screen, empty, when the session ends, and the next session in that folder uses it.
@@ -295,7 +299,7 @@
         var f = layout.floors[pl.branch];
         if (!f) {
           var r = roomDef(pl);
-          layout.keys[r.id] = pl.noteKey;
+          layout.keys[r.id] = pl.noteKey; layout.places[r.id] = pl;
           if (layout.spare) {   // the empty building's spare floor and room become this floor and room
             layout.spare = false;
             f = layout.floors[pl.branch] = { id: 1, rooms: {} };
@@ -311,7 +315,7 @@
         }
         if (!f.rooms[pl.root]) {
           var r2 = roomDef(pl);
-          layout.keys[r2.id] = pl.noteKey;
+          layout.keys[r2.id] = pl.noteKey; layout.places[r2.id] = pl;
           f.rooms[pl.root] = r2.id;
           emit({ type: 'room.add', floorId: f.id, room: r2 });
         }
@@ -408,9 +412,10 @@
         snapshot.sessions.forEach(function (s) {
           if (!s.place) return;   // wait until the server knows the repo and branch
           var pl = placeOf(s), k = known[s.uid], emit = base, prev = null;
-          // the session checked out another branch, or moved to another folder: seat it again. So does a changed supervision
-          // label (an agent whose config turned out not to ask): the DS sets the card's platform line only when the bot is added.
-          if (k && !k.ended && (k.place !== placeKey(pl) || k.sup !== V.supervision(s))) {
+          // the session checked out another branch, or moved to another folder: seat it again. So does a changed card line
+          // (a supervision label: an agent whose config turned out not to ask; a Paperclip role and company, #76, once the office
+          // watches that company): the DS sets the card's platform and owner lines only when the bot is added.
+          if (k && !k.ended && (k.place !== placeKey(pl) || k.sup !== V.supervision(s) || k.card !== cardOf(s))) {
             dismissHelpers(k, emit, 'Moved with its session');
             emit({ type: 'bot.remove', bot: k.name }); delete taken[k.name]; delete known[s.uid];
             prev = k; k = null;
@@ -423,7 +428,7 @@
           if (!k) {
             if (s.status === 'ended') return;
             var name = uniqueName(s.name);
-            k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: V.status(s).key, task: V.taskLine(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, olderDone: false, held: false, firstKind: seedAll ? 'seed' : 'restore', prevSeen: prev ? prev.replySeen : null, errKind: seedAll ? 'seed' : 'restore', errPrev: prev ? prev.errorSeen : null, model: s.model, ended: false, place: placeKey(pl), sup: V.supervision(s), room: roomOf(pl, emit) };
+            k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: V.status(s).key, task: V.taskLine(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, olderDone: false, held: false, firstKind: seedAll ? 'seed' : 'restore', prevSeen: prev ? prev.replySeen : null, errKind: seedAll ? 'seed' : 'restore', errPrev: prev ? prev.errorSeen : null, model: s.model, ended: false, place: placeKey(pl), sup: V.supervision(s), card: cardOf(s), room: roomOf(pl, emit) };
             // platform: the line on the bot's card: the supervision label of an ungated agent, else its agent kind (Claude Code,
             // Ollama, ...), the same word every list shows (vocab.js)
             // The old seat held its replies (the older ones were still loading), so it told none of them: this seat tells them
@@ -431,6 +436,8 @@
             // The same for its error: errKind and errPrev say how the error is told, because the pass that tells it may come later.
             if (prev && prev.held) { k.firstKind = prev.firstKind; k.prevSeen = prev.prevSeen; k.holdTop = prev.holdTop; k.errKind = prev.errKind; k.errPrev = prev.errPrev; k.errTop = prev.errTop; }
             var bot = withColor({ name: name, role: 'coder', shape: shapeOf(s.uid), status: k.status, task: k.task, platform: V.platform(s, snapshot.kinds), identity: s.cwd }, s.uid);
+            // a Paperclip run (#76): the company and the Paperclip agent own it (its budget is on the stats display, terminal.js)
+            if (s.hq) bot.owner = ownerOf(s);
             if (s.skills && s.skills.length) bot.skills = s.skills.slice(0, 16);
             if (s.scheduleId) bot.triggers = [s.name];
             emit(stamp({ type: 'bot.add', roomId: k.room, bot: bot }, s.startedAt));
@@ -589,6 +596,9 @@
         if (m.roomsShown().some(function (k) { return !nowRooms[k] && wtSeen[k]; })) return true;
         return false;
       };
+      // The empty building's spare room has no place and no notes key: it holds no board, notes or room tools until a session or worktree takes it.
+      m.spare = function () { return !!layout.spare; };
+      m.usable = function (roomId, snap) { return !!m.noteKey(roomId, snap); };
       // The open sessions in one room of this building, and that room's place.
       m.roomInfo = function (roomId, snap) {
         var s = snap || latest, out = { sessions: [], place: null };
@@ -596,6 +606,7 @@
         if (!out.place) {
           var rp = repoOf(s, repo);
           (rp ? rp.worktrees : []).forEach(function (w) { var pl = fromPlace(w.place); if (pl.roomId === roomId) out.place = pl; });
+          if (!out.place) out.place = layout.places[roomId] || null;   // a room a session made, empty now: the layout remembers its place
         }
         return out;
       };

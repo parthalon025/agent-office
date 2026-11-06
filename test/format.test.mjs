@@ -104,6 +104,14 @@ test('cleanupNote says what the clean-up did, and is an error when a floor was s
   assert.deepEqual(F.cleanupNote({}), ['info', 'Nothing to clean up', 'No floor was deleted.']);
 });
 
+test('remoteNote says whether remote access is on, off or set up wrong (#133)', () => {
+  assert.equal(F.remoteNote({ state: 'on', host: 'office.example.com' }), 'Remote access is on. Open the office at https://office.example.com. Cloudflare Access signs you in, and the office checks that login on every request.');
+  assert.equal(F.remoteNote({ state: 'incomplete', missing: ['OFFICE_REMOTE_AUD'], reason: 'missing OFFICE_REMOTE_AUD.' }), 'Remote access is off. A setting is not right: missing OFFICE_REMOTE_AUD. See the README.');
+  assert.equal(F.remoteNote({ state: 'off' }), 'Remote access is off. The README says how to turn it on.');
+  assert.equal(F.remoteNote(undefined), F.remoteNote({ state: 'off' }));
+  assert.doesNotMatch(F.remoteNote({ state: 'on', host: 'h.example.com' }), /!|please|oops|sorry/i);
+});
+
 test('cleanupEmpty gives the true reason the clean-up list is empty', () => {
   assert.equal(F.cleanupEmpty(0), 'No floor is ready. A floor must be merged, have no changes and no session, and be over an hour old.');
   assert.equal(F.cleanupEmpty(undefined), F.cleanupEmpty(0));

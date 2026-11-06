@@ -1,4 +1,4 @@
-/* Agent Office adapter x0.1 for Claude Code (bridge pattern, hooks in, process control out).
+/* Agent Office adapter x0.2 for Claude Code (bridge pattern, hooks in, process control out).
    The server (server.mjs) turns Claude Code hook events into session snapshots and streams them
    over SSE. This file is the browser side: the event stream, the REST calls for DS commands and the
    window.officeAdapter facade. The snapshot store and the per-building adapter are in building.js, where the
@@ -18,7 +18,8 @@
    code (#n=<code>). The page takes the code out of the address bar and trades it for an HttpOnly cookie with
    POST /launch. Every later call and the event stream send the cookie by themselves, so a reload keeps working.
    Without a working cookie the page says so (officeAdapter.onAuth) and asks again every 5 s: a launch link opened
-   in another tab gives this tab the new cookie too. */
+   in another tab gives this tab the new cookie too. On the remote address (#133) the cookie comes from POST /remote/signin
+   instead: Cloudflare Access adds its login to every request, and the server checks it. */
 (function () {
   var problemFns = [];
   // The lean snapshot leaves out the oldest replies of a session with long replies (wire.js olderReplies). The store asks for
@@ -39,9 +40,19 @@
     authFns.forEach(function (fn) { fn(a); });
   }
   function answer(r) { return r.json().catch(function () { return {}; }); }
-  function check() {
-    return fetch('/api/auth').then(function (r) { return answer(r).then(function (j) { return r.ok ? { ok: true } : { ok: false, reason: j.error || 'No access.' }; }); },
+  function probe() {
+    return fetch('/api/auth').then(function (r) { return answer(r).then(function (j) { return r.ok ? { ok: true } : { ok: false, status: r.status, reason: j.error || 'No access.' }; }); },
       function () { return { ok: false, reason: 'The office server is not reachable.' }; });
+  }
+  // On the remote address (https; the local office is http) a page with no cookie asks for one with its Cloudflare Access
+  // login: POST /remote/signin, no code. The server checks the login itself. Without a valid login it answers 403, and the
+  // page says it has no access.
+  function check() {
+    return probe().then(function (a) {
+      if (a.ok || a.status !== 401 || location.protocol !== 'https:') return a;
+      return fetch('/remote/signin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
+        .then(function (r) { return r.ok ? probe() : a; }, function () { return a; });
+    });
   }
   var code = /^#n=([0-9a-f]{32})$/.exec(location.hash);
   if (code) history.replaceState(null, '', location.pathname + location.search);   // the code works once; keep it out of history
@@ -113,11 +124,11 @@
         return uids.length ? post('/api/interrupt', { uid: uids[0] }) : Promise.resolve({ ok: false, reason: 'No open session.' });
       case 'resume':
         uids = uidsOf(cmd);
-        return uids.length ? sendAll(uids, { text: 'Continue.' }) : Promise.resolve({ ok: false, reason: 'No open session.' });
+        return uids.length ? sendAll(uids, { text: 'Continue.', answers: false }) : Promise.resolve({ ok: false, reason: 'No open session.' });
       case 'retry': {
         uids = uidsOf(cmd);
         var last = uids.length && sessionOf(uids[0]);
-        return last && last.prompt ? sendAll(uids, { text: last.prompt }) : Promise.resolve({ ok: false, reason: 'Nothing to run again.' });
+        return last && last.prompt ? sendAll(uids, { text: last.prompt, answers: false }) : Promise.resolve({ ok: false, reason: 'Nothing to run again.' });
       }
       case 'dismiss': {   // the server clears the error; the next snapshot moves every surface off Error
         var du = uidsOf(cmd)[0];

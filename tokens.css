@@ -1,4 +1,4 @@
-/* Agent Office DS x1.7.11: tokens.css. Edited by hand. Keep it in step with tokens.json (test/ds-kit.test.mjs checks every token). */
+/* Agent Office DS x1.7.13: tokens.css. Edited by hand. Keep it in step with tokens.json (test/ds-kit.test.mjs checks every token). */
 :root, [data-theme="light"] {
   color-scheme: light;
   --bg: #e9edf1;
@@ -356,7 +356,7 @@
   --status-working-text: #0e700e;
   --status-waiting-text: #a94409;
   --status-error-text: #b10e1c;
-  --status-resting-text: #5c5c5c;
+  --status-resting-text: #616161;
   --status-finished-text: #115ea3;
   --status-working-on-bubble: var(--status-working);
   --status-waiting-on-bubble: #bc4b09;
@@ -415,10 +415,10 @@
   --status-error: #dc626d;
   --status-resting: #858585;
   --status-finished: #62abf5;
-  --status-working-text: #54b054;
+  --status-working-text: var(--status-working);
   --status-waiting-text: var(--status-waiting);
   --status-error-text: #ee8a93;
-  --status-resting-text: #a3a3a3;
+  --status-resting-text: #adadad;
   --status-finished-text: var(--status-finished);
   --status-working-on-bubble: #0e700e;
   --status-waiting-on-bubble: #bc4b09;

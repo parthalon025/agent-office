@@ -57,6 +57,15 @@ function checkAgentWrite(text, capped = true) {
 
 const lines = (t) => (t === '' ? [] : String(t).split('\n'));
 const norm = (t) => String(t ?? '').replace(/\r\n?/g, '\n');
+// The user's own text (#27 L9): control characters (not tab or line break), C1 controls and invisible direction characters go, so a
+// note cannot hide text from the person who reads the board. The emoji joiners U+200C and U+200D stay. Agent text is not cleaned
+// here: the scan refuses it (checkAgentWrite).
+const INVISIBLE = new RegExp('[\\u0000-\\u0008\\u000b-\\u001f\\u007f-\\u009f' + HIDDEN.source.slice(1, -1) + ']', 'g');
+const cleanUser = (t) => norm(t).replace(INVISIBLE, '');
+// A board key is the page's room key. A name that every object already has (__proto__, constructor, toString) is never one.
+const checkKey = (key) => {
+  if (typeof key !== 'string' || !key || key.length > 400 || key in Object.prototype || key === 'prototype') throw new NotesError(400, 'Unknown board.');
+};
 
 // Longest common subsequence of two line lists: for each index of a, the matching index in b or -1.
 function match(a, b) {
@@ -132,7 +141,7 @@ export function cleanPin(text) {
 export function createNotes({ notes, pins, now = Date.now }) {
   const past = new Map(); // key -> [{ v, text }] newest last; memory only
 
-  const entry = (key) => notes[key] || null;
+  const entry = (key) => (Object.hasOwn(notes, key) ? notes[key] : null);
   const versionOf = (key) => { const e = entry(key); return e ? (Number.isInteger(e.v) ? e.v : 1) : 0; };
   const textOf = (key) => entry(key)?.text || '';
 
@@ -172,7 +181,8 @@ export function createNotes({ notes, pins, now = Date.now }) {
      * with this version (it typed on while a merged answer came back), so merge against that text.
      */
     save(key, text, base, sent = false) {
-      text = norm(text);
+      checkKey(key);
+      text = cleanUser(text);
       checkCap(text, 'A note');
       const cur = versionOf(key);
       const hasBase = base !== undefined && base !== null;
@@ -192,6 +202,7 @@ export function createNotes({ notes, pins, now = Date.now }) {
 
     /** An agent adds lines at the end. Each line starts with the session name. Returns the added text. */
     append(key, name, text) {
+      checkKey(key);
       const add = norm(text).split('\n').map((l) => l.trim()).filter(Boolean);
       if (!add.length) throw new NotesError(400, 'notes_append is empty. Give the text to add.');
       checkAgentWrite(add.join('\n'));
@@ -205,6 +216,7 @@ export function createNotes({ notes, pins, now = Date.now }) {
 
     /** An agent replaces all notes. An empty text clears the board. Returns the old text. */
     replace(key, name, text) {
+      checkKey(key);
       const next = norm(text);
       checkAgentWrite(next, false); // a rewrite may fill the board; the board cap below is its limit
       checkCap(next, 'The notes board');
@@ -214,10 +226,11 @@ export function createNotes({ notes, pins, now = Date.now }) {
     },
 
     /** The blackboard pin: { text, by, at } or null. */
-    pinOf(key) { return pins[key] || null; },
+    pinOf(key) { return Object.hasOwn(pins, key) ? pins[key] : null; },
 
     /** Sets or clears the pin. One line: whitespace runs become one space, control characters go. Returns 'set', 'cleared' or 'none'. */
     pin(key, name, text) {
+      checkKey(key);
       const t = cleanPin(text); // the length check and the scan: a refused pin changes nothing
       if (t) { pins[key] = { text: t, by: name, at: now() }; return 'set'; }
       if (pins[key]) { delete pins[key]; return 'cleared'; }

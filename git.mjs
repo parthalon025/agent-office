@@ -180,8 +180,15 @@ async function baseOf(cwd, branch) {
 // English, because this check reads its message.
 const LASTING_GIT_FAILURE = /not a git repository|dubious ownership|unsafe repository|safe\.directory|was not found on PATH|is installed as a script|\bENOENT\b/i;
 
+// The cause of a lasting git failure, from its message: 'no-git', 'untrusted' (git refuses the folder) or 'not-repo'.
+function lastingCause(message) {
+  if (/was not found on PATH|is installed as a script|\bENOENT\b/i.test(message)) return 'no-git';
+  if (/dubious ownership|unsafe repository|safe\.directory/i.test(message)) return 'untrusted';
+  return 'not-repo';
+}
+
 // Where a folder sits in git, or KEEP when git still failed for a passing reason after `attempts` tries. See locate and locateOrKeep.
-async function placeOrKeep(cwd, { exec = git, exists = fs.existsSync, wait = (ms) => new Promise((r) => setTimeout(r, ms)), attempts = 3 } = {}) {
+async function placeOrKeep(cwd, { exec = git, exists = fs.existsSync, wait = (ms) => new Promise((r) => setTimeout(r, ms)), attempts = 3, why } = {}) {
   for (let i = 1; ; i++) try {
     const [top, branch, common] = (await exec(['rev-parse', '--show-toplevel', '--abbrev-ref', 'HEAD', '--path-format=absolute', '--git-common-dir'], cwd, 8000, ENGLISH)).trim().split(/\r?\n/);
     const dir = path.resolve(cwd, common);
@@ -199,7 +206,8 @@ async function placeOrKeep(cwd, { exec = git, exists = fs.existsSync, wait = (ms
     }
     return out;
   } catch (e) {
-    if (!exists(cwd) || LASTING_GIT_FAILURE.test(String(e && e.message))) return null;
+    if (!exists(cwd)) { if (why) why.cause = 'gone'; return null; }
+    if (LASTING_GIT_FAILURE.test(String(e && e.message))) { if (why) why.cause = lastingCause(String(e.message)); return null; }
     if (i >= attempts) return KEEP;
     await wait(250 * i);
   }
@@ -225,6 +233,23 @@ export async function locate(cwd, deps) {
  */
 export async function locateOrKeep(cwd, deps) {
   return placeOrKeep(cwd, deps);
+}
+
+/**
+ * `locateOrKeep` for the office start (#132): a place or KEEP. A lasting failure throws with its real cause in place of a
+ * bare null: git is not installed, git does not trust the folder (safe.directory), the folder is gone, or it is not in a
+ * git repository. Same `deps` as `locate`.
+ */
+export async function startPlace(cwd, deps) {
+  const why = {};
+  const loc = await placeOrKeep(cwd, { ...deps, why });
+  if (loc) return loc;
+  const text = {
+    'no-git': 'git is not installed, or git.exe is not on PATH. Install Git for Windows.',
+    untrusted: 'git does not trust this folder (safe.directory). Run: git config --global --add safe.directory <this folder>',
+    gone: 'The folder is gone.',
+  }[why.cause];
+  throw new Error(text || 'This folder is not in a git repository, so it has no branch to take a port from.');
 }
 
 /** Every agent branch's base in one call: branch -> base branch. */

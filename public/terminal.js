@@ -1,4 +1,4 @@
-/* Agent Office for Claude Code x0.1: the desk terminals.
+/* Agent Office for Claude Code x0.2: the desk terminals.
    Each bot's desk monitor shows that bot's Claude Code session as a terminal: the last prompt, the
    tool calls with their outcome, and the reply as it streams, with a blinking cursor. A desk with two
    monitors (the coder desk) shows the terminal on the left and the session's stats on the right
@@ -273,6 +273,8 @@
     if (todos.length) S.rows.push(['Agent', pre + model]);
     else S.rows.push(['Agent', pre + (s.headless ? 'in the office' : 'in a terminal')], ['Model', model]);
     if (window.OfficeVocab.supervision(s)) S.rows.push(['Oversight', window.OfficeVocab.supervision(s)]);
+    // A Paperclip run (#76): its role and the budget Paperclip keeps for the agent. The office sets no second limit on it.
+    if (s.hq) S.rows.push(['Paperclip', s.hq.role + (s.hq.budget ? DOT + window.OfficeVocab.hq.budget(s.hq.budget) : '')]);
     S.rows.push(['Context', pct == null ? '--' : pct + '%', 'bar', pct]);
     if (!todos.length) S.rows.push(['Tokens', u.tokens ? fmtTok(u.tokens) + (u.input ? DOT + Math.round(100 * (u.cached || 0) / u.input) + '% cached' : '') : '--']);
     S.rows.push(['Spend', money(s.cost, s.costUnknown) + DOT + plural(+s.turns || 0, 'turn', 'turns')]);

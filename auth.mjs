@@ -13,8 +13,11 @@
 // (test/auth.test.mjs). writeOwnerOnly is the one helper that writes; it gets the file system and icacls injected.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
 import os from 'node:os';
 import path from 'node:path';
+import { DEFAULT_PORT } from './files.mjs';
 
 export const LAUNCH_TTL_MS = 5 * 60 * 1000;
 export const AGENT_TOKEN_RE = /^[0-9a-f]{48}$/;
@@ -93,7 +96,7 @@ export function cookieValues(header, name) {
 /** The route group of a request: 'public', 'launch', 'agent', 'page', or null (not a route: 404). */
 export function routeOf(method, pathname, isStatic = () => false) {
   if (method === 'GET' && (pathname === '/' || pathname === '/favicon.ico' || isStatic(pathname))) return 'public';
-  if (pathname === '/launch') return 'launch';
+  if (pathname === '/launch' || pathname === '/remote/signin') return 'launch';
   if (pathname === '/hook' || pathname.startsWith('/hook/') || pathname.startsWith('/mcp/')) return 'agent';
   if (pathname === '/events' || pathname.startsWith('/api/')) return 'page';
   return null;
@@ -124,13 +127,220 @@ export function checkRequest(req, site) {
   const fetchSite = h['sec-fetch-site'];
   if (fetchSite !== undefined && fetchSite !== 'same-origin' && fetchSite !== 'none') return deny(403, 'Forbidden: the request comes from another site.');
   if (req.method === 'POST' && !isJson(h['content-type'])) return deny(415, 'Send JSON: the content type must be application/json.');
-  if (group === 'launch') return req.method === 'POST' ? { ok: true, group } : deny(404, 'Not found');
+  // The launch code is the local page's key; /remote/signin gives the cookie for an Access login and only the remote gate serves it.
+  if (group === 'launch') return req.method === 'POST' && req.path === '/launch' ? { ok: true, group } : deny(404, 'Not found');
   const given = h['x-office-token'];
   if (group === 'agent') return tokenEqual(given, site.agentToken) ? { ok: true, group } : deny(401, 'Unauthorized');
   const cookies = cookieValues(h.cookie, cookieName(site.port));
   let pass = tokenEqual(given, site.pageToken);
   for (const c of cookies) pass = tokenEqual(c, site.pageToken) || pass; // compare all, no early exit
   return pass ? { ok: true, group } : deny(401, NO_ACCESS);
+}
+
+// ---------- remote access (#133, ADR 0005) ----------
+// The owner can open the office at an address such as office.kurat0r.ai through a Cloudflare Tunnel and a Cloudflare
+// Access application. Access signs every request it lets through with an RS256 token (header Cf-Access-Jwt-Assertion).
+// The office does not trust the tunnel: it checks that token itself on every request whose Host is the remote host,
+// with node:crypto only, against the team's certificate list. Anything it cannot prove is refused (fail closed).
+// The server still listens on 127.0.0.1 only. The agent routes never answer a remote request.
+export const REMOTE_NAMES = ['OFFICE_REMOTE_HOST', 'OFFICE_REMOTE_TEAM', 'OFFICE_REMOTE_AUD', 'OFFICE_REMOTE_EMAILS'];
+export const ACCESS_HEADER = 'cf-access-jwt-assertion';
+export const REMOTE_SIGNIN = '/remote/signin';
+const HOSTNAME_RE = /^(?=.{4,253}$)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
+const EMAIL_RE = /^[^\s@,*]+@[^\s@,*]+\.[^\s@,*]+$/;
+const isIp = (h) => /^\d+(\.\d+){3}$/.test(h);
+const TOKEN_MAX = 8192;
+const CERTS_MAX = 262144;
+export const CERTS_REFRESH_GAP_MS = 60 * 1000;
+export const CERTS_MAX_AGE_MS = 60 * 60 * 1000;
+
+/**
+ * Remote settings from the environment: OFFICE_REMOTE_HOST (the public host name), OFFICE_REMOTE_TEAM (the Access team
+ * domain, <name>.cloudflareaccess.com), OFFICE_REMOTE_AUD (the application audience tag), OFFICE_REMOTE_EMAILS (the
+ * allowed emails, comma separated). All four are needed. OFFICE_REMOTE_PORT (default 4317) is the one port that honors
+ * them; a branch office never does. OFFICE_REMOTE_CERTS_URL is for tests: a loopback http address for the certificate list.
+ * Returns { on: true, state: 'on', host, team, issuer, certsUrl, aud, emails, port }, or { on: false, state, missing, reason }:
+ * state 'off' (not set up, or another port) or 'incomplete' (set up in part or wrong: the reason says what).
+ */
+export function remoteConfig(env = process.env, { port, branch = false } = {}) {
+  const val = (n) => String(env[n] ?? '').trim();
+  const off = (reason) => ({ on: false, state: 'off', missing: [], reason });
+  const incomplete = (reason, missing = []) => ({ on: false, state: 'incomplete', missing, reason });
+  const asked = REMOTE_NAMES.some((n) => val(n));
+  let remotePort = DEFAULT_PORT;
+  if (val('OFFICE_REMOTE_PORT')) {
+    remotePort = /^\d{1,5}$/.test(val('OFFICE_REMOTE_PORT')) ? Number(val('OFFICE_REMOTE_PORT')) : 0;
+    if (!(remotePort >= 1 && remotePort <= 65535)) return asked ? incomplete('OFFICE_REMOTE_PORT is not a port number.') : off('Remote access is not set up.');
+  }
+  if (!asked) return off('Remote access is not set up.');
+  if (branch || port !== remotePort) return off(`Remote access is not used on port ${port}.`);
+  const missing = REMOTE_NAMES.filter((n) => !val(n));
+  if (missing.length) return incomplete(`missing ${missing.join(', ')}.`, missing);
+  const host = val('OFFICE_REMOTE_HOST').toLowerCase(), team = val('OFFICE_REMOTE_TEAM').toLowerCase();
+  if (!HOSTNAME_RE.test(host) || isIp(host)) return incomplete('OFFICE_REMOTE_HOST must be a host name such as office.example.com, with no port and no address.');
+  if (!HOSTNAME_RE.test(team) || isIp(team)) return incomplete('OFFICE_REMOTE_TEAM must be the Access team domain, such as myteam.cloudflareaccess.com.');
+  const aud = val('OFFICE_REMOTE_AUD');
+  if (/\s/.test(aud)) return incomplete('OFFICE_REMOTE_AUD must be the application audience tag, with no spaces.');
+  const emails = val('OFFICE_REMOTE_EMAILS').split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+  if (!emails.length || !emails.every((e) => EMAIL_RE.test(e))) return incomplete('OFFICE_REMOTE_EMAILS must list email addresses, separated by commas.');
+  let certsUrl = `https://${team}/cdn-cgi/access/certs`;
+  if (val('OFFICE_REMOTE_CERTS_URL')) {
+    let u = null;
+    try { u = new URL(val('OFFICE_REMOTE_CERTS_URL')); } catch { /* checked below */ }
+    if (!u || u.protocol !== 'http:' || u.hostname !== '127.0.0.1') return incomplete('OFFICE_REMOTE_CERTS_URL is only for tests and must be an http address on 127.0.0.1.');
+    certsUrl = u.href;
+  }
+  return { on: true, state: 'on', host, team, issuer: `https://${team}`, certsUrl, aud, emails, port: remotePort };
+}
+
+/** What the info route says about remote access: the state and the address, never the audience tag or the emails. */
+export const remoteInfo = (cfg) => ({ state: cfg.state, host: cfg.on ? cfg.host : undefined, missing: cfg.missing || [], reason: cfg.reason });
+
+/** True when the Host header is the remote host (the one address Access serves). Exactly that name, no port, any case. */
+export const isRemoteHost = (host, cfg) => !!cfg && cfg.on === true && typeof host === 'string' && host.toLowerCase() === cfg.host;
+
+/** Reads the certificate list: https (or the loopback http of a test), status 200, at most 256 KB, JSON. Rejects on anything else. */
+export function fetchCerts(url, { timeoutMs = 5000 } = {}) {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const get = u.protocol === 'https:' ? https.get : u.protocol === 'http:' && u.hostname === '127.0.0.1' ? http.get : null;
+    if (!get) return reject(new Error('The certificate list must come over https.'));
+    const req = get(u, { agent: false, timeout: timeoutMs, headers: { accept: 'application/json' } }, (res) => {
+      if (res.statusCode !== 200) { res.resume(); return reject(new Error(`The certificate list answered ${res.statusCode}.`)); }
+      const parts = []; let n = 0;
+      res.on('data', (c) => { n += c.length; if (n > CERTS_MAX) { req.destroy(new Error('The certificate list is too large.')); return; } parts.push(c); });
+      res.on('end', () => { try { resolve(JSON.parse(Buffer.concat(parts).toString('utf8'))); } catch (e) { reject(e); } });
+      res.on('error', reject);
+    });
+    req.on('timeout', () => req.destroy(new Error('The certificate list timed out.')));
+    req.on('error', reject);
+  });
+}
+
+/** The RSA signing keys of a certificate list (its `keys`, as JWKs), by key id. Throws when there is none we can use. */
+function parseKeys(doc) {
+  const out = new Map();
+  const list = doc && Array.isArray(doc.keys) ? doc.keys : [];
+  for (const jwk of list) {
+    try {
+      if (!jwk || typeof jwk !== 'object' || jwk.kty !== 'RSA' || typeof jwk.kid !== 'string' || !jwk.kid || out.has(jwk.kid)) continue;
+      if ((jwk.use !== undefined && jwk.use !== 'sig') || (jwk.alg !== undefined && jwk.alg !== 'RS256')) continue;
+      const key = crypto.createPublicKey({ key: jwk, format: 'jwk' });
+      if (key.asymmetricKeyType !== 'rsa' || !(key.asymmetricKeyDetails?.modulusLength >= 2048)) continue;
+      out.set(jwk.kid, key);
+    } catch { /* a key we cannot read is no key */ }
+  }
+  if (!out.size) throw new Error('The certificate list has no usable key.');
+  return out;
+}
+
+/**
+ * The team's signing keys, kept in memory. get(kid) gives the key or null. The list is read again when a key id is
+ * unknown and the last try was a minute ago or more (so a flood of odd ids reads it once a minute), and when the cache is
+ * an hour old. Each read replaces the list whole, so a key Cloudflare removed is gone after it. A read that fails keeps
+ * the keys for now, but never past an hour: with no readable list, nothing passes. Reads at the same time share one fetch.
+ */
+export function createAccessKeys({ url, fetchJson = fetchCerts, now = Date.now, gapMs = CERTS_REFRESH_GAP_MS, maxAgeMs = CERTS_MAX_AGE_MS }) {
+  let keys = new Map(), loadedAt = -Infinity, lastTry = -Infinity, inflight = null;
+  const fresh = () => now() - loadedAt < maxAgeMs;
+  function refresh() {
+    lastTry = now();
+    inflight = (async () => {
+      try { keys = parseKeys(await fetchJson(url)); loadedAt = now(); } catch { /* keep what we have, for now */ } finally { inflight = null; }
+    })();
+    return inflight;
+  }
+  return {
+    async get(kid) {
+      if (fresh() && keys.has(kid)) return keys.get(kid);
+      if (inflight) await inflight;
+      else if (now() - lastTry >= gapMs) await refresh();
+      return fresh() ? keys.get(kid) ?? null : null;
+    },
+  };
+}
+
+const B64URL_RE = /^[A-Za-z0-9_-]+$/;
+const asObject = (b64) => { try { const v = JSON.parse(Buffer.from(b64, 'base64url').toString('utf8')); return v && typeof v === 'object' && !Array.isArray(v) ? v : null; } catch { return null; } };
+
+/**
+ * Checks an Access token: RS256 only, signed by a key of the team's list (by key id), the team issuer, the audience tag,
+ * not expired (no allowance), not before now (a minute of clock drift), and an allowed email. Anything else, and any
+ * error, is { ok: false, reason } (the reason is for logs and tests, never for the client). A good token gives
+ * { ok: true, email, exp } with exp in seconds.
+ */
+export async function verifyAccessToken(token, cfg, keys, now = Date.now) {
+  const fail = (reason) => ({ ok: false, reason });
+  try {
+    if (typeof token !== 'string' || token.length > TOKEN_MAX) return fail('no token');
+    const parts = token.split('.');
+    if (parts.length !== 3 || !parts.every((p) => B64URL_RE.test(p))) return fail('not a token');
+    const head = asObject(parts[0]);
+    if (!head || head.alg !== 'RS256' || typeof head.kid !== 'string' || !head.kid) return fail('not an RS256 token with a key id');
+    const key = await keys.get(head.kid);
+    if (!key) return fail('unknown key');
+    const sig = Buffer.from(parts[2], 'base64url');
+    if (!crypto.verify('RSA-SHA256', Buffer.from(`${parts[0]}.${parts[1]}`), key, sig)) return fail('bad signature');
+    const c = asObject(parts[1]);
+    if (!c) return fail('no claims');
+    const t = now() / 1000;
+    if (c.iss !== cfg.issuer) return fail('wrong issuer');
+    const auds = typeof c.aud === 'string' ? [c.aud] : Array.isArray(c.aud) ? c.aud : [];
+    if (!auds.includes(cfg.aud)) return fail('wrong audience');
+    if (typeof c.exp !== 'number' || !Number.isFinite(c.exp) || !(c.exp > t)) return fail('expired');
+    if (c.nbf !== undefined && (typeof c.nbf !== 'number' || !(c.nbf <= t + 60))) return fail('not yet valid');
+    if (typeof c.email !== 'string' || !cfg.emails.includes(c.email.toLowerCase())) return fail('email not allowed');
+    return { ok: true, email: c.email.toLowerCase(), exp: c.exp };
+  } catch { return fail('error'); }
+}
+
+/**
+ * The page cookie for a remote sign-in. Secure (the address is https), and it ends with the Access token: Max-Age and
+ * Expires are the token's expiry. expSec is the token's exp (seconds), nowMs the clock.
+ */
+export function remoteCookie(port, token, expSec, nowMs) {
+  const maxAge = Math.max(0, Math.floor(expSec - nowMs / 1000));
+  return `${pageCookie(port, token)}; Secure; Max-Age=${maxAge}; Expires=${new Date(expSec * 1000).toUTCString()}`;
+}
+
+/**
+ * The request gate for a request whose Host is the remote host (async: the keys may need a read). In order:
+ * 1. A valid Access token in Cf-Access-Jwt-Assertion, for every route. No token, a bad one or an unreadable key list: 403.
+ * 2. An Origin header must be https://<remote host>.
+ * 3. The agent group (hooks, MCP, the OpenClaw gate) refuses every remote request: 403.
+ * 4. As for a local request: Sec-Fetch-Site, JSON on a POST, then the route group. The launch code is not served here (404);
+ *    POST /remote/signin is, and its answer carries { remote: { email, exp } } for the cookie. A page route needs the
+ *    remote page cookie or token (site.remote.pageToken) as well and carries the same remote field.
+ */
+export async function checkRemoteRequest(req, site) {
+  const h = req.headers || {}, cfg = site.remote.config;
+  let who;
+  try { who = await verifyAccessToken(h[ACCESS_HEADER], cfg, site.remote.keys, site.now || Date.now); } catch { who = { ok: false }; }
+  if (!who.ok) return deny(403, 'Forbidden');
+  if (h.origin !== undefined && h.origin !== `https://${cfg.host}`) return deny(403, 'Forbidden: the request comes from another site.');
+  const group = routeOf(req.method, req.path, site.isStatic);
+  if (!group) return deny(404, 'Not found');
+  if (group === 'agent') return deny(403, 'Forbidden');
+  if (group === 'public') return { ok: true, group };
+  const fetchSite = h['sec-fetch-site'];
+  if (fetchSite !== undefined && fetchSite !== 'same-origin' && fetchSite !== 'none') return deny(403, 'Forbidden: the request comes from another site.');
+  if (req.method === 'POST' && !isJson(h['content-type'])) return deny(415, 'Send JSON: the content type must be application/json.');
+  const remote = { email: who.email, exp: who.exp };
+  if (group === 'launch') return req.method === 'POST' && req.path === REMOTE_SIGNIN ? { ok: true, group, remote } : deny(404, 'Not found');
+  const cookies = cookieValues(h.cookie, cookieName(site.port));
+  // The remote page token is its own secret (site.remote.pageToken), never the local page token: a remote cookie opens
+  // nothing on the local host, and the local token opens nothing here.
+  const want = site.remote.pageToken;
+  let pass = tokenEqual(h['x-office-token'], want);
+  for (const c of cookies) pass = tokenEqual(c, want) || pass;
+  return pass ? { ok: true, group, remote } : deny(401, NO_ACCESS);
+}
+
+/** The gate the server uses: the remote gate for the remote host (when remote access is on), else the local gate. */
+export function gateRequest(req, site) {
+  const cfg = site.remote?.config;
+  if (cfg?.on && isRemoteHost((req.headers || {}).host, cfg)) return checkRemoteRequest(req, site);
+  return Promise.resolve(checkRequest(req, site));
 }
 
 /**

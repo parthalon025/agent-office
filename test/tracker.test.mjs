@@ -865,3 +865,14 @@ test('a permission request keeps the reason the agent gave, trimmed; a request w
   // Only a permission request carries it.
   assert.equal(slimPayload({ hook_event_name: 'PostToolUse', tool_name: 'Bash', ask_reason: 'x' }).ask_reason, undefined);
 });
+
+// #27 L3: a cut preview says so.
+test('makePreview says how much a Write or MultiEdit preview left out', async () => {
+  const { makePreview } = await import('../tracker.mjs');
+  const big = Array.from({ length: 55 }, (_, i) => 'line ' + i).join('\n');
+  assert.match(makePreview('Write', { file_path: 'a.txt', content: big }), /15 more lines/);
+  assert.doesNotMatch(makePreview('Write', { file_path: 'a.txt', content: 'one\ntwo' }), /more line/);
+  const edits = Array.from({ length: 9 }, (_, i) => ({ old_string: 'a' + i, new_string: 'b' + i }));
+  assert.match(makePreview('MultiEdit', { file_path: 'a.txt', edits }), /3 more edits/);
+  assert.doesNotMatch(makePreview('MultiEdit', { file_path: 'a.txt', edits: edits.slice(0, 2) }), /more edit/);
+});

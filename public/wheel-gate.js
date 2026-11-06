@@ -1,4 +1,4 @@
-/* Agent Office for Claude Code x0.1: wheel gate.
+/* Agent Office for Claude Code x0.2: wheel gate.
    Decides when scrolling out leaves a level (floor, then building, then city). One trackpad flick sends
    dozens of wheel events, some of them after the finger lifts. Without a gate one flick would leave the
    floor and the building in one go. The gate lets one gesture change one level.

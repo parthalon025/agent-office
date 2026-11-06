@@ -520,6 +520,25 @@ test('a lasting git failure is null at once, not KEEP: not a repository, git ref
   assert.equal(exec.calls.length, 1);
 });
 
+// #132: the start names the real cause of a lasting git failure.
+test('startPlace: a lasting git failure says its own cause; not a repository, a gone folder and a passing failure keep their words', async () => {
+  const cases = [
+    [NO_GIT, /git is not installed/i],
+    ['git is installed as a script (C:\\bin\\git.cmd). The office starts programs without a shell, so it needs git.exe on PATH.', /git is not installed/i],
+    ['spawn C:\\Program Files\\Git\\cmd\\git.exe ENOENT', /git is not installed/i],
+    [DUBIOUS, /does not trust this folder.*safe\.directory/i],
+    ["fatal: detected dubious ownership in repository at 'C:/r'", /does not trust this folder/i],
+    ["fatal: unsafe repository ('C:/r' is owned by someone else)", /does not trust this folder/i],
+    ['fatal: not a git repository (or any of the parent directories): .git', /not in a git repository/i],
+  ];
+  for (const [msg, want] of cases) {
+    await assert.rejects(git.startPlace('/r', { exec: seq(new Error(msg)), ...retry }), want, msg);
+  }
+  await assert.rejects(git.startPlace('/r', { exec: seq(new Error('timed out')), ...retry, exists: () => false }), /folder is gone/i);
+  assert.equal(await git.startPlace('/r', { exec: seq(new Error('timed out')), ...retry }), git.KEEP);
+  assert.equal((await git.startPlace('/r', { exec: seq(TOP), ...retry })).branch, 'main');
+});
+
 test('locateOrKeep, with real git: a repo, no commit yet, a plain folder under a German locale, a folder of another owner, a removed folder', async () => {
   const dir = repo();
   const empty = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-empty-')));

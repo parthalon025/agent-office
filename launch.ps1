@@ -4,3 +4,5 @@
 $Host.UI.RawUI.WindowTitle = $env:OFFICE_TITLE
 $a = [string[]]($env:OFFICE_ARGS | ConvertFrom-Json)
 & $env:OFFICE_CLAUDE @a
+# The window stays open (-NoExit). A claude started in it later must not carry this session's id (#27 L7).
+Remove-Item Env:OFFICE_ID -ErrorAction SilentlyContinue

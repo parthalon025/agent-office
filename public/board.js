@@ -1,4 +1,4 @@
-/* Agent Office for Claude Code x0.1: the room's boards, stats display and door.
+/* Agent Office for Claude Code x0.2: the room's boards, stats display and door.
    Each lab room gets four things that the user can see and click:
    - The blackboard on the back wall is the agents' overview: plan progress, browser steps, last steps
      and the top of the repository. An agent can pin a note on it. The page shows the same data in full
@@ -426,7 +426,7 @@
     function scan() {
       prune();
       // the host matches the shown floor's room groups to the DS rooms by order
-      host.rooms().forEach(function (x) { if (x.room.type === 'lab') decorate(x.rg, x.room.id); });
+      host.rooms().forEach(function (x) { if (x.room.type === 'lab' && (!o.usable || o.usable(x.room.id))) decorate(x.rg, x.room.id); });
       // a door pulse that came while its floor was being rebuilt
       Object.keys(pending).forEach(function (id) {
         var p = pending[id];

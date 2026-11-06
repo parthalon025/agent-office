@@ -1,4 +1,4 @@
-# Office type pictures (Agent Office DS x1.7.11)
+# Office type pictures (Agent Office DS x1.7.13)
 
 Flat isometric (30 degree) room pictures. viewBox `0 0 320 200`. Each room has a floor tile, a back wall, a left wall and the signature items of the room type. A thin stripe in the type colour runs along the front edges of the floor. Each room shows two or three tiny bots.
 

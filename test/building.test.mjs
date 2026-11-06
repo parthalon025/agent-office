@@ -180,6 +180,27 @@ test('a supervision label that changes after the bot is seated seats it again, s
   assert.equal(of(m.ev, 'bot.add').length, adds + 1);
 });
 
+test('a Paperclip run (#76) is labelled with its role, company and task; the label that comes once the office watches it seats the bot again', async () => {
+  const r = rig({ kinds: [{ kind: 'claude-code', label: 'Claude Code' }] });
+  const m = r.mount(KEY_A);
+  await r.hook(HOOKS.turnWithEdit[0]);
+  assert.equal(of(m.ev, 'bot.add').at(-1).bot.owner, undefined, 'not a Paperclip run (yet): no owner');
+  const adds = of(m.ev, 'bot.add').length;
+  const s = [...r.tracker.sessions.values()][0];
+  s.hq = { agent: 'Ada', role: 'Backend engineer', company: 'Acme Robotics', task: 'ACM-12 Add a health route to the API', budget: { spent: 8.3, limit: 50 }, run: 'run-1' };
+  r.push();
+  assert.equal(of(m.ev, 'bot.add').length, adds + 1, 'the card lines come only with bot.add');
+  const bot = of(m.ev, 'bot.add').at(-1).bot;
+  assert.equal(bot.platform, 'Paperclip Backend engineer, Claude Code');
+  assert.equal(bot.owner, 'Acme Robotics (Ada)');
+  assert.equal(bot.task, 'ACM-12 Add a health route to the API', 'its Paperclip task, not the wake-up prompt');
+  r.push();
+  assert.equal(of(m.ev, 'bot.add').length, adds + 1, 'nothing changed: not seated again');
+  s.hq = { ...s.hq, task: 'ACM-13 Next task', budget: { spent: 9, limit: 50 } };
+  r.push();
+  assert.equal(of(m.ev, 'bot.add').length, adds + 1, 'a new task or budget is a status line, not a new seat');
+});
+
 test('a turn with an edit: working, tool call without a bubble on replay, result, finished', async () => {
   const r = rig();
   const m0 = r.mount(KEY_A);
@@ -1482,4 +1503,59 @@ test('a helper cut from the 20-entry agent list while open still leaves, once (#
   for (const n of names) assert.equal(helperDone(m.ev, n).length, 1, `${n} is not told twice`);
   const h = of(m.ev, 'delegate').map((e) => e.spawn.name)[22];
   assert.equal(helperDone(m.ev, h).length, 0, 'a helper still listed and open stays');
+});
+
+
+test('Other folders: a room whose session ended keeps its name and notes key', async () => {
+  const r = rig();
+  await r.hook({ ...HOOKS.turnWithEdit[0], cwd: 'C:\\scratch\\notes' });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'sid-2', cwd: 'C:\\scratch\\other' });
+  const m = r.mount('');
+  const bots = of(m.ev, 'bot.add');
+  const roomOfFirst = bots[0].roomId;
+  r.tracker.onHook(slimPayload({ hook_event_name: 'SessionEnd', session_id: 'sid-1', cwd: 'C:\\scratch\\notes' }, null)); r.push();
+  const info = m.roomInfo(roomOfFirst);
+  assert.equal(info.sessions.length, 0);
+  assert.equal(info.place && info.place.roomName, 'notes', 'not the bare word Room');
+  assert.ok(m.noteKey(roomOfFirst), 'the notes key is kept');
+});
+
+test('the spare room has no notes key: it is not usable, and the room that replaces it is', async () => {
+  const r = rig();
+  const m = r.mount(KEY_A);
+  assert.equal(m.spare(), true);
+  assert.equal(m.noteKey('spare-room'), '');
+  assert.equal(m.usable('spare-room'), false, 'no board, no notes, no Ctrl+K room tools for it');
+  await r.hook(HOOKS.turnWithEdit[0]);
+  const ru = of(m.ev, 'room.update')[0];
+  assert.equal(m.spare(), false);
+  assert.ok(m.noteKey(ru.room.id), 'the renamed room has the key of its place');
+  assert.equal(m.usable(ru.room.id), true);
+  assert.equal(m.usable('spare-room'), false, 'the old id is gone');
+});
+
+test('an empty building whose first change is a repo with two worktrees: the spare floor is renamed, the second floor is added', () => {
+  const r = rig();
+  const m = r.mount(KEY_A);
+  r.repos.push({ path: REPO_A, worktrees: [{ branch: 'main', root: REPO_A }, { branch: 'feat/x', root: 'C:\\work\\repo-feat' }] });
+  r.push();
+  assert.deepEqual(types(m.ev), ['floor.update', 'room.update', 'floor.add']);
+  assert.equal(of(m.ev, 'floor.update')[0].floor.name, 'main');
+  assert.equal(of(m.ev, 'floor.add')[0].floor.name, 'feat/x');
+  assert.equal(m.spare(), false);
+  assert.equal(m.roomsShown().length, 2);
+  assert.equal(m.stale(), false);
+});
+
+test('stale() under wtSeen: a branch switch of a worktree is stale, a room a session made is not', () => {
+  const r = rig({ repos: [{ path: REPO_A, worktrees: [{ branch: 'main', root: REPO_A }] }] });
+  r.push();
+  const m = r.mount(KEY_A);
+  assert.equal(m.stale(), false);
+  r.repos[0].worktrees[0].branch = 'dev';   // the main checkout switches branch: its room is on another floor now
+  r.push();
+  assert.equal(m.stale(), true, 'a room that was a worktree is gone from its floor');
+  const next = r.mount(KEY_A);
+  assert.deepEqual(next.def.floors.map((f) => f.name), ['dev']);
+  assert.equal(next.stale(), false);
 });

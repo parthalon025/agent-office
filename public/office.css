@@ -1,4 +1,4 @@
-/* Agent Office for Claude Code x0.1: page styles. Only Agent Office DS tokens, no literal colors.
+/* Agent Office for Claude Code x0.2: page styles. Only Agent Office DS tokens, no literal colors.
    The 3D office and its HUD come from the design system; this file styles what the page adds:
    the control strip, the dialogs, the diff, and the chat grips and slash list. */
 /* The height of the dock plus a gap. office.js measures the dock and updates it; this is the value before that. */
@@ -91,6 +91,11 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 @media (max-width: 820px) {
   #office.sec-look .ao-hud-left, #office.sec-look .ao-hud-right:not(.ao-hud-inbox) { visibility: hidden; pointer-events: none; }
 }
+/* the empty building's spare room has no bots: no broadcast bar, and no roster that says "No bots yet" */
+/* the roster keeps its box (visibility, not display): the DS camera reads the right column's left edge, and it does not
+   measure again when the class goes, so display: none would frame the first room small and off to the left */
+#office.no-rooms .ao-hud-cast { display: none; }
+#office.no-rooms .ao-hud-right:not(.ao-hud-inbox):not(.ao-hud-chat) { visibility: hidden; pointer-events: none; }
 
 /* ---------- dialogs ---------- */
 .ao-dialog { width: min(560px, calc(100vw - 32px)); }
@@ -269,6 +274,10 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .city-kbd { margin-left: var(--space-2); }
 .city-name { flex: 1; min-width: 0; font-weight: var(--type-title-weight); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .city-sub { color: var(--muted); }
+/* Paperclip HQ (#76): its line (agents and budget) is long, so it takes a line of its own under the name */
+.city-row.is-hq .city-main { flex-wrap: wrap; }
+.city-row.is-hq .city-sub { flex-basis: 100%; }
+.city-name .ao-icon { margin-right: var(--space-1); vertical-align: -2px; }
 .city-wait { color: var(--ink); font: var(--type-caption-weight) var(--type-caption-size)/var(--type-caption-line) var(--font-sans); }
 .city-tag { position: absolute; z-index: var(--z-tag); left: 50%; top: var(--space-5); translate: -50% 0; padding: var(--space-1) var(--space-3); background: var(--panel); backdrop-filter: blur(var(--blur-panel)); border: 1px solid var(--line); border-radius: var(--radius-full); box-shadow: var(--shadow-panel); font: var(--type-body-weight) var(--type-body-size)/var(--type-body-line) var(--font-sans); animation: page-fade var(--duration-fast) var(--ease-out) both; }
 .city-zoom { position: absolute; z-index: var(--z-hud); right: var(--space-5); top: var(--space-5); display: flex; gap: var(--space-1); padding: var(--space-1); background: var(--panel); backdrop-filter: blur(var(--blur-panel)); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-panel); }

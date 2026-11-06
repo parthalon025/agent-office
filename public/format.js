@@ -1,4 +1,4 @@
-/* Agent Office for Claude Code x0.1: display formats.
+/* Agent Office for Claude Code x0.2: display formats.
    One home for how the page and the server write money, counts and folder paths, so every surface reads the same.
    Plain script, no I/O, no timers. The page loads it as a script (window.OfficeFormat). The server and the tests
    import it for its side effect and read globalThis.OfficeFormat.
@@ -18,6 +18,7 @@
                         pattern, for commands and errors that are kept or exported (history.json, Export). notes.mjs keeps
                         its own list of the key shapes it refuses; test/format.test.mjs holds both to the same samples.
      cleanupNote(result) -> [tone, title, text] for the toast after a floor clean-up ({ deleted, skipped } from the server).
+     remoteNote(remote) -> the text of the Remote access part of the Attach sessions dialog ({ state, host, missing, reason } from GET /api/info).
      cleanupEmpty(kept) -> the empty text of the clean-up dialog: the true reason (the user kept every floor, or none was ready).
      tokens(n)       -> '999', '1.2k', '3.4M' (token counts, one form on every surface)
      clock(t, zone?) -> 'HH:MM:SS' local time (zone 'utc' for tests); a dash when t is not a time
@@ -50,6 +51,12 @@
     var why = (k.length === 1 ? 'It changed' : 'They changed') + ' or a session works there.';
     if (!d.length) return ['error', 'No floor deleted', 'Kept: ' + k.join(', ') + '. ' + why];
     return ['error', 'Some floors stayed', plural(d.length, 'floor') + ' deleted. Kept: ' + k.join(', ') + '. ' + why];
+  }
+  /** What the Attach sessions dialog says about remote access (#133): on with the address, a setting that is missing or wrong, or off. */
+  function remoteNote(r) {
+    if (r && r.state === 'on') return 'Remote access is on. Open the office at https://' + r.host + '. Cloudflare Access signs you in, and the office checks that login on every request.';
+    if (r && r.state === 'incomplete') return 'Remote access is off. A setting is not right: ' + (r.reason || 'check the OFFICE_REMOTE settings.') + ' See the README.';
+    return 'Remote access is off. The README says how to turn it on.';
   }
   /** The empty text of the clean-up dialog. kept = how many floors the user left out with Keep this floor. */
   function cleanupEmpty(kept) {
@@ -149,5 +156,5 @@
     var p = parts(s.startedAt || 0, zone);
     return base + '-' + p.y + '-' + two(p.mo) + '-' + two(p.d) + '-' + two(p.h) + two(p.mi) + '.md';
   }
-  root.OfficeFormat = { tokens: tokens, clock: clock, duration: duration, timeline: timeline, exportText: exportText, exportFileName: exportFileName, money: money, cost: cost, costLabel: costLabel, plural: plural, folderName: folderName, shortPath: shortPath, hintPill: hintPill, cleanupNote: cleanupNote, cleanupEmpty: cleanupEmpty, maskSecret: maskSecret, redactSecrets: redactSecrets, SECRET_MASK: SECRET_MASK };
+  root.OfficeFormat = { tokens: tokens, clock: clock, duration: duration, timeline: timeline, exportText: exportText, exportFileName: exportFileName, money: money, cost: cost, costLabel: costLabel, plural: plural, folderName: folderName, shortPath: shortPath, hintPill: hintPill, cleanupNote: cleanupNote, remoteNote: remoteNote, cleanupEmpty: cleanupEmpty, maskSecret: maskSecret, redactSecrets: redactSecrets, SECRET_MASK: SECRET_MASK };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

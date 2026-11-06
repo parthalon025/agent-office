@@ -1,10 +1,10 @@
-# Agent Office for Claude Code x0.1
+# Agent Office for Claude Code x0.2
 
 [![CI](https://github.com/parthalon025/agent-office/actions/workflows/ci.yml/badge.svg)](https://github.com/parthalon025/agent-office/actions/workflows/ci.yml)
 
 A 3D office that shows your Claude Code sessions as bots at desks, and lets you run them without a terminal. Open a session, talk to it in a chat, approve its steps, see what it changed, and close it, all from one browser tab.
 
-It is built on the Agent Office design system (x1.7.11), which lives in this folder. The design system documents are in [DS-README.md](DS-README.md).
+It is built on the Agent Office design system (x1.7.13), which lives in this folder. The design system documents are in [DS-README.md](DS-README.md).
 
 ## What it does
 
@@ -207,6 +207,20 @@ When the hour ends, save a new token in the same file. The office reads the file
 - **The check.** Each readiness check starts Copilot once in a temp folder, opens one session and closes it: no prompt, no update, none of its built-in MCP servers, and its log goes to a temp folder that the office removes after the check. A first start can take more than 10 s: the check then says "still starting" and goes on for up to 60 s.
 - **Not tested signed in.** The office was checked against the signed-out handshake of Copilot CLI 1.0.105 only. The shapes of its requests come from its SDK schema, not from a real turn.
 
+### Paperclip HQ
+
+[Paperclip](https://github.com/paperclipai/paperclip) is the graph harness that runs a company of agents: goals, heartbeats, routines and budgets. The office supervises those agents: it holds the Claude Code calls of their runs for your answer, and shows them. The office can watch one Paperclip company as an HQ building in the city. It is off until you connect it, and the office works alone as before without it. The office only reads Paperclip. It never sends a heartbeat, assigns a task, runs a routine or changes a budget. The one change it can make is **Supervise in office** (below), after you confirm it.
+
+- **Before you start.** Paperclip needs Node 24.11 or newer (the office itself runs on Node 22). Run it on this computer in local trusted mode: `paperclipai run --bind loopback` (on a new data folder, `paperclipai onboard` first). The office connects only to an address on 127.0.0.1 and refuses any other host, `localhost` too. It does not sign in: a Paperclip in authenticated mode answers 403, and the office says so.
+- **Connect.** Open **More**, then **Attach sessions**. Under **Paperclip HQ**, type the address (`http://127.0.0.1:3100` by default) and click **Connect**. With several companies, pick one. The office keeps the address and the company in `state.json` and connects again when it starts. **Disconnect Paperclip** stops the watch; Paperclip runs on.
+- **The HQ building.** The company is the first building in the city, with a penthouse and a mast on its roof. Its sign shows its agents and its budget for the month. A pip per agent shows its state in Paperclip: working while a run is queued or runs, error after a failed run, else at rest. A Paperclip approval (hire an agent, a strategy) is Paperclip's, so it never shows as Needs you. Click the HQ (or Ctrl+K, **Paperclip HQ**) to see each agent's role, task, heartbeat, budget and supervision, and the routines with their next run.
+- **Both schedulers run.** Paperclip runs its heartbeats and routines; the office runs its own schedules. Neither moves the other's.
+- **Budgets.** Paperclip owns the budgets of its runs. The office shows them on the HQ and on the stats of each Paperclip bot, and sets no second limit on those runs. Office sessions keep the office spend limit.
+- **Supervise in office.** An agent whose runs skip the office shows "Unsupervised". To hold its Claude Code calls here, open the **Agents** screen of a Security room, click **Paperclip** at the top of the screen, click **Supervise in office** on the agent, then **Confirm** on the wall. The office sends one change of that agent's adapter config to Paperclip: `engine: cli`, `dangerouslySkipPermissions: false`, and `--permission-mode default --settings <this office's office-hooks file>` at the end of its `extraArgs`. Its other arguments stay, but a flag that lets a run approve its own calls or turns off hooks goes, with its values: `--dangerously-skip-permissions`, `--allow-dangerously-skip-permissions`, `--permission-prompt-tool`, `--allowedTools` (`--allowed-tools`), `--managed-settings`, `--bare` and `--safe-mode`. All three settings are needed (spike #75): the default ACP engine approves every call and ignores the arguments, and without `--permission-mode default` the machine default (Auto) asks nothing. Only a `claude_local` agent can be set up. The office reads the agent from Paperclip again just before it sends the change, so a change you made in Paperclip a moment before stays, and once more after it: when Paperclip saved other arguments than the office sent, the feed says so and the agent shows what Paperclip saved. Claude Code loads only the last `--settings`, so an own settings file of the agent no longer loads after the change, and the feed names it. The agent shows Unsupervised until Paperclip has saved the change.
+- **Its runs in the office.** A supervised agent's run is a terminal-type session in the building of its folder. Its bot card says "Paperclip <role>, Claude Code" with the company and agent as owner, its task line shows its Paperclip task, and its stats show its Paperclip budget. Its requests wait like an office session (a Paperclip run has no terminal dialog): 15 minutes, because the command hook waits up to 1000 seconds (`hook.mjs` posts with `node:http`, #128). This is true for every run with Paperclip ids in its environment, also a run of a company that the office does not watch. A request that waits too long is denied with a reason, and when Paperclip still marks the run succeeded, the feed says that the office denied a call of it.
+- **What the office checks.** The office reads the command line of each run (Paperclip's `adapter.invoke` event). A run that starts without the office hooks, with a flag that lets it approve its own calls (such as `--allowedTools`, which Paperclip itself passes on a sandbox target), or on another computer is named in the feed, and the agent shows "Unsupervised: its last run skipped the office". An agent or a run that starts another program than `claude` (the `command` setting) is "Partly supervised": the office cannot tell if that program uses the office hooks. So is an agent with a flag that loads plugins, agents or settings (`--plugin-dir`, `--plugin-url`, `--agents`, `--agent`, `--setting-sources`, ...), lets something else answer a call (`--sdk-url`, `--remote-control`, `--channels`), or that the office does not know: Supervise in office leaves these flags as they are. The office reads the arguments the way Claude Code 2.1.318 reads them, so a flag inside the value of another flag does not count. A cloud session (`--cloud`, `--environment`) is Unsupervised. In the agent's `env` the office reads only the names, never a value, and never changes it: a name that turns off hooks or permissions (such as `CLAUDE_CODE_SIMPLE`) makes the agent Unsupervised, and Supervise in office is not offered until you remove it in Paperclip. A name of the families `CLAUDE_CODE_*`, `CLAUDE_BG_*` and `NODE_*` that the office does not know makes the agent "Partly supervised" (a login, a provider choice and `NODE_ENV` do not). A project or routine that Paperclip lists carries an `env` too: the office reads its names the same way. Every project of the company counts, because an agent can be given an issue of any project. When Paperclip lists no `env` for a project or routine, or lists 500 issues (its default cut), or a list does not load, the agent is "Partly supervised": the office never reads what it cannot see as empty. "Supervised" means the office holds every call Claude Code asks about. Claude Code does not ask for a call that an allow rule in a settings file of the run's folder or your home folder allows, and the office does not read those files. The office cannot see the environment of the Paperclip process itself, which Paperclip passes to its runs too. A model profile or an issue that overrides the adapter config makes the agent "Partly supervised" too. Agents of other kinds (`codex_local`, `process`, `http`, ...) never reach the office hooks: they show in the HQ as Unsupervised, and the office cannot set them up.
+- **Not tested against a real Paperclip.** The routes and events come from the Paperclip source (0.3.1, checked again for the projects and routines routes and their `env` fields) and the spike on 2026.1023.0 (#75). The `engine` setting of `claude_local` is from the spike only: the 0.3.1 source has no such setting, so an agent without `engine: cli` shows Unsupervised; the tests use a fake Paperclip (`test/fixtures/fake-paperclip.mjs`). A live run with a supervised agent is still to do.
+
 ## How it works
 
 ```
@@ -286,7 +300,31 @@ An office on a port other than 4317 (`OFFICE_PORT`, `npm run start:branch`) writ
 - The office never edits `~/.claude/settings.json` or your credentials.
 - Saved sessions (`history.json`) contain Claude's replies, and `state.json` keeps schedule prompts and room notes. They stay on this machine, and only your Windows user, SYSTEM and Administrators can read them (set when the office starts). An agent edit of `state.json`, `history.json` or their per-port files is rated high, because schedules in them run later.
 - The cloud kinds (Azure AI Foundry, Copilot Studio) are off until you set an endpoint and a token. The office never signs in and never asks Azure for a token. It sends the token you made to the `https` Microsoft host you set, and to no other host. The token is never shown in the page, the chat or the feed, and the office does not write it to any file. At start the office takes `OFFICE_*_TOKEN` and `OFFICE_*_TOKEN_FILE` out of its environment, so the sessions and commands it starts do not get the token or the path to its file. Keep the token file outside the folders your agents work in.
-- Remote access is not supported. Reaching an agent that can run commands needs real login and encryption. If you want it from a phone, put the office behind Tailscale.
+- Paperclip HQ connects only to 127.0.0.1, follows no redirect and keeps no secret. It only reads Paperclip; the one write is Supervise in office for one agent, after the Confirm on the wall.
+- Remote access is off until you set it up (see **Remote access**). The office never opens a port: it listens on 127.0.0.1 only, and the agent routes (hooks, MCP, the OpenClaw gate) refuse every remote request.
+
+## Remote access
+
+You can open the office from your phone or laptop at an address on your own domain, for example `office.example.com`, through a Cloudflare Tunnel and Cloudflare Access. No router port is opened. Access lets only your email in, and the office also checks the signed Access login on every request from that address, so a request that did not pass Access is refused even if it reaches your PC. Tailscale is another way to do this; the office needs no setting for it.
+
+Set it up once:
+
+1. Install `cloudflared` on the PC and sign in to Cloudflare. Create a tunnel and route a host name to it (`cloudflared tunnel route dns <tunnel> office.example.com`). In the tunnel config, point the host at `http://127.0.0.1:4317`. The office does not start or change cloudflared.
+2. In Cloudflare Zero Trust, add a self-hosted Access application for `office.example.com`. Add one Allow policy: your email only. Copy the **Application Audience (AUD) tag** from the application, and your **team domain** (`<name>.cloudflareaccess.com`) from Settings.
+3. Set these four variables for the office (all four are needed) and start it:
+
+| Variable | Value |
+| --- | --- |
+| `OFFICE_REMOTE_HOST` | The public host name, `office.example.com`. No port. |
+| `OFFICE_REMOTE_TEAM` | The Access team domain, `<name>.cloudflareaccess.com`. |
+| `OFFICE_REMOTE_AUD` | The application audience tag. |
+| `OFFICE_REMOTE_EMAILS` | Your email. A comma separated list for more than one. |
+
+`OFFICE_REMOTE_PORT` (default `4317`) is the one port that honors them. A branch office or a test office never does. If a setting is missing or wrong, the office stays off for remote requests and the start log names it. When it is on, the log says `Remote access is on at https://...`, and the Attach sessions dialog shows the address.
+
+Open `https://office.example.com` and sign in with Access. The page takes its session from your Access login with no launch code, and the session ends when the Access login ends. Each sign-in writes a feed line with your email. Looser changes (Allow rules, No limit, a pull request, removing a room) still need their painted Confirm.
+
+What does not work from the remote address: hooks, MCP and the OpenClaw gate. Agents run on the PC and post to `127.0.0.1`. Check once by hand: a request to the address without Access (for example with `curl`) must give 403 or the Access login page.
 
 ## Troubleshooting
 
