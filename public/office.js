@@ -1213,7 +1213,7 @@
     return h('aside', { className: 'board-panel', 'aria-label': 'Board of ' + d.room },
       h(A.Panel, { title: d.room + (d.branch ? ' · ' + d.branch : ''), count: plural(d.sessions.length, 'session', 'sessions') },
         h('div', { className: 'board-b' },
-          h(NeedsButton, { count: askCount(p.sessions), onGo: p.onGo }),
+          h(NeedsButton, { onGo: p.onGo }),
           h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onClose }, 'Back to the room'), h('span', { className: 'note' }, 'Esc also goes back.')),
           d.pin ? h('p', { className: 'note board-pin' }, 'Note from ' + d.pin.by + ': ' + d.pin.text) : null,
           d.todos.length ? h(A.PlanCard, { title: 'To do', goal: d.goal ? clip(d.goal, 120) : undefined, steps: d.todos.map(function (t, i) { return { id: 't' + i, text: t.text, status: window.OfficeVocab.todoStatus(t) }; }) })
@@ -1241,7 +1241,7 @@
     return h('aside', { className: 'board-panel', 'aria-label': 'Stats of ' + ((info.place && info.place.roomName) || 'this room') },
       h(A.Panel, { title: ((info.place && info.place.roomName) || 'Room') + ' · stats', count: plural(v.sessions, 'session', 'sessions') },
         h('div', { className: 'board-b' },
-          h(NeedsButton, { count: askCount((info.sessions || []).concat(p.extra || [])), onGo: p.onGo }),
+          h(NeedsButton, { onGo: p.onGo }),
           h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onClose }, 'Back to the room'), h('span', { className: 'note' }, 'Esc also goes back.')),
           h('ul', { className: 'stats-list' },
             row('Working', String(v.working)), row('Needs you', String(v.waiting)), row('Tool calls', String(v.toolCalls)),
@@ -1427,10 +1427,12 @@
   // ---------- requests: the paper and the note on the desk (#90, desk.js) ----------
   // A request is answered on the desk, in the scene: a permission request is a paper with Approve and Decline stamps, a question is a
   // note with a text field. The panels and the look bar carry one button, which goes to the oldest request.
-  function askCount(list) { var n = 0; (list || []).forEach(function (x) { n += window.OfficeVocab.requests(x).length; }); return n; }
+  // The count is the one queue's (every building, #146), the same number the button goes to the oldest of.
+  function useQueueCount() { var snap = useSnapshot(); return snap ? window.officeAdapter.queue(snap).count : 0; }
   function NeedsButton(p) {
-    if (!(p.count > 0)) return null;
-    return h('div', { className: 'needs-go' }, h(A.Button, { variant: 'emphasis', icon: 'waiting', onClick: p.onGo }, 'Needs you · ' + p.count + '. Go to the request'));
+    var count = useQueueCount();
+    if (!(count > 0)) return null;
+    return h('div', { className: 'needs-go' }, h(A.Button, { variant: 'emphasis', icon: 'waiting', onClick: p.onGo }, 'Needs you · ' + count + '. Go to the request'));
   }
 
   // ---------- a screen in the room, looked at up close (scene-host.js focus) ----------
@@ -1467,12 +1469,12 @@
   var LOOK_ICON = { board: 'plan', notes: 'memory', stats: 'cost', terminal: 'terminal', desk: 'add', lobby: 'building' };
   // While the camera looks at a screen: back to the room, or the screen's second step (the same as a second click).
   // It sits at the bottom of the free part of the view, and the screen is framed above it.
-  // asks: sessions with open requests, shown in the bar while the page hides the HUD columns for the look (a Security screen
+  // The Needs you button in the bar (the one queue's count) shows while the page hides the HUD columns for the look (a Security screen
   // at 820 px and below, review M6), so an approval never hides. The bar is placed again when they change.
   function LookBar(p) {
     var ref = React.useRef(null);
     var ps = useState(null), pos = ps[0], setPos = ps[1];
-    var asks = p.asks || [], askKey = String(askCount(asks));
+    var askKey = String(useQueueCount());
     var placeRef = React.useRef(null);
     React.useLayoutEffect(function () {
       function place() {
@@ -1493,7 +1495,7 @@
     // A screen with no second step (a Security room screen: its cells take the clicks) has the Back button only.
     return h('div', { ref: ref, className: 'look-bar', role: 'group', 'aria-label': 'Screen in view', style: pos ? { left: pos.left, top: pos.top } : { visibility: 'hidden' } },
       p.agents ? h(LookCard, { agents: p.agents, onInspect: p.onInspect }) : null,
-      h(NeedsButton, { count: askCount(asks), onGo: p.onGo }),
+      p.layout ? h(NeedsButton, { onGo: p.onGo }) : null,   // only while the page hides the HUD columns (a Security screen at 820 px and below)
       h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onBack }, 'Back to the room'),
       p.verb ? h(A.Button, { variant: 'quiet', icon: p.icon, onClick: p.onOpen }, p.verb) : null);
   }
@@ -1787,7 +1789,7 @@
   // ---------- Needs you: every open request and question of every building ----------
   function NeedsDialog(p) {
     var snap = useSnapshot();
-    var list = snap ? window.officeAdapter.requests(snap) : [];
+    var list = snap ? window.officeAdapter.queue(snap).items : [];
     var bz = useState(''), busy = bz[0], setBusy = bz[1], box = React.useRef(null), lastIdx = React.useRef(0), M = useMerge(p.toast);
     // After an answer the row goes. Keep the focus inside the dialog, on the row that took its place.
     useEffect(function () { refocusRow(box.current, lastIdx.current); }, [list.map(function (r) { return r.id; }).join('|')]);
@@ -2057,7 +2059,8 @@
     var cs = useState(function () { try { return localStorage.getItem('ao-building'); } catch (x) { return null; } }), cur = cs[0], setCur = cs[1];
     function pick(key) { setCur(key); try { localStorage.setItem('ao-building', key); } catch (x) { /* private window */ } }
     var list = snap ? window.officeAdapter.buildings(snap) : [];
-    var needs = snap ? window.officeAdapter.requests(snap) : [];   // every open request of every building (Needs you)
+    var queue = snap ? window.officeAdapter.queue(snap) : null;
+    var needs = queue ? queue.items : [];   // the one queue: every open request of every building, oldest first (Needs you)
     var hasCur = list.some(function (b) { return b.key === cur; });
     // Show the chosen building while it has sessions; when it empties, go where the work is.
     var shown = hasCur || (!list.length && cur != null) ? cur : (list.length ? list[0].key : '');
@@ -2167,16 +2170,20 @@
       requestAnimationFrame(wantDesk);
     }
     // Needs you (the scene's top bar, the city panel, the bezel count of a screen in focus): one tap goes to the oldest open request
-    // of every building (needs is officeAdapter.requests, oldest first, the count of the one Notifier), at the desk screen of its
+    // of every building (needs is officeAdapter.queue(snap).items, oldest first, the count of the one Notifier), at the desk screen of its
     // session (#89), where the request shows with Approve and Decline.
     // The oldest request: the camera looks at its paper or note on the desk. When that desk is not on screen yet, the scene goes
     // there (its monitor) and the next press finds the paper.
     function goOldest() {
-      var r = needs[0];
-      if (!r) return;
-      if (!r.uid) { setDlg({ name: 'needs' }); return; }   // a Ready to merge decision has no desk (#93)
-      if (deskRef.current && r.id && cur2.view === 'office' && deskRef.current.show(r.id, false)) return;
-      openDesk(r.uid, 'chat');
+      openQueueItem(queue && queue.oldest);
+    }
+    // Every surface opens a request through here (the top bar, the panels, the bezel, a toast): the queue says how it opens.
+    function openQueueItem(r) {
+      var way = queue && queue.reach(r);
+      if (!way) return;
+      if (way.via === 'list') { setDlg({ name: 'needs' }); return; }   // a Ready to merge decision has no desk (#93)
+      if (deskRef.current && way.id && cur2.view === 'office' && deskRef.current.show(way.id, false)) return;
+      openDesk(way.uid, 'chat');
     }
     function noteKey(roomId) { return mount ? mount.noteKey(roomId) : ''; }   // the server's key for the room (place.mjs)
     useEffect(function () { return function () {
@@ -2316,7 +2323,7 @@
       onNotify: function (n) {
         if (n.kind !== 'request' && n.kind !== 'error') return;
         var ns = mount ? mount.session(n.bot) : null;   // the session, so the toast and its Open outlive a scene change
-        toast({ tone: n.kind === 'error' ? 'error' : 'warning', title: n.bot, text: n.text, bot: n.bot, req: n.kind === 'request', uid: ns ? ns.uid : '', action: { label: 'Open', onClick: function () { if (ns && n.kind === 'request') openDesk(ns.uid, 'chat'); else if (ns) goTo(ns); else if (officeRef.current) officeRef.current.select(n.bot); } } });
+        toast({ tone: n.kind === 'error' ? 'error' : 'warning', title: n.bot, text: n.text, bot: n.bot, req: n.kind === 'request', uid: ns ? ns.uid : '', action: { label: 'Open', onClick: function () { var qi = n.kind === 'request' && window.officeAdapter.queue().find(n.id); if (qi) openQueueItem(qi); else if (ns) goTo(ns); else if (officeRef.current) officeRef.current.select(n.bot); } } });
       },
       ambient: ambient, onAmbientOpen: function () { setAmbient(false); }, onReady: function (o) {
         officeRef.current = o; readyKey.current = sceneKey;
@@ -2633,7 +2640,7 @@
         rect: function () { return hostRef.current ? hostRef.current.rect() : null; }, flying: function () { return hostRef.current ? hostRef.current.flying() : false; },
         onClose: function () { if (boardRef.current) boardRef.current.refresh(); blurScene(); } }) : null,
       look && !board && hostRef.current ? h(LookBar, { key: look.key, verb: look.verb, agents: look.item && look.item.roomId && look.kind !== 'security' && mount ? roomAndSel(look.item.roomId) : null, onInspect: goTo, icon: LOOK_ICON[look.kind] || 'zoom-in', toast: toast, layout: secLook,
-        onGo: goOldest, asks: secLook && snap ? (snap.sessions || []).filter(function (s) { return window.OfficeVocab.requests(s).length > 0; }) : [],
+        onGo: goOldest,
         free: function (el) { return hostRef.current ? hostRef.current.free(sceneCovers(el)) : null; },
         onPlaced: function () { if (hostRef.current) hostRef.current.refit(); },
         onBack: blurScene, onOpen: function () { if (hostRef.current) hostRef.current.open(); } }) : null,

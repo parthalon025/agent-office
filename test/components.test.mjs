@@ -83,8 +83,9 @@ test('office.js: no dock and no welcome card; the Reception holds the office act
 test('office.js: Needs you in the scene top bar and the city panel: the Notifier count, and one tap goes to the oldest request', () => {
   assert.match(office, /waitingCount: needs\.length, onWaiting: goOldest,/, 'the scene: the page total and the oldest request');
   assert.match(office, /h\(A\.Notifier, \{ enabled: alertsOn\(\), count: needs\.length,/, 'the same count as the tab title');
-  assert.match(office, /function goOldest\(\) \{\s+var r = needs\[0\];\s+if \(!r\) return;\s+(?:if \(!r\.uid\)[^\n]*\s+)?if \(deskRef\.current && r\.id && cur2\.view === 'office' && deskRef\.current\.show\(r\.id, false\)\) return;\s+openDesk\(r\.uid, 'chat'\);/, 'the oldest request: the camera looks at its paper or note (#90), else the scene goes to its desk (#89)');
-  assert.match(office, /if \(!r\.uid\) \{ setDlg\(\{ name: 'needs' \}\); return; \}/, 'a Ready to merge decision with no desk opens the Needs you list (#93)');
+  assert.match(office, /function goOldest\(\) \{\s+openQueueItem\(queue && queue\.oldest\);/, 'the oldest request of the one queue (#146)');
+  assert.match(office, /if \(deskRef\.current && way\.id && cur2\.view === 'office' && deskRef\.current\.show\(way\.id, false\)\) return;\s+openDesk\(way\.uid, 'chat'\);/, 'the camera looks at its paper or note (#90), else the scene goes to its desk (#89)');
+  assert.match(office, /if \(way\.via === 'list'\) \{ setDlg\(\{ name: 'needs' \}\); return; \}/, 'a Ready to merge decision with no desk opens the Needs you list (#93)');
   assert.match(office, /h\(CityView, \{ key: 'city', shown: shown, onEnter: enter, needs: needs\.length, onNeeds: goOldest, onHq: function \(\) \{ setDlg\(\{ name: 'hq' \}\); \} \}\)/, 'the city too');
   assert.match(office, /p\.needs > 0 \? h\(A\.Button, \{ variant: 'emphasis', icon: 'waiting', className: 'city-needs',[^\n]*onClick: p\.onNeeds \}, 'Needs you · ' \+ p\.needs\)/);
   assert.match(css, /@media \(pointer: coarse\) \{ \.city-needs \{ min-height: 44px; \} \}/);
@@ -203,7 +204,7 @@ test('office.js and office.css: a Security screen in focus at 820 px and below g
   assert.match(js, /useLayoutEffect\(function \(\) \{ var el = document\.getElementById\('office'\); if \(el\) el\.classList\.toggle\('sec-look', hideHud\)/, 'set in the commit, before the look bar places itself');
   assert.match(js, /layout: secLook/);
   assert.match(js, /\[hideHud\]\);/, 'the screen is framed again when the class changes');
-  assert.match(js, /h\(LookBar, \{[^}]*asks:/, 'the look bar gets the open requests');
+  assert.match(js, /var askKey = String\(useQueueCount\(\)\);/, 'the look bar counts the one queue');
   const m = /@media \(max-width: 820px\) \{\s*#office\.sec-look \.ao-hud-left, #office\.sec-look \.ao-hud-right:not\(\.ao-hud-inbox\) \{ visibility: hidden; pointer-events: none; \}/.exec(css);
   assert.ok(m, 'the rule in office.css');
 });

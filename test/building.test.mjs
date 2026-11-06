@@ -1786,3 +1786,32 @@ test('desk targets: a paper for each request, a note for each question, an open 
   pend.risk = 'low'; r.push();
   assert.equal(m.deskTargets().papers[0].always, 'Bash(rm *)', 'a low-risk paper offers it');
 });
+
+test('queue: one model over every building, oldest first, every item reachable (#146)', async () => {
+  const r = rig({ repos: [{ path: REPO_B, worktrees: [{ branch: 'main', root: REPO_B }] }] });
+  const none = r.store.queue();
+  assert.deepEqual([none.items, none.count, none.oldest, none.find('x'), none.reach(null)], [[], 0, null, null, null], 'no snapshot, empty queue');
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'b', cwd: REPO_B });
+  r.t += 10;
+  r.tracker.permissionRequest(slimPayload({ ...HOOKS.permission, session_id: 'b', cwd: REPO_B }, null));
+  r.t += 10;
+  const sa = [...r.tracker.sessions.values()].find((s) => s.cwd === REPO_A);
+  r.tracker.askQuestion(sa, 'Use the old schema?');
+  r.push();
+  const q = r.store.queue();
+  assert.deepEqual(q.items, r.store.requests(), 'the queue is the requests list: one owner');
+  assert.equal(q.count, 2);
+  assert.equal(q.oldest, q.items[0]);
+  assert.ok(q.items[0].t <= q.items[1].t, 'oldest first across buildings');
+  assert.notEqual(q.items[0].building, q.items[1].building);
+  for (const it of q.items) {
+    assert.equal(q.find(it.id), it, 'every item is found by id');
+    assert.deepEqual(q.reach(it), { via: 'desk', uid: it.uid, id: it.id }, 'a session item opens at its desk, where Approve and Decline are');
+  }
+  assert.deepEqual(q.reach({ id: 'm1', uid: null }), { via: 'list' }, 'an item with no desk opens in the list');
+  r.tracker.sessions.forEach((s) => { s.status = 'ended'; });
+  r.push();
+  assert.equal(r.store.queue().count, 0);
+  assert.equal(r.store.queue().oldest, null);
+});
