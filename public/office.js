@@ -10,16 +10,16 @@
   var h = React.createElement, A = window.AgentOffice, useState = React.useState, useEffect = React.useEffect,
       useMemo = React.useMemo;
   var Bezel = O.Bezel, BoardPanel = O.BoardPanel, Changes = O.Changes,
-      DEFAULT_KIND = O.DEFAULT_KIND, DeskScreen = O.DeskScreen, ExtensionsDialog = O.Extensions.Dialog, F = O.F,
-      FloorsDialog = O.FloorsDialog, FlowDialog = O.FlowDialog, HooksDialog = O.HooksDialog, HqDialog = O.Hq.Hq,
+      DEFAULT_KIND = O.DEFAULT_KIND, DeskScreen = O.Screens.Desk, ExtensionsDialog = O.Extensions.Dialog, F = O.F,
+      FloorsDialog = O.FloorsDialog, FlowDialog = O.Merge.Flow, HooksDialog = O.HooksDialog, HqDialog = O.Hq.Hq,
       KindsDialog = O.KindsDialog, LOOK_ICON = O.LOOK_ICON, LookBar = O.LookBar, MODELS = O.MODELS, MODES = O.MODES,
-      ManagerDialog = O.Hq.Manager, NeedsDialog = O.NeedsDialog, NoteScreen = O.NoteScreen, NotesEditor = O.NotesEditor,
-      OpenDialog = O.OpenDialog, PHONE_MAX = O.PHONE_MAX, PastDialog = O.PastDialog, PersonasDialog = O.Characters.Dialog,
-      PhoneView = O.PhoneView, RecapDialog = O.Reception.Recap, ReceptionDialog = O.Reception.Reception, RoomDialog = O.RoomDialog,
+      ManagerDialog = O.Hq.Manager, NeedsDialog = O.Needs.Dialog, NoteScreen = O.Screens.Note, NotesEditor = O.NotesEditor,
+      OpenDialog = O.OpenDialog, PHONE_MAX = O.Needs.PHONE_MAX, PastDialog = O.PastDialog, PersonasDialog = O.Characters.Dialog,
+      PhoneView = O.Needs.Phone, RecapDialog = O.Reception.Recap, ReceptionDialog = O.Reception.Reception, RoomDialog = O.RoomDialog,
       SchedulesDialog = O.Schedules.Dialog, SessionsDialog = O.SessionsDialog, StatsPanel = O.StatsPanel,
       TourCard = O.Reception.TourCard, TrustDialog = O.Hq.Trust, WANT_MS = O.WANT_MS, client = O.client, clip = O.clip, cssMs = O.cssMs,
       getInfo = O.getInfo, kindOf = O.kindOf, layerMemory = O.layerMemory, noteLayer = O.noteLayer,
-      openPalette = O.openPalette, plural = O.plural, reduced = O.reduced, resetText = O.resetText,
+      openPalette = O.Needs.openPalette, plural = O.plural, reduced = O.reduced, resetText = O.resetText,
       sceneCovers = O.sceneCovers, sceneName = O.sceneName, setTourSeen = O.Reception.setTourSeen, tourSeen = O.Reception.tourSeen,
       useChatBot = O.useChatBot, useSnapshot = O.useSnapshot;
 

@@ -499,7 +499,7 @@ test('writeOwnerOnly with the real icacls: only the user, SYSTEM and Administrat
 test('no token in the page source, no token from the URL, no plain token compare in the server', () => {
   const html = read('public/index.html');
   assert.doesNotMatch(html, /__TOKEN__|office-token/);
-  for (const f of ['public/adapter.js', 'public/page-core.js', 'public/dialogs.js', 'public/schedules.js', 'public/extensions.js', 'public/hq.js', 'public/characters.js', 'public/reception.js', 'public/panels.js', 'public/changes.js', 'public/needs.js', 'public/office.js']) {
+  for (const f of ['public/adapter.js', 'public/page-core.js', 'public/skills.js', 'public/dialogs.js', 'public/schedules.js', 'public/extensions.js', 'public/hq.js', 'public/characters.js', 'public/reception.js', 'public/panels.js', 'public/changes.js', 'public/screens.js', 'public/merge.js', 'public/needs.js', 'public/office.js']) {
     const src = read(f);
     assert.doesNotMatch(src, /office-token|x-office-token|[?&]t=/, f);
   }

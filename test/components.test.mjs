@@ -38,9 +38,9 @@ const office = readFileSync(join(pub, 'office.js'), 'utf8').replace(/\r\n/g, '\n
 // #1 story 26: office.js is split by concern into page files that share window.OfficePage. A rule about one part reads the file
 // that holds it; a rule that holds for the whole page (a name that must not come back, a count) reads all of them.
 const page = (f) => readFileSync(join(pub, f), 'utf8').replace(/\r\n/g, '\n');
-const PAGE_FILES = ['page-core.js', 'dialogs.js', 'schedules.js', 'extensions.js', 'hq.js', 'characters.js', 'reception.js', 'panels.js', 'changes.js', 'needs.js', 'office.js'];
+const PAGE_FILES = ['page-core.js', 'skills.js', 'dialogs.js', 'schedules.js', 'extensions.js', 'hq.js', 'characters.js', 'reception.js', 'panels.js', 'changes.js', 'screens.js', 'merge.js', 'needs.js', 'office.js'];
 const pageAll = PAGE_FILES.map(page).join('\n');
-const core = page('page-core.js'), panels = page('panels.js'), changesJs = page('changes.js'), extra = page('reception.js');
+const core = page('page-core.js'), panels = page('panels.js'), changesJs = page('changes.js'), screensJs = page('screens.js'), extra = page('reception.js');
 
 test('the page files load in order before chat-extras.js, and the server serves each one (#1 story 26)', () => {
   const html = readFileSync(join(pub, 'index.html'), 'utf8');
@@ -166,7 +166,7 @@ test('office.js: pinned screens replace the terminal and changes panels, and eve
   const js = office, css = readFileSync(join(pub, 'office.css'), 'utf8');
   assert.doesNotMatch(pageAll, /TerminalPanel|terminal-panel/, 'no terminal side panel');
   assert.doesNotMatch(css, /\.terminal-panel/, 'no terminal side panel style');
-  const fn = (name) => { const at = panels.indexOf('function ' + name + '('); assert.ok(at >= 0, name); return panels.slice(at, panels.indexOf('\n  }\n', at)); };
+  const fn = (name) => { const at = (panels + screensJs).indexOf('function ' + name + '('); assert.ok(at >= 0, name); return (panels + screensJs).slice(at, (panels + screensJs).indexOf('\n  }\n', at)); };
   const fnC = (name) => { const at = changesJs.indexOf('function ' + name + '('); assert.ok(at >= 0, name); return changesJs.slice(at, changesJs.indexOf('\n  }\n', at)); };
   assert.match(fn('DeskScreen'), /h\(Bezel, \{ inline: true, count: p\.waiting/, 'the desk screen has the bezel count');
   assert.match(fnC('ChangesScreen'), /h\(Bezel, \{ inline: true, count: p\.waiting/, 'the changes screen has the bezel count');
@@ -182,7 +182,7 @@ test('office.js: pinned screens replace the terminal and changes panels, and eve
 // a request is open the bar takes the screen under the head with no cap and the tabs wait. The browser check measures it.
 test('office.js and office.css: on the desk screen the requests come first, and on a small screen they take the screen (review 89)', () => {
   const js = office, css = readFileSync(join(pub, 'office.css'), 'utf8');
-  const at = panels.indexOf('function DeskScreen('), desk = panels.slice(at, panels.indexOf('\n  }\n', at));
+  const at = screensJs.indexOf('function DeskScreen('), desk = screensJs.slice(at, screensJs.indexOf('\n  }\n', at));
   const head = desk.indexOf("h('div', { className: 'pin-head' }"), tabs = desk.indexOf('h(A.Tabs, {');
   assert.ok(head >= 0 && tabs > head, 'head, then the tabs (DOM order is the reading and focus order)');
   assert.doesNotMatch(pageAll, /RequestBar/, 'the request bar is gone (#90): a request is a paper or a note on the desk');
@@ -219,6 +219,6 @@ test('office.js: the screen waits are deadlines in time, a pinned screen hides t
   assert.equal((pageAll.match(/Date\.now\(\) > w\.until/g) || []).length, 1, 'the changes wait ends on a deadline');
   assert.match(js, /wantClock\(w, Date\.now\(\)/, 'the desk wait ends on a deadline in time (wantClock, #189)');
   assert.match(js, /var hideHud = secLook \|\| pinned;/, 'a pinned screen takes the same columns away as a Security screen');
-  assert.match(panels, /el\.querySelector\('#pin-chat-input, \.term-field'\)/, 'the message box takes focus');
+  assert.match(screensJs, /el\.querySelector\('#pin-chat-input, \.term-field'\)/, 'the message box takes focus');
   assert.match(panels, /bezelAt\(r, p\.host\.free\(\), 18\)/, 'the bezel is kept inside host.free()');
 });

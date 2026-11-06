@@ -19,7 +19,7 @@ npm test             # offline tests
 - Before you finish a UI change, run the design system checker:
 
 ```
-python kit/check.py public/index.html public/office.css public/page-core.js public/dialogs.js public/schedules.js public/extensions.js public/hq.js public/characters.js public/reception.js public/panels.js public/needs.js public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/persona.js public/lobby.js public/desk.js public/wheel-gate.js public/vocab.js public/scene-host.js public/building.js public/format.js public/toasts.js public/wire.js public/security.js components/bundle.css components/bundle.js kit/page.html
+python kit/check.py public/index.html public/office.css public/page-core.js public/skills.js public/dialogs.js public/schedules.js public/extensions.js public/hq.js public/characters.js public/reception.js public/panels.js public/needs.js public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/persona.js public/lobby.js public/desk.js public/wheel-gate.js public/vocab.js public/scene-host.js public/building.js public/format.js public/toasts.js public/wire.js public/security.js components/bundle.css components/bundle.js kit/page.html
 ```
 
 ## Branch ports
