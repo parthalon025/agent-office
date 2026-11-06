@@ -325,7 +325,7 @@ export function createManager(deps = {}) {
         return { ok: true };
       } catch (e) {
         const tasks = { ...((e && e.written) || (g.handoff && g.handoff.tasks) || {}) };
-        g.handoff = { company: (g.handoff && g.handoff.company) || '', tasks };
+        g.handoff = { company: (e && e.company) || (g.handoff && g.handoff.company) || '', tasks };
         const left = g.steps.filter((s) => !tasks[s.id]).length;
         stop(g, 'handoff-failed', `Handoff failed: ${Object.keys(tasks).length} of ${g.steps.length} tasks written, ${left} left. ${clip(e && e.message || e, 200)}`);
         return { ok: false, status: 502, reason: g.reason };
@@ -436,7 +436,7 @@ export function officeSource(manager) {
     kind: 'office',
     list(building) {
       return manager.snapshot().filter((g) => !building || g.building === building).map((g) => ({
-        id: g.id, building: g.building, goal: g.goal, status: g.status, reason: g.reason,
+        id: g.id, building: g.building, goal: g.goal, status: g.status, reason: g.reason, handoff: g.handoff || null,
         steps: g.steps.map((s) => ({ id: s.id, title: s.text, state: s.status, owner: s.owner, cost: null, model: s.tier || '' })),
       }));
     },
@@ -455,7 +455,7 @@ export function createPlanBoard({ sources = [], onChange = () => {} } = {}) {
         let mapped;
         try {
           mapped = src.list(building).map((p) => ({
-            id: p.id, building: p.building, goal: p.goal, status: p.status || '', reason: p.reason || '', frozen: p.frozen === true, source: src.kind, sourceWord: P.sourceWord(src.kind),
+            id: p.id, building: p.building, goal: p.goal, status: p.status || '', reason: p.reason || '', frozen: p.frozen === true, handoff: p.handoff || null, source: src.kind, sourceWord: P.sourceWord(src.kind),
             steps: p.steps.map((s) => {
               const state = P.stepState(s.state);
               return { id: s.id, title: s.title, state, word: P.stepWord(state), owner: s.owner || '', cost: Number.isFinite(s.cost) ? s.cost : null,

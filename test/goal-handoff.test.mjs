@@ -55,6 +55,23 @@ test('a handoff posts one task per step with the exact body, and the goal moves 
   } finally { await r.close(); }
 });
 
+test('the plan board carries the handoff record of a goal, so the page can show Handoff failed and Retry (#159)', async () => {
+  const { createPlanBoard, officeSource } = await import('../manager.mjs');
+  const r = await rig();
+  try {
+    await until(() => r.hq.state() === 'on', 'the events socket');
+    const board = createPlanBoard({ sources: [officeSource(r.m)] });
+    assert.equal(board.snapshot().plans[0].handoff, null);
+    r.pc.failIssueAfter = 2;
+    await r.m.handoff(r.id, r.send);
+    const p = board.snapshot().plans[0];
+    assert.equal(p.status, 'handoff-failed');
+    assert.deepEqual(Object.keys(p.handoff.tasks), [`${r.id}-1`, `${r.id}-2`]);
+    assert.equal(p.handoff.company, 'Acme Robotics');
+    board.close();
+  } finally { await r.close(); }
+});
+
 test('a failure after 2 tasks is Handoff failed; Retry creates only the rest, and a task is never doubled', async () => {
   const r = await rig();
   try {

@@ -748,7 +748,7 @@ export function createHq(deps = {}) {
         if (!made.id) throw httpError(502, 'Paperclip did not name the task it made.');
         written[step] = String(made.id);
       }
-    } catch (e) { throw Object.assign(e, { written }); }
+    } catch (e) { throw Object.assign(e, { written, company: name }); }
     refetchSoon(conn);
     return { written, company: name };
   }
