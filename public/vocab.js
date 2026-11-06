@@ -55,6 +55,12 @@
      hq               -> Paperclip HQ words (#76): status(agent) { key, word } (never waiting: a Paperclip approval is not an
                          office request), budget(b) ("$8.30 of $50.00 this month"), every(seconds) (a heartbeat), supervision(agent)
                          ("Supervised in office" or the label), state(snap.hq) (the connection as a line).
+     layers           -> the four layers of detail (ADR 0006): glance (is all fine), look (what is it doing, how is it going), inspect (exactly
+                         what happened), deep (proof and rules). order, opens(layer) (the next layer, '' at deep), surfaces (each surface's
+                         layer and the layer it opens), surface(id), mood(state) ({ key, word } of a worst state: calm, busy, needs you, failed),
+                         glance(fig, worst) ({ state, mood, text }: text only when something needs the owner, else ''), look(s) ({ intent, progress,
+                         cost }: one sentence, "2 of 5 steps" and the cost so far), remember(mem, place, layer) and layerFor(mem, place) (the layer
+                         a place is used at most; Glance for a new place). No page code invents a detail rule.
      platform(s, kinds) -> the bot card line: the supervision label or the kind word, after "Paperclip <role>, " for a Paperclip run.
 */
 (function (root) {
@@ -304,6 +310,50 @@
     word: function (v) { return SEC_WORD[v] || ''; }
   };
 
+  // ---------- layers (ADR 0006, #145) ----------
+  // Every surface shows one layer of detail and opens the next with one tap. Glance: a color and a mood, text only when
+  // something needs the owner. Look: one sentence of intent, goal progress, cost so far. Inspect: chat, terminal, timeline,
+  // diff, raw calls. Deep: the Security room, raw request text, logs. The facts live here; the page only reads them.
+  var LAYER_ORDER = ['glance', 'look', 'inspect', 'deep'];
+  function layerOpens(l) { var i = LAYER_ORDER.indexOf(l); return i >= 0 && i < LAYER_ORDER.length - 1 ? LAYER_ORDER[i + 1] : ''; }
+  var LAYER_SURFACES = bare({
+    city: { layer: 'glance' }, floor: { layer: 'glance' }, room: { layer: 'look' }, agent: { layer: 'look' },
+    chat: { layer: 'inspect' }, terminal: { layer: 'inspect' }, changes: { layer: 'inspect' }, timeline: { layer: 'inspect' },
+    security: { layer: 'deep' }, request: { layer: 'deep' }, logs: { layer: 'deep' }
+  });
+  Object.keys(LAYER_SURFACES).forEach(function (k) { LAYER_SURFACES[k].opens = layerOpens(LAYER_SURFACES[k].layer); });
+  var MOOD = { error: 'Failed', waiting: 'Needs you', review: 'Needs you', working: 'Busy', finished: 'Calm', resting: 'Calm' };
+  function mood(state) { var k = state || 'resting'; return { key: k, word: MOOD[k] || 'Calm' }; }
+  // fig: figures() of a city building, floor or room; worst: its worst state. Text only on need: "2 need you", or "Failed".
+  function glance(fig, worst) {
+    var f = fig || {}, w = worst || (f.waiting > 0 ? 'waiting' : f.working > 0 ? 'working' : 'resting');
+    var text = w === 'error' ? 'Failed' : w === 'waiting' && f.waiting > 0 ? f.waiting + (f.waiting === 1 ? ' needs you' : ' need you') : w === 'waiting' || w === 'review' ? 'Needs you' : '';
+    return { state: w, mood: mood(w), text: text };
+  }
+  // The Look layer of one session: intent (one sentence), progress ("2 of 5 steps", '' with no plan) and cost so far.
+  function look(s) {
+    var t = (s && s.todos) || [], done = t.filter(function (x) { return x.status === 'completed'; }).length;
+    var intent = oneLine(s && s.prompt) || taskLine(s || {});
+    return { intent: clip(intent, 120), progress: t.length ? done + ' of ' + t.length + (t.length === 1 ? ' step' : ' steps') : '',
+      cost: s && s.costUnknown ? 'unknown' : s && typeof s.cost === 'number' ? money(s.cost) : '' };
+  }
+  // The layer a place is used at most: mem is { place: { layer: count } }. A tie goes to the lower layer. A new place opens at Glance.
+  function remember(mem, place, layer) {
+    var m = Object.assign({}, mem || {});
+    if (!place || LAYER_ORDER.indexOf(layer) < 0) return m;
+    var c = Object.assign({}, own(m, place) ? m[place] : {});
+    c[layer] = (c[layer] || 0) + 1;
+    m[place] = c;
+    return m;
+  }
+  function layerFor(mem, place) {
+    var c = own(mem, place) ? mem[place] : null, best = 'glance', n = 0;
+    LAYER_ORDER.forEach(function (l) { if (c && (c[l] || 0) > n) { n = c[l]; best = l; } });
+    return best;
+  }
+  var layers = { order: LAYER_ORDER, opens: layerOpens, surfaces: LAYER_SURFACES, surface: function (id) { return own(LAYER_SURFACES, id) ? LAYER_SURFACES[id] : null; },
+    mood: mood, glance: glance, look: look, remember: remember, layerFor: layerFor };
+
   function kindWord(s, kinds) {
     var id = s && s.provider;
     if (!id) return '';
@@ -387,5 +437,5 @@
     return label + ' does not report cost, so the office shows it as unknown and no spend limit can stop it. Check the spend in its own account.';
   }
 
-  root.OfficeVocab = { stateWord: stateWord, laneOf: laneOf, limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform, hq: hq, plan: plan };
+  root.OfficeVocab = { stateWord: stateWord, laneOf: laneOf, limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform, hq: hq, plan: plan, layers: layers };
 })(typeof globalThis !== 'undefined' ? globalThis : window);
