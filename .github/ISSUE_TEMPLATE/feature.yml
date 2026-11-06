@@ -1,0 +1,22 @@
+name: Feature request
+description: Ask for a new feature or a change.
+labels: [needs-triage]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: Say what you cannot do today, and why it matters.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: The change you want
+      description: Say what the office should do. A sketch or a screenshot helps.
+    validations:
+      required: true
+  - type: textarea
+    id: other
+    attributes:
+      label: Other ways to solve it

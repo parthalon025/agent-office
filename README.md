@@ -61,3 +61,7 @@ All the jobs, with every control, are in [Using the office](docs/using-the-offic
 | [Troubleshooting](docs/troubleshooting.md) | Problems and fixes, by kind of session. |
 | [Development](docs/development.md) | Commands, tests, the core-jobs gate, branch ports, how it works and the file map. |
 | [DS-README.md](DS-README.md) | The design system: rules, recipes, reference and concepts. |
+
+## Contributing and license
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before you open a pull request. To report a security problem in private, follow [SECURITY.md](SECURITY.md). The office is licensed under the [MIT license](LICENSE).

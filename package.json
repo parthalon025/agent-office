@@ -2,6 +2,11 @@
   "name": "agent-office",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
+  "author": "parthalon025 (Justin McFarland)",
+  "repository": { "type": "git", "url": "https://github.com/parthalon025/agent-office.git" },
+  "bugs": { "url": "https://github.com/parthalon025/agent-office/issues" },
+  "homepage": "https://github.com/parthalon025/agent-office#readme",
   "type": "module",
   "description": "A floor-plan dashboard for Claude Code sessions, fed by hooks. Open and close sessions from the office.",
   "scripts": {
