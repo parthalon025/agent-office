@@ -249,7 +249,7 @@
     else m = m.replace(/-/g, ' ');
     return m + (big ? ' 1M' : '');
   }
-  function ctxPct(s) { return s && s.ctxTokens && s.ctxWindow ? Math.min(100, Math.round(100 * s.ctxTokens / s.ctxWindow)) : null; }
+  function ctxPct(s) { return window.OfficeVocab.context(s).pct; }
   function fmtTok(n) { return window.OfficeFormat.tokens(n); }
   // A session's spend: "unknown" when its agent reports no cost (an ACP agent), never $0.00 (format.js cost).
   function money(c, unknown) { return window.OfficeFormat.cost(c, unknown); }
@@ -276,7 +276,7 @@
     if (window.OfficeVocab.supervision(s)) S.rows.push(['Oversight', window.OfficeVocab.supervision(s)]);
     // A Paperclip run (#76): its role and the budget Paperclip keeps for the agent. The office sets no second limit on it.
     if (s.hq) S.rows.push(['Paperclip', s.hq.role + (s.hq.budget ? DOT + window.OfficeVocab.hq.budget(s.hq.budget) : '')]);
-    S.rows.push(['Context', pct == null ? '--' : pct + '%', 'bar', pct]);
+    S.rows.push(['Context', window.OfficeVocab.context(s).word, 'bar', pct]);
     if (!todos.length) S.rows.push(['Tokens', u.tokens ? fmtTok(u.tokens) + (u.input ? DOT + Math.round(100 * (u.cached || 0) / u.input) + '% cached' : '') : '--']);
     S.rows.push(['Spend', money(s.cost, s.costUnknown) + DOT + plural(+s.turns || 0, 'turn', 'turns')]);
     if (!todos.length) S.rows.push(['Time', age(Date.now() - (+s.startedAt || Date.now()))], ['Tools', tools]);
@@ -288,7 +288,7 @@
     if (!s) return null;
     if (s.helper) return { left: 'Subagent', right: plural((s.calls || []).length, 'call', 'calls'), pct: null };
     var pct = ctxPct(s), right = [];
-    if (pct != null) right.push('context ' + pct + '%');
+    right.push('context ' + window.OfficeVocab.context(s).word);
     if (s.costUnknown || typeof s.cost === 'number') right.push(window.OfficeFormat.costLabel(s.cost, s.costUnknown));
     return { left: s.git && s.git.branch ? s.git.branch : base(s.cwd), right: right.join(DOT), pct: pct };
   }
@@ -872,5 +872,5 @@
     };
   }
 
-  window.OfficeTerminal = { attach: attach, lines: lines, timeline: timeline, status: status, toolName: toolName, stats: statsOf, trays: trays };
+  window.OfficeTerminal = { attach: attach, lines: lines, timeline: timeline, status: status, toolName: toolName, stats: statsOf, trays: trays, foot: footOf };
 })();

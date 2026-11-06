@@ -235,6 +235,8 @@ export function createAgentFramework(deps) {
     const text = body ? (isMember(st, r.author) ? `${r.author}: ${body}` : body) : '';
     if (text) st.last = text;
     emit(st, () => events.stream(s, { type: 'assistant', message: { id: r.id, content: text ? [{ type: 'text', text }] : [], usage: { input_tokens: r.input, output_tokens: r.output } } }));
+    // The window is the model server's (#164); the tokens are this response's prompt plus completion. Unknown window: no line.
+    if (st.window && (r.input || r.output)) emit(st, () => events.stream(s, { type: 'usage', ctx: { used: r.input + r.output, size: st.window } }));
   }
   function output(s, st, m) {
     const author = String(m.author || m.executor_id || '');
@@ -424,6 +426,7 @@ export function createAgentFramework(deps) {
         child, team, names: new Set(team.agents.map((a) => a.name)), tools: makeTools(s.cwd),
         busy: false, closed: false, ended: false, interrupted: false, failure: null, fatal: null, version: null, steps: 0,
         queue: [], waiting: new Map(), deleg: new Map(), resp: null, last: '', seq: 0,
+        window: (typeof target.server.windowOf === 'function' && target.server.windowOf(target.id)) || null,
       };
       teams.set(s.uid, st);
       s.pid = child.pid;

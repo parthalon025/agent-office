@@ -27,6 +27,21 @@ test('the stats monitor names the agent kind, and a to-do list keeps the rows it
   assert.equal(T.stats(null).note, 'No session at this desk.');
 });
 
+// #164: the Context row reads the one vocabulary rule: a percent when the agent reported both numbers, the word unknown otherwise.
+test('the Context row: a percent when the agent reports its context, "unknown" and an empty bar when it does not', () => {
+  const s = { uid: 'u', headless: true, model: 'm', cost: 0, turns: 1, startedAt: Date.now(), calls: [], todos: [] };
+  const ctx = (x) => T.stats({ ...s, ...x }, 'Hermes Agent').rows.find((r) => r[0] === 'Context');
+  assert.deepEqual(ctx({ ctxTokens: 15259, ctxWindow: 128000 }), ['Context', '12%', 'bar', 12]);
+  assert.deepEqual(ctx({ ctxTokens: 0, ctxWindow: 128000 }), ['Context', '0%', 'bar', 0], 'an empty context is 0%, not unknown');
+  assert.deepEqual(ctx({ ctxTokens: 900000, ctxWindow: 128000 }), ['Context', '100%', 'bar', 100]);
+  for (const x of [{}, { ctxTokens: 5000 }, { ctxWindow: 128000 }, { ctxTokens: 5, ctxWindow: 0 }, { ctxTokens: null, ctxWindow: null }]) assert.deepEqual(ctx(x), ['Context', 'unknown', 'bar', null], JSON.stringify(x));
+  assert.deepEqual(globalThis.OfficeVocab.context({ ctxTokens: 50, ctxWindow: 200 }), { pct: 25, word: '25%' });
+  assert.equal(T.foot({ ...s, ctxTokens: 15259, ctxWindow: 128000 }).right, 'context 12% · $0.00');
+  assert.equal(T.foot({ ...s }).right, 'context unknown · $0.00', 'the desk footer says unknown too, and draws no bar');
+  assert.equal(T.foot({ ...s }).pct, null);
+  assert.deepEqual(globalThis.OfficeVocab.context(null), { pct: null, word: 'unknown' });
+});
+
 test('desk trays (#93): the inbox tray holds queued office messages, the outbox tray holds what waits on the user', () => {
   assert.deepEqual(T.trays(null), { inbox: 0, outbox: 0 });
   assert.deepEqual(T.trays({}), { inbox: 0, outbox: 0 }, 'a session with no lists shows empty trays');

@@ -88,6 +88,7 @@ export const AGENTS = {
     label: 'OpenClaw', program: 'openclaw', args: ['acp'],
     gated: true, plugin: true,
     askTimeoutMs: null, gateway: true, minVersion: MIN_VERSION,
+    contextUsage: false, // its usage_update is Gateway session totals, not the tokens in context (#164): the Context bar stays unknown
     features: [], pin: null, // not run against a real Gateway yet: OpenClaw on the owner's PC (2026.1.29) is too old to start
     needs: ['Install OpenClaw so that openclaw.exe is on the PATH, then start its Gateway.'], // a .cmd shim from npm is not accepted (resolveExe)
   },
@@ -816,7 +817,8 @@ export function createAcp(deps) {
       }
       case 'usage_update':
         // Token totals (used, size) go to the stats. The cost the spec allows here is not read: the session stays "unknown".
-        emit(st, () => events.stream(s, { type: 'usage', used: u.used, size: u.size }));
+        // used is the tokens in context for an agent that follows the spec (#164); OpenClaw sends session totals (contextUsage: false).
+        emit(st, () => events.stream(s, spec.contextUsage === false ? { type: 'usage', used: u.used } : { type: 'usage', used: u.used, ctx: { used: u.used, size: u.size } }));
         break;
       default: break; // thoughts, commands, modes: not shown yet
     }
