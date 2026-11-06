@@ -2041,6 +2041,9 @@
     var deskUid = pinned && layer.kind === 'terminal' && layer.item ? layer.item.uid : null;
     var panelOpen = pinned || !!(board && (board.kind === 'board' || board.kind === 'stats'));
     useEffect(function () { var el = document.getElementById('office'); if (el) el.classList.toggle('has-panel', panelOpen); }, [panelOpen]);
+    // The spare room of an empty building takes no bots and no message: the DS broadcast bar is hidden then (office.css).
+    var spareNow = !!(mount && mount.spare && mount.spare());
+    useEffect(function () { var el = document.getElementById('office'); if (el) el.classList.toggle('no-rooms', spareNow); }, [spareNow]);
     // A side panel changes the free part of the view: the screen in focus is framed again beside it. The window too.
     useEffect(function () { if (hostRef.current) hostRef.current.refit(); }, [panelOpen]);
     // A Security room screen in focus (review M6): at 820 px and below office.css hides the floor list and the room card (the
@@ -2160,6 +2163,7 @@
           boardRef.current = window.OfficeBoard.attach(o, {
             host: host,
             room: function (id) { return mount.roomInfo(id); },
+            usable: function (id) { return mount.usable(id); },
             note: function (id) { var n = latestSnap.current && latestSnap.current.notes && latestSnap.current.notes[noteKey(id)]; return n ? n.text : ''; },
             tree: function (root) { return api('/api/tree', { root: root }); },
             stats: function (id) { return mount.figures(id); },

@@ -91,6 +91,11 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 @media (max-width: 820px) {
   #office.sec-look .ao-hud-left, #office.sec-look .ao-hud-right:not(.ao-hud-inbox) { visibility: hidden; pointer-events: none; }
 }
+/* the empty building's spare room has no bots: no broadcast bar, and no roster that says "No bots yet" */
+/* the roster keeps its box (visibility, not display): the DS camera reads the right column's left edge, and it does not
+   measure again when the class goes, so display: none would frame the first room small and off to the left */
+#office.no-rooms .ao-hud-cast { display: none; }
+#office.no-rooms .ao-hud-right:not(.ao-hud-inbox):not(.ao-hud-chat) { visibility: hidden; pointer-events: none; }
 
 /* ---------- dialogs ---------- */
 .ao-dialog { width: min(560px, calc(100vw - 32px)); }
