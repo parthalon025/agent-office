@@ -10,32 +10,19 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import net from 'node:net';
-import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { pageFile } from '../auth.mjs';
 import { officeFiles } from '../files.mjs';
 import { shortOf } from './fixtures/short-name.mjs';
+import { startOnFreePort, until as waitUntil, START_MS } from './fixtures/office-server.mjs';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 // shortRepo: the 8.3 short spelling of repo, or null when the volume keeps none (base is not made real on purpose: on
 // GitHub's Windows runner os.tmpdir() is C:\Users\RUNNER~1\..., and git answers the long path).
-let base, copy, work, home, repo, shortRepo, child, port, agentToken, pageToken, log = '';
+let base, copy, work, home, repo, shortRepo, office, port, agentToken, pageToken;
 
-const freePort = () => new Promise((resolve, reject) => {
-  const s = net.createServer();
-  s.listen(0, '127.0.0.1', () => { const { port: p } = s.address(); s.close(() => resolve(p)); });
-  s.on('error', reject);
-});
-const until = async (fn, what, ms = 15000) => {
-  const t0 = Date.now();
-  for (;;) {
-    const v = await fn();
-    if (v) return v;
-    if (Date.now() - t0 > ms) assert.fail(`timed out waiting for ${what}\n${log.slice(-800)}`);
-    await new Promise((r) => setTimeout(r, 50));
-  }
-};
+// The fixture's wait: long under load, and a failure shows the end of the server log.
+const until = (fn, what, ms = START_MS) => waitUntil(fn, what, { ms, log: () => office?.out() ?? '' });
 const post = (route, body, token, signal) => fetch(`http://127.0.0.1:${port}${route}`, {
   method: 'POST', headers: { 'content-type': 'application/json', 'x-office-token': token }, body: JSON.stringify(body || {}), signal,
 }).then(async (r) => ({ status: r.status, text: await r.text() })).then((r) => ({ ...r, json: (() => { try { return JSON.parse(r.text); } catch { return null; } })() }));
@@ -93,15 +80,15 @@ before(async () => {
     if (/\.(mjs|json|ps1)$/.test(f) && !/^(state|history)(-\d+)?\.json$/.test(f) && !f.startsWith('office-')) fs.copyFileSync(path.join(SRC, f), path.join(copy, f));
   }
   for (const d of ['providers', 'public']) fs.cpSync(path.join(SRC, d), path.join(copy, d), { recursive: true });
-  port = await freePort();
-  const env = { ...process.env, OFFICE_PORT: String(port), OFFICE_HOOKS: 'command', OFFICE_RATE_FILE: path.join(base, 'no-rate.json'), OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local'), USERPROFILE: home, HOME: home };
-  child = spawn(process.execPath, ['server.mjs'], { cwd: copy, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env });
-  child.stdout.on('data', (d) => { log += d; });
-  child.stderr.on('data', (d) => { log += d; });
+  const env = { ...process.env, OFFICE_HOOKS: 'command', OFFICE_RATE_FILE: path.join(base, 'no-rate.json'), OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local'), USERPROFILE: home, HOME: home };
+  // Ready is the server's own "is open" line, after it wrote its files; a busy port starts again on a new one.
+  const started = await startOnFreePort(copy, env);
+  ({ office, port } = started);
   const read = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')).token; } catch { return null; } };
   // the office's files carry the port in their names (files.mjs), as the port is not the default one
-  agentToken = await until(() => read(officeFiles(copy, port).token), 'the server to listen');
-  pageToken = await until(() => read(pageFile(env, port)), 'the page token file');
+  agentToken = read(officeFiles(copy, port).token);
+  pageToken = read(pageFile(started.env, port));
+  assert.ok(agentToken && pageToken, `the office is open but a token file is missing\n${office.out().slice(-800)}`);
   // A terminal Claude Code session in a folder outside git (building key ''), seated once its place is known.
   assert.equal((await hook(ev('SessionStart', { source: 'startup' }))).status, 200);
   await until(async () => (await sessionIn(work))?.place, 'the session to be placed');
@@ -114,7 +101,7 @@ before(async () => {
   }
 });
 after(async () => {
-  if (child) child.kill();
+  if (office) await office.stop();
   await new Promise((r) => setTimeout(r, 300)); // let Windows release the folder
   if (base) try { fs.rmSync(base, { recursive: true, force: true }); } catch { /* a temp folder may stay */ }
 });
