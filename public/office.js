@@ -753,11 +753,37 @@
   function ManagerDialog(p) {
     var snap = useSnapshot(), V = window.OfficeVocab, v = V.plan.board(snap && snap.plans);
     var bz = useState(''), busy = bz[0], setBusy = bz[1];
+    var ha = useState(null), ask = ha[0], setAsk = ha[1];   // { g, text, tasks }: the handoff waits for the painted Confirm (#159)
+    var connected = !!(snap && snap.hq && snap.hq.company);
     function act(route, body, key) {
       setBusy(key);
       api(route, body).then(function () { setBusy(''); }, function (x) { setBusy(''); p.toast({ tone: 'error', title: 'Manager', text: x.message }); });
     }
+    // The first call has no confirmed: the server answers 409 with the exact tasks it would create. The Confirm sends the same call again.
+    function handoff(g, confirmed) {
+      setBusy(g.id);
+      api('/api/goal/handoff', { id: g.id, confirmed: confirmed === true }).then(function () {
+        setBusy(''); setAsk(null); p.toast({ tone: 'success', title: 'Handed to Paperclip', text: g.goal });
+      }, function (x) {
+        setBusy('');
+        if (x.body && x.body.confirm === 'handoff' && !confirmed) { setAsk({ g: g, text: x.message, tasks: x.body.tasks || [] }); return; }
+        setAsk(null); p.toast({ tone: 'error', title: 'Handoff failed', text: x.message });
+      });
+    }
     var buildingName = function (key) { var r = ((snap && snap.repos) || []).filter(function (x) { return x.key === key; })[0]; return r ? r.name : ''; };
+    if (ask) {
+      var rows = V.plan.handoffRows(ask.tasks, ask.g.handoff && ask.g.handoff.tasks), todo = rows.filter(function (r) { return !r.written; }).length;
+      return h(A.Dialog, { open: true, title: 'Hand this goal to Paperclip', onClose: function () { setAsk(null); }, actions: [
+        h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setAsk(null); } }, 'Keep it here'),
+        h(A.Button, { key: 'y', variant: 'primary', icon: 'hq', loading: busy === ask.g.id, onClick: function () { handoff(ask.g, true); } }, 'Create ' + plural(todo, 'task', 'tasks'))] },
+        h('div', { className: 'form wide handoff-ask' },
+          h('p', { className: 'note' }, ask.text),
+          h('ul', { className: 'past', 'aria-label': 'Tasks the office creates' }, rows.map(function (r) {
+            return h('li', { key: r.step, className: 'past-row' }, h('div', { className: 'past-main' },
+              h('div', { className: 'past-title' }, h('b', null, r.title), r.written ? h(Tag, null, 'Already in Paperclip') : null),
+              h('div', { className: 'past-meta handoff-desc' }, r.description)));
+          }))));
+    }
     return h(A.Dialog, { open: true, title: 'Manager board', onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
       h('div', { className: 'form wide manager-board' },
         v.unreadable.map(function (t) { return h('p', { key: t, className: 'note manager-warn', role: 'status' }, t); }),
@@ -767,7 +793,10 @@
           return h('section', { key: g.id, className: 'manager-goal' + (g.frozen ? ' is-frozen' : ''), 'aria-label': g.goal },
             h('div', { className: 'past-title' }, h('b', null, g.goal), h(Tag, null, g.sourceWord), g.readOnly ? h(Tag, null, 'Read only') : null, g.building ? h(Tag, null, buildingName(g.building) || 'Other folders') : null,
               g.stateWord ? h('span', { className: 'sess-state' }, g.stateWord) : null),
-            g.note ? h('p', { className: 'note', role: g.frozen ? 'status' : undefined }, g.note) : null,
+            g.note && !(g.handoff && g.handoff.failed) ? h('p', { className: 'note', role: g.frozen ? 'status' : undefined }, g.note) : null,
+            g.handoff && g.handoff.failed && g.note ? h('p', { className: 'note' }, g.note.replace(/^Handoff failed: \d+ of \d+ tasks written, \d+ left\.\s*/, '')) : null,
+            g.handoff && g.handoff.failed ? h('p', { className: 'note', role: 'alert' }, V.plan.handoffFailed(g.handoff)) : null,
+            g.handoff && g.handoff.done ? h('p', { className: 'note', role: 'status' }, V.plan.handoffDone(g.handoff)) : null,
             g.total ? h('p', { className: 'note mono' }, g.done + ' of ' + plural(g.total, 'step', 'steps') + ' done') : null,
             g.total ? h('ul', { className: 'past' }, g.steps.map(function (x) {
               var facts = [x.owner ? 'Agent ' + x.owner : '', x.model, x.budget ? 'Budget ' + window.OfficeFormat.cost(x.budget.spent) + (x.budget.limit ? ' of ' + window.OfficeFormat.cost(x.budget.limit) : '') : '', x.cost != null ? window.OfficeFormat.cost(x.cost) : ''].filter(Boolean).join(' · ');
@@ -780,9 +809,11 @@
                   x.uid ? h(A.Button, { variant: 'ghost', icon: 'chevron-right', onClick: function () { var s = window.officeAdapter.sessionByUid(x.uid); if (s) p.onGo(s); } }, 'Go to desk') : null,
                   !g.readOnly && x.state === 'error' ? h(A.Button, { variant: 'quiet', icon: 'retry', disabled: busy === g.id + x.id, onClick: function () { act('/api/goal/retry', { id: g.id, step: x.id }, g.id + x.id); } }, 'Retry step') : null));
             })) : null,
-            !g.readOnly && open ? h('div', { className: 'inline-actions' },
+            !g.readOnly && (open || (g.handoffable && connected)) ? h('div', { className: 'inline-actions' },
               g.status === 'awaiting-approval' ? h(A.Button, { variant: 'emphasis', icon: 'approve', disabled: busy === g.id, onClick: function () { act('/api/goal/approve', { id: g.id }, g.id); } }, 'Approve plan') : null,
-              h(A.Button, { variant: 'quiet', icon: 'decline', disabled: busy === g.id, onClick: function () { act('/api/goal/cancel', { id: g.id }, g.id); } }, 'Cancel goal')) : null);
+              g.handoffable && connected ? h(A.Button, { variant: g.handoff && g.handoff.failed ? 'emphasis' : 'quiet', icon: g.handoff && g.handoff.failed ? 'retry' : 'hq', disabled: busy === g.id, onClick: function () { handoff(g, false); } }, g.handoff && g.handoff.failed ? 'Retry handoff' : 'Hand to Paperclip') : null,
+              open ? h(A.Button, { variant: 'quiet', icon: 'decline', disabled: busy === g.id, onClick: function () { act('/api/goal/cancel', { id: g.id }, g.id); } }, 'Cancel goal') : null) : null,
+            g.handoff && g.handoff.done && p.onHq ? h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'hq', onClick: p.onHq }, 'Open Paperclip HQ')) : null);
         })));
   }
 
@@ -2815,7 +2846,7 @@
         onPlaced: function () { if (hostRef.current) hostRef.current.refit(); },
         onBack: blurScene, onOpen: function () { if (hostRef.current) hostRef.current.open(); } }) : null,
       d === 'sessions' ? h(SessionsDialog, { onClose: close, onGo: goTo }) : null,
-      d === 'manager' ? h(ManagerDialog, { toast: toast, onClose: close, onGo: function (x) { goTo(x); } }) : null,
+      d === 'manager' ? h(ManagerDialog, { toast: toast, onClose: close, onGo: function (x) { goTo(x); }, onHq: function () { setDlg({ name: 'hq' }); } }) : null,
       d === 'hq' ? h(HqDialog, { snap: snap, onAttach: function () { show('hooks'); }, onClose: close }) : null,
       d === 'needs' ? h(NeedsDialog, { toast: toast, onClose: close, onManager: function () { setDlg({ name: 'manager' }); }, onGo: function (r) { var s = snap && snap.sessions.filter(function (x) { return x.uid === r.uid; })[0]; if (s) goTo(s); else close(); } }) : null,
       // The one Notifier (the scene has notifier: false). The tab title counts every request of every building, in the

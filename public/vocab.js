@@ -70,6 +70,7 @@
   var ARG = { Bash: 'command', PowerShell: 'command', Read: 'file', Edit: 'file', Write: 'file', MultiEdit: 'file', NotebookEdit: 'file', Grep: 'pattern', Glob: 'pattern', WebFetch: 'url', WebSearch: 'query', Task: 'task', Agent: 'task', Skill: 'skill' };
   var TODO = { pending: 'resting', in_progress: 'working', completed: 'finished', error: 'error' };
 
+  function count(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
   function clip(t, n) { t = String(t || ''); return t.length > n ? t.slice(0, n - 1) + '…' : t; }
   function has(a) { return !!(a && a.length); }
   function oneLine(t) { return clip(String(t == null ? '' : t).replace(/\s+/g, ' ').trim(), 300); }
@@ -105,7 +106,14 @@
   var PLAN_SOURCE = { office: 'Office', paperclip: 'Paperclip' };
   var PLAN_STEP = { pending: 'Waiting', working: 'Working', finished: 'Done', error: 'Error', unknown: 'Unknown' }; // unknown: a state the source has no word for (never done)
   var GOAL_WORD = { planning: 'Planning', 'awaiting-approval': 'Waiting for your approval', running: 'Running', finished: 'Done', blocked: 'Blocked', stopped: 'Stopped', failed: 'Failed', cancelled: 'Cancelled', 'handed-off': 'Handed to Paperclip', 'handoff-failed': 'Handoff failed' };
+  var HANDOFF_FROM = ['awaiting-approval', 'blocked', 'stopped', 'handoff-failed']; // the goal states that run nothing (manager.mjs handoff)
   var plan = {
+    // The goal handoff (#159, ADR 0007): the words around the painted Confirm, the failed state and the link to Paperclip.
+    handoffRows: function (tasks, written) {
+      return (Array.isArray(tasks) ? tasks : []).map(function (t) { return { step: t.step, title: t.title, description: t.description || '', written: !!(written && written[t.step]) }; });
+    },
+    handoffFailed: function (h) { return 'Handoff failed. ' + count(h.written, 'task is', 'tasks are') + ' in ' + h.company + '. ' + count(h.left, 'task is', 'tasks are') + ' left. Retry writes only the rest.'; },
+    handoffDone: function (h) { return count(h.written, 'task is', 'tasks are') + ' in ' + h.company + '. Paperclip plans this work now. The office does not run it.'; },
     sourceWord: function (kind) { return PLAN_SOURCE[kind] || ''; },
     stepState: function (state) { return PLAN_STEP[state] ? state : 'pending'; },
     stepWord: function (state) { return PLAN_STEP[state] || PLAN_STEP.pending; },
@@ -120,7 +128,10 @@
       var plans = (snap && snap.plans) || [], un = (snap && snap.unreadable) || [];
       var groups = plans.filter(function (p) { return !building || p.building === building; }).map(function (p) {
         var steps = p.steps || [], note = p.frozen ? p.reason : (p.source === 'paperclip' ? plan.readOnlyNote(p.source) : (p.reason || ''));
+        var ho = p.handoff && typeof p.handoff === 'object' ? p.handoff : null, written = ho && ho.tasks ? Object.keys(ho.tasks).length : 0;
+        var handoff = ho ? { company: String(ho.company || ''), tasks: ho.tasks || {}, written: written, left: Math.max(0, steps.length - written), failed: p.status === 'handoff-failed', done: p.status === 'handed-off' } : null;
         return { id: p.id, building: p.building, source: p.source, sourceWord: p.sourceWord, goal: p.goal, readOnly: p.source === 'paperclip', frozen: !!p.frozen, status: p.status,
+          handoff: handoff, handoffable: p.source === 'office' && HANDOFF_FROM.indexOf(p.status) >= 0 && steps.length > 0 && !steps.some(function (x) { return x.state === 'working'; }),
           stateWord: plan.goalWord(p.status), note: note, steps: steps, total: steps.length, done: steps.filter(function (x) { return x.state === 'finished'; }).length };
       });
       return { groups: groups, empty: !groups.length && !un.length, unreadable: un.map(function (u) { return plan.unreadable(u.word); }) };

@@ -487,3 +487,26 @@ test('plan board: no plans is one empty answer, and an unknown state is neutral,
   assert.equal(g.done, 0);
   assert.equal(g.steps[0].word, 'Unknown');
 });
+
+// The goal handoff (#159): what the Manager board shows around the painted Confirm, the failed state and the link to Paperclip.
+test('plan board: a goal that can go to Paperclip, and what a handoff record says', () => {
+  const g = (o) => V.plan.board({ plans: [pl({ steps: [st('a', 'pending'), st('b', 'pending')], ...o })], unreadable: [] }).groups[0];
+  for (const s of ['awaiting-approval', 'blocked', 'stopped', 'handoff-failed']) assert.equal(g({ status: s }).handoffable, true, s);
+  for (const s of ['planning', 'running', 'finished', 'failed', 'cancelled', 'handed-off']) assert.equal(g({ status: s }).handoffable, false, s);
+  assert.equal(g({ status: 'blocked', steps: [st('a', 'working')] }).handoffable, false, 'a step runs');
+  assert.equal(g({ status: 'blocked', steps: [] }).handoffable, false, 'no steps');
+  assert.equal(g({ status: 'blocked', source: 'paperclip' }).handoffable, false, 'a Paperclip plan is read only');
+  assert.equal(g({ status: 'blocked' }).handoff, null);
+  const h = g({ status: 'handoff-failed', handoff: { company: 'Acme', tasks: { a: 'i1' } } }).handoff;
+  assert.deepEqual([h.company, h.written, h.left, h.failed, h.done], ['Acme', 1, 1, true, false]);
+  const d = g({ status: 'handed-off', handoff: { company: 'Acme', tasks: { a: 'i1', b: 'i2' } } }).handoff;
+  assert.deepEqual([d.written, d.left, d.failed, d.done], [2, 0, false, true]);
+});
+test('plan handoff words: the preview rows mark the tasks already written, and the notes are plain', () => {
+  const rows = V.plan.handoffRows([{ step: 'a', title: 'One', description: 'm\n\nbody' }, { step: 'b', title: 'Two', description: 'm2' }], { a: 'i1' });
+  assert.deepEqual(rows.map((r) => [r.step, r.title, r.written]), [['a', 'One', true], ['b', 'Two', false]]);
+  assert.equal(rows[1].description, 'm2');
+  assert.deepEqual(V.plan.handoffRows(undefined, undefined), []);
+  assert.equal(V.plan.handoffFailed({ company: 'Acme', written: 2, left: 1 }), 'Handoff failed. 2 tasks are in Acme. 1 task is left. Retry writes only the rest.');
+  assert.equal(V.plan.handoffDone({ company: 'Acme', written: 1 }), '1 task is in Acme. Paperclip plans this work now. The office does not run it.');
+});
