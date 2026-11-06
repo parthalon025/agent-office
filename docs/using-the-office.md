@@ -8,49 +8,49 @@ The same office in Day, Night and Sublevel. The Fluent themes look alike with ot
 
 **Day**
 
-![The Agent Office building in the Day theme, with the elevator panel of floors on the left](img/day-building-1360.png)
+![The lumen-web building in the Day theme: four floors, the elevator panel on the left and the two working bots of the Lobby floor on the right](img/day-building-1360.png)
 
-The Day theme with the floor list on the left, one lab room with three desks in the middle and the three working bots listed on the right.
+The building view in Day. The elevator panel on the left lists the floors, the card on the right lists the rooms and bots of the Lobby floor, and Waiting on me is empty.
 
-![A lab room in the Day theme with three desks, a blackboard, a notes board and a server rack](img/day-room-1360.png)
+![A lab room in the Day theme with three desks, a blackboard, a notes board and a server rack, next to the Reception room](img/day-room-1360.png)
 
-The same room in Day. Each desk has a monitor and a speech badge, and the blackboard hangs on the back wall.
+The floor view in Day, zoomed to a lab room. Each desk has a monitor, a bot and a speech badge. The blackboard and the notes board hang on the back wall.
 
 **Night**
 
-![The building in the Night theme: floors with name tags on a dark ground](img/night-building-1360.png)
+![The lumen-web building in the Night theme: floor slabs with name tags on a dark ground, with a lit street light at the left](img/night-building-1360.png)
 
-The Night theme shows the building view. Each floor is a slab with a tag that names its branch. Choose Building or Floor at the top to switch the view.
+The same building in Night. Each floor is a slab with a tag that names it. Choose Building or Floor at the top to switch the view.
 
-![A lab room in the Night theme with lit desk monitors](img/night-room-1360.png)
+![A lab room in the Night theme with lit desk monitors and a warm light on the floor](img/night-room-1360.png)
 
-The same room at night. The desk lights glow amber, and the window shows city lights.
+The room in Night. The desk monitors are lit, and the light pools on the floor.
 
 **Sublevel**
 
-![The building in the Sublevel theme: a pale building with a green accent](img/sublevel-building-1360.png)
+![The lumen-web building in the Sublevel theme: a pale building with green floor slabs and capital letters in the top bar](img/sublevel-building-1360.png)
 
-The Sublevel theme uses a monospace face and a green accent. The floor list, the dock and the room figures keep their places.
+The Sublevel theme uses a monospace face, capital letters for labels and a green accent. The floor list and the room card keep their places.
 
-![A lab room in the Sublevel theme with a green floor](img/sublevel-room-1360.png)
+![A lab room in the Sublevel theme with a green floor and three desks](img/sublevel-room-1360.png)
 
-The same room in Sublevel. The room floor is green, and the cost and weekly limit show at the bottom.
+The same room in Sublevel. The room floor is green, and the Weekly limit shows at the bottom right.
 
 **The city, the boards, a desk and a held request**
 
-![The city in Day: one tall building with a beacon above it and the City panel on the left](img/day-city-1360.png)
+![The city in Day: three buildings on a street grid, the orbit-api building with lit windows and a beacon, and the City panel on the left](img/day-city-1360.png)
 
-The city shows every repository as a building. A beacon marks a building with a request, and the panel on the left counts sessions by state.
+The city shows every repository as a building. A beacon and lit windows mark a building with a request, and the panel on the left counts sessions by state and lists each building.
 
-![The room blackboard in Day, titled What the agents do](img/day-boards-1360.png)
+![The room blackboard in Day, titled What the agents do, with the plan at 1 of 4 steps done, and the board panel with the to-do list on the right](img/day-boards-1360.png)
 
-The room blackboard shows what the agents do: the plan, the browser steps, the last steps and the top folders of the repository. Click a board once to look at it, as here.
+The room blackboard shows what the agents do: the plan, the browser steps, the last steps and the top folders of the repository. Click a board once to look at it, as here. The panel on the right lists the same plan and steps.
 
-![The desk screen in Day: a chat with an Approve and a Decline button under the line Allow Bash: npm test?](img/day-desk-1360.png)
+![A lab room in Day with the chat of one agent on the right, showing an Approve and a Decline button under the line Allow Bash: npm test?](img/day-desk-1360.png)
 
-Click a desk monitor twice to open the chat of its agent. A held request shows its command with Approve and Decline.
+Click a bot to open the chat of its agent. A held request shows its command with Approve and Decline, and a speech bubble at the desk says the same.
 
-![The building in Day with one request listed under Waiting on me in the left column](img/day-needs-you-1360.png)
+![The orbit-api building in Day with a Needs you button in the top bar and one request, with Approve and Decline, under Waiting on me in the left column](img/day-needs-you-1360.png)
 
 The Needs you button in the top bar and the Waiting on me card list every held request of every building. Approve or decline it from the left column.
 
