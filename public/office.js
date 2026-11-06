@@ -1933,7 +1933,8 @@
   }
 
   // ---------- Needs you: every open request and question of every building ----------
-  function NeedsDialog(p) {
+  // The one queue as a list, with Approve and Decline on each row: the Needs you dialog and the phone list show it (#148).
+  function QueueList(p) {
     var snap = useSnapshot();
     var list = snap ? window.officeAdapter.queue(snap).items : [];
     var bz = useState(''), busy = bz[0], setBusy = bz[1], box = React.useRef(null), lastIdx = React.useRef(0), M = useMerge(p.toast);
@@ -1953,8 +1954,7 @@
       setBusy(r.id);
       api('/api/answer', { id: r.id, allow: allow }).then(function () { setBusy(''); }, function (x) { setBusy(''); p.toast({ tone: 'error', title: r.bot, text: x.message }); });
     }
-    return h(A.Dialog, { open: true, title: 'Needs you', onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
-      h('div', { className: 'form wide' },
+    return h(React.Fragment, null,
         list.length ? h('p', { className: 'note' }, plural(list.length, 'request waits', 'requests wait') + ' for you, oldest first. This is every building.') : null,
         !list.length ? h(A.EmptyState, { icon: 'finished', compact: true, title: 'Nothing needs you', text: 'New requests show here when an agent asks.' }) : null,
         h('div', { ref: box }, h('ul', { className: 'past' }, groups.map(function (g) {
@@ -1973,11 +1973,53 @@
               h(A.Button, { variant: 'emphasis', icon: 'approve', disabled: busy === r.id, onClick: function () { answer(r, true); } }, q ? 'Yes' : 'Approve'),
               h(A.Button, { variant: 'quiet', icon: 'decline', disabled: busy === r.id, onClick: function () { answer(r, false); } }, q ? 'No' : 'Decline'),
               h(A.Button, { variant: 'ghost', icon: 'chevron-right', onClick: function () { p.onGo(r); } }, 'Go to')));
-        }))), M.node));
+        }))), M.node);
+  }
+  function NeedsDialog(p) {
+    return h(A.Dialog, { open: true, title: 'Needs you', onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
+      h('div', { className: 'form wide' }, h(QueueList, { toast: p.toast, onManager: p.onManager, onGo: p.onGo })));
   }
 
   // the DS palette listens for Ctrl+K on the document, so a button sends the same key
   function openPalette() { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true, cancelable: true })); }
+
+  // ---------- the phone list (#148): the Glance and Look layers and the queue as a 2D list, below 820 px ----------
+  // It reads the store (officeAdapter.phone), never the scene, so it always agrees with the scene. Every request is answered
+  // here, with the same rows as Needs you. An agent row opens that agent in the scene (Inspect).
+  var PHONE_MAX = 820;
+  function PhoneMood(p) {
+    var k = p.glance.mood.key === 'review' ? 'waiting' : p.glance.mood.key;
+    return h('span', { className: 'phone-mood is-' + k }, h('span', { className: 'phone-dot', 'aria-hidden': 'true' }), p.glance.text || p.glance.mood.word);
+  }
+  function PhoneView(p) {
+    var snap = useSnapshot();
+    var ph = snap ? window.officeAdapter.phone(snap) : { queue: { count: 0 }, buildings: [] };
+    return h('div', { className: 'phone', role: 'region', 'aria-label': 'Agents' },
+      h('div', { className: 'phone-head' },
+        h('h1', { className: 'phone-title' }, 'Agent Office'),
+        h(A.Button, { variant: 'quiet', icon: 'search', 'aria-label': 'Open the command palette', onClick: openPalette }, 'Commands')),
+      h('section', { className: 'phone-sec', 'aria-label': 'Needs you' },
+        h('h2', { className: 'phone-h' }, 'Needs you', ph.queue.count ? h(Tag, null, String(ph.queue.count)) : null),
+        h(QueueList, { toast: p.toast, onManager: p.onManager, onGo: p.onGo })),
+      h('section', { className: 'phone-sec', 'aria-label': 'Buildings' },
+        h('h2', { className: 'phone-h' }, 'Buildings'),
+        !ph.buildings.length ? h(A.EmptyState, { icon: 'building', compact: true, title: 'No buildings yet', text: 'Open a session in a repository to see it here.' }) : null,
+        ph.buildings.map(function (b) {
+          return h('div', { key: b.key, className: 'phone-bld' },
+            h('div', { className: 'phone-row phone-bld-head' }, h('b', null, b.name), h(PhoneMood, { glance: b.glance })),
+            b.rooms.map(function (r) {
+              return h('div', { key: r.id, className: 'phone-room' },
+                h('div', { className: 'phone-row' }, h('b', null, r.name), h(PhoneMood, { glance: r.glance })),
+                h('p', { className: 'look-intent' }, r.look.intent),
+                h('p', { className: 'look-facts mono' }, [plural(r.agents.length, 'agent', 'agents'), r.look.progress, r.look.cost].filter(Boolean).join(' · ')),
+                h('ul', { className: 'look-agents' }, r.agents.map(function (a) {
+                  return h('li', { key: a.uid }, h('button', { type: 'button', className: 'look-agent', onClick: function () { p.onOpenAgent(a.uid); } },
+                    h('span', { className: 'phone-row' }, h('b', null, a.name || 'Agent'), h(PhoneMood, { glance: a.glance })),
+                    h('span', null, [clip(a.look.intent, 60), a.look.progress, a.look.cost].filter(Boolean).join(' · '))));
+                })));
+            }));
+        })));
+  }
 
   // ---------- the Reception (#92): the archetype memo, the floors, the office's actions, the tour ----------
   // The reception memo and the directory board in the lobby open it, and so does Ctrl+K. Each floor change is one call
@@ -2073,6 +2115,10 @@
     var s2 = useState(null), dlg = s2[0], setDlg = s2[1];
     var s3 = useState({ recent: [], templates: [], schedules: [] }), info = s3[0], setInfo = s3[1];
     var ws = useState(winSize), win = ws[0], setWin = ws[1];   // the window size: the scene height follows it (#55)
+    // The phone list (#148): below 820 px it covers the scene until the user opens an agent. The scene stays mounted under it (the palette and the dialogs live there).
+    var pl0 = useState(true), phoneList = pl0[0], setPhoneList = pl0[1];
+    var phoneOn = win.w <= PHONE_MAX && phoneList;
+    useEffect(function () { if (win.w > PHONE_MAX) setPhoneList(true); }, [win.w > PHONE_MAX]);   // a narrow window opens on the list again
     // The DS Since you left card shows (OfficeScene onSinceYouLeft, #66).
     var sy = useState(false), syl = sy[0], setSyl = sy[1];
     // Toasts (toasts.js): an error or a toast with an action stays until closed; the others close after 8 s, and wait while the pointer or focus is on them, or while the stack has no room (is-off).
@@ -2780,6 +2826,9 @@
 
     return h(React.Fragment, null,
       h('div', { className: 'view' + (fading ? ' is-fading' : '') }, scene),
+      phoneOn ? h(PhoneView, { toast: toast, onManager: function () { setDlg({ name: 'manager' }); }, onGo: function (r) { var x = snap && snap.sessions.filter(function (y) { return y.uid === r.uid; })[0]; if (x) { setPhoneList(false); goTo(x); } },
+        onOpenAgent: function (uid) { var x = window.officeAdapter.sessionByUid(uid); if (x) { setPhoneList(false); goTo(x); } } }) : null,
+      win.w <= PHONE_MAX && !phoneList ? h('div', { className: 'phone-back' }, h(A.Button, { variant: 'emphasis', icon: 'chevron-right', onClick: function () { blurScene(); setBoard(null); setPhoneList(true); } }, 'Back to the list')) : null,
       !ambient && touring && cur2.view === 'office' ? h(TourCard, { onStep: tourStep, onDone: endTour }) : null,
       d === 'reception' ? h(ReceptionDialog, { repo: shown, actions: officeActions, onTour: startTour, onClose: close }) : null,
       d === 'open' ? h(OpenDialog, { shownPath: shownPath, kind: dlg.kind, role: dlg.role, roleName: dlg.roleName, folder: dlg.folder, spendLimit: info.spendLimit, recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,

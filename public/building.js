@@ -256,6 +256,26 @@
       reach: function (r) { return !r ? null : r.uid ? { via: 'desk', uid: r.uid, id: r.id } : { via: 'list' }; }
     };
   }
+  // The phone list (#148): the Glance and Look layers of every building, room and agent, and the one queue. It reads the snapshot
+  // only, through the rules above and in OfficeVocab.layers, so the list and the scene never disagree. Rooms are the live
+  // sessions' places, in the order of their newest event.
+  function phone(snap, now) {
+    var L = V.layers, by = {};
+    live(snap).forEach(function (s) {
+      var pl = placeOf(s), b = by[pl.repo] || (by[pl.repo] = {}), r = b[pl.roomId] || (b[pl.roomId] = { id: pl.roomId, name: pl.roomName, list: [] });
+      r.list.push(s);
+    });
+    var out = buildings(snap).map(function (b) {
+      var rooms = Object.keys(by[b.key] || {}).map(function (id) {
+        var r = by[b.key][id], states = r.list.map(function (s) { return V.status(s).key; });
+        return { id: r.id, name: r.name, glance: L.glance(V.figures(r.list), worst(states)), look: L.lookRoom(r.list),
+          last: r.list.reduce(function (m, s) { return Math.max(m, s.lastEvent || 0); }, 0),
+          agents: r.list.map(function (s) { return { uid: s.uid, name: s.name, glance: L.glance(V.figures([s]), V.status(s).key), look: L.look(s), waiting: V.requests(s).length }; }) };
+      }).sort(function (a, c) { return (c.glance.mood.key === 'waiting') - (a.glance.mood.key === 'waiting') || c.last - a.last; });
+      return { key: b.key, name: b.name, glance: L.glance({ waiting: b.waiting, working: b.sessions }, b.state), rooms: rooms };
+    });
+    return { queue: queue(snap, now), buildings: out };
+  }
   // Browser alerts for the page's one Notifier: each open request and each failed turn of every building.
   // An error id holds the error's own id, so a new failure is a new alert.
   function alerts(snap) {
@@ -379,6 +399,7 @@
     store.requests = function (snap) { return requests(snap || latest); };
     store.queue = function (snap) { return queue(snap || latest); };
     store.alerts = function (snap) { return alerts(snap || latest); };
+    store.phone = function (snap, now) { return phone(snap || latest, now); };
     store.preview = function (repo, snap) { return describe(repo, snap || latest, true).def; };
     store.shapeOf = shapeOf;
     store.colorOf = colorOf;
