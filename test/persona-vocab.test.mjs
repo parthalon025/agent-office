@@ -1,7 +1,7 @@
 // Agent character on the page (#150): the words, the look and the body cue, one copy in vocab.js. Pure: no I/O.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import '../public/vocab.js';
+import '../src/vocab.mjs';
 import { SHAPES, COLORS, ACCESSORIES, STYLES, bodyCue } from '../src/personas.mjs';
 
 const P = globalThis.OfficeVocab.persona;

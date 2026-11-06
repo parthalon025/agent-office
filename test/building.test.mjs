@@ -10,7 +10,7 @@ import { slimPayload } from '../src/payload.mjs';
 import { placeOfSession, placeOfWorktree, normPath, securityRoomIdOf, seatOf } from '../src/place.mjs';
 import { settleRooms, viewRooms } from '../src/rooms.mjs';
 import { newRecord, shownFloors, layoutView, edit as editLayout } from '../src/archetypes.mjs';
-import '../public/vocab.js';
+import '../src/vocab.mjs';
 import '../public/wire.js';
 import '../public/building.js';
 import { loadBundle } from './fixtures/ds-bundle.mjs';

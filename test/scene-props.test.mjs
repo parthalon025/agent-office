@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import '../public/format.js';
-import '../public/vocab.js';
+import '../src/vocab.mjs';
 import '../public/screen-kit.js';
 import '../public/lobby.js';
 

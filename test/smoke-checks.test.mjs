@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { inWorktreeOf, roomFiguresOf, roomAtRest } from './fixtures/smoke-checks.mjs';
 import { createTracker } from '../src/tracker.mjs';
 import { slimPayload } from '../src/payload.mjs';
-import '../public/vocab.js';
+import '../src/vocab.mjs';
 
 const V = globalThis.OfficeVocab;
 
@@ -21,7 +21,7 @@ test('the worktree of repo1 is repo1.worktrees/<slug>, in any slash style and ca
 // driven by the hooks and stream lines that session gets: the same figures and words the smoke script reads.
 test('after a failed first turn the room is at rest and the failed session reads as an error, then as finished after Dismiss', () => {
   const t = createTracker({
-    now: () => 1_000_000, makeId: (k) => k + Math.random().toString(36).slice(2), locate: async () => null, onChange() {}, releaseHold() {}, setTimer: () => 1, persist: {},
+    now: () => 1_000_000, makeId: (k) => k + Math.random().toString(36).slice(2), locate: async () => null, onChange() {}, releaseHold() {}, setTimer: () => 1,
   });
   const watcher = t.newSession({ officeId: 'w', uid: 'w', headless: true, status: 'starting', name: 'watcher' });
   const failer = t.newSession({ officeId: 'f', uid: 'f', headless: true, status: 'starting', name: 'failer', budget: 0.0001 });
@@ -44,7 +44,7 @@ test('after a failed first turn the room is at rest and the failed session reads
 // same turn: it counts the turn, but it neither starts work again nor clears the error (#188).
 test('a prompt hook that comes after the result of the same turn does not make the failed session work again', () => {
   const t = createTracker({
-    now: () => 1_000_000, makeId: (k) => k + Math.random().toString(36).slice(2), locate: async () => null, onChange() {}, releaseHold() {}, setTimer: () => 1, persist: {},
+    now: () => 1_000_000, makeId: (k) => k + Math.random().toString(36).slice(2), locate: async () => null, onChange() {}, releaseHold() {}, setTimer: () => 1,
   });
   const failer = t.newSession({ officeId: 'f', uid: 'f', headless: true, status: 'starting', name: 'failer', budget: 0.0001, prompt: 'Say hello.' });
   t.onStream(failer, JSON.stringify({ type: 'result', subtype: 'error_max_budget_usd', is_error: false, total_cost_usd: 0.01 }));

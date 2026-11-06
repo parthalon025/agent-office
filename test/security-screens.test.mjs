@@ -2,7 +2,7 @@
 // click or a key does. The pure part only: no browser, no THREE, no server. Run: node --test test/security-screens.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import '../public/vocab.js';
+import '../src/vocab.mjs';
 import '../public/format.js';
 import '../public/screen-kit.js';
 import '../public/security.js';

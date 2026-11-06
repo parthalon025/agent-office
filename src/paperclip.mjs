@@ -16,6 +16,7 @@
 // test/fixtures/fake-paperclip.mjs; through the server: test/paperclip-routes.test.mjs).
 import path from 'node:path';
 import { runIds, cleanIds } from './payload.mjs';
+import { readArgs, CLAUDE_FLAGS_VERSION } from './providers/claude-code.mjs';
 
 export const DEFAULT_URL = 'http://127.0.0.1:3100';
 
@@ -48,111 +49,6 @@ const strings = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string'
 export const argsOf = (cfg) => { const e = strings(obj(cfg).extraArgs); return e.length ? e : strings(obj(cfg).args); };
 const samePath = (a, b) => !!a && !!b && path.win32.normalize(String(a)).toLowerCase() === path.win32.normalize(String(b)).toLowerCase();
 
-// ---------- Claude Code's arguments, read the way Claude Code reads them ----------
-// The flags of the claude main command in Claude Code 2.1.318, read from its binary (`claude --help` shows most; the rest
-// are hidden), with what each takes after it: 0 nothing (a switch), 1 the next argument whatever it is, ? the next argument
-// when it is not a flag, + the next argument and then each next one up to a flag. That is how its parser (commander) reads
-// them. The spellings of one flag share an entry. A flag that is not here is not guessed at: the agent is Partly supervised.
-const CLAUDE_FLAGS = '-d --debug ?|-d2e --debug-to-stderr 0|--debug-file 1|--verbose 0|-p --print 0|--bare 0|--safe-mode 0|--init 0|' +
-  '--init-only 0|--maintenance 0|--output-format 1|--json-schema 1|--include-hook-events 0|--include-partial-messages 0|' +
-  '--forward-subagent-text 0|--session-mirror 0|--await-claim 0|--input-format 1|--await-initialize 0|--dangerously-skip-permissions 0|' +
-  '--allow-dangerously-skip-permissions 0|--thinking 1|--thinking-display 1|--max-thinking-tokens 1|--max-turns 1|--max-budget-usd 1|' +
-  '--task-budget 1|--replay-user-messages 0|--prompt-suggestions ?|--enable-auth-status 0|--allowedTools --allowed-tools +|--tools +|' +
-  '--restricted 0|--disallowedTools --disallowed-tools +|--mcp-config +|--permission-prompt-tool 1|--permission-prompts 1|' +
-  '--system-prompt 1|--system-prompt-file 1|--append-system-prompt 1|--append-system-prompt-file 1|--system-prompt-snapshot 1|' +
-  '--append-subagent-system-prompt 1|--append-subagent-system-prompt-file 1|--plan-mode-instructions 1|' +
-  '--exclude-dynamic-system-prompt-sections 0|--permission-mode 1|--inherit-permission-mode 1|-c --continue 0|-r --resume ?|' +
-  '--fork-session 0|--watch-artifact 1|--watch-artifact-no-autoreact 1|--prefill 1|--deep-link-origin 0|--deep-link-repo 1|' +
-  '--deep-link-last-fetch 1|--prefill-b64 1|--deep-link-cwd-b64 1|--from-pr ?|--no-session-persistence 0|--resume-session-at 1|' +
-  '--resume-drops-turn 1|--reply-on-resume 0|--rewind-files 1|--model 1|--include-unsupported-models 0|--effort 1|--fast-mode 1|' +
-  '--agent 1|--betas +|--fallback-model 1|--workload 1|--settings 1|--client-data-url 1|--allow-other-models 0|--managed-settings 1|' +
-  '--host-auth-is-org-sign-in 0|--add-dir +|--project-config-root 1|--ide 0|--desktop 0|--strict-mcp-config 0|--session-id 1|' +
-  '-n --name 1|--agents 1|--setting-sources 1|--plugin-dir 1|--plugin-dir-no-mcp 1|--plugin-url 1|--disable-slash-commands 0|' +
-  '--chrome 0|--no-chrome 0|--file +|-w --worktree ?|--tmux 0|--advisor 1|--autocompact 1|--enable-auto-mode 0|--proactivity 1|' +
-  '--agents-view-if-allowed 0|--bg --background 0|--messaging-socket-path 1|--brief 0|--ax-screen-reader 0|--channels +|' +
-  '--dangerously-load-development-channels +|--agent-id 1|--agent-name 1|--team-name 1|--agent-color 1|--plan-mode-required 0|' +
-  '--parent-session-id 1|--teammate-mode 1|--agent-type 1|--sdk-url 1|--runner-declares 1|--session-began-as-copy 1|--teleport ?|' +
-  '--cloud ?|--forward-home-settings 1|--remote ?|--attach-serve 1|--environment 1|--pool 1|--correlation-id 1|--ref 1|--on-branch 1|' +
-  '--remote-control ?|--rc ?|--remote-control-session-name-prefix 1|-h --help 0|-v --version 0';
-const CLAUDE_VERSION = '2.1.318';
-// What a flag does to the office's view of a run (the rest change nothing for it).
-// self: the run approves its own calls, or the hooks are off, so a call skips the hold. Unsupervised; Supervise takes it out
-//   with its values. --allowedTools is what Paperclip passes on a sandbox target in place of --dangerously-skip-permissions
-//   (claude-local permissions.ts).
-// cloud: the session runs in the cloud, so its calls never reach the office hooks. Unsupervised; Supervise keeps it (taking
-//   it out would move the work), so Supervise is not offered.
-// load: it loads plugins, agents or settings the office cannot read, or lets something other than the office answer a call.
-//   Partly supervised; Supervise keeps it, because taking it out changes what the agent does and the office cannot tell if
-//   that is safe.
-const FLAG_KINDS = [
-  ['self', ['--dangerously-skip-permissions'], () => 'It skips permissions (--dangerously-skip-permissions).'],
-  ['self', ['--allow-dangerously-skip-permissions'], () => 'It can turn on skip permissions (--allow-dangerously-skip-permissions).'],
-  ['self', ['--permission-prompt-tool'], () => 'Its own tool answers permission prompts (--permission-prompt-tool).'],
-  ['self', ['--allowedTools'], (f) => `It allows tools without asking (${f}).`],
-  ['self', ['--managed-settings'], () => 'It passes policy settings (--managed-settings), which can allow calls or turn off the office hooks.'],
-  ['self', ['--bare'], () => 'It runs in bare mode (--bare), which skips the hooks of settings files, so the office hooks do not run.'],
-  ['self', ['--safe-mode'], () => 'It runs in safe mode (--safe-mode), which turns off hooks, so the office hooks do not run.'],
-  ['cloud', ['--cloud', '--remote', '--environment', '--pool', '--attach-serve'], (f) => `It runs its session in the cloud (${f}), so its calls never reach the office hooks.`],
-  ['load', ['--plugin-dir', '--plugin-dir-no-mcp', '--plugin-url', '--await-initialize'], (f) => `It loads plugins (${f}), and a plugin hook can allow a call without the office.`],
-  ['load', ['--agents', '--agent', '--agent-type'], (f) => `It loads agents (${f}), and an agent can set its own permission mode and hooks.`],
-  ['load', ['--setting-sources', '--project-config-root', '--client-data-url'], (f) => `It changes which settings load (${f}), and the office cannot read them.`],
-  ['load', ['--sdk-url', '--await-claim'], (f) => `It connects to an SDK host (${f}), which can answer permission prompts.`],
-  ['load', ['--remote-control', '--rc'], (f) => `It turns on Remote Control (${f}), where a remote client can answer permission prompts.`],
-  ['load', ['--channels', '--dangerously-load-development-channels'], (f) => `It registers channel servers (${f}), which the office cannot check.`],
-  ['load', ['--teleport'], (f) => `It resumes a cloud session here (${f}), which the office cannot check.`],
-  ['load', ['--chrome'], (f) => `It turns on Claude in Chrome (${f}), whose browser actions the office cannot check.`],
-];
-const FLAGS = new Map();   // spelling -> { names, takes, kind, why }
-for (const entry of CLAUDE_FLAGS.split('|')) {
-  const names = entry.split(' '), t = names.pop();
-  const e = { names, takes: t === '0' ? 0 : t === '1' ? 1 : t, kind: '', why: null };
-  for (const n of names) FLAGS.set(n, e);
-}
-for (const [kind, names, why] of FLAG_KINDS) {
-  for (const n of names) {
-    const e = FLAGS.get(n);
-    if (!e) throw new Error(`paperclip.mjs: ${n} is not in CLAUDE_FLAGS`);
-    Object.assign(e, { kind, why });
-  }
-}
-// An argument Claude Code's parser reads as a flag: a dash and at least one more character.
-const isFlag = (a) => typeof a === 'string' && a.length > 1 && a[0] === '-';
-
-/**
- * A claude argument list as Claude Code's parser reads it: { flags, unknown, end }. flags: [{ e, as, values, first, last }]
- * (as: the spelling used; first..last: the arguments it takes up). unknown: [{ i, as }], flags that are not Claude Code
- * 2.1.318's. end: the index of a '--' (after it every argument is text, not a flag), else the length. Short flags may sit
- * together (-pc), a short flag that takes a value takes the rest of its argument (-nName), and --flag=value holds its value.
- */
-export function readArgs(args) {
-  const a = strings(args), flags = [], unknown = [];
-  const queue = a.map((v, i) => ({ v, i }));
-  let list = null, end = a.length;
-  while (queue.length) {
-    const { v: x, i } = queue.shift();
-    if (x === '--') { end = i; break; }
-    if (list && !isFlag(x)) { list.values.push(x); list.last = i; continue; }
-    list = null;
-    if (!isFlag(x)) continue;   // text: the prompt, or - (read the prompt from stdin)
-    let e = FLAGS.get(x);
-    if (e) {
-      const f = { e, as: x, values: [], first: i, last: i }, next = queue[0];
-      if (next && (e.takes === 1 || e.takes === '+' || (e.takes === '?' && !isFlag(next.v)))) { queue.shift(); f.values.push(next.v); f.last = next.i; }
-      if (e.takes === '+') list = f;
-      flags.push(f);
-      continue;
-    }
-    if (x.length > 2 && x[1] !== '-' && (e = FLAGS.get('-' + x[1]))) {
-      flags.push({ e, as: '-' + x[1], values: e.takes ? [x.slice(2)] : [], first: i, last: i, part: true });
-      if (!e.takes) queue.unshift({ v: '-' + x.slice(2), i });   // the rest of -pc is read again: -c
-      continue;
-    }
-    const eq = x.indexOf('=');
-    if (x.startsWith('--') && eq > 2 && (e = FLAGS.get(x.slice(0, eq))) && e.takes) { flags.push({ e, as: x.slice(0, eq), values: [x.slice(eq + 1)], first: i, last: i }); continue; }
-    unknown.push({ i, as: x });
-  }
-  return { flags, unknown, end };
-}
 const named = (f, name) => f.e.names.includes(name);
 const settingsOf = (r) => r.flags.filter((f) => named(f, '--settings')).map((f) => f.values[0]);
 
@@ -177,7 +73,7 @@ function argsRead(args, hooksFile) {
   if ((f = first('load'))) return { ...none, partly: f.e.why(f.as), kind: 'load' };
   // stream-json input lets what writes to stdin switch the permission mode (a control request), so the office cannot hold it
   if ((f = r.flags.find((x) => named(x, '--input-format') && String(x.values[0]).toLowerCase() === 'stream-json'))) return { ...none, partly: `It reads stream-json input (${f.as}), where the program that writes to stdin can switch the permission mode.`, kind: 'load' };
-  if (r.unknown.length) return { ...none, partly: `It passes ${text(r.unknown[0].as, 80)}, which is not a flag of Claude Code ${CLAUDE_VERSION}, so the office cannot tell which arguments are its values.`, kind: 'unknown' };
+  if (r.unknown.length) return { ...none, partly: `It passes ${text(r.unknown[0].as, 80)}, which is not a flag of Claude Code ${CLAUDE_FLAGS_VERSION}, so the office cannot tell which arguments are its values.`, kind: 'unknown' };
   return none;
 }
 /** Why a claude CLI argument list does not hold calls in this office ('' = it does): the run as Paperclip starts it. */

@@ -25,12 +25,12 @@ function rig(over = {}) {
     setTimer: (fn, ms) => { r.timers.push({ fn, ms }); return r.timers.length; },
     // over.screen: the check before a hold (the server passes the Security room rules)
     ...(over.screen ? { screen: over.screen } : {}),
-    persist: {
-      history: (s) => r.history.push({ uid: s.uid, status: s.status }),
-      recentDir: (d) => r.dirs.push(d),
-      commands: (c) => r.commands.push(c),
-      placed: (s, g) => r.placed.push({ uid: s.uid, git: g }),
-      spent: (s, dollars) => (r.spent = r.spent || []).push({ uid: s.uid, kind: s.provider, dollars }),
+    record: (what, a, b) => {
+      if (what === 'history') r.history.push({ uid: a.uid, status: a.status });
+      else if (what === 'recentDir') r.dirs.push(a);
+      else if (what === 'commands') r.commands.push(a);
+      else if (what === 'placed') r.placed.push({ uid: a.uid, git: b });
+      else if (what === 'spent') (r.spent = r.spent || []).push({ uid: a.uid, kind: a.provider, dollars: b });
     },
   });
   r.hook = (raw, officeId = null) => r.tracker.onHook(slimPayload(raw, officeId));

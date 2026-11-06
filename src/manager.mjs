@@ -1,9 +1,9 @@
 // Manager: the rules that turn one goal into steps handed to agents. A pure core, like tracker.mjs: everything outside
 // the rules is injected, so importing this module starts nothing and a test needs no server, model or timer.
 //
-//   createManager({ planner, agents, dispatch, interrupt?, deliver?, spendOf?, board?, defaultSpendLimit?, clock?, makeId?, onChange?, managerName?, limits? })
+//   createManager({ planner?, agents, dispatch, interrupt?, deliver?, spendOf?, board?, defaultSpendLimit?, clock?, makeId?, onChange?, managerName?, limits? })
 //
-//   planner(goal, agents)        -> Promise<[{ text, role?, room?, bot? }]>   any provider can plan (a local model, a paid one, a fake)
+//   planner(goal, agents)        -> Promise<[{ text, role?, room?, bot? }]>   optional; the default is one step per line of the goal (leading bullets and numbers cut). A test or a model ladder (#74) can pass another
 //   agents(building)             -> [{ id, name, role, room, free, paid? }]    who could take a step right now. paid is false for a local model.
 //   dispatch(agent, task, ctx)   -> void | Promise                            start the step on that agent; ctx = { goalId, stepId }
 //   interrupt(agentId)           -> void                                       optional: stop a step on cancel
@@ -42,7 +42,7 @@
 import crypto from 'node:crypto';
 import { DEFAULT_SPEND_LIMIT, spendLimitFor } from './providers/index.mjs';
 import { NOTES_MAX } from './notes.mjs';
-import '../public/vocab.js';
+import './vocab.mjs';
 
 export const DEFAULT_LIMITS = { maxSteps: 12, maxHops: 4, maxMessages: 30, maxAttempts: 3, boardMax: NOTES_MAX - 100 }; // boardMax: the board text must fit a notes board
 
@@ -100,7 +100,8 @@ const BOARD_GOAL = 300, BOARD_STEP = 240, BOARD_OWNER = 40; // 12 steps of 240 a
 const clip = (s, n) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 
 export function createManager(deps = {}) {
-  if (typeof deps.planner !== 'function') throw new Error('createManager needs a planner');
+  // The default planner: one step per line of the goal, a leading bullet or number cut.
+  const planner = typeof deps.planner === 'function' ? deps.planner : async (goal) => String(goal).split(/\r?\n/).map((l) => l.replace(/^\s*(?:[-*]|\d+[.)])\s+/, '').trim()).filter(Boolean).map((text) => ({ text }));
   if (typeof deps.agents !== 'function') throw new Error('createManager needs agents()');
   if (typeof deps.dispatch !== 'function') throw new Error('createManager needs dispatch()');
   const now = deps.clock || Date.now;
@@ -231,7 +232,7 @@ export function createManager(deps = {}) {
       goals.set(g.id, g);
       touch(g);
       let raw;
-      try { raw = await deps.planner(text, deps.agents(g.building)); } catch (e) { stop(g, 'failed', 'Could not make a plan: ' + clip(e && e.message || e, 200)); return g.id; }
+      try { raw = await planner(text, deps.agents(g.building)); } catch (e) { stop(g, 'failed', 'Could not make a plan: ' + clip(e && e.message || e, 200)); return g.id; }
       const steps = (Array.isArray(raw) ? raw : []).filter((x) => x && String(x.text || '').trim()).slice(0, limits.maxSteps);
       if (!steps.length) { stop(g, 'failed', 'The plan has no steps.'); return g.id; }
       g.steps = steps.map((x, i) => ({

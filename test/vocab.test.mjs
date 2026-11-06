@@ -1,7 +1,7 @@
 // Session vocabulary: one table of session fixtures, one expected status, task line and figures.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import '../public/vocab.js';
+import '../src/vocab.mjs';
 
 const V = globalThis.OfficeVocab;
 const base = { status: 'idle', turns: 0, pending: [], questions: [], calls: [], todos: [], usage: { tokens: 0 }, error: null, cost: null, lastEvent: 0, note: '', prompt: '', live: '', tool: null };

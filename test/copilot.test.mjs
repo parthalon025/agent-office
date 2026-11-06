@@ -15,7 +15,7 @@ import { providerEvents, checkProvider, spendLimitFor, describe, traitsOf } from
 import { createAcp, AGENTS } from '../src/providers/acp.mjs';
 import { requestCall, argsCall, SESSION_ARGS, SELF_APPROVE } from '../src/providers/copilot.mjs';
 import { cleanRules, decide, openRefusal, costAsk, enforcement } from '../src/security.mjs';
-import '../public/vocab.js';
+import '../src/vocab.mjs';
 
 const FAKE = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-copilot.mjs');
 const SEC = globalThis.OfficeVocab.security;

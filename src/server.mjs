@@ -51,7 +51,7 @@ import { mcpAddArgs, mcpRemoveArgs, pluginArgs } from './extensions.mjs';
 import * as auth from './auth.mjs';
 import { officeFiles, portArgs, DEFAULT_PORT, OFFICE_ROOT } from './files.mjs';
 import '../public/format.js'; // money, plurals and short paths, shared with the page (globalThis.OfficeFormat)
-import '../public/vocab.js'; // session vocabulary, shared with the page (globalThis.OfficeVocab)
+import './vocab.mjs'; // session vocabulary, shared with the page (globalThis.OfficeVocab)
 import '../public/ask.js'; // the ask-first protocol, shared with the page (globalThis.OfficeAsk)
 import '../public/wire.js'; // the /events wire format: lean snapshot and patches, shared with the page (globalThis.OfficeWire)
 const V = globalThis.OfficeVocab;
@@ -295,18 +295,19 @@ const tracker = createTracker({
   releaseHold: (id, decision) => releaseHold(id, decision),
   // The check before a hold: the Security room rules answer Allow and Deny at once (security.mjs decide).
   screen: (s, p, opts) => decide(saved.get('security'), callOf(s, p, opts)),
-  persist: {
-    history: (s) => recordHistory(s),
-    recentDir: (dir) => rememberDir(dir),
-    commands: (list) => { saved.set('commands', list); savePersisted(); },
-    placed: (s, g) => { adoptNotes(roomPlace(s)); if (g) addRepo(g.repo); },
-    spent: (s, dollars) => { saved.set('costs', addCost(saved.get('costs'), Date.now(), V.security.columnOf(s.provider), dollars)); savePersisted(); },
+  // The one persistence call of the tracker, by what happened (tracker.mjs deps.record).
+  record: (what, a, b) => {
+    if (what === 'history') recordHistory(a);
+    else if (what === 'recentDir') rememberDir(a);
+    else if (what === 'commands') { saved.set('commands', a); savePersisted(); }
+    else if (what === 'placed') { adoptNotes(roomPlace(a)); if (b) addRepo(b.repo); }
+    else if (what === 'spent') { saved.set('costs', addCost(saved.get('costs'), Date.now(), V.security.columnOf(a.provider), b)); savePersisted(); }
   },
 });
 const { sessions, feed, addFeed, newSession, placeSession, findSession, onHook, endSession } = tracker;
 
 // ---------- the Security room: the user's permission rules (#70) ----------
-// The rules live in security.mjs and public/vocab.js; this file applies them. A call is rated against the session's root
+// The rules live in security.mjs and public/vocab-security.js; this file applies them. A call is rated against the session's root
 // (tracker.rootOf, like the Approve card) in its building. A session not placed yet (git not looked up) has no building
 // (null): the office-wide rule applies unless some building has a stricter override, and then the call is held.
 const buildingOfSession = (s) => (s.placed ? roomPlace(s).buildingKey : null);
@@ -1236,11 +1237,10 @@ async function probeHttp() {
 }
 
 // ---------- Manager goals: the office plan source (#156, spec #130) ----------
-// manager.mjs holds the rules; this is the wiring. A goal is split into steps (one per line of the goal: the planner is injected, and the
+// manager.mjs holds the rules; this is the wiring. A goal is split into steps (one per line of the goal: the Manager's default planner, and the
 // model ladder of #74 replaces it later), approved first, and each step goes to an idle agent that sits in the same building. The spend limit is
 // checked by the Manager before each dispatch. Goals are saved in the state file. While a Paperclip company is connected the office is not the
 // planner (one planner per building): a goal is refused (409, confirm: 'goal') until the same call comes with confirmed: true.
-const planLines = async (goal) => String(goal).split(/\r?\n/).map((l) => l.replace(/^\s*(?:[-*]|\d+[.)])\s+/, '').trim()).filter(Boolean).map((text) => ({ text }));
 const goalAgents = (building) => [...sessions.values()].filter((s) => s.status !== 'ended' && buildingOfSession(s) === building).map((s) => {
   let paid = true; try { paid = traitsOf(providers.of(s)).paid; } catch { /* a kind that left: count it as paid */ }
   return { id: s.uid, name: s.name, role: s.deskRole || '', room: '', free: s.status === 'idle' && !s.error, paid, tiers: tiersOf(s, paid) };
@@ -1254,7 +1254,6 @@ function tiersOf(s, paid) {
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const stepSeen = new Set(); // agents that began the turn of their step (a terminal session starts it with its next hook)
 const manager = createManager({
-  planner: planLines,
   agents: goalAgents,
   // A Claude Code agent is set to the tier's model before the step starts (control set_model, the dock's model switch); a free agent keeps its model.
   dispatch: (agent, task, ctx) => {
@@ -1606,7 +1605,7 @@ setInterval(() => { for (const c of clients) c.write(': ping\n\n'); }, 20000).un
 const MIME = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
 const FONT_FILES = fs.readdirSync(path.join(PUBLIC, 'vendor', 'fonts')).filter((f) => /^[a-z0-9-]+\.woff2$/.test(f));
 const STATIC_FILES = new Map([
-  ['/page-core.js', 'public/page-core.js'], ['/dialogs.js', 'public/dialogs.js'], ['/schedules.js', 'public/schedules.js'], ['/extensions.js', 'public/extensions.js'], ['/hq.js', 'public/hq.js'], ['/characters.js', 'public/characters.js'], ['/reception.js', 'public/reception.js'], ['/panels.js', 'public/panels.js'], ['/changes.js', 'public/changes.js'], ['/needs.js', 'public/needs.js'], ['/office.js', 'public/office.js'], ['/scene-host.js', 'public/scene-host.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/persona.js', 'public/persona.js'], ['/lobby.js', 'public/lobby.js'], ['/desk.js', 'public/desk.js'], ['/security.js', 'public/security.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/vocab.js', 'public/vocab.js'], ['/ask.js', 'public/ask.js'], ['/client.js', 'public/client.js'], ['/wire.js', 'public/wire.js'], ['/format.js', 'public/format.js'], ['/wheel-gate.js', 'public/wheel-gate.js'], ['/building.js', 'public/building.js'], ['/toasts.js', 'public/toasts.js'], ['/screen-kit.js', 'public/screen-kit.js'], ['/tokens.css', 'tokens.css'],
+  ['/page-core.js', 'public/page-core.js'], ['/dialogs.js', 'public/dialogs.js'], ['/schedules.js', 'public/schedules.js'], ['/extensions.js', 'public/extensions.js'], ['/hq.js', 'public/hq.js'], ['/characters.js', 'public/characters.js'], ['/reception.js', 'public/reception.js'], ['/panels.js', 'public/panels.js'], ['/changes.js', 'public/changes.js'], ['/needs.js', 'public/needs.js'], ['/office.js', 'public/office.js'], ['/scene-host.js', 'public/scene-host.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/persona.js', 'public/persona.js'], ['/lobby.js', 'public/lobby.js'], ['/desk.js', 'public/desk.js'], ['/security.js', 'public/security.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/vocab.js', 'public/vocab.js'], ['/vocab-security.js', 'public/vocab-security.js'], ['/vocab-layers.js', 'public/vocab-layers.js'], ['/vocab-persona.js', 'public/vocab-persona.js'], ['/ask.js', 'public/ask.js'], ['/client.js', 'public/client.js'], ['/wire.js', 'public/wire.js'], ['/format.js', 'public/format.js'], ['/wheel-gate.js', 'public/wheel-gate.js'], ['/building.js', 'public/building.js'], ['/toasts.js', 'public/toasts.js'], ['/screen-kit.js', 'public/screen-kit.js'], ['/tokens.css', 'tokens.css'],
   ['/components/bundle.css', 'components/bundle.css'], ['/components/bundle.js', 'components/bundle.js'],
   ['/components/lib/three.min.js', 'components/lib/three.min.js'],
   ['/components/lib/three-orbit-controls.js', 'components/lib/three-orbit-controls.js'],

@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { normPath } from '../src/place.mjs';
 import { stageOf } from '../src/changes.mjs';
-import '../public/vocab.js';
+import '../src/vocab.mjs';
 import '../public/wire.js';
 import '../public/building.js';
 import { loadBundle } from './fixtures/ds-bundle.mjs';

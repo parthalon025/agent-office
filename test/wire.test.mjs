@@ -14,7 +14,7 @@ import { startOnFreePort, copyOffice } from './fixtures/office-server.mjs';
 import { createTracker, MAX_CALLS } from '../src/tracker.mjs';
 import { slimPayload } from '../src/payload.mjs';
 import { placeOfSession } from '../src/place.mjs';
-import '../public/vocab.js';
+import '../src/vocab.mjs';
 import '../public/wire.js';
 
 const W = globalThis.OfficeWire, V = globalThis.OfficeVocab;

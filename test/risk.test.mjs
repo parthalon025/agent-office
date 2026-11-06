@@ -9,7 +9,7 @@ import { riskOf, actionOf, inside, realInside, isProtectedPart, fileKey } from '
 import { officeFiles } from '../src/files.mjs';
 import { shortOf } from './fixtures/short-name.mjs';
 import { FIXTURE_ROOT, OFFICE, holds } from './fixtures/fixture-root.mjs';
-import '../public/vocab.js';
+import '../src/vocab.mjs';
 
 const V = globalThis.OfficeVocab;
 const WIN = process.platform === 'win32';

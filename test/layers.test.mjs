@@ -1,7 +1,7 @@
 // Layers (ADR 0006, #145): the layer vocabulary in public/vocab.js.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import '../public/vocab.js';
+import '../src/vocab.mjs';
 
 const V = globalThis.OfficeVocab;
 const L = V.layers;

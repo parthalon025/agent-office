@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 globalThis.window = globalThis;
 await import('../public/screen-kit.js');
 await import('../public/format.js');
-await import('../public/vocab.js'); // terminal.js reads the supervision words (#73) and kind words from it, as on the page
+await import('../src/vocab.mjs'); // terminal.js reads the supervision words (#73) and kind words from it, as on the page
 await import('../public/terminal.js');
 const T = globalThis.OfficeTerminal;
 const labels = (S) => S.rows.map((r) => r[0]);
