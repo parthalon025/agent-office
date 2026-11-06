@@ -1033,3 +1033,122 @@ test('hitAt: the control under the point, padded; the nearest centre wins where 
   assert.equal(P.hitAt(ctl, null, plane, 44), null);
   assert.equal(P.hitAt(ctl, { x: 0.1, y: 0.1 }, { w: 0, h: 0 }, 44), null, 'a plane with no size has no point');
 });
+
+// ---------- camera controls (#163): arrow keys, the pivot of a rotation ----------
+const cam0 = (t = [0, 0, 0]) => ({ p: [t[0] + 30, t[1] + 26.25, t[2] + 30], t });
+const zero = (a) => a.map((v) => v + 0);   // no -0
+
+test('panDelta: left and right go along the floor, up and down away from and toward the viewer, in whole steps', () => {
+  const c = cam0();
+  assert.deepEqual(zero(P.panDelta('ArrowRight', c, 20)), [20, 0, 0]);
+  assert.deepEqual(zero(P.panDelta('ArrowLeft', c, 20)), [-20, 0, 0]);
+  assert.deepEqual(zero(P.panDelta('ArrowUp', c, 20)), [0, 0, -20]);
+  assert.deepEqual(zero(P.panDelta('ArrowDown', c, 20)), [0, 0, 20]);
+  assert.equal(P.panDelta('a', c, 20), null);
+  // a camera a little off the diagonal (after a turn and a turn back) keeps the floor axes
+  const off = { p: [30.4, 26, 29.6], t: [0, 0, 0] };
+  assert.deepEqual(zero(P.panDelta('ArrowRight', off, 20)), [20, 0, 0]);
+  assert.deepEqual(zero(P.panDelta('ArrowUp', off, 20)), [0, 0, -20]);
+  // turned a quarter: the camera looks along -x, so screen right is -z and up is -x
+  const turned = { p: [30, 26, 0], t: [0, 0, 0] };
+  assert.deepEqual(zero(P.panDelta('ArrowRight', turned, 20)), [0, 0, -20]);
+  assert.deepEqual(zero(P.panDelta('ArrowUp', turned, 20)), [-20, 0, 0]);
+});
+
+test('roomStep: the middle gap between rooms; a default for fewer than two', () => {
+  assert.equal(P.roomStep([[0, 0, 0], [20, 0, 0], [40, 0, 0]]), 20);
+  assert.equal(P.roomStep([[0, 0, 0], [18, 0, 0], [40, 0, 0]]), 22);
+  assert.equal(P.roomStep([[5, 0, 0]]), 20);
+  assert.equal(P.roomStep([]), 20);
+});
+
+test('panTarget: a pan stays within half a step of the rooms', () => {
+  const rooms = [[0, 0, 0], [20, 0, 0]];
+  assert.deepEqual(zero(P.panTarget([0, 0, 0], [20, 0, 0], rooms, 20)), [20, 0, 0]);
+  assert.deepEqual(zero(P.panTarget([20, 0, 0], [20, 0, 0], rooms, 20)), [30, 0, 0]);
+  assert.deepEqual(zero(P.panTarget([0, 0, 0], [0, 0, -40], rooms, 20)), [0, 0, -10]);
+  assert.deepEqual(zero(P.panTarget([0, 0, 0], [5, 0, 0], [], 20)), [5, 0, 0]);   // no rooms known: no bound
+});
+
+test('pivotOn: the pivot is the room in view, on the line of sight, so the picture does not change', () => {
+  const rooms = [[0, 2.6, 0], [20, 2.6, 0], [40, 2.6, 0]];
+  const c = cam0([21, 0, 0]);   // panned toward the middle room
+  assert.equal(P.roomInView(rooms, c), 1);
+  const t = P.pivotOn(c, rooms[1]);
+  const d = [t[0] - c.t[0], t[1] - c.t[1], t[2] - c.t[2]], v = [c.t[0] - c.p[0], c.t[1] - c.p[1], c.t[2] - c.p[2]];
+  const cross = [d[1] * v[2] - d[2] * v[1], d[2] * v[0] - d[0] * v[2], d[0] * v[1] - d[1] * v[0]];
+  assert.ok(Math.hypot(...cross) < 1e-9, 'moved along the line of sight only');
+  const off = [rooms[1][0] - t[0], rooms[1][1] - t[1], rooms[1][2] - t[2]];
+  assert.ok(Math.abs((off[0] * v[0] + off[1] * v[1] + off[2] * v[2]) / Math.hypot(...v)) < 1e-9, 'the room centre is at the pivot depth');
+  assert.equal(P.roomInView(rooms, cam0([40, 0, 0])), 2);
+  assert.equal(P.roomInView([], c), -1);
+});
+
+test('keyOk: arrows act only with nothing focused, and never over a dialog, palette, field or list', () => {
+  const el = (tag, within) => ({ tagName: tag, closest: (sel) => (within && sel.includes(within) ? {} : null) });
+  const body = el('BODY'), canvas = el('CANVAS');
+  const doc = (open) => ({ body, documentElement: el('HTML'), querySelector: () => (open ? {} : null) });
+  const key = (target, extra = {}) => ({ key: 'ArrowLeft', target, ...extra });
+  assert.equal(P.keyOk(key(body), doc(false), canvas), true);
+  assert.equal(P.keyOk(key(canvas), doc(false), canvas), true);
+  assert.equal(P.keyOk(key(body, { shiftKey: true }), doc(false), canvas), false);
+  assert.equal(P.keyOk(key(body, { ctrlKey: true }), doc(false), canvas), false);
+  assert.equal(P.keyOk(key(body, { defaultPrevented: true }), doc(false), canvas), false);
+  assert.equal(P.keyOk(key(body), doc(true), canvas), false, 'a dialog or the palette is open');
+  assert.equal(P.keyOk(key(el('INPUT')), doc(false), canvas), false);
+  assert.equal(P.keyOk(key(el('TEXTAREA')), doc(false), canvas), false);
+  assert.equal(P.keyOk(key(el('DIV', 'listbox')), doc(false), canvas), false);
+  assert.equal(P.keyOk(key(el('BUTTON')), doc(false), canvas), false, 'a focused control keeps its keys');
+  assert.equal(P.keyOk({ key: 'Enter', target: body }, doc(false), canvas), false);
+});
+
+function panStage(rooms) {
+  const s = focusStage({ board: 9 });
+  const rgs = rooms.map((x, i) => node({ isGroup: true, position: { x }, name: 'r' + i, matrixWorld: { elements: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, x, 0, 0, 1] }, updateWorldMatrix() {} }, [box(10, 5.2, 0.2)]));
+  rgs.forEach((g) => { g.parent = s.fg; s.fg.children.push(g); });
+  const host = globalThis.OfficeSceneHost.attach({ ...s.office, getBuilding: () => ({ floors: [{ id: 1, rooms: rooms.map((x, i) => ({ id: 'r' + i })) }] }) });
+  s.stage.cam.position.set(30, 26.25, 30);
+  s.stage.ctl.target.set(0, 0, 0);
+  const body = { tagName: 'BODY', closest: () => null };
+  return { ...s, host, body, doc: { body, documentElement: {}, querySelector: () => null } };
+}
+const arrow = (s, key) => s.host.key({ key, target: s.body, preventDefault() { s.prevented = true; } }, s.doc);
+
+test('host: an arrow key moves camera and target together by one room, and the view keeps its angle', () => {
+  const s = panStage([0, 20, 40]);
+  assert.equal(arrow(s, 'ArrowRight'), true);
+  land(s);
+  assert.equal(s.prevented, true);
+  assert.ok(near(s.stage.ctl.target.x, 20) && near(s.stage.ctl.target.z, 0));
+  assert.ok(near(s.stage.cam.position.x, 50) && near(s.stage.cam.position.y, 26.25) && near(s.stage.cam.position.z, 30));
+  arrow(s, 'ArrowRight'); arrow(s, 'ArrowRight'); land(s);
+  assert.ok(near(s.stage.ctl.target.x, 50), 'the last room plus half a step is the end: ' + s.stage.ctl.target.x);
+});
+
+test('host: with reduced motion the move is instant; while a screen is in focus the arrows do nothing', () => {
+  const s = panStage([0, 20]);
+  s.stage.rm = true;
+  arrow(s, 'ArrowRight');
+  s.anim[0](0.016, 1);
+  assert.ok(near(s.stage.ctl.target.x, 20));
+  const f = panStage([0, 20]);
+  const { t } = screens(f, []);
+  f.host.register(t);
+  f.host.show(t, { id: 'a', mesh: f.a }, false);
+  assert.equal(arrow(f, 'ArrowRight'), false);
+});
+
+test('host: pressing to rotate turns around the room in view, and the picture does not change', () => {
+  const s = panStage([0, 20, 40]);
+  arrow(s, 'ArrowRight'); arrow(s, 'ArrowRight'); land(s);
+  const p0 = { x: s.stage.cam.position.x, y: s.stage.cam.position.y, z: s.stage.cam.position.z };
+  s.handlers.pointerdown(ev(10, 10, 0));
+  const t = s.stage.ctl.target, v = [t.x - p0.x, t.y - p0.y, t.z - p0.z], n = Math.hypot(...v), off = [40 - t.x, 2.6 - t.y, 0 - t.z];
+  assert.deepEqual({ x: s.stage.cam.position.x, y: s.stage.cam.position.y, z: s.stage.cam.position.z }, p0, 'the camera does not move');
+  assert.ok(Math.abs((off[0] * v[0] + off[1] * v[1] + off[2] * v[2]) / n) < 1e-6, 'the last room is at the pivot depth');
+});
+
+test('DS controls: left rotates, middle and right pan', () => {
+  const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'components', 'bundle.js'), 'utf8');
+  assert.match(src, /mouseButtons\s*=\s*\{\s*LEFT:\s*T\.MOUSE\.ROTATE,\s*MIDDLE:\s*T\.MOUSE\.PAN,\s*RIGHT:\s*T\.MOUSE\.PAN\s*\}/);
+});

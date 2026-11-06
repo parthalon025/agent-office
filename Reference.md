@@ -107,6 +107,7 @@ The `bot` of `bot.add`. `kit/check.py --events` and `AgentOffice.validate` check
 `onReady(office)` in React, or the return value of `AgentOffice.office.mount(el, opts)`: `addBot`, `addFloor`, `addRoom`, `all`, `applyEvent`, `approve`, `approveMany`, `bots`, `broadcast`, `byBot`, `chatOf`, `connect`, `cost`, `decline`, `declineMany`, `dispose`, `errors`, `ev`, `events`, `finished`, `floor`, `focusRoom`, `getBuilding`, `history`, `inspect`, `message`, `messages`, `quality`, `removeBot`, `replay`, `retry`, `right`, `screenPos`, `select`, `send`, `sessions`, `setFloor`, `setFrameInset`, `setSound`, `setView`, `speed`, `stage`, `stopReplay`, `stopSession`, `summary`, `to`, `tokens`, `toolCalls`, `top`, `validate`, `visible`, `waiting`, `y`, `zoom`.
 
 - `zoom(factor)`: zoom by a factor (the HUD + and - buttons use 1.2 and 1/1.2). The zoom stays inside the controls' `minZoom` and `maxZoom` (0.4 and 4 by default). A step never goes the wrong way: when a framed view is past the limit, + keeps the zoom. Returns the new zoom.
+- Camera controls: left-drag rotates, middle-drag and right-drag pan, the wheel zooms (`stage.ctl.mouseButtons`). The page may move the camera with the controls' target and the camera together (arrow keys, #163) and set the pivot of a rotation on the line of sight; the engine reads `stage.ctl.target` as the pivot.
 - Camera moves (`setView`, `setFloor`, `focusRoom`, `setFrameInset`) glide for `duration-camera`. With `prefers-reduced-motion` they cut, and a floor change shows the new floor at once. Each move still sets `stage.goal` (`office.inspect().stage`), and the next frame ends it. So a page that holds `stage.goal` back, for example while an item is in focus, holds the cut too.
 - `dispose()` frees the GPU memory of the stage: every geometry, material and texture in the scene (also the ones the page added), the Kit caches, the light shadows and the post effects. Then it frees the renderer and its WebGL context. It is safe to call twice. It frees nothing that another live stage still uses, with one exception: the post effects share one full-screen triangle geometry between all stages, and `dispose()` frees it. A stage that still draws uploads it again on its next frame, so nothing shows. If a free throws, the other frees still run: the renderer, its WebGL context and its canvas are freed, and then the first error reaches the caller.
 - `stage.clear(group)` takes a group out of the scene at once and frees its GPU memory after the next frame. What the scene and the Kit caches (`K.tex`, `K.mats`) still use then stays, so a page can build again in the same frame from the same materials and textures. A theme change frees the old Kit textures.
@@ -317,28 +318,28 @@ Each README has the full props table. Types: `components/index.d.ts`.
 
 #### Fluent 2 source of Fluent and Fluent Dark
 
-Fluent and Fluent Dark follow the open Fluent 2 design tokens: `webLightTheme` and `webDarkTheme` of `@fluentui/tokens` (MIT, version 1.0.0-alpha.24). Each color names its source: an alias token (`colorNeutralBackground3`), a step of the neutral ramp (`grey[94]`), of the brand ramp (`brandWeb[90]`) or of a shared palette color (`orchid tint30`). "Matches" means the value is the source value. Where it differs, the cell says why; most differences are a contrast fix, so do not set them back to the source. A value that drifted with no reason was aligned to its source (in x1.7.11 or x1.7.17, as the cell says), and every contrast pair was measured again. A `{token}` value takes the value of that token. The theme shows no Microsoft logo, Windows mark or product name.
+Fluent and Fluent Dark follow the open Fluent 2 design tokens: `webLightTheme` and `webDarkTheme` of `@fluentui/tokens` (MIT, version 1.0.0-alpha.24). Each color names its source: an alias token (`colorNeutralBackground3`), a step of the neutral ramp (`grey[94]`), of the brand ramp (`brandWeb[90]`) or of a shared palette color (`orchid tint30`). "Matches" means the value is the source value. Where it differs, the cell says why; most differences are a contrast fix, so do not set them back to the source. A value that drifted with no reason was aligned to its source (in x1.7.11 or x1.7.18, as the cell says), and every contrast pair was measured again. A `{token}` value takes the value of that token. The theme shows no Microsoft logo, Windows mark or product name.
 
 | Token | fluent (webLightTheme) | fluent-dark (webDarkTheme) |
 | --- | --- | --- |
-| `bg` | `#f5f5f5`: colorNeutralBackground3. Aligned from `#f3f3f3` (x1.7.17). | `#1f1f1f`: colorNeutralBackground2. Matches. |
-| `panel` | `rgba(255,255,255,0.88)`: colorNeutralBackground1, at the 88% glass alpha of the DS. Fluent 2 has no glass surface. Aligned from `rgba(251,251,251,0.88)` (x1.7.17). | `rgba(41,41,41,0.88)`: colorNeutralBackground1, at the 88% glass alpha of the DS. Fluent 2 has no glass surface. |
+| `bg` | `#f5f5f5`: colorNeutralBackground3. Aligned from `#f3f3f3` (x1.7.18). | `#1f1f1f`: colorNeutralBackground2. Matches. |
+| `panel` | `rgba(255,255,255,0.88)`: colorNeutralBackground1, at the 88% glass alpha of the DS. Fluent 2 has no glass surface. Aligned from `rgba(251,251,251,0.88)` (x1.7.18). | `rgba(41,41,41,0.88)`: colorNeutralBackground1, at the 88% glass alpha of the DS. Fluent 2 has no glass surface. |
 | `chip` | `#ebebeb`: colorSubtleBackgroundSelected. Matches. | `#333333`: colorSubtleBackgroundSelected. Matches. |
 | `line` | `rgba(0,0,0,0.10)`: colorNeutralStencil1Alpha. The stroke token colorNeutralStrokeAlpha (0.05) is too faint on the glass panel. | `rgba(255,255,255,0.10)`: colorNeutralStrokeAlpha. Matches. |
 | `ink` | `#242424`: colorNeutralForeground1. Matches. | `#ffffff`: colorNeutralForeground1. Matches. |
 | `muted` | `#616161`: colorNeutralForeground3. Matches. | `#adadad`: colorNeutralForeground3. Matches. |
-| `accent` | `#0f6cbd`: colorBrandBackground. Matches. | `#479ef5`: colorBrandForeground1. Aligned from `#4aa0f6` (x1.7.17); `accent-text` is the lighter `#62abf5`. |
-| `accent-text` | `{accent}`: colorBrandForeground1. Matches. | `#62abf5`: colorBrandForeground2. Differs from `accent` on purpose: `#479ef5` is 4.499:1 on chip, under 4.5:1. The next brand step, `#62abf5` (brandWeb[110]), is 5.2:1 on chip and 6.8:1 on bg. Aligned from the hand-nudged `#4aa0f6` (x1.7.17). |
+| `accent` | `#0f6cbd`: colorBrandBackground. Matches. | `#479ef5`: colorBrandForeground1. Aligned from `#4aa0f6` (x1.7.18); `accent-text` is the lighter `#62abf5`. |
+| `accent-text` | `{accent}`: colorBrandForeground1. Matches. | `#62abf5`: colorBrandForeground2. Differs from `accent` on purpose: `#479ef5` is 4.499:1 on chip, under 4.5:1. The next brand step, `#62abf5` (brandWeb[110]), is 5.2:1 on chip and 6.8:1 on bg. Aligned from the hand-nudged `#4aa0f6` (x1.7.18). |
 | `on-accent` | `#ffffff`: colorNeutralForegroundOnBrand. Matches. | `#141414`: colorNeutralBackground3. Accent is the light brand foreground, so the text on it is dark: white on `#479ef5` is 2.8:1. |
 | `emphasis` | `{accent}`: colorBrandBackground (= accent). Matches. | `{accent}`: colorBrandForeground1 (= accent). Matches. |
 | `on-emphasis` | `{on-accent}`: colorNeutralForegroundOnBrand (= on-accent). Matches. | `{on-accent}`: colorNeutralBackground3 (= on-accent). Matches. |
 | `on-status` | `#ffffff`: colorNeutralForegroundOnBrand. Not used (agent-office #118). | `#141414`: colorNeutralBackground3. Not used (agent-office #118). |
 | `bubble` | `#ffffff`: colorNeutralBackground1. Matches. | `#f5f5f5`: grey[96] (webLightTheme colorNeutralBackground3). The bubble is a light face in every theme. |
 | `status-working` | `#107c10`: colorStatusSuccessBackground3. Matches. | `#54b054`: colorStatusSuccessForeground1. Matches. |
-| `status-waiting` | `#de590b`: orange shade10, one step darker than colorStatusWarningBackground3. Differs: colorStatusWarningBackground3 `#f7630c` is 2.6:1 on chip; orange shade10 is 3.2:1. Aligned from `#d2560b` (x1.7.17). | `#faa06b`: colorStatusWarningForeground1. Matches. |
+| `status-waiting` | `#de590b`: orange shade10, one step darker than colorStatusWarningBackground3. Differs: colorStatusWarningBackground3 `#f7630c` is 2.6:1 on chip; orange shade10 is 3.2:1. Aligned from `#d2560b` (x1.7.18). | `#faa06b`: colorStatusWarningForeground1. Matches. |
 | `status-error` | `#c50f1f`: colorStatusDangerBackground3. Matches. | `#dc626d`: colorStatusDangerForeground1. Matches. |
 | `status-resting` | `#7a7a7a`: grey[48]. Fluent 2 has no idle status: a mid step of the neutral ramp, 3:1 or more on chip. | `#858585`: grey[52]. Fluent 2 has no idle status: a mid step of the neutral ramp. |
-| `status-finished` | `#2886de`: brandWeb[90]. Fluent 2 has no finished status: a step of the brand ramp, 3:1 or more on chip. Aligned from `#227ed4` (x1.7.17). | `#62abf5`: colorBrandForeground2. Matches. |
+| `status-finished` | `#2886de`: brandWeb[90]. Fluent 2 has no finished status: a step of the brand ramp, 3:1 or more on chip. Aligned from `#227ed4` (x1.7.18). | `#62abf5`: colorBrandForeground2. Matches. |
 | `status-working-text` | `#0e700e`: colorStatusSuccessForeground1. Matches. | `{status-working}`: colorStatusSuccessForeground1, the value of status-working. Aligned from `#6cbf6c` (x1.7.11). |
 | `status-waiting-text` | `#a94409`: colorStatusWarningForeground1. Differs: `#bc4b09` is 4.25:1 on chip; darkened to 5.0:1. | `{status-waiting}`: colorStatusWarningForeground1. Matches. |
 | `status-error-text` | `#b10e1c`: colorStatusDangerForeground1. Matches. | `#ee8a93`: colorStatusDangerForeground1. Differs: `#dc626d` is 3.6:1 on chip; lightened to 5.2:1. |
@@ -349,27 +350,27 @@ Fluent and Fluent Dark follow the open Fluent 2 design tokens: `webLightTheme` a
 | `status-error-on-bubble` | `{status-error}`: colorStatusDangerBackground3. Matches. | `#b10e1c`: webLightTheme colorStatusDangerForeground1. Light face. |
 | `status-resting-on-bubble` | `#707070`: colorNeutralForeground4. Matches. | `#616161`: webLightTheme colorNeutralForeground3. Light face. |
 | `status-finished-on-bubble` | `#0f6cbd`: colorBrandForeground1. Matches. | `#115ea3`: webLightTheme colorBrandForeground2. Light face. |
-| `floor-ops` | `#505c60`: platinum shade20. Fluent 2 has no floor colors: a shared palette color, 4.9:1 or more under white. Aligned from `#4d5f6b` (x1.7.17). | `#505c60`: platinum shade20. Aligned from `#4d5f6b` (x1.7.17). |
-| `floor-sales` | `#b6480e`: pumpkin shade10. Shared palette color. | `#b6480e`: pumpkin shade10. Aligned from `#ad440d` (x1.7.17). |
-| `floor-research` | `#00723b`: seafoam shade30. Shared palette color. Aligned from `#1c7d3b` (x1.7.17). | `#00723b`: seafoam shade30. Aligned from `#1a7539` (x1.7.17). |
+| `floor-ops` | `#505c60`: platinum shade20. Fluent 2 has no floor colors: a shared palette color, 4.9:1 or more under white. Aligned from `#4d5f6b` (x1.7.18). | `#505c60`: platinum shade20. Aligned from `#4d5f6b` (x1.7.18). |
+| `floor-sales` | `#b6480e`: pumpkin shade10. Shared palette color. | `#b6480e`: pumpkin shade10. Aligned from `#ad440d` (x1.7.18). |
+| `floor-research` | `#00723b`: seafoam shade30. Shared palette color. Aligned from `#1c7d3b` (x1.7.18). | `#00723b`: seafoam shade30. Aligned from `#1a7539` (x1.7.18). |
 | `floor-content` | `#6656d1`: lavender shade10. Shared palette color. | `#6656d1`: lavender shade10. Matches. |
 | `floor-hq` | `#8e562e`: brown primary. Shared palette color. | `#8e562e`: brown primary. Matches. |
 | `on-floor` | `#ffffff`: colorNeutralForegroundOnBrand. Matches. | `#ffffff`: colorNeutralForeground1. Matches. |
-| `scrim` | `#000000`: black, the color of colorBackgroundOverlay. The DS mixes it to 45%. Aligned from `#0a1016` (x1.7.17). | `#000000`: black, the color of colorBackgroundOverlay. Matches. |
+| `scrim` | `#000000`: black, the color of colorBackgroundOverlay. The DS mixes it to 45%. Aligned from `#0a1016` (x1.7.18). | `#000000`: black, the color of colorBackgroundOverlay. Matches. |
 | `type-team` | `#4f6bed`: cornflower primary. Shared palette color. | `#778df1`: cornflower tint20. Matches. |
 | `type-lab` | `#038387`: teal primary. Shared palette color. | `#4cb4b7`: teal tint30. Matches. |
 | `type-studio` | `#c239b3`: berry primary. Shared palette color. | `#da7ed0`: berry tint30. Matches. |
-| `type-hq` | `#b27c00`: marigold shade20. Shared palette color, 3.05:1 on chip. Aligned from `#9a6a00` (x1.7.17). | `#efb839`: marigold tint20. Matches. |
-| `type-security` | `#8764b8`: orchid primary. Shared palette color. | `#b29ad4`: orchid tint30. Aligned from `#b49dd4` (x1.7.17). |
-| `scene-floor` | `#f0f0f0`: grey[94]. A 3D material: Fluent 2 has no scene tokens, so a neutral material is a step of the neutral ramp. Aligned from `#eeeeee` (x1.7.17). | `#2e2e2e`: grey[18]. A step of the neutral ramp. |
-| `scene-wall` | `#e6e6e6`: grey[90]. Neutral ramp. Aligned from `#e8e8e8` (x1.7.17). | `#292929`: grey[16]. Neutral ramp. |
+| `type-hq` | `#b27c00`: marigold shade20. Shared palette color, 3.05:1 on chip. Aligned from `#9a6a00` (x1.7.18). | `#efb839`: marigold tint20. Matches. |
+| `type-security` | `#8764b8`: orchid primary. Shared palette color. | `#b29ad4`: orchid tint30. Aligned from `#b49dd4` (x1.7.18). |
+| `scene-floor` | `#f0f0f0`: grey[94]. A 3D material: Fluent 2 has no scene tokens, so a neutral material is a step of the neutral ramp. Aligned from `#eeeeee` (x1.7.18). | `#2e2e2e`: grey[18]. A step of the neutral ramp. |
+| `scene-wall` | `#e6e6e6`: grey[90]. Neutral ramp. Aligned from `#e8e8e8` (x1.7.18). | `#292929`: grey[16]. Neutral ramp. |
 | `scene-wood` | `#e2cfae`: no source. A 3D material (wood): no Fluent 2 source. | `#8c7a5e`: no source. A 3D material (wood): no Fluent 2 source. |
-| `scene-chair` | `#394146`: anchor primary. Shared palette color. Aligned from `#3a4048` (x1.7.17). | `#4a5356`: silver shade30. Aligned from `#4a5058` (x1.7.17). |
+| `scene-chair` | `#394146`: anchor primary. Shared palette color. Aligned from `#3a4048` (x1.7.18). | `#4a5356`: silver shade30. Aligned from `#4a5058` (x1.7.18). |
 | `scene-rug` | `#5a8fd0`: no source. A 3D material (the lounge rug, in the brand blue family): no Fluent 2 source. | `#2f5d8f`: no source. A 3D material: no Fluent 2 source. |
-| `scene-wall-side` | `#e0e0e0`: grey[88]. Neutral ramp, one step darker than the wall. Aligned from `#dedede` (x1.7.17). | `#242424`: grey[14]. Neutral ramp. |
+| `scene-wall-side` | `#e0e0e0`: grey[88]. Neutral ramp, one step darker than the wall. Aligned from `#dedede` (x1.7.18). | `#242424`: grey[14]. Neutral ramp. |
 | `scene-slab` | `#b3b3b3`: grey[70]. Neutral ramp. | `#1a1a1a`: grey[10]. Neutral ramp. |
 | `scene-rail` | `#ffffff`: white. Matches. | `#5c5c5c`: grey[36]. Neutral ramp. |
-| `scene-sofa` | `#4d565c`: anchor tint10. Shared palette color. Aligned from `#4a5560` (x1.7.17). | `#3f4a55`: no source. A 3D material: no Fluent 2 source. |
+| `scene-sofa` | `#4d565c`: anchor tint10. Shared palette color. Aligned from `#4a5560` (x1.7.18). | `#3f4a55`: no source. A 3D material: no Fluent 2 source. |
 | `scene-metal` | `#a8a8a8`: grey[66]. Neutral ramp. | `#707070`: grey[44]. Neutral ramp. |
 | `scene-dark` | `#292929`: grey[16] (colorNeutralBackgroundInverted). Matches. | `#141414`: grey[8] (colorNeutralBackground3). Matches. |
 | `scene-glass` | `#cfe4fa`: brandWeb[150] (colorBrandBackground2Hover). Matches. | `#34506e`: no source. A 3D glass tint: no Fluent 2 source. |
