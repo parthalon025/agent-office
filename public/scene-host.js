@@ -200,6 +200,13 @@
     var ax = v3(it.ax), ay = v3(it.ay);
     return { dir: dir, right: right, up: up, sx: Math.abs(vdot(ax, right)) + Math.abs(vdot(ay, right)), sy: Math.abs(vdot(ax, up)) + Math.abs(vdot(ay, up)) };
   }
+  // Where the bezel count sits: the top right corner of the screen's rect, kept inside the free part of the view (a page box is
+  // not covered by it). half: half the bezel's height. The bezel's right edge is at x, its middle at y.
+  function bezelAt(rect, free, half) {
+    var x = rect.left + rect.width, y = rect.top;
+    if (free) { x = Math.min(x, free.right); y = Math.max(y, free.top + half); }
+    return { x: x, y: y };
+  }
   var MIN_FREE = 60;   // px: a free part smaller than this is no place to show a screen; the whole view is used
   function framePose(it, cam, view, free, fill) {
     var fc = facing(it, cam), dir = fc.dir, right = fc.right, up = fc.up, sx = fc.sx, sy = fc.sy;
@@ -272,7 +279,7 @@
   };
 
   var pure = { inScene: inScene, shown: shown, floorOf: floorOf, floorGroups: floorGroups, shownFloor: shownFloor, viewOf: viewOf, roomGroups: roomGroups, rebuilt: rebuilt, choose: choose,
-    focusStep: focusStep, freeRect: freeRect, facing: facing, framePose: framePose, uvOn: uvOn, projectRect: projectRect, layerSame: layerSame, parts: parts };
+    focusStep: focusStep, freeRect: freeRect, facing: facing, framePose: framePose, uvOn: uvOn, bezelAt: bezelAt, projectRect: projectRect, layerSame: layerSame, parts: parts };
 
   // ---------- browser ----------
   // A token in px or ms from the page's CSS (no DOM in the tests: the fallback).

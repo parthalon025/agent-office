@@ -176,7 +176,7 @@ test('office.js and office.css: on the desk screen the requests come first, and 
   assert.doesNotMatch(css, /\.pin-desk\.is-small \.pin-head \{ flex-wrap: nowrap; \}/, 'a head too narrow wraps, never clips Back');
   assert.match(css, /\.pin-desk\.is-small \.pin-head > \* \{ flex: none; \}/, 'its buttons keep their size; the name gives way');
   assert.match(desk, /h\(Bezel, \{ inline: true, count: p\.waiting, onGo: p\.onGo, compact: small \}\)/, 'a small head shows the count, not the words');
-  assert.match(js, /p\.compact \? 'Needs you · ' \+ p\.count \+ '\. Go to the oldest request' : null/, 'the compact bezel keeps its whole name as its label');
+  assert.match(js, /compact \? 'Needs you · ' \+ p\.count \+ '\. Go to the oldest request' : null/, 'the compact bezel keeps its whole name as its label');
   assert.match(css, /\.pin-desk\.is-small\.has-asks \.asks \{ flex: 1 1 auto; min-height: 0; max-height: none; border-bottom: 0; \}/, 'no cap on a small screen');
   assert.match(css, /\.pin-desk\.is-small\.has-asks \.ao-tabs \{ display: none; \}/, 'the tabs wait while a request is open');
   assert.match(js, /\.term-input, \.term-note, \.bezel, \.board-b > \.inline-actions,/, 'the toast stack keeps off the terminal note, the bezel and the room panel actions');
@@ -187,9 +187,9 @@ test('office.js and office.css: on the desk screen the requests come first, and 
 // frames the screen again, and the look bar shows the open requests, so an approval never hides.
 test('office.js and office.css: a Security screen in focus at 820 px and below gets the floor list and the room card out of the way (M6)', () => {
   const js = readFileSync(join(pub, 'office.js'), 'utf8');
-  assert.match(js, /useLayoutEffect\(function \(\) \{ var el = document\.getElementById\('office'\); if \(el\) el\.classList\.toggle\('sec-look', secLook\)/, 'set in the commit, before the look bar places itself');
+  assert.match(js, /useLayoutEffect\(function \(\) \{ var el = document\.getElementById\('office'\); if \(el\) el\.classList\.toggle\('sec-look', hideHud\)/, 'set in the commit, before the look bar places itself');
   assert.match(js, /layout: secLook/);
-  assert.match(js, /\[secLook\]\);/, 'the screen is framed again when the class changes');
+  assert.match(js, /\[hideHud\]\);/, 'the screen is framed again when the class changes');
   assert.match(js, /h\(LookBar, \{[^}]*asks:/, 'the look bar gets the open requests');
   const m = /@media \(max-width: 820px\) \{\s*#office\.sec-look \.ao-hud-left, #office\.sec-look \.ao-hud-right:not\(\.ao-hud-inbox\) \{ visibility: hidden; pointer-events: none; \}/.exec(css);
   assert.ok(m, 'the rule in office.css');
@@ -198,4 +198,13 @@ test('office.js and office.css: a Security screen in focus at 820 px and below g
 // From 1100 px down to 821 px the dock sits on the left edge; the left menu (floors, rooms, queue) stops above it, so no Approve button sits under the dock.
 test('the left menu stops above the dock from 1100 px down to 821 px', () => {
   assert.match(css, /@media \(min-width: 821px\) and \(max-width: 1100px\) \{\s*\.ao-hud-left \{ max-height: calc\(100% - 68px - var\(--strip-clear, 200px\)\); \}\s*\}/);
+});
+
+test('office.js: the screen waits are deadlines in time, a pinned screen hides the floor list, the first request takes focus, the bezel stays in the free part (review 89)', () => {
+  const js = readFileSync(join(pub, 'office.js'), 'utf8');
+  assert.doesNotMatch(js, /\+\+w\.n > 300/, 'no count of frames');
+  assert.equal((js.match(/Date\.now\(\) > w\.until/g) || []).length, 2, 'the changes and the desk wait end on a deadline');
+  assert.match(js, /var hideHud = secLook \|\| pinned;/, 'a pinned screen takes the same columns away as a Security screen');
+  assert.match(js, /el\.querySelector\('\.asks button'\) \|\| el\.querySelector\('#pin-chat-input/, 'an open request takes focus before the message box');
+  assert.match(js, /bezelAt\(r, p\.host\.free\(\), 18\)/, 'the bezel is kept inside host.free()');
 });

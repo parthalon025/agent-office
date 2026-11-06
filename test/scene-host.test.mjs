@@ -1002,3 +1002,13 @@ test('host: click, hover and open get the screen point of a plane hit in hit.uv;
   assert.deepEqual(hits, [null]);
   host2.dispose();
 });
+
+// The bezel count of a screen in focus sits on its top right corner, but never outside the free part of the view (review 89):
+// a page box (HUD column, dock, panel) is not covered by it.
+test('bezelAt: the corner of the screen, kept inside the free part of the view', () => {
+  const free = { left: 100, top: 50, right: 700, bottom: 500 };
+  assert.deepEqual(P.bezelAt({ left: 200, top: 120, width: 300, height: 200 }, free, 20), { x: 500, y: 120 });
+  assert.deepEqual(P.bezelAt({ left: 200, top: 120, width: 800, height: 200 }, free, 20), { x: 700, y: 120 }, 'right edge cut by the free part');
+  assert.deepEqual(P.bezelAt({ left: 200, top: 10, width: 300, height: 200 }, free, 20), { x: 500, y: 70 }, 'top edge cut: half the bezel below the free top');
+  assert.deepEqual(P.bezelAt({ left: 200, top: 120, width: 300, height: 200 }, null, 20), { x: 500, y: 120 }, 'no free part: the corner');
+});

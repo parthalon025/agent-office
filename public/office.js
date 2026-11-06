@@ -1391,6 +1391,7 @@
   // The scene host gives the screen's box (host.layer, host.onLayer) every frame it moves, and hides the layer while the
   // camera flies. The page puts the box on its element with setProperty, never a style attribute (the CSP), and renders
   // again only when the screen or its state changes, not on every move.
+  var WANT_MS = 5000;   // a wait for a screen to settle (a flight, another building): a deadline in time, not a count of frames
   function px(v) { return Math.round(v * 10) / 10 + 'px'; }
   function putBox(el, r) {
     el.style.setProperty('--pin-x', px(r.left)); el.style.setProperty('--pin-y', px(r.top));
@@ -1414,10 +1415,15 @@
   // compact (a small pinned screen): the icon and the count, with the whole name as the label, so the head keeps one row.
   function Bezel(p) {
     var ref = React.useRef(null);
-    usePinBox(p.inline ? null : p.host, ref, function (el, r) { el.style.setProperty('--pin-x', px(r.left + r.width)); el.style.setProperty('--pin-y', px(r.top)); });
+    // the corner of the screen, kept inside the free part of the view (host.free), compact on a small screen
+    var small = usePinBox(p.inline ? null : p.host, ref, function (el, r) {
+      var b = window.OfficeSceneHost.pure.bezelAt(r, p.host.free(), 18);
+      el.style.setProperty('--pin-x', px(b.x)); el.style.setProperty('--pin-y', px(b.y));
+    });
     if (!(p.count > 0)) return null;
+    var compact = p.compact || (!p.inline && small);
     return h('div', { ref: ref, className: 'bezel' + (p.inline ? ' is-inline' : ''), hidden: !p.inline && !p.shown },
-      h(A.Button, { variant: 'emphasis', icon: 'waiting', label: p.compact ? 'Needs you · ' + p.count + '. Go to the oldest request' : null, title: 'Go to the oldest request', onClick: p.onGo }, p.compact ? String(p.count) : 'Needs you · ' + p.count));
+      h(A.Button, { variant: 'emphasis', icon: 'waiting', label: compact ? 'Needs you · ' + p.count + '. Go to the oldest request' : null, title: 'Go to the oldest request', onClick: p.onGo }, compact ? String(p.count) : 'Needs you · ' + p.count));
   }
   // Focus moves into a pinned screen when it shows, and back to where it was when it goes (the DS Definition of done).
   function usePinFocus(shown, find) {
@@ -1471,7 +1477,7 @@
     var s = snap ? snap.sessions.filter(function (x) { return x.uid === p.uid; })[0] : null;
     var ref = React.useRef(null);
     var small = usePinBox(p.host, ref, putBox);
-    usePinFocus(p.shown, function () { var el = ref.current; return el && (el.querySelector('#pin-chat-input, .term-field') || el.querySelector('.ao-tab[aria-selected="true"]')); });
+    usePinFocus(p.shown, function () { var el = ref.current; return el && (el.querySelector('.asks button') || el.querySelector('#pin-chat-input, .term-field') || el.querySelector('.ao-tab[aria-selected="true"]')); });
     var working = s && (s.status === 'working' || s.status === 'waiting');
     var asks = window.OfficeVocab.requests(s).length > 0;
     function stop() { api('/api/interrupt', { uid: s.uid }).catch(function (x) { p.toast({ tone: 'error', title: s.name, text: x.message }); }); }
@@ -1839,7 +1845,7 @@
       setDlg(null);
       if (host.floorId() !== fl.id) { host.blur(); o.setFloor(fl.id); }
       setChg({ uid: uid, name: name, roomId: roomId, ended: s.status === 'ended' });   // after the blur: its focus event clears chg
-      chgWant.current = { roomId: roomId, uid: uid, name: name, n: 0, host: host };
+      chgWant.current = { roomId: roomId, uid: uid, name: name, until: Date.now() + WANT_MS, host: host };
       requestAnimationFrame(wantChanges);
     }
     function wantChanges() {
@@ -1847,7 +1853,7 @@
       if (!w) return;
       if (host !== w.host) { chgWant.current = null; return; }   // the scene went: nothing to fly to
       if (host && b && host.settled() && b.open(w.roomId, 'changes')) { chgWant.current = null; return; }
-      if (++w.n > 300) { chgWant.current = null; setChg(null); changesDialog(w.uid, w.name); return; }
+      if (Date.now() > w.until) { chgWant.current = null; setChg(null); changesDialog(w.uid, w.name); return; }
       requestAnimationFrame(wantChanges);
     }
     // Which building (repository) the scene shows. The choice is kept in the browser.
@@ -1941,7 +1947,7 @@
       var nm = window.officeAdapter.botName(uid), o = officeRef.current;
       if (cur2.view !== 'office' || window.officeAdapter.buildingOf(s) !== shown || !o || !nm) goTo(s);
       else o.select(nm);   // its floor, and the dock's actions for it
-      deskWant.current = { uid: uid, n: 0 };
+      deskWant.current = { uid: uid, until: Date.now() + WANT_MS };
       requestAnimationFrame(wantDesk);
     }
     function wantDesk() {
@@ -1950,7 +1956,7 @@
       var f = host && host.focused();
       if (f && f.kind === 'terminal' && f.item && f.item.uid === w.uid) { deskWant.current = null; return; }
       if (t && host && host.settled() && t.open(w.uid)) { deskWant.current = null; return; }
-      if (++w.n > 300) {
+      if (Date.now() > w.until) {
         deskWant.current = null;
         var s = window.officeAdapter.sessionByUid(w.uid);
         toast({ tone: 'info', title: s ? s.name : 'Desk', text: 'The desk of this session is not on screen.' });
@@ -2041,8 +2047,10 @@
     // Decisions inbox stays), so the screen gets the height of the view; it is framed again when that changes. The look bar
     // then shows the open requests (LookBar asks).
     var secLook = !!(look && look.kind === 'security');
-    React.useLayoutEffect(function () { var el = document.getElementById('office'); if (el) el.classList.toggle('sec-look', secLook); }, [secLook]);
-    useEffect(function () { if (hostRef.current) hostRef.current.refit(); }, [secLook]);
+    // A pinned desk or changes screen needs the height too (review 89: at 400x640 a request needs 140-170 px): the same columns go.
+    var hideHud = secLook || pinned;
+    React.useLayoutEffect(function () { var el = document.getElementById('office'); if (el) el.classList.toggle('sec-look', hideHud); }, [hideHud]);
+    useEffect(function () { if (hostRef.current) hostRef.current.refit(); }, [hideHud]);
     // The scene is as tall as the window. The DS sets its height inline from the height prop, so a resize renders
     // the page again with the new size (once per frame), and then frames the screen in focus again (#55).
     useEffect(function () {

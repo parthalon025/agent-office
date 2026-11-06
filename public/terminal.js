@@ -213,7 +213,7 @@
     if (full) {
       var all = flat(before).concat(head, flat(after), tail);
       all = all.length > 400 ? all.slice(-400) : all;
-      // An ungated agent (ADR 0001): the label stays at the top of the terminal panel.
+      // An ungated agent (ADR 0001): the label stays at the top of the terminal view of the desk screen.
       var sup = window.OfficeVocab.supervision(s);
       return sup ? [{ text: sup, tone: 'muted' }].concat(all) : all;
     }
