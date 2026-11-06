@@ -922,6 +922,40 @@
           live.map(function (n) { return h(A.Button, { key: n, variant: 'quiet', icon: 'add', onClick: function () { setForm({ name: n, style: '', shape: 'round', color: 0, accessory: 'none' }); } }, n); })) : null));
   }
 
+  // ---------- weekly recap, while you were away, Focus mode (#151) ----------
+  var AWAY_KEY = 'ao_away_since';
+  function awaySince() { try { var v = Number(localStorage.getItem(AWAY_KEY)); return v > 0 ? v : Date.now() - 24 * 3600000; } catch (x) { return Date.now() - 24 * 3600000; } }
+  function awayMark() { try { localStorage.setItem(AWAY_KEY, String(Date.now())); } catch (x) { /* the list then starts 24 hours back */ } }
+  function RecapDialog(p) {
+    var ls = useState(null), r = ls[0], setR = ls[1];
+    var er = useState(''), err = er[0], setErr = er[1];
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var since = useState(awaySince)[0];
+    useEffect(function () { call('/api/recap?since=' + since).then(function (x) { return x.json(); }).then(setR, function (x) { setErr(x.message); }); }, []);
+    function close() { awayMark(); p.onClose(); }
+    function focus(on) { setBusy(true); api('/api/settings/focus', { on: on }).then(function () { setBusy(false); setR(Object.assign({}, r, { focus: on })); p.toast({ tone: 'info', title: on ? 'Focus mode is on' : 'Focus mode is off', text: on ? 'Sound, motion and rituals are off.' : 'Rituals are back.' }); }, function (x) { setBusy(false); setErr(x.message); }); }
+    var m = r && r.metrics;
+    function num(v, unit) { return v == null ? 'No data yet' : v + (unit || ''); }
+    function row(k, title, meta) { return h('li', { key: k, className: 'past-row' }, h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h('b', null, title)), meta ? h('div', { className: 'past-meta' }, meta) : null)); }
+    return h(A.Dialog, { open: true, title: 'Weekly recap', onClose: close, actions: [
+      h(A.Button, { key: 'f', variant: 'quiet', icon: 'sound-off', loading: busy, disabled: !r, onClick: function () { focus(!(r && r.focus)); } }, r && r.focus ? 'Turn off Focus mode' : 'Turn on Focus mode'),
+      h(A.Button, { key: 'd', variant: 'primary', onClick: close }, 'Done')] },
+      h('div', { className: 'form wide' },
+        h(Busy, { on: !r && !err }),
+        err ? h('p', { className: 'note', role: 'alert' }, err) : null,
+        r ? h('div', null,
+          h('p', { className: 'note' }, 'Last ' + r.days + ' days. Cost counts the sessions that started in this time.'),
+          h('ul', { className: 'past' },
+            row('ship', F.plural(r.shipped.length, 'change', 'changes') + ' shipped', r.shipped.slice(0, 5).map(function (x) { return '#' + x.number + ' ' + x.title; }).join(' · ')),
+            row('cost', money(r.cost) + ' spent'),
+            row('apm', 'Approvals per merge: ' + num(m.approvalsPerMerge), F.plural(m.approvals, 'approval', 'approvals') + ' for ' + F.plural(m.merges, 'merge', 'merges')),
+            row('mtm', 'Minutes from done to merged: ' + num(m.minutesToMerge)),
+            row('iph', 'Interruptions per hour: ' + num(m.interruptionsPerHour), F.plural(m.interruptions, 'answer', 'answers') + ' from you')),
+          r.best.length ? h('div', null, h('h3', null, 'Best moments'), h('ul', { className: 'past' }, r.best.map(function (b) { return row('b-' + b.name, b.name, b.text); }))) : null,
+          h('h3', null, 'While you were away'),
+          r.away.length ? h('ul', { className: 'past' }, r.away.map(function (a, i) { return row('a' + i, a.text, F.clock ? F.clock(a.t) : ''); })) : h('p', { className: 'note' }, 'Nothing happened since your last visit.')) : null));
+  }
+
   // A row of a dialog list goes (answered, kept). If the focus was on it, it falls to the page. Move it inside the dialog:
   // to the button of the row that took its place, else to the first dialog button. inner = any element inside the dialog.
   function refocusRow(inner, idx) {
@@ -2272,7 +2306,7 @@
     }
     var week = snap && snap.plan && snap.plan.week;
     useEffect(function () { var el = document.getElementById('office'); if (el) el.classList.toggle('has-plan', !!week); }, [!!week]);
-    var officeRef = React.useRef(null);
+    var officeRef = React.useRef(null), focusRef = React.useRef(false);
     // the room board the camera faces, if any (board.js)
     var boardRef = React.useRef(null);
     var bs = useState(null), board = bs[0], setBoard = bs[1];
@@ -2582,7 +2616,7 @@
         }
         if (st && host && window.OfficePersona) {
           if (personaRef.current) personaRef.current.dispose();
-          personaRef.current = window.OfficePersona.attach(o, { host: host, session: function (botName) { return mount.session(botName); } });
+          personaRef.current = window.OfficePersona.attach(o, { host: host, session: function (botName) { return mount.session(botName); }, off: function () { return focusRef.current; } });
           window.officePersona = personaRef.current;   // for the console and tests
         }
         if (st && host && window.OfficeDesk) {
@@ -2705,17 +2739,22 @@
       return onlyExtra ? extra : inRoom.concat(extra);
     }
     var d = dlg && dlg.name;
+    // Focus mode (#151): the server keeps it and the snapshot carries it. It turns off sound, the bots' body language, the merged moment and the stand-up.
+    var focusOn = !!(snap && snap.rituals && snap.rituals.focus);
+    focusRef.current = focusOn;
+    useEffect(function () { if (focusOn && officeRef.current && officeRef.current.setSound) officeRef.current.setSound(false); }, [focusOn]);
 
     // the page's own commands in Ctrl+K, built from this render's state and handed to the palette after the render
     var actions = [];
     [['open', 'Open a session', 'add', function () { show('open'); }], ['sessions', 'All sessions', 'identity', function () { setDlg({ name: 'sessions' }); }],
      ['city', 'City view', 'building', function () { go('city'); }], ['office', 'Office view', 'floor', function () { go('office'); }], ['floors', 'Branches and worktrees', 'floor', function () { setDlg({ name: 'floors' }); }],
      ['past', 'Past sessions', 'session', function () { show('past'); }], ['schedules', 'Schedules', 'schedule', function () { show('schedules'); }],
-     ['hooks', 'Attach sessions', 'terminal', function () { show('hooks'); }], ['kinds', 'Agent kinds', 'bot', function () { setDlg({ name: 'kinds' }); }], ['personas', 'Agent characters', 'bot', function () { setDlg({ name: 'personas' }); }], ['compact', 'Compact view', 'zoom-out', function () { setAmbient(true); }],
+     ['hooks', 'Attach sessions', 'terminal', function () { show('hooks'); }], ['kinds', 'Agent kinds', 'bot', function () { setDlg({ name: 'kinds' }); }], ['personas', 'Agent characters', 'bot', function () { setDlg({ name: 'personas' }); }], ['recap', 'Weekly recap and while you were away', 'schedule', function () { setDlg({ name: 'recap' }); }], ['compact', 'Compact view', 'zoom-out', function () { setAmbient(true); }],
      ['reception', 'Reception: floors and the kind of building', 'building', function () { setDlg({ name: 'reception' }); }], ['tour', 'Replay the lobby tour', 'chevron-right', function () { startTour(); }]]
       .forEach(function (a) { actions.push({ id: 'page-' + a[0], label: a[1], icon: a[2], group: 'Office', run: a[3] }); });
     var selKind = selSess ? kindOf(window.officeAdapter.kinds(), selSess.provider) : null;
     if (selSess && (!selKind || selKind.control)) actions.push({ id: 'page-ext', label: 'Extensions of ' + selSess.name, icon: 'connector', group: 'Office', run: function () { extensions(selSess.uid, selSess.name); } });
+    actions.push({ id: 'page-focus', label: focusOn ? 'Turn off Focus mode' : 'Turn on Focus mode', icon: 'sound-off', group: 'Office', keywords: 'quiet sound motion rituals calm', run: function () { api('/api/settings/focus', { on: !focusOn }).then(function () { toast({ tone: 'info', title: !focusOn ? 'Focus mode is on' : 'Focus mode is off', text: !focusOn ? 'Sound, motion and rituals are off.' : 'Rituals are back.' }); }, function (x) { toast({ tone: 'error', title: 'Focus mode', text: x.message }); }); } });
     actions.push({ id: 'page-needs', label: needs.length ? 'Needs you (' + needs.length + ')' : 'Needs you', icon: 'waiting', group: 'Office', keywords: 'requests approve decline questions decisions', run: function () { setDlg({ name: 'needs' }); } });
     actions.push({ id: 'page-flow', label: 'Changes: pipeline and Ready to merge', icon: 'pull-request', group: 'Office', keywords: 'pull request pr merge pipeline folder review checks tray', run: function () { setDlg({ name: 'flow' }); } });
     var planWaits = snap ? window.OfficeVocab.plan.waits(snap.plans) : [], planAll = snap ? window.OfficeVocab.plan.board(snap.plans) : { groups: [], unreadable: [] };
@@ -2784,6 +2823,7 @@
       d === 'reception' ? h(ReceptionDialog, { repo: shown, actions: officeActions, onTour: startTour, onClose: close }) : null,
       d === 'open' ? h(OpenDialog, { shownPath: shownPath, kind: dlg.kind, role: dlg.role, roleName: dlg.roleName, folder: dlg.folder, spendLimit: info.spendLimit, recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
       d === 'personas' ? h(PersonasDialog, { toast: toast, onClose: close }) : null,
+      d === 'recap' ? h(RecapDialog, { toast: toast, onClose: close }) : null,
       d === 'kinds' ? h(KindsDialog, { onOpen: function (kind) { refresh().then(function () { setDlg({ name: 'open', kind: kind }); }); }, onClose: close }) : null,
       d === 'flow' ? h(FlowDialog, { toast: toast, onClose: close }) : null,
       d === 'past' ? h(PastDialog, { onClose: close, onChanges: changes, toast: toast }) : null,

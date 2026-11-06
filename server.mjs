@@ -20,6 +20,7 @@ import * as git from './git.mjs';
 import { createReader as createPrReader, readyEntries, mergeArgs } from './changes.mjs';
 import { slimPayload, cleanIds as cleanPaperclipIds } from './payload.mjs';
 import { createHq } from './paperclip.mjs';
+import { mergeRecord, recap as recapOf, away as awayOf, MERGES_KEPT } from './rituals.mjs';
 import { createTracker, clip } from './tracker.mjs';
 import { createRegistry, providerEvents, isPaid, isGated, supervisionOf, costOf, spendLimitFor, featuresOf, DEFAULT_SPEND_LIMIT, DEFAULT_PROVIDER } from './providers/index.mjs';
 import { createLocal } from './providers/local.mjs';
@@ -604,6 +605,11 @@ async function mergeChange(body) {
     throw e;
   }
   await git.mergePr(r.path, mergeArgs(n));
+  try { // the merge is done on GitHub: a failure to write the record must not read as a failed merge
+    const rec = mergeRecord(k, p, Date.now());
+    persisted.merges = [rec, ...persisted.merges.filter((m) => m.key !== rec.key)].slice(0, MERGES_KEPT); savePersisted();
+    addFeed({ uid: 'merge', name: r.name || 'Office' }, 'merge', `merged #${n} ${clip(p.title, 80)}`);
+  } catch (e) { console.warn(`The office could not record the merge of #${n}: ${e.message}`); }
   prReader.invalidate(k); await refreshChanges(k);
   return { ok: true };
 }
@@ -775,7 +781,7 @@ function sendMessage(uid, text, attachments = [], { answers = true } = {}) {
   const q = s.questions[0];
   if (answers && q && clean && holds.has(q.id)) { releaseHold(q.id, { text: clean }); addFeed(s, 'prompt', 'answered in the office: ' + clip(clean, 100)); return { answered: true }; }
   if (s.headless && (s.status !== 'working' || attachments.length)) {
-    writeUser(s, clean, attachments);
+    writeUser(s, standupLine(s) + clean, attachments);
     tracker.startTurn(s, clean || '(attachment)');
     return { sent: true };
   }
@@ -892,6 +898,9 @@ function askUser(s, question) {
 // notes.mjs owns the rules (versions, merge, caps); this file only calls it and saves the maps.
 // An agent changes only its own room: the room comes from the calling session, never from the arguments.
 persisted.notes = persisted.notes || {};
+persisted.merges = Array.isArray(persisted.merges) ? persisted.merges.slice(0, MERGES_KEPT) : []; // merges the user confirmed (#151): recap, merged moment
+persisted.standups = persisted.standups && typeof persisted.standups === 'object' ? persisted.standups : {}; // agent name -> the day of its last stand-up (#151)
+persisted.focus = persisted.focus === true; // Focus mode (#151): no rituals
 persisted.personas = persisted.personas && typeof persisted.personas === 'object' ? persisted.personas : {}; // agent character (#150), by agent name
 persisted.pins = persisted.pins || {};
 const board = createNotes({ notes: persisted.notes, pins: persisted.pins });
@@ -1075,6 +1084,16 @@ function answer(id, allow, always = false) {
 
 // ---------- sessions that run inside the office (no terminal) ----------
 // The session's provider runs the agent (providers/). The office marks the message on the session after the provider took it.
+// Stand-up (#151): at an agent's first turn of the day the prompt carries one line that asks for a note on the room's notes board (a desk
+// note the agent writes with office_room_update). Only the agents that have the office tools. Focus mode turns it off.
+const STANDUP_KINDS = new Set(['claude-code', 'ollama', 'lmstudio']);
+function standupLine(s) {
+  const R = globalThis.OfficeVocab.rituals, t = Date.now();
+  if (!s.headless || !STANDUP_KINDS.has(s.provider) || !R.standupDue(persisted.standups, s.name, t, { focus: persisted.focus })) return '';
+  R.standupDone(persisted.standups, s.name, t); savePersisted();
+  addFeed(s, 'tool', 'asked for a stand-up note');
+  return R.STANDUP + '\n\n';
+}
 function writeUser(s, text, attachments = []) {
   providerOf(s).message(s, { text, attachments });
   tracker.userMessage(s);
@@ -1218,7 +1237,7 @@ function openHeadless(provider, { cwd, name, prompt, worktree = null, budget = n
   if (asked && permissionMode !== asked) addFeed(s, 'start', `opened in ${permissionMode} permission mode, not ${asked}: the Security room has Ask rules`);
   if (costUnknown) addFeed(s, 'start', `${provider.label} does not report cost. The office shows it as unknown, and no spend limit can stop it.`);
   if (supervision) addFeed(s, 'start', `${provider.label}: ${supervision}. The feed says what it ran without asking.`);
-  if (prompt) { s.prompt = prompt; s.firstPrompt ||= prompt; writeUser(s, prompt); addFeed(s, 'prompt', clip(prompt, 100)); }
+  if (prompt) { s.prompt = prompt; s.firstPrompt ||= prompt; writeUser(s, standupLine(s) + prompt); addFeed(s, 'prompt', clip(prompt, 100)); }
   broadcast();
   return s.uid;
 }
@@ -1754,6 +1773,7 @@ const snapshot = () => (W.lean({
   // Function floors (#92): each building's floors (archetypes.mjs layoutView), each room's floors and name, and the catalog
   layouts: layoutsView(), rooms: roomsView(), catalog: CATALOG,
   changes: changesView(),   // paper flow (#93): building key -> { ok, at, error, mergedToday, prs, ready } from gh
+  rituals: { focus: persisted.focus, merges: persisted.merges.slice(0, 20) }, // Focus mode and the recent merges (the merged moment, #151)
 }));
 // A page gets the whole snapshot when it connects, then one patch per broadcast with only what changed (wire.js).
 // State changes within BROADCAST_MS go out as one patch, so a burst of hooks sends at most 10 messages a second.
@@ -1862,6 +1882,13 @@ const server = http.createServer(async (req, res) => {
         hooksMode, claudeVersion: CLAUDE_VERSION, templates: persisted.templates, schedules: persisted.schedules, spendLimit: defaultSpend(),
       });
     }
+    // The weekly recap and the while-you-were-away list (#151): computed from the feed, the merges and the history (rituals.mjs).
+    if (req.method === 'GET' && url.pathname === '/api/recap') {
+      const now = Date.now(), since = Number(url.searchParams.get('since')) || 0;
+      const live = [...sessions.values()].filter((s) => s.headless).map((s) => ({ name: s.name, cost: s.cost, startedAt: s.startedAt, endedAt: s.endedAt, worktree: s.worktree }));
+      const hist = [...live, ...history.filter((h) => !sessions.has(h.uid))];
+      return send(res, 200, { ...recapOf({ feed, merges: persisted.merges, history: hist, now }), away: awayOf({ feed, since, now }), focus: persisted.focus });
+    }
     if (req.method === 'GET' && url.pathname === '/api/personas') return send(res, 200, { personas: persisted.personas });
     if (req.method !== 'POST') return send(res, 404, { error: 'Not found' });
 
@@ -1959,6 +1986,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, out);
     }
     if (url.pathname === '/api/merge') return send(res, 200, await mergeChange(body));
+    if (url.pathname === '/api/settings/focus') { persisted.focus = body.on === true; savePersisted(); broadcast(); return send(res, 200, { focus: persisted.focus }); }
     if (url.pathname === '/api/settings/spend') { const r = saveSpendLimit(body); broadcast(); return send(res, 200, r); }
     // One Security room rule from the wall: { scope: 'office' | 'building', building, row, col, value, confirmed } (security.mjs setRule).
     if (url.pathname === '/api/security/set') return send(res, 200, saveRule(body));

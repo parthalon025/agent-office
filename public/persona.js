@@ -109,7 +109,7 @@
           var p = s && s.persona;
           if (!p) { undress(b); return; }
           var u = dress(b, p);
-          var cue = V.persona.cueOf(V.status(s).key, !!st.rm);
+          var cue = V.persona.cueOf(V.status(s).key, !!st.rm || !!(o.off && o.off()));
           cues[b.name] = cue;
           var pose = V.persona.pose(cue, t || 0);
           u.arm.visible = !!cue;

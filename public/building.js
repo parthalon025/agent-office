@@ -322,6 +322,7 @@
     var defer = opts.defer || function (fn) { setTimeout(fn, 0); };
     var later = opts.setTimer || function (fn, ms) { return setTimeout(fn, ms); };
     var latest = null, listeners = [], attached = [], mountSeq = 0;
+    var reducedNow = opts.reduced || function () { return !!(typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches); };
     var store = {};
 
     store.latest = function () { return latest; };
@@ -541,6 +542,23 @@
       // A restore inside a live pass (a bot seated again on another floor, an error a bot had before the scene saw it)
       // is seeded without at: a seeded event with at after the last visit is news to the DS, so it would be recorded twice.
       // out: the emitter of this pass.
+      // The merged moment (#151): a paper filed and a short line from the bot that made the merge. News only: what the snapshot already
+      // held at mount is marked played, never replayed. Focus mode and reduced motion turn it off; it waits while any request is open.
+      var played = {};
+      function playMoments(snapshot, out, seedAll) {
+        var r = snapshot.rituals || {}, list = (r.merges || []).filter(function (m) { return m.repo === repo; });
+        if (seedAll) { list.forEach(function (m) { played[m.key] = true; }); return; }
+        var waiting = 0;
+        snapshot.sessions.forEach(function (s) { waiting += (s.pending || []).length + (s.questions || []).length; });
+        V.rituals.moments(list, played, { focus: r.focus, reduced: reducedNow(), waiting: waiting, now: now() }).forEach(function (m) {
+          played[m.key] = true;
+          var s = snapshot.sessions.filter(function (x) { return x.git && x.git.branch === m.head && known[x.uid] && !known[x.uid].ended; })[0];
+          if (!s) return;
+          var bot = known[s.uid].name, text = 'Merged #' + m.number + (m.title ? ' ' + clip(m.title, 60) : '') + '.';
+          out({ type: 'checkpoint', bot: bot, id: 'merged-' + m.key, label: text });
+          out({ type: 'message', bot: bot, text: text, format: 'plain' });
+        });
+      }
       function apply(snapshot, out, seedAll) {
         var seen = {};
         var seeded = function (e) { e.seeded = true; out(e); };
@@ -686,6 +704,7 @@
           if (st !== k.status) { k.status = st; k.task = task; emit({ type: 'status', bot: bot0, status: st, task: task }); }
           else if (task !== k.task) { k.task = task; emit({ type: 'status', bot: bot0, status: st, task: task, quiet: true }); }
         });
+        playMoments(snapshot, out, seedAll);
         // sessions the server forgot
         Object.keys(known).forEach(function (uid) {
           if (seen[uid]) return;
@@ -715,7 +734,7 @@
       }
       m._follow = function (snap) { seeWorktrees(snap); if (emitRef) { prime(emitRef); apply(snap, emitRef); syncUsage(snap, emitRef); } };
       m.attach = function (emit) {
-        known = {}; taken = {}; layout = freshLayout(); lastUsage = { percent: null, t: 0 }; oldFailed = {};
+        known = {}; taken = {}; layout = freshLayout(); lastUsage = { percent: null, t: 0 }; oldFailed = {}; played = {};
         emitRef = emit; primed = false; seedSnap = latest;
         if (attached.indexOf(m) < 0) attached.push(m);
         defer(function () { if (emitRef === emit) prime(emit); });
