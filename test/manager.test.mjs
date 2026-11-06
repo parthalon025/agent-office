@@ -486,6 +486,14 @@ test('a fake source flows to the board field with source and state words', () =>
   assert.equal(plans[0].steps[1].cost, null);
 });
 
+test('the board carries a plan\'s mail (from, to, text, time) for the cable tray (#21)', () => {
+  const mail = [{ from: 'Ann', to: 'Bo', text: 'Ready.', t: 5, extra: 'x' }];
+  const board = createPlanBoard({ sources: [fakeSource('office', [{ id: 'g', building: 'b', goal: 'Ship', steps: [], mail }]), fakeSource('paperclip', [{ id: 'p', building: 'b', goal: 'Run', steps: [] }])] });
+  const { plans } = board.snapshot();
+  assert.deepEqual(plans[0].mail, [{ from: 'Ann', to: 'Bo', text: 'Ready.', t: 5 }]);
+  assert.deepEqual(plans[1].mail, [], 'a source with no mail has an empty list');
+});
+
 test('source changes reach the board listener, and a failing source is named unreadable', () => {
   const good = fakeSource('office', []);
   const bad = { kind: 'paperclip', list() { throw new Error('down'); } };

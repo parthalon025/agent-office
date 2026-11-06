@@ -1912,3 +1912,29 @@ test('the merged moment (#151): news after the mount plays once on the bot of th
   assert.deepEqual(of((await run({ reduced: () => true })).m.ev, 'checkpoint'), [], 'reduced motion');
   assert.deepEqual(of((await run({}, (r) => { r.rituals = { focus: true, merges: r.rituals.merges }; })).m.ev, 'checkpoint'), [], 'Focus mode');
 });
+
+// Mail on the cable tray (#21): each mail a goal routed (snapshot plans[].mail) is one message.agent from the sender's bot to the
+// receiver's bot, once. The DS picks the picture (turn, walk or envelope on the cable tray); the page never moves a bot.
+test('mail: a mail of a goal is one message.agent between the two bots, told once; a scene mounted later does not replay it', async () => {
+  const r = rig();
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'b', cwd: REPO_A });
+  const [sa, sb] = [...r.tracker.sessions.values()];
+  sa.name = 'Ann'; sb.name = 'Bo'; r.push();
+  const m = r.mount(KEY_A);
+  const plan = (mail) => ({ plans: [{ id: 'g1', building: KEY_A, goal: 'Ship', status: 'running', reason: '', frozen: false, source: 'office', steps: [], mail }], unreadable: [] });
+  const one = { from: 'Ann', to: 'Bo', text: 'The numbers are ready.', t: 5 };
+  r.plans = plan([one]); r.push();
+  const sent = of(m.ev, 'message.agent');
+  assert.equal(sent.length, 1);
+  assert.deepEqual([sent[0].from, sent[0].to, sent[0].text, sent[0].seeded], ['Ann', 'Bo', 'The numbers are ready.', undefined]);
+  r.push(); r.push();
+  assert.equal(of(m.ev, 'message.agent').length, 1, 'the same mail is not told twice');
+  r.plans = plan([one, { from: 'Bo', to: 'Ann', text: 'Thanks.', t: 9 }]); r.push();
+  assert.deepEqual(of(m.ev, 'message.agent').map((e) => e.text), ['The numbers are ready.', 'Thanks.']);
+  const late = r.mount(KEY_A);
+  assert.equal(of(late.ev, 'message.agent').length, 0, 'a mail the office already had is not an envelope again');
+  // a mail between two names that have no bot here, or of another building, says nothing
+  r.plans = plan([one, { from: 'Ghost', to: 'Bo', text: 'x', t: 11 }]); r.plans.plans[0].building = KEY_B; r.push();
+  assert.equal(of(m.ev, 'message.agent').length, 2);
+});
