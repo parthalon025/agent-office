@@ -469,6 +469,18 @@ function disconnectHq() {
   broadcast();
   return { ok: true };
 }
+// Goal handoff (ADR 0007, #159): the second and last write to Paperclip. Without confirmed: true the answer is 409 with the exact tasks the Confirm shows.
+async function handoffGoalHq(body) {
+  const company = hq.view()?.company;
+  if (!company) throw httpError(409, 'Paperclip is not connected, so there is no company to hand this goal to.');
+  const g = manager.get(String(body.id || ''));
+  if (!g) throw httpError(404, 'No such goal.');
+  if (body.confirmed !== true) throw Object.assign(httpError(409, `Create ${g.steps.length} tasks in ${company.name || 'Paperclip'}? The office writes these tasks and nothing else. It never assigns, changes or deletes a task.`), { confirm: 'handoff', tasks: hq.handoffTasks(g).map((t) => ({ step: t.step, title: t.title, description: t.description })) });
+  const r = await manager.handoff(g.id, (goal, written) => hq.handoffGoal(goal, written));
+  broadcast();
+  if (!r.ok) throw httpError(r.status, r.reason);
+  return { ok: true, plans: planBoard.snapshot().plans.filter((p) => p.id === g.id) };
+}
 // Supervise in office (#76): one PATCH, only with the Confirm the Security room's Agents screen paints.
 async function superviseHq(body) {
   if (body.confirmed !== true) throw httpError(409, 'Confirm Supervise in office first. It writes to the agent\'s config in Paperclip.');
@@ -1958,6 +1970,7 @@ const server = http.createServer(async (req, res) => {
     // Manager goals (#156): start { building, goal, approveFirst?, spendLimit?, confirmed? }, approve, cancel and retry { id, step }.
     if (url.pathname === '/api/goal/start') return send(res, 200, await startGoal(body));
     if (url.pathname === '/api/goal/approve') { if (!await manager.approve(String(body.id))) throw httpError(409, 'That goal does not wait for approval.'); return send(res, 200, { ok: true }); }
+    if (url.pathname === '/api/goal/handoff') return send(res, 200, await handoffGoalHq(body));
     if (url.pathname === '/api/goal/cancel') { if (!manager.cancel(String(body.id))) throw httpError(409, 'That goal is done or stopped.'); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/goal/retry') { const r = await manager.retry(String(body.id), String(body.step)); if (!r.ok) throw httpError(409, r.reason); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/template/save') return send(res, 200, saveTemplate(body));
@@ -1971,7 +1984,7 @@ const server = http.createServer(async (req, res) => {
     // confirm: the request needs the user's yes first; the page asks and sends it again. The cost question (confirmCost) is a
     // normal answer, 200 { confirm, question }; the fork and skill questions are still 409 { error, confirm }.
     if (e.question) send(res, 200, { confirm: e.confirm, question: e.message });
-    else send(res, e.status || 500, { error: e.message, ...(e.confirm ? { confirm: e.confirm } : {}) });
+    else send(res, e.status || 500, { error: e.message, ...(e.confirm ? { confirm: e.confirm } : {}), ...(e.tasks ? { tasks: e.tasks } : {}) });
   }
 });
 

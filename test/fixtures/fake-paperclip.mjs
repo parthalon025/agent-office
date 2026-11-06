@@ -73,7 +73,7 @@ export const DEMO = (hooksFile = null) => {
 export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
   const st = { companies: structuredClone(seed.companies || []), agents: structuredClone(seed.agents || []), issues: structuredClone(seed.issues || []), routines: structuredClone(seed.routines || []), projects: structuredClone(seed.projects || []), liveRuns: structuredClone(seed.liveRuns || []) };
   const requests = [], sockets = new Set();
-  const api = { afterPatch: null };   // set by a test: runs right after a PATCH is answered (a change made in Paperclip at the same time)
+  const api = { afterPatch: null, failIssueAfter: null, created: 0 };   // set by a test: runs right after a PATCH is answered (a change made in Paperclip at the same time)
   let seq = 0;
   const send = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
   function emit(type, payload, companyId = st.companies[0]?.id) {
@@ -101,6 +101,17 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/issues$/))) {
         const want = (u.searchParams.get('status') || '').split(',').map((s) => s.trim()).filter(Boolean);
         return send(res, 200, st.issues.filter((i) => i.companyId === x[1] && (seed.allIssues || !want.length || want.includes(i.status))));
+      }
+      // create a task (routes/issues.ts, createIssueSchema 0.3.1: title, description, status; no metadata, no idempotency key).
+      // api.failIssueAfter = n answers 500 to every create once n tasks were made (a failure in the middle of a handoff).
+      if (req.method === 'POST' && (x = m(/^\/api\/companies\/([^/]+)\/issues$/))) {
+        if (!parsed || typeof parsed.title !== 'string' || !parsed.title) return send(res, 422, { error: 'Validation error' });
+        if (api.failIssueAfter != null && api.created >= api.failIssueAfter) return send(res, 500, { error: 'Internal error' });
+        api.created += 1;
+        const n = st.issues.length + 1;
+        const i = { id: `i2000000-0000-4000-8000-${String(n).padStart(12, '0')}`, companyId: x[1], identifier: `ACM-${100 + n}`, assigneeAgentId: null, assigneeAdapterOverrides: null, ...parsed };
+        st.issues.push(i);
+        return send(res, 201, i);
       }
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/routines$/))) return send(res, 200, st.routines.filter((r) => r.companyId === x[1]));
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/projects$/))) return seed.noProjects ? send(res, 404, { error: 'Not found' }) : send(res, 200, st.projects.filter((r) => r.companyId === x[1]));
