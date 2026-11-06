@@ -248,13 +248,41 @@
     if (!s || s.status === 'ended') return [];
     var out = [];
     (s.pending || []).forEach(function (r, i) {
-      out.push({ id: r.id, kind: 'permission', tool: r.tool, detail: r.detail || '', reason: oneLine(r.reason), text: 'Allow ' + r.tool + (r.detail ? ': ' + clip(r.detail, 160) : '') + '?', risk: r.risk, always: r.always || null, t: +r.t || 0, i: i });
+      out.push({ id: r.id, kind: 'permission', tool: r.tool, detail: r.detail || '', reason: oneLine(r.reason), explain: r.explain || null, text: 'Allow ' + r.tool + (r.detail ? ': ' + clip(r.detail, 160) : '') + '?', risk: r.risk, always: r.always || null, t: +r.t || 0, i: i });
     });
     (s.questions || []).forEach(function (q, i) {
       out.push({ id: q.id, kind: 'question', tool: 'office_ask', detail: '', reason: '', text: clip(q.text, 400), risk: undefined, always: null, t: +q.t || 0, i: 1000 + i });
     });
     out.sort(function (a, b) { return a.t - b.t || a.i - b.i; });
     return out.map(function (r) { delete r.i; return r; });
+  }
+  // The three layers of an approval (#149, story 6): a one-line intent, the reason, the raw command. Intent and reason come from a
+  // local model (r.explain, written after the request came in) and are only shown. The raw command is the request's own text
+  // (preview, else detail) and is always there: a summary never replaces it. Without an explanation the reason is the agent's own.
+  function explainLayers(r) {
+    r = r || {};
+    var e = r.explain || null;
+    return { intent: e ? oneLine(e.intent) : '', reason: e && e.reason ? oneLine(e.reason) : oneLine(r.reason), raw: String(r.preview || r.detail || ''), explained: !!(e && e.intent), model: e ? String(e.model || '') : '' };
+  }
+  // Similar open requests answer together (#149, stories 7-9): the same tool and the same trimmed text. Only a permission request
+  // of lower than high risk groups; a question, a merge decision and a high-risk call stand alone. Items keep their order
+  // (oldest first). Each group is { key, items, count, groupable }; a group of one is not groupable.
+  function requestGroups(items) {
+    var out = [], at = {};
+    (items || []).forEach(function (r) {
+      var ok = r.kind === 'permission' && r.risk !== 'high' && !!r.tool;
+      var k = ok ? 'g:' + r.tool + '|' + String(r.detail || '').trim() : 'one:' + r.id;
+      if (at[k] == null) { at[k] = out.length; out.push({ key: k, items: [], count: 0, groupable: false }); }
+      var g = out[at[k]]; g.items.push(r); g.count = g.items.length; g.groupable = ok && g.count > 1;
+    });
+    return out;
+  }
+  // The answers of a group: one for each request, each with its own id. The page sends them one by one, so each is recorded
+  // by itself. Nothing for a group of one or a group that holds a question.
+  function groupAnswers(g, allow) {
+    if (!g || !g.groupable) return [];
+    var list = g.items.filter(function (r) { return r.kind === 'permission' && r.risk !== 'high'; });
+    return list.length > 1 && list.length === g.items.length ? list.map(function (r) { return { id: r.id, allow: allow === true }; }) : [];
   }
   // How long the office holds a request for the user: 15 minutes in a session that runs in the office, 60 s in a terminal session
   // (server.mjs HEADLESS_ASK_MS and the terminal dialog). The approval paper shows the time left.
@@ -511,5 +539,5 @@
     unknown: { word: 'PR state unknown', place: 'desk', mark: 'grey', glyph: 'pull-request' }
   };
   function folderOf(state) { var f = FOLDER[state] || FOLDER.unknown; return { word: f.word, place: f.place, mark: f.mark, glyph: f.glyph }; }
-  root.OfficeVocab = { stateWord: stateWord, laneOf: laneOf, limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform, hq: hq, plan: plan, layers: layers, holdMs: holdMs, folderOf: folderOf };
+  root.OfficeVocab = { explainLayers: explainLayers, requestGroups: requestGroups, groupAnswers: groupAnswers, stateWord: stateWord, laneOf: laneOf, limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform, hq: hq, plan: plan, layers: layers, holdMs: holdMs, folderOf: folderOf };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

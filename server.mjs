@@ -23,6 +23,7 @@ import { createHq } from './paperclip.mjs';
 import { createTracker, clip } from './tracker.mjs';
 import { createRegistry, providerEvents, isPaid, isGated, supervisionOf, costOf, spendLimitFor, featuresOf, DEFAULT_SPEND_LIMIT, DEFAULT_PROVIDER } from './providers/index.mjs';
 import { createLocal } from './providers/local.mjs';
+import { createExplainer } from './explain.mjs';
 import { createAcp, AGENTS as ACP_AGENTS } from './providers/acp.mjs';
 import { gateRequest as openclawRequest, officeIdOf as openclawOfficeId, probeGateway } from './providers/openclaw.mjs';
 import { createAgentFramework } from './providers/agent-framework.mjs';
@@ -396,6 +397,19 @@ const ollama = createLocal({ events, kind: 'ollama', baseUrl: process.env.OFFICE
 const lmstudio = createLocal({ events, kind: 'lmstudio', baseUrl: process.env.OFFICE_LMSTUDIO_URL, officeTools });
 // An Agent Framework team runs on one of the local servers (#23): LM Studio first, the order of its models list.
 const agentFramework = createAgentFramework({ events, servers: [lmstudio, ollama], officeTools });
+// A free local model explains the requests that wait for the user (#149). It runs after the Security room rules and the hold,
+// off the hot path, and only adds text to the request: it never decides. OFFICE_EXPLAIN=off turns it off;
+// OFFICE_EXPLAIN_MODEL names the model (else the first chat model of the first local server that is ready).
+const explainer = String(process.env.OFFICE_EXPLAIN || '').toLowerCase() === 'off' ? null
+  : createExplainer({ providers: [lmstudio, ollama], model: process.env.OFFICE_EXPLAIN_MODEL });
+function explainHeld(s, id) {
+  const r = explainer && s.pending.find((x) => x.id === id);
+  if (!r) return;
+  const R = globalThis.OfficeFormat.redactSecrets;
+  explainer.explain({ tool: r.tool, detail: R(r.detail), preview: R(r.preview) }).then((e) => {
+    if (e && holds.has(id)) { tracker.explainRequest(s.uid, id, e); broadcast(); }
+  }, () => {});
+}
 const providers = createRegistry([claude, ollama, lmstudio, agentFramework,
   // ACP agents (providers/acp.mjs): Hermes Agent, DeepSeek Harness, OpenClaw and Copilot CLI, one entry each in its AGENTS list.
   // blocked: the Security room's answer to whether this kind may run now (its Agents screen: an ungated kind is off until
@@ -808,6 +822,7 @@ function holdRequest({ s, id, suggestions, auto }, res = null) {
   }, hold);
   const reply = (d) => { const body = providerOf(s).answer(s, { id, suggestions }, d); if (res) replyOn(res, body); };
   holds.set(id, { uid: s.uid, timer, suggestions, reply });
+  explainHeld(s, id);
 }
 
 function onPermission(p, res) {
