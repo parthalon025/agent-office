@@ -405,8 +405,9 @@ const explainer = String(process.env.OFFICE_EXPLAIN || '').toLowerCase() === 'of
 function explainHeld(s, id) {
   const r = explainer && s.pending.find((x) => x.id === id);
   if (!r) return;
-  const R = globalThis.OfficeFormat.redactSecrets;
-  explainer.explain({ tool: r.tool, detail: R(r.detail), preview: R(r.preview) }).then((e) => {
+  let call;
+  try { const R = globalThis.OfficeFormat.redactSecrets; call = { tool: r.tool, detail: R(r.detail), preview: R(r.preview) }; } catch { return; }
+  explainer.explain(call).then((e) => {
     if (e && holds.has(id)) { tracker.explainRequest(s.uid, id, e); broadcast(); }
   }, () => {});
 }

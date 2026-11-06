@@ -106,11 +106,12 @@ test('explainRequest: only a request that still waits takes it', () => {
 // ----- grouping (stories 6-9) -----
 const mk = (id, o = {}) => ({ id: String(id), kind: 'permission', tool: 'Bash', detail: 'npm test', risk: 'medium', uid: 'u' + id, bot: 'b' + id, building: 'r', t: +id, ...o });
 
-test('similar open requests group by tool and trimmed text, oldest first; a high-risk request stands alone', () => {
+test('similar open requests group by tool, risk and whole call text, oldest first; a high-risk request stands alone', () => {
   const items = [mk(1), mk(2, { detail: ' npm test ' }), mk(3, { detail: 'npm run build' }), mk(4, { risk: 'high', detail: 'npm test' }), mk(5, { risk: 'high', detail: 'npm test' }), mk(6, { kind: 'question', tool: 'office_ask' }), mk(7, { tool: 'Edit' })];
+  items.push(mk(8, { risk: 'low', detail: 'npm test' }), mk(9, { detail: 'npm ci', preview: 'npm ci --one' }), mk(10, { detail: 'npm ci', preview: 'npm ci --two' }), mk(11, { detail: '' }));
   const g = V.requestGroups(items);
-  assert.deepEqual(g.map((x) => x.items.map((r) => r.id)), [['1', '2'], ['3'], ['4'], ['5'], ['6'], ['7']]);
-  assert.deepEqual(g.map((x) => x.groupable), [true, false, false, false, false, false]);
+  assert.deepEqual(g.map((x) => x.items.map((r) => r.id)), [['1', '2'], ['3'], ['4'], ['5'], ['6'], ['7'], ['8'], ['9'], ['10'], ['11']]);
+  assert.deepEqual(g.map((x) => x.groupable), [true, false, false, false, false, false, false, false, false, false]);
   assert.equal(g[0].count, 2);
 });
 

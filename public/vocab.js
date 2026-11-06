@@ -264,14 +264,15 @@
     var e = r.explain || null;
     return { intent: e ? oneLine(e.intent) : '', reason: e && e.reason ? oneLine(e.reason) : oneLine(r.reason), raw: String(r.preview || r.detail || ''), explained: !!(e && e.intent), model: e ? String(e.model || '') : '' };
   }
-  // Similar open requests answer together (#149, stories 7-9): the same tool and the same trimmed text. Only a permission request
+  // Similar open requests answer together (#149, stories 7-9): the same tool, the same risk and the same whole call text (preview, else detail). Only a permission request
   // of lower than high risk groups; a question, a merge decision and a high-risk call stand alone. Items keep their order
   // (oldest first). Each group is { key, items, count, groupable }; a group of one is not groupable.
   function requestGroups(items) {
     var out = [], at = {};
     (items || []).forEach(function (r) {
-      var ok = r.kind === 'permission' && r.risk !== 'high' && !!r.tool;
-      var k = ok ? 'g:' + r.tool + '|' + String(r.detail || '').trim() : 'one:' + r.id;
+      var text = String(r.preview || r.detail || '').trim(); // the whole call text: detail alone is a short label
+      var ok = r.kind === 'permission' && r.risk !== 'high' && !!r.tool && !!text;
+      var k = ok ? 'g:' + r.tool + '|' + r.risk + '|' + text : 'one:' + r.id;
       if (at[k] == null) { at[k] = out.length; out.push({ key: k, items: [], count: 0, groupable: false }); }
       var g = out[at[k]]; g.items.push(r); g.count = g.items.length; g.groupable = ok && g.count > 1;
     });
