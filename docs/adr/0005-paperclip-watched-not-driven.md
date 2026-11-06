@@ -1,6 +1,6 @@
 # 0005: Paperclip is watched, not driven, and Supervise in office is its one write
 
-Status: proposed (needs the owner to confirm). From #76 (spec #67: Q18 revised, Q20 b, Q31, Q32, Q33) and the spike in #75.
+Status: accepted, 2026-11-05. From #76 (spec #67: Q18 revised, Q20 b, Q31, Q32, Q33) and the spike in #75.
 
 ## Context
 
@@ -20,7 +20,7 @@ The spike (#75, Paperclip 2026.1023.0 on Windows) found:
 - Loopback only: `http://127.0.0.1:<port>`, no other host (`localhost` included), no redirect, no credentials. Off until the user connects it.
 - Supervise in office is the one write: one `PATCH /api/agents/:id` of one agent's `adapterConfig`, after the painted Confirm on the Security room's Agents screen (the route refuses it without `confirmed: true`). It sets `engine: cli`, `dangerouslySkipPermissions: false` and adds `--permission-mode default --settings <this office's command hooks file>` to `extraArgs`, keeping the agent's other arguments and taking out each flag that lets a run approve its own calls or turns off hooks (`--allowedTools` among them). All three in one PATCH, because each alone leaves the calls unheld. The office reads the agent again just before the PATCH and builds it from that read.
 - The agent shows "Unsupervised" until Paperclip's saved config carries all three. The office also reads each run's command line (`adapter.invoke`): a run without the office hooks is named in the feed and shown on the agent, and a model profile or an issue override that changes the run config, another program than claude, or a flag or env key that loads what the office cannot read, shows "Partly supervised". The office reads only the names of the agent's env keys and never writes env. It cannot see the environment of the Paperclip process itself, which Paperclip also passes to its runs. The office cannot stop such a run: it only says so.
-- A Paperclip run has no terminal dialog, so its held calls wait like an office session's (15 minutes) and end in a deny with a reason. That holds for every session with Paperclip run ids, whether or not the office watches its company. When Paperclip marks such a run succeeded, the feed says that the office denied a call of it.
+- A Paperclip run has no terminal dialog, so its held calls wait like an office session's (15 minutes for an office session; a command hook run through `hook.mjs` gives up after about 5 minutes until #128 lands) and end in a deny with a reason. That holds for every session with Paperclip run ids, whether or not the office watches its company. When Paperclip marks such a run succeeded, the feed says that the office denied a call of it.
 
 ## Consequences
 

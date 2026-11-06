@@ -175,6 +175,8 @@ function argsRead(args, hooksFile) {
   if (!settings.some((x) => samePath(x, hooksFile))) return { ...none, why: 'It does not load the office hooks file.' };
   if (!samePath(settings.at(-1), hooksFile)) return { ...none, why: 'Claude Code loads only the last --settings, and that is not the office hooks file.' };
   if ((f = first('load'))) return { ...none, partly: f.e.why(f.as), kind: 'load' };
+  // stream-json input lets what writes to stdin switch the permission mode (a control request), so the office cannot hold it
+  if ((f = r.flags.find((x) => named(x, '--input-format') && String(x.values[0]).toLowerCase() === 'stream-json'))) return { ...none, partly: `It reads stream-json input (${f.as}), where the program that writes to stdin can switch the permission mode.`, kind: 'load' };
   if (r.unknown.length) return { ...none, partly: `It passes ${text(r.unknown[0].as, 80)}, which is not a flag of Claude Code ${CLAUDE_VERSION}, so the office cannot tell which arguments are its values.`, kind: 'unknown' };
   return none;
 }
@@ -195,6 +197,18 @@ const ENV_OFF = {
   CLAUDE_BG_SESSION_PERMISSION_RULES: 'adds permission rules that can allow calls',
   CLAUDE_CODE_REMOTE_TOOLS_HOST_ALLOWS_UNATTENDED: 'lets tools run with no one to ask',
   CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS: 'skips more permission checks',
+  // keys that can run another program in place of the office hook, or change which program or file loads (review 76, finding 1)
+  CLAUDE_CODE_SHELL_PREFIX: 'runs every shell command through another program',
+  CLAUDE_CODE_GIT_BASH_PATH: 'picks the shell program that runs the hooks',
+  BASH_ENV: 'runs a script before each shell command, and it can answer the office hook',
+  ENV: 'runs a script when a shell starts, and it can answer the office hook',
+  SHELLOPTS: 'changes how the shell runs, and it can answer the office hook',
+  BASHOPTS: 'changes how the shell runs, and it can answer the office hook',
+  PS4: 'can run a command each time a shell traces, and it can answer the office hook',
+  NODE_OPTIONS: 'can load code into the hook program, and it can answer the office hook',
+  NODE_PATH: 'can change which code the hook program loads, and it can answer the office hook',
+  PATH: 'can change which program runs as claude or as the hook, and it can answer the office hook',
+  PATHEXT: 'can change which program a name starts, and it can answer the office hook',
 };
 const ENV_LOAD = {
   CLAUDE_CODE_PLUGIN_DIRS: 'loads plugins, and a plugin hook can allow a call without the office',
@@ -204,6 +218,23 @@ const ENV_LOAD = {
 };
 // The key names of an env object (Object.keys reads no value). Windows env names do not care about case.
 const envKeys = (env) => Object.keys(obj(env));
+// A copy of an adapter config that keeps the env key names and drops every value (review 76, finding 8): the office never
+// holds an env value in memory, since a key is all it reads.
+const noEnv = (cfg) => (cfg && typeof cfg === 'object' && !Array.isArray(cfg) && 'env' in cfg ? { ...cfg, env: Object.fromEntries(envKeys(cfg.env).map((k) => [k, ''])) } : cfg);
+export function scrubAgent(a) {
+  if (!a || typeof a !== 'object') return a;
+  const out = { ...a };
+  if (a.adapterConfig) out.adapterConfig = noEnv(a.adapterConfig);
+  const profiles = obj(obj(a.runtimeConfig).modelProfiles);
+  if (Object.keys(profiles).length) out.runtimeConfig = { ...a.runtimeConfig, modelProfiles: Object.fromEntries(Object.entries(profiles).map(([k, p]) => [k, obj(p).adapterConfig ? { ...p, adapterConfig: noEnv(p.adapterConfig) } : p])) };
+  return out;
+}
+export function scrubIssue(i) {
+  const o = obj(obj(i).assigneeAdapterOverrides);
+  return o.adapterConfig ? { ...i, assigneeAdapterOverrides: { ...o, adapterConfig: noEnv(o.adapterConfig) } } : i;
+}
+// a project or a routine: its id and the key names of its env, nothing else of the env
+const envOnly = (x) => ({ ...x, env: Object.fromEntries(envKeys(x && x.env).map((k) => [k, ''])) });
 function envRead(keys) {
   const names = strings(keys).map((k) => k.toUpperCase());
   for (const k of names) if (Object.hasOwn(ENV_OFF, k)) return { why: `Its env has ${k}, which ${ENV_OFF[k]}.`, partly: '' };
@@ -225,7 +256,7 @@ export function configWhy(cfg, hooksFile) {
  */
 export function commandWhy(command) {
   const cmd = typeof command === 'string' && command.length ? command : 'claude';
-  if (CLAUDE.has(path.win32.basename(cmd).toLowerCase())) return '';
+  if (CLAUDE.has(cmd.toLowerCase())) return '';   // a bare name only: a path, or a name with a folder, is not checked (the folder may hold another program)
   return `It starts ${text(cmd, 120)}, not claude. The office cannot tell if that program uses the office hooks.`;
 }
 const CLAUDE = new Set(['claude', 'claude.exe']);
@@ -251,7 +282,10 @@ function partlyOf(cfg, hooksFile) {
   const r = argsRead(argsOf(c), hooksFile);
   if (r.partly) return { why: r.partly, kind: r.kind };
   const env = envRead(envKeys(c.env));
-  return env.partly ? { why: env.partly, kind: 'env' } : null;
+  if (env.partly) return { why: env.partly, kind: 'env' };
+  // adapterConfig.chrome turns on Claude in Chrome (an unset or false value does not)
+  if (c.chrome !== undefined && c.chrome !== null && c.chrome !== false) return { why: 'It turns on Claude in Chrome (chrome), whose browser actions the office cannot check.', kind: 'load' };
+  return null;
 }
 /**
  * What one run's command line says (adapter.invoke: its program, arguments and the key names of its env): { ok, why, partly,
@@ -262,6 +296,8 @@ export function runCheck(command, args, hooksFile, keys = []) {
   const why = remoteWhy(command) || env.why || r.why;
   if (why) return { ok: false, why, partly: false, kind: '' };
   const program = commandWhy(command);
+  // Paperclip logs at most 50 arguments of a run line: a list that long may be cut, and the part cut is not read
+  if (strings(args).length >= 50 && !program && !r.partly) return { ok: false, why: 'Its run line has 50 or more arguments, and Paperclip may have cut it, so the office cannot read all of it.', partly: true, kind: 'unknown' };
   const p = program ? { why: program, kind: 'program' } : r.partly ? { why: r.partly, kind: r.kind } : env.partly ? { why: env.partly, kind: 'env' } : null;
   return p ? { ok: false, why: p.why, partly: true, kind: p.kind } : { ok: true, why: '', partly: false, kind: '' };
 }
@@ -277,13 +313,13 @@ export function runCheck(command, args, hooksFile, keys = []) {
  * issues: the agent's open issues (their adapter overrides). lastRun: { ok, why, partly, kind } from the command line of its
  * last run (adapter.invoke, runCheck), the last word on what ran.
  */
-export function supervisionOf(agent, hooksFile, { issues = [], lastRun = null } = {}) {
+export function supervisionOf(agent, hooksFile, { issues = [], lastRun = null, unread = [], layers = [] } = {}) {
   const a = obj(agent);
   if (a.adapterType !== 'claude_local') {
     const why = `Its runs use ${a.adapterType || 'another adapter'}, not Claude Code, so they never reach the office hooks.`;
     return { state: 'unsupervised', label: 'Unsupervised: runs without the office hooks', why, can: false };
   }
-  if (!a.adapterConfig || typeof a.adapterConfig !== 'object') return { state: 'unknown', label: 'Unsupervised: config not shown', why: 'Paperclip did not show its adapter config to the office, so the office cannot tell.', can: false };
+  if (!a.adapterConfig || typeof a.adapterConfig !== 'object' || Array.isArray(a.adapterConfig) || !Object.keys(a.adapterConfig).length) return { state: 'unknown', label: 'Unsupervised: config not shown', why: 'Paperclip did not show its adapter config to the office, so the office cannot tell.', can: false };
   const cfg = a.adapterConfig;
   // What Supervise in office does not change (the env, a cloud session): it is not offered, and the wall says why.
   const env = envRead(envKeys(cfg.env)).why, args = argsRead(argsOf(cfg), hooksFile);
@@ -300,18 +336,36 @@ export function supervisionOf(agent, hooksFile, { issues = [], lastRun = null } 
   }
   const partly = partlyOf(cfg, hooksFile);
   if (partly) return { state: 'partly', label: `Partly supervised: ${PARTLY[partly.kind][0]}`, why: partly.why, can: false };
-  // A model profile or an issue's adapter overrides are merged over the config for some runs (heartbeat.ts).
-  const merged = (o) => { const m = { ...cfg, ...obj(o) }; return configWhy(m, hooksFile) || (partlyOf(m, hooksFile) || {}).why || ''; };
-  for (const [key, p] of Object.entries(obj(obj(a.runtimeConfig).modelProfiles))) {
-    if (obj(p).enabled === false || !obj(p).adapterConfig) continue;
+  // What the office could not read (a failed read of the issues, routines or projects): never Supervised (fail closed)
+  if (unread.length) return { state: 'partly', label: 'Partly supervised: the office could not read all of its setup', why: `The office could not read the ${unread.join(', ')} of this company, which can change how its runs start.`, can: false };
+  // The env of a project or a routine of this agent (key names only) is passed to its runs too.
+  for (const l of layers) {
+    const e = envRead(l.keys);
+    if (e.why) return { state: 'unsupervised', label: 'Unsupervised: its env turns off the office', why: `For ${l.name}: ${e.why} Supervise in office does not change env: change it in Paperclip.`, can: false };
+    if (e.partly) return { state: 'partly', label: `Partly supervised: ${PARTLY.env[0]}`, why: `For ${l.name}: ${e.partly}`, can: false };
+  }
+  // A model profile or an issue's adapter overrides are merged over the config for some runs (heartbeat.ts), on their own or
+  // together, and a layer of env adds keys, so every combination is read.
+  const merged = (...os) => {
+    const m = { ...cfg }; let env = { ...obj(cfg.env) };
+    for (const o of os) { Object.assign(m, obj(o)); env = { ...env, ...obj(obj(o).env) }; }
+    m.env = env;
+    return configWhy(m, hooksFile) || (partlyOf(m, hooksFile) || {}).why || '';
+  };
+  const profiles = Object.entries(obj(obj(a.runtimeConfig).modelProfiles)).filter(([, p]) => obj(p).enabled !== false && obj(p).adapterConfig);
+  const overs = issues.map((i) => [i, obj(obj(i).assigneeAdapterOverrides).adapterConfig]).filter(([i, o]) => o && i.assigneeAgentId === a.id);
+  for (const [key, p] of profiles) {
     const why = merged(p.adapterConfig);
     if (why) return { state: 'partly', label: 'Partly supervised: a model profile skips the office', why: `With the ${key} model profile: ${why}`, can: false };
   }
-  for (const i of issues) {
-    const o = obj(obj(i).assigneeAdapterOverrides).adapterConfig;
-    if (!o || i.assigneeAgentId !== a.id) continue;
+  const issueName = (i) => i.identifier || i.title || 'one issue';
+  for (const [i, o] of overs) {
     const why = merged(o);
-    if (why) return { state: 'partly', label: 'Partly supervised: an issue skips the office', why: `For ${i.identifier || i.title || 'one issue'}: ${why}`, can: false };
+    if (why) return { state: 'partly', label: 'Partly supervised: an issue skips the office', why: `For ${issueName(i)}: ${why}`, can: false };
+    for (const [key, p] of profiles) {
+      const both = merged(p.adapterConfig, o);
+      if (both) return { state: 'partly', label: 'Partly supervised: an issue skips the office', why: `For ${issueName(i)} with the ${key} model profile: ${both}`, can: false };
+    }
   }
   return { state: 'supervised', label: '', why: '', can: false };
 }
@@ -332,7 +386,11 @@ export function supervisePatch(agent, hooksFile) {
     }
   }
   const kept = args.filter((_, k) => !drop.has(k));
-  const cut = r.end < args.length ? r.end - drop.size : kept.length;
+  // A flag at the end that takes a value and has none would take the next argument we add as its value: the office's
+  // arguments go in front of it. (Not a flag the patch drops.)
+  const dangling = r.flags.find((f) => !drop.has(f.first) && (f.e.takes === 1 || f.e.takes === '+') && !f.values.length && f.last === args.length - 1);
+  const stop = Math.min(r.end, dangling ? dangling.first : args.length);
+  const cut = stop - [...drop].filter((k) => k < stop).length;
   return { adapterConfig: { engine: 'cli', dangerouslySkipPermissions: false, extraArgs: [...kept.slice(0, cut), '--permission-mode', 'default', '--settings', hooksFile, ...kept.slice(cut)] } };
 }
 
@@ -383,17 +441,21 @@ export function createHq(deps = {}) {
   // Every read of one company. Routines and live runs are optional (an older Paperclip may not have them).
   async function read(conn) {
     const id = encodeURIComponent(conn.companyId);
-    const [company, agents, issues, routines, live] = await Promise.all([
+    const unread = [];
+    const opt = (name, route, fallback = []) => call(conn, route).catch(() => { unread.push(name); return fallback; });
+    const [company, agents, issues, routines, projects, live] = await Promise.all([
       call(conn, `/api/companies/${id}`),
       call(conn, `/api/companies/${id}/agents`),
-      call(conn, `/api/companies/${id}/issues?status=todo,in_progress,in_review`).catch(() => []),
-      call(conn, `/api/companies/${id}/routines`).catch(() => []),
+      opt('issues', `/api/companies/${id}/issues?status=todo,in_progress,in_review`),
+      opt('routines', `/api/companies/${id}/routines`),
+      opt('projects', `/api/companies/${id}/projects`),
       call(conn, `/api/companies/${id}/live-runs`).catch(() => []),
     ]);
     if (c !== conn) return;
     const runs = d && d.company && d.company.id === conn.companyId ? d.runs : new Map();
     for (const r of list(live)) if (r && r.agentId && r.id) runs.set(r.agentId, { id: r.id, status: r.status || 'running' });
-    d = { company: obj(company), agents: new Map(list(agents).filter((a) => a && a.id).map((a) => [a.id, a])), issues: list(issues), routines: list(routines), runs, last: d && d.last ? d.last : new Map() };
+    // env values are dropped here: only the key names are kept (scrubAgent, scrubIssue, envOnly)
+    d = { company: obj(company), agents: new Map(list(agents).filter((a) => a && a.id).map((a) => [a.id, scrubAgent(a)])), issues: list(issues).map(scrubIssue), routines: list(routines).map(envOnly), projects: list(projects).map(envOnly), unread, runs, last: d && d.last ? d.last : new Map() };
     changed();
   }
   function refetchSoon(conn) {
@@ -509,7 +571,18 @@ export function createHq(deps = {}) {
     const mine = (d ? d.issues : []).filter((i) => i && i.assigneeAgentId === agentId);
     return mine.find((i) => i.status === 'in_progress') || mine.find((i) => i.status === 'in_review') || mine.find((i) => i.status === 'todo') || null;
   };
-  const supOf = (a) => supervisionOf(a, hooksFile(), { issues: d ? d.issues.filter((i) => i && i.assigneeAgentId === a.id && i.status !== 'done') : [], lastRun: d ? d.last.get(a.id) : null });
+  function layersOf(a) {
+    if (!d) return [];
+    const mine = d.issues.filter((i) => i && i.assigneeAgentId === a.id && i.status !== 'done');
+    const out = [];
+    for (const pid of new Set(mine.map((i) => i.projectId).filter(Boolean))) {
+      const p = d.projects.find((x) => x && x.id === pid);
+      if (p) out.push({ name: `its project ${text(p.name, 60) || pid}`, keys: envKeys(p.env) });
+    }
+    for (const r of d.routines) if (r && r.assigneeAgentId === a.id) out.push({ name: `its routine ${text(r.title, 60) || r.id}`, keys: envKeys(r.env) });
+    return out;
+  }
+  const supOf = (a) => supervisionOf(a, hooksFile(), { issues: d ? d.issues.filter((i) => i && i.assigneeAgentId === a.id && i.status !== 'done') : [], lastRun: d ? d.last.get(a.id) : null, unread: d ? d.unread : [], layers: layersOf(a) });
   function agentView(a) {
     const i = issueOf(a.id), hb = obj(obj(a.runtimeConfig).heartbeat), run = d.runs.get(a.id) || null;
     return {
@@ -569,7 +642,7 @@ export function createHq(deps = {}) {
     conn.busy.add(id); changed();
     try {
       const route = `/api/agents/${encodeURIComponent(id)}`;
-      const a = await call(conn, route);
+      const a = scrubAgent(await call(conn, route));
       if (c !== conn || !d) return { ok: false };
       if (!a || a.id !== id || a.companyId !== conn.companyId) throw httpError(404, 'Paperclip has no such agent in this company.');
       d.agents.set(id, a);
@@ -577,11 +650,11 @@ export function createHq(deps = {}) {
       if (before.state === 'supervised') return { ok: true, already: true, supervision: before };
       if (!before.can) throw httpError(409, `Supervise in office cannot set up ${text(a.name, 60)}: ${before.why}`);
       const patch = supervisePatch(a, file);
-      const out = await call(conn, route, { method: 'PATCH', body: JSON.stringify(patch) });
+      const out = scrubAgent(await call(conn, route, { method: 'PATCH', body: JSON.stringify(patch) }));
       if (c !== conn || !d) return { ok: false };
       // Paperclip's PATCH has no version check, so a change saved in Paperclip at the same time can replace the office's.
       // The agent is read once more, and its supervision comes from what Paperclip keeps, not from what the office sent.
-      const saved = await call(conn, route);
+      const saved = scrubAgent(await call(conn, route));
       if (c !== conn || !d) return { ok: false };
       const now = saved && saved.id === id ? saved : out && out.id === id ? out : null;
       if (now) d.agents.set(id, now);

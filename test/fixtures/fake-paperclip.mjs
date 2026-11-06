@@ -67,11 +67,11 @@ export const DEMO = (hooksFile = null) => {
 };
 
 /**
- * Starts the fake on 127.0.0.1. seed: { companies, agents, issues, routines, liveRuns, health, auth }. auth: true answers
+ * Starts the fake on 127.0.0.1. seed: { companies, agents, issues, routines, projects, noProjects, liveRuns, health, auth }. auth: true answers
  * 403 to every route (a Paperclip in authenticated mode). port: 0 for a free one.
  */
 export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
-  const st = { companies: structuredClone(seed.companies || []), agents: structuredClone(seed.agents || []), issues: structuredClone(seed.issues || []), routines: structuredClone(seed.routines || []), liveRuns: structuredClone(seed.liveRuns || []) };
+  const st = { companies: structuredClone(seed.companies || []), agents: structuredClone(seed.agents || []), issues: structuredClone(seed.issues || []), routines: structuredClone(seed.routines || []), projects: structuredClone(seed.projects || []), liveRuns: structuredClone(seed.liveRuns || []) };
   const requests = [], sockets = new Set();
   const api = { afterPatch: null };   // set by a test: runs right after a PATCH is answered (a change made in Paperclip at the same time)
   let seq = 0;
@@ -103,6 +103,7 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
         return send(res, 200, st.issues.filter((i) => i.companyId === x[1] && (!want.length || want.includes(i.status))));
       }
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/routines$/))) return send(res, 200, st.routines.filter((r) => r.companyId === x[1]));
+      if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/projects$/))) return seed.noProjects ? send(res, 404, { error: 'Not found' }) : send(res, 200, st.projects.filter((r) => r.companyId === x[1]));
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/live-runs$/))) return send(res, 200, st.liveRuns);
       // the agent as saved, with what buildAgentDetail adds (routes/agents.ts; the board reads the whole config)
       if (req.method === 'GET' && (x = m(/^\/api\/agents\/([^/]+)$/))) { const a = st.agents.find((y) => y.id === x[1]); return a ? send(res, 200, { ...a, chainOfCommand: [], access: {} }) : send(res, 404, { error: 'Agent not found' }); }

@@ -128,10 +128,10 @@ test('only the last --settings counts: an office hooks file that a later --setti
 // Review 76, finding 3: Paperclip starts adapterConfig.command (default claude, execute.ts). Another program may or may not
 // pass the calls on to Claude Code with the office hooks: the office cannot tell.
 test('the program a run starts: unset or claude is supervised, any other program is Partly supervised with the reason', () => {
-  for (const command of [undefined, '', 'claude', 'CLAUDE', 'claude.exe', 'C:\\Users\\a\\.local\\bin\\claude.exe', 'C:/Users/a/.local/bin/Claude.EXE', '/usr/local/bin/claude']) {
+  for (const command of [undefined, '', 'claude', 'CLAUDE', 'claude.exe']) {
     assert.equal(supervisionOf(agent({ ...SUPERVISED, command }), HOOKS).state, 'supervised', String(command));
   }
-  for (const command of ['C:/tools/claude-wrap.cmd', 'node', 'claude.cmd', 'C:/x/claude.exe.bak', 'C:/claude/run.exe', 'claude --bare']) {
+  for (const command of ['C:\\Users\\a\\.local\\bin\\claude.exe', 'C:/Users/a/.local/bin/Claude.EXE', '/usr/local/bin/claude', 'C:/tools/claude-wrap.cmd', 'node', 'claude.cmd', 'C:/x/claude.exe.bak', 'C:/claude/run.exe', 'claude --bare']) {
     const s = supervisionOf(agent({ ...SUPERVISED, command }), HOOKS);
     assert.deepEqual([s.state, s.label, s.can], ['partly', 'Partly supervised: it starts another program', false], command);
     assert.equal(s.why, `It starts ${command}, not claude. The office cannot tell if that program uses the office hooks.`);
@@ -251,7 +251,7 @@ test('the arguments are read with the value count of each Claude Code flag: a fl
     assert.deepEqual(supervisePatch(agent({ extraArgs: x }), HOOKS).adapterConfig.extraArgs, [...x, '--permission-mode', 'default', '--settings', HOOKS], 'the patch keeps it');
   }
   // Paperclip's own run line has only flags the office knows
-  assert.deepEqual(runCheck('C:/Users/a/.local/bin/claude.exe', ['--print', '-', '--output-format', 'stream-json', '--verbose', '--resume', 's1', '--model', 'haiku', '--effort', 'high', '--max-turns', '8',
+  assert.deepEqual(runCheck('claude.exe', ['--print', '-', '--output-format', 'stream-json', '--verbose', '--resume', 's1', '--model', 'haiku', '--effort', 'high', '--max-turns', '8',
     '--append-system-prompt-file', 'C:/i.md', '--add-dir', 'C:/b', ...ok], HOOKS), { ok: true, why: '', partly: false, kind: '' });
   // Supervise puts the office settings before a --, where Claude Code still reads them as flags
   const p = supervisePatch(agent({ extraArgs: ['--verbose', '--', 'some text'] }), HOOKS).adapterConfig;
@@ -437,7 +437,7 @@ test('the command line of a run: a flag that approves calls, another program or 
     await until(() => feed.length === 1, 'the first feed line', { ms: 3000 });
     assert.equal(feed[0], 'Paperclip started a run of Ada without the office: It allows tools without asking (--allowedTools). Its tool calls are not held.');
     assert.equal(ada().supervision.label, 'Unsupervised: its last run skipped the office');
-    invoke('r2', 'C:\\Users\\a\\.local\\bin\\claude.exe', SUPERVISED.extraArgs);
+    invoke('r2', 'claude.exe', SUPERVISED.extraArgs);
     await until(() => ada().supervision.state === 'supervised', 'a held run again', { ms: 3000 });
     invoke('r3', 'C:/tools/wrap.cmd', SUPERVISED.extraArgs);
     await until(() => feed.length === 2, 'the second feed line', { ms: 3000 });
@@ -487,4 +487,70 @@ test('a refused address sends nothing; several companies ask which; a Paperclip 
   assert.equal(hq4.view().state, 'lost');
   assert.match(hq4.view().error, /No Paperclip answers at http:\/\/127\.0\.0\.1:9/);
   hq4.disconnect();
+});
+
+// Review 76, round 3 (owner direction: a Paperclip agent is untrusted by default; anything unknown, unreadable or cut is
+// never Supervised).
+test('round 3: env keys that can answer the office hook make the agent Unsupervised; chrome, stream-json input and an empty config are never Supervised', () => {
+  for (const key of ['CLAUDE_CODE_SHELL_PREFIX', 'CLAUDE_CODE_GIT_BASH_PATH', 'BASH_ENV', 'ENV', 'SHELLOPTS', 'BASHOPTS', 'PS4', 'NODE_OPTIONS', 'NODE_PATH', 'PATH', 'PATHEXT', 'path']) {
+    const s = supervisionOf(agent({ ...SUPERVISED, env: { [key]: 'x' } }), HOOKS);
+    assert.deepEqual([s.state, s.can], ['unsupervised', false], key);
+    assert.equal(supervisionOf(agent({ cwd: 'C:/x', env: { [key]: 'x' } }), HOOKS).can, false);
+  }
+  assert.equal(supervisionOf(agent({ ...SUPERVISED, chrome: true }), HOOKS).state, 'partly');
+  assert.equal(supervisionOf(agent({ ...SUPERVISED, chrome: false }), HOOKS).state, 'supervised');
+  const si = supervisionOf(agent({ ...SUPERVISED, extraArgs: [...SUPERVISED.extraArgs, '--input-format', 'stream-json'] }), HOOKS);
+  assert.deepEqual([si.state, si.can], ['partly', false]);
+  assert.match(si.why, /stream-json input/);
+  assert.equal(supervisionOf(agent({ ...SUPERVISED, extraArgs: [...SUPERVISED.extraArgs, '--input-format', 'text'] }), HOOKS).state, 'supervised');
+  assert.deepEqual([supervisionOf(agent({}), HOOKS).state, supervisionOf(agent({}), HOOKS).can], ['unknown', false], 'an empty config is a hidden one');
+  // a run line of 50 arguments may be cut
+  assert.equal(runCheck('claude', [...SUPERVISED.extraArgs, ...Array(46).fill('x')], HOOKS).partly, true);
+  assert.equal(runCheck('claude', SUPERVISED.extraArgs, HOOKS).ok, true);
+});
+
+test('round 3: a profile and an issue override read together, and the env layers of a project or routine, are checked; unread parts fail closed', () => {
+  const profile = { runtimeConfig: { modelProfiles: { fast: { adapterConfig: { env: { BASH_ENV: '1' } } } } } };
+  const issue = { id: 'i', identifier: 'ACM-1', assigneeAgentId: 'a1', assigneeAdapterOverrides: { adapterConfig: { command: 'C:/w.cmd' } } };
+  // each alone is partly; together with a clean profile the issue still counts
+  assert.equal(supervisionOf(agent(SUPERVISED, { runtimeConfig: { modelProfiles: { ok: { adapterConfig: { model: 'haiku' } } } } }), HOOKS, { issues: [issue] }).state, 'partly');
+  const both = supervisionOf(agent(SUPERVISED, profile), HOOKS, { issues: [{ ...issue, assigneeAdapterOverrides: { adapterConfig: { model: 'x' } } }] });
+  assert.match(both.why, /model profile/);
+  const layerKeys = supervisionOf(agent(SUPERVISED), HOOKS, { layers: [{ name: 'its project Web', keys: ['PATH'] }] });
+  assert.deepEqual([layerKeys.state, layerKeys.can], ['unsupervised', false]);
+  assert.match(layerKeys.why, /^For its project Web: Its env has PATH/);
+  assert.equal(supervisionOf(agent(SUPERVISED), HOOKS, { layers: [{ name: 'its routine R', keys: ['FOO'] }] }).state, 'supervised');
+  const un = supervisionOf(agent(SUPERVISED), HOOKS, { unread: ['issues'] });
+  assert.deepEqual([un.state, un.can], ['partly', false]);
+});
+
+test('round 3: the patch puts the office arguments in front of a trailing flag that takes a value', () => {
+  const a = agent({ engine: 'cli', extraArgs: ['--max-turns', '8', '--model'] });
+  assert.deepEqual(supervisePatch(a, HOOKS).adapterConfig.extraArgs, ['--max-turns', '8', '--permission-mode', 'default', '--settings', HOOKS, '--model']);
+  assert.deepEqual(supervisePatch(agent({ engine: 'cli', extraArgs: [] }), HOOKS).adapterConfig.extraArgs, ['--permission-mode', 'default', '--settings', HOOKS]);
+});
+
+test('round 3: the watcher holds no env value, and a failed read of projects is not Supervised', async () => {
+  const demo = DEMO(HOOKS);
+  demo.agents[1].adapterConfig.env = { SECRET_TOKEN: 'sk-very-secret' };
+  demo.projects = [{ id: 'p1', companyId: demo.companies[0].id, name: 'Web', env: { PS4: 'sk-other-secret' } }];
+  demo.issues[0].projectId = 'p1';
+  const pc = await startFakePaperclip(demo);
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS });
+  try {
+    await hq.connect({ url: pc.url });
+    const ada = hq.view().agents.find((a) => a.name === 'Ada');
+    assert.deepEqual([ada.supervision.state, ada.supervision.can], ['unsupervised', false], 'the project env key PS4');
+    assert.match(ada.supervision.why, /its project Web/);
+    assert.equal(JSON.stringify(hq.view()).includes('sk-'), false);
+    await hq.supervise('a1000000-0000-4000-8000-000000000002').catch(() => {});
+  } finally { hq.disconnect(); await pc.close(); }
+  const pc2 = await startFakePaperclip({ ...DEMO(HOOKS), noProjects: true });
+  const hq2 = createHq({ ...fast, hooksFile: () => HOOKS });
+  try {
+    await hq2.connect({ url: pc2.url });
+    const ada = hq2.view().agents.find((a) => a.name === 'Ada');
+    assert.deepEqual([ada.supervision.state, ada.supervision.can], ['partly', false]);
+    assert.match(ada.supervision.why, /projects/);
+  } finally { hq2.disconnect(); await pc2.close(); }
 });
