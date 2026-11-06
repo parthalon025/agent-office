@@ -13,7 +13,7 @@ import { execFileSync } from 'node:child_process';
 import * as git from '../git.mjs';
 import { officeFiles } from '../files.mjs';
 import { pageFile } from '../auth.mjs';
-import { startOffice } from './fixtures/office-server.mjs';
+import { startOffice, settle, holdPort, hold, close, closeHeld } from './fixtures/office-server.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const win = process.platform === 'win32';
@@ -118,19 +118,6 @@ test('checkoutName: the branch, or the worktree folder name when HEAD is detache
 });
 
 const sh = (args, cwd) => execFileSync(git.resolveExe('git'), ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd, stdio: 'pipe' });
-const holdPort = (port) => new Promise((resolve, reject) => {
-  const s = net.createServer();
-  s.once('error', reject);
-  s.listen(port, '127.0.0.1', () => resolve(s));
-});
-const close = (s) => new Promise((r) => s.close(r));
-
-// listening: the server said it is open. A server that stopped first has its exit code.
-const settle = async (o) => {
-  const listening = await o.done.then(() => true, () => false);
-  return { listening, code: listening ? null : await o.exited };
-};
-
 // The office takes ports of a name's sequence, so the test picks a name whose whole sequence is free to hold now. Offices
 // that run at the same time hold other ports and cannot change what this test sees (#96).
 async function freeName() {
@@ -155,7 +142,7 @@ const fakeOwn = (port, dir, lad, sub = '') => new Promise((resolve, reject) => {
     res.end(JSON.stringify({ hooksFile: officeFiles(path.join(dir, sub), port).hooksCmd }));
   });
   s.once('error', reject);
-  s.listen(port, '127.0.0.1', () => resolve(s));
+  s.listen(port, '127.0.0.1', () => resolve(hold(s)));
 });
 
 test('OFFICE_PORT=branch: the office takes the first free port of its sequence, says so, and stops when none is free or its own checkout holds one', { timeout: 600000 }, async () => {
@@ -263,6 +250,7 @@ test('OFFICE_PORT=branch: the office takes the first free port of its sequence, 
     assert.equal(r5.code, 1);
     assert.match(nogit.out(), /not in a git repository/i);
   } finally {
+    await closeHeld();
     await new Promise((r) => setTimeout(r, 300));
     try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { /* a temp folder may stay */ }
   }
