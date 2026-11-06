@@ -2,7 +2,7 @@
    Some calls need the user's yes before they run: merge, fork, skill, cost, goal, handoff (the server asks), and pull request
    and remove (the page asks before it calls). One Module owns both sides, so a ninth kind is one row in KINDS:
      build side (server):  OfficeAsk.answer(kind, text, extra) -> { status, body }   the first call, before it runs
-     read side (page):     OfficeAsk.asked(x, kind, confirmed) -> { text, body } | null   x is the Error api() rejects with
+     read side (page):     OfficeAsk.asked(x, kind, confirmed) -> { text, body } | null   x is the Error a client command rejects with
    The page then sends the same call again with its confirmation flag (`confirmed: true`; `confirmCost: true` for cost).
    A cost question is a normal answer (200 { confirm, question }, no error); every other server kind is 409 { error, confirm }.
    Plain script, no I/O: the page loads it as a script (window.OfficeAsk); the server and the tests import it for its side
@@ -30,7 +30,7 @@
     if (k.question) return { status: k.status, body: { confirm: kind, question: text } };
     return { status: k.status, body: Object.assign({ error: text, confirm: kind }, extra || {}) };
   }
-  // True for a 200 body that is a question and not a result (api() in page-core turns it into an Error).
+  // True for a 200 body that is a question and not a result (client.js turns it into an Error).
   function isQuestion(j) { return !!(j && j.confirm && j.question); }
   // The question of a rejected call, when it is this kind and the user has not said yes yet. Else null: the caller shows the error.
   function asked(x, kind, confirmed) {

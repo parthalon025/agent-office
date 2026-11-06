@@ -22,12 +22,13 @@
    instead: Cloudflare Access adds its login to every request, and the server checks it. */
 (function () {
   var problemFns = [];
+  var ready;   // set below, once the access flow starts; the client reads it at each call
+  var client = window.OfficeClient.createClient({ fetch: function (p, o) { return window.fetch(p, o); }, ready: function () { return ready; } });
   // The lean snapshot leaves out the oldest replies of a session with long replies (wire.js olderReplies). The store asks for
-  // them here before a chat fills (#80): the whole reply list of one session, from GET /api/session.
+  // them here before a chat fills (#80): the whole reply list of one session, from the session read.
   var store = window.OfficeBuilding.createStore({
     fetchReplies: function (uid) {
-      return ready.then(function () { return fetch('/api/session?uid=' + encodeURIComponent(uid)); })
-        .then(function (r) { if (!r.ok) throw new Error('No session.'); return r.json(); })
+      return client.get('session', { uid: uid }).catch(function () { throw new Error('No session.'); })
         .then(function (j) { return (j.session && j.session.replies) || []; });
     },
     onProblem: function (text) { problemFns.forEach(function (fn) { fn(text); }); }
@@ -39,9 +40,8 @@
     auth = a;
     authFns.forEach(function (fn) { fn(a); });
   }
-  function answer(r) { return r.json().catch(function () { return {}; }); }
   function probe() {
-    return fetch('/api/auth').then(function (r) { return answer(r).then(function (j) { return r.ok ? { ok: true } : { ok: false, status: r.status, reason: j.error || 'No access.' }; }); },
+    return client.auth().then(function (r) { return r.ok ? { ok: true } : { ok: false, status: r.status, reason: r.body.error || 'No access.' }; },
       function () { return { ok: false, reason: 'The office server is not reachable.' }; });
   }
   // On the remote address (https; the local office is http) a page with no cookie asks for one with its Cloudflare Access
@@ -50,21 +50,18 @@
   function check() {
     return probe().then(function (a) {
       if (a.ok || a.status !== 401 || location.protocol !== 'https:') return a;
-      return fetch('/remote/signin', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })
-        .then(function (r) { return r.ok ? probe() : a; }, function () { return a; });
+      return client.signin().then(function (r) { return r.ok ? probe() : a; }, function () { return a; });
     });
   }
   var code = /^#n=([0-9a-f]{32})$/.exec(location.hash);
   if (code) history.replaceState(null, '', location.pathname + location.search);   // the code works once; keep it out of history
-  var ready = !code ? check() : fetch('/launch', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: code[1] }) })
+  ready = !code ? check() : client.launch(code[1])
     .then(function (r) {
-      return answer(r).then(function (j) {
-        // A used or old code: a cookie from an earlier link may still work.
-        return r.ok ? { ok: true } : check().then(function (c) { return c.ok ? c : { ok: false, reason: j.error || c.reason }; });
-      });
+      // A used or old code: a cookie from an earlier link may still work.
+      return r.ok ? { ok: true } : check().then(function (c) { return c.ok ? c : { ok: false, reason: r.body.error || c.reason }; });
     }, check);
   function connect() {
-    var src = es = new EventSource('/events');
+    var src = es = new EventSource(client.url('events'));
     // The first message is the whole snapshot, the next ones are patches (wire.js). A patch that does not fit the
     // snapshot the page has: connect again, and the server sends it whole.
     src.onmessage = function (e) {
@@ -82,10 +79,11 @@
   }
   ready.then(function (a) { if (a.ok) connect(); else { setAuth(a); retry = setTimeout(recheck, 5000); } });
 
-  function post(path, body) {
-    return ready.then(function () { return fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); })
-      .then(function (r) { return r.json().then(function (j) { return r.ok ? { ok: true } : { ok: false, reason: j.error || 'The office could not do that.' }; }); },
-            function () { return { ok: false, reason: 'The office server is not reachable.' }; });
+  // A DS command's call, as the DS expects it: { ok } or { ok: false, reason }. A rejected command has the server's text; a call
+  // that never got an answer has no status.
+  function post(name, body) {
+    return client.send(name, body).then(function () { return { ok: true }; },
+      function (e) { return e.status ? { ok: false, reason: (e.body && e.body.error) || 'The office could not do that.' } : { ok: false, reason: 'The office server is not reachable.' }; });
   }
   // The chat hands over data: or blob: URLs. The server needs the bytes.
   function readAttachments(list) {
@@ -101,7 +99,7 @@
     }));
   }
   function sendAll(uids, body) {
-    return Promise.all(uids.map(function (u) { return post('/api/message', Object.assign({ uid: u }, body)); }))
+    return Promise.all(uids.map(function (u) { return post('message', Object.assign({ uid: u }, body)); }))
       .then(function (rs) { return rs.every(function (r) { return r.ok; }) ? { ok: true } : rs.filter(function (r) { return !r.ok; })[0]; });
   }
 
@@ -109,8 +107,8 @@
   function send(m, cmd) {
     var uids, uidsOf = m.uidsOf, sessionOf = store.sessionByUid;
     switch (cmd.type) {
-      case 'session.stop': return post('/api/close', { uid: cmd.session });
-      case 'approve': case 'decline': return post('/api/answer', { id: cmd.requestId, allow: cmd.type === 'approve' });
+      case 'session.stop': return post('close', { uid: cmd.session });
+      case 'approve': case 'decline': return post('answer', { id: cmd.requestId, allow: cmd.type === 'approve' });
       case 'message':
         uids = uidsOf(cmd);
         if (!uids.length) return Promise.resolve({ ok: false, reason: 'No open session to send to.' });
@@ -121,7 +119,7 @@
         return sendAll(uids, { text: cmd.text });
       case 'pause':   // stops the turn that is running; the session stays open
         uids = uidsOf(cmd);
-        return uids.length ? post('/api/interrupt', { uid: uids[0] }) : Promise.resolve({ ok: false, reason: 'No open session.' });
+        return uids.length ? post('interrupt', { uid: uids[0] }) : Promise.resolve({ ok: false, reason: 'No open session.' });
       case 'resume':
         uids = uidsOf(cmd);
         return uids.length ? sendAll(uids, { text: 'Continue.', answers: false }) : Promise.resolve({ ok: false, reason: 'No open session.' });
@@ -132,7 +130,7 @@
       }
       case 'dismiss': {   // the server clears the error; the next snapshot moves every surface off Error
         var du = uidsOf(cmd)[0];
-        return du ? post('/api/dismiss', { uid: du }) : Promise.resolve({ ok: true });
+        return du ? post('dismiss', { uid: du }) : Promise.resolve({ ok: true });
       }
       default: return Promise.resolve({ ok: false, reason: 'The office does not support this command.' });
     }
@@ -141,6 +139,7 @@
   // The facade the page and the scene modules use: the store, plus mount(repo).
   // mount(repo) makes a building adapter for one scene; pass its .adapter to OfficeScene and its .def as the building.
   var facade = Object.create(store);
+  facade.client = client;   // the page's one client (client.js)
   facade.ready = ready;   // settles once the page knows whether it has access: { ok, reason }
   // fn({ ok, reason }) at once when access is known, and on each change. Returns the unsubscribe.
   facade.onAuth = function (fn) {

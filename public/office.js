@@ -17,7 +17,7 @@
       OpenDialog = O.OpenDialog, PHONE_MAX = O.PHONE_MAX, PastDialog = O.PastDialog, PersonasDialog = O.PersonasDialog,
       PhoneView = O.PhoneView, RecapDialog = O.RecapDialog, ReceptionDialog = O.ReceptionDialog, RoomDialog = O.RoomDialog,
       SchedulesDialog = O.SchedulesDialog, SessionsDialog = O.SessionsDialog, StatsPanel = O.StatsPanel,
-      TourCard = O.TourCard, TrustDialog = O.TrustDialog, WANT_MS = O.WANT_MS, api = O.api, clip = O.clip, cssMs = O.cssMs,
+      TourCard = O.TourCard, TrustDialog = O.TrustDialog, WANT_MS = O.WANT_MS, client = O.client, clip = O.clip, cssMs = O.cssMs,
       getInfo = O.getInfo, kindOf = O.kindOf, layerMemory = O.layerMemory, noteLayer = O.noteLayer,
       openPalette = O.openPalette, plural = O.plural, reduced = O.reduced, resetText = O.resetText,
       sceneCovers = O.sceneCovers, sceneName = O.sceneName, setTourSeen = O.setTourSeen, tourSeen = O.tourSeen,
@@ -616,7 +616,7 @@
             room: function (id) { return mount.roomInfo(id); },
             usable: function (id) { return mount.usable(id); },
             note: function (id) { var n = latestSnap.current && latestSnap.current.notes && latestSnap.current.notes[noteKey(id)]; return n ? n.text : ''; },
-            tree: function (root) { return api('/api/tree', { root: root }); },
+            tree: function (root) { return client.tree({ root: root }); },
             stats: function (id) { return mount.figures(id); },
             goals: function (id, building) { return window.OfficeVocab.plan.board(latestSnap.current && latestSnap.current.plans, building).groups; },   // the Manager board on the wall (#157)
             view: function (id) { return window.OfficeVocab.wall.viewOf(latestSnap.current && latestSnap.current.screens, noteKey(id)); },   // the blackboard view the user chose for this room (#152)
@@ -633,7 +633,7 @@
             roomId: function () { return secMount.securityRoom(); },
             // the rules, what each agent kind enforces and the Spend figures (snap.security), for this building
             data: function () { var sn = latestSnap.current; return sn && sn.security ? { sec: sn.security, building: secMount.repo, buildingName: (def && def.name) || '', hq: sn.hq || null } : null; },
-            post: function (route, body) { return api(route, body); },
+            post: function (cmd, body) { return client.send(cmd, body); },
             onError: function (text) { toast({ tone: 'error', title: 'Security', text: text }); }
           });
           window.officeSecurity = securityRef.current;   // the Security room screens (open a screen), for the console and tests
@@ -679,11 +679,11 @@
             targets: function () { return deskMount.deskTargets(latestSnap.current); },
             sessions: function () { return ((latestSnap.current && latestSnap.current.sessions) || []).filter(function (x) { return deskMount.botName(x.uid); }).map(function (x) { return Object.assign({}, x, { botName: deskMount.botName(x.uid) }); }); },
             onAnswer: function (paper, act) {
-              api('/api/answer', { id: paper.id, allow: act.allow, always: !!act.always }).then(function () {
+              client.answer({ id: paper.id, allow: act.allow, always: !!act.always }).then(function () {
                 if (act.always) toast({ tone: 'success', title: paper.bot, text: 'Allowed from now on: ' + paper.always });
               }, function (x) { toast({ tone: 'error', title: paper.bot, text: x.message }); });
             },
-            onPause: function (uid) { api('/api/interrupt', { uid: uid }).catch(function (x) { toast({ tone: 'error', title: 'Pause', text: x.message }); }); }
+            onPause: function (uid) { client.interrupt({ uid: uid }).catch(function (x) { toast({ tone: 'error', title: 'Pause', text: x.message }); }); }
           });
           window.officeDesk = deskRef.current;   // the desk objects, for the console and tests
         }
@@ -722,7 +722,7 @@
     function deskStart(roomId) {
       var fn = mount ? mount.roomFloor(roomId) : null, pl = mount ? mount.roomInfo(roomId).place : null;
       var cwd = (pl && pl.path) || shownPath || ((info && info.recent) || [])[0] || '';
-      api('/api/open', { cwd: cwd, provider: DEFAULT_KIND, where: 'office', isolation: 'same', role: fn || undefined }).then(function () {}, function (x) {
+      client.open({ cwd: cwd, provider: DEFAULT_KIND, where: 'office', isolation: 'same', role: fn || undefined }).then(function () {}, function (x) {
         toast({ tone: 'error', title: 'Start agent', text: x.message });
       });
     }
@@ -806,7 +806,7 @@
       .forEach(function (a) { actions.push({ id: 'page-' + a[0], label: a[1], icon: a[2], group: 'Office', run: a[3] }); });
     var selKind = selSess ? kindOf(window.officeAdapter.kinds(), selSess.provider) : null;
     if (selSess && (!selKind || selKind.control)) actions.push({ id: 'page-ext', label: 'Extensions of ' + selSess.name, icon: 'connector', group: 'Office', run: function () { extensions(selSess.uid, selSess.name); } });
-    actions.push({ id: 'page-focus', label: focusOn ? 'Turn off Focus mode' : 'Turn on Focus mode', icon: 'sound-off', group: 'Office', keywords: 'quiet sound motion rituals calm', run: function () { api('/api/settings/focus', { on: !focusOn }).then(function () { toast({ tone: 'info', title: !focusOn ? 'Focus mode is on' : 'Focus mode is off', text: !focusOn ? 'Sound, motion and rituals are off.' : 'Rituals are back.' }); }, function (x) { toast({ tone: 'error', title: 'Focus mode', text: x.message }); }); } });
+    actions.push({ id: 'page-focus', label: focusOn ? 'Turn off Focus mode' : 'Turn on Focus mode', icon: 'sound-off', group: 'Office', keywords: 'quiet sound motion rituals calm', run: function () { client.settingsFocus({ on: !focusOn }).then(function () { toast({ tone: 'info', title: !focusOn ? 'Focus mode is on' : 'Focus mode is off', text: !focusOn ? 'Sound, motion and rituals are off.' : 'Rituals are back.' }); }, function (x) { toast({ tone: 'error', title: 'Focus mode', text: x.message }); }); } });
     var trustN = snap && snap.security && snap.security.trust ? snap.security.trust.proposals.length : 0;
     actions.push({ id: 'page-trust', label: trustN ? 'Earned trust (' + trustN + (trustN === 1 ? ' proposal)' : ' proposals)') : 'Earned trust', icon: 'security', group: 'Office', keywords: 'trust proposals rules allow withdraw grant security approvals', run: function () { setDlg({ name: 'trust' }); } });
     actions.push({ id: 'page-needs', label: needs.length ? 'Needs you (' + needs.length + ')' : 'Needs you', icon: 'waiting', group: 'Office', keywords: 'requests approve decline questions decisions', run: function () { setDlg({ name: 'needs' }); } });
@@ -857,15 +857,15 @@
         // the dock's per-agent actions (#92): Always allow, the model and the permission mode
         var ask = window.OfficeVocab.alwaysOffer(s), skd = kindOf(window.officeAdapter.kinds(), s.provider), steer = s.headless && (!skd || skd.control);
         if (ask) out.push({ id: 'page-s-always-' + s.uid, label: 'Always allow ' + clip(ask.always, 40) + ' for ' + nm, icon: 'approve', group: 'Sessions', hint: where, keywords: kw + ' permission rule approve',
-          run: function () { api('/api/answer', { id: ask.id, allow: true, always: true }).then(function () { toast({ tone: 'success', title: s.name, text: 'Allowed from now on: ' + ask.always }); }, function (x) { toast({ tone: 'error', title: s.name, text: x.message }); }); } });
+          run: function () { client.answer({ id: ask.id, allow: true, always: true }).then(function () { toast({ tone: 'success', title: s.name, text: 'Allowed from now on: ' + ask.always }); }, function (x) { toast({ tone: 'error', title: s.name, text: x.message }); }); } });
         if (steer) MODELS.slice(1).forEach(function (mo) { if (mo.value !== s.model) out.push({ id: 'page-s-model-' + mo.value + '-' + s.uid, label: 'Model of ' + nm + ': ' + mo.label, icon: 'bot', group: 'Sessions', hint: where, keywords: kw + ' model lane',
-          run: function () { api('/api/control', { uid: s.uid, action: 'model', value: mo.value }).catch(function (x) { toast({ tone: 'error', title: s.name, text: x.message }); }); } }); });
+          run: function () { client.control({ uid: s.uid, action: 'model', value: mo.value }).catch(function (x) { toast({ tone: 'error', title: s.name, text: x.message }); }); } }); });
         if (steer) MODES.forEach(function (md) { if (md.value && md.value !== s.mode) out.push({ id: 'page-s-mode-' + md.value + '-' + s.uid, label: 'Permissions of ' + nm + ': ' + md.label, icon: 'security', group: 'Sessions', hint: where, keywords: kw + ' permission mode',
-          run: function () { api('/api/control', { uid: s.uid, action: 'mode', value: md.value }).catch(function (x) { toast({ tone: 'error', title: s.name, text: x.message }); }); } }); });
+          run: function () { client.control({ uid: s.uid, action: 'mode', value: md.value }).catch(function (x) { toast({ tone: 'error', title: s.name, text: x.message }); }); } }); });
         out.push({ id: 'page-s-go-' + s.uid, label: 'Go to session ' + nm, icon: 'chevron-right', group: 'Sessions', hint: where, keywords: kw, run: function () { goTo(s); } });
         out.push({ id: 'page-s-term-' + s.uid, label: 'Terminal of ' + nm, icon: 'terminal', group: 'Sessions', hint: where, keywords: kw + ' output', run: function () { openDesk(s.uid, 'terminal'); } });
         out.push({ id: 'page-s-chg-' + s.uid, label: 'Changes of ' + nm, icon: 'trace', group: 'Sessions', hint: where, keywords: kw + ' diff files', run: function () { changes(s.uid, nm); } });
-        if (s.headless && (s.status === 'working' || s.status === 'waiting')) out.push({ id: 'page-s-stop-' + s.uid, label: 'Stop turn of ' + nm, icon: 'pause', group: 'Sessions', hint: where, keywords: kw + ' interrupt', run: function () { api('/api/interrupt', { uid: s.uid }).catch(function (x) { toast({ tone: 'error', title: s.name, text: x.message }); }); } });
+        if (s.headless && (s.status === 'working' || s.status === 'waiting')) out.push({ id: 'page-s-stop-' + s.uid, label: 'Stop turn of ' + nm, icon: 'pause', group: 'Sessions', hint: where, keywords: kw + ' interrupt', run: function () { client.interrupt({ uid: s.uid }).catch(function (x) { toast({ tone: 'error', title: s.name, text: x.message }); }); } });
       });
       return out;
     }

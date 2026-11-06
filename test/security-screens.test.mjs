@@ -13,7 +13,7 @@ import { createCopilotStudio } from '../src/providers/copilot-studio.mjs';
 import { cloudConfig } from '../src/providers/cloud.mjs';
 
 const P = globalThis.OfficeSecurity.pure;
-const SET = '/api/security/set';
+const SET = 'securitySet';
 const NOT_SET_UP = { reason: 'The office has no provider for this agent kind yet. The rule applies when it has one.', rows: {} };
 const enforce = { 'claude-code': { reason: '', rows: {} }, hermes: NOT_SET_UP, dsh: NOT_SET_UP, openclaw: NOT_SET_UP, copilot: NOT_SET_UP, local: { reason: '', rows: {} }, 'agent-framework': { reason: '', rows: {} } };
 const B = 'c:/work/repo';
@@ -51,11 +51,11 @@ test('a click on Ask paints the Confirm; a second click moves on to Deny; Confir
   assert.ok(p1.items.some((i) => i.t === 'fill' && i.c === 'pending'), 'amber');
   assert.ok(hotOf(p1, 'confirm') && hotOf(p1, 'cancel'));
   const ok = P.step(r1.view, hotOf(p1, 'confirm'), d);
-  assert.deepEqual(ok.send, { route: SET, body: { scope: 'office', row: 'files-outside', col: 'claude-code', value: 'allow', confirmed: true } });
+  assert.deepEqual(ok.send, { cmd: SET, body: { scope: 'office', row: 'files-outside', col: 'claude-code', value: 'allow', confirmed: true } });
   assert.equal(ok.view.pending, null);
   assert.equal(P.step(r1.view, hotOf(p1, 'cancel'), d).view.pending, null);
   const on = P.step(r1.view, c, d);
-  assert.deepEqual(on.send, { route: SET, body: { scope: 'office', row: 'files-outside', col: 'claude-code', value: 'deny' } }, 'Deny applies at once');
+  assert.deepEqual(on.send, { cmd: SET, body: { scope: 'office', row: 'files-outside', col: 'claude-code', value: 'deny' } }, 'Deny applies at once');
 });
 
 test('a tightening change goes to the server at once; the Secrets cells cycle Ask and Deny', () => {
@@ -120,7 +120,7 @@ test('Agents: turning on an ungated agent needs the Confirm; a gated kind has no
 
 test('Spend: minus and plus in 1 dollar steps, minus never under $1; a click on the value types it; Enter saves, Esc cancels', () => {
   const d = data(), v = view({ screen: 'spend', h: 738 }), p = P.plan(v, d);
-  assert.deepEqual(P.step(v, hotOf(p, 'spend-plus'), d).send, { route: '/api/settings/spend', body: { limit: 3 } });
+  assert.deepEqual(P.step(v, hotOf(p, 'spend-plus'), d).send, { cmd: 'settingsSpend', body: { limit: 3 } });
   assert.deepEqual(P.step(v, hotOf(p, 'spend-minus'), d).send.body, { limit: 1 });
   const zero = data(undefined, { limit: 0, month: '2026-11', byColumn: {} });
   assert.equal(P.step(v, hotOf(P.plan(v, zero), 'spend-minus'), zero).send, undefined, 'No limit: minus does nothing');
@@ -138,7 +138,7 @@ test('Spend: minus and plus in 1 dollar steps, minus never under $1; a click on 
   e = P.key(e, { key: '5' }).view;
   assert.ok(texts(P.plan(e, d)).includes('$7.5|'), 'the typed value with a caret');
   assert.equal(P.key(e, { key: 'x' }).taken, true, 'a letter does nothing while typing');
-  assert.deepEqual(P.key(e, { key: 'Enter' }).send, { route: '/api/settings/spend', body: { limit: 7.5 } });
+  assert.deepEqual(P.key(e, { key: 'Enter' }).send, { cmd: 'settingsSpend', body: { limit: 7.5 } });
   assert.equal(P.key(e, { key: 'Escape' }).view.edit, null);
   assert.equal(P.key(view(), { key: '5' }).taken, false, 'no typing, no keys taken');
   const big = P.key({ ...e, edit: { text: '5000' } }, { key: 'Enter' });
@@ -166,7 +166,7 @@ test('Spend: minus at $1 (or under $1.50) never removes the limit; No limit need
     assert.ok(t.includes('Confirm: No limit'), t.join(' / '));
     assert.ok(p.items.some((i) => i.c === 'pending'), 'the value turns amber');
     const ok = P.step(r.view, hotOf(p, 'confirm'), d);
-    assert.deepEqual(ok.send, { route: '/api/settings/spend', body: { limit: 0, confirmed: true } });
+    assert.deepEqual(ok.send, { cmd: 'settingsSpend', body: { limit: 0, confirmed: true } });
     assert.equal(ok.view.pending, null);
     assert.equal(P.step(r.view, hotOf(p, 'cancel'), d).view.pending, null);
     assert.equal(P.step(r.view, hotOf(p, 'cancel'), d).send, undefined);
@@ -221,13 +221,13 @@ test('B1: a default Ask that Claude Code decides says Partly enforced; a click s
   const v = view(), p = P.plan(v, d({}));
   assert.ok(said(p).includes('Partly enforced for Claude Code. ' + why), texts(p).join(' / '));
   const r = P.step(v, cell(p, 'read-inside', 'claude-code'), d({}));
-  assert.deepEqual(r.send, { route: SET, body: { scope: 'office', row: 'read-inside', col: 'claude-code', value: 'ask' } }, 'the same word, now set by the user');
+  assert.deepEqual(r.send, { cmd: SET, body: { scope: 'office', row: 'read-inside', col: 'claude-code', value: 'ask' } }, 'the same word, now set by the user');
   const setD = d({ 'read-inside|claude-code': 'ask' }), sp = P.plan(v, setD);
   assert.equal(texts(sp).filter((x) => x === 'Partly enforced').length, 1, 'only Edit inside still has its note');
   assert.equal(P.step(v, cell(sp, 'read-inside', 'claude-code'), setD).view.pending.to, 'allow', 'a set Ask cycles on to Allow');
   const use = sp.hots.find((h) => h.kind === 'clear' && h.row === 'read-inside' && h.col === 'claude-code');
   assert.ok(use && texts(sp).includes('Use default'), 'a set cell offers Use default');
-  assert.deepEqual(P.step(v, use, setD).send, { route: SET, body: { scope: 'office', row: 'read-inside', col: 'claude-code', value: null } });
+  assert.deepEqual(P.step(v, use, setD).send, { cmd: SET, body: { scope: 'office', row: 'read-inside', col: 'claude-code', value: null } });
   // back to a looser default (the local model's Allow) waits for the Confirm
   const ld = d({ 'read-inside|local': 'ask' }), lp = P.plan(v, ld);
   const lr = P.step(v, lp.hots.find((h) => h.kind === 'clear' && h.col === 'local'), ld);
@@ -477,7 +477,7 @@ test('Agents, Paperclip part: each agent with its state in words; Supervise in o
   assert.match(said(pp), /The office writes to its config in Paperclip: engine cli, skip permissions off, permission mode default and the office hooks file/);
   assert.ok(pp.items.some((i) => i.t === 'fill' && i.c === 'pending'), 'amber');
   assert.equal(pp.hots.some((h) => h.kind === 'supervise'), false, 'no second click starts another write while one waits');
-  assert.deepEqual(P.step(r.view, hotOf(pp, 'confirm'), d).send, { route: '/api/paperclip/supervise', body: { agent: 'a1', confirmed: true } });
+  assert.deepEqual(P.step(r.view, hotOf(pp, 'confirm'), d).send, { cmd: 'paperclipSupervise', body: { agent: 'a1', confirmed: true } });
   assert.equal(P.step(r.view, hotOf(pp, 'cancel'), d).view.pending, null);
   for (const i of p.items.filter((x) => x.t === 'text' && x.maxW && x.align !== 'center')) assert.ok(i.text.length * P.charW(i.s, i.wt) <= i.maxW + 0.5 || i.text.endsWith('…'), `"${i.text}" fits`);
 });

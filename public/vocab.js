@@ -30,7 +30,7 @@
      kindsWord(list, kinds) -> the kinds of a list of sessions as one word ('Claude Code, Ollama'): each kind once,
                          in the order of kinds, a kind it does not know last. '' when no session has a kind.
    Agent kinds as the Open dialog, a room's Add agent and the Agent kinds view show them. A kind k is a snapshot kind
-   (src/providers/index.mjs describe) with its GET /api/providers answer: { checking, ready, models, needs, ... }.
+   (src/providers/index.mjs describe) with its providers read: { checking, ready, models, needs, ... }.
      kindState(k)     -> { key, word }: Checking (no answer yet), Ready, Not ready or Not configured (a cloud kind the user has not
                          set up), with a DS status key
      notConfigured(k) -> true when the kind answered and is not set up (Open session waits)
