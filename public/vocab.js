@@ -596,5 +596,23 @@
     accessoryWord: function (k) { return own(ACCESSORY_WORD, k) ? ACCESSORY_WORD[k] : ''; }
   };
 
-  root.OfficeVocab = { explainLayers: explainLayers, requestGroups: requestGroups, groupAnswers: groupAnswers, stateWord: stateWord, laneOf: laneOf, limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform, hq: hq, plan: plan, layers: layers, holdMs: holdMs, folderOf: folderOf, persona: persona };
+  // Rituals (#151): the small moments of the office. Shared by the page and the server. Focus mode and reduced motion turn every one off.
+  // A ritual never covers or delays a request: a moment waits while any request is open, and a stand-up is only a line in a prompt.
+  var MOMENT_MS = 10 * 60000;
+  var STANDUP = 'Stand-up. Before you start, add one note to the room notes board with office_room_update (notes_append): Yesterday, Today, Blocked, one short line each. Then go on with the task.';
+  function ritualsOn(o) { o = o || {}; return !o.focus && !o.reduced; }
+  function dayKey(t) { var d = new Date(t); return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
+  function standupKey(name) { return 'n:' + String(name == null ? '' : name).trim().toLowerCase(); }
+  function standupDue(seen, name, t, o) { return ritualsOn(o) && seen[standupKey(name)] !== dayKey(t); }
+  function standupDone(seen, name, t) { seen[standupKey(name)] = dayKey(t); }
+  // The merges to play now: not played yet, under 10 minutes old, and none while a request is open (they wait; the request is never held back).
+  function moments(merges, played, o) {
+    o = o || {};
+    if (!ritualsOn(o) || o.waiting > 0) return [];
+    var t = o.now == null ? Date.now() : o.now;
+    return (merges || []).filter(function (m) { return !own(played || {}, m.key) && t - m.at <= MOMENT_MS; });
+  }
+  var rituals = { on: ritualsOn, dayKey: dayKey, standupDue: standupDue, standupDone: standupDone, moments: moments, STANDUP: STANDUP, MOMENT_MS: MOMENT_MS };
+
+  root.OfficeVocab = { rituals: rituals, explainLayers: explainLayers, requestGroups: requestGroups, groupAnswers: groupAnswers, stateWord: stateWord, laneOf: laneOf, limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform, hq: hq, plan: plan, layers: layers, holdMs: holdMs, folderOf: folderOf, persona: persona };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

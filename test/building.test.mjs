@@ -57,7 +57,7 @@ function rig(over = {}) {
     onChange: () => {},
     setTimer: () => 0,
   });
-  r.store = B.createStore({ now: () => r.t, defer: over.defer || ((fn) => fn()), setTimer: (fn, ms) => { r.timers.push({ fn, ms }); }, fetchReplies: over.fetchReplies, onProblem: over.onProblem });
+  r.store = B.createStore({ now: () => r.t, reduced: over.reduced, defer: over.defer || ((fn) => fn()), setTimer: (fn, ms) => { r.timers.push({ fn, ms }); }, fetchReplies: over.fetchReplies, onProblem: over.onProblem });
   // Function floors (#92), as the server does them: one record per building (r.layouts[key]; default General), the seat of
   // each session (place.mjs seatOf), and the room records (place.mjs settleRooms, viewRooms), kept across snapshots like persisted.rooms.
   r.layouts = over.layouts || {};
@@ -82,7 +82,7 @@ function rig(over = {}) {
     const layouts = {};
     for (const key of new Set([...repos.map((x) => x.key), ...sessions.filter((s) => s.place).map((s) => s.place.buildingKey)])) layouts[key] = layoutView(recOf(key));
     return {
-      sessions, figures, notes: {}, pins: {}, plan: r.plan || null, plans: r.plans, now: r.t, kinds: over.kinds || [], repos, layouts, rooms,
+      sessions, figures, notes: {}, pins: {}, plan: r.plan || null, plans: r.plans, now: r.t, kinds: over.kinds || [], repos, layouts, rooms, rituals: r.rituals,
     };
   };
   // as over SSE. wire: the server's way (wire.js): the lean snapshot, whole once, then patches; r.reconnect() starts again.
@@ -1878,4 +1878,37 @@ test('phone: the Glance and Look layers and the queue as one list from the store
   r.tracker.sessions.forEach((x) => { x.status = 'ended'; });
   r.push();
   assert.deepEqual(r.store.phone().queue.items, [], 'ended sessions leave the list');
+});
+
+test('the merged moment (#151): news after the mount plays once on the bot of that branch; Focus mode, reduced motion and an open request hold it back', async () => {
+  const merge = (n, at) => ({ key: `${KEY_A}#${n}`, repo: KEY_A, number: n, title: 'Fix it', head: 'feat/x', at });
+  const run = async (over, setup) => {
+    const r = rig({ repos: [{ path: REPO_A, worktrees: [] }], ...over });
+    r.rituals = { focus: false, merges: [merge(1, r.t - 1000)] };
+    await r.play(fromHooks('turnWithEdit', 'C:\\work\\repo-feat', 'sid-m'));
+    const m = r.mount(KEY_A);
+    r.push();
+    assert.deepEqual(of(m.ev, 'checkpoint'), [], 'a merge the snapshot already held is not news');
+    m.ev.length = 0;
+    if (setup) setup(r);
+    r.rituals = { ...r.rituals, merges: [merge(2, r.t), merge(1, r.t - 1000)] };
+    r.push();
+    return { r, m };
+  };
+  const { m } = await run({});
+  assert.equal(of(m.ev, 'checkpoint').length, 1);
+  assert.match(of(m.ev, 'checkpoint')[0].label, /^Merged #2 Fix it\.$/);
+  assert.equal(of(m.ev, 'message').filter((e) => /Merged #2/.test(e.text)).length, 1);
+  // an open request holds it back, and it plays when the request is answered (the request is never held back)
+  const w = await run({}, (r) => { r.rituals = { focus: false, merges: [] }; });
+  w.r.rituals = { focus: false, merges: [merge(3, w.r.t)] };
+  const snap = JSON.parse(JSON.stringify(w.r.snap()));
+  snap.sessions.forEach((x) => { x.pending = [{ id: 'q1', tool: 'Bash', detail: 'ls', t: w.r.t }]; });
+  w.m.ev.length = 0;
+  w.r.store.set(snap);
+  assert.deepEqual(of(w.m.ev, 'checkpoint'), [], 'a request is open');
+  w.r.push();
+  assert.equal(of(w.m.ev, 'checkpoint').length, 1, 'plays once the request is answered');
+  assert.deepEqual(of((await run({ reduced: () => true })).m.ev, 'checkpoint'), [], 'reduced motion');
+  assert.deepEqual(of((await run({}, (r) => { r.rituals = { focus: true, merges: r.rituals.merges }; })).m.ev, 'checkpoint'), [], 'Focus mode');
 });
