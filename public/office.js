@@ -9,6 +9,7 @@
   // A repository is a building, a branch is a floor and a worktree is a room. The adapter builds
   // the shown building (a building adapter from officeAdapter.mount) and adds floors and rooms as sessions arrive.
 
+  // The fallback Claude Code model list: shown only before /api/providers answers (#101). The server's list replaces it.
   var MODELS = [
     { value: '', label: 'Default' }, { value: 'opus', label: 'Opus' }, { value: 'sonnet', label: 'Sonnet' },
     { value: 'haiku', label: 'Haiku' }, { value: 'claude-fable-5-1', label: 'Fable' }
@@ -142,7 +143,7 @@
   // The kinds and their options come with the snapshot (officeAdapter.kinds(), from providers/index.mjs describe):
   // label, paid (spend limit), terminal (Runs), modes (Permissions), needsModel, control (the dock's live changes).
   // Readiness and models come from GET /api/providers, which asks each provider and can take a few seconds
-  // (Claude Code runs claude --version). Until it answers a kind is checking, and Claude Code offers the models in MODELS.
+  // (Claude Code runs claude --version). Until it answers a kind is checking, and Claude Code offers the fallback models in MODELS. One shared answer feeds every place that shows a model.
   var DEFAULT_KIND = 'claude-code';
   function kindOf(list, id) { return (list || []).filter(function (k) { return k.kind === (id || DEFAULT_KIND); })[0] || null; }
   // The kind rules and words (state, model choices, first model, the note, a kind change) live in vocab.js.
@@ -152,6 +153,21 @@
   // on: false asks nothing yet (a room's list shows before its Add agent form).
   // checking: an ask is out. A second ask (Check again) keeps the last answer on screen until the new one comes,
   // so a not-ready box stays and its Check again button shows that it works.
+  // One shared ask for every useKinds (#101): an open dialog, the schedule form, the dock and the model words share one answer,
+  // so none repeats claude --version. Check again (fresh) always asks anew. The server keeps its own answer for 30 s too.
+  var provShared = { by: null, at: 0, flight: null };
+  function fetchProviders(fresh) {
+    if (!fresh && provShared.flight) return provShared.flight;
+    if (!fresh && provShared.by && Date.now() - provShared.at < 30000) return Promise.resolve(provShared.by);
+    var f = call(fresh ? '/api/providers?fresh=1' : '/api/providers').then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); }).then(function (j) {
+      var by = {};
+      (j.providers || []).forEach(function (x) { by[x.kind] = x; });
+      provShared.by = by; provShared.at = Date.now(); if (provShared.flight === f) provShared.flight = null;
+      return by;
+    }, function (e) { if (provShared.flight === f) provShared.flight = null; throw e; });
+    provShared.flight = f;
+    return f;
+  }
   function useKinds(on) {
     var snap = useSnapshot();
     var st = useState(null), status = st[0], setStatus = st[1];   // kind -> its /api/providers entry, or null before the first answer
@@ -166,10 +182,8 @@
       if (!ask) { setStatus(null); setBusy(false); return undefined; }
       setBusy(true);
       var fresh = wantFresh.current; wantFresh.current = false;
-      call(fresh ? '/api/providers?fresh=1' : '/api/providers').then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); }).then(function (j) {
+      fetchProviders(fresh).then(function (by) {
         if (!live) return;
-        var by = {};
-        (j.providers || []).forEach(function (x) { by[x.kind] = x; });
         setStatus(by); setBusy(false);
       }, function () { if (live) { setStatus({}); setBusy(false); } });
       return function () { live = false; };
@@ -456,6 +470,7 @@
   // ---------- schedules ----------
   var BLANK = { id: '', name: '', cwd: '', prompt: '', kind: 'every', every: '60', at: '09:00', model: '', permissionMode: '', isolation: 'same', maxBudget: '', enabled: true };
   function SchedulesDialog(p) {
+    var modelOpts = modelChoices(kindOf(useKinds().list, DEFAULT_KIND));
     var l = useState(null), list = l[0], setList = l[1];
     var ed = useState(null), edit = ed[0], setEdit = ed[1];
     var er = useState(''), err = er[0], setErr = er[1];
@@ -490,7 +505,7 @@
               ? h(A.TextInput, { id: 's-at', label: 'Time (24 hours)', value: edit.at, placeholder: '09:00', onChange: set('at') })
               : h(A.TextInput, { id: 's-every', label: 'Minutes (5 or more)', value: String(edit.every), onChange: set('every') })),
           Pair(
-            h(A.Select, { id: 's-model', label: 'Model', options: MODELS, value: edit.model, onChange: set('model') }),
+            h(A.Select, { id: 's-model', label: 'Model', options: modelOpts, value: edit.model, onChange: set('model') }),
             h(A.Select, { id: 's-iso', label: 'Work in', options: ISOLATION, value: edit.isolation, onChange: set('isolation') })),
           h(A.TextInput, { id: 's-budget', label: 'Spend limit per run in USD', value: String(edit.maxBudget || ''), placeholder: 'No limit', onChange: set('maxBudget'), hint: LIMIT_HINT }),
           h(Area, { id: 's-prompt', label: 'Instruction', value: edit.prompt, rows: 4, onChange: set('prompt') })));
@@ -1244,11 +1259,8 @@
   }
 
   // ---------- room helpers ----------
-  function modelWord(m) {
-    if (!m) return 'Default model';
-    var hit = MODELS.filter(function (o) { return o.value && m.indexOf(o.value) === 0; })[0] || MODELS.filter(function (o) { return o.value && m.toLowerCase().indexOf(o.label.toLowerCase()) >= 0; })[0];
-    return hit ? hit.label : m;
-  }
+  // The word for a session's model, from the models of its own kind (#101); an unknown id shows as itself.
+  function modelWord(kinds, s) { return KV.modelWord(kindOf(kinds, s.provider), s.model, MODELS); }
 
   // ---------- the agents in one room ----------
   function RoomDialog(p) {
@@ -1266,7 +1278,7 @@
     list.forEach(function (s) { if (window.OfficeVocab.hasFeature(s, 'skills') && s.provider && !skillKinds.some(function (k) { return k.kind === s.provider; })) skillKinds.push({ kind: s.provider, agent: window.officeAdapter.kindWord(s) }); });
     useEffect(function () { if (confirm && !cur) setConfirm(null); }, [confirm, !!cur]);
     // An ungated kind (ADR 0001) opens only in a room of its own, so a room's Add agent does not offer it.
-    var KA = useKinds(!!add), K = Object.assign({}, KA, { list: KA.list.filter(function (x) { return x.gated !== false; }) });
+    var KA = useKinds(true), K = Object.assign({}, KA, { list: KA.list.filter(function (x) { return x.gated !== false; }) });
     var addKind = add ? kindOf(K.list, add.provider) : null;
     var cq = useState(null), costQ = cq[0], setCostQ = cq[1];   // the cost question of an agent that reports no cost, or null
     useFirstModel(addKind, add || {}, function (fn) { setAdd(function (a) { return a ? fn(a) : a; }); });
@@ -1310,7 +1322,7 @@
           list.length ? h('ul', { className: 'agent-list' }, list.map(function (s) {
             return h('li', { key: s.uid, className: 'agent-row' },
               h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: colorOf(s.uid), status: statusOf(s), size: 28 }),
-              h('span', { className: 'agent-who' }, h('b', null, s.name), h('span', { className: 'agent-sub' }, window.OfficeVocab.status(s).word + ' · ' + window.officeAdapter.kindWord(s) + ' · ' + modelWord(s.model)), h(FeatureTags, { session: s })),
+              h('span', { className: 'agent-who' }, h('b', null, s.name), h('span', { className: 'agent-sub' }, window.OfficeVocab.status(s).word + ' · ' + window.officeAdapter.kindWord(s) + ' · ' + modelWord(KA.list, s)), h(FeatureTags, { session: s })),
               h(A.Button, { variant: 'quiet', icon: 'remove', onClick: function () { setErr(''); setConfirm(s.uid); } }, 'Close session'));
           })) : h(A.EmptyState, { icon: 'identity', compact: true, title: 'No agents here', text: 'Add an agent to start work in this room.' }),
           skillKinds.map(function (k) { return h(A.Button, { key: k.kind, variant: 'quiet', icon: 'skill', onClick: function () { setSkills(k); } }, 'Skills of ' + k.agent); }),
@@ -1473,7 +1485,7 @@
   // whole screen under the head and the tabs wait (has-asks), so Approve and Decline are always on the screen.
   var DESK_TABS = [{ id: 'chat', label: 'Chat', icon: 'chat' }, { id: 'terminal', label: 'Terminal', icon: 'terminal' }, { id: 'timeline', label: 'Timeline', icon: 'trace' }];
   function DeskScreen(p) {
-    var snap = useSnapshot();
+    var snap = useSnapshot(), kinds = useKinds();
     var s = snap ? snap.sessions.filter(function (x) { return x.uid === p.uid; })[0] : null;
     var ref = React.useRef(null);
     var small = usePinBox(p.host, ref, putBox);
@@ -1488,7 +1500,7 @@
       h('div', { className: 'pin-head' },
         h(A.StatusDot, { status: s ? statusOf(s) : 'resting' }),
         h('b', { className: 'pin-name' }, p.name),   // the scene's name of the bot (unique in the building), as on its desk
-        h('span', { className: 'pin-sub mono' }, s ? window.officeAdapter.kindWord(s) + ' · ' + modelWord(s.model) : ''),
+        h('span', { className: 'pin-sub mono' }, s ? window.officeAdapter.kindWord(s) + ' · ' + modelWord(kinds.list, s) : ''),
         h(Bezel, { inline: true, count: p.waiting, onGo: p.onGo, compact: small }),
         s && s.headless && working ? act('pause', 'Stop turn', null, stop) : null,
         s ? act('copy', 'Export', 'Save this session as a Markdown file', function () { exportSession(s.uid, p.toast); }) : null,
@@ -1624,7 +1636,7 @@
   // ---------- the control strip ----------
   function Tip(p) { return p.text ? h(A.Tooltip, { text: p.text }, p.children) : p.children; }
   function Controls(p) {
-    var snap = useSnapshot();
+    var snap = useSnapshot(), kinds = useKinds();
     var sess = p.sel ? window.officeAdapter.session(p.sel) : null;
     var live = snap ? snap.sessions.filter(function (s) { return s.status !== 'ended'; }) : [];
     // spend of the sessions that are open now (closed ones are under Past); "unknown" is part of it when an agent reports none
@@ -1651,8 +1663,7 @@
 
     var modeOpts = [{ value: 'default', label: 'Default' }, { value: 'plan', label: 'Plan only' }, { value: 'acceptEdits', label: 'Accept edits' }];
     if (sess && sess.mode && !modeOpts.some(function (o) { return o.value === sess.mode; })) modeOpts.push({ value: sess.mode, label: sess.mode });
-    var modelOpts = MODELS.slice(1);
-    if (sess && sess.model && !modelOpts.some(function (o) { return o.value === sess.model; })) modelOpts.unshift({ value: sess.model, label: sess.model });
+    var modelOpts = sess ? KV.modelSwitch(kindOf(kinds.list, sess.provider), sess.model, MODELS) : [];
     // Model, mode and connector changes are control requests: only a kind that takes them offers them (a local model does not).
     var sk = sess ? kindOf(window.officeAdapter.kinds(), sess.provider) : null, steer = !sk || sk.control;
     var ctxPct = sess && sess.ctxTokens && sess.ctxWindow ? Math.round(100 * sess.ctxTokens / sess.ctxWindow) : null;
@@ -1698,7 +1709,7 @@
                 sess.headless && !sess.costUnknown && (sess.cost || usage) ? h(A.CostMeter, { tokens: usage ? usage.tokens : 0, cost: sess.cost || 0, cached: usage && usage.input ? usage.cached / usage.input : undefined }) : null,
                 sess.headless && steer ? h(A.Select, { id: 'c-model', label: 'Model', options: modelOpts, value: sess.model || '', onChange: function (v) { ctl('model', v); } }) : null,
                 sess.headless && steer ? h(A.Select, { id: 'c-mode', label: 'Permissions', options: modeOpts, value: sess.mode || '', onChange: function (v) { ctl('mode', v); } }) : null,
-                sess.headless && !steer ? h('p', { className: 'strip-more-note' }, window.officeAdapter.kindWord(sess) + ' · ' + modelWord(sess.model) + '. Open a new session to use another model.') : null) : null) : null),
+                sess.headless && !steer ? h('p', { className: 'strip-more-note' }, window.officeAdapter.kindWord(sess) + ' · ' + modelWord(kinds.list, sess) + '. Open a new session to use another model.') : null) : null) : null),
           // The city HUD has its own Search actions button, so the dock shows this one in the office only.
           p.view === 'office' ? h(A.Button, { variant: 'quiet', icon: 'search', className: 'strip-search', title: 'Search actions, sessions and buildings', onClick: openPalette }, 'Search actions', h('kbd', { className: 'ao-kbd strip-kbd', 'aria-hidden': 'true' }, 'Ctrl+K')) : null),
         sess ? h('div', { className: 'strip-group strip-bot' },

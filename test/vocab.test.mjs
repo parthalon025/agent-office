@@ -412,3 +412,25 @@ test('tool calls of the cloud agents get a DS tool kind', () => {
 test('todoStatus shows a failed manager step as error', () => {
   assert.equal(V.todoStatus('error'), 'error');
 });
+
+test('#101: a model added to the kind reaches the schedule options, the dock switch and the model word', () => {
+  const grown = { ...CC, models: [{ id: 'opus', label: 'Opus' }, { id: 'claude-new-9', label: 'Newcomer' }] };
+  assert.ok(V.modelChoices(grown, FALL).some((o) => o.value === 'claude-new-9' && o.label === 'Newcomer'), 'schedule form options');
+  assert.deepEqual(V.modelSwitch(grown, '', FALL).map((o) => o.value), ['opus', 'claude-new-9'], 'dock switch: no Default entry');
+  assert.equal(V.modelWord(grown, 'claude-new-9-20271101', FALL), 'Newcomer');
+  assert.equal(V.modelWord(grown, '', FALL), 'Default model');
+});
+
+test('#101: the dock switch keeps an unknown current model, and an unknown id is its own word', () => {
+  const k = { ...CC, models: [{ id: 'opus', label: 'Opus' }] };
+  assert.deepEqual(V.modelSwitch(k, 'claude-old-3', FALL).map((o) => o.value), ['claude-old-3', 'opus']);
+  assert.equal(V.modelWord(k, 'claude-old-3', FALL), 'claude-old-3');
+});
+
+test('#101: before the first answer Claude Code uses the fallback; a local kind never shows Claude models', () => {
+  assert.equal(V.modelWord({ ...CC, models: [] }, 'opus', FALL), 'Opus');
+  assert.equal(V.modelWord(null, 'opus', FALL), 'Opus');
+  assert.deepEqual(V.modelSwitch({ ...CC, models: [] }, '', FALL).map((o) => o.value), ['opus']);
+  assert.equal(V.modelWord(OL, 'opus', FALL), 'opus', 'a local kind has no Claude labels');
+  assert.deepEqual(V.modelSwitch({ ...OL, models: [] }, '', FALL), []);
+});
