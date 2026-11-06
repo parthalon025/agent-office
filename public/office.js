@@ -1694,11 +1694,73 @@
   // The scene's own name of a session (unique per building), else its plain name.
   function sceneName(s) { return window.officeAdapter.botName(s.uid) || s.name; }
 
+  // ---------- paper flow (#93): Ready to merge, the pipeline board and the PR cards ----------
+  // The server reads `gh` (read-only); building.js changes() turns it into folders. Merge is the one write and asks first: the first
+  // call is 409 with confirm: 'merge' and the question, and the Merge dialog sends the same call again with confirmed: true.
+  function useMerge(toast) {
+    var st = useState(null), ask = st[0], setAsk = st[1], bz = useState(''), busy = bz[0], setBusy = bz[1], er = useState(''), err = er[0], setErr = er[1];
+    function send(r, confirmed) {
+      setBusy(r.id || ('pr:' + r.number)); setErr('');
+      return api('/api/merge', { repo: r.repo, number: r.number, confirmed: confirmed === true }).then(function () {
+        setBusy(''); setAsk(null); toast({ tone: 'success', title: 'Merged #' + r.number, text: r.title || '' });
+      }, function (x) {
+        setBusy('');
+        if (x.body && x.body.confirm === 'merge' && !confirmed) { setAsk({ r: r, text: x.message }); return; }
+        if (confirmed) setErr(x.message); else { setAsk(null); toast({ tone: 'error', title: 'Merge #' + r.number, text: x.message }); }
+      });
+    }
+    var node = ask ? h(A.Dialog, { open: true, title: 'Merge #' + ask.r.number, onClose: function () { setAsk(null); setErr(''); }, actions: [
+      h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setAsk(null); setErr(''); } }, 'Cancel'),
+      h(A.Button, { key: 'm', variant: 'primary', icon: 'merge', loading: !!busy, onClick: function () { send(ask.r, true); } }, 'Merge it')] },
+      h('div', { className: 'form' }, h('p', { className: 'note' }, ask.text), err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null)) : null;
+    return { start: function (r) { send(r, false); }, busy: busy, node: node };
+  }
+  // A decision summary: the key point first, the recommendation, the reason, a link to the review finding (the change page).
+  function MergeRow(p) {
+    var r = p.r;
+    return h('li', { className: 'past-row' },
+      h('div', { className: 'past-main' },
+        h('div', { className: 'past-title' }, h(A.Icon, { name: 'merge', size: 16 }), h('b', null, r.text), h(Tag, null, r.buildingName)),
+        h('div', { className: 'past-snip' }, h('em', null, 'Recommended: '), r.recommendation + '. ' + r.reason),
+        r.url ? h('div', { className: 'past-sub mono' }, h('a', { href: r.url, target: '_blank', rel: 'noopener noreferrer' }, 'Review finding on #' + r.number)) : null),
+      h('div', { className: 'past-actions' },
+        h(A.Button, { variant: 'emphasis', icon: 'merge', disabled: !!p.busy, onClick: function () { p.onMerge(r); } }, 'Merge')));
+  }
+  // The pipeline board: every change by stage (Intake, Build, Check, Review, Gate, Merge, Release, Record); a stage with no data says unknown.
+  // Each change is a PR card: glyph, number and title, branch to base, the state in words, checks, reviewer, diff size, Merge when ready.
+  function FlowDialog(p) {
+    var snap = useSnapshot(), M = useMerge(p.toast), now = Date.now();
+    var repos = snap ? snap.repos || [] : [];
+    return h(A.Dialog, { open: true, title: 'Changes', onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
+      h('div', { className: 'form wide flow' },
+        !repos.length ? h(A.EmptyState, { icon: 'building', compact: true, title: 'No buildings yet', text: 'Open a session in a repository to see its changes.' }) : null,
+        repos.map(function (r) {
+          var c = window.OfficeBuilding.changes(snap, r.key, now), open = c.folders.filter(function (f) { return f.state !== 'merged' && f.state !== 'closed'; });
+          return h('section', { key: r.key, className: 'flow-b', 'aria-label': r.name },
+            h('div', { className: 'past-title' }, h(A.Icon, { name: 'building', size: 16 }), h('b', null, r.name), c.unknown ? h(Tag, null, c.line) : h(Tag, null, c.mergedToday + ' merged today')),
+            h('ol', { className: 'flow-stages', 'aria-label': 'Pipeline of ' + r.name }, c.pipeline.map(function (st) {
+              return h('li', { key: st.id, className: 'flow-stage' + (st.unknown ? ' is-unknown' : ''), 'aria-label': st.name + ': ' + (st.unknown ? 'unknown' : plural(st.count, 'change', 'changes')) },
+                h('span', { className: 'flow-n mono' }, st.unknown ? 'unknown' : String(st.count)), h('span', { className: 'flow-w' }, st.name));
+            })),
+            !c.unknown && !open.length ? h('p', { className: 'note' }, 'No open changes.') : null,
+            h('ul', { className: 'past' }, open.map(function (f) {
+              var ck = f.checks || { total: 0, passed: 0 };
+              return h('li', { key: f.number, className: 'past-row flow-card' },
+                h('div', { className: 'past-main' },
+                  h('div', { className: 'past-title' }, h(A.Icon, { name: f.glyph, size: 16 }), h('b', null, '#' + f.number + ' ' + f.title)),
+                  h('div', { className: 'past-sub mono' }, f.head + ' to ' + (f.base || 'main')),
+                  h('div', { className: 'past-meta mono' }, [f.word, ck.total ? ck.passed + ' of ' + plural(ck.total, 'check', 'checks') + ' passed' : 'no checks', f.reviewer ? 'reviewer ' + f.reviewer : 'no reviewer', '+' + f.diff.additions + ' -' + f.diff.deletions + ' in ' + plural(f.diff.files, 'file', 'files')].join(' · '))),
+                f.state === 'ready' ? h('div', { className: 'past-actions' }, h(A.Button, { variant: 'emphasis', icon: 'merge', disabled: !!M.busy, onClick: function () { M.start({ repo: r.key, number: f.number, title: f.title }); } }, 'Merge')) : null);
+            })));
+        }),
+        M.node));
+  }
+
   // ---------- Needs you: every open request and question of every building ----------
   function NeedsDialog(p) {
     var snap = useSnapshot();
     var list = snap ? window.officeAdapter.requests(snap) : [];
-    var bz = useState(''), busy = bz[0], setBusy = bz[1], box = React.useRef(null), lastIdx = React.useRef(0);
+    var bz = useState(''), busy = bz[0], setBusy = bz[1], box = React.useRef(null), lastIdx = React.useRef(0), M = useMerge(p.toast);
     // After an answer the row goes. Keep the focus inside the dialog, on the row that took its place.
     useEffect(function () { refocusRow(box.current, lastIdx.current); }, [list.map(function (r) { return r.id; }).join('|')]);
     function answer(r, allow) {
@@ -1711,6 +1773,7 @@
         list.length ? h('p', { className: 'note' }, plural(list.length, 'request waits', 'requests wait') + ' for you, oldest first. This is every building.') : null,
         !list.length ? h(A.EmptyState, { icon: 'finished', compact: true, title: 'Nothing needs you', text: 'New requests show here when an agent asks.' }) : null,
         h('div', { ref: box }, h('ul', { className: 'past' }, list.map(function (r) {
+          if (r.kind === 'merge') return h(MergeRow, { key: r.id, r: r, busy: M.busy, onMerge: function (x) { M.start(x); } });
           var q = r.kind === 'question';
           return h('li', { key: r.id, className: 'past-row' },
             h('div', { className: 'past-main' },
@@ -1723,7 +1786,7 @@
               h(A.Button, { variant: 'emphasis', icon: 'approve', disabled: busy === r.id, onClick: function () { answer(r, true); } }, q ? 'Yes' : 'Approve'),
               h(A.Button, { variant: 'quiet', icon: 'decline', disabled: busy === r.id, onClick: function () { answer(r, false); } }, q ? 'No' : 'Decline'),
               h(A.Button, { variant: 'ghost', icon: 'chevron-right', onClick: function () { p.onGo(r); } }, 'Go to')));
-        })))));
+        }))), M.node));
   }
 
   // the DS palette listens for Ctrl+K on the document, so a button sends the same key
@@ -2075,7 +2138,7 @@
     // Needs you (the scene's top bar, the city panel, the bezel count of a screen in focus): one tap goes to the oldest open request
     // of every building (needs is officeAdapter.requests, oldest first, the count of the one Notifier), at the desk screen of its
     // session (#89), where the request shows with Approve and Decline.
-    function goOldest() { var r = needs[0]; if (r) openDesk(r.uid, 'chat'); }
+    function goOldest() { var r = needs[0]; if (r && r.uid) openDesk(r.uid, 'chat'); else if (r) setDlg({ name: 'needs' }); }   // a Ready to merge decision has no desk (#93)
     function noteKey(roomId) { return mount ? mount.noteKey(roomId) : ''; }   // the server's key for the room (place.mjs)
     useEffect(function () { return function () {
       if (boardRef.current) { boardRef.current.dispose(); boardRef.current = null; }
@@ -2410,10 +2473,11 @@
     var selKind = selSess ? kindOf(window.officeAdapter.kinds(), selSess.provider) : null;
     if (selSess && (!selKind || selKind.control)) actions.push({ id: 'page-ext', label: 'Extensions of ' + selSess.name, icon: 'connector', group: 'Office', run: function () { extensions(selSess.uid, selSess.name); } });
     actions.push({ id: 'page-needs', label: needs.length ? 'Needs you (' + needs.length + ')' : 'Needs you', icon: 'waiting', group: 'Office', keywords: 'requests approve decline questions decisions', run: function () { setDlg({ name: 'needs' }); } });
+    actions.push({ id: 'page-flow', label: 'Changes: pipeline and Ready to merge', icon: 'pull-request', group: 'Office', keywords: 'pull request pr merge pipeline folder review checks tray', run: function () { setDlg({ name: 'flow' }); } });
     if (snap && snap.hq) actions.push({ id: 'page-hq', label: 'Paperclip HQ', icon: 'hq', group: 'Office', keywords: 'paperclip company agents budget heartbeats routines supervise', run: function () { setDlg({ name: 'hq' }); } });
     list.forEach(function (b) { if (b.key !== shown) actions.push({ id: 'page-b-' + b.key, label: 'Go to ' + b.name, icon: 'building', group: 'Buildings', keywords: 'building repository ' + b.name, run: function () { pick(b.key); } }); });
     // The Reception lists the office's own actions (the dock had them before #92), so a touch screen reaches them with no keyboard.
-    var officeActions = actions.filter(function (a) { return ['page-open', 'page-needs', 'page-sessions', 'page-past', 'page-schedules', 'page-hooks', 'page-kinds', 'page-floors', 'page-city', 'page-compact'].indexOf(a.id) >= 0; })
+    var officeActions = actions.filter(function (a) { return ['page-open', 'page-needs', 'page-flow', 'page-sessions', 'page-past', 'page-schedules', 'page-hooks', 'page-kinds', 'page-floors', 'page-city', 'page-compact'].indexOf(a.id) >= 0; })
       .concat([{ id: 'page-search', label: 'Search actions', icon: 'search', run: openPalette }]);
 
     // Room tools and sessions are built when the palette draws, so the rooms of the floor on screen are current.
@@ -2462,6 +2526,7 @@
       d === 'reception' ? h(ReceptionDialog, { repo: shown, actions: officeActions, onTour: startTour, onClose: close }) : null,
       d === 'open' ? h(OpenDialog, { shownPath: shownPath, kind: dlg.kind, role: dlg.role, roleName: dlg.roleName, folder: dlg.folder, spendLimit: info.spendLimit, recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
       d === 'kinds' ? h(KindsDialog, { onOpen: function (kind) { refresh().then(function () { setDlg({ name: 'open', kind: kind }); }); }, onClose: close }) : null,
+      d === 'flow' ? h(FlowDialog, { toast: toast, onClose: close }) : null,
       d === 'past' ? h(PastDialog, { onClose: close, onChanges: changes, toast: toast }) : null,
       d === 'schedules' ? h(SchedulesDialog, { recent: info.recent, spendLimit: info.spendLimit, onInfo: setInfo, toast: toast, onClose: close }) : null,
       d === 'changes' ? h(ChangesDialog, { uid: dlg.uid, name: dlg.label, ended: dlg.ended, toast: toast, onClose: close }) : null,

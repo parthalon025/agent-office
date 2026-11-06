@@ -94,3 +94,7 @@ Orchestration icons (x0.8): `tool` is two meshed gears; `settings` is one gear w
 | `trace` | ![](trace.svg) | A trace (steps as a tree). |
 | `cost` | ![](cost.svg) | Cost of a run. |
 | `token` | ![](token.svg) | Tokens. |
+| `pull-request` | ![](pull-request.svg) | A change (pull request). |
+| `merge` | ![](merge.svg) | Merge a change. |
+| `branch` | ![](branch.svg) | A branch. |
+| `conflict` | ![](conflict.svg) | A merge conflict. |
