@@ -10,6 +10,7 @@
 // server saves the maps after a change (state.json). Importing this module starts nothing.
 
 export const NOTES_MAX = 4000;
+export const MAX_BOARDS = 500; // boards (one per room key) in state.json (#27 L9)
 export const PIN_MAX = 140;
 // What an agent writes to the board is capped lower than the board (small capped memory, #72): the next agent reads the board, so it
 // holds short facts, not a dump. The user's own save keeps the board cap.
@@ -153,6 +154,7 @@ export function createNotes({ notes, pins, now = Date.now }) {
   }
   // Writes the next text as the next version. A board with no text keeps its counter and no `at`.
   function write(key, text, by) {
+    if (!entry(key) && Object.keys(notes).length >= MAX_BOARDS) throw new NotesError(413, `The office keeps notes for ${MAX_BOARDS} boards. A new board would be too many.`);
     remember(key);
     const v = versionOf(key) + 1;
     const blank = !text.trim();

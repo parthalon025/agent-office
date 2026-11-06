@@ -9,7 +9,7 @@
 // fake runner. Nothing starts on import.
 import crypto from 'node:crypto';
 import { spawn as realSpawn, execFile as realExecFile, execFileSync as realExecFileSync } from 'node:child_process';
-import { resolveExe, helperCwd } from '../git.mjs';
+import { resolveExe, helperCwd, processStart } from '../git.mjs';
 import { clip } from '../tracker.mjs';
 import { providerError } from './index.mjs';
 
@@ -103,6 +103,13 @@ export function createClaudeCode(deps) {
   const closing = new Set();
 
   const program = (name) => programPath(name, exe);
+  // The start time of each process the office spawned (#27 L11): close kills only a pid that still has it.
+  const stamps = new Map();
+  const stamp = (s) => {
+    const p = processStart(s.pid, { execFile, exe: program }).then((t) => { s.pidStart = t; stamps.delete(s.uid); return t; });
+    stamps.set(s.uid, p);
+    return p;
+  };
   // Options shared by the office and the terminal window: the office's hooks and MCP server, then model and mode.
   function baseArgs(o) {
     const f = files();
@@ -206,7 +213,7 @@ export function createClaudeCode(deps) {
         env: { ...env, OFFICE_ID: s.officeId },
       });
       procs.set(s.uid, child);
-      s.pid = child.pid;
+      s.pid = child.pid; stamp(s);
       let buf = '', err = '';
       // Text, not bytes: a character split across two chunks stays one character.
       child.stdout.setEncoding('utf8');
@@ -243,7 +250,7 @@ export function createClaudeCode(deps) {
         windowsVerbatimArguments: true, cwd: s.cwd, stdio: 'ignore', windowsHide: true,
         env: { ...env, OFFICE_ID: s.officeId, OFFICE_ARGS: JSON.stringify(args), OFFICE_TITLE: title, OFFICE_CLAUDE: claude },
       });
-      s.pid = child.pid;
+      s.pid = child.pid; stamp(s);
       windows.add(s.uid);
       child.on('error', (e) => { windows.delete(s.uid); events.feed(s, 'end', `could not start: ${e.message}`); events.end(s, 'could not start'); });
       child.on('exit', () => {
@@ -285,7 +292,17 @@ export function createClaudeCode(deps) {
       if (!s.pid || s.pid === process.pid) throw providerError(409, 'This session has no known process to close. Close it in its own terminal.');
       const taskkill = program('taskkill');
       closing.add(s.uid);
-      return new Promise((resolve, reject) => {
+      // #27 L11: the pid must still be the process the office saw start. Another start time, or none, means it is gone
+      // and the pid belongs to something else (or nothing), so nothing is killed.
+      const verified = (async () => {
+        const known = s.pidStart || (await stamps.get(s.uid)) || null;
+        const now = await processStart(s.pid, { execFile, exe: program });
+        if (!now) return false; // nothing runs under that pid: already gone
+        if (!known) throw providerError(409, 'This session\'s process cannot be checked, so the office will not stop it. Close it in its own terminal.');
+        return now === known;
+      })();
+      return verified.catch((e) => { closing.delete(s.uid); throw e; }).then((same) => new Promise((resolve, reject) => {
+        if (!same) { if (!procs.has(s.uid) && !windows.has(s.uid)) closing.delete(s.uid); return resolve(); }
         execFile(taskkill, ['/PID', String(s.pid), '/T', '/F'], { cwd: helperCwd(), windowsHide: true }, (err, _o, stderr) => {
           if (err && !/not found|no running instance/i.test(String(stderr))) {
             closing.delete(s.uid); // it still runs: a later exit is the session's end again
@@ -294,7 +311,7 @@ export function createClaudeCode(deps) {
           if (!procs.has(s.uid) && !windows.has(s.uid)) closing.delete(s.uid); // no exit to wait for (gone, or not ours)
           resolve();
         });
-      });
+      }));
     },
 
     control,

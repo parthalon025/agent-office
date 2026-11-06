@@ -41,6 +41,29 @@ export function resolveExe(name, env = process.env) {
 }
 
 /**
+ * The start time of a process, as text, or null when no such process runs (#27 L11). A pid alone can name another process
+ * after the first one ended; a pid with its start time cannot. Never by image name. deps.execFile is injectable.
+ */
+export function processStart(pid, deps = {}) {
+  const run = deps.execFile || execFile;
+  const n = Number(pid);
+  if (!Number.isInteger(n) || n <= 0) return Promise.resolve(null);
+  const win = process.platform === 'win32';
+  const file = deps.exe ? deps.exe(win ? 'powershell.exe' : 'ps') : resolveExe(win ? 'powershell.exe' : 'ps');
+  const args = win
+    ? ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${n} -ErrorAction SilentlyContinue).StartTime.ToFileTimeUtc()`]
+    : ['-o', 'lstart=', '-p', String(n)];
+  return new Promise((resolve) => {
+    try {
+      run(file, args, { cwd: helperCwd(), windowsHide: true, timeout: 10000 }, (err, out) => {
+        const t = err ? '' : String(out || '').trim();
+        resolve(t || null);
+      });
+    } catch { resolve(null); }
+  });
+}
+
+/**
  * The folder a helper starts in when it works on no folder of its own (the walkToClaude PowerShell, icacls, the ACL
  * reader, taskkill, `claude --version`): %SystemRoot% on Windows, else the root of the file system. Never the office
  * folder, which a helper would otherwise inherit: on Windows a running process keeps its current folder busy, so nobody

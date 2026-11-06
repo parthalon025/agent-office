@@ -46,7 +46,7 @@ function office() {
   return o;
 }
 // A session as the snapshot sends it, without the process id (only the provider path has a process).
-const view = (s) => { const v = JSON.parse(JSON.stringify(s)); delete v.pid; return v; };
+const view = (s) => { const v = JSON.parse(JSON.stringify(s)); delete v.pid; delete v.pidStart; return v; };
 
 // ---------- a fake provider: an in-office agent with one scripted turn ----------
 // It reports on a later tick, as the contract asks: the office marks the turn (startTurn, interrupt) after a call returns.
@@ -437,7 +437,7 @@ function claudeRig(over = {}) {
     events: o.events,
     files: () => FILES,
     spawn: (file, args, opts) => { const child = fakeChild(); r.spawned.push({ file, args, opts, child }); return child; },
-    execFile: (file, args, opts, cb) => { r.execs.push({ file, args, opts }); (over.exec || ((_f, _a, done) => done(null, '', '')))(file, args, cb); },
+    execFile: (file, args, opts, cb) => { r.execs.push({ file, args, opts }); if (/powershell/.test(file) && !over.ps) return cb(null, '7\n', ''); (over.exec || ((_f, _a, done) => done(null, '', '')))(file, args, cb); },
     // resolveExe's contract: an absolute path, or it throws
     exe: over.exe || ((name) => { if ((over.missing || []).includes(name)) throw new Error(`${name} was not found on PATH.`); return `C:/bin/${name}`; }),
     env: { PATH: 'C:/bin', ...(over.env || {}) },
@@ -573,14 +573,17 @@ test('claude-code process end: a failed start, an early exit with its stderr, a 
 });
 
 test('claude-code close: taskkill on the process tree by full path; not found counts as closed', async () => {
-  const r = claudeRig();
-  const s = r.o.session({ pid: 4242 });
+  // the start-time lookup (powershell) answers "7"; the session was stamped "7" when it started (#27 L11)
+  const answer = (kill) => (f, _a, done) => (/powershell/.test(f) ? done(null, '7\n', '') : kill(done));
+  const r = claudeRig({ exec: answer((done) => done(null, '', '')) });
+  const s = r.o.session({ pid: 4242, pidStart: '7' });
   await r.p.close(s);
-  assert.deepEqual([r.execs[0].file, r.execs[0].args], ['C:/bin/taskkill', ['/PID', '4242', '/T', '/F']]);
-  const gone = claudeRig({ exec: (_f, _a, done) => done(new Error('x'), '', 'ERROR: The process "4242" not found.') });
-  await gone.p.close(gone.o.session({ pid: 4242 }));
-  const denied = claudeRig({ exec: (_f, _a, done) => done(new Error('x'), '', 'ERROR: Access is denied.') });
-  await assert.rejects(denied.p.close(denied.o.session({ pid: 4242 })), (e) => e.status === 500 && e.message === 'Could not close it: ERROR: Access is denied.');
+  const k = r.execs.find((e) => /taskkill/.test(e.file));
+  assert.deepEqual([k.file, k.args], ['C:/bin/taskkill', ['/PID', '4242', '/T', '/F']]);
+  const gone = claudeRig({ exec: answer((done) => done(new Error('x'), '', 'ERROR: The process "4242" not found.')) });
+  await gone.p.close(gone.o.session({ pid: 4242, pidStart: '7' }));
+  const denied = claudeRig({ exec: answer((done) => done(new Error('x'), '', 'ERROR: Access is denied.')) });
+  await assert.rejects(denied.p.close(denied.o.session({ pid: 4242, pidStart: '7' })), (e) => e.status === 500 && e.message === 'Could not close it: ERROR: Access is denied.');
   assert.throws(() => r.p.close(r.o.session({ uid: 'o2', pid: null })), (e) => e.status === 409 && /no known process/.test(e.message));
   assert.throws(() => r.p.close(r.o.session({ uid: 'o3', pid: process.pid })), (e) => e.status === 409);
   const nokill = claudeRig({ missing: ['taskkill'] });
@@ -997,4 +1000,32 @@ test('launch.ps1 clears OFFICE_ID when claude returns, so a later session in the
   const ps = fs.readFileSync(new URL('../launch.ps1', import.meta.url), 'utf8');
   assert.match(ps, /Remove-Item\s+Env:OFFICE_ID/);
   assert.ok(ps.indexOf('Remove-Item Env:OFFICE_ID') > ps.indexOf('& $env:OFFICE_CLAUDE'), 'after claude runs');
+});
+
+test('processStart: a running pid has a stable start time; a pid that runs nothing has none', { skip: process.platform !== 'win32' }, async () => {
+  const { processStart } = await import('../git.mjs');
+  const a = await processStart(process.pid);
+  assert.ok(a && a === await processStart(process.pid));
+  assert.equal(await processStart(0), null);
+  assert.equal(await processStart(2147483000), null);
+});
+
+// L11 (#27): a pid can be reused; close kills only the process the office saw start.
+test('claude-code close: kills only while the pid is still the process the office started (start time)', async () => {
+  const rig = (now) => claudeRig({ ps: true, exec: (file, args, done) => {
+    if (/powershell|ps$/i.test(String(file))) return done(null, now === null ? '' : String(now) + '\n', '');
+    done(null, '', '');
+  } });
+  const killed = (r) => r.execs.some((e) => e.args.includes('/PID') && e.args.includes('/F'));
+  const same = rig(111);
+  await same.p.close(same.o.session({ pid: 4242, pidStart: '111' }));
+  assert.ok(killed(same), 'same start time: killed');
+  const reused = rig(222);
+  await reused.p.close(reused.o.session({ pid: 4242, pidStart: '111' }));
+  assert.ok(!killed(reused), 'another start time: no kill');
+  const gone = rig(null);
+  await gone.p.close(gone.o.session({ pid: 4242, pidStart: '111' }));
+  assert.ok(!killed(gone), 'process gone: no kill');
+  const unknown = rig(111);
+  await assert.rejects(unknown.p.close(unknown.o.session({ pid: 4242 })), (e) => e.status === 409 && /cannot be checked/.test(e.message));
 });
