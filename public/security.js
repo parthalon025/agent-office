@@ -22,7 +22,7 @@
    Pure part (window.OfficeSecurity.pure, no DOM, no THREE; tested in test/security-screens.test.mjs):
      plan(view, data)    -> { items, hots }: what a screen paints (in canvas px, tone names, no colors) and where its hotspots are
      hotAt(p, uv, w, h)  -> the hotspot under a screen point (uv: { x, y } from the bottom left, as the host gives it), or null
-     step(view, hot, data) -> { view, send? }: a click on a hotspot. send: { route, body } for the server
+     step(view, hot, data) -> { view, send? }: a click on a hotspot. send: { cmd, body } for the server
      key(view, e, data)  -> { view, send?, taken } for a key while the Spend value is being typed
      PAGED_BELOW         -> 700: below this width (px) that the screen in focus can take, it shows one agent kind
      pagedFor(free, aspect) -> that check: the free width, or the free height times the screen aspect (review M6)
@@ -30,7 +30,7 @@
    data: { sec (snap.security), building (key), buildingName, hq (snap.hq) }
    The Agents screen has two parts (section): the agent kinds (the grid) and Paperclip (#76): each agent of the watched
    company with its supervision and Supervise in office, which waits for the same painted Confirm and then sends
-   POST /api/paperclip/supervise { agent, confirmed: true } (one PATCH of that agent in Paperclip). */
+   the paperclipSupervise command { agent, confirmed: true } (one PATCH of that agent in Paperclip). */
 (function (root) {
   'use strict';
   var V = root.OfficeVocab;
@@ -173,7 +173,7 @@
   // ---------- the Paperclip part of the Agents screen (#76) ----------
   // Each Paperclip agent of the watched company: its role, whether its runs hold their calls in the office (paperclip.mjs
   // supervisionOf), why not, and Supervise in office when the office can set it up. A click paints the Confirm; Confirm sends
-  // POST /api/paperclip/supervise, one PATCH of that agent in Paperclip. data.hq: the snapshot's hq (null: not connected).
+  // the paperclipSupervise command: one PATCH of that agent in Paperclip. data.hq: the snapshot's hq (null: not connected).
   function hqAgents(data) { var q = data && data.hq; return q && q.company && q.agents ? q.agents : null; }
   function hqHead(data) {
     var q = data && data.hq;
@@ -517,7 +517,7 @@
     var b = { scope: view.scope === 'building' ? 'building' : 'office', row: row, col: col, value: value };
     if (b.scope === 'building') b.building = data.building;
     if (confirmed) b.confirmed = true;
-    return { route: '/api/security/set', body: b };
+    return { cmd: 'securitySet', body: b };
   }
   function with_(view, o) { return Object.assign({}, view, { note: null }, o); }
   // A click on a hotspot: the next view, and maybe one change for the server.
@@ -537,8 +537,8 @@
       case 'confirm': {
         var pd = view.pending;
         if (!pd) return { view: view };
-        if (isSpend(pd)) return { view: with_(view, { pending: null }), send: { route: '/api/settings/spend', body: { limit: pd.spend, confirmed: true } } };
-        if (isHq(pd)) return { view: with_(view, { pending: null }), send: { route: '/api/paperclip/supervise', body: { agent: pd.hq, confirmed: true } } };
+        if (isSpend(pd)) return { view: with_(view, { pending: null }), send: { cmd: 'settingsSpend', body: { limit: pd.spend, confirmed: true } } };
+        if (isHq(pd)) return { view: with_(view, { pending: null }), send: { cmd: 'paperclipSupervise', body: { agent: pd.hq, confirmed: true } } };
         return { view: with_(view, { pending: null }), send: setBody(view, data, pd.row, pd.col, pd.to, true) };
       }
       case 'cell': {
@@ -561,7 +561,7 @@
         var lim = +((data.sec && data.sec.spend && data.sec.spend.limit) || 0), up = h.kind === 'spend-plus';
         if (!up && lim <= 1) return { view: with_(view, { edit: null, pending: null, note: lim > 0 ? 'The lowest step is $1. Click the value to type a lower limit.' : null }) };
         var to = up ? Math.min(1000, Math.round(lim) + 1) : Math.max(1, Math.round(lim) - 1);
-        return { view: with_(view, { edit: null, pending: null }), send: { route: '/api/settings/spend', body: { limit: to } } };
+        return { view: with_(view, { edit: null, pending: null }), send: { cmd: 'settingsSpend', body: { limit: to } } };
       }
       case 'spend-edit': {
         var l0 = +((data.sec && data.sec.spend && data.sec.spend.limit) || 0);
@@ -584,7 +584,7 @@
         var cur = +((data && data.sec && data.sec.spend && data.sec.spend.limit) || 0);
         return { view: with_(view, { edit: null, pending: data && cur === 0 ? null : { spend: 0 } }), taken: true };
       }
-      return { view: with_(view, { edit: null }), send: { route: '/api/settings/spend', body: { limit: n } }, taken: true };
+      return { view: with_(view, { edit: null }), send: { cmd: 'settingsSpend', body: { limit: n } }, taken: true };
     }
     if (k === 'Backspace') return { view: with_(view, { edit: { text: t.slice(0, -1) } }), taken: true };
     if (/^[0-9]$/.test(k) && t.length < 7) return { view: with_(view, { edit: { text: t + k } }), taken: true };
@@ -627,7 +627,7 @@
   var pure = { plan: plan, hotAt: hotAt, step: step, key: key, pagedFor: pagedFor, wrap: wrap, charW: charW, noteOf: noteOf, levelFor: levelFor, PAGED_BELOW: PAGED_BELOW, CANVAS_W: CANVAS_W, TONES: TONES, toneColors: toneColors };
 
   // ---------- browser ----------
-  // opts: { host, data() -> data, post(route, body) -> Promise, onError(text) }
+  // opts: { host, data() -> data, post(cmd, body) -> Promise, onError(text) }
   function attach(office, opts) {
     opts = opts || {};
     var T = root.THREE, host = opts.host, st = null;
@@ -727,7 +727,7 @@
     function send(s, it) {
       if (!s) return;
       busy = true; refresh();
-      Promise.resolve(opts.post ? opts.post(s.route, s.body) : null).then(function () {
+      Promise.resolve(opts.post ? opts.post(s.cmd, s.body) : null).then(function () {
         busy = false; refresh();
       }, function (e) {
         busy = false;

@@ -6,7 +6,7 @@
   'use strict';
   var O = window.OfficePage;
   var h = React.createElement, A = window.AgentOffice, useState = React.useState, useEffect = React.useEffect;
-  var ChangesBody = O.ChangesBody, ChangesConfirm = O.ChangesConfirm, F = O.F, ago = O.ago, api = O.api,
+  var ChangesBody = O.ChangesBody, ChangesConfirm = O.ChangesConfirm, F = O.F, ago = O.ago, client = O.client,
       changesActions = O.changesActions, clip = O.clip, exportSession = O.exportSession, modelWord = O.modelWord,
       plural = O.plural, statusOf = O.statusOf, useChanges = O.useChanges, useKinds = O.useKinds,
       useSnapshot = O.useSnapshot;
@@ -128,7 +128,7 @@
       var mark = edits.current;
       latest.current = v;
       var wasSent = fromSent.current;
-      return api('/api/notes/save', { key: p.noteKey, text: v, base: base.current, sent: wasSent }).then(function (res) {
+      return client.notesSave({ key: p.noteKey, text: v, base: base.current, sent: wasSent }).then(function (res) {
         var typedMore = edits.current !== mark;
         if (res.merged && res.text !== v) {
           // An agent changed the notes. The new base is the merged version. When the user typed on, the server keeps the
@@ -326,7 +326,7 @@
     var small = usePinBox(p.host, ref, putBox);
     usePinFocus(p.shown, function () { var el = ref.current; return el && (el.querySelector('#pin-chat-input, .term-field') || el.querySelector('.ao-tab[aria-selected="true"]')); });
     var working = s && (s.status === 'working' || s.status === 'waiting');
-    function stop() { api('/api/interrupt', { uid: s.uid }).catch(function (x) { p.toast({ tone: 'error', title: s.name, text: x.message }); }); }
+    function stop() { client.interrupt({ uid: s.uid }).catch(function (x) { p.toast({ tone: 'error', title: s.name, text: x.message }); }); }
     var tab = p.tab || 'chat';
     // small: the button shows its icon, and its name is its label (and its tooltip)
     function act(icon, text, title, onClick) { return h(A.Button, { variant: 'quiet', icon: icon, label: small ? text : null, title: small ? (title || text) : title, onClick: onClick }, small ? null : text); }
@@ -364,7 +364,7 @@
   }
 
   // The question note of a desk, pinned (#90): the question and a text field over the note in the scene. The answer goes to the
-  // agent as its next message (the server gives a pending question the next message, /api/message).
+  // agent as its next message (the server gives a pending question the next message, the message command).
   function NoteScreen(p) {
     var ref = React.useRef(null), tx = useState(''), text = tx[0], setText = tx[1], bz = useState(false), busy = bz[0], setBusy = bz[1];
     var small = usePinBox(p.host, ref, putBox);
@@ -373,7 +373,7 @@
       var v = String(t == null ? text : t).trim();
       if (!v || busy) return;
       setBusy(true);
-      api('/api/message', { uid: p.note.uid, text: v }).then(function () { setBusy(false); setText(''); p.onBack(); }, function (x) { setBusy(false); p.toast({ tone: 'error', title: p.note.bot, text: x.message }); });
+      client.message({ uid: p.note.uid, text: v }).then(function () { setBusy(false); setText(''); p.onBack(); }, function (x) { setBusy(false); p.toast({ tone: 'error', title: p.note.bot, text: x.message }); });
     }
     return h('section', { ref: ref, className: 'pin pin-note' + (small ? ' is-small' : ''), hidden: !p.shown, 'aria-label': 'Question from ' + p.note.bot },
       h('div', { className: 'pin-head' },
@@ -430,7 +430,7 @@
       var t = text.trim();
       if (!t || !s || busy) return;
       setBusy(true);
-      api('/api/message', { uid: s.uid, text: t }).then(function () { setBusy(false); setText(''); stick.current = true; }, function (x) { setBusy(false); p.toast({ tone: 'error', title: s.name, text: x.message }); });
+      client.message({ uid: s.uid, text: t }).then(function () { setBusy(false); setText(''); stick.current = true; }, function (x) { setBusy(false); p.toast({ tone: 'error', title: s.name, text: x.message }); });
     }
     var ended = !s || s.status === 'ended';
     return h('div', { className: 'pin-term' },

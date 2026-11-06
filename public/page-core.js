@@ -12,7 +12,7 @@
   // is the ground floor), an agent sits on the floor of its role, and a worktree or folder is a room named from its task.
   // The adapter builds the shown building (a building adapter from officeAdapter.mount) and adds rooms as sessions arrive.
 
-  // The fallback Claude Code model list: shown only before /api/providers answers (#101). The server's list replaces it.
+  // The fallback Claude Code model list: shown only before the providers read answers (#101). The server's list replaces it.
   var MODELS = [
     { value: '', label: 'Default' }, { value: 'opus', label: 'Opus' }, { value: 'sonnet', label: 'Sonnet' },
     { value: 'haiku', label: 'Haiku' }, { value: 'claude-fable-5-1', label: 'Fable' }
@@ -36,19 +36,10 @@
   var KIND = [{ value: 'every', label: 'Every N minutes' }, { value: 'daily', label: 'Every day at' }];
 
   // ---------- helpers ----------
-  // The page holds no token: calls send the page cookie by themselves (adapter.js has the access flow). They wait
-  // until the page knows whether it has access, so a first call never runs before the launch code is traded.
-  function call(path, opts) { return window.officeAdapter.ready.then(function () { return fetch(path, opts); }); }
-  function api(path, body) {
-    return call(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body || {}) })
-      .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
-        if (!r.ok) { var e = new Error(j.error || 'The office could not do that (' + r.status + ').'); e.status = r.status; e.body = j; throw e; }
-        // A question before the call can run (the cost question: 200 { confirm, question }): the caller asks, as for a 409.
-        if (window.OfficeAsk.isQuestion(j)) { var q = new Error(j.question); q.status = r.status; q.body = j; throw q; }
-        return j;
-      }); });
-  }
-  function getInfo(first) { return call('/api/info' + (first ? '?first=' + encodeURIComponent(first) : '')).then(function (r) { return r.json(); }); }
+  // The page holds no token: calls send the page cookie by themselves (adapter.js has the access flow). Every call goes
+  // through the one client (client.js): it waits until the page knows whether it has access, and owns the error and question rules.
+  var client = window.officeAdapter.client;
+  function getInfo(first) { return client.get('info', { first: first }); }
   function ago(t) {
     if (!t) return '';
     var s = Math.max(0, Math.round((Date.now() - t) / 1000));
@@ -111,7 +102,7 @@
   function Pair(a, b) { return h('div', { className: 'row' }, a, b); }
   // Export (#72): the server writes the Markdown of a session (every agent kind has it); the browser saves it as a file.
   function exportSession(uid, toast) {
-    return api('/api/export', { uid: uid }).then(function (j) {
+    return client.export({ uid: uid }).then(function (j) {
       var url = URL.createObjectURL(new Blob([j.text], { type: 'text/markdown;charset=utf-8' }));
       var a = document.createElement('a');
       a.href = url; a.download = j.filename;
@@ -121,7 +112,7 @@
     }, function (x) { if (toast) toast({ tone: 'error', title: 'Export failed', text: x.message }); });
   }
   // An agent that reports no cost asks once before it runs while its Security room cell is Ask (security.mjs costAsk): the
-  // server answers 200 with confirm: 'cost' and the question (api() turns it into an Error with .body); the page asks, then sends the same call with confirmCost: true.
+  // server answers 200 with confirm: 'cost' and the question (the client turns it into an Error with .body); the page asks, then sends the same call with confirmCost: true.
   function costAsked(x) { return !!window.OfficeAsk.asked(x, 'cost'); }
   // p: { title, text (the server's question), busy, err, onCancel, onRun }
   function CostDialog(p) {
@@ -149,7 +140,7 @@
   // ---------- agent kinds (#20) ----------
   // The kinds and their options come with the snapshot (officeAdapter.kinds(), from src/providers/index.mjs describe):
   // label, paid (spend limit), terminal (Runs), modes (Permissions), needsModel, control (the dock's live changes).
-  // Readiness and models come from GET /api/providers, which asks each provider and can take a few seconds
+  // Readiness and models come from the providers read, which asks each provider and can take a few seconds
   // (Claude Code runs claude --version). Until it answers a kind is checking, and Claude Code offers the fallback models in MODELS. One shared answer feeds every place that shows a model.
   var DEFAULT_KIND = 'claude-code';
   function kindOf(list, id) { return (list || []).filter(function (k) { return k.kind === (id || DEFAULT_KIND); })[0] || null; }
@@ -166,7 +157,7 @@
   function fetchProviders(fresh) {
     if (!fresh && provShared.flight) return provShared.flight;
     if (!fresh && provShared.by && Date.now() - provShared.at < 30000) return Promise.resolve(provShared.by);
-    var f = call(fresh ? '/api/providers?fresh=1' : '/api/providers').then(function (r) { if (!r.ok) throw new Error(String(r.status)); return r.json(); }).then(function (j) {
+    var f = client.get('providers', { fresh: fresh ? 1 : undefined }).then(function (j) {
       var by = {};
       (j.providers || []).forEach(function (x) { by[x.kind] = x; });
       provShared.by = by; provShared.at = Date.now(); if (provShared.flight === f) provShared.flight = null;
@@ -177,7 +168,7 @@
   }
   function useKinds(on) {
     var snap = useSnapshot();
-    var st = useState(null), status = st[0], setStatus = st[1];   // kind -> its /api/providers entry, or null before the first answer
+    var st = useState(null), status = st[0], setStatus = st[1];   // kind -> its providers entry, or null before the first answer
     var bz = useState(false), busy = bz[0], setBusy = bz[1];
     var rd = useState(0), round = rd[0], setRound = rd[1];
     // The server keeps its answer for 30 s. Only Check again asks it to look again (fresh=1); opening a dialog or a room's
@@ -250,7 +241,7 @@
 
   Object.assign(O, { Area: Area, Busy: Busy, CostDialog: CostDialog, DEFAULT_KIND: DEFAULT_KIND, F: F,
       FeatureTags: FeatureTags, ISOLATION: ISOLATION, KIND: KIND, KV: KV, KindFields: KindFields, MODELS: MODELS,
-      MODES: MODES, Pair: Pair, Pairs: Pairs, Tag: Tag, WHERE: WHERE, ago: ago, api: api, cadence: cadence, call: call,
+      MODES: MODES, Pair: Pair, Pairs: Pairs, Tag: Tag, WHERE: WHERE, ago: ago, cadence: cadence, client: client,
       clip: clip, costAsked: costAsked, cssMs: cssMs, exportSession: exportSession, getInfo: getInfo, kindOf: kindOf,
       limitHint: limitHint, limitSent: limitSent, limitText: limitText, look: look, modelWord: modelWord, money: money,
       plural: plural, reduced: reduced, refocusRow: refocusRow, resetText: resetText, sceneName: sceneName,

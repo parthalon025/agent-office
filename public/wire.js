@@ -1,7 +1,7 @@
 /* Agent Office for Claude Code x0.2: the /events wire format.
    The server sends the whole snapshot when a page connects, then one patch per broadcast with only what changed.
    The snapshot is lean: per session only the fields the page reads, with caps. Full data of one session is on
-   request (GET /api/session?uid=). Both ends use this one file, so they never disagree. Plain script, no I/O, no
+   request (the session read). Both ends use this one file, so they never disagree. Plain script, no I/O, no
    timers. The page loads it as a script (window.OfficeWire). The server and the tests import it for its side effect
    and read globalThis.OfficeWire.
 

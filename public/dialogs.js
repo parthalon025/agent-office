@@ -8,7 +8,7 @@
   var h = React.createElement, A = window.AgentOffice, useState = React.useState, useEffect = React.useEffect;
   var Area = O.Area, Busy = O.Busy, CostDialog = O.CostDialog, DEFAULT_KIND = O.DEFAULT_KIND, F = O.F,
       FeatureTags = O.FeatureTags, ISOLATION = O.ISOLATION, KIND = O.KIND, KV = O.KV, KindFields = O.KindFields,
-      MODES = O.MODES, Pair = O.Pair, Pairs = O.Pairs, Tag = O.Tag, WHERE = O.WHERE, ago = O.ago, api = O.api,
+      MODES = O.MODES, Pair = O.Pair, Pairs = O.Pairs, Tag = O.Tag, WHERE = O.WHERE, ago = O.ago, client = O.client,
       cadence = O.cadence, call = O.call, clip = O.clip, costAsked = O.costAsked, exportSession = O.exportSession,
       getInfo = O.getInfo, kindOf = O.kindOf, limitHint = O.limitHint, limitSent = O.limitSent, limitText = O.limitText,
       look = O.look, modelWord = O.modelWord, plural = O.plural, refocusRow = O.refocusRow, sceneName = O.sceneName,
@@ -59,23 +59,23 @@
       var where = canWindow ? form.where : 'office';
       var body = Object.assign({}, form, { where: where, isolation: form.useFolder || where === 'terminal' ? 'same' : 'worktree', permissionMode: hasModes ? form.permissionMode : '', maxBudget: limited ? limitSent(form.maxBudget, p.spendLimit !== undefined) : undefined, confirmCost: confirmed === true, role: p.role || undefined });
       delete body.useFolder;
-      api('/api/open', body).then(function () { setBusy(false); setCostQ(null); p.onClose(); }, function (x) {
+      client.open(body).then(function () { setBusy(false); setCostQ(null); p.onClose(); }, function (x) {
         setBusy(false);
         if (costAsked(x) && confirmed !== true) { setCostQ(x.message); return; }
         setErr(x.message);
       });
     }
     function saveTemplate() {
-      api('/api/template/save', { name: saving, text: form.prompt }).then(function (t) { setSaving(null); p.onTemplates(); setForm(Object.assign({}, form, { template: t.id })); }, function (x) { setErr(x.message); });
+      client.templateSave({ name: saving, text: form.prompt }).then(function (t) { setSaving(null); p.onTemplates(); setForm(Object.assign({}, form, { template: t.id })); }, function (x) { setErr(x.message); });
     }
-    function delTemplate() { api('/api/template/delete', { id: form.template }).then(function () { setForm(Object.assign({}, form, { template: '' })); p.onTemplates(); }, function (x) { setErr(x.message); }); }
+    function delTemplate() { client.templateDelete({ id: form.template }).then(function () { setForm(Object.assign({}, form, { template: '' })); p.onTemplates(); }, function (x) { setErr(x.message); }); }
     var terminal = canWindow && form.where === 'terminal';
     var blocked = KV.noModelFor(k) || KV.notConfigured(k);
     // The server owns the folder rules (recent.mjs recentChoices); until its answer comes, show the stored list.
     var fc = useState(null), fetched = fc[0], setFetched = fc[1];
     useEffect(function () {
-      call('/api/choices?first=' + encodeURIComponent(p.shownPath || ''))
-        .then(function (r) { return r.json(); }).then(function (j) { setFetched(j.folders || null); }, function () {});
+      client.get('choices', { first: p.shownPath || '' })
+        .then(function (j) { setFetched(j.folders || null); }, function () {});
     }, [p.shownPath]);
     var folders = fetched || (p.recent || []).slice(0, 6);
     var tpl = [{ value: '', label: 'No template' }].concat(p.templates.map(function (t) { return { value: t.id, label: t.name }; }));
@@ -123,16 +123,16 @@
     var cf = useState(null), ask = cf[0], setAsk = cf[1];         // { action, name, text, question }: waiting for the user's yes
     var bz = useState(''), busy = bz[0], setBusy = bz[1];
     var er = useState(''), err = er[0], setErr = er[1];
-    function load() { api('/api/skills/list', { provider: p.kind }).then(function (j) { setList(j); }, function (x) { setList({ skills: [] }); setErr(x.message); }); }
+    function load() { client.skillsList({ provider: p.kind }).then(function (j) { setList(j); }, function (x) { setList({ skills: [] }); setErr(x.message); }); }
     useEffect(load, []);
     function openEdit(name) {
       setBusy(name); setErr('');
-      api('/api/skills/read', { provider: p.kind, name: name }).then(function (j) { setBusy(''); setEdit({ name: name, text: j.text, orig: j.text }); }, function (x) { setBusy(''); setErr(x.message); });
+      client.skillsRead({ provider: p.kind, name: name }).then(function (j) { setBusy(''); setEdit({ name: name, text: j.text, orig: j.text }); }, function (x) { setBusy(''); setErr(x.message); });
     }
     // action: 'save' or 'delete'. The first call asks; the call with confirmed: true writes.
     function write(action, name, text, confirmed) {
       setBusy(action + name); setErr('');
-      api('/api/skills/' + action, { provider: p.kind, name: name, text: text, confirmed: confirmed === true }).then(function () {
+      client.send('skills' + action.charAt(0).toUpperCase() + action.slice(1), { provider: p.kind, name: name, text: text, confirmed: confirmed === true }).then(function () {
         setBusy(''); setAsk(null); setEdit(null);
         p.toast({ tone: 'success', title: p.agent, text: action === 'delete' ? 'Skill ' + name + ' deleted' : 'Skill ' + name + ' saved' });
         load();
@@ -189,18 +189,18 @@
     var ak = useState(null), ask = ak[0], setAsk = ak[1];   // the session the user is about to forget
     var rc = useState(null), runAsk = rc[0], setRunAsk = rc[1];   // { s, text }: its agent reports no cost, so ask before it runs
     var fa = useState(null), forkAsk = fa[0], setForkAsk = fa[1];   // { s, text }: Fork waits for the user's yes
-    function load() { api('/api/history').then(function (j) { setList(j.sessions); }, function (x) { setErr(x.message); }); }
+    function load() { client.history().then(function (j) { setList(j.sessions); }, function (x) { setErr(x.message); }); }
     useEffect(load, []);
     useEffect(function () {
       if (q.trim().length < 2) { setResults(null); return undefined; }
-      var t = setTimeout(function () { api('/api/search', { q: q }).then(function (j) { setResults(j.results); }, function (x) { setErr(x.message); }); }, 250);
+      var t = setTimeout(function () { client.search({ q: q }).then(function (j) { setResults(j.results); }, function (x) { setErr(x.message); }); }, 250);
       return function () { clearTimeout(t); };
     }, [q]);
     function act(uid, fn) { setBusy(uid); setErr(''); fn().then(function () { setBusy(''); }, function (x) { setBusy(''); setErr(x.message); }); }
     // The server answers confirm: 'cost' for an agent that reports no cost: the user says yes once, then the same call runs it.
     function reopen(s, confirmed) {
       act(s.uid, function () {
-        return api('/api/reopen', { uid: s.uid, confirmCost: confirmed === true }).then(function () { setRunAsk(null); p.onClose(); }, function (x) {
+        return client.reopen({ uid: s.uid, confirmCost: confirmed === true }).then(function () { setRunAsk(null); p.onClose(); }, function (x) {
           if (costAsked(x) && !confirmed) { setRunAsk({ s: s, text: x.message }); return; }
           throw x;
         });
@@ -209,7 +209,7 @@
     // Fork (#72) writes a worktree and a session, so the server holds it: 409 with confirm: 'fork' and the question; the same call with confirmed: true runs it.
     function fork(s, confirmed) {
       act(s.uid, function () {
-        return api('/api/fork', { uid: s.uid, confirmed: confirmed === true }).then(function () {
+        return client.fork({ uid: s.uid, confirmed: confirmed === true }).then(function () {
           setForkAsk(null); if (p.toast) p.toast({ tone: 'success', title: s.name, text: 'Forked into a new worktree' }); p.onClose();
         }, function (x) {
           var q = window.OfficeAsk.asked(x, 'fork', confirmed);
@@ -218,7 +218,7 @@
         });
       });
     }
-    function forget(uid) { act(uid, function () { return api('/api/history/forget', { uid: uid }).then(function () { setAsk(null); if (p.toast) p.toast({ tone: 'info', title: 'Session forgotten', text: 'It is gone from Past sessions.' }); load(); }); }); }
+    function forget(uid) { act(uid, function () { return client.historyForget({ uid: uid }).then(function () { setAsk(null); if (p.toast) p.toast({ tone: 'info', title: 'Session forgotten', text: 'It is gone from Past sessions.' }); load(); }); }); }
     if (ask) {
       return h(A.Dialog, { open: true, title: 'Forget ' + ask.name, onClose: function () { setAsk(null); setErr(''); }, actions: [
         h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setAsk(null); setErr(''); } }, 'Keep it'),
@@ -275,11 +275,11 @@
     useEffect(load, []);
     function set(k) { return function (v) { var n = Object.assign({}, edit); n[k] = v; setEdit(n); }; }
     function save() {
-      api('/api/schedule/save', Object.assign({}, edit, { every: Number(edit.every) || 60, maxBudget: limited ? limitSent(edit.maxBudget, p.spendLimit !== undefined) : undefined })).then(function () { if (p.toast) p.toast({ tone: 'success', title: edit.id ? 'Schedule saved' : 'Schedule added', text: edit.name || cadence(edit) }); setEdit(null); setErr(''); load(); }, function (x) { setErr(x.message); });
+      client.scheduleSave(Object.assign({}, edit, { every: Number(edit.every) || 60, maxBudget: limited ? limitSent(edit.maxBudget, p.spendLimit !== undefined) : undefined })).then(function () { if (p.toast) p.toast({ tone: 'success', title: edit.id ? 'Schedule saved' : 'Schedule added', text: edit.name || cadence(edit) }); setEdit(null); setErr(''); load(); }, function (x) { setErr(x.message); });
     }
     var dl = useState(null), ask = dl[0], setAsk = dl[1];   // the schedule the user is about to delete
-    function run(s) { api('/api/schedule/run', { id: s.id }).then(function () { setErr(''); if (p.toast) p.toast({ tone: 'success', title: s.name || 'Schedule', text: 'A session is starting now.' }); }, function (x) { setErr(x.message); }); }
-    function del(id) { api('/api/schedule/delete', { id: id }).then(function () { setAsk(null); if (p.toast) p.toast({ tone: 'info', title: 'Schedule deleted', text: 'It will not run again.' }); load(); }, function (x) { setErr(x.message); }); }
+    function run(s) { client.scheduleRun({ id: s.id }).then(function () { setErr(''); if (p.toast) p.toast({ tone: 'success', title: s.name || 'Schedule', text: 'A session is starting now.' }); }, function (x) { setErr(x.message); }); }
+    function del(id) { client.scheduleDelete({ id: id }).then(function () { setAsk(null); if (p.toast) p.toast({ tone: 'info', title: 'Schedule deleted', text: 'It will not run again.' }); load(); }, function (x) { setErr(x.message); }); }
     if (ask && !edit) {
       return h(A.Dialog, { open: true, title: 'Delete ' + (ask.name || 'this schedule'), onClose: function () { setAsk(null); setErr(''); }, actions: [
         h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setAsk(null); setErr(''); } }, 'Keep it'),
@@ -288,7 +288,7 @@
           h('p', { className: 'note' }, 'The schedule will not run again. Sessions it already started stay open.'),
           err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
     }
-    function toggle(s) { api('/api/schedule/save', Object.assign({}, s, { enabled: !s.enabled })).then(load, function (x) { setErr(x.message); }); }
+    function toggle(s) { client.scheduleSave(Object.assign({}, s, { enabled: !s.enabled })).then(load, function (x) { setErr(x.message); }); }
     if (edit) {
       return h(A.Dialog, { open: true, title: edit.id ? 'Edit schedule' : 'New schedule', onClose: function () { setEdit(null); }, actions: [
         h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setEdit(null); } }, 'Cancel'),
@@ -346,7 +346,7 @@
     var cf = useState(null), confirm = cf[0], setConfirm = cf[1];
     var bz = useState(false), busy = bz[0], setBusy = bz[1];
     var rs = useState(null), result = rs[0], setResult = rs[1];
-    function load() { setErr(''); api('/api/changes', { uid: uid }).then(setData, function (x) { setErr(x.message); setData({ files: [], diff: '', branch: '', stat: '' }); }); }
+    function load() { setErr(''); client.changes({ uid: uid }).then(setData, function (x) { setErr(x.message); setData({ files: [], diff: '', branch: '', stat: '' }); }); }
     useEffect(load, [uid]);
     function run(fn) {
       setBusy(true); setErr('');
@@ -357,8 +357,8 @@
       }, function (x) { setBusy(false); setErr(x.message); });
     }
     return { data: data, err: err, setErr: setErr, confirm: confirm, setConfirm: setConfirm, busy: busy, result: result, load: load, wt: data && data.worktree,
-      pr: function () { run(function () { return api('/api/pr', { uid: uid }); }); },
-      remove: function (force) { run(function () { return api('/api/worktree/remove', { uid: uid, force: force }); }); } };
+      pr: function () { run(function () { return client.pr({ uid: uid }); }); },
+      remove: function (force) { run(function () { return client.worktreeRemove({ uid: uid, force: force }); }); } };
   }
   // The confirm dialog of a pull request or a worktree removal, or null. Push, pull request and removal always ask here.
   function ChangesConfirm(p) {
@@ -444,7 +444,7 @@
     var sb = useState(false), startBusy = sb[0], setStartBusy = sb[1];
     function toggleStartup() {
       setStartBusy(true);
-      api('/api/startup', { enabled: !startup.enabled }).then(function (r) {
+      client.startup({ enabled: !startup.enabled }).then(function (r) {
         setStartup(r); setStartBusy(false);
         if (p.toast) p.toast({ tone: 'info', title: r.enabled ? 'Start with Windows is on' : 'Start with Windows is off', text: r.enabled ? 'The office starts when you sign in.' : 'The office no longer starts when you sign in.' });
       }, function (x) { setStartBusy(false); if (p.toast) p.toast({ tone: 'error', title: 'Not changed', text: x.message }); });
@@ -456,7 +456,7 @@
     function saveLimit() {
       setLimitBusy(true); setLimitErr('');
       // An empty field is No limit; Save on the typed field is the confirm the server asks for (it refuses 0 without one).
-      api('/api/settings/spend', { limit: limitSent(limit, true), confirmed: true }).then(function (r) {
+      client.settingsSpend({ limit: limitSent(limit, true), confirmed: true }).then(function (r) {
         setLimitBusy(false);
         if (p.onSaved) p.onSaved();
         if (p.toast) p.toast({ tone: 'info', title: r.spendLimit > 0 ? 'Default spend limit saved' : 'Default spend limit cleared', text: r.spendLimit > 0 ? 'New Claude Code sessions stop at $' + r.spendLimit + '.' : 'New Claude Code sessions have no limit.' });
@@ -508,7 +508,7 @@
     var choose = q && q.state === 'choose' ? q.companies || [] : null;
     function connect(co) {
       setBusy(true); setErr('');
-      api('/api/paperclip/connect', { url: url, company: co || undefined }).then(function (r) {
+      client.paperclipConnect({ url: url, company: co || undefined }).then(function (r) {
         setBusy(false);
         if (r.choose) { setCompany(r.choose[0] ? r.choose[0].id : ''); return; }
         if (p.toast) p.toast({ tone: 'success', title: 'Paperclip connected', text: H.state(r.hq) + '. The office only reads it.' });
@@ -516,7 +516,7 @@
     }
     function disconnect() {
       setBusy(true);
-      api('/api/paperclip/disconnect', {}).then(function () { setBusy(false); if (p.toast) p.toast({ tone: 'info', title: 'Paperclip disconnected', text: 'Paperclip runs on as before. The office no longer watches it.' }); },
+      client.paperclipDisconnect({}).then(function () { setBusy(false); if (p.toast) p.toast({ tone: 'info', title: 'Paperclip disconnected', text: 'Paperclip runs on as before. The office no longer watches it.' }); },
         function (x) { setBusy(false); setErr(x.message); });
     }
     var on = q && q.state !== 'choose';
@@ -575,14 +575,14 @@
     var cl = useState(null), clean = cl[0], setClean = cl[1];         // clean up: null, or { floors: [{ branch, rooms }], kept: floors the user left out }
     var box = React.useRef(null), lastIdx = React.useRef(null);       // lastIdx: the row that Keep removed; null when no row went
     var DONE = {
-      '/api/floor/cleanup': function (b, j) { return F.cleanupNote(j); },
-      '/api/floor/create': ['success', 'Floor added', function (b) { return 'Branch ' + b.branch + ' with its first room.'; }],
-      '/api/floor/delete': ['info', 'Floor deleted', function (b) { return 'Branch ' + b.branch + ' and its rooms are gone.'; }],
-      '/api/room/create': ['success', 'Room added', function (b) { return 'A new worktree on ' + b.branch + '.'; }],
-      '/api/room/delete': ['info', 'Room removed', function (b) { return 'The folder ' + String(b.root).split(/[\\/]/).pop() + ' is gone. Its branch stays.'; }] };
+      'floorCleanup': function (b, j) { return F.cleanupNote(j); },
+      'floorCreate': ['success', 'Floor added', function (b) { return 'Branch ' + b.branch + ' with its first room.'; }],
+      'floorDelete': ['info', 'Floor deleted', function (b) { return 'Branch ' + b.branch + ' and its rooms are gone.'; }],
+      'roomCreate': ['success', 'Room added', function (b) { return 'A new worktree on ' + b.branch + '.'; }],
+      'roomDelete': ['info', 'Room removed', function (b) { return 'The folder ' + String(b.root).split(/[\\/]/).pop() + ' is gone. Its branch stays.'; }] };
     function run(key, path, body, after) {
       setBusy(key); setErr('');
-      api(path, Object.assign({ repo: p.repo }, body)).then(function (j) {
+      client.send(path, Object.assign({ repo: p.repo }, body)).then(function (j) {
         setBusy(''); if (after) after();
         var t = DONE[path]; if (typeof t === 'function') t = t(body, j) ; else if (t) t = [t[0], t[1], t[2](body)];
         if (t && p.toast) p.toast({ tone: t[0], title: t[1], text: t[2] });
@@ -606,7 +606,7 @@
       var fl = clean.floors;
       return h(A.Dialog, { open: true, title: 'Clean up unused floors', onClose: function () { setClean(null); setErr(''); }, actions: [
         h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setClean(null); setErr(''); } }, fl.length ? 'Keep them' : 'Close'),
-        fl.length ? h(A.Button, { key: 'r', variant: 'danger', icon: 'remove', loading: busy === 'cleanup', onClick: function () { run('cleanup', '/api/floor/cleanup', { branches: fl.map(function (f) { return f.branch; }) }, function () { setClean(null); }); } }, 'Delete ' + fl.length + (fl.length === 1 ? ' floor' : ' floors')) : null] },
+        fl.length ? h(A.Button, { key: 'r', variant: 'danger', icon: 'remove', loading: busy === 'cleanup', onClick: function () { run('cleanup', 'floorCleanup', { branches: fl.map(function (f) { return f.branch; }) }, function () { setClean(null); }); } }, 'Delete ' + fl.length + (fl.length === 1 ? ' floor' : ' floors')) : null] },
         h('div', { className: 'form', ref: box },
           fl.length
             ? h('p', { className: 'note' }, 'These floors are merged into ' + (main ? main.branch : 'the main branch') + ', have no changes, no session and are over an hour old. Press Keep this floor to leave one out. Deleting removes the rest with their rooms and branches. No commit is lost. ' + IGNORED_NOTE)
@@ -622,8 +622,8 @@
       var isFloor = confirm.kind === 'floor';
       var forced = /anyway/i.test(err);
       var go = function () {
-        if (isFloor) run('confirm', '/api/floor/delete', { branch: confirm.branch, force: forced }, function () { setConfirm(null); });
-        else run('confirm', '/api/room/delete', { root: confirm.root, force: forced }, function () { setConfirm(null); });
+        if (isFloor) run('confirm', 'floorDelete', { branch: confirm.branch, force: forced }, function () { setConfirm(null); });
+        else run('confirm', 'roomDelete', { root: confirm.root, force: forced }, function () { setConfirm(null); });
       };
       return h(A.Dialog, { open: true, title: isFloor ? 'Delete the floor ' + confirm.branch : 'Remove the room', onClose: function () { setConfirm(null); setErr(''); }, actions: [
         h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setConfirm(null); setErr(''); } }, 'Keep it'),
@@ -648,7 +648,7 @@
               h(A.Select, { id: 'f-from', label: 'Start from', options: branches, value: form.from, onChange: function (v) { setForm(Object.assign({}, form, { from: v })); } })),
             h(A.TextInput, { id: 'f-room', label: 'Name of the first room (optional)', value: form.name || '', placeholder: 'login-work', onChange: function (v) { setForm(Object.assign({}, form, { name: v })); } }),
             h('div', { className: 'inline-actions' },
-              h(A.Button, { variant: 'primary', icon: 'add', loading: busy === 'new', disabled: !form.branch.trim(), onClick: function () { run('new', '/api/floor/create', { branch: form.branch.trim(), from: form.from, name: (form.name || '').trim() }, function () { setForm(null); }); } }, 'Create floor and room'),
+              h(A.Button, { variant: 'primary', icon: 'add', loading: busy === 'new', disabled: !form.branch.trim(), onClick: function () { run('new', 'floorCreate', { branch: form.branch.trim(), from: form.from, name: (form.name || '').trim() }, function () { setForm(null); }); } }, 'Create floor and room'),
               h(A.Button, { variant: 'quiet', onClick: function () { setForm(null); setErr(''); } }, 'Cancel')))) : null,
         h('ul', { className: 'past' }, order.map(function (b) {
           var rooms = floors[b], hasMain = rooms.some(function (w) { return w.main; });
@@ -664,7 +664,7 @@
               }),
               newRoom && newRoom.branch === b ? h('div', { className: 'inline-actions' },
                 h(A.TextInput, { id: 'r-name', label: 'Room name (optional)', value: newRoom.name, placeholder: 'review', onChange: function (v) { setNewRoom({ branch: b, name: v }); } }),
-                h(A.Button, { variant: 'primary', icon: 'add', loading: busy === 'room:' + b, onClick: function () { run('room:' + b, '/api/room/create', { branch: b, name: newRoom.name.trim() }, function () { setNewRoom(null); }); } }, 'Add room'),
+                h(A.Button, { variant: 'primary', icon: 'add', loading: busy === 'room:' + b, onClick: function () { run('room:' + b, 'roomCreate', { branch: b, name: newRoom.name.trim() }, function () { setNewRoom(null); }); } }, 'Add room'),
                 h(A.Button, { variant: 'quiet', onClick: function () { setNewRoom(null); } }, 'Cancel')) : null),
             h('div', { className: 'past-actions' },
               newRoom && newRoom.branch === b ? null : h(A.Button, { variant: 'quiet', icon: 'add', onClick: function () { setErr(''); setNewRoom({ branch: b, name: '' }); } }, 'Add room'),
@@ -672,13 +672,13 @@
         })),
         form ? null : h('div', { className: 'inline-actions' },
           h(A.AddButton, { label: 'Add a floor', onClick: function () { setErr(''); setForm({ branch: '', from: main ? main.branch : '', name: '' }); } }),
-          h(A.Button, { variant: 'quiet', icon: 'remove', loading: busy === 'stale', onClick: function () { setBusy('stale'); setErr(''); api('/api/floor/stale', { repo: p.repo }).then(function (j) { setBusy(''); setClean({ floors: j.floors }); }, function (x) { setBusy(''); setErr(x.message); }); } }, 'Clean up unused floors')),
+          h(A.Button, { variant: 'quiet', icon: 'remove', loading: busy === 'stale', onClick: function () { setBusy('stale'); setErr(''); client.floorStale({ repo: p.repo }).then(function (j) { setBusy(''); setClean({ floors: j.floors }); }, function (x) { setBusy(''); setErr(x.message); }); } }, 'Clean up unused floors')),
         h(FloorsWithoutRooms, { repo: p.repo, busy: busy, run: run, shown: repo.worktrees.map(function (w) { return w.branch; }) })));
   }
   // Branches with no worktree: a room brings the floor into the building.
   function FloorsWithoutRooms(p) {
     var l = useState(null), list = l[0], setList = l[1];
-    useEffect(function () { api('/api/branches', { repo: p.repo }).then(function (j) { setList(j.branches); }, function () { setList([]); }); }, [p.repo, p.shown.join('|')]);
+    useEffect(function () { client.branches({ repo: p.repo }).then(function (j) { setList(j.branches); }, function () { setList([]); }); }, [p.repo, p.shown.join('|')]);
     var rest = (list || []).filter(function (b) { return p.shown.indexOf(b) < 0; });
     if (!rest.length) return null;
     return h('div', { className: 'form' },
@@ -686,7 +686,7 @@
       h('ul', { className: 'past' }, rest.slice(0, 30).map(function (b) {
         return h('li', { key: b, className: 'past-row' },
           h('div', { className: 'past-title' }, h(A.Icon, { name: 'floor', size: 16 }), h('span', { className: 'mono' }, b)),
-          h(A.Button, { variant: 'quiet', icon: 'add', loading: p.busy === 'room:' + b, onClick: function () { p.run('room:' + b, '/api/room/create', { branch: b }); } }, 'Add room'));
+          h(A.Button, { variant: 'quiet', icon: 'add', loading: p.busy === 'room:' + b, onClick: function () { p.run('room:' + b, 'roomCreate', { branch: b }); } }, 'Add room'));
       })));
   }
 
@@ -712,11 +712,11 @@
     var cf = useState(null), confirm = cf[0], setConfirm = cf[1];
     var qq = useState(''), q = qq[0], setQ = qq[1];
     var pq = useState(''), pfind = pq[0], setPfind = pq[1];
-    function load() { setErr(''); api('/api/ext/list', { uid: p.uid }).then(setData, function (x) { setErr(x.message); setData({ servers: null, plugins: [] }); }); }
+    function load() { setErr(''); client.extList({ uid: p.uid }).then(setData, function (x) { setErr(x.message); setData({ servers: null, plugins: [] }); }); }
     useEffect(load, [p.uid]);
     function act(key, body, done) {
       setBusy(key); setErr(''); setNote('');
-      api('/api/ext', Object.assign({ uid: p.uid }, body)).then(function (r) {
+      client.ext(Object.assign({ uid: p.uid }, body)).then(function (r) {
         setBusy(''); if (r.restart) setNote('Saved. New sessions in this folder get the change. Close and reopen this session to use it now.');
         var said = { 'mcp-add': ['success', 'Connector added', body.name], 'mcp-remove': ['info', 'Connector removed', body.name], 'plugin-install': ['success', 'Plugin installed', body.id],
           'plugin-uninstall': ['info', 'Plugin removed', body.id], 'plugin-enable': ['success', 'Plugin on', body.id], 'plugin-disable': ['info', 'Plugin off', body.id],
@@ -870,13 +870,13 @@
     useFirstModel(addKind, add || {}, function (fn) { setAdd(function (a) { return a ? fn(a) : a; }); });
     function closeSession() {
       setBusy(true);
-      api('/api/close', { uid: cur.uid }).then(function () { setBusy(false); setConfirm(null); p.toast({ tone: 'success', title: cur.name, text: 'Session closed' }); }, function (x) { setBusy(false); setErr(x.message); });
+      client.close({ uid: cur.uid }).then(function () { setBusy(false); setConfirm(null); p.toast({ tone: 'success', title: cur.name, text: 'Session closed' }); }, function (x) { setBusy(false); setErr(x.message); });
     }
     function addAgent(confirmed) {
       var cwd = list.length && list[0].cwd ? list[0].cwd : place && place.path;
       if (!cwd) { setErr('This room has no folder yet.'); return; }
       setBusy(true); setErr('');
-      api('/api/open', { cwd: cwd, name: add.name.trim(), provider: add.provider, where: 'office', isolation: 'same', model: add.model, prompt: add.prompt, confirmCost: confirmed === true })
+      client.open({ cwd: cwd, name: add.name.trim(), provider: add.provider, where: 'office', isolation: 'same', model: add.model, prompt: add.prompt, confirmCost: confirmed === true })
         .then(function () { setBusy(false); setCostQ(null); setAdd(null); p.toast({ tone: 'success', title: 'Office', text: 'Agent added' }); }, function (x) {
           setBusy(false);
           if (costAsked(x) && confirmed !== true) { setCostQ(x.message); return; }
@@ -888,7 +888,7 @@
     var WV = window.OfficeVocab.wall, wallKey = p.mount.noteKey(p.roomId, snap || undefined), wallNow = WV.viewOf(snap && snap.screens, wallKey);
     function setWall(v) {
       setErr('');
-      api('/api/screen/set', { key: wallKey, view: v }).then(function () { p.toast({ tone: 'success', title: 'Wall screen', text: WV.word(v) }); }, function (x) { setErr(x.message); });
+      client.screenSet({ key: wallKey, view: v }).then(function () { p.toast({ tone: 'success', title: 'Wall screen', text: WV.word(v) }); }, function (x) { setErr(x.message); });
     }
     if (costQ) return h(CostDialog, { title: 'Run ' + (addKind ? addKind.label : 'the agent'), text: costQ, busy: busy, err: err, onCancel: function () { setCostQ(null); setErr(''); }, onRun: function () { addAgent(true); } });
     if (skills) return h(SkillsDialog, { kind: skills.kind, agent: skills.agent, toast: p.toast, onClose: function () { setSkills(null); } });

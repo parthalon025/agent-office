@@ -5,7 +5,7 @@
   'use strict';
   var O = window.OfficePage;
   var h = React.createElement, A = window.AgentOffice, useState = React.useState, useEffect = React.useEffect;
-  var Tag = O.Tag, ago = O.ago, api = O.api, clip = O.clip, plural = O.plural, refocusRow = O.refocusRow,
+  var Tag = O.Tag, ago = O.ago, client = O.client, clip = O.clip, plural = O.plural, refocusRow = O.refocusRow,
       sceneName = O.sceneName, useSnapshot = O.useSnapshot;
 
   // ---------- paper flow (#93): Ready to merge, the pipeline board and the PR cards ----------
@@ -15,7 +15,7 @@
     var st = useState(null), ask = st[0], setAsk = st[1], bz = useState(''), busy = bz[0], setBusy = bz[1], er = useState(''), err = er[0], setErr = er[1];
     function send(r, confirmed) {
       setBusy(r.id || ('pr:' + r.number)); setErr('');
-      return api('/api/merge', { repo: r.repo, number: r.number, confirmed: confirmed === true }).then(function () {
+      return client.merge({ repo: r.repo, number: r.number, confirmed: confirmed === true }).then(function () {
         setBusy(''); setAsk(null); toast({ tone: 'success', title: 'Merged #' + r.number, text: r.title || '' });
       }, function (x) {
         setBusy('');
@@ -108,13 +108,13 @@
       var answers = window.OfficeVocab.groupAnswers(g, allow);
       lastIdx.current = list.indexOf(g.items[0]);
       setBusy(g.key);
-      answers.reduce(function (chain, a) { return chain.then(function () { return api('/api/answer', a); }); }, Promise.resolve())
+      answers.reduce(function (chain, a) { return chain.then(function () { return client.answer(a); }); }, Promise.resolve())
         .then(function () { setBusy(''); }, function (x) { setBusy(''); p.toast({ tone: 'error', title: g.items[0].tool, text: x.message }); });
     }
     function answer(r, allow) {
       lastIdx.current = list.indexOf(r);
       setBusy(r.id);
-      api('/api/answer', { id: r.id, allow: allow }).then(function () { setBusy(''); }, function (x) { setBusy(''); p.toast({ tone: 'error', title: r.bot, text: x.message }); });
+      client.answer({ id: r.id, allow: allow }).then(function () { setBusy(''); }, function (x) { setBusy(''); p.toast({ tone: 'error', title: r.bot, text: x.message }); });
     }
     return h(React.Fragment, null,
         list.length ? h('p', { className: 'note' }, plural(list.length, 'request waits', 'requests wait') + ' for you, oldest first. This is every building.') : null,

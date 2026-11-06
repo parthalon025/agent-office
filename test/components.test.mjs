@@ -74,11 +74,11 @@ test('office.js: only Check again asks the server for a fresh provider round; op
   const sh = core.match(/function fetchProviders\(fresh\) \{[\s\S]*?\n  \}\r?\n/);
   assert.ok(sh, 'fetchProviders: the one shared ask (#101)');
   assert.equal((fx[0].match(/fetchProviders\(/g) || []).length, 1, 'useKinds asks only through the shared fetch');
-  assert.equal((sh[0].match(/'\/api\/providers\?fresh=1' : '\/api\/providers'/g) || []).length, 1, 'one plain ask, one fresh ask');
+  assert.equal((sh[0].match(/client\.get\('providers', \{ fresh: fresh \? 1 : undefined \}\)/g) || []).length, 1, 'one ask, plain or fresh');
   assert.match(fx[0], /var fresh = wantFresh\.current; wantFresh\.current = false;/, 'the flag is read once');
   assert.match(fx[0], /recheck: function \(\) \{ wantFresh\.current = true; setRound\(round \+ 1\); \}/, 'only recheck sets it');
   assert.equal((fx[0].match(/wantFresh\.current = true/g) || []).length, 1);
-  assert.equal([...pageAll.matchAll(/'\/api\/providers/g)].length, 2, 'no other page code asks for the provider status');
+  assert.equal([...pageAll.matchAll(/client\.get\('providers'/g)].length, 1, 'no other page code asks for the provider status');
 });
 
 // #92: the dock goes away. Its actions are in the scene (open desks, the reception memo, the elevator) and in Ctrl+K, and the

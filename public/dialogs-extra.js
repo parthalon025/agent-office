@@ -5,7 +5,7 @@
   'use strict';
   var O = window.OfficePage;
   var h = React.createElement, A = window.AgentOffice, useState = React.useState, useEffect = React.useEffect;
-  var Area = O.Area, Busy = O.Busy, F = O.F, Pair = O.Pair, Tag = O.Tag, ago = O.ago, api = O.api, call = O.call,
+  var Area = O.Area, Busy = O.Busy, F = O.F, Pair = O.Pair, Tag = O.Tag, ago = O.ago, client = O.client,
       money = O.money, plural = O.plural, useSnapshot = O.useSnapshot;
 
   // ---------- the Manager board (#157): one plan per goal, from the Office or from Paperclip ----------
@@ -18,12 +18,12 @@
     var connected = !!(snap && snap.hq && snap.hq.company);
     function act(route, body, key) {
       setBusy(key);
-      api(route, body).then(function () { setBusy(''); }, function (x) { setBusy(''); p.toast({ tone: 'error', title: 'Manager', text: x.message }); });
+      client.send(route, body).then(function () { setBusy(''); }, function (x) { setBusy(''); p.toast({ tone: 'error', title: 'Manager', text: x.message }); });
     }
     // The first call has no confirmed: the server answers 409 with the exact tasks it would create. The Confirm sends the same call again.
     function handoff(g, confirmed) {
       setBusy(g.id);
-      api('/api/goal/handoff', { id: g.id, confirmed: confirmed === true }).then(function () {
+      client.goalHandoff({ id: g.id, confirmed: confirmed === true }).then(function () {
         setBusy(''); setAsk(null); p.toast({ tone: 'success', title: 'Handed to Paperclip', text: g.goal });
       }, function (x) {
         setBusy('');
@@ -69,12 +69,12 @@
                   x.skipped ? h('div', { className: 'past-meta' }, 'This run skipped the office. ' + (x.skippedWhy || '')) : null),
                 h('div', { className: 'past-actions' },
                   x.uid ? h(A.Button, { variant: 'ghost', icon: 'chevron-right', onClick: function () { var s = window.officeAdapter.sessionByUid(x.uid); if (s) p.onGo(s); } }, 'Go to desk') : null,
-                  !g.readOnly && x.state === 'error' ? h(A.Button, { variant: 'quiet', icon: 'retry', disabled: busy === g.id + x.id, onClick: function () { act('/api/goal/retry', { id: g.id, step: x.id }, g.id + x.id); } }, 'Retry step') : null));
+                  !g.readOnly && x.state === 'error' ? h(A.Button, { variant: 'quiet', icon: 'retry', disabled: busy === g.id + x.id, onClick: function () { act('goalRetry', { id: g.id, step: x.id }, g.id + x.id); } }, 'Retry step') : null));
             })) : null,
             !g.readOnly && (open || (g.handoffable && connected)) ? h('div', { className: 'inline-actions' },
-              g.status === 'awaiting-approval' ? h(A.Button, { variant: 'emphasis', icon: 'approve', disabled: busy === g.id, onClick: function () { act('/api/goal/approve', { id: g.id }, g.id); } }, 'Approve plan') : null,
+              g.status === 'awaiting-approval' ? h(A.Button, { variant: 'emphasis', icon: 'approve', disabled: busy === g.id, onClick: function () { act('goalApprove', { id: g.id }, g.id); } }, 'Approve plan') : null,
               g.handoffable && connected ? h(A.Button, { variant: g.handoff && g.handoff.failed ? 'emphasis' : 'quiet', icon: g.handoff && g.handoff.failed ? 'retry' : 'hq', disabled: busy === g.id, onClick: function () { handoff(g, false); } }, g.handoff && g.handoff.failed ? 'Retry handoff' : 'Hand to Paperclip') : null,
-              open ? h(A.Button, { variant: 'quiet', icon: 'decline', disabled: busy === g.id, onClick: function () { act('/api/goal/cancel', { id: g.id }, g.id); } }, 'Cancel goal') : null) : null,
+              open ? h(A.Button, { variant: 'quiet', icon: 'decline', disabled: busy === g.id, onClick: function () { act('goalCancel', { id: g.id }, g.id); } }, 'Cancel goal') : null) : null,
             g.handoff && g.handoff.done && p.onHq ? h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'hq', onClick: p.onHq }, 'Open Paperclip HQ')) : null);
         })));
   }
@@ -122,7 +122,7 @@
     var er = useState(''), err = er[0], setErr = er[1];
     function run(id, route, body, done) {
       setBusy(id); setErr('');
-      api(route, body).then(function () { setBusy(''); setSure(null); if (done) p.toast(done); }, function (x) { setBusy(''); setErr(x.message); });
+      client.send(route, body).then(function () { setBusy(''); setSure(null); if (done) p.toast(done); }, function (x) { setBusy(''); setErr(x.message); });
     }
     var proposals = (t && t.proposals) || [], grants = (t && t.grants) || [], cards = (t && t.cards) || [];
     function grantName(g) {
@@ -141,14 +141,14 @@
               h('div', { className: 'past-title' }, h('b', null, x.rowLabel), h(Tag, null, x.agent), h(Tag, null, x.buildingName)),
               h('div', { className: 'past-meta' }, x.text)),
             h('div', { className: 'past-actions' },
-              asking ? h(A.Button, { variant: 'primary', icon: 'approve', loading: busy === x.id, onClick: function () { run(x.id, '/api/trust/apply', { id: x.id, confirmed: true }, { tone: 'success', title: 'Rule granted', text: x.rowLabel + ' for ' + x.agent }); } }, 'Confirm allow') : h(A.Button, { variant: 'quiet', icon: 'approve', onClick: function () { setSure(x.id); setErr(''); } }, 'Allow'),
-              asking ? h(A.Button, { variant: 'quiet', onClick: function () { setSure(null); } }, 'Cancel') : h(A.Button, { variant: 'quiet', icon: 'decline', loading: busy === x.id, onClick: function () { run(x.id, '/api/trust/dismiss', { id: x.id }); } }, 'Not now')));
+              asking ? h(A.Button, { variant: 'primary', icon: 'approve', loading: busy === x.id, onClick: function () { run(x.id, 'trustApply', { id: x.id, confirmed: true }, { tone: 'success', title: 'Rule granted', text: x.rowLabel + ' for ' + x.agent }); } }, 'Confirm allow') : h(A.Button, { variant: 'quiet', icon: 'approve', onClick: function () { setSure(x.id); setErr(''); } }, 'Allow'),
+              asking ? h(A.Button, { variant: 'quiet', onClick: function () { setSure(null); } }, 'Cancel') : h(A.Button, { variant: 'quiet', icon: 'decline', loading: busy === x.id, onClick: function () { run(x.id, 'trustDismiss', { id: x.id }); } }, 'Not now')));
         })) : h(A.EmptyState, { icon: 'security', compact: true, title: 'No proposals', text: 'A proposal shows after you approve the same kind of call five times with no decline.' }),
         h('h3', { className: 'ext-h' }, 'Rules you granted'),
         grants.length ? h('ul', { className: 'past' }, grants.map(function (g) {
           return h('li', { key: g.id, className: 'past-row' },
             h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h('b', null, grantName(g))), h('div', { className: 'past-meta' }, 'Granted ' + ago(g.at) + '. Withdraw puts the cell back as it was.')),
-            h('div', { className: 'past-actions' }, h(A.Button, { variant: 'quiet', icon: 'retry', loading: busy === g.id, onClick: function () { run(g.id, '/api/trust/withdraw', { id: g.id }, { tone: 'success', title: 'Rule withdrawn', text: grantName(g) }); } }, 'Withdraw')));
+            h('div', { className: 'past-actions' }, h(A.Button, { variant: 'quiet', icon: 'retry', loading: busy === g.id, onClick: function () { run(g.id, 'trustWithdraw', { id: g.id }, { tone: 'success', title: 'Rule withdrawn', text: grantName(g) }); } }, 'Withdraw')));
         })) : h('p', { className: 'note' }, 'No rule was granted from a proposal.'),
         h('h3', { className: 'ext-h' }, 'Trust per agent'),
         cards.length ? h('ul', { className: 'past' }, cards.map(function (c) {
@@ -177,17 +177,17 @@
     var te = useState(null), tform = te[0], setTform = te[1];   // the team template in the editor, or null
     var importRef = React.useRef(null);
     var fo = useState(p.folder || ''), folder = fo[0], setFolder = fo[1];   // where a character or a squad starts
-    function load() { call('/api/personas').then(function (r) { return r.json(); }).then(function (j) { setList(j.personas || {}); setTeams(j.teams || {}); }, function (x) { setList({}); setErr(x.message); }); }
+    function load() { client.get('personas').then(function (j) { setList(j.personas || {}); setTeams(j.teams || {}); }, function (x) { setList({}); setErr(x.message); }); }
     useEffect(load, []);
     // Start an agent from a character, or a squad from a team template (#152). Each agent gets its own room. A cost question or a refusal is shown, never skipped.
     function startAgent(r) {
       setBusy(true); setErr('');
-      api('/api/open', { persona: r.name, cwd: folder }).then(function () { setBusy(false); p.toast({ tone: 'success', title: 'Agent started', text: r.name }); },
+      client.open({ persona: r.name, cwd: folder }).then(function () { setBusy(false); p.toast({ tone: 'success', title: 'Agent started', text: r.name }); },
         function (x) { setBusy(false); setErr(x.message); });
     }
     function startSquad(t) {
       setBusy(true); setErr('');
-      api('/api/team/start', { team: t.name, cwd: folder }).then(function (j) {
+      client.teamStart({ team: t.name, cwd: folder }).then(function (j) {
         setBusy(false);
         var bad = (j.started || []).filter(function (m) { return m.error; });
         p.toast({ tone: bad.length ? 'error' : 'success', title: bad.length ? 'Squad started with problems' : 'Squad started', text: bad.length ? bad[0].name + ': ' + bad[0].error : t.name });
@@ -195,22 +195,22 @@
     }
     function addStarters() {
       setBusy(true); setErr('');
-      api('/api/persona/starters', {}).then(function (j) { setBusy(false); load(); p.toast({ tone: 'success', title: j.added ? 'Starters added' : 'No new starters', text: j.added ? 'Reviewer, Fixer, Researcher and a team.' : 'You have them all.' }); },
+      client.personaStarters({}).then(function (j) { setBusy(false); load(); p.toast({ tone: 'success', title: j.added ? 'Starters added' : 'No new starters', text: j.added ? 'Reviewer, Fixer, Researcher and a team.' : 'You have them all.' }); },
         function (x) { setBusy(false); setErr(x.message); });
     }
     function saveTeam() {
       setBusy(true); setErr('');
       var members = String(tform.members || '').split(',').map(function (m) { return m.trim(); }).filter(Boolean);
-      api('/api/team/save', { name: tform.name, members: members }).then(function () { setBusy(false); setTform(null); load(); p.toast({ tone: 'success', title: 'Team saved', text: tform.name }); },
+      client.teamSave({ name: tform.name, members: members }).then(function () { setBusy(false); setTform(null); load(); p.toast({ tone: 'success', title: 'Team saved', text: tform.name }); },
         function (x) { setBusy(false); setErr(x.message); });
     }
     function delTeam(name) {
       setBusy(true); setErr('');
-      api('/api/team/delete', { name: name }).then(function () { setBusy(false); load(); }, function (x) { setBusy(false); setErr(x.message); });
+      client.teamDelete({ name: name }).then(function () { setBusy(false); load(); }, function (x) { setBusy(false); setErr(x.message); });
     }
     // Export and import: one JSON file of the setup (characters, teams, floor layouts, wall screens). It holds no Security rules.
     function exportSetup() {
-      call('/api/custom/export').then(function (r) { return r.text(); }).then(function (t) {
+      client.text('customExport').then(function (t) {
         var url = URL.createObjectURL(new Blob([t], { type: 'application/json;charset=utf-8' }));
         var a = document.createElement('a');
         a.href = url; a.download = 'agent-office-setup.json';
@@ -223,7 +223,7 @@
       var f = e.target.files && e.target.files[0]; e.target.value = '';
       if (!f) return;
       setBusy(true); setErr('');
-      f.text().then(function (t) { return api('/api/custom/import', { data: JSON.parse(t) }); }).then(function (j) {
+      f.text().then(function (t) { return client.customImport({ data: JSON.parse(t) }); }).then(function (j) {
         setBusy(false); load(); p.toast({ tone: 'success', title: 'Setup imported', text: j.personas + ' characters, ' + j.teams + ' teams' });
       }, function (x) { setBusy(false); setErr(x instanceof SyntaxError ? 'This file is not JSON.' : x.message); });
     }
@@ -234,12 +234,12 @@
     function set(k) { return function (v) { var n = Object.assign({}, form); n[k] = v; setForm(n); }; }
     function save() {
       setBusy(true); setErr('');
-      api('/api/persona/save', form).then(function () { setBusy(false); setForm(null); load(); p.toast({ tone: 'success', title: 'Character saved', text: form.name }); },
+      client.personaSave(form).then(function () { setBusy(false); setForm(null); load(); p.toast({ tone: 'success', title: 'Character saved', text: form.name }); },
         function (x) { setBusy(false); setErr(x.message); });
     }
     function del(name) {
       setBusy(true); setErr('');
-      api('/api/persona/delete', { name: name }).then(function () { setBusy(false); setForm(null); load(); p.toast({ tone: 'success', title: 'Character removed', text: name }); },
+      client.personaDelete({ name: name }).then(function () { setBusy(false); setForm(null); load(); p.toast({ tone: 'success', title: 'Character removed', text: name }); },
         function (x) { setBusy(false); setErr(x.message); });
     }
     function look(r) { var l = PV.lookOf(r, colors) || {}; return { shape: l.shape || 'blob', color: l.color || colors[0] }; }
@@ -324,9 +324,9 @@
     var er = useState(''), err = er[0], setErr = er[1];
     var bz = useState(false), busy = bz[0], setBusy = bz[1];
     var since = useState(awaySince)[0];
-    useEffect(function () { call('/api/recap?since=' + since).then(function (x) { return x.json(); }).then(setR, function (x) { setErr(x.message); }); }, []);
+    useEffect(function () { client.get('recap', { since: since }).then(setR, function (x) { setErr(x.message); }); }, []);
     function close() { awayMark(); p.onClose(); }
-    function focus(on) { setBusy(true); api('/api/settings/focus', { on: on }).then(function () { setBusy(false); setR(Object.assign({}, r, { focus: on })); p.toast({ tone: 'info', title: on ? 'Focus mode is on' : 'Focus mode is off', text: on ? 'Sound, motion and rituals are off.' : 'Rituals are back.' }); }, function (x) { setBusy(false); setErr(x.message); }); }
+    function focus(on) { setBusy(true); client.settingsFocus({ on: on }).then(function () { setBusy(false); setR(Object.assign({}, r, { focus: on })); p.toast({ tone: 'info', title: on ? 'Focus mode is on' : 'Focus mode is off', text: on ? 'Sound, motion and rituals are off.' : 'Rituals are back.' }); }, function (x) { setBusy(false); setErr(x.message); }); }
     var m = r && r.metrics;
     function num(v, unit) { return v == null ? 'No data yet' : v + (unit || ''); }
     function row(k, title, meta) { return h('li', { key: k, className: 'past-row' }, h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h('b', null, title)), meta ? h('div', { className: 'past-meta' }, meta) : null)); }
@@ -351,7 +351,7 @@
 
   // ---------- the Reception (#92): the archetype memo, the floors, the office's actions, the tour ----------
   // The reception memo and the directory board in the lobby open it, and so does Ctrl+K. Each floor change is one call
-  // (POST /api/layout). A rename shows in place; a switch, an added, hidden or moved floor builds the scene again.
+  // (the layout command). A rename shows in place; a switch, an added, hidden or moved floor builds the scene again.
   function aName(n) { return (/^[AEIOU]/.test(String(n)) ? 'an ' : 'a ') + n; }
   function ReceptionDialog(p) {
     var snap = useSnapshot();
@@ -364,7 +364,7 @@
     function change(body, done) {
       var key = body.action + ':' + (body.floor || body.archetype || '');
       setBusy(key); setErr('');
-      api('/api/layout', Object.assign({ building: p.repo }, body)).then(function () { setBusy(''); if (done) done(); }, function (x) { setBusy(''); setErr(x.message); });
+      client.layout(Object.assign({ building: p.repo }, body)).then(function () { setBusy(''); if (done) done(); }, function (x) { setBusy(''); setErr(x.message); });
     }
     if (!lay) return h(A.Dialog, { open: true, title: 'Reception', onClose: p.onClose, actions: [h(A.Button, { key: 'c', variant: 'quiet', onClick: p.onClose }, 'Close')] },
       h(A.EmptyState, { icon: 'building', compact: true, title: 'No floors yet', text: 'The office has not read this building yet. Open a session in it first.' }));
