@@ -113,23 +113,8 @@
   function stroke(p, x, y, w, h, c, lw, r) { p.items.push({ t: 'stroke', x: x, y: y, w: w, h: h, c: c, lw: lw || 3, r: r || 0 }); }
   function text(p, x, y, s, c, str, o) { o = o || {}; p.items.push({ t: 'text', x: x, y: y, s: s, c: c, text: String(str), wt: o.wt || 400, align: o.align || 'left', maxW: o.maxW || 0, mono: !!o.mono }); }
   function hot(p, h) { p.hots.push(h); return h; }
-  // Wrapping. Node has no canvas to measure text, so the plan wraps by a safe estimate of the width of a character: a share of
-  // the font size (IBM Plex Sans, checked against the browser's measureText in the screenshots: the average English text is
-  // about 0.48 em at 400 and 0.52 at 600). The share is higher than that on purpose, so a line the plan makes fits in the
-  // browser and the paint's ellipsis (clipW) never cuts a reason. One rule for the plan and for the test.
-  function charW(size, wt) { return size * (wt >= 600 ? 0.6 : 0.56); }
-  // The size a one-line word in a column takes: s, or smaller so that it fits maxW by the same estimate (six agent kinds make
-  // the columns narrower, #24), with 5 % more room than charW, so the paint's ellipsis never cuts it. Never under 14 px.
-  function fit(str, s, maxW, wt) { var n = String(str).length; return n ? Math.max(14, Math.min(s, Math.floor(maxW / (n * charW(1, wt) * 1.08)))) : s; }
-  function wrap(str, size, maxW, wt) {
-    var cap = Math.max(1, Math.floor(maxW / charW(size, wt))), lines = [], cur = '';
-    String(str).split(/\s+/).filter(Boolean).forEach(function (w) {
-      while (w.length > cap) { if (cur) { lines.push(cur); cur = ''; } lines.push(w.slice(0, cap)); w = w.slice(cap); }
-      if (!cur) cur = w; else if (cur.length + 1 + w.length <= cap) cur += ' ' + w; else { lines.push(cur); cur = w; }
-    });
-    if (cur) lines.push(cur);
-    return lines;
-  }
+  // Wrapping and fitting by the estimate of a character's width: OfficeScreenKit (charW, fitSize, wrapEst), one rule for the plan and the test.
+  var Kit = root.OfficeScreenKit, charW = Kit.charW, fit = Kit.fitSize, wrap = Kit.wrapEst, wrapAll = Kit.wrapEstAll;
   // Paint wrapped lines, the first baseline at y, lh apart. Returns the baseline after the last line.
   function para(p, x, y, s, lh, c, list, o) {
     list.forEach(function (l, i) { text(p, x, y + i * lh, s, c, l, Object.assign({}, o)); });
@@ -361,7 +346,6 @@
     });
     return order.map(function (k) { var x = by[k]; return x.word + (onlyCol ? '' : ' for ' + x.cols.join(', ')) + '. ' + x.why; });
   }
-  function wrapAll(list, size, maxW, wt) { var out = []; list.forEach(function (t) { out = out.concat(wrap(t, size, maxW, wt)); }); return out; }
 
   // The painted Confirm at the bottom of a screen: the change, what it is for, Confirm and Cancel. big: the paged view. The
   // texts wrap in the room the buttons leave, and the band grows with them (a long Confirm, like Allow on Shell commands).
@@ -651,7 +635,7 @@
     if (!T || !host || !st) return { open: function () { return false; }, refresh: function () {}, dispose: function () {} };
     var K = st.K, dead = false, room = null, items = [], views = {}, scope = 'office', edit = null, lastTok = K.tok, busy = false;
     function tk(k) { return K.tok[k]; }
-    function mix(a, b, t) { try { return '#' + new T.Color(a).lerp(new T.Color(b), t).getHexString(); } catch (e) { return a; } }
+    var mix = Kit.mix, rr = Kit.rr;
     // Tone names to token colors. The face is scene-dark: text is the bubble color, status tones mix into the face.
     function colors() { return toneColors(tk, mix); }
     function viewOf(it) {
@@ -662,27 +646,13 @@
         hover: focused ? v.hover : null, busy: busy, note: v.note, section: v.section || 'kinds', hqPage: v.hqPage || 0 };
     }
     function keyOf(it) { return 'security:' + it.screen; }
-    function newTex(w, h) {
-      var cv = document.createElement('canvas'); cv.width = w; cv.height = h;
-      var tex = new T.CanvasTexture(cv); tex.encoding = T.sRGBEncoding; tex.anisotropy = 4;
-      return { canvas: cv, tex: tex };
-    }
     function take(mesh, w, h) {   // our picture on the engine's screen plane (its own picture is freed)
-      var t = newTex(w, h), mt = mesh.material;
+      var t = Kit.newTex(w, h), mt = mesh.material;
       if (mt.map && mt.map !== t.tex) mt.map.dispose();
       mt.map = t.tex; mt.emissive = new T.Color(0xffffff); mt.emissiveMap = t.tex; mt.emissiveIntensity = 0.5; mt.needsUpdate = true;
       return t;
     }
-    function rr(c, x, y, w, h, r) {
-      r = Math.min(r, w / 2, h / 2);
-      c.beginPath(); c.moveTo(x + r, y); c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r); c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
-    }
-    function clipW(c, s, maxW) {
-      s = String(s || '');
-      if (!maxW || c.measureText(s).width <= maxW) return s;
-      while (s.length > 1 && c.measureText(s + '…').width > maxW) s = s.slice(0, -1);
-      return s + '…';
-    }
+    function clipText(c, s, maxW) { return maxW ? Kit.clip(c, s, maxW) : String(s || ''); }
     function paint(c, p) {
       var col = colors(), f = K.f || {}, sl = !!K.caps;
       p.items.forEach(function (d) {
@@ -700,7 +670,7 @@
         else if (d.t === 'text') {
           c.fillStyle = cc; c.textAlign = d.align; c.textBaseline = 'alphabetic';
           c.font = d.wt + ' ' + d.s + 'px ' + (d.mono ? f.mono || 'monospace' : f.sans || 'sans-serif');
-          c.fillText(clipW(c, sl && d.s >= 56 ? d.text.toUpperCase() : d.text, d.maxW), d.x, d.y);
+          c.fillText(clipText(c, sl && d.s >= 56 ? d.text.toUpperCase() : d.text, d.maxW), d.x, d.y);
         }
       });
       c.textAlign = 'left';

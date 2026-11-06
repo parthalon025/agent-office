@@ -16,6 +16,7 @@
    camera: the host flies. Colors come from DS tokens (K.tok) through FACES. Ctrl+K reaches every action (paletteActions). */
 (function (root) {
   'use strict';
+  var Kit = root.OfficeScreenKit;
 
   // ---------- pure ----------
   var HIT = 44;       // the least hit area of a control, in px
@@ -132,18 +133,6 @@
     var SH = root.OfficeSceneHost.pure, V3 = new T.Vector3(), BX = new T.Box3();
     var W = 640, H = 480;   // the paper's canvas (4:3)
 
-    function font(px, weight, mono) { var f = K.f || {}; return (weight || 500) + ' ' + px + 'px ' + (mono ? f.mono || 'monospace' : f.sans || 'sans-serif'); }
-    function newTex(w, h) { var cv = document.createElement('canvas'); cv.width = w; cv.height = h; var tex = new T.CanvasTexture(cv); tex.encoding = T.sRGBEncoding; tex.anisotropy = 4; return { canvas: cv, tex: tex }; }
-    function wrap(c, text, max, lines) {
-      var out = [], line = '', words = String(text || '').split(/\s+/);
-      for (var i = 0; i < words.length; i++) {
-        var t = line ? line + ' ' + words[i] : words[i];
-        if (line && c.measureText(t).width > max) { out.push(line); line = words[i]; if (out.length === lines) break; } else line = t;
-      }
-      if (line && out.length < lines) out.push(line);
-      var cut = out.length === lines && words.join(' ').length > out.join(' ').length;
-      return out.map(function (l, i) { var s = l; while (s.length > 1 && c.measureText(s + (cut && i === lines - 1 ? '…' : '')).width > max) s = s.slice(0, -1); return s + (cut && i === lines - 1 ? '…' : ''); });
-    }
     function stamp(c, ctl, w, h, hot) {
       var r = ctl.rect, x = r.x * w, y = (1 - r.y - r.h) * h, bw = r.w * w, bh = r.h * h, F = FACES.stamp, tok = K.tok;
       c.fillStyle = ctl.tone === 'go' ? tok[F.face] : tok[FACES.paper.face];
@@ -151,7 +140,7 @@
       c.lineWidth = hot ? 10 : 6;
       c.beginPath(); c.rect(x, y, bw, bh); c.fill(); c.stroke();
       c.fillStyle = ctl.tone === 'go' ? tok[F.ink] : tok[FACES.paper.ink];
-      c.font = font(Math.round(bh * 0.46), 700); c.textBaseline = 'middle'; c.textAlign = 'center';
+      c.font = Kit.font(K, Math.round(bh * 0.46), 700); c.textBaseline = 'middle'; c.textAlign = 'center';
       c.fillText(ctl.label, x + bw / 2, y + bh / 2 + 2); c.textAlign = 'left';
     }
     function paintPaper(it) {
@@ -163,14 +152,14 @@
       c.fillStyle = tok[F.ink]; c.textBaseline = 'top';
       var tx = paperText(p), left = timeLeft(p.until, now), stage = stages[p.id] === 'confirm';
       var lw = 0;
-      if (left) { c.font = font(28, 600, true); lw = c.measureText(left).width + 20; c.textAlign = 'right'; c.fillText(left, W - 28, 36); c.textAlign = 'left'; }
-      c.font = font(34, 700); c.fillText(wrap(c, tx.head, W - 56 - lw, 1)[0] || '', 28, 34);
+      if (left) { c.font = Kit.font(K, 28, 600, true); lw = c.measureText(left).width + 20; c.textAlign = 'right'; c.fillText(left, W - 28, 36); c.textAlign = 'left'; }
+      c.font = Kit.font(K, 34, 700); c.fillText(Kit.wrap(c, tx.head, W - 56 - lw, { lines: 1, clip: '' })[0] || '', 28, 34);
       var sp = spent(p, now);
       if (left) { c.fillRect(28, 78, (W - 56) * (1 - sp), 6); }
-      c.font = font(30, 500);
-      var y = 100, lines = stage ? ['This request is high risk. Confirm to approve it.'] : wrap(c, tx.body, W - 56, narrow ? 2 : 3);
+      c.font = Kit.font(K, 30, 500);
+      var y = 100, lines = stage ? ['This request is high risk. Confirm to approve it.'] : Kit.wrap(c, tx.body, W - 56, { lines: narrow ? 2 : 3, clip: '' });
       lines.forEach(function (l) { c.fillText(l, 28, y); y += 38; });
-      if (!stage && tx.reason && !narrow) { c.font = font(24, 500); wrap(c, tx.reason, W - 56, 1).forEach(function (l) { c.fillText(l, 28, y + 2); }); }
+      if (!stage && tx.reason && !narrow) { c.font = Kit.font(K, 24, 500); Kit.wrap(c, tx.reason, W - 56, { lines: 1, clip: '' }).forEach(function (l) { c.fillText(l, 28, y + 2); }); }
       plan(p, stage ? 'confirm' : 'ask', narrow).forEach(function (ctl) { stamp(c, ctl, W, H, hover === it && hoverCtl === ctl.id); });
       it.tex.needsUpdate = true;
     }
@@ -180,17 +169,17 @@
       c.fillStyle = tok[F.band]; c.fillRect(0, 0, W, 16);
       c.strokeStyle = tok[F.ink]; c.lineWidth = 6; c.strokeRect(3, 3, W - 6, H - 6);
       c.fillStyle = tok[F.ink]; c.textBaseline = 'top';
-      c.font = font(34, 700); c.fillText(n.bot + ' asks', 28, 34);
-      c.font = font(32, 500); var y = 100;
-      wrap(c, n.text, W - 56, 5).forEach(function (l) { c.fillText(l, 28, y); y += 42; });
-      c.font = font(26, 600); c.fillText(hover === it ? 'Click again to answer' : 'Click to read and answer', 28, H - 56);
+      c.font = Kit.font(K, 34, 700); c.fillText(n.bot + ' asks', 28, 34);
+      c.font = Kit.font(K, 32, 500); var y = 100;
+      Kit.wrap(c, n.text, W - 56, { lines: 5, clip: '' }).forEach(function (l) { c.fillText(l, 28, y); y += 42; });
+      c.font = Kit.font(K, 26, 600); c.fillText(hover === it ? 'Click again to answer' : 'Click to read and answer', 28, H - 56);
       it.tex.needsUpdate = true;
     }
     function paintKey(it) {
       var c = it.canvas.getContext('2d'), tok = K.tok, F = FACES.key, w = it.canvas.width, h = it.canvas.height;
       c.fillStyle = tok[F.face]; c.fillRect(0, 0, w, h);
       c.strokeStyle = tok[F.ink]; c.lineWidth = hover === it ? 8 : 4; c.strokeRect(2, 2, w - 4, h - 4);
-      c.fillStyle = tok[F.ink]; c.font = font(Math.round(h * 0.5), 700); c.textBaseline = 'middle'; c.textAlign = 'center';
+      c.fillStyle = tok[F.ink]; c.font = Kit.font(K, Math.round(h * 0.5), 700); c.textBaseline = 'middle'; c.textAlign = 'center';
       c.fillText('Pause', w / 2, h / 2 + 2); c.textAlign = 'left';
       it.tex.needsUpdate = true;
     }
@@ -198,7 +187,7 @@
 
     // ----- scene objects -----
     function makeMesh(kind, size, cw, ch) {
-      var t = newTex(cw, ch), mt = new T.MeshBasicMaterial({ map: t.tex, transparent: true, side: T.DoubleSide, toneMapped: false });
+      var t = Kit.newTex(cw, ch), mt = new T.MeshBasicMaterial({ map: t.tex, transparent: true, side: T.DoubleSide, toneMapped: false });
       mt.fog = false;
       var m = new T.Mesh(new T.PlaneGeometry(size[0], size[1]), mt);
       m.renderOrder = 800; m.layers.set(1); m.userData.noNav = 1; m.userData.deskObj = true; m.name = 'desk-' + kind;

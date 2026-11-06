@@ -4,6 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import '../public/scene-host.js';
+import '../public/screen-kit.js';
 import '../public/desk.js';
 
 const D = globalThis.OfficeDesk.pure, H = globalThis.OfficeSceneHost.pure;
