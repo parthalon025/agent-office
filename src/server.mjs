@@ -17,6 +17,7 @@ import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process'; // execFileSync: icacls for writeSecret
 import * as git from './git.mjs';
 import * as launch from './launch.mjs';
+import * as branchPort from './branch-port.mjs';
 import { createReader as createPrReader, readyEntries, mergeArgs } from './changes.mjs';
 import { slimPayload, cleanIds as cleanPaperclipIds } from './payload.mjs';
 import { createHq } from './paperclip.mjs';
@@ -56,7 +57,7 @@ const W = globalThis.OfficeWire;
 
 const ROOT = OFFICE_ROOT; // the repository root: runtime files, public/, components/, tokens.css, launch.ps1 (the code is in src/)
 const PUBLIC = path.join(ROOT, 'public');
-// OFFICE_PORT=branch: a port of this checkout's branch (git.branchPorts), so each worktree has its own. The first free
+// OFFICE_PORT=branch: a port of this checkout's branch (branchPort.branchPorts), so each worktree has its own. The first free
 // port of the name's fixed sequence is taken, and the start message says which one (#106). An office of this checkout on
 // any port of the sequence stops the start, and so does a sequence with no free port (see server.on('error')).
 // An office never takes another port than those of its sequence.
@@ -85,9 +86,9 @@ const BRANCH_PORT = process.env.OFFICE_PORT === 'branch'
       // then answers KEEP, and the message says so. A lasting failure throws its own cause (startPlace, #132).
       const loc = await git.startPlace(ROOT);
       if (loc === git.KEEP) throw new Error('git did not give the branch of this folder (it timed out, or the repository has no commit yet). Start the office again.');
-      name = git.checkoutName(loc);
+      name = branchPort.checkoutName(loc);
     } catch (e) { return stopAtStart(`Agent Office cannot pick a port for this folder: ${e.message}`); }
-    const r = await git.pickBranchPort(name, { isFree: portIsFree, isOwn: portIsOwn });
+    const r = await branchPort.pickBranchPort(name, { isFree: portIsFree, isOwn: portIsOwn });
     if (r.own) return stopAtStart(`Agent Office is already open on port ${r.own} for branch "${name}", from this folder. Nothing was changed.\nOpen that office, or stop it by the process id that owns its port (netstat -ano | findstr :${r.own}), never by image name.`);
     if (!r.port) return stopAtStart(`Agent Office stopped: no port is free for branch "${name}".\nThese ports are busy: ${r.busy.join(', ')}. Nothing was changed, and no other port was tried.\nFind a process id with: netstat -ano | findstr :<port>. Stop that process by its id, never by image name.`);
     return { name, port: r.port, busy: r.busy };

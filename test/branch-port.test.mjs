@@ -10,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import * as git from '../src/git.mjs';
+import * as bp from '../src/branch-port.mjs';
 import * as launch from '../src/launch.mjs';
 import { officeFiles } from '../src/files.mjs';
 import { pageFile } from '../src/auth.mjs';
@@ -20,24 +20,24 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const win = process.platform === 'win32';
 
 test('branchPort: same name, same port; always inside 4330-4399; never 4317', () => {
-  assert.equal(git.BRANCH_PORT_MIN, 4330);
-  assert.equal(git.BRANCH_PORT_MAX, 4399);
+  assert.equal(bp.BRANCH_PORT_MIN, 4330);
+  assert.equal(bp.BRANCH_PORT_MAX, 4399);
   const names = ['main', 'chore/port-per-branch', 'fix/55-64-66-small-layout', 'agent-a24e3e08d03fba8dc', 'detached', 'a', 'Ünï/çödé', '', ' '];
   for (let i = 0; i < 500; i++) names.push('feature/' + i, 'worktree-agent-' + (i * 7919).toString(16));
   for (const n of names) {
-    const p = git.branchPort(n);
+    const p = bp.branchPort(n);
     assert.ok(Number.isInteger(p) && p >= 4330 && p <= 4399, `${n} -> ${p}`);
     assert.notEqual(p, 4317);
-    assert.equal(git.branchPort(n), p, 'stable for ' + n);
+    assert.equal(bp.branchPort(n), p, 'stable for ' + n);
   }
   // Fixed values: the same on every machine and every release. Changing the hash moves every branch, so this fails on purpose.
-  const spread = new Set(names.map(git.branchPort));
+  const spread = new Set(names.map(bp.branchPort));
   assert.ok(spread.size > 60, 'the hash uses the range: ' + spread.size);
 });
 
 test('branchPort pins known values', () => {
   assert.deepEqual(
-    ['main', 'chore/port-per-branch', 'fix/60-hide-agent-token'].map(git.branchPort),
+    ['main', 'chore/port-per-branch', 'fix/60-hide-agent-token'].map(bp.branchPort),
     PINNED,
   );
 });
@@ -45,18 +45,18 @@ const PINNED = [4392, 4355, 4354];
 
 test('branchPorts: a fixed sequence per name, the first is branchPort, no repeats, inside the range', () => {
   for (const n of ['main', 'feat/20-agent-kinds-ui', 'fix/79-toast-stack-400', 'x', '']) {
-    const seq = git.branchPorts(n);
-    assert.equal(seq.length, git.BRANCH_PORT_TRIES);
-    assert.equal(seq[0], git.branchPort(n));
+    const seq = bp.branchPorts(n);
+    assert.equal(seq.length, bp.BRANCH_PORT_TRIES);
+    assert.equal(seq[0], bp.branchPort(n));
     assert.equal(new Set(seq).size, seq.length, 'no repeat for ' + n);
     assert.ok(seq.every((p) => p >= 4330 && p <= 4399 && p !== 4317));
-    assert.deepEqual(git.branchPorts(n), seq, 'stable for ' + n);
-    assert.deepEqual(git.branchPorts(n, 3), seq.slice(0, 3));
+    assert.deepEqual(bp.branchPorts(n), seq, 'stable for ' + n);
+    assert.deepEqual(bp.branchPorts(n, 3), seq.slice(0, 3));
   }
-  assert.equal(git.branchPorts('a', 1000).length, 70, 'never more than the range');
-  assert.equal(git.branchPorts('a', 0).length, 1);
+  assert.equal(bp.branchPorts('a', 1000).length, 70, 'never more than the range');
+  assert.equal(bp.branchPorts('a', 0).length, 1);
   // The sequence wraps at the end of the range.
-  const wrap = Array.from({ length: 400 }, (_, i) => git.branchPorts('w' + i)).find((q) => q[0] === 4399);
+  const wrap = Array.from({ length: 400 }, (_, i) => bp.branchPorts('w' + i)).find((q) => q[0] === 4399);
   assert.ok(wrap && wrap[1] === 4330, 'wraps from 4399 to 4330');
 });
 
@@ -64,29 +64,29 @@ test('branchPorts: a fixed sequence per name, the first is branchPort, no repeat
 const sameFirst = (() => {
   const seen = new Map();
   for (let i = 0; ; i++) {
-    const n = 'fix/' + i, p = git.branchPort(n);
+    const n = 'fix/' + i, p = bp.branchPort(n);
     if (seen.has(p)) return [seen.get(p), n];
     seen.set(p, n);
   }
 })();
-const pick = (name, busy, own = []) => git.pickBranchPort(name, { isFree: async (p) => !busy.includes(p), isOwn: async (p) => own.includes(p) });
+const pick = (name, busy, own = []) => bp.pickBranchPort(name, { isFree: async (p) => !busy.includes(p), isOwn: async (p) => own.includes(p) });
 
 test('pickBranchPort: two names with the same first port get different ports', async () => {
   const [a, b] = sameFirst;
-  assert.equal(git.branchPort(a), git.branchPort(b));
+  assert.equal(bp.branchPort(a), bp.branchPort(b));
   const first = await pick(a, []);
-  assert.equal(first.port, git.branchPort(a));
+  assert.equal(first.port, bp.branchPort(a));
   assert.deepEqual(first.busy, []);
   const second = await pick(b, [first.port]); // the office of a holds it
-  assert.equal(second.port, git.branchPorts(b)[1]);
+  assert.equal(second.port, bp.branchPorts(b)[1]);
   assert.notEqual(second.port, first.port);
   assert.deepEqual(second.busy, [first.port]);
-  const third = await pick('fix/third', git.branchPorts('fix/third').slice(0, 2));
-  assert.equal(third.port, git.branchPorts('fix/third')[2]);
+  const third = await pick('fix/third', bp.branchPorts('fix/third').slice(0, 2));
+  assert.equal(third.port, bp.branchPorts('fix/third')[2]);
 });
 
 test('pickBranchPort: never takes a port an office of this checkout holds, and never leaves the sequence', async () => {
-  const seq = git.branchPorts('main');
+  const seq = bp.branchPorts('main');
   const own = await pick('main', [seq[0]], [seq[0]]);
   assert.equal(own.port, null);
   assert.equal(own.own, seq[0]);
@@ -112,10 +112,10 @@ test('pickBranchPort: never takes a port an office of this checkout holds, and n
 });
 
 test('checkoutName: the branch, or the worktree folder name when HEAD is detached', () => {
-  assert.equal(git.checkoutName({ branch: 'chore/x', root: 'E:\\a\\b\\wt1' }), 'chore/x');
-  assert.equal(git.checkoutName({ branch: 'detached', root: 'E:\\a\\b\\wt1' }), 'wt1');
-  assert.equal(git.checkoutName({ branch: 'detached', root: '/a/b/wt2/' }), 'wt2');
-  assert.throws(() => git.checkoutName(null), /not in a git repository/i);
+  assert.equal(bp.checkoutName({ branch: 'chore/x', root: 'E:\\a\\b\\wt1' }), 'chore/x');
+  assert.equal(bp.checkoutName({ branch: 'detached', root: 'E:\\a\\b\\wt1' }), 'wt1');
+  assert.equal(bp.checkoutName({ branch: 'detached', root: '/a/b/wt2/' }), 'wt2');
+  assert.throws(() => bp.checkoutName(null), /not in a git repository/i);
 });
 
 const sh = (args, cwd) => execFileSync(launch.resolveExe('git'), ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd, stdio: 'pipe' });
@@ -125,7 +125,7 @@ async function freeName() {
   for (let i = 0; i < 300; i++) {
     const name = 'test/port-check-' + process.pid + '-' + i;
     const held = [];
-    try { for (const p of git.branchPorts(name)) held.push(await holdPort(p)); } catch { for (const s of held) s.close(); continue; }
+    try { for (const p of bp.branchPorts(name)) held.push(await holdPort(p)); } catch { for (const s of held) s.close(); continue; }
     for (const s of held) await close(s);
     return name;
   }
@@ -153,7 +153,7 @@ test('OFFICE_PORT=branch: the office takes the first free port of its sequence, 
   fs.mkdirSync(lad);
   copyOffice(dir);
   const branch = await freeName();
-  const seq = git.branchPorts(branch);
+  const seq = bp.branchPorts(branch);
   sh(['init', '-b', branch], dir);
   sh(['commit', '--allow-empty', '-m', 'x'], dir);
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toLowerCase() !== 'path'));
