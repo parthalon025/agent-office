@@ -1,4 +1,4 @@
-// The page features of #184 (schedules, extensions, hq, characters, reception): each public/<name>.js runs in a VM with the DS
+// The page features of #184 (schedules, extensions, hq, characters, reception, skills, merge, the pinned screens, needs): each public/<name>.js runs in a VM with the DS
 // bundle, the vendored React and a page core of stand-ins, and is tested through its Interface on window.OfficePage.
 // Changes (#183) has its own test file. No DOM, no browser, no server.
 import test from 'node:test';
@@ -26,6 +26,9 @@ const SHAPES = {
   'extensions.js': ['Extensions', ['Dialog']],
   'hq.js': ['Hq', ['Hq', 'Manager', 'Trust']],
   'characters.js': ['Characters', ['Dialog']],
+  'skills.js': ['Skills', ['Dialog']],
+  'merge.js': ['Merge', ['Flow', 'Row', 'use']],
+  'screens.js': ['Screens', ['Desk', 'Note']],
   'reception.js': ['Reception', ['Recap', 'Reception', 'TourCard', 'setTourSeen', 'tourSeen']],
 };
 
@@ -59,4 +62,14 @@ test('the page files load in an order where each feature file comes after page-c
     assert.ok(at('page-core.js') < at(f) && at(f) < at('office.js'), f);
   }
   assert.equal(html.includes('dialogs-extra.js'), false);
+});
+
+test('needs.js: the Interface is OfficePage.Needs, and the paper flow and the pinned screens moved out of the shared namespace', () => {
+  const { O } = load('needs.js');
+  assert.deepEqual(Object.keys(O.Needs).sort(), ['Dialog', 'PHONE_MAX', 'Phone', 'openPalette']);
+  assert.equal(typeof O.Needs.PHONE_MAX, 'number');
+  for (const k of ['Dialog', 'Phone', 'openPalette']) assert.equal(typeof O.Needs[k], 'function', k);
+  for (const old of ['FlowDialog', 'NeedsDialog', 'PhoneView', 'PHONE_MAX', 'openPalette', 'DeskScreen', 'NoteScreen', 'SkillsDialog']) {
+    assert.equal(Object.prototype.hasOwnProperty.call(O, old), false, old);
+  }
 });

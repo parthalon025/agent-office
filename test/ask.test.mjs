@@ -62,7 +62,7 @@ test('no route builds a confirm answer by hand, and no page reads one by hand', 
   const code = (f) => readFileSync(join(root, f), 'utf8').split(/\r?\n/).filter((l) => !/^\s*\/\//.test(l)).join('\n');
   const server = ['src/server.mjs', 'src/office.mjs', 'src/office-core.mjs', 'src/schedules.mjs', 'src/room-awareness.mjs'].map(code).join('\n');
   assert.doesNotMatch(server, /e\.confirm\s*=|confirm:\s*'(merge|fork|skill|goal|handoff|cost)'\s*[,}]|e\.question\s*=/, 'server asks through askFirst');
-  for (const f of ['page-core.js', 'dialogs.js', 'schedules.js', 'extensions.js', 'hq.js', 'characters.js', 'reception.js', 'needs.js', 'panels.js', 'changes.js', 'office.js']) {
+  for (const f of ['page-core.js', 'skills.js', 'dialogs.js', 'schedules.js', 'extensions.js', 'hq.js', 'characters.js', 'reception.js', 'needs.js', 'panels.js', 'changes.js', 'screens.js', 'merge.js', 'office.js']) {
     const src = readFileSync(join(root, 'public', f), 'utf8');
     assert.doesNotMatch(src, /\.confirm\s*===\s*'(merge|fork|skill|goal|handoff|cost|pr|rm)'/, f + ' reads through OfficeAsk');
   }
