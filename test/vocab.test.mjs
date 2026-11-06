@@ -248,7 +248,7 @@ test('the agent kind word: the label of the session\'s kind, from the snapshot\'
   assert.equal(V.kindWord(null, kinds), '');
 });
 
-// The agent kinds of the Open dialog, a room's Add agent and the Agent kinds view (office.js reads these).
+// The agent kinds of the Open dialog, a room's Add agent and the Agent kinds view (page-core.js and dialogs.js read these).
 const CC = { kind: 'claude-code', label: 'Claude Code', paid: true, terminal: true, modes: ['default', 'plan', 'acceptEdits'], needsModel: false, models: [{ id: 'opus', label: 'Opus' }] };
 const OL = { kind: 'ollama', label: 'Ollama', paid: false, terminal: false, modes: [], needsModel: true, models: [{ id: 'qwen' }, { id: 'llama', label: 'Llama' }] };
 const FALL = [{ value: '', label: 'Default' }, { value: 'opus', label: 'Opus' }];

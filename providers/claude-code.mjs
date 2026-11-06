@@ -18,7 +18,7 @@ export const MODEL_RE = /^(opus|sonnet|haiku|claude-[\w.-]+)$/;
 export const MODES = new Set(['default', 'acceptEdits', 'plan']);
 const MAX_ATTACH_CHARS = 9_000_000; // base64 characters across all attachments of one message
 // The Open dialog and a room's Add agent read this list through models() (GET /api/providers). The page still has its own
-// copy (public/office.js MODELS) for the schedule form, the dock's model switch, the model word, and those two forms
+// copy (public/page-core.js MODELS) for the schedule form, the dock's model switch, the model word, and those two forms
 // until the server answers (#101).
 const MODELS = [
   { id: 'opus', label: 'Opus' }, { id: 'sonnet', label: 'Sonnet' }, { id: 'haiku', label: 'Haiku' }, { id: 'claude-fable-5-1', label: 'Fable' },
