@@ -34,6 +34,7 @@ import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, clea
 import { detect, newRecord, cleanRecord, edit as editLayout, layoutView, shownFloors, catalogView, functionOf } from './archetypes.mjs';
 import * as startup from './startup.mjs';
 import { createManager, createPlanBoard, officeSource } from './manager.mjs';
+import { setPersona, removePersona, personaOf, stylePrompt } from './personas.mjs';
 import { createNotes, cleanPin, PIN_MAX, NOTES_MAX, AGENT_WRITE_MAX } from './notes.mjs';
 import { createSkills } from './skills.mjs';
 import { cleanRules, setRule, decide, preToolDecision, permissionModeFor, openRefusal, costAsk, enforcement, addCost, costThisMonth } from './security.mjs';
@@ -862,6 +863,7 @@ function askUser(s, question) {
 // notes.mjs owns the rules (versions, merge, caps); this file only calls it and saves the maps.
 // An agent changes only its own room: the room comes from the calling session, never from the arguments.
 persisted.notes = persisted.notes || {};
+persisted.personas = persisted.personas && typeof persisted.personas === 'object' ? persisted.personas : {}; // agent character (#150), by agent name
 persisted.pins = persisted.pins || {};
 const board = createNotes({ notes: persisted.notes, pins: persisted.pins });
 for (const e of Object.values(persisted.notes)) if (!Number.isInteger(e.v)) e.v = 1; // notes saved before versions were counters
@@ -1180,7 +1182,8 @@ function openHeadless(provider, { cwd, name, prompt, worktree = null, budget = n
     commands: known?.commands || [], skills: known?.skills || [], costUnknown, supervision, deskRole });
   placeSession(s, true);
   if (prior) { s.replies = prior.replies || []; s.replySeq = s.replies.reduce((n, r) => Math.max(n, r.id || 0), 0); s.costBase = prior.cost || 0; s.cost = prior.cost || null; s.turns = prior.turns || 0; s.prompt = prior.prompt || ''; }
-  provider.open(s, { model, permissionMode, budget, resume, fork });
+  // The persona's style is the tone of the system prompt only (#150). The Security room never reads it.
+  provider.open(s, { model, permissionMode, budget, resume, fork, tone: stylePrompt(personaOf(persisted.personas, name)) });
   if (!worktree) rememberDir(cwd); // a worktree folder is an implementation detail, not a place to start from
   addFeed(s, 'start', fork ? `forked from ${prior?.name || 'a past session'}, in a new worktree on branch ${worktree?.branch}` : resume ? 'reopened in the office' : worktree ? `started in the office on branch ${worktree.branch}` : 'started in the office');
   if (asked && permissionMode !== asked) addFeed(s, 'start', `opened in ${permissionMode} permission mode, not ${asked}: the Security room has Ask rules`);
@@ -1812,6 +1815,7 @@ const server = http.createServer(async (req, res) => {
         hooksMode, claudeVersion: CLAUDE_VERSION, templates: persisted.templates, schedules: persisted.schedules, spendLimit: defaultSpend(),
       });
     }
+    if (req.method === 'GET' && url.pathname === '/api/personas') return send(res, 200, { personas: persisted.personas });
     if (req.method !== 'POST') return send(res, 404, { error: 'Not found' });
 
     const body = await readBody(req);
@@ -1841,6 +1845,8 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/launch-link') return send(res, 200, { url: auth.launchUrl(PORT, launchCodes.mint()) }); // a second npm start asks for one
     if (url.pathname === '/api/probe-http') return send(res, 200, await probeHttp());
+    if (url.pathname === '/api/persona/save') { const p = setPersona(persisted.personas, String(body.name || ''), body); savePersisted(); return send(res, 200, { ok: true, persona: p }); }
+    if (url.pathname === '/api/persona/delete') { removePersona(persisted.personas, String(body.name || '')); savePersisted(); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/notes/save') {
       // the notes board of a room: the user's own reminders, kept in state.json
       const key = String(body.key || '');

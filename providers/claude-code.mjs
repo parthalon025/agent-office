@@ -199,6 +199,8 @@ export function createClaudeCode(deps) {
       const args = [...HEADLESS, ...baseArgs(o)];
       if (o.resume) args.push('--resume', o.resume);
       if (o.budget) args.push('--max-budget-usd', String(o.budget));
+      // The persona's tone line (#150): text only, an argument list entry, never a permission flag.
+      if (o.tone) args.push('--append-system-prompt', String(o.tone));
       const child = spawn(file, args, {
         cwd: s.cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...env, OFFICE_ID: s.officeId },
