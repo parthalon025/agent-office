@@ -125,21 +125,23 @@ Copy `kit/part.js`. Build meshes with `A.office.Parts` helpers inside a workstat
 
 ## Add a theme
 
-A theme is one contract. `test/theme-contract.test.mjs` reads the theme list from `tokens.json` and checks every part below for every theme, so a new theme is checked as soon as it is in `tokens.json`. A failure names the theme, the part and the file that owns it. Work down this list, in this order, until the suite passes. Do not add a theme to a test by hand.
+A theme is a token set plus a component set. Add the parts below in this order. `test/skin.test.mjs` checks the same parts in the same order, in the same way for every theme of `tokens.json`, and names the part that is missing: "<theme>: <part> missing or wrong (<file>)". Follow the list until the test passes. Leave the tests as they are: the new theme is checked as soon as it is in `tokens.json`.
 
-1. **Theme entry.** Add `{ "id", "name" }` to `color.themes` in `tokens.json`. The id is the `data-theme` value. A variant of a theme takes the id `<family>-<variant>` (Fluent Dark is `fluent-dark`).
-2. **Colors and shadow.** Give every color token and `shadow-panel` a value for the theme in `tokens.json`. An alias `{token}` must name a token that exists.
-3. **Light and effects.** Add `light-<look>-sky|sun|lamp` and `fx-bloom|threshold|exposure|fog|vignette-<look>` to `tokens.json`. A theme with its own faces or corners also adds `font-<family>-*` or `radius-<family>-*`, and `bundle.css` sets them on `[data-theme="<family>"]` (or `[data-theme|="<family>"]` for a family with variants), as Sublevel and Fluent do. Do not copy the family rules for a variant.
-4. **tokens.css.** Add a `[data-theme="<id>"]` block with the same values (`tokens.css` is edited by hand; the suite checks that it agrees with `tokens.json`). A dark theme joins the one `color-scheme:dark` rule in `bundle.css`.
-5. **Engine tables.** Add the look to `LOOKS` and `FX` in `components/bundle.js`, so the scene light and the effects are set. A window picture goes in `Parts.window`; without one, it shows the Day sky.
-6. **Mode.** Add an entry to `AgentOffice.MODES`: look id, `data-theme` value, label (the `tokens.json` name), its own icon, and `dark: true` for a dark scene. `dark` must match the `color-scheme` of the theme. `dark: true` gives the scene lit windows, screen glow and desk light; scene code reads `K.dark`, never the look name.
-7. **Icon.** Add the icon to `AO.ICONS`, `kit/schema.json` and `assets/Icons/<icon>.svg`, with the same drawing.
-8. **Office type pictures.** Add `AgentOffice.THUMBS_BY_THEME["<id>"]` with one picture for each office type, from `assets/Offices/<type>-<id>.svg`, or list the theme in Reference, Shared assets.
-9. **Portraits and logos.** Give the theme its own set, or list it in Reference, Shared assets under "Themes on the default set".
-10. **Contrast.** Run ContrastCheck in the theme. `test/contrast.test.mjs` runs every theme of `tokens.json`; do not add a theme id to it.
-11. **Reference.** Add a column for the theme to the color table (and its value to the shadow, light and fx tables), a row to Themes, and a row for each color token to the Fluent 2 provenance table if the theme is a Fluent variant. Say where a value comes from.
-12. **Docs.** Name the theme in the Definition of done (`DS-README.md`), in "Test your page" below and in the screenshot line of `CLAUDE.md`. Check the HUD mode control still fits: the suite computes the width of the control from the number of `MODES` entries.
-
+1. **Theme entry.** `{ "id": "<id>", "name": "<Label>" }` in `tokens.json` `color.themes`. A variant of a theme (a dark mode of a light theme) takes the id `<family>-<variant>`.
+2. **Color, shadow and skin tokens.** A value for every color token, `shadow-panel` and every `skin` token (`portrait-ink`, `portrait-gloss`, `portrait-outline`, `portrait-eyes-square`, `logo-mark-radius`). `{token}` takes the value of another token.
+3. **Light, fx, font and radius tokens.** `light-<look>-sky`, `-sun`, `-lamp` and `fx-bloom-`, `fx-threshold-`, `fx-exposure-`, `fx-fog-`, `fx-vignette-<look>` (0 to 2), where `<look>` is the id of the MODES entry (step 6). A theme with its own faces or corners adds `font-<family>-*` or `radius-<family>-*` and sets them in its family rule (step 13).
+4. **tokens.css block.** `[data-theme="<id>"] { ... }` with every value of step 2, as in `tokens.json`, and `color-scheme: dark` for a dark theme (`light` for the others). The first dark theme is also the system dark block, `:root:not([data-theme])`.
+5. **LOOKS and FX entries.** `AgentOffice.office.LOOKS[<look>]` in the engine, with every field (Reference, Skins): the light levels of step 3, the light colors and sun position, a window picture of `AgentOffice.office.WINDOWS` (or a new one there), the frame and leaf colors, the beacon tokens and the flags `clock`, `flicker`, `caps`, `term`. And the `<look>` entries of `FX` (`bloom`, `thr`, `exp`, `fog`, `vig`), the same as the `fx-*` tokens.
+6. **MODES entry.** `{ id: "<look>", theme: "<id>", label, icon, dark, retro, wordmark, wrapper }` in `AgentOffice.MODES`, in the order of `tokens.json`. Every field is set: `dark` and `retro` are `true` or `false`, `wordmark` names a drawing of `AgentOffice.LOGO.wordmarks`, `wrapper` names an exported office component (`OfficeScene`, or a named office such as `FluentOffice` that defaults to the first theme naming it).
+7. **Mode icon.** Its own icon: in `AO.ICONS`, in `kit/schema.json` and as `assets/Icons/<icon>.svg` with the same drawing. Below a container width the toggle shows icons only, so two themes with one icon would look the same.
+8. **Office type pictures.** Nothing to draw: `AgentOffice.officePicture` draws every office type from the tokens of step 2 and the `dark` and `retro` flags of step 6. The test draws each one and fails on a color that does not come from a token of the theme (the tiny bots keep `AgentOffice.BODY_COLORS`).
+9. **Portraits and logo.** Nothing to draw: the `portrait-*` and `logo-mark-radius` tokens of step 2 and the `wordmark` of step 6. No theme has a picture file of its own, and no part falls back to the part of another theme.
+10. **Contrast pairs.** Every pair of the ContrastCheck card (`components/ContrastCheck/preview.html`) passes in the theme, and so does every pair of `test/contrast.test.mjs`. There is no exception for one theme: change the token, not the test.
+11. **Reference column.** A column in each per-theme table of Reference (color, skin), the `shadow-panel` value, a row in Themes, and the `light-*` and `fx-*` rows. A theme after an outside design system also gets a source table, as "Fluent 2 source of Fluent and Fluent Dark": a column `<id> (<source>)` whose cells start with the value of `tokens.json` in code ticks, then name the source token and the reason for a difference. The suite checks the start of each cell.
+12. **Screenshot lists.** The theme's name in the screenshot line of the Definition of done (DS-README), of "Test your page" below and of `CLAUDE.md`.
+13. **Family style rules.** Look rules of the theme in `bundle.css` (and in the page's own style sheet) use the family selector `[data-theme|="<family>"]`, never `[data-theme="<id>"]`, so a variant shares them and nothing is copied.
+14. **Mode control fit.** One more theme makes the mode toggle longer. If the test says the top bar needs more room, raise the width under which the toggle shows icons only (`@container (max-width:...)` rule of `.ao-hud-top .ao-seg` in `bundle.css`; the bar with the Needs you button has its own rule, `.ao-hud-top:has(.ao-hud-needs) .ao-seg`).
+15. **Code reads flags, not the id.** No code compares a look or theme id with a string. A behavior of one theme is a token or a field of its MODES or LOOKS entry (as `dark`, `retro`, `caps`, `term`), so the next theme can turn it on too.
 
 ## Add a component
 
@@ -154,7 +156,7 @@ Use tokens only. Write a README with a props table and a "consumer provides" lin
 
 ## Prompt templates
 
-**Build a page:** "Build <page> x0.1 with Agent Office DS x1.7.15. Read README, Recipes and Reference. Start from kit/page.html. Use tokens and the icon set only. Write copy in Simplified Technical English. Run kit/check.py and take the screenshots in the definition of done. Report what you checked."
+**Build a page:** "Build <page> x0.1 with Agent Office DS x1.7.16. Read README, Recipes and Reference. Start from kit/page.html. Use tokens and the icon set only. Write copy in Simplified Technical English. Run kit/check.py and take the screenshots in the definition of done. Report what you checked."
 
 **Connect a platform:** "Write an Agent Office adapter x0.1 for <platform>. Read Recipes (Connect a platform) and the events and commands in Reference. Copy kit/adapter.js. Fill the mapping tables first, then the code. Set AgentOffice.strict = true and play a recorded log. Report each event type you saw."
 

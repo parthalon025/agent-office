@@ -1,4 +1,4 @@
-/* Agent Office DS x1.7.15: tokens.css. Edited by hand. Keep it in step with tokens.json (test/ds-kit.test.mjs checks every token). */
+/* Agent Office DS x1.7.16: tokens.css. Edited by hand. Keep it in step with tokens.json (test/ds-kit.test.mjs checks every token). */
 :root, [data-theme="light"] {
   color-scheme: light;
   --bg: #e9edf1;
@@ -54,7 +54,13 @@
   --scene-dark: #2b323b;
   --scene-glass: #bcd3e6;
   --scene-subagent: #9aa3ad;
+  --scene-lamp: #f2b766;
   --shadow-panel: 0 6px 24px rgba(10,20,30,0.08);
+  --portrait-ink: #11161c;
+  --portrait-gloss: 1;
+  --portrait-outline: 0;
+  --portrait-eyes-square: 0;
+  --logo-mark-radius: 25%;
   --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
@@ -259,7 +265,13 @@
   --scene-dark: #2b323b;
   --scene-glass: #3d5468;
   --scene-subagent: #6f7884;
+  --scene-lamp: #f2b766;
   --shadow-panel: 0 6px 24px rgba(0,0,0,0.35);
+  --portrait-ink: #11161c;
+  --portrait-gloss: 1;
+  --portrait-outline: 0;
+  --portrait-eyes-square: 0;
+  --logo-mark-radius: 25%;
 }
 [data-theme="sublevel"] {
   color-scheme: light;
@@ -271,7 +283,7 @@
   --muted: #4d6660;
   --accent: #1f6f8b;
   --on-accent: #ffffff;
-  --accent-text: var(--accent);
+  --accent-text: #1e6d89;
   --emphasis: #b5302b;
   --on-emphasis: #ffffff;
   --on-status: #ffffff;
@@ -316,11 +328,18 @@
   --scene-dark: #263238;
   --scene-glass: #cfe3e0;
   --scene-subagent: #b9c4bf;
+  --scene-lamp: #f2b766;
   --shadow-panel: 0 1px 0 rgba(16,42,51,0.10);
+  --portrait-ink: #102a33;
+  --portrait-gloss: 0;
+  --portrait-outline: 1;
+  --portrait-eyes-square: 1;
+  --logo-mark-radius: 50%;
 }
 [data-theme="fluent"] {
-  --bg: #f3f3f3;
-  --panel: rgba(251,251,251,0.88);
+  color-scheme: light;
+  --bg: #f5f5f5;
+  --panel: rgba(255,255,255,0.88);
   --chip: #ebebeb;
   --line: rgba(0,0,0,0.10);
   --ink: #242424;
@@ -333,10 +352,10 @@
   --on-status: #ffffff;
   --bubble: #ffffff;
   --status-working: #107c10;
-  --status-waiting: #d2560b;
+  --status-waiting: #de590b;
   --status-error: #c50f1f;
   --status-resting: #7a7a7a;
-  --status-finished: #227ed4;
+  --status-finished: #2886de;
   --status-working-text: #0e700e;
   --status-waiting-text: #a94409;
   --status-error-text: #b10e1c;
@@ -347,43 +366,50 @@
   --status-error-on-bubble: var(--status-error);
   --status-resting-on-bubble: #707070;
   --status-finished-on-bubble: #0f6cbd;
-  --floor-ops: #4d5f6b;
+  --floor-ops: #505c60;
   --floor-sales: #b6480e;
-  --floor-research: #1c7d3b;
+  --floor-research: #00723b;
   --floor-content: #6656d1;
   --floor-hq: #8e562e;
   --on-floor: #ffffff;
-  --scrim: #0a1016;
+  --scrim: #000000;
   --type-team: #4f6bed;
   --type-lab: #038387;
   --type-studio: #c239b3;
-  --type-hq: #9a6a00;
+  --type-hq: #b27c00;
   --type-security: #8764b8;
-  --scene-floor: #eeeeee;
-  --scene-wall: #e8e8e8;
+  --scene-floor: #f0f0f0;
+  --scene-wall: #e6e6e6;
   --scene-wood: #e2cfae;
-  --scene-chair: #3a4048;
+  --scene-chair: #394146;
   --scene-rug: #5a8fd0;
-  --scene-wall-side: #dedede;
+  --scene-wall-side: #e0e0e0;
   --scene-slab: #b3b3b3;
   --scene-rail: #ffffff;
-  --scene-sofa: #4a5560;
+  --scene-sofa: #4d565c;
   --scene-metal: #a8a8a8;
   --scene-dark: #292929;
   --scene-glass: #cfe4fa;
   --scene-subagent: #a3a3a3;
+  --scene-lamp: #ffba66;
   --shadow-panel: 0 0 2px rgba(0,0,0,0.12), 0 4px 8px rgba(0,0,0,0.14);
+  --portrait-ink: #11161c;
+  --portrait-gloss: 1;
+  --portrait-outline: 0;
+  --portrait-eyes-square: 0;
+  --logo-mark-radius: 25%;
 }
 [data-theme="fluent-dark"] {
+  color-scheme: dark;
   --bg: #1f1f1f;
   --panel: rgba(41,41,41,0.88);
   --chip: #333333;
   --line: rgba(255,255,255,0.10);
   --ink: #ffffff;
   --muted: #adadad;
-  --accent: #4aa0f6;
+  --accent: #479ef5;
   --on-accent: #141414;
-  --accent-text: var(--accent);
+  --accent-text: #62abf5;
   --emphasis: var(--accent);
   --on-emphasis: var(--on-accent);
   --on-status: #141414;
@@ -403,9 +429,9 @@
   --status-error-on-bubble: #b10e1c;
   --status-resting-on-bubble: #616161;
   --status-finished-on-bubble: #115ea3;
-  --floor-ops: #4d5f6b;
-  --floor-sales: #ad440d;
-  --floor-research: #1a7539;
+  --floor-ops: #505c60;
+  --floor-sales: #b6480e;
+  --floor-research: #00723b;
   --floor-content: #6656d1;
   --floor-hq: #8e562e;
   --on-floor: #ffffff;
@@ -414,11 +440,11 @@
   --type-lab: #4cb4b7;
   --type-studio: #da7ed0;
   --type-hq: #efb839;
-  --type-security: #b49dd4;
+  --type-security: #b29ad4;
   --scene-floor: #2e2e2e;
   --scene-wall: #292929;
   --scene-wood: #8c7a5e;
-  --scene-chair: #4a5058;
+  --scene-chair: #4a5356;
   --scene-rug: #2f5d8f;
   --scene-wall-side: #242424;
   --scene-slab: #1a1a1a;
@@ -428,7 +454,13 @@
   --scene-dark: #141414;
   --scene-glass: #34506e;
   --scene-subagent: #6b6b6b;
+  --scene-lamp: #ffba66;
   --shadow-panel: 0 0 2px rgba(0,0,0,0.24), 0 4px 8px rgba(0,0,0,0.28);
+  --portrait-ink: #11161c;
+  --portrait-gloss: 1;
+  --portrait-outline: 0;
+  --portrait-eyes-square: 0;
+  --logo-mark-radius: 25%;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
@@ -486,6 +518,12 @@
     --scene-dark: #2b323b;
     --scene-glass: #3d5468;
     --scene-subagent: #6f7884;
+    --scene-lamp: #f2b766;
     --shadow-panel: 0 6px 24px rgba(0,0,0,0.35);
+    --portrait-ink: #11161c;
+    --portrait-gloss: 1;
+    --portrait-outline: 0;
+    --portrait-eyes-square: 0;
+    --logo-mark-radius: 25%;
   }
 }

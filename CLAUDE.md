@@ -1,16 +1,15 @@
 # CLAUDE.md: Agent Office for Claude Code
 
-A browser office for Claude Code sessions: bots at desks, a chat per bot, approvals, diffs, schedules. Node ES modules, no dependencies, Windows first. User docs are in `README.md`. The UI is the Agent Office design system (DS x1.7.15), documented in `DS-README.md`, `Recipes.md`, `Reference.md`, `Concepts.md`.
+A browser office for Claude Code sessions: bots at desks, a chat per bot, approvals, diffs, schedules. Node ES modules, no dependencies, Windows first. User docs are in `README.md`. The UI is the Agent Office design system (DS x1.7.16), documented in `DS-README.md`, `Recipes.md`, `Reference.md`, `Concepts.md`.
 
 ## UI rules (the DS is law for anything visual)
 
 Read `DS-README.md`, `Recipes.md` and `Reference.md` before you change the UI, and follow the DS Rules and Definition of done.
 
-- Use DS tokens for every color, size and duration. No literal colors. Use the DS icon set and DS components (`Button`, `Dialog`, `Select`, `TextInput`, `EmptyState`, ...). No emoji.
+- Use DS tokens for every color, size and duration. No literal colors. A theme (skin) is its tokens plus its `AgentOffice.MODES` and engine `LOOKS` entries: page code reads flags (`K.dark`, `K.caps`, `K.term`) and tokens, never compares a look or theme id with a string, and styles a theme only with a family selector (`[data-theme|="<family>"]`). `test/skin.test.mjs` runs the same checks for every theme of `tokens.json`; to add a theme, follow Recipes, "Add a theme". Use the DS icon set and DS components (`Button`, `Dialog`, `Select`, `TextInput`, `EmptyState`, ...). No emoji.
 - Write copy in Simplified Technical English: short sentences, active voice, buttons say the result. No "Oops", "Sorry", exclamation marks, "please".
-- Keep the `x` version prefix (page `x0.2`, DS `x1.7.15`) in titles.
+- Keep the `x` version prefix (page `x0.2`, DS `x1.7.16`) in titles.
 - The DS lives in this repo and its owner may change it. DS changes go in `components/`, `kit/`, the tokens and the DS docs, with a Changelog row and the DS Definition of done (`DS-README.md`). Page code still uses only DS APIs: no DOM patching of DS internals.
-- A new theme follows Recipes, "Add a theme". `test/theme-contract.test.mjs` reads the theme list from `tokens.json` and checks every part of each theme; a failure names the theme, the part and the owner file. Do not type a theme list into a test.
 - Never move bots yourself. The scene changes only from adapter events.
 - Before you finish a UI change: `python kit/check.py public/index.html public/office.css public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/lobby.js public/wheel-gate.js public/vocab.js public/scene-host.js public/building.js public/format.js public/toasts.js public/wire.js public/security.js components/bundle.css components/bundle.js kit/page.html`, then look at screenshots in Day, Night, Sublevel, Fluent and Fluent Dark at 1360, 1100 and 400 px.
 - In-scene controls (the Security room screens) have no keyboard or screen reader path (ADR 0003, the exception line in the DS Definition of done). Do not add one.

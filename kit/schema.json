@@ -1,5 +1,5 @@
 {
- "version": "x1.7.15",
+ "version": "x1.7.16",
  "events": {
   "status": {
    "desc": "A bot changes state. The bot walks to rest or back to its seat when needed.",
@@ -451,6 +451,7 @@
   "light-sublevel-sky",
   "light-sublevel-sun",
   "line",
+  "logo-mark-radius",
   "muted",
   "accent-text",
   "on-accent",
@@ -460,6 +461,10 @@
   "opacity-glass",
   "opacity-resting",
   "panel",
+  "portrait-eyes-square",
+  "portrait-gloss",
+  "portrait-ink",
+  "portrait-outline",
   "radius-fluent-lg",
   "radius-fluent-md",
   "radius-fluent-sm",
@@ -477,6 +482,7 @@
   "scene-glass",
   "scene-handoff-dash",
   "scene-handoff-gap",
+  "scene-lamp",
   "scene-metal",
   "scene-nav-cell",
   "scene-nav-pad",

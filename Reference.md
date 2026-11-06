@@ -111,35 +111,41 @@ The `bot` of `bot.add`. `kit/check.py --events` and `AgentOffice.validate` check
 - `dispose()` frees the GPU memory of the stage: every geometry, material and texture in the scene (also the ones the page added), the Kit caches, the light shadows and the post effects. Then it frees the renderer and its WebGL context. It is safe to call twice. It frees nothing that another live stage still uses, with one exception: the post effects share one full-screen triangle geometry between all stages, and `dispose()` frees it. A stage that still draws uploads it again on its next frame, so nothing shows. If a free throws, the other frees still run: the renderer, its WebGL context and its canvas are freed, and then the first error reaches the caller.
 - `stage.clear(group)` takes a group out of the scene at once and frees its GPU memory after the next frame. What the scene and the Kit caches (`K.tex`, `K.mats`) still use then stays, so a page can build again in the same frame from the same materials and textures. A theme change frees the old Kit textures.
 
-Globals: `AgentOffice.MODES` (the themes, see Themes below), `AgentOffice.BODY_COLORS` (the 10 bot body colors, a frozen array), `AgentOffice.BOT_COLORS` (one portrait color for each shape), `AgentOffice.money(n)` (the DS money format), `AgentOffice.validate(event)`, `AgentOffice.schema`, `AgentOffice.strict`, `AgentOffice.adapters.create`, `AgentOffice.adapters.mock`, `AgentOffice.solutions`, `AgentOffice.office.ROLES`, `.Work`, `.Parts`, `.helpers`, `.Nav`. `components/index.d.ts` types them: `AgentOfficeGlobals`, set on `window.AgentOffice`.
+Globals: `AgentOffice.MODES` (the themes, see Themes below), `AgentOffice.modeOf(theme)` (the MODES entry of a `data-theme` value; a value that is no theme gets the first entry), `AgentOffice.themeOf(el)` (the theme whose tokens an element shows; see Themes), `AgentOffice.PORTRAITS[shape](color, look?)` (a bot portrait as an SVG string; see Skins), `AgentOffice.officePicture(type, tok, style)` and `AgentOffice.OFFICE_PICTURES` (the office type pictures; see Skins), `AgentOffice.LOGO` (`mark(ink, dot, radius)` and `wordmarks`), `AgentOffice.office.LOOKS`, `.FX` and `.WINDOWS` (the scene part of each theme; see Skins), `AgentOffice.BODY_COLORS` (the 10 bot body colors, a frozen array), `AgentOffice.BOT_COLORS` (one portrait color for each shape), `AgentOffice.money(n)` (the DS money format), `AgentOffice.validate(event)`, `AgentOffice.schema`, `AgentOffice.strict`, `AgentOffice.adapters.create`, `AgentOffice.adapters.mock`, `AgentOffice.solutions`, `AgentOffice.office.ROLES`, `.Work`, `.Parts`, `.helpers`, `.Nav`. `components/index.d.ts` types them: `AgentOfficeGlobals`, set on `window.AgentOffice`.
 
 ### Themes
 
-`AgentOffice.MODES` is the one list of themes. The scene engine, `ModeToggle` (its default options), the `OfficeScene` HUD toggle and the command palette read it. A page that shows its own theme control reads it too and keeps no copy. Read it; do not change it.
+`AgentOffice.MODES` is the one list of themes, in the order of the themes of `tokens.json`. The scene engine, `ModeToggle` (its default options), the `OfficeScene` HUD toggle, the command palette and the drawn parts (`Logo`, `OfficeTypeCard`) read it. A page that shows its own theme control reads it too and keeps no copy. Read it; do not change it. Every entry has every field.
 
-| `id` (look) | `theme` (`data-theme`) | `label` | `icon` | `dark` | Look |
-| --- | --- | --- | --- | --- | --- |
-| `day` | `light` | Day | `day` |  | Daylight office; the sun follows the clock. |
-| `night` | `dark` | Night | `night` | `true` | Dark office, warm room lamps, glow and fog. |
-| `sublevel` | `sublevel` | Sublevel | `terminal` |  | Retro corporate floor under fluorescent light. |
-| `fluent` | `fluent` | Fluent | `fluent` |  | Bright, quiet office in soft daylight, low bloom and light haze. System faces, 4 px controls and 8 px panels. |
-| `fluent-dark` | `fluent-dark` | Fluent Dark | `fluentdark` | `true` | Fluent at night: a dim, neutral office with soft room lamps, screen glow and a dusk window. The faces, corners, heads and accent pills of Fluent. |
+| `id` (look) | `theme` (`data-theme`) | `label` | `icon` | `dark` | `retro` | `wordmark` | `wrapper` | Look |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `day` | `light` | Day | `day` |  |  | `sans` | `OfficeScene` | Daylight office; the sun follows the clock. |
+| `night` | `dark` | Night | `night` | `true` |  | `sans` | `OfficeScene` | Dark office, warm room lamps, glow and fog. |
+| `sublevel` | `sublevel` | Sublevel | `terminal` |  | `true` | `wide` | `SublevelOffice` | Retro corporate floor under fluorescent light. |
+| `fluent` | `fluent` | Fluent | `fluent` |  |  | `sans` | `FluentOffice` | Bright, quiet office in soft daylight, low bloom and light haze. System faces, 4 px controls and 8 px panels. |
+| `fluent-dark` | `fluent-dark` | Fluent Dark | `fluentdark` | `true` |  | `sans` | `FluentOffice` | Fluent at night: a dim, neutral office with soft room lamps, screen glow and a dusk window. The faces, corners, heads and accent pills of Fluent. |
 
-The `id` names the look: the engine reads `light-<id>-*` and `fx-*-<id>`. An unknown `data-theme` shows the Day look.
+The `id` names the look: the engine reads `light-<id>-*` and `fx-*-<id>`, and `AgentOffice.office.LOOKS[id]`. The theme of an element is `AgentOffice.themeOf(el)`, by the rules of `tokens.css`: the nearest `data-theme` on the element or a parent that is a theme. A value that is no theme is passed over, because no block of `tokens.css` matches it. With none, it is the first dark theme (Night) when `<html>` has no `data-theme` and the system scheme is dark, else the first theme (Day). The engine and the drawn parts read the theme there, so the tokens and the look always show one theme. `setMode` with a value that is no look leaves the look to `data-theme`. A theme of `AgentOffice.MODES` with no `LOOKS` entry or no `FX` value stops the Stage with an error that names the theme and the part: no theme takes the look of another.
 
-`dark: true` marks a dark scene (Night, Fluent Dark): the window shows a night or dusk sky with lit windows, monitors glow more, the page lays a pool of screen light on each desk, and `OfficeTypeCard` shows the Night pictures when the theme has no set of its own. The engine sets `stage.K.dark` from it. Scene code on a page reads `K.dark` and does not compare the look name with `"night"`.
+- `dark: true` marks a dark scene (Night, Fluent Dark): the window shows a night or dusk sky with lit windows, monitors glow more, the page lays a pool of screen light on each desk, the office type pictures show lit screens and lamp pools, and `tokens.css` sets `color-scheme: dark` in the theme's block, so the browser draws scrollbars and check boxes dark. The engine sets `stage.K.dark` from it.
+- `retro: true` (Sublevel) draws the office type pictures in the retro style: terminal desks with number grids, carpet tiles, a wainscot band, square-eyed bots.
+- `wordmark` names the theme's wordmark drawing in `AgentOffice.LOGO.wordmarks`: `sans` (IBM Plex Sans) or `wide` (Archivo, capitals).
+- `wrapper` names the office component that shows the theme: `OfficeScene` (any theme, by the `theme` prop) or a named office (`SublevelOffice`, `FluentOffice`). A named office with no `theme` prop shows the first entry that names it (`FluentOffice` shows Fluent, and `theme: "fluent-dark"` shows Fluent Dark), so the component holds no theme id.
 
-A theme can be a variant of another: its id is `<family>-<variant>` (Fluent Dark is `fluent-dark`). `bundle.css` sets the look of the family once, on `[data-theme|="<family>"]`, which matches the family id and every `<family>-*` id. Each variant has its own colors in `tokens.css`.
+A theme can be a variant of another: its id is `<family>-<variant>` (Fluent Dark is `fluent-dark`). `bundle.css` and the page's own style sheet set the look of a family once, on `[data-theme|="<family>"]`, which matches the family id and every `<family>-*` id (Sublevel is `[data-theme|="sublevel"]`, Fluent and Fluent Dark `[data-theme|="fluent"]`). No style rule names one theme with `[data-theme="<id>"]`. Each variant has its own colors in `tokens.css`.
 
-#### Shared assets
+### Skins
 
-A theme either has its own set of an asset or uses the default set. This table is the one list of that choice; `test/theme-contract.test.mjs` reads it, and a theme that is in neither column fails. A theme that shares the default set draws the bots, the mark and the wordmark of Day, in its own token colors.
+A skin (a theme) is a token set plus a component set. Code reads the skin only through its tokens and its entries in `AgentOffice.MODES` and `AgentOffice.office.LOOKS`, and never compares a look or theme id with a string. Every skin has its own variant of each themed part, and no part falls back to the part of another skin. `test/skin.test.mjs` runs the same checks for every theme of `tokens.json` (Recipes, "Add a theme", lists the parts in its order).
 
-| Asset | Own set | Themes on the default set | Where |
-| --- | --- | --- | --- |
-| Office type pictures | every theme | none | `AgentOffice.THUMBS_BY_THEME[theme]`, one picture for each office type (`type-*` token) |
-| Bot portraits | `sublevel` | `light`, `dark`, `fluent`, `fluent-dark` | `AgentOffice.PORTRAITS`, `AgentOffice.PORTRAITS_SUBLEVEL` |
-| Logo mark and wordmark | `sublevel` | `light`, `dark`, `fluent`, `fluent-dark` | `AgentOffice.LOGO`, `AgentOffice.LOGO.sublevel` |
+| Part | Comes from |
+| --- | --- |
+| Colors, shadow, light, effects, faces, corners | The theme's tokens (`tokens.json`, `tokens.css`; faces and corners through a family rule in `bundle.css`). |
+| Bot portraits (`BotAvatar`) | One drawing per shape (`AgentOffice.PORTRAITS`), styled by the theme's `portrait-*` tokens through the `ao-pt-*` classes of `bundle.css` (`portrait-ink` colors the eyes, the lines and the soft shadow). For a file in a theme, pass `look = { ink, gloss, outline, eyesSquare }`, the theme's token values. |
+| Logo | The mark takes `ink`, `bg` and `logo-mark-radius`; the wordmark is the drawing that the MODES entry names (`wordmark`). Both come from the theme of the logo's own element. |
+| Office type pictures (`OfficeTypeCard`) | `AgentOffice.officePicture(type, tok, { dark, retro })`: one drawing per type. Every color is a token of the theme (the scene tokens with `scene-lamp`, `type-*`, the status tokens, `accent`, `ink`, `portrait-ink`), some darkened or lightened; only the tiny bots take `AgentOffice.BODY_COLORS`, with the portrait shade. `dark` and `retro` come from the MODES entry. `OfficeTypeCard` reads the tokens and the MODES entry from one element: the theme it sits in (`AgentOffice.themeOf`). `AgentOffice.OFFICE_PICTURES` lists the types. |
+| Mode icon | The `icon` of the MODES entry, from the icon set. Each theme has its own. |
+| Scene look | `AgentOffice.office.LOOKS[id]`: `hi`, `si`, `lamp` (from the `light-*` tokens), `hc`, `hg`, `sc` (sky, ground and sun light colors), `sp` (sun position), `win` (the window picture, a name of `AgentOffice.office.WINDOWS`: `sky`, `stars`, `corridor`, `clouds`, `dusk`), `frame` (window frame color), `leaf` (plant leaf color), `beacon` (the two tokens of the room alert beacon: for a request, for an error), `clock` (the sun follows the clock), `flicker` (the fill light flickers now and then), `caps` (signs and wall screen titles in capitals; the engine sets `stage.K.caps`), `term` (desk monitors in the terminal face; `stage.K.term`, which the page's desk terminals read too). `AgentOffice.office.FX` holds the post effects of each look, from the `fx-*` tokens. |
 
 ### Bot colors
 
@@ -166,7 +172,7 @@ A theme either has its own set of an asset or uses the default set. This table i
 | `AgentRegistry` | Governance | The inventory of every agent: platform, identity, model, tool count, access scope and last run. |
 | `AmbientBar` | Daily | A thin status strip for a second screen or a narrow window. |
 | `ApprovalItem` | Queues | One request in Waiting on me. |
-| `BotAvatar` | Roster | A flat portrait of a bot for use outside the 3D scene: lists, notifications, docs. |
+| `BotAvatar` | Roster | A flat portrait of a bot for use outside the 3D scene: lists, notifications, docs. One drawing per shape; the `portrait-*` tokens of the theme style it. |
 | `BotLineup` | 3D parts | The four bot shapes (blob, cone, octa, capsule) with their status bubbles, on a plinth. |
 | `BotRow` | Roster | One bot in the roster: portrait in its shape and body color with a status dot, name, role icon, and the status line `State · Task`. |
 | `BroadcastBar` | Conversation | Send one message to many bots: a room, a floor or every floor. |
@@ -191,13 +197,13 @@ A theme either has its own set of an asset or uses the default set. This table i
 | `Foundations` | Docs | Motion, layers, breakpoints and 3D units in one place. |
 | `HermesOffice` | Solutions | The Hermes orchestrator office. |
 | `Icon` | Foundations | The icon set: 86 line icons on a 24px grid with a 1.75px stroke, round caps and joins. |
-| `Logo` | Foundations | The Agent Office mark, wordmark and lockup. |
+| `Logo` | Foundations | The Agent Office mark, wordmark and lockup, in the theme it sits in: the mark takes `logo-mark-radius`, the wordmark is the one the theme's MODES entry names. The logo reads the theme from its own element (`AgentOffice.themeOf`), so a `data-theme` on a parent changes the mark and the wordmark together. `theme` sets `data-theme` on the logo. |
 | `ModeToggle` | Actions | A segmented control for the scene mode: Day, Night, Sublevel, Fluent, Fluent Dark and Tour (`AgentOffice.MODES` plus Tour). Each option has an icon. |
 | `ModelBadge` | Orchestration | The model an agent runs on. |
 | `Notifier` | Daily | Alerts for a person who works in another tab. |
 | `OfficeScene` | 3D office | The 3D office itself and the main component of the system. |
 | `OfficeTypeBadge` | Office types | A chip that names an office type with its icon and type color. |
-| `OfficeTypeCard` | Office types | A flat picture and badge for one office type. The picture comes from `THUMBS_BY_THEME[theme]`. Every theme has its own set (Fluent and Fluent Dark too), and the stripe in the picture is the `type-*` color of that theme. |
+| `OfficeTypeCard` | Office types | A flat picture and badge for one office type. The picture is drawn from the tokens of the theme the card sits in (`AgentOffice.officePicture`), in the dark or retro style of its MODES entry, so the stripe is the `type-*` color of that theme. It reads the tokens and the theme (`AgentOffice.themeOf`) from its own element after the first render, before the paint, and draws again when a `data-theme` or the system scheme changes. `theme` sets `data-theme` on the card. |
 | `Panel` | Surfaces | The glass surface for every HUD block over the 3D scene. |
 | `PlanCard` | Orchestration | The orchestrator's plan: the goal, each step with its status and owner, and steps done over total. |
 | `RichText` | Conversation | Safe Markdown for one chat message. |
@@ -235,63 +241,64 @@ Each README has the full props table. Types: `components/index.d.ts`.
 
 | Token | light | dark | sublevel | fluent | fluent-dark | Use |
 | --- | --- | --- | --- | --- | --- | --- |
-| `bg` | `#e9edf1` | `#10141a` | `#dfe6e1` | `#f3f3f3` | `#1f1f1f` | Page and 3D scene background behind every panel. |
-| `panel` | `rgba(255,255,255,0.86)` | `rgba(24,30,38,0.86)` | `rgba(246,248,245,0.93)` | `rgba(251,251,251,0.88)` | `rgba(41,41,41,0.88)` | Glass HUD panels over the 3D scene. Always pair with blur-panel. |
+| `bg` | `#e9edf1` | `#10141a` | `#dfe6e1` | `#f5f5f5` | `#1f1f1f` | Page and 3D scene background behind every panel. |
+| `panel` | `rgba(255,255,255,0.86)` | `rgba(24,30,38,0.86)` | `rgba(246,248,245,0.93)` | `rgba(255,255,255,0.88)` | `rgba(41,41,41,0.88)` | Glass HUD panels over the 3D scene. Always pair with blur-panel. |
 | `chip` | `#f1f4f7` | `#1f2630` | `#e7ece8` | `#ebebeb` | `#333333` | Hover, selected row, pressed segment, quiet button fill. |
 | `line` | `rgba(30,45,60,0.10)` | `rgba(200,215,230,0.10)` | `rgba(20,60,50,0.16)` | `rgba(0,0,0,0.10)` | `rgba(255,255,255,0.10)` | Panel borders and dividers. Hairline only. |
 | `ink` | `#18212b` | `#e6ebf0` | `#102a33` | `#242424` | `#ffffff` | Primary text on bg, panel and chip. |
 | `muted` | `#5f6b78` | `#8e9aa7` | `#4d6660` | `#616161` | `#adadad` | Secondary text: task lines, timestamps, counts. 4.6:1 or more on bg, panel and chip. |
-| `accent` | `#2f6fe4` | `#6c9dff` | `#1f6f8b` | `#0f6cbd` | `#4aa0f6` | Primary action (Approve, Retry), focus ring, routine markers. |
-| `accent-text` | `#2363dc` | `{accent}` | `{accent}` | `{accent}` | `{accent}` | Accent as text on bg, card and chip (4.5:1; Sublevel on bg is 4.47:1, not pinned). Fills, the focus ring and the 3D scene keep `accent`. |
+| `accent` | `#2f6fe4` | `#6c9dff` | `#1f6f8b` | `#0f6cbd` | `#479ef5` | Primary action (Approve, Retry), focus ring, routine markers. |
+| `accent-text` | `#2363dc` | `{accent}` | `#1e6d89` | `{accent}` | `#62abf5` | Accent as text on bg, card and chip: 4.5:1 or more in every theme. Fills, the focus ring and the 3D scene keep `accent`. |
 | `on-accent` | `#ffffff` | `#0d1420` | `#ffffff` | `#ffffff` | `#141414` | Text on accent. |
 | `emphasis` | `{accent}` | `{accent}` | `#b5302b` | `{accent}` | `{accent}` | The 10% color: alerts and the one key action in a decision (Approve on a request, unread counts, room alert beacons). In Day, Night, Fluent and Fluent Dark it equals accent; in Sublevel it is red. Never a fill larger than a button. |
 | `on-emphasis` | `{on-accent}` | `{on-accent}` | `#ffffff` | `{on-accent}` | `{on-accent}` | Text on emphasis. |
 | `on-status` | `#ffffff` | `#ffffff` | `#ffffff` | `#ffffff` | `#141414` | Not used by the DS (agent-office #118): no one value reaches 4.5:1 on all five status fills in any theme. Draw a status word with status-*-text or status-*-on-bubble, or on a status-*-text fill with bg (danger button, door sign count). The desk terminal word is scene-dark on status-* mixed 55% into bubble. |
 | `bubble` | `#ffffff` | `#f2f5f8` | `#f6f8f5` | `#ffffff` | `#f5f5f5` | Fill of status bubbles and speech bubbles over bots, in 2D and 3D. Also the check mark cut out of the finished disk (3:1 or more on status-finished-on-bubble). |
 | `status-working` | `#1f9a58` | `#2fb36d` | `#1d8a5a` | `#107c10` | `#54b054` | Bot is working. Dot, bubble glyph, monitor glow. |
-| `status-waiting` | `#c27c17` | `#e3992f` | `#b07514` | `#d2560b` | `#faa06b` | Bot needs a human decision. Always shows in Waiting on me. |
+| `status-waiting` | `#c27c17` | `#e3992f` | `#b07514` | `#de590b` | `#faa06b` | Bot needs a human decision. Always shows in Waiting on me. |
 | `status-error` | `#d1403b` | `#e5605b` | `#c23b36` | `#c50f1f` | `#dc626d` | Bot failed. Always shows in Waiting on me with Retry. |
 | `status-resting` | `#78818b` | `#8a939d` | `#788583` | `#7a7a7a` | `#858585` | Bot is idle in the lounge. |
-| `status-finished` | `#3b74e0` | `#5b93f5` | `#2f6bc8` | `#227ed4` | `#62abf5` | Bot finished a task; check bubble at the desk. |
-| `status-working-text` | `#197a46` | `#2fb36d` | `#18734b` | `#0e700e` | `{status-working}` | Text color for the working status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-working. |
-| `status-waiting-text` | `#945f12` | `#e3992f` | `#895b10` | `#a94409` | `#faa06b` | Text color for the waiting status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-waiting. |
+| `status-finished` | `#3b74e0` | `#5b93f5` | `#2f6bc8` | `#2886de` | `#62abf5` | Bot finished a task; check bubble at the desk. |
+| `status-working-text` | `#197a46` | `{status-working}` | `#18734b` | `#0e700e` | `{status-working}` | Text color for the working status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-working. |
+| `status-waiting-text` | `#945f12` | `{status-waiting}` | `#895b10` | `#a94409` | `{status-waiting}` | Text color for the waiting status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-waiting. |
 | `status-error-text` | `#c4332e` | `#e6645f` | `#b63733` | `#b10e1c` | `#ee8a93` | Text color for the error status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-error. |
-| `status-resting-text` | `#646b74` | `#8a939d` | `#5d6765` | `#616161` | `#adadad` | Text color for the resting status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-resting. |
-| `status-finished-text` | `#2363dc` | `#5b93f5` | `#2c63ba` | `#115ea3` | `#62abf5` | Text color for the finished status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-finished. |
-| `status-working-on-bubble` | `#1b854c` | `#217e4d` | `#1b7f53` | `#107c10` | `#0e700e` | Text color for the working status on bubble (a light face in every theme). 4.5:1 or more. |
+| `status-resting-text` | `#646b74` | `{status-resting}` | `#5d6765` | `#616161` | `#adadad` | Text color for the resting status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-resting. |
+| `status-finished-text` | `#2363dc` | `{status-finished}` | `#2c63ba` | `#115ea3` | `{status-finished}` | Text color for the finished status on bg, panel and chip. 4.5:1 or more. Use it for a status word. Dot and fill use status-finished. |
+| `status-working-on-bubble` | `#1b854c` | `#217e4d` | `#1b7f53` | `{status-working}` | `#0e700e` | Text color for the working status on bubble (a light face in every theme). 4.5:1 or more. |
 | `status-waiting-on-bubble` | `#a46913` | `#9a6315` | `#996611` | `#bc4b09` | `#bc4b09` | Text color for the waiting status on bubble (a light face in every theme). 4.5:1 or more. |
-| `status-error-on-bubble` | `#d1403b` | `#d42822` | `#c23b36` | `#c50f1f` | `#b10e1c` | Text color for the error status on bubble (a light face in every theme). 4.5:1 or more. |
+| `status-error-on-bubble` | `{status-error}` | `#d42822` | `{status-error}` | `{status-error}` | `#b10e1c` | Text color for the error status on bubble (a light face in every theme). 4.5:1 or more. |
 | `status-resting-on-bubble` | `#6e7780` | `#666f7a` | `#677371` | `#707070` | `#616161` | Text color for the resting status on bubble (a light face in every theme). 4.5:1 or more. |
-| `status-finished-on-bubble` | `#3771df` | `#1565f1` | `#2f6bc8` | `#0f6cbd` | `#115ea3` | Text color for the finished status on bubble (a light face in every theme). 4.5:1 or more. |
-| `floor-ops` | `#4a6278` | `#587089` | `#3f5d70` | `#4d5f6b` | `#4d5f6b` | Floor 1 identity. Roster header fill, building-view floor band; white text on it. |
-| `floor-sales` | `#b5523b` | `#b5523b` | `#5d4a7a` | `#b6480e` | `#ad440d` | Floor 2 identity. Roster header fill; white text on it. |
-| `floor-research` | `#2f7f44` | `#2f7f44` | `#2c6b57` | `#1c7d3b` | `#1a7539` | Floor 3 identity. Roster header fill; white text on it. |
+| `status-finished-on-bubble` | `#3771df` | `#1565f1` | `{status-finished}` | `#0f6cbd` | `#115ea3` | Text color for the finished status on bubble (a light face in every theme). 4.5:1 or more. |
+| `floor-ops` | `#4a6278` | `#587089` | `#3f5d70` | `#505c60` | `#505c60` | Floor 1 identity. Roster header fill, building-view floor band; white text on it. |
+| `floor-sales` | `#b5523b` | `#b5523b` | `#5d4a7a` | `#b6480e` | `#b6480e` | Floor 2 identity. Roster header fill; white text on it. |
+| `floor-research` | `#2f7f44` | `#2f7f44` | `#2c6b57` | `#00723b` | `#00723b` | Floor 3 identity. Roster header fill; white text on it. |
 | `floor-content` | `#7a52c7` | `#7a52c7` | `#2f5f86` | `#6656d1` | `#6656d1` | Floor 4 identity. Roster header fill; white text on it. |
 | `floor-hq` | `#8a5a12` | `#8a5a12` | `#7a5414` | `#8e562e` | `#8e562e` | Floor 5 (HQ) identity. Roster header fill; white text on it. |
 | `on-floor` | `#ffffff` | `#ffffff` | `#ffffff` | `#ffffff` | `#ffffff` | Text on any floor-* fill. 4.9:1 or more. |
-| `scrim` | `#0a1016` | `#0a1016` | `#0a1016` | `#0a1016` | `#000000` | Dark veil behind a dialog or the command palette. Mix it with transparent: color-mix(in srgb, var(--scrim) 45%, transparent). |
+| `scrim` | `#0a1016` | `#0a1016` | `#0a1016` | `#000000` | `#000000` | Dark veil behind a dialog or the command palette. Mix it with transparent: color-mix(in srgb, var(--scrim) 45%, transparent). |
 | `type-team` | `#3a7ca5` | `#5f9fc8` | `#2f6b7a` | `#4f6bed` | `#778df1` | Office type: team floor. Type badge dot, room icon, the stripe on the room floor edge. |
 | `type-lab` | `#0f8b8d` | `#2fb3b5` | `#0f7f7c` | `#038387` | `#4cb4b7` | Office type: lab / server room. |
 | `type-studio` | `#c2477a` | `#e0709a` | `#b03f6e` | `#c239b3` | `#da7ed0` | Office type: studio. |
-| `type-hq` | `#a36a12` | `#d0922e` | `#946010` | `#9a6a00` | `#efb839` | Office type: war room / HQ. |
-| `type-security` | `#6650b8` | `#9a86e8` | `#5a48a6` | `#8764b8` | `#b49dd4` | Office type: Security room (the permission rules on its wall screens). |
-| `scene-floor` | `#f3f2ee` | `#2a3039` | `#2f6456` | `#eeeeee` | `#2e2e2e` | 3D floor slab top. |
-| `scene-wall` | `#e3e6ea` | `#232a34` | `#e9ede7` | `#e8e8e8` | `#292929` | 3D back wall. |
+| `type-hq` | `#a36a12` | `#d0922e` | `#946010` | `#b27c00` | `#efb839` | Office type: war room / HQ. |
+| `type-security` | `#6650b8` | `#9a86e8` | `#5a48a6` | `#8764b8` | `#b29ad4` | Office type: Security room (the permission rules on its wall screens). |
+| `scene-floor` | `#f3f2ee` | `#2a3039` | `#2f6456` | `#f0f0f0` | `#2e2e2e` | 3D floor slab top. |
+| `scene-wall` | `#e3e6ea` | `#232a34` | `#e9ede7` | `#e6e6e6` | `#292929` | 3D back wall. |
 | `scene-wood` | `#d8b98a` | `#8f7656` | `#f1f1ea` | `#e2cfae` | `#8c7a5e` | 3D desk tops and side tables. |
-| `scene-chair` | `#2f5d4a` | `#24493b` | `#1c2326` | `#3a4048` | `#4a5058` | 3D chairs and sofas. |
+| `scene-chair` | `#2f5d4a` | `#24493b` | `#1c2326` | `#394146` | `#4a5356` | 3D chairs and sofas. |
 | `scene-rug` | `#c0563f` | `#a8483a` | `#2a5560` | `#5a8fd0` | `#2f5d8f` | 3D lounge rug. Marks the resting zone. |
-| `scene-wall-side` | `#d9dde2` | `#1e242d` | `#e2e7e2` | `#dedede` | `#242424` | 3D left wall. One step darker than scene-wall so the corner reads. |
+| `scene-wall-side` | `#d9dde2` | `#1e242d` | `#e2e7e2` | `#e0e0e0` | `#242424` | 3D left wall. One step darker than scene-wall so the corner reads. |
 | `scene-slab` | `#c9ced4` | `#1b2028` | `#b9c4bf` | `#b3b3b3` | `#1a1a1a` | 3D floor slab edge and kit plinths; the City ground. |
 | `scene-rail` | `#ffffff` | `#59616c` | `#f4f6f2` | `#ffffff` | `#5c5c5c` | 3D front railing slats. |
-| `scene-sofa` | `#2f5f52` | `#24493b` | `#2c5b6b` | `#4a5560` | `#3f4a55` | 3D lounge sofas. |
+| `scene-sofa` | `#2f5f52` | `#24493b` | `#2c5b6b` | `#4d565c` | `#3f4a55` | 3D lounge sofas. |
 | `scene-metal` | `#9aa2ab` | `#6f7884` | `#b8c0bf` | `#a8a8a8` | `#707070` | 3D desk pedestals and bases. |
 | `scene-dark` | `#2b323b` | `#2b323b` | `#263238` | `#292929` | `#141414` | 3D monitors, lamps, racks, tripods. |
 | `scene-glass` | `#bcd3e6` | `#3d5468` | `#cfe3e0` | `#cfe4fa` | `#34506e` | 3D glass partitions between rooms and the room boxes in the building view. Used at 22–28% opacity. |
 | `scene-subagent` | `#9aa3ad` | `#6f7884` | `#b9c4bf` | `#a3a3a3` | `#6b6b6b` | 3D body of a temporary subagent. Grey so it reads as on loan; it leaves when it returns. |
+| `scene-lamp` | `#f2b766` | `#f2b766` | `#f2b766` | `#ffba66` | `#ffba66` | Warm lamp light: the lamp pools, bulbs and shades in the office type pictures of a dark theme (`dark` in AgentOffice.MODES). The 3D room lamps are lights with their own color. |
 
 #### Contrast pairs the DS checks
 
-`test/contrast.test.mjs` measures these pairs in every theme: Day, Night, Sublevel, Fluent and Fluent Dark. A page can check its own uses against the same list. Card = `panel` over `bg`.
+`test/contrast.test.mjs` measures these pairs in every theme of `tokens.json`, with no exception for one theme; `test/skin.test.mjs` also runs the pairs of the ContrastCheck card in every theme. A page can check its own uses against the same list. Card = `panel` over `bg`.
 
 | Foreground | Background | Needs | Use |
 | --- | --- | --- | --- |
@@ -300,7 +307,7 @@ Each README has the full props table. Types: `components/index.d.ts`.
 | `status-*-text` | `bg`, card, `chip` | 4.5:1 | A status word on a theme surface. |
 | `status-*-on-bubble` | `bubble` | 4.5:1 | A status word on a bubble or a whiteboard face. |
 | `on-accent` | `accent` | 4.5:1 | Label of a primary button. |
-| `accent-text` | `chip` | 4.5:1 | Accent text on a selected row: the More link of a decision card, a ghost button. Raw `accent` is 4.21:1 on chip in Day. |
+| `accent-text` | `bg`, card, `chip` | 4.5:1 | Accent text on a selected row: the More link of a decision card, a ghost button. Raw `accent` is 4.21:1 on chip in Day. |
 | `bubble` | `status-finished-on-bubble` | 3:1 | The check mark cut out of the finished disk (StatusBubble and the 3D bubble). |
 | `on-floor` | every `floor-*` | 4.9:1 | Floor header text. |
 | `status-*` | card, `chip` | 3:1 | Status dot, next to a word. |
@@ -308,65 +315,66 @@ Each README has the full props table. Types: `components/index.d.ts`.
 | `accent` | `bg` | 3:1 | Focus ring and the accent pill of a pressed control. |
 | `status-*` | any | not checked at 4.5:1 | Do not use it as text color. It is a fill and a dot. Use `status-*-text` or `status-*-on-bubble`. |
 
-#### Fluent 2 provenance
+#### Fluent 2 source of Fluent and Fluent Dark
 
-The Fluent and Fluent Dark colors come from the open Fluent 2 design tokens (`@fluentui/tokens`, MIT license: `webLightTheme` for Fluent, `webDarkTheme` for Fluent Dark). The office does not import that package; the values are copied. Each cell names the Fluent 2 source token. "(matches)" means the DS value is the source value. "own" means the value differs: the cell names the nearest source token and the reason. `test/theme-contract.test.mjs` checks that every color token has a row and that every cell is one of these three forms.
+Fluent and Fluent Dark follow the open Fluent 2 design tokens: `webLightTheme` and `webDarkTheme` of `@fluentui/tokens` (MIT, version 1.0.0-alpha.24). Each color names its source: an alias token (`colorNeutralBackground3`), a step of the neutral ramp (`grey[94]`), of the brand ramp (`brandWeb[90]`) or of a shared palette color (`orchid tint30`). "Matches" means the value is the source value. Where it differs, the cell says why; most differences are a contrast fix, so do not set them back to the source. A value that drifted with no reason was aligned to its source (in x1.7.11 or x1.7.16, as the cell says), and every contrast pair was measured again. A `{token}` value takes the value of that token. The theme shows no Microsoft logo, Windows mark or product name.
 
-| Token | Fluent source (`webLightTheme`) | Fluent Dark source (`webDarkTheme`) |
+| Token | fluent (webLightTheme) | fluent-dark (webDarkTheme) |
 | --- | --- | --- |
-| `bg` | own: nearest `colorNeutralBackground3` #f5f5f5; scene art, no Fluent 2 counterpart | `colorNeutralBackground2` (matches) |
-| `panel` | own: translucent surface; no Fluent 2 token is translucent | own: translucent surface; no Fluent 2 token is translucent |
-| `chip` | `colorNeutralBackground5` (matches) | `colorNeutralBackground6` (matches) |
-| `line` | own: translucent surface; no Fluent 2 token is translucent | own: translucent surface; no Fluent 2 token is translucent |
-| `ink` | `colorNeutralForeground1` (matches) | `colorNeutralForeground1` (matches) |
-| `muted` | `colorNeutralForeground3` (matches) | `colorNeutralForeground3` (matches) |
-| `accent` | `colorBrandBackground` (matches) | own: nearest `colorBrandForegroundLink` #479ef5; scene art, no Fluent 2 counterpart |
-| `accent-text` | alias of `accent` | alias of `accent` |
-| `on-accent` | `colorNeutralForegroundOnBrand` (matches) | own: nearest `colorNeutralForegroundOnBrand` #ffffff; scene art, no Fluent 2 counterpart |
-| `emphasis` | alias of `accent` | alias of `accent` |
-| `on-emphasis` | alias of `on-accent` | alias of `on-accent` |
-| `on-status` | `colorNeutralForegroundOnBrand` (matches) | `colorNeutralBackground3` (matches) |
-| `bubble` | `colorNeutralBackground1` (matches) | own: nearest `colorNeutralForeground1` #ffffff; scene art, no Fluent 2 counterpart |
-| `status-working` | `colorStatusSuccessBackground3` (matches) | `colorStatusSuccessForeground1` (matches) |
-| `status-waiting` | own: nearest `colorPalettePumpkinBorderActive` #ca5010; status hue of the DS, nearest source shown | `colorStatusWarningForeground1` (matches) |
-| `status-error` | `colorStatusDangerBackground3` (matches) | `colorStatusDangerForeground1` (matches) |
-| `status-resting` | own: nearest `colorNeutralForeground4` #707070; status hue of the DS, nearest source shown | own: nearest `colorNeutralForeground4` #999999; status hue of the DS, nearest source shown |
-| `status-finished` | own: nearest `colorBrandBackground` #0f6cbd; status hue of the DS, nearest source shown | `colorBrandForeground2` (matches) |
-| `status-working-text` | `colorStatusSuccessForeground1` (matches) | alias of `status-working` |
-| `status-waiting-text` | own: nearest `colorStatusWarningForeground1` #bc4b09; moved from the source to pass 4.5:1 on chip and bg (source 4.25:1) | alias of `status-waiting` |
-| `status-error-text` | `colorStatusDangerForeground1` (matches) | own: nearest `colorStatusDangerForeground1` #dc626d; moved from the source to pass 4.5:1 on chip and bg (source 3.62:1) |
-| `status-resting-text` | `colorNeutralForeground3` (matches) | `colorNeutralForeground3` (matches) |
-| `status-finished-text` | `colorBrandForegroundLink` (matches) | alias of `status-finished` |
-| `status-working-on-bubble` | alias of `status-working` | `colorStatusSuccessForegroundInverted` (matches) |
-| `status-waiting-on-bubble` | `colorStatusWarningForeground1` (matches) | `colorStatusWarningForegroundInverted` (matches) |
-| `status-error-on-bubble` | alias of `status-error` | `colorStatusDangerForegroundInverted` (matches) |
-| `status-resting-on-bubble` | `colorNeutralForeground4` (matches) | own: nearest `colorNeutralForeground3` #adadad; moved from the source to pass 4.5:1 on bubble (source 2.06:1) |
-| `status-finished-on-bubble` | `colorBrandBackground` (matches) | `colorBrandBackground` (matches) |
-| `floor-ops` | own: nearest `colorNeutralForeground3` #616161; role color of the DS, nearest source shown | own: nearest `colorNeutralStencil1` #575757; role color of the DS, nearest source shown |
-| `floor-sales` | own: nearest `colorStatusWarningForeground1` #bc4b09; role color of the DS, nearest source shown | own: nearest `colorPalettePeachBackground2` #8f4e00; role color of the DS, nearest source shown |
-| `floor-research` | own: nearest `colorPaletteSeafoamForeground2` #00723b; role color of the DS, nearest source shown | own: nearest `colorPaletteSeafoamBackground2` #00723b; role color of the DS, nearest source shown |
-| `floor-content` | own: nearest `colorPaletteLavenderBorderActive` #7160e8; role color of the DS, nearest source shown | own: nearest `colorPaletteNavyBorderActive` #546fd2; role color of the DS, nearest source shown |
-| `floor-hq` | `colorPaletteBrownBorderActive` (matches) | own: nearest `colorPalettePeachBackground2` #8f4e00; role color of the DS, nearest source shown |
-| `on-floor` | `colorNeutralForegroundOnBrand` (matches) | `colorNeutralForeground1` (matches) |
-| `scrim` | own: nearest `colorStrokeFocus2` #000000; scene art, no Fluent 2 counterpart | `colorNeutralBackground5` (matches) |
-| `type-team` | `colorPaletteCornflowerBorderActive` (matches) | own: nearest `colorPaletteCornflowerBorderActive` #93a4f4; role color of the DS, nearest source shown |
-| `type-lab` | `colorPaletteTealBorderActive` (matches) | `colorPaletteTealBorderActive` (matches) |
-| `type-studio` | `colorPaletteBerryBackground3` (matches) | `colorPaletteBerryForeground1` (matches) |
-| `type-hq` | own: nearest `colorPaletteBrassBorderActive` #986f0b; role color of the DS, nearest source shown | `colorPaletteMarigoldForeground3` (matches) |
-| `type-security` | own: nearest `colorPaletteLilacBorderActive` #b146c2; role color of the DS, nearest source shown | own: nearest `colorPalettePurpleForeground2` #c6b1de; role color of the DS, nearest source shown |
-| `scene-floor` | own: nearest `colorNeutralBackground4` #f0f0f0; scene art, no Fluent 2 counterpart | `colorNeutralBackground2Selected` (matches) |
-| `scene-wall` | own: nearest `colorNeutralBackground6` #e6e6e6; scene art, no Fluent 2 counterpart | `colorNeutralBackground1` (matches) |
-| `scene-wood` | own: nearest `colorPaletteBrassBackground2` #e0cea2; scene art, no Fluent 2 counterpart | own: nearest `colorNeutralStroke1` #666666; scene art, no Fluent 2 counterpart |
-| `scene-chair` | own: nearest `colorPaletteAnchorBorderActive` #394146; scene art, no Fluent 2 counterpart | own: nearest `colorNeutralStroke2` #525252; scene art, no Fluent 2 counterpart |
-| `scene-rug` | own: nearest `colorPaletteCornflowerBorderActive` #4f6bed; scene art, no Fluent 2 counterpart | own: nearest `colorPaletteCornflowerBackground2` #2c3c85; scene art, no Fluent 2 counterpart |
-| `scene-wall-side` | own: nearest `colorNeutralStroke2` #e0e0e0; scene art, no Fluent 2 counterpart | `colorNeutralForeground1Static` (matches) |
-| `scene-slab` | `colorNeutralStroke1Pressed` (matches) | `colorNeutralBackground4Selected` (matches) |
-| `scene-rail` | `colorNeutralForegroundOnBrand` (matches) | `colorNeutralForegroundDisabled` (matches) |
-| `scene-sofa` | own: nearest `colorPaletteMinkBorderActive` #5d5a58; scene art, no Fluent 2 counterpart | own: nearest `colorPalettePlatinumBackground2` #3b4447; scene art, no Fluent 2 counterpart |
-| `scene-metal` | own: nearest `colorPaletteAnchorBackground2` #bcc3c7; scene art, no Fluent 2 counterpart | `colorNeutralStroke1Selected` (matches) |
-| `scene-dark` | `colorNeutralBackgroundInverted` (matches) | `colorNeutralBackground3` (matches) |
-| `scene-glass` | `colorBrandBackground2Hover` (matches) | own: nearest `colorPaletteCornflowerBackground2` #2c3c85; scene art, no Fluent 2 counterpart |
-| `scene-subagent` | own: nearest `colorPaletteDarkGreenBackground2` #9ad29a; scene art, no Fluent 2 counterpart | `colorNeutralStroke1Pressed` (matches) |
+| `bg` | `#f5f5f5`: colorNeutralBackground3. Aligned from `#f3f3f3` (x1.7.16). | `#1f1f1f`: colorNeutralBackground2. Matches. |
+| `panel` | `rgba(255,255,255,0.88)`: colorNeutralBackground1, at the 88% glass alpha of the DS. Fluent 2 has no glass surface. Aligned from `rgba(251,251,251,0.88)` (x1.7.16). | `rgba(41,41,41,0.88)`: colorNeutralBackground1, at the 88% glass alpha of the DS. Fluent 2 has no glass surface. |
+| `chip` | `#ebebeb`: colorSubtleBackgroundSelected. Matches. | `#333333`: colorSubtleBackgroundSelected. Matches. |
+| `line` | `rgba(0,0,0,0.10)`: colorNeutralStencil1Alpha. The stroke token colorNeutralStrokeAlpha (0.05) is too faint on the glass panel. | `rgba(255,255,255,0.10)`: colorNeutralStrokeAlpha. Matches. |
+| `ink` | `#242424`: colorNeutralForeground1. Matches. | `#ffffff`: colorNeutralForeground1. Matches. |
+| `muted` | `#616161`: colorNeutralForeground3. Matches. | `#adadad`: colorNeutralForeground3. Matches. |
+| `accent` | `#0f6cbd`: colorBrandBackground. Matches. | `#479ef5`: colorBrandForeground1. Aligned from `#4aa0f6` (x1.7.16); `accent-text` is the lighter `#62abf5`. |
+| `accent-text` | `{accent}`: colorBrandForeground1. Matches. | `#62abf5`: colorBrandForeground2. Differs from `accent` on purpose: `#479ef5` is 4.499:1 on chip, under 4.5:1. The next brand step, `#62abf5` (brandWeb[110]), is 5.2:1 on chip and 6.8:1 on bg. Aligned from the hand-nudged `#4aa0f6` (x1.7.16). |
+| `on-accent` | `#ffffff`: colorNeutralForegroundOnBrand. Matches. | `#141414`: colorNeutralBackground3. Accent is the light brand foreground, so the text on it is dark: white on `#479ef5` is 2.8:1. |
+| `emphasis` | `{accent}`: colorBrandBackground (= accent). Matches. | `{accent}`: colorBrandForeground1 (= accent). Matches. |
+| `on-emphasis` | `{on-accent}`: colorNeutralForegroundOnBrand (= on-accent). Matches. | `{on-accent}`: colorNeutralBackground3 (= on-accent). Matches. |
+| `on-status` | `#ffffff`: colorNeutralForegroundOnBrand. Not used (agent-office #118). | `#141414`: colorNeutralBackground3. Not used (agent-office #118). |
+| `bubble` | `#ffffff`: colorNeutralBackground1. Matches. | `#f5f5f5`: grey[96] (webLightTheme colorNeutralBackground3). The bubble is a light face in every theme. |
+| `status-working` | `#107c10`: colorStatusSuccessBackground3. Matches. | `#54b054`: colorStatusSuccessForeground1. Matches. |
+| `status-waiting` | `#de590b`: orange shade10, one step darker than colorStatusWarningBackground3. Differs: colorStatusWarningBackground3 `#f7630c` is 2.6:1 on chip; orange shade10 is 3.2:1. Aligned from `#d2560b` (x1.7.16). | `#faa06b`: colorStatusWarningForeground1. Matches. |
+| `status-error` | `#c50f1f`: colorStatusDangerBackground3. Matches. | `#dc626d`: colorStatusDangerForeground1. Matches. |
+| `status-resting` | `#7a7a7a`: grey[48]. Fluent 2 has no idle status: a mid step of the neutral ramp, 3:1 or more on chip. | `#858585`: grey[52]. Fluent 2 has no idle status: a mid step of the neutral ramp. |
+| `status-finished` | `#2886de`: brandWeb[90]. Fluent 2 has no finished status: a step of the brand ramp, 3:1 or more on chip. Aligned from `#227ed4` (x1.7.16). | `#62abf5`: colorBrandForeground2. Matches. |
+| `status-working-text` | `#0e700e`: colorStatusSuccessForeground1. Matches. | `{status-working}`: colorStatusSuccessForeground1, the value of status-working. Aligned from `#6cbf6c` (x1.7.11). |
+| `status-waiting-text` | `#a94409`: colorStatusWarningForeground1. Differs: `#bc4b09` is 4.25:1 on chip; darkened to 5.0:1. | `{status-waiting}`: colorStatusWarningForeground1. Matches. |
+| `status-error-text` | `#b10e1c`: colorStatusDangerForeground1. Matches. | `#ee8a93`: colorStatusDangerForeground1. Differs: `#dc626d` is 3.6:1 on chip; lightened to 5.2:1. |
+| `status-resting-text` | `#616161`: colorNeutralForeground3. Fluent 2 has no idle status, so the word takes the secondary text color. Aligned from `#5c5c5c` (x1.7.11). | `#adadad`: colorNeutralForeground3. Aligned from `#a3a3a3` (x1.7.11). |
+| `status-finished-text` | `#115ea3`: colorBrandForeground2. Matches. | `{status-finished}`: colorBrandForeground2. Matches. |
+| `status-working-on-bubble` | `{status-working}`: colorStatusSuccessBackground3. Matches. | `#0e700e`: webLightTheme colorStatusSuccessForeground1. The bubble is a light face, so the light theme gives the text. |
+| `status-waiting-on-bubble` | `#bc4b09`: colorStatusWarningForeground1. Matches. | `#bc4b09`: webLightTheme colorStatusWarningForeground1. Light face. Aligned from `#a94409` (x1.7.11). |
+| `status-error-on-bubble` | `{status-error}`: colorStatusDangerBackground3. Matches. | `#b10e1c`: webLightTheme colorStatusDangerForeground1. Light face. |
+| `status-resting-on-bubble` | `#707070`: colorNeutralForeground4. Matches. | `#616161`: webLightTheme colorNeutralForeground3. Light face. |
+| `status-finished-on-bubble` | `#0f6cbd`: colorBrandForeground1. Matches. | `#115ea3`: webLightTheme colorBrandForeground2. Light face. |
+| `floor-ops` | `#505c60`: platinum shade20. Fluent 2 has no floor colors: a shared palette color, 4.9:1 or more under white. Aligned from `#4d5f6b` (x1.7.16). | `#505c60`: platinum shade20. Aligned from `#4d5f6b` (x1.7.16). |
+| `floor-sales` | `#b6480e`: pumpkin shade10. Shared palette color. | `#b6480e`: pumpkin shade10. Aligned from `#ad440d` (x1.7.16). |
+| `floor-research` | `#00723b`: seafoam shade30. Shared palette color. Aligned from `#1c7d3b` (x1.7.16). | `#00723b`: seafoam shade30. Aligned from `#1a7539` (x1.7.16). |
+| `floor-content` | `#6656d1`: lavender shade10. Shared palette color. | `#6656d1`: lavender shade10. Matches. |
+| `floor-hq` | `#8e562e`: brown primary. Shared palette color. | `#8e562e`: brown primary. Matches. |
+| `on-floor` | `#ffffff`: colorNeutralForegroundOnBrand. Matches. | `#ffffff`: colorNeutralForeground1. Matches. |
+| `scrim` | `#000000`: black, the color of colorBackgroundOverlay. The DS mixes it to 45%. Aligned from `#0a1016` (x1.7.16). | `#000000`: black, the color of colorBackgroundOverlay. Matches. |
+| `type-team` | `#4f6bed`: cornflower primary. Shared palette color. | `#778df1`: cornflower tint20. Matches. |
+| `type-lab` | `#038387`: teal primary. Shared palette color. | `#4cb4b7`: teal tint30. Matches. |
+| `type-studio` | `#c239b3`: berry primary. Shared palette color. | `#da7ed0`: berry tint30. Matches. |
+| `type-hq` | `#b27c00`: marigold shade20. Shared palette color, 3.05:1 on chip. Aligned from `#9a6a00` (x1.7.16). | `#efb839`: marigold tint20. Matches. |
+| `type-security` | `#8764b8`: orchid primary. Shared palette color. | `#b29ad4`: orchid tint30. Aligned from `#b49dd4` (x1.7.16). |
+| `scene-floor` | `#f0f0f0`: grey[94]. A 3D material: Fluent 2 has no scene tokens, so a neutral material is a step of the neutral ramp. Aligned from `#eeeeee` (x1.7.16). | `#2e2e2e`: grey[18]. A step of the neutral ramp. |
+| `scene-wall` | `#e6e6e6`: grey[90]. Neutral ramp. Aligned from `#e8e8e8` (x1.7.16). | `#292929`: grey[16]. Neutral ramp. |
+| `scene-wood` | `#e2cfae`: no source. A 3D material (wood): no Fluent 2 source. | `#8c7a5e`: no source. A 3D material (wood): no Fluent 2 source. |
+| `scene-chair` | `#394146`: anchor primary. Shared palette color. Aligned from `#3a4048` (x1.7.16). | `#4a5356`: silver shade30. Aligned from `#4a5058` (x1.7.16). |
+| `scene-rug` | `#5a8fd0`: no source. A 3D material (the lounge rug, in the brand blue family): no Fluent 2 source. | `#2f5d8f`: no source. A 3D material: no Fluent 2 source. |
+| `scene-wall-side` | `#e0e0e0`: grey[88]. Neutral ramp, one step darker than the wall. Aligned from `#dedede` (x1.7.16). | `#242424`: grey[14]. Neutral ramp. |
+| `scene-slab` | `#b3b3b3`: grey[70]. Neutral ramp. | `#1a1a1a`: grey[10]. Neutral ramp. |
+| `scene-rail` | `#ffffff`: white. Matches. | `#5c5c5c`: grey[36]. Neutral ramp. |
+| `scene-sofa` | `#4d565c`: anchor tint10. Shared palette color. Aligned from `#4a5560` (x1.7.16). | `#3f4a55`: no source. A 3D material: no Fluent 2 source. |
+| `scene-metal` | `#a8a8a8`: grey[66]. Neutral ramp. | `#707070`: grey[44]. Neutral ramp. |
+| `scene-dark` | `#292929`: grey[16] (colorNeutralBackgroundInverted). Matches. | `#141414`: grey[8] (colorNeutralBackground3). Matches. |
+| `scene-glass` | `#cfe4fa`: brandWeb[150] (colorBrandBackground2Hover). Matches. | `#34506e`: no source. A 3D glass tint: no Fluent 2 source. |
+| `scene-subagent` | `#a3a3a3`: grey[64]. Neutral ramp. | `#6b6b6b`: grey[42]. Neutral ramp. |
+| `scene-lamp` | `#ffba66`: peach tint30. A lamp light: Fluent 2 has no scene tokens, so a warm shared palette color. | `#ffba66`: peach tint30. The same lamp. |
 
 ### spacing
 
@@ -391,13 +399,25 @@ The Fluent and Fluent Dark colors come from the open Fluent 2 design tokens (`@f
 | `radius-fluent-md` | `4px` | Rows and segments in Fluent and Fluent Dark. The theme sets radius-md to it. |
 | `radius-fluent-lg` | `8px` | Panels, cards and dialogs in Fluent and Fluent Dark. The theme sets radius-lg to it. |
 
-`tokens.css` only defines the `radius-fluent-*` and `font-fluent-*` tokens. `components/bundle.css` maps them under `[data-theme|="fluent"]` (`radius-sm`, `radius-md`, `radius-lg`, `font-sans`, `font-mono`), for Fluent and Fluent Dark, as it maps `font-sublevel-*` for Sublevel. So load `bundle.css` with `tokens.css`: with `tokens.css` alone, Fluent and Fluent Dark keep the Day corners and faces.
+`tokens.css` only defines the `radius-fluent-*` and `font-fluent-*` tokens. `components/bundle.css` maps them under `[data-theme|="fluent"]` (`radius-sm`, `radius-md`, `radius-lg`, `font-sans`, `font-mono`), for Fluent and Fluent Dark, as it maps `font-sublevel-*` under `[data-theme|="sublevel"]`. Fluent 2 sources: `borderRadiusMedium` (4px) for controls and rows, `borderRadiusXLarge` (8px) for panels. So load `bundle.css` with `tokens.css`: with `tokens.css` alone, Fluent and Fluent Dark keep the Day corners and faces.
 
 ### shadow
 
 | Token | Value | Use |
 | --- | --- | --- |
 | `shadow-panel` | `{"light": "0 6px 24px rgba(10,20,30,0.08)", "dark": "0 6px 24px rgba(0,0,0,0.35)", "sublevel": "0 1px 0 rgba(16,42,51,0.10)", "fluent": "0 0 2px rgba(0,0,0,0.12), 0 4px 8px rgba(0,0,0,0.14)", "fluent-dark": "0 0 2px rgba(0,0,0,0.24), 0 4px 8px rgba(0,0,0,0.28)"}` | Every floating HUD panel. Nothing else casts a shadow. |
+
+### skin
+
+The values of the drawn DS parts in each theme: the bot portraits (`BotAvatar`, `AgentOffice.PORTRAITS`) and the logo mark. `bundle.css` applies them (`ao-pt-*`, `.ao-mark`), so no theme has a portrait or logo file of its own.
+
+| Token | light | dark | sublevel | fluent | fluent-dark | Use |
+| --- | --- | --- | --- | --- | --- | --- |
+| `portrait-ink` | `#11161c` | `#11161c` | `#102a33` | `#11161c` | `#11161c` | Eyes, line art and soft shadow of a bot portrait (BotAvatar), and the bot eyes and shadows in the office type pictures. |
+| `portrait-gloss` | `1` | `1` | `0` | `1` | `1` | Bot portrait: 1 shows the highlight and the soft shadow under the bot, 0 draws the bot flat. |
+| `portrait-outline` | `0` | `0` | `1` | `0` | `0` | Bot portrait: 1 draws an outline, the inner facet edges and a floor line in portrait-ink, 0 draws none. |
+| `portrait-eyes-square` | `0` | `0` | `1` | `0` | `0` | Bot portrait: 1 draws square eyes, 0 round eyes. |
+| `logo-mark-radius` | `25%` | `25%` | `50%` | `25%` | `25%` | Corner of the logo mark: 25% is a rounded square, 50% a circle. |
 
 ### blur
 
@@ -467,7 +487,7 @@ Layout breakpoints for the office HUD (container width).
 | `bp-compact` | `1100px` | At this width and below: the activity log hides and the broadcast bar moves left. |
 | `bp-wide` | `1360px` | The reference width for previews and the full HUD. |
 
-The office top bar (brand, mode toggle, view toggle, status counts) keeps to the rows above the side columns: one row above `bp-phone`, two rows to 521 px, three rows below. In the bar the mode toggle shows icons only (the pressed mode keeps its label) to 999 px, and to 1199 px in Sublevel. The status counts go to a second row between the columns, and hide below 960 px. When a toggle still goes to a lower row (Sublevel from 821 to 899 px, or a long building or agent name), the side columns start below the last toggle of the bar (CSS anchor positioning), so no toggle is under a column. A page that puts its own panel under the bar starts it at 68 px above `bp-phone`, as the columns do.
+The office top bar (brand, mode toggle, view toggle, status counts) keeps to the rows above the side columns: one row above `bp-phone`, two rows to 521 px, three rows below. In the bar the mode toggle shows icons only (the pressed mode keeps its label) to 999 px, and to 1199 px in the Sublevel family, whose capitals are wider. While a decision waits, the Needs you button is in the bar too, and the toggle shows icons only to 1119 px (1325 px in the Sublevel family). `test/skin.test.mjs` checks the width for every theme against the number of `AgentOffice.MODES` entries and the label lengths (a pinned estimate with 16 px to spare), so a new theme that makes the toggle longer must raise the width. The status counts go to a second row between the columns, and hide below 960 px. When a toggle still goes to a lower row (Sublevel from 821 to 899 px, or a long building or agent name), the side columns start below the last toggle of the bar (CSS anchor positioning), so no toggle is under a column. A page that puts its own panel under the bar starts it at 68 px above `bp-phone`, as the columns do.
 
 ### scene
 
@@ -554,7 +574,7 @@ The office top bar (brand, mode toggle, view toggle, status counts) keeps to the
 - `font-fluent-sans`: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, sans-serif (system faces: the office loads no font file for them)
 - `font-fluent-mono`: "Cascadia Mono", "Cascadia Code", Consolas, ui-monospace, monospace
 
-Without the Fluent faces: a machine that has no Segoe UI Variable falls back to Segoe UI, then to the system UI face (`system-ui`, and `-apple-system` on macOS), then to a generic sans-serif. A machine with no Cascadia Mono or Cascadia Code (Windows has Consolas, macOS and Linux do not) shows Consolas, then the system monospace face. The office loads no file for these faces, so the widths on such a machine differ from Windows 11. The layout does not depend on them.
+The Fluent faces are system faces. On Windows 11 the office shows Segoe UI Variable and Cascadia Mono; on Windows 10, Segoe UI and Consolas (Cascadia comes with Windows Terminal). A machine with none of them shows its system face: San Francisco on macOS (`-apple-system`, `system-ui`), the desktop face on Linux (`system-ui`, often Cantarell or Noto Sans), and its default monospace face. The layout does not depend on the face: the mode control fit rule (Breakpoint) has room for a wider face.
 
 ## Icons
 

@@ -23,25 +23,9 @@ const py = (args) => {
   return r;
 };
 
-test('tokens.css has every color token of tokens.json, with the same value, in each theme', () => {
-  const block = (open) => { const at = css.indexOf(open); assert.ok(at >= 0, `tokens.css has ${open}`); return css.slice(at, css.indexOf('\n}', at)); };
-  // every theme of tokens.json, in its order: Day is the root block, each other theme has its own block
-  const ids = JSON.parse(read('tokens.json')).color.themes.map((t) => t.id);
-  assert.ok(ids.length >= 3 && new Set(ids).size === ids.length, 'tokens.json lists themes');
-  assert.deepEqual(ids.slice(0, 3), ['light', 'dark', 'sublevel'], 'Day, Night and Sublevel stay first');
-  const themes = Object.fromEntries(ids.map((id) => [id, block(id === 'light' ? ':root, [data-theme="light"] {' : `\n[data-theme="${id}"] {`)]));
-  for (const [th, text] of Object.entries(themes)) {
-    for (const t of tokens) {
-      const want = t.value[th].replace(/^\{(.+)\}$/, 'var(--$1)');
-      const m = text.match(new RegExp(`\\n\\s*--${t.name}: ([^;]+);`));
-      assert.ok(m, `${t.name} missing in ${th}`);
-      assert.equal(m[1], want, `${t.name} in ${th}`);
-    }
-  }
-});
-
 // The non-color groups of tokens.json. Each custom property is named after the token; type styles and families
-// have a name of their own (--type-<style>-size|line|weight|tracking, --font-<family>). Only `shadow` changes per theme.
+// have a name of their own (--type-<style>-size|line|weight|tracking, --font-<family>). The per-theme groups (color, shadow,
+// skin) are checked for every skin in test/skin.test.mjs.
 function nonColorProps() {
   const j = JSON.parse(read('tokens.json'));
   const flat = [];
@@ -56,8 +40,7 @@ function nonColorProps() {
       if (s.letterSpacing) flat.push([`type-${s.name}-tracking`, s.letterSpacing]);
     }
   }
-  const perTheme = j.shadow.tokens.map((t) => [t.name, t.value]);
-  return { flat, perTheme };
+  return { flat };
 }
 const cssBlock = (text, open) => { const at = text.indexOf(open); return text.slice(at, text.indexOf('\n}', at)); };
 const cssProp = (text, name) => text.match(new RegExp(`\\n\\s*--${name}: ([^;]+);`))?.[1];
@@ -65,7 +48,7 @@ const cssProp = (text, name) => text.match(new RegExp(`\\n\\s*--${name}: ([^;]+)
 test('tokens.css has every non-color token of tokens.json, with the same value', () => {
   const { flat } = nonColorProps();
   assert.ok(flat.length > 100, `only ${flat.length} non-color tokens found`);
-  const root = cssBlock(css, ':root, [data-theme="light"] {');
+  const root = cssBlock(css, `:root, [data-theme="${JSON.parse(read('tokens.json')).color.themes[0].id}"] {`);
   for (const [name, value] of flat) {
     const got = cssProp(root, name);
     assert.ok(got !== undefined, `--${name} missing in tokens.css`);
@@ -73,24 +56,11 @@ test('tokens.css has every non-color token of tokens.json, with the same value',
   }
 });
 
-test('tokens.css has every per-theme shadow token, with the same value, in each theme and in the system dark block', () => {
-  const { perTheme } = nonColorProps();
-  // every theme of tokens.json (Fluent and Fluent Dark too), plus the system dark block, which takes the Night value
-  const ids = JSON.parse(read('tokens.json')).color.themes.map((t) => t.id);
-  const blocks = Object.fromEntries(ids.map((id) => [id, cssBlock(css, id === 'light' ? ':root, [data-theme="light"] {' : `\n[data-theme="${id}"] {`)]));
-  blocks.system = cssBlock(css, ':root:not([data-theme]) {');
-  for (const [name, value] of perTheme) {
-    assert.deepEqual(Object.keys(value), ids, `${name} has a value for every theme, in order`);
-    for (const [th, text] of Object.entries(blocks)) {
-      const got = cssProp(text, name);
-      assert.ok(got !== undefined, `--${name} missing in ${th}`);
-      assert.equal(got, value[th === 'system' ? 'dark' : th], `--${name} in ${th}`);
-    }
-  }
-});
-
-test('the schema lists every color token', () => {
-  for (const t of tokens) assert.ok(schema.tokens.includes(t.name), `${t.name} not in kit/schema.json tokens`);
+test('the schema lists every token of tokens.json (color, shadow, skin and every non-color group)', () => {
+  const j = JSON.parse(read('tokens.json'));
+  const groups = Object.keys(j).filter((g) => Array.isArray(j[g]?.tokens));
+  assert.ok(['color', 'shadow', 'skin', 'scene', 'fx'].every((g) => groups.includes(g)), `groups found: ${groups}`);
+  for (const g of groups) for (const t of j[g].tokens) assert.ok(schema.tokens.includes(t.name), `${g} token ${t.name} not in kit/schema.json tokens`);
 });
 
 test('the schema inside the bundle is the one in kit/schema.json', () => {
@@ -250,11 +220,12 @@ test('CI checks the DS files with kit/check.py', () => {
   for (const f of ['components/bundle.css', 'components/bundle.js', 'kit/page.html']) assert.ok(line.split(/\s+/).includes(f), `${f} is in the CI check list`);
 });
 
-test('the DS CSS uses tokens for the overlay and the Sublevel scan lines', () => {
+// A theme's own look rules (scan lines, faces) are its data: test/skin.test.mjs checks, the same way for every theme, that each one
+// uses tokens only. No test here names one theme.
+test('the DS CSS uses the scrim token for the overlay', () => {
   const b = read('components/bundle.css');
   assert.match(b, /\.ao-overlay\{[^}]*background:color-mix\(in srgb,var\(--scrim\) 45%,transparent\)/);
   assert.match(b, /\.ao-overlay\.is-inline\{[^}]*background:color-mix\(in srgb,var\(--scrim\) 25%,transparent\)/);
-  assert.match(b, /\.ao-fh\{background-image:repeating-linear-gradient\(0deg,color-mix\(in srgb,var\(--on-floor\) 6%,transparent\)/);
   assert.ok(tokens.some((t) => t.name === 'scrim'), 'scrim is in tokens.json');
 });
 
@@ -298,7 +269,6 @@ test('bundle.js defines ModeToggle once, with an icon on every mode; the types a
   const ma = b.indexOf('AO.MODES=[');
   const modes = b.slice(ma, b.indexOf('];', ma));
   const themes = JSON.parse(read('tokens.json')).color.themes;
-  for (const t of themes) assert.match(modes, new RegExp(`theme:"${t.id}",label:"${t.name}",icon:"[a-z]+"`), `AO.MODES has ${t.name} with an icon`);
   assert.match(read('components/index.d.ts'), /interface ModeToggleProps \{[^}]*options\?: \{ id: string; label: string; icon\?: string \}\[\]/, 'index.d.ts: options take an icon');
   assert.match(read('components/ModeToggle/README.md'), /\| `options` \| no \| `\{ id: string; label: string; icon\?: string \}\[\]` \|/, 'component README: options take an icon');
   const list = new RegExp(`${themes.map((t) => t.name).join(', ')}\\)? and Tour`);
@@ -307,16 +277,7 @@ test('bundle.js defines ModeToggle once, with an icon on every mode; the types a
   }
 });
 
-test('native scrollbars follow the theme: color-scheme in each theme block, and one token-based scrollbar-color (#97)', () => {
-  const scheme = (text) => text.match(/\n\s*color-scheme: ([^;]+);/)?.[1];
-  const light = cssBlock(css, ':root, [data-theme="light"] {');
-  const dark = cssBlock(css, '[data-theme="dark"] {');
-  const sublevel = cssBlock(css, '[data-theme="sublevel"] {');
-  const system = cssBlock(css, ':root:not([data-theme]) {');
-  assert.equal(scheme(light), 'light', 'Day');
-  assert.equal(scheme(dark), 'dark', 'Night');
-  assert.equal(scheme(sublevel), 'light', 'Sublevel has a light palette');
-  assert.equal(scheme(system), 'dark', 'system dark');
+test('native scrollbars follow the theme: one token-based scrollbar-color (#97); color-scheme is in each theme block (test/skin.test.mjs)', () => {
   const b = read('components/bundle.css');
   const rule = b.match(/(^|\n)([^{}\n]*)\{scrollbar-color:([^;}]*)[;}]/);
   assert.ok(rule, 'bundle.css sets scrollbar-color once, on the office and the page root');
