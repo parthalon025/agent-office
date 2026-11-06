@@ -22,6 +22,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { officeFiles, portArg } from './files.mjs';
+import { httpPost } from './post.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PORT = portArg(process.argv[2]);
@@ -85,14 +86,16 @@ function config() {
 async function office(route, body, ms) {
   const cfg = config();
   if (!cfg) throw new Error('Agent Office is not running.');
-  const res = await fetch(`http://127.0.0.1:${cfg.port}${route}`, {
-    method: 'POST',
+  // node:http (post.mjs), not fetch: fetch gives up after 300 s without headers, and office_ask waits up to 10 min (#128).
+  const res = await httpPost({
+    port: cfg.port, path: route,
     headers: { 'content-type': 'application/json', 'x-office-token': cfg.token },
     body: JSON.stringify({ office_id: process.env.OFFICE_ID || null, pid: process.ppid, ...body }),
     signal: AbortSignal.timeout(ms),
   });
-  const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error || `Agent Office answered ${res.status}.`);
+  let json = {};
+  try { json = JSON.parse(res.text); } catch { /* no JSON body */ }
+  if (res.status < 200 || res.status > 299) throw new Error(json.error || `Agent Office answered ${res.status}.`);
   return json;
 }
 

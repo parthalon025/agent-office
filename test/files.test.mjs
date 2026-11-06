@@ -62,7 +62,7 @@ async function fakeOffice() {
 
 test('hook.mjs and mcp.mjs read the token file of the port in their first argument', { timeout: 60000 }, async () => {
   const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-files-')));
-  for (const f of ['hook.mjs', 'mcp.mjs', 'payload.mjs', 'files.mjs']) fs.copyFileSync(path.join(ROOT, f), path.join(tmp, f));
+  for (const f of ['hook.mjs', 'mcp.mjs', 'payload.mjs', 'files.mjs', 'post.mjs']) fs.copyFileSync(path.join(ROOT, f), path.join(tmp, f));
   const plain = await fakeOffice(), other = await fakeOffice();
   try {
     // The default office's file names port `plain`; the file of port `other` names port `other`.
