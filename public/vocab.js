@@ -596,6 +596,23 @@
     accessoryWord: function (k) { return own(ACCESSORY_WORD, k) ? ACCESSORY_WORD[k] : ''; }
   };
 
+  // The blackboard views of a room (#152): what the room's wall screen shows. The choice is saved by room key (personas.mjs setScreen,
+  // exported with the setup). Overview is the default and is never saved. A view names the columns under the plan line.
+  var WALL_VIEWS = [
+    { id: 'overview', word: 'Overview', note: 'Browser steps, last steps and the repository.', cols: ['browser', 'recent', 'repo'] },
+    { id: 'steps', word: 'Steps', note: 'Browser steps and last steps, wider.', cols: ['browser', 'recent'] },
+    { id: 'repo', word: 'Repository', note: 'The folders of the repository and which ones agents touched.', cols: ['repo'] }
+  ];
+  function wallView(id) { for (var i = 0; i < WALL_VIEWS.length; i++) if (WALL_VIEWS[i].id === id) return WALL_VIEWS[i]; return WALL_VIEWS[0]; }
+  var wall = {
+    VIEWS: WALL_VIEWS,
+    isView: function (id) { return typeof id === 'string' && WALL_VIEWS.some(function (v) { return v.id === id; }); },
+    columnsOf: function (id) { return wallView(id).cols.slice(); },
+    viewOf: function (map, key) { return map && typeof key === 'string' && own(map, key) ? wallView(map[key]).id : 'overview'; },
+    word: function (id) { return wallView(id).word; },
+    note: function (id) { return wallView(id).note; }
+  };
+
   // Rituals (#151): the small moments of the office. Shared by the page and the server. Focus mode and reduced motion turn every one off.
   // A ritual never covers or delays a request: a moment waits while any request is open, and a stand-up is only a line in a prompt.
   var MOMENT_MS = 10 * 60000;
@@ -614,5 +631,5 @@
   }
   var rituals = { on: ritualsOn, dayKey: dayKey, standupDue: standupDue, standupDone: standupDone, moments: moments, STANDUP: STANDUP, MOMENT_MS: MOMENT_MS };
 
-  root.OfficeVocab = { rituals: rituals, explainLayers: explainLayers, requestGroups: requestGroups, groupAnswers: groupAnswers, stateWord: stateWord, laneOf: laneOf, limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform, hq: hq, plan: plan, layers: layers, holdMs: holdMs, folderOf: folderOf, persona: persona };
+  root.OfficeVocab = { rituals: rituals, explainLayers: explainLayers, requestGroups: requestGroups, groupAnswers: groupAnswers, stateWord: stateWord, laneOf: laneOf, limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform, hq: hq, plan: plan, layers: layers, holdMs: holdMs, folderOf: folderOf, persona: persona, wall: wall };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

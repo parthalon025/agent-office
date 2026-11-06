@@ -43,3 +43,17 @@ test('a cue pose is a small bounded movement, and none for no cue', () => {
   }
   assert.deepEqual(P.pose(null, 1), { arm: 0, lift: 0 });
 });
+
+test('the blackboard views: ids, words, which columns each shows, and an unknown id falls back to Overview', () => {
+  const W = globalThis.OfficeVocab.wall;
+  assert.deepEqual(W.VIEWS.map((v) => v.id), ['overview', 'steps', 'repo']);
+  assert.ok(W.VIEWS.every((v) => v.word && v.note));
+  assert.deepEqual(W.columnsOf('overview'), ['browser', 'recent', 'repo']);
+  assert.deepEqual(W.columnsOf('steps'), ['browser', 'recent']);
+  assert.deepEqual(W.columnsOf('repo'), ['repo']);
+  assert.deepEqual(W.columnsOf('constructor'), ['browser', 'recent', 'repo']);
+  assert.equal(W.viewOf({ a: 'repo' }, 'a'), 'repo');
+  assert.equal(W.viewOf({ a: 'weather' }, 'a'), 'overview');
+  assert.equal(W.viewOf(null, 'a'), 'overview');
+  assert.equal(W.viewOf({}, '__proto__'), 'overview');
+});

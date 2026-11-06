@@ -5,7 +5,7 @@
    timers. The page loads it as a script (window.OfficeWire). The server and the tests import it for its side effect
    and read globalThis.OfficeWire.
 
-     lean(state)        -> the snapshot the page gets. state: { sessions (each with place and seat), plan, plans, figures, notes, pins, repos, kinds, security, layouts, rooms, catalog, changes }
+     lean(state)        -> the snapshot the page gets. state: { sessions (each with place and seat), plan, plans, figures, notes, pins, screens, repos, kinds, security, layouts, rooms, catalog, changes }
      leanCall(c)        -> one tool call as the page reads it
      diff(prev, next)   -> the patch from one lean snapshot to the next, or null when nothing changed
      apply(prev, patch) -> the next snapshot. prev does not change; the parts that did not change are shared
@@ -33,7 +33,7 @@
   var CAPS = { calls: 60, replyChars: 32000 };
   var SHAPE = {
     sessions: { key: 'uid', item: { calls: { key: 'id' }, replies: { key: 'id' } } },
-    figures: { map: true }, notes: { map: true }, pins: { map: true }, layouts: { map: true }, rooms: { map: true }, changes: { map: true }
+    figures: { map: true }, notes: { map: true }, pins: { map: true }, screens: { map: true }, layouts: { map: true }, rooms: { map: true }, changes: { map: true }
   };
 
   function leanCall(c) {
@@ -76,6 +76,7 @@
       figures: state.figures || {},
       notes: state.notes || {},
       pins: state.pins || {},
+      screens: state.screens || {},
       repos: state.repos || [],
       kinds: state.kinds || [],   // the agent kinds (providers/index.mjs kinds): fixed while the server runs, so no patch repeats them
       security: state.security || null,  // the Security room (#70): rules, what is enforced, the Spend screen

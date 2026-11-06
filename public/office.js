@@ -1709,6 +1709,12 @@
         });
     }
     var title = 'Agents in ' + ((place && place.roomName) || 'this room');
+    // The wall screen of this room (#152): what its blackboard shows. Saved at once, by the room's key; Overview clears it.
+    var WV = window.OfficeVocab.wall, wallKey = p.mount.noteKey(p.roomId, snap || undefined), wallNow = WV.viewOf(snap && snap.screens, wallKey);
+    function setWall(v) {
+      setErr('');
+      api('/api/screen/set', { key: wallKey, view: v }).then(function () { p.toast({ tone: 'success', title: 'Wall screen', text: WV.word(v) }); }, function (x) { setErr(x.message); });
+    }
     if (costQ) return h(CostDialog, { title: 'Run ' + (addKind ? addKind.label : 'the agent'), text: costQ, busy: busy, err: err, onCancel: function () { setCostQ(null); setErr(''); }, onRun: function () { addAgent(true); } });
     if (skills) return h(SkillsDialog, { kind: skills.kind, agent: skills.agent, toast: p.toast, onClose: function () { setSkills(null); } });
     if (cur) {
@@ -1736,6 +1742,8 @@
               h('span', { className: 'agent-who' }, h('b', null, s.name), h('span', { className: 'agent-sub' }, window.OfficeVocab.status(s).word + ' · ' + window.officeAdapter.kindWord(s) + ' · ' + modelWord(KA.list, s)), h(FeatureTags, { session: s })),
               h(A.Button, { variant: 'quiet', icon: 'remove', onClick: function () { setErr(''); setConfirm(s.uid); } }, 'Close session'));
           })) : h(A.EmptyState, { icon: 'identity', compact: true, title: 'No agents here', text: 'Add an agent to start work in this room.' }),
+          wallKey ? h(A.Select, { id: 'room-wall', label: 'Blackboard shows', options: WV.VIEWS.map(function (v) { return { value: v.id, label: v.word }; }), value: wallNow, onChange: setWall, hint: WV.note(wallNow) }) : null,
+          err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
           skillKinds.map(function (k) { return h(A.Button, { key: k.kind, variant: 'quiet', icon: 'skill', onClick: function () { setSkills(k); } }, 'Skills of ' + k.agent); }),
           h(A.AddButton, { label: 'Add an agent', onClick: function () { setErr(''); setAdd({ name: '', provider: DEFAULT_KIND, model: '', prompt: '' }); } }))));
   }
@@ -2773,6 +2781,7 @@
             tree: function (root) { return api('/api/tree', { root: root }); },
             stats: function (id) { return mount.figures(id); },
             goals: function (id, building) { return window.OfficeVocab.plan.board(latestSnap.current && latestSnap.current.plans, building).groups; },   // the Manager board on the wall (#157)
+            view: function (id) { return window.OfficeVocab.wall.viewOf(latestSnap.current && latestSnap.current.screens, noteKey(id)); },   // the blackboard view the user chose for this room (#152)
             pin: function (id) { var n = latestSnap.current && latestSnap.current.pins && latestSnap.current.pins[noteKey(id)]; return n && n.text ? { text: n.text, by: n.by } : null; },
             onDoor: function (id) { setDlg({ name: 'room', roomId: id }); },
             state: function (id) { return mount.rollup().rooms[id] || null; },
