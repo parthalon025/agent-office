@@ -437,7 +437,7 @@ function claudeRig(over = {}) {
     events: o.events,
     files: () => FILES,
     spawn: (file, args, opts) => { const child = fakeChild(); r.spawned.push({ file, args, opts, child }); return child; },
-    execFile: (file, args, opts, cb) => { r.execs.push({ file, args, opts }); if (/powershell/.test(file) && !over.ps) return cb(null, '7\n', ''); (over.exec || ((_f, _a, done) => done(null, '', '')))(file, args, cb); },
+    execFile: (file, args, opts, cb) => { r.execs.push({ file, args, opts }); if (/powershell|\/ps$/i.test(file) && !over.ps) return cb(null, '7\n', '');   // the start-time lookup: powershell on Windows, ps elsewhere (over.exec || ((_f, _a, done) => done(null, '', '')))(file, args, cb); },
     // resolveExe's contract: an absolute path, or it throws
     exe: over.exe || ((name) => { if ((over.missing || []).includes(name)) throw new Error(`${name} was not found on PATH.`); return `C:/bin/${name}`; }),
     env: { PATH: 'C:/bin', ...(over.env || {}) },
@@ -574,7 +574,7 @@ test('claude-code process end: a failed start, an early exit with its stderr, a 
 
 test('claude-code close: taskkill on the process tree by full path; not found counts as closed', async () => {
   // the start-time lookup (powershell) answers "7"; the session was stamped "7" when it started (#27 L11)
-  const answer = (kill) => (f, _a, done) => (/powershell/.test(f) ? done(null, '7\n', '') : kill(done));
+  const answer = (kill) => (f, _a, done) => (/powershell|\/ps$/i.test(f) ? done(null, '7\n', '') : kill(done));
   const r = claudeRig({ exec: answer((done) => done(null, '', '')) });
   const s = r.o.session({ pid: 4242, pidStart: '7' });
   await r.p.close(s);
