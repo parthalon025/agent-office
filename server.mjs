@@ -1399,13 +1399,30 @@ async function probeHttp() {
 const planLines = async (goal) => String(goal).split(/\r?\n/).map((l) => l.replace(/^\s*(?:[-*]|\d+[.)])\s+/, '').trim()).filter(Boolean).map((text) => ({ text }));
 const goalAgents = (building) => [...sessions.values()].filter((s) => s.status !== 'ended' && buildingOfSession(s) === building).map((s) => {
   let paid = true; try { paid = isPaid(providers.of(s)); } catch { /* a kind that left: count it as paid */ }
-  return { id: s.uid, name: s.name, role: s.deskRole || '', room: '', free: s.status === 'idle' && !s.error, paid };
+  return { id: s.uid, name: s.name, role: s.deskRole || '', room: '', free: s.status === 'idle' && !s.error, paid, tiers: tiersOf(s, paid) };
 });
+// The model ladder (#74, manager.mjs): a free agent is the local tier, a Claude Code agent takes the three Claude tiers. Another paid kind
+// (an ACP agent) picks its own model, so it has no ladder tier and takes no ladder step.
+function tiersOf(s, paid) {
+  if (!paid) return ['local'];
+  return s.provider === 'claude-code' || !s.provider ? ['haiku', 'sonnet', 'opus'] : [];
+}
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const stepSeen = new Set(); // agents that began the turn of their step (a terminal session starts it with its next hook)
 const manager = createManager({
   planner: planLines,
   agents: goalAgents,
-  dispatch: (agent, task) => { sendMessage(agent.id, task, [], { answers: false }); stepSeen.delete(agent.id); },
+  // A Claude Code agent is set to the tier's model before the step starts (control set_model, the dock's model switch); a free agent keeps its model.
+  dispatch: (agent, task, ctx) => {
+    const s = sessions.get(agent.id);
+    if (ctx?.tier && ctx.tier !== 'local' && s?.headless && s.status !== 'ended' && s.model !== ctx.tier) {
+      try { doControl(agent.id, 'model', ctx.tier); } catch (e) { console.warn(`Manager: could not set the model: ${e.message}`); }
+    }
+    sendMessage(agent.id, task, [], { answers: false }); stepSeen.delete(agent.id);
+  },
+  ready: (building) => [...new Set(goalAgents(building).flatMap((a) => a.tiers))],
+  callsOf: (id, since) => (sessions.get(id)?.calls || []).filter((c) => c.t >= since && !c.agent).map((c) => ({ key: `${c.name}:${c.detail}`, ok: c.ok, changed: c.ok === true && EDIT_TOOLS.has(c.name) })),
+  paperclip: () => !!(persisted.paperclip?.company || hq.view()?.company),
   interrupt: (id) => { const s = sessions.get(id); if (s && s.status === 'working') tracker.interrupt(s); },
   spendOf: (id) => Number(sessions.get(id)?.cost) || 0,
   onChange: () => { persisted.goals = manager.export(); savePersisted(); broadcast(); },
@@ -1421,6 +1438,7 @@ function goalTick() {
     goalTickQueued = false;
     try {
       for (const id of manager.workingAgents()) {
+        await manager.check(id); // the model ladder: a stage signal takes the step one tier up
         const s = sessions.get(id);
         if (!s || s.status === 'ended') { stepSeen.delete(id); await manager.finish(id, { ok: false, text: 'The agent left the office.' }); }
         else if (s.status !== 'idle') stepSeen.add(id);

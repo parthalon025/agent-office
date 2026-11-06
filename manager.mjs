@@ -13,6 +13,9 @@
 //                                                                              every change, only when the status, the to-dos or the text changed. Not wired to the server yet.
 //                                                                              Owner decision (e1, default): when it is wired, `text` goes to its own section of the room
 //                                                                              board, never over the user's notes. The report has no room or notes key yet; the wiring adds it.
+//   ready(building)              -> ['local'|'haiku'|'sonnet'|'opus']          optional: the ladder tiers that can run now (#74). Without it the ladder is off and a step has no tier.
+//   callsOf(agentId, since)      -> [{ key, ok, changed }]                      optional: the calls the agent made since the step began (oldest first), read by check()
+//   paperclip()                  -> boolean                                     optional: true while a Paperclip company is connected (the ladder then stays still)
 //   defaultSpendLimit            number                                        optional: dollars for a goal that asks for none of its own (default 2; 0 = none)
 //
 // A goal that can reach a paid agent gets the default spend limit (providers/index.mjs spendLimitFor) unless submit() says otherwise: a
@@ -154,7 +157,8 @@ export function createManager(deps = {}) {
 
   /** The best free agent for a step: its named bot first, then role and room. null when nobody is free. */
   function pick(g, step) {
-    const free = deps.agents(g.building).filter((a) => a.free && !reserved.has(a.id));
+    // A step on the ladder goes only to an agent of its tier (an agent that lists no tiers takes any step).
+    const free = deps.agents(g.building).filter((a) => a.free && !reserved.has(a.id) && (!step.tier || !Array.isArray(a.tiers) || a.tiers.includes(step.tier)));
     let best = null, bestScore = -1;
     for (const a of free) {
       let score = 0;
@@ -175,6 +179,13 @@ export function createManager(deps = {}) {
 
   function stop(g, status, reason) { g.status = status; g.reason = reason; g.waitingFor = ''; touch(g); }
 
+  /** Take a working step back from its agent (the agent is interrupted); the step is pending again. */
+  function release(step) {
+    reserved.delete(step.agentId);
+    if (deps.interrupt) deps.interrupt(step.agentId);
+    step.status = 'pending'; step.owner = step.bot || ''; step.agentId = '';
+  }
+
   /** Give the next pending step to a free agent. Called after every change that could free one. */
   async function pump(g) {
     if (g.status !== 'running' || g.pumping) return;
@@ -190,12 +201,12 @@ export function createManager(deps = {}) {
     if (!agent) { g.waitingFor = step.id; touch(g); return; }
     g.waitingFor = '';
     g.pumping = true;
-    step.status = 'working'; step.owner = agent.name; step.agentId = agent.id; step.attempts += 1;
+    step.status = 'working'; step.owner = agent.name; step.agentId = agent.id; step.attempts += 1; step.startedAt = now();
     reserved.add(agent.id);
     if (!g.baseline.has(agent.id)) g.baseline.set(agent.id, Number(spendOf(agent.id)) || 0);
     touch(g);
     try {
-      await deps.dispatch(agent, step.text, { goalId: g.id, stepId: step.id });
+      await deps.dispatch(agent, step.text, { goalId: g.id, stepId: step.id, ...(step.tier ? { tier: step.tier } : {}) });
     } catch (e) {
       reserved.delete(agent.id);
       step.status = 'error'; step.result = clip(e && e.message || e, 300);
@@ -214,6 +225,9 @@ export function createManager(deps = {}) {
         approveFirst: opts.approveFirst === true, spendLimit: limitOf(building, opts.spendLimit), messages: 0,
         baseline: new Map(), lastBoard: '', waitingFor: '', pumping: false, createdAt: now(), updatedAt: now(),
       };
+      const startTier = typeof deps.ready === 'function' ? ladderStart(deps.ready(g.building)) : '';
+      g.paidAsked = startTier !== 'local'; // a goal that starts on a paid tier was asked when the user started it
+      g.holdPaid = false;
       goals.set(g.id, g);
       touch(g);
       let raw;
@@ -222,7 +236,7 @@ export function createManager(deps = {}) {
       if (!steps.length) { stop(g, 'failed', 'The plan has no steps.'); return g.id; }
       g.steps = steps.map((x, i) => ({
         id: `${g.id}-${i + 1}`, text: clip(String(x.text).trim(), 300), role: x.role || '', room: x.room || '', bot: x.bot || '',
-        status: 'pending', owner: x.bot || '', agentId: '', result: '', attempts: 0,
+        status: 'pending', owner: x.bot || '', agentId: '', result: '', attempts: 0, ...(startTier ? { tier: startTier } : {}),
       }));
       g.status = g.approveFirst ? 'awaiting-approval' : 'running';
       touch(g);
@@ -234,9 +248,37 @@ export function createManager(deps = {}) {
     async approve(goalId) {
       const g = goals.get(goalId);
       if (!g || g.status !== 'awaiting-approval') return false;
+      if (g.holdPaid) { g.paidAsked = true; g.holdPaid = false; g.reason = ''; } // the user said yes to the first paid step
       g.status = 'running'; touch(g);
       await pump(g);
       return true;
+    },
+
+    /**
+     * The model ladder (#74). Called after every change: reads the calls of the working step of `agentId`, and on a stage signal
+     * takes one step up with stepUp (the spend limit is checked there, the first paid tier is asked). Returns the stepUp answer, or null
+     * (the ladder is off, no such step, no signal). up: the step waits for an agent of the next tier. ask: the goal waits for approve().
+     * stop: the goal stops. stay (Paperclip connected): nothing changes.
+     */
+    async check(agentId) {
+      if (typeof deps.callsOf !== 'function') return null;
+      for (const g of goals.values()) {
+        if (g.status !== 'running') continue;
+        const step = g.steps.find((s) => s.status === 'working' && s.agentId === agentId);
+        if (!step || !step.tier) continue;
+        const signal = stageSignal(deps.callsOf(agentId, step.startedAt) || []);
+        if (!signal) return null;
+        const r = stepUp({ tier: step.tier, signal, spent: spent(g), limit: g.spendLimit, paidAsked: g.paidAsked, paperclip: typeof deps.paperclip === 'function' && deps.paperclip() === true });
+        if (r.action === 'stay') return r;
+        release(step);
+        if (r.action === 'stop') { stop(g, 'stopped', r.reason); return r; }
+        step.tier = r.tier;
+        if (r.action === 'ask') { g.holdPaid = true; g.status = 'awaiting-approval'; g.reason = r.reason; touch(g); return r; }
+        touch(g);
+        await pump(g);
+        return r;
+      }
+      return null;
     },
 
     /** A step's agent finished its turn. ok = false marks the step failed and holds the goal for retry. */
@@ -302,7 +344,8 @@ export function createManager(deps = {}) {
       return [...goals.values()].map((g) => ({
         id: g.id, building: g.building, goal: g.goal, status: g.status, reason: g.reason, approveFirst: g.approveFirst, spendLimit: g.spendLimit,
         messages: g.messages, createdAt: g.createdAt, updatedAt: g.updatedAt, baseline: [...g.baseline],
-        steps: g.steps.map((s) => ({ id: s.id, text: s.text, role: s.role, room: s.room, bot: s.bot, status: s.status, owner: s.owner, result: s.result, attempts: s.attempts })),
+        steps: g.steps.map((s) => ({ id: s.id, text: s.text, role: s.role, room: s.room, bot: s.bot, status: s.status, owner: s.owner, result: s.result, attempts: s.attempts, tier: s.tier || '' })),
+        paidAsked: g.paidAsked === true, holdPaid: g.holdPaid === true,
       }));
     },
 
@@ -316,10 +359,10 @@ export function createManager(deps = {}) {
           id: r.id, building: String(r.building || ''), goal: r.goal, status: st(r.status, Object.keys(WORD), 'failed'), reason: String(r.reason || ''),
           approveFirst: r.approveFirst === true, spendLimit: Number.isFinite(r.spendLimit) && r.spendLimit >= 0 ? r.spendLimit : 0,
           messages: Number.isInteger(r.messages) ? r.messages : 0, baseline: new Map((Array.isArray(r.baseline) ? r.baseline : []).filter((e) => Array.isArray(e) && Number.isFinite(e[1]))),
-          lastBoard: '', waitingFor: '', pumping: false, createdAt: Number(r.createdAt) || now(), updatedAt: Number(r.updatedAt) || now(),
+          paidAsked: r.paidAsked === true, holdPaid: r.holdPaid === true, lastBoard: '', waitingFor: '', pumping: false, createdAt: Number(r.createdAt) || now(), updatedAt: Number(r.updatedAt) || now(),
           steps: r.steps.filter((s) => s && typeof s.id === 'string' && typeof s.text === 'string').slice(0, limits.maxSteps).map((s) => ({
             id: s.id, text: s.text, role: String(s.role || ''), room: String(s.room || ''), bot: String(s.bot || ''), status: st(s.status, Object.keys(MARK), 'pending'),
-            owner: String(s.owner || ''), agentId: '', result: String(s.result || ''), attempts: Number.isInteger(s.attempts) ? s.attempts : 0,
+            owner: String(s.owner || ''), agentId: '', result: String(s.result || ''), attempts: Number.isInteger(s.attempts) ? s.attempts : 0, ...(LADDER.includes(s.tier) ? { tier: s.tier } : {}),
           })),
         };
         if (g.status === 'planning') { g.status = 'failed'; g.reason = 'The office restarted before the plan was ready.'; }
@@ -341,7 +384,7 @@ export function createManager(deps = {}) {
       return [...goals.values()].map((g) => ({
         id: g.id, building: g.building, goal: g.goal, status: g.status, reason: g.reason, approveFirst: g.approveFirst,
         spendLimit: g.spendLimit, spent: spent(g), messages: g.messages, waitingFor: g.waitingFor, updatedAt: g.updatedAt,
-        steps: g.steps.map((s) => ({ id: s.id, text: s.text, role: s.role, room: s.room, owner: s.owner, status: s.status, result: s.result, attempts: s.attempts })),
+        steps: g.steps.map((s) => ({ id: s.id, text: s.text, role: s.role, room: s.room, owner: s.owner, status: s.status, result: s.result, attempts: s.attempts, tier: s.tier || '' })),
       }));
     },
 
@@ -367,7 +410,7 @@ export function officeSource(manager) {
     list(building) {
       return manager.snapshot().filter((g) => !building || g.building === building).map((g) => ({
         id: g.id, building: g.building, goal: g.goal, status: g.status, reason: g.reason,
-        steps: g.steps.map((s) => ({ id: s.id, title: s.text, state: s.status, owner: s.owner, cost: null })),
+        steps: g.steps.map((s) => ({ id: s.id, title: s.text, state: s.status, owner: s.owner, cost: null, model: s.tier || '' })),
       }));
     },
     subscribe: (fn) => manager.subscribe(fn),
