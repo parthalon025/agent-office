@@ -355,7 +355,7 @@ export function createTracker(deps = {}) {
     s.status = 'waiting'; s.note = `${p.tool_name} ${detail}`.trim();
     addFeed(s, 'wait', `asks to use ${s.note}`);
     changed();
-    return { s, id, suggestions };
+    return { s, id, suggestions, call: p };
   }
 
   // The office refused a call before it ran (Claude Code's PreToolUse, a Deny rule): the call ends as failed with the reason.
