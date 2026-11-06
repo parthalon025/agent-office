@@ -524,7 +524,7 @@ test('floorScroll: the current floor is centered in a strip that scrolls; no scr
 });
 
 test('FloorList scrolls the current floor into view when the floor or the list changes (#64)', () => {
-  const fl = source('function FloorList(p){var fl=p.floors', '));}\n');
+  const fl = source('function FloorList(p){var fl=floorRows(p.floors', '));}\n');
   assert.match(fl, /h\("div",\{className:"ao-floors",ref:box\}/);
   assert.match(fl, /R\.useEffect\(function\(\)\{function fit\(\)\{keepInView\(box\.current\);\}/);
   assert.match(fl, /\},\[p\.current,fl\.length\]\);/);
@@ -555,13 +555,13 @@ test('keepInView: the current row is centered down a capped list and along a str
 
 test('the left menu lists: the cap above 820 px, the lists use keepInView, the Add rows are outside the scrolling rows', () => {
   assert.match(dsCss, /@container \(min-width:821px\)\{\.ao-hud-left \.ao-floors\{max-height:150px;overflow-y:auto;[^}]*\}\.ao-hud-left>\.ao-panel:nth-child\(2\) \.ao-floors\{max-height:96px\}\}/);
-  const fl = source('function FloorList(p){var fl=p.floors', '));}\n');
+  const fl = source('function FloorList(p){var fl=', '));}\n');
   const rl = source('function RoomList(p){', '));}\n');
   for (const [name, src] of [['FloorList', fl], ['RoomList', rl]]) {
     assert.match(src, /R\.useEffect\(function\(\)\{function fit\(\)\{keepInView\(box\.current\);\}/, `${name} keeps its current row in view`);
     assert.match(src, /h\("div",\{className:"ao-floors",ref:box\}/, `${name} has the scrolling rows`);
   }
-  assert.match(fl, /\}\)\),p\.onAdd&&h\("div",\{className:"ao-addrow"\}/, 'Add floor follows the scrolling rows, it is not inside them');
+  assert.match(fl, /(\}\)\)|out\)),p\.onAdd&&h\("div",\{className:"ao-addrow"\}/, 'Add floor follows the scrolling rows, it is not inside them');
   assert.match(rl, /\}\)\),\n\s+p\.onAddRoom&&h\("div",\{className:"ao-addrow"\}/, 'Add room follows the scrolling rows, it is not inside them');
 });
 
@@ -1110,8 +1110,9 @@ function cssRules(text) {
 test('the office top bar keeps to the rows above the side columns: icons only where the labels do not fit, the counts hide, the columns start below the last toggle', () => {
   const css = cssRules(readFileSync(join(root, 'components', 'bundle.css'), 'utf8'));
   const office = cssRules(readFileSync(join(root, 'public', 'office.css'), 'utf8'));
-  // the bar holds the brand, the mode toggle, the view toggle and the counts, in this order: the view toggle is the last .ao-seg of the bar
-  assert.match(bundle, /h\("div",\{className:"ao-hud-top"\},h\("div",\{className:"ao-panel ao-brand"\}[^\n]*\n\s*h\(A\.ModeToggle,[^\n]*\n\s*h\(A\.ViewToggle,[^\n]*\n\s*h\("div",\{className:"ao-hud-counts"\}/);
+  // the bar holds the brand, Needs you (with onWaiting, #92 review), the mode toggle, the view toggle and the counts, in this order: the
+  // view toggle is the last .ao-seg of the bar, so Needs you sits above the columns' top too
+  assert.match(bundle, /h\("div",\{className:"ao-hud-top"\},h\("div",\{className:"ao-panel ao-brand"\}[^\n]*\n\s*p\.onWaiting&&nwait>0\?h\(A\.Button,[^\n]*\n\s*h\(A\.ModeToggle,[^\n]*\n\s*h\(A\.ViewToggle,[^\n]*\n\s*h\("div",\{className:"ao-hud-counts"\}/);
   assert.match(source('function ViewToggle(p){'), /className:"ao-panel ao-seg"/);
   const rule = (cond, sel) => css.filter((r) => r.cond === cond && r.sel === sel);
   const sr = 'position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)';
@@ -1361,4 +1362,72 @@ test('the change record of a bot carries every agent card field of BotDef: owner
   assert.deepEqual([r.platform, r.owner, r.triggers, r.cost, r.identity, r.tools, r.room], [b.platform, b.owner, b.triggers, b.cost, b.identity, b.tools, 'room-1']);
   const none = record({ name: 'x' }, { id: 'r' }, {}, () => []);
   assert.deepEqual([none.owner, none.triggers, none.cost], [null, null, null]);
+});
+
+// ---------- function floors (#92): the elevator panel, open desks, the Reception ----------
+test('worstOf: the worst state of a floor lights its elevator button (error, needs you, review ready, working, finished, resting)', () => {
+  const worstOf = new Function(source('var WORST=[', '];\n') + source('function worstOf(l){') + 'return worstOf;')();
+  assert.equal(worstOf(['resting', 'working', 'finished']), 'working');
+  assert.equal(worstOf(['working', 'waiting']), 'waiting');
+  assert.equal(worstOf(['waiting', 'error']), 'error');
+  assert.equal(worstOf(['finished', 'review']), 'review');
+  assert.equal(worstOf([]), null);
+  assert.equal(worstOf(['nope']), null);
+});
+
+test('room.spare adds open desks after the bots: a room with no bot still has desks to click', () => {
+  const lr = bundle.slice(bundle.indexOf('function layoutRoom(room){'), bundle.indexOf('function layoutFloor(f){'));
+  const lay = new Function('var PITCH=4.6;' + source('var TYPES={', '};\n') + lr + 'return layoutRoom;')();
+  assert.equal(lay({ type: 'lab', bots: [] }).stations.length, 0);
+  assert.equal(lay({ type: 'lab', bots: [], spare: 2 }).stations.length, 2);
+  assert.equal(lay({ type: 'lab', bots: [{}], spare: 1 }).stations.length, 2);
+  assert.equal(lay({ type: 'lab', bots: [], spare: 40 }).stations.length, 6, 'at most 6 open desks');
+  const lobby = lay({ type: 'lobby', bots: [], spare: 2 });
+  assert.equal(lobby.stations.length, 2);
+  assert.ok(lobby.W >= 16, 'the Reception is wide enough for its desk');
+  // the builder marks each open desk for a page to pick, with a padded hit box
+  assert.ok(bundle.includes('dg.userData.spareDesk={room:room.id,i:sp-room.bots.length}'));
+  assert.ok(bundle.includes('hb.userData.spareDesk=dg.userData.spareDesk;hb.userData.spareHit=true;'));
+  assert.ok(bundle.includes('memo.userData.lobby="memo"') && bundle.includes('dir.userData.lobby="directory"'));
+});
+
+test('room.add and room.update carry the small print and the open desks; the sign shows the note', () => {
+  const mk = new Function('TYPES', 'bld', 'st',
+    'function floorOf(id){return bld.floors.filter(function(f){return f.id===id;})[0];}' +
+    'function norm(){}function rebuildFloor(){}function rebuildBuilding(){}function show(){}function emit(){}function frameFloor(){}' +
+    source(' function addRoom(') + source(' function updateRoom(') + 'return { addRoom: addRoom, updateRoom: updateRoom };');
+  const bld = { floors: [{ id: 1, rooms: [] }] };
+  const e = mk({ lab: { label: 'Lab' }, team: { label: 'Team' } }, bld, {});
+  e.addRoom(1, { id: 'spare-quality', type: 'lab', name: 'Open desks', note: 'No agents here. Click a desk to start one.', spare: 2, spareRole: 'analyst' });
+  assert.deepEqual(bld.floors[0].rooms[0], { id: 'spare-quality', type: 'lab', name: 'Open desks', bots: [], note: 'No agents here. Click a desk to start one.', spare: 2, spareRole: 'analyst' });
+  e.updateRoom('spare-quality', { id: 'w-repo-1', name: 'Tidy', note: 'main · Shared workspace', spare: 1 });
+  const r = bld.floors[0].rooms[0];
+  assert.deepEqual([r.id, r.name, r.note, r.spare], ['w-repo-1', 'Tidy', 'main · Shared workspace', 1]);
+  assert.ok(bundle.includes('Parts.sign(K,rg,room.name,room.note?String(room.note).slice(0,48):'));
+});
+
+// #92 review: with no dock, a request in another building showed only in the tab title. OfficeScene onWaiting puts a Needs you
+// button in the top bar (every width: the zoom column with Decisions hides at 820 px and below), with the page's count.
+test('OfficeScene onWaiting: a Needs you button in the top bar, before the toggles, with waitingCount; none when nothing waits', () => {
+  assert.ok(bundle.includes('var nwait=p.waitingCount!=null?p.waitingCount:nreq;'), 'the page total, else this building');
+  const top = source('h("div",{className:"ao-hud-top"}', 'h(A.ModeToggle,');
+  assert.match(top, /p\.onWaiting&&nwait>0\?h\(A\.Button,\{variant:"emphasis",icon:"waiting",className:"ao-hud-needs",/, 'only with onWaiting and a count');
+  assert.match(top, /onClick:function\(\)\{p\.onWaiting\(\);\}\},"Needs you · "\+nwait\)/);
+  assert.match(top, /label:"Needs you: "\+nwait\+\(nwait===1\?" decision":" decisions"\)\+"\. Go to the oldest\."/, 'the label says what a tap does');
+  assert.ok(top.indexOf('ao-hud-needs') > top.indexOf('ao-brand'), 'after the brand');
+  // not hidden at any width: no container or media rule hides it, and it is a finger target on a touch screen
+  const css = readFileSync(join(root, 'components', 'bundle.css'), 'utf8');
+  assert.doesNotMatch(css, /\.ao-hud-needs[^{]*\{[^}]*display:\s*none/);
+  assert.match(css, /@media \(pointer:coarse\)\{\.ao-hud-needs\{min-height:44px\}\}/);
+});
+
+test('the elevator panel groups floors in wings, dims an empty floor and skips it on the arrow keys', () => {
+  const fl = source('function FloorList(p){var fl=floorRows(p.floors', '));}\n');
+  assert.match(fl, /className:"ao-wing"/);
+  assert.match(fl, /"ao-row"\+\(f\.empty\?" is-empty":""\)/);
+  assert.match(fl, /"No agents here"/);
+  assert.match(fl, /function step\(i,d\)\{for\(var j=i\+d;j>=0&&j<fl\.length;j\+=d\)\{if\(!fl\[j\]\.empty\)/);
+  assert.match(fl, /title:p\.title\|\|"Floors"/);
+  assert.ok(bundle.includes('h(A.FloorList,{title:p.floorsTitle,'));
+  assert.ok(bundle.includes('r.spare?"No agents here. Click a desk to start one.":'));
 });

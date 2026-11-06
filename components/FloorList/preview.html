@@ -1,9 +1,16 @@
-<!-- @dsCard group="Navigation" height=260 -->
+<!-- @dsCard group="Navigation" height=540 width=560 -->
 <!doctype html>
 <html><head><meta charset="utf-8"><title>FloorList</title></head><body style="margin:0;background:var(--bg)">
 <div id="root"></div>
 <script>
 var A=window.AgentOffice,h=React.createElement;
-ReactDOM.createRoot(document.getElementById("root")).render(h("div",{style:{width:230,padding:16,background:"var(--bg)"}},h(A.FloorList,{current:3,onAdd:function(){},floors:[{id:5,name:"HQ",rooms:1,statuses:["working","working","working","working","resting"]},{id:4,name:"Content",rooms:2,statuses:["working","working","resting","working","working","working"]},{id:3,name:"Research",rooms:2,statuses:["working","resting","finished","working","error","working"]},{id:2,name:"Sales",rooms:1,statuses:["waiting","working","resting","working"]},{id:1,name:"Ops",rooms:2,statuses:["resting","working","working","working","working"]}]})));
+/* Left: the plain floor list. Right: the elevator panel of a building with function floors (#92): one header per wing, also when the
+   floors mix wings (Support, a Go to market floor, sits between Product and tech floors), the number lit in the worst state of a
+   floor's desks, and empty floors dimmed with "No agents here" (the arrow keys skip them). */
+var plain=[{id:5,name:"HQ",rooms:1,statuses:["working","working","working","working","resting"]},{id:4,name:"Content",rooms:2,statuses:["working","working","resting","working","working","working"]},{id:3,name:"Research",rooms:2,statuses:["working","resting","finished","working","error","working"]},{id:2,name:"Sales",rooms:1,statuses:["waiting","working","resting","working"]},{id:1,name:"Ops",rooms:2,statuses:["resting","working","working","working","working"]}];
+var elevator=[{id:9,name:"Records",wing:"Operations",rooms:1,statuses:[],empty:true},{id:8,name:"Docs",wing:"Product and tech",rooms:1,statuses:[],empty:true},{id:7,name:"Support",wing:"Go to market",rooms:1,statuses:["waiting","working"]},{id:6,name:"Design",wing:"Product and tech",rooms:1,statuses:[],empty:true},{id:5,name:"IT and Ops",wing:"Product and tech",rooms:1,statuses:["finished"]},{id:4,name:"Security",wing:"Product and tech",rooms:1,statuses:[],empty:true},{id:3,name:"Quality",wing:"Product and tech",rooms:1,statuses:["working","finished"]},{id:2,name:"Engineering",wing:"Product and tech",rooms:2,statuses:["error","working","working"]},{id:1,name:"Lobby",wing:"",rooms:2,statuses:["resting"]}];
+ReactDOM.createRoot(document.getElementById("root")).render(h("div",{style:{display:"flex",gap:16,alignItems:"flex-start",padding:16,background:"var(--bg)",flexWrap:"wrap"}},
+ h("div",{style:{width:230}},h(A.FloorList,{current:3,onAdd:function(){},floors:plain})),
+ h("div",{style:{width:250}},h(A.FloorList,{title:"Elevator",current:2,floors:elevator}))));
 </script>
 </body></html>

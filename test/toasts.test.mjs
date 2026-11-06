@@ -205,7 +205,7 @@ test('the stack is placed by office.js at every width: no width rule moves it, a
   assert.match(js, /OfficeToasts\.place\(/);
   const keep = /var KEEP = '([^']*)'/.exec(js)?.[1] || '';
   // the pinned screens (#89): their head (Back, the bezel count), tabs and message boxes, and the bezel count of any screen in focus
-  for (const sel of ['.ao-hud-top', '.ao-hud-left', '.ao-hud-zoom', '.strip', '.asks', '.term-input', '.pin-head', '.pin .ao-tablist', '.pin-input', '.bezel', '.ao-hud-chat .ao-act', '.ao-hud-chat .ao-composer']) {
+  for (const sel of ['.ao-hud-top', '.ao-hud-left', '.ao-hud-zoom', '.tour-card', '.asks', '.term-input', '.pin-head', '.pin .ao-tablist', '.pin-input', '.bezel', '.ao-hud-chat .ao-act', '.ao-hud-chat .ao-composer']) {
     assert.ok(keep.split(',').map((x) => x.trim()).includes(sel), 'KEEP lists ' + sel);
   }
   const z = (sel) => /calc\(var\(--z-dialog\) \+ (\d+)\)/.exec(css.slice(css.indexOf(sel + ' {')))?.[1];
@@ -218,4 +218,12 @@ test('the tool column follows the open panel by one shared width (#114)', () => 
   for (const c of ['board-panel']) { // the terminal panel is gone (#89): the desk screen is pinned on the monitor
     assert.match(css, new RegExp('\\.' + c + ' \\{[^}]*width: var\\(--panel-w\\)'), c + ' reads the shared width');
   }
+});
+
+test('Needs you (the top bar, the city, the bezel) has one goOldest, and it opens the desk screen, not the chat (#92 rebase on #89)', () => {
+  const js = fs.readFileSync(new URL('../public/office.js', import.meta.url), 'utf8');
+  assert.equal(js.match(/function goOldest\(/g).length, 1, 'a second goOldest would shadow the first');
+  assert.match(js, /function goOldest\(\) \{[^}]*openDesk\(r\.uid, 'chat'\)/);
+  assert.match(js, /waitingCount: needs\.length, onWaiting: goOldest/);
+  assert.match(js, /onNeeds: goOldest/);
 });

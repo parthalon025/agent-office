@@ -5,7 +5,7 @@
    timers. The page loads it as a script (window.OfficeWire). The server and the tests import it for its side effect
    and read globalThis.OfficeWire.
 
-     lean(state)        -> the snapshot the page gets. state: { sessions (each with place), plan, figures, notes, pins, repos, kinds, security }
+     lean(state)        -> the snapshot the page gets. state: { sessions (each with place and seat), plan, figures, notes, pins, repos, kinds, security, layouts, rooms, catalog }
      leanCall(c)        -> one tool call as the page reads it
      diff(prev, next)   -> the patch from one lean snapshot to the next, or null when nothing changed
      apply(prev, patch) -> the next snapshot. prev does not change; the parts that did not change are shared
@@ -26,14 +26,14 @@
   // A field the page does not read stays on the server. Add a field here when the page starts to read it.
   var SESSION_FIELDS = ['uid', 'provider', 'name', 'status', 'cwd', 'headless', 'note', 'model', 'mode', 'tool', 'prompt', 'promptAt', 'live',
     'error', 'turns', 'cost', 'costUnknown', 'supervision', 'usage', 'ctxTokens', 'ctxWindow', 'todos', 'agents', 'calls', 'replies', 'pending', 'questions',
-    'inbox', 'commands', 'skills', 'features', 'scheduleId', 'startedAt', 'endedAt', 'lastEvent', 'git', 'place', 'olderReplies', 'hq'];
+    'inbox', 'commands', 'skills', 'features', 'scheduleId', 'startedAt', 'endedAt', 'lastEvent', 'git', 'place', 'seat', 'olderReplies', 'hq'];
   // Per session and broadcast. calls: the tracker's own limit (MAX_CALLS); the boards and the terminal count all of them.
   // replyChars: the newest replies whose text fits, and always the newest one. The rest is on request, and the session says
   // how many it left out (olderReplies), so the page asks for them before it fills the chat (#80).
   var CAPS = { calls: 60, replyChars: 32000 };
   var SHAPE = {
     sessions: { key: 'uid', item: { calls: { key: 'id' }, replies: { key: 'id' } } },
-    figures: { map: true }, notes: { map: true }, pins: { map: true }
+    figures: { map: true }, notes: { map: true }, pins: { map: true }, layouts: { map: true }, rooms: { map: true }
   };
 
   function leanCall(c) {
@@ -79,7 +79,12 @@
       repos: state.repos || [],
       kinds: state.kinds || [],   // the agent kinds (providers/index.mjs kinds): fixed while the server runs, so no patch repeats them
       security: state.security || null,  // the Security room (#70): rules, what is enforced, the Spend screen
-      hq: state.hq || null               // Paperclip HQ (#76, paperclip.mjs view): null until the user connects it
+      hq: state.hq || null,              // Paperclip HQ (#76, paperclip.mjs view): null until the user connects it
+      // Function floors (#92): building key -> floors (archetypes.mjs layoutView); notes key -> { floors, title } of each room;
+      // the function catalog (fixed while the server runs)
+      layouts: state.layouts || {},
+      rooms: state.rooms || {},
+      catalog: state.catalog || null
     };
   }
 

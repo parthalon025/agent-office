@@ -300,14 +300,17 @@
   // sup: the supervision label of the least supervised agent in the room ('' when all are gated; ADR 0001), whole, on two
   // lines (OfficeVocab.supervisionLines). The font shrinks until the longer line fits left of the count (or the sign's edge
   // when there is no count); it is never cut.
-  function paintSign(c, w, h, count, tok, f, sup) {
+  // state: the worst state of the room's desks (#92, AgentOffice.worstOf), or null. It sets the frame color, and "Needs you" or
+  // "Error" takes the place of the title, so the door says it in words too, not by color alone.
+  function paintSign(c, w, h, count, tok, f, sup, state) {
     var col = function (k, fb) { return tok[k] || fb || '#888'; }, sans = f.sans || 'sans-serif', mono = f.mono || 'monospace';
     c.fillStyle = col('scene-dark'); rr(c, 0, 0, w, h, 26); c.fill();
-    c.strokeStyle = mix(col('status-waiting'), col('scene-dark'), 0.35); c.lineWidth = 6; rr(c, 6, 6, w - 12, h - 12, 22); c.stroke();
+    var alarm = state === 'error' || state === 'waiting';
+    c.strokeStyle = mix(col(state ? 'status-' + state : 'status-waiting'), col('scene-dark'), alarm ? 0 : 0.35); c.lineWidth = alarm ? 12 : 6; rr(c, 6, 6, w - 12, h - 12, 22); c.stroke();
     c.textBaseline = 'middle'; c.textAlign = 'left';
     // A room that two or more agents share says "N agents" (OfficeVocab.agentsSign) and has no count; any other room says
     // "Agents" and the count. The supervision label goes under that title.
-    var shared = window.OfficeVocab.agentsSign(count), title = shared || 'Agents';
+    var shared = window.OfficeVocab.agentsSign(count), title = alarm ? window.OfficeVocab.stateWord(state) : shared || 'Agents';
     c.fillStyle = col('bubble');
     var rows = sup ? window.OfficeVocab.supervisionLines(sup) : [];
     if (rows.length) {
@@ -351,6 +354,7 @@
 
   // Attach boards to a mounted office.
   // o: { room(roomId) -> info, tree(root) -> Promise, note(roomId) -> text, stats(roomId) -> numbers, pin(roomId) -> { text, by },
+  //      state(roomId) -> the worst state of its desks for the door sign (#92),
   //      onOpen(roomId, kind: 'board' | 'notes' | 'stats'), onDoor(roomId), host? }
   //   The page learns from the host (host.onFocus) when the screen in focus changes (look, back).
   //   The returned object has open(roomId, kind) for the keyboard path (Ctrl+K), and OfficeBoard.layerOpen() for the Esc rule.
@@ -584,10 +588,10 @@
         s.tex.needsUpdate = true;
       });
       doors.forEach(function (d) {
-        var v = statsOf(d.roomId), n = v.sessions, sup = v.supervision || '', sig = skinVersion + K.look + n + '|' + sup;
+        var v = statsOf(d.roomId), n = v.sessions, sup = v.supervision || '', stt = o.state ? o.state(d.roomId) : null, sig = skinVersion + K.look + n + '|' + sup + '|' + stt;
         if (sig === d.sig) return;
         d.sig = sig;
-        paintSign(d.canvas.getContext('2d'), d.canvas.width, d.canvas.height, n, K.tok, K.f || {}, sup);
+        paintSign(d.canvas.getContext('2d'), d.canvas.width, d.canvas.height, n, K.tok, K.f || {}, sup, stt);
         d.tex.needsUpdate = true;
       });
       repaint = false;
@@ -798,5 +802,5 @@
     };
   }
 
-  window.OfficeBoard = { attach: attach, layerOpen: layerOpen, escTaken: escTaken, data: boardData, toolWord: toolWord, raiseRoom: raiseRoom, lowerRoom: lowerRoom };
+  window.OfficeBoard = { attach: attach, layerOpen: layerOpen, escTaken: escTaken, data: boardData, toolWord: toolWord, raiseRoom: raiseRoom, lowerRoom: lowerRoom, hintTex: hintTex };
 })();

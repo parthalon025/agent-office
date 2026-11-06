@@ -1,13 +1,15 @@
 /* Agent Office for Claude Code x0.2: page script.
-   Mounts the DS office, the control strip, the dialogs (open, past sessions, schedules, changes, hooks), and the pinned
-   screens (#89): the chat and terminal on a desk monitor and the changes on a room's wall screen, laid over the 3D scene. */
+   Mounts the DS office, the Reception, the lobby tour, the dialogs (open, past sessions, schedules, changes, hooks), and the pinned
+   screens (#89): the chat and terminal on a desk monitor and the changes on a room's wall screen, laid over the 3D scene.
+   There is no dock (#92): the office's actions are in the scene (open desks, the reception memo, the elevator) and in Ctrl+K. */
 (function () {
   'use strict';
   var h = React.createElement, A = window.AgentOffice, useState = React.useState, useEffect = React.useEffect, useMemo = React.useMemo;
   A.strict = true;
 
-  // A repository is a building, a branch is a floor and a worktree is a room. The adapter builds
-  // the shown building (a building adapter from officeAdapter.mount) and adds floors and rooms as sessions arrive.
+  // A repository is a building. Its floors are company functions (#92: the archetype of the building picks them; the Lobby
+  // is the ground floor), an agent sits on the floor of its role, and a worktree or folder is a room named from its task.
+  // The adapter builds the shown building (a building adapter from officeAdapter.mount) and adds rooms as sessions arrive.
 
   // The fallback Claude Code model list: shown only before /api/providers answers (#101). The server's list replaces it.
   var MODELS = [
@@ -244,7 +246,7 @@
   }
   function OpenDialog(p) {
     var snapOpen = useSnapshot();
-    var f = useState({ cwd: p.shownPath || p.recent[0] || '', name: '', provider: p.kind || DEFAULT_KIND, where: 'office', useFolder: false, model: '', permissionMode: '', maxBudget: limitText(p.spendLimit), prompt: '', template: '' }), form = f[0], setForm = f[1];
+    var f = useState({ cwd: p.folder || p.shownPath || p.recent[0] || '', name: '', provider: p.kind || DEFAULT_KIND, where: 'office', useFolder: false, model: '', permissionMode: '', maxBudget: limitText(p.spendLimit), prompt: '', template: '' }), form = f[0], setForm = f[1];
     var K = useKinds(), k = kindOf(K.list, form.provider);
     useFirstModel(k, form, setForm);
     // The options of the kind (providers/index.mjs describe). Without kinds yet, the dialog offers what Claude Code takes.
@@ -266,7 +268,7 @@
       // Each agent gets its own room (a new worktree) unless the user keeps the folder. A terminal window always uses the folder.
       // Only the options the kind takes go to the server: a local model has no spend limit, window or permission mode.
       var where = canWindow ? form.where : 'office';
-      var body = Object.assign({}, form, { where: where, isolation: form.useFolder || where === 'terminal' ? 'same' : 'worktree', permissionMode: hasModes ? form.permissionMode : '', maxBudget: limited ? limitSent(form.maxBudget, p.spendLimit !== undefined) : undefined, confirmCost: confirmed === true });
+      var body = Object.assign({}, form, { where: where, isolation: form.useFolder || where === 'terminal' ? 'same' : 'worktree', permissionMode: hasModes ? form.permissionMode : '', maxBudget: limited ? limitSent(form.maxBudget, p.spendLimit !== undefined) : undefined, confirmCost: confirmed === true, role: p.role || undefined });
       delete body.useFolder;
       api('/api/open', body).then(function () { setBusy(false); setCostQ(null); p.onClose(); }, function (x) {
         setBusy(false);
@@ -290,12 +292,13 @@
     var tpl = [{ value: '', label: 'No template' }].concat(p.templates.map(function (t) { return { value: t.id, label: t.name }; }));
     if (costQ) return h(CostDialog, { title: 'Run ' + (k ? k.label : 'the agent'), text: costQ, busy: busy, err: err, onCancel: function () { setCostQ(null); setErr(''); }, onRun: function () { submit(true); } });
     return h(A.Dialog, {
-      open: true, title: 'Open a session', onClose: p.onClose,
+      open: true, title: !p.roleName ? 'Open a session' : p.role === 'lobby' ? 'Start an agent at the open desks' : 'Start an agent on the ' + p.roleName + ' floor', onClose: p.onClose,
       actions: [
         h(A.Button, { key: 'c', variant: 'quiet', onClick: p.onClose }, 'Cancel'),
-        h(A.Button, { key: 'o', variant: saving === null ? 'primary' : 'quiet', icon: 'add', loading: busy, disabled: blocked, onClick: submit }, 'Open session')
+        h(A.Button, { key: 'o', variant: saving === null ? 'primary' : 'quiet', icon: 'add', loading: busy, disabled: blocked, onClick: submit }, p.roleName ? 'Start agent' : 'Open session')
       ]
     }, h('div', { className: 'form' },
+      p.roleName ? h('p', { className: 'note' }, p.role === 'lobby' ? 'The agent sits at the open desks of the Lobby. It has no role yet.' : 'The agent sits at a desk on the ' + p.roleName + ' floor and takes its role.') : null,
       h('p', { className: 'note' }, KV.kindNote(k, terminal)),
       h(A.TextInput, { id: 'f-cwd', label: 'Folder', value: form.cwd, placeholder: 'E:\\pensiv', onChange: set('cwd'), error: err || undefined, hint: p.shownPath && form.cwd === p.shownPath ? 'The building you are looking at.' : undefined }),
       folders.length ? h('div', { className: 'chips', role: 'group', 'aria-label': 'Recent folders' }, folders.map(function (d) { return h(A.Button, { key: d, variant: 'quiet', icon: 'floor', title: d, onClick: function () { set('cwd')(d); } }, F.shortPath(d)); })) : null,
@@ -1098,7 +1101,7 @@
     var out = window.officeAdapter.buildings(snap).map(function (b) {
       var def = window.officeAdapter.preview(b.key, snap), bots = [];
       def.floors.forEach(function (f) { f.rooms.forEach(function (r) { (r.bots || []).forEach(function (x) { bots.push({ uid: x.uid, name: x.name, status: x.status, word: x.word, shape: x.shape, floor: f.name }); }); }); });
-      return { key: b.key, name: b.name, sessions: b.sessions, waiting: b.waiting, floors: def.floors.map(function (f) { return { name: f.name, key: f.key }; }), bots: bots };
+      return { key: b.key, name: b.name, sessions: b.sessions, waiting: b.waiting, state: b.state, floors: def.floors.map(function (f) { return { name: f.name, key: f.key }; }), bots: bots };
     });
     var hq = hqBuilding(snap);
     return hq ? [hq].concat(out) : out;
@@ -1178,6 +1181,7 @@
           h('div', { className: 'city-tools' },
             h(A.ModeToggle, { value: mode, options: CITY_MODES, label: 'Theme', onChange: function (id) { if (city.current) city.current.setMode(id); } }),
             total ? h('div', { className: 'city-counts', title: 'Sessions in every building, by state' }, h(A.StatusCounts, { counts: counts })) : null,
+            p.needs > 0 ? h(A.Button, { variant: 'emphasis', icon: 'waiting', className: 'city-needs', label: 'Needs you: ' + plural(p.needs, 'decision', 'decisions') + '. Go to the oldest.', title: 'Go to the oldest request', onClick: p.onNeeds }, 'Needs you · ' + p.needs) : null,
             h(A.Button, { variant: 'quiet', icon: 'search', onClick: function () { setPalOpen(true); } }, 'Search actions', h('kbd', { className: 'ao-kbd city-kbd', 'aria-hidden': 'true' }, 'Ctrl+K'))),
           !list.length ? h(A.EmptyState, { icon: 'building', compact: true, title: 'No buildings yet', text: 'Open a session in a git repository to add its building.' }) : null,
           h('ul', { className: 'city-list' }, list.map(function (b) {
@@ -1191,8 +1195,8 @@
                   b.bots.slice(0, 12).map(function (x, i) { return h('span', { key: i, className: 'city-dot', title: x.name + ' · ' + x.word }, h(A.StatusDot, { status: x.status })); }),
                   b.bots.length > 12 ? h('span', { className: 'city-sub mono' }, '+' + (b.bots.length - 12)) : null) : null));
           })),
-          h('p', { className: 'note' }, 'Each building is a repository. Each floor is a branch. Click a building, or zoom in on it, to go inside. In a building, zoom out to come back.'),
-          waiting ? h('p', { className: 'note' }, plural(waiting, 'request waits', 'requests wait') + '. Buildings with a request show a beacon.') : null)),
+          h('p', { className: 'note' }, 'Each building is a repository. Each floor is a function, from Engineering to Records. Click a building, or zoom in on it, to go inside. In a building, zoom out to come back.'),
+          waiting ? h('p', { className: 'note' }, plural(waiting, 'request waits', 'requests wait') + '. Buildings with a request show a beacon and lit windows.') : null)),
       hov ? h('div', { className: 'city-tag', role: 'status' }, h('b', null, hov.name), hov.hq ? ' · ' + hov.line : ' · ' + plural(hov.floors.length, 'floor', 'floors') + ' · ' + plural(hov.sessions, 'session', 'sessions') + (hov.waiting ? ' · ' + plural(hov.waiting, 'request', 'requests') : '')) : null,
       h('div', { className: 'city-zoom', role: 'toolbar', 'aria-label': 'City zoom' },
         h(A.Button, { variant: 'quiet', icon: 'zoom-in', title: 'Zoom in', onClick: function () { if (city.current) city.current.zoomBy(1.35); } }, 'Zoom in'),
@@ -1292,7 +1296,7 @@
       function tick() {
         raf = requestAnimationFrame(tick);
         var el = ref.current;
-        if (!el || (window.OfficeBoard && window.OfficeBoard.layerOpen()) || document.querySelector('.strip-more')) return;   // a layer or the open More menu keeps its focus
+        if (!el || (window.OfficeBoard && window.OfficeBoard.layerOpen())) return;   // a layer keeps its focus
         if (!shown) { shown = true; el.focus({ preventScroll: true }); }
         if (!landed && !p.flying()) { landed = true; if (document.activeElement !== el) el.focus({ preventScroll: true }); }
       }
@@ -1450,7 +1454,7 @@
 
   // ---------- a screen in the room, looked at up close (scene-host.js focus) ----------
   // The page's boxes over the 3D scene. The scene host frames a screen in the part of the view they leave free.
-  var COVERS = '.ao-hud-top, .ao-hud-left, .ao-hud-right, .ao-hud-zoom, .ao-hud-use, .ao-hud-syl, .ao-hud-scrub, .ao-hud-cast, .ao-hud-log, .strip, .board-panel, .look-bar';
+  var COVERS = '.ao-hud-top, .ao-hud-left, .ao-hud-right, .ao-hud-zoom, .ao-hud-use, .ao-hud-syl, .ao-hud-scrub, .ao-hud-cast, .ao-hud-log, .tour-card, .board-panel, .look-bar';
   function sceneCovers(skip) {
     return [].slice.call(document.querySelectorAll(COVERS)).filter(function (el) {
       if (el === skip) return false;
@@ -1458,7 +1462,7 @@
       return cs.visibility !== 'hidden' && cs.display !== 'none';
     }).map(function (el) { return el.getBoundingClientRect(); });
   }
-  var LOOK_ICON = { board: 'plan', notes: 'memory', stats: 'cost', terminal: 'terminal' };
+  var LOOK_ICON = { board: 'plan', notes: 'memory', stats: 'cost', terminal: 'terminal', desk: 'add', lobby: 'building' };
   // While the camera looks at a screen: back to the room, or the screen's second step (the same as a second click).
   // It sits at the bottom of the free part of the view, and the screen is framed above it.
   // asks: sessions with open requests, shown in the bar while the page hides the HUD columns for the look (a Security screen
@@ -1725,89 +1729,90 @@
         })))));
   }
 
-  // ---------- the control strip ----------
-  function Tip(p) { return p.text ? h(A.Tooltip, { text: p.text }, p.children) : p.children; }
-  function Controls(p) {
-    var snap = useSnapshot(), kinds = useKinds();
-    var sess = p.sel ? window.officeAdapter.session(p.sel) : null;
-    var live = snap ? snap.sessions.filter(function (s) { return s.status !== 'ended'; }) : [];
-    // spend of the sessions that are open now (closed ones are under Past); "unknown" is part of it when an agent reports none
-    var spend = window.OfficeVocab.figures(live), total = F.cost(spend.cost, spend.unknown);
-    function fail(x) { p.toast({ tone: 'error', title: sess ? sess.name : 'Office', text: x.message }); }
-    function ctl(action, value) { api('/api/control', { uid: sess.uid, action: action, value: value }).catch(fail); }
-    function stopTurn() { api('/api/interrupt', { uid: sess.uid }).catch(fail); }
-    // "Always allow" is a lasting permission, so it is a quiet button, and never offered for a high-risk request
-    var ask = window.OfficeVocab.alwaysOffer(sess);
-    var mo = useState(false), more = mo[0], setMore = mo[1], moreRef = React.useRef(null);
-    useEffect(function () {
-      var btn = moreRef.current && moreRef.current.querySelector('.strip-more-btn');
-      if (btn) { btn.setAttribute('aria-expanded', String(more)); btn.setAttribute('aria-haspopup', 'true'); }
-      if (!more) return undefined;
-      function away(e) { if (moreRef.current && !moreRef.current.contains(e.target)) setMore(false); }
-      function esc(e) { if (e.key === 'Escape' && !(window.OfficeBoard ? window.OfficeBoard.escTaken(e) : e.defaultPrevented)) {   // a dialog or the palette opened later is the top layer: Esc is its
-         e.preventDefault(); setMore(false); if (btn) btn.focus(); } }
-      document.addEventListener('mousedown', away); document.addEventListener('keydown', esc);
-      return function () { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc); };
-    }, [more]);
-    // the DS palette listens for Ctrl+K on the document, so the button sends the same key
-    function openPalette() { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true, cancelable: true })); }
-    function always() { api('/api/answer', { id: ask.id, allow: true, always: true }).then(function () { p.toast({ tone: 'success', title: sess.name, text: 'Allowed from now on: ' + ask.always }); }, fail); }
+  // the DS palette listens for Ctrl+K on the document, so a button sends the same key
+  function openPalette() { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true, cancelable: true })); }
 
-    var modeOpts = [{ value: 'default', label: 'Default' }, { value: 'plan', label: 'Plan only' }, { value: 'acceptEdits', label: 'Accept edits' }];
-    if (sess && sess.mode && !modeOpts.some(function (o) { return o.value === sess.mode; })) modeOpts.push({ value: sess.mode, label: sess.mode });
-    var modelOpts = sess ? KV.modelSwitch(kindOf(kinds.list, sess.provider), sess.model, MODELS) : [];
-    // Model, mode and connector changes are control requests: only a kind that takes them offers them (a local model does not).
-    var sk = sess ? kindOf(window.officeAdapter.kinds(), sess.provider) : null, steer = !sk || sk.control;
-    var ctxPct = sess && sess.ctxTokens && sess.ctxWindow ? Math.round(100 * sess.ctxTokens / sess.ctxWindow) : null;
-    var working = sess && (sess.status === 'working' || sess.status === 'waiting');
-    var usage = sess && sess.usage && sess.usage.tokens ? sess.usage : null;
-    var many = p.buildings.length > 1 || (p.buildings.length && p.buildings[0].key !== p.shown);
-
-    // With no live session the welcome card shows. One card at a time: it waits while the DS Since you left card
-    // shows (they share the middle of the screen, and do not both fit on a phone), and the dock holds the primary button then (#66).
-    // It also waits while the camera looks at a screen (p.look): the Security room screens work with no session (#70).
-    var welcome = !!snap && !live.length && !p.syl && !p.look;
-    return h(React.Fragment, null,
-      welcome ? h('div', { className: 'welcome' },
-        h('div', { className: 'welcome-logo' }, h(A.Logo, { variant: 'lockup', height: 28 })),
-        h(A.EmptyState, { icon: 'building', title: 'No sessions yet', text: 'Open a session to seat the first bot. You can also reopen a past one.', action: { label: 'Open session', icon: 'add', onClick: p.onOpen } })) : null,
-      h('div', { className: 'strip', role: 'toolbar', 'aria-label': 'Office controls' },
-        h('div', { className: 'strip-group' },
-          h(A.Button, { variant: welcome ? 'quiet' : 'primary', icon: 'add', onClick: p.onOpen }, 'Open session'),   // the welcome card holds the primary one while it shows
-          many ? h(A.Select, { id: 'c-building', ariaLabel: 'Building (repository)', value: p.shown, onChange: p.onBuilding,
-                options: p.buildings.map(function (b) { return { value: b.key, label: b.name + ' · ' + plural(b.sessions, 'session', 'sessions') + (b.waiting ? ' · ' + b.waiting + ' need you' : '') }; })
-                  .concat(p.buildings.some(function (b) { return b.key === p.shown; }) ? [] : [{ value: p.shown, label: (p.shownName || 'This building') + ' · no sessions' }]) }) : null,
-          p.needs ? h(A.Button, { variant: 'emphasis', icon: 'waiting', title: 'Every request that waits for you, in every building', onClick: p.onNeeds }, 'Needs you · ' + p.needs) : null,
-          live.length ? h('span', { className: 'strip-total mono' }, live.length + ' open · ' + total) : null),
-        h('div', { className: 'strip-group strip-nav' },
-          p.view === 'city' ? h(A.Button, { variant: 'quiet', icon: 'floor', title: 'Go inside ' + (p.shownName || 'the building'), onClick: p.onOffice }, 'Go inside') : h(A.Button, { variant: 'quiet', icon: 'building', onClick: p.onCity }, p.needs ? 'City · ' + p.needs : 'City'),
-          p.shown ? h(A.Button, { variant: 'quiet', icon: 'floor', onClick: p.onFloors }, 'Floors') : null,
-          h(A.Button, { variant: 'quiet', icon: 'identity', onClick: p.onSessions }, 'Sessions'),
-          h(A.Button, { variant: 'quiet', icon: 'session', onClick: p.onPast }, 'Past'),
-          h('span', { className: 'strip-more-host', ref: moreRef },
-            h(A.Button, { variant: 'quiet', icon: 'more', className: 'strip-more-btn', onClick: function () { setMore(!more); } }, more ? 'Less' : 'More'),
-            more ? h('div', { className: 'strip-more', role: 'group', 'aria-label': 'More controls' },
-              h(A.Button, { variant: 'quiet', icon: 'schedule', onClick: function () { setMore(false); p.onSchedules(); } }, 'Schedules'),
-              h(A.Button, { variant: 'quiet', icon: 'terminal', title: 'Seat a session you started in a terminal', onClick: function () { setMore(false); p.onHooks(); } }, 'Attach sessions'),
-              h(A.Button, { variant: 'quiet', icon: 'bot', title: 'The agents the office can run, and what each needs', onClick: function () { setMore(false); p.onKinds(); } }, 'Agent kinds'),
-              h(Tip, { text: 'A thin status bar for a second screen' }, h(A.Button, { variant: 'quiet', icon: 'zoom-out', onClick: function () { setMore(false); p.onCompact(); } }, 'Compact')),
-              sess ? h('div', { className: 'strip-more-set' },
-                h('span', { className: 'strip-more-h' }, 'Actions for ' + sess.name),
-                h(A.Button, { variant: 'quiet', icon: 'terminal', onClick: function () { setMore(false); p.onTerminal(sess.uid, p.sel); } }, 'Open terminal'),
-                h(A.Button, { variant: 'quiet', icon: 'trace', onClick: function () { setMore(false); p.onChanges(sess.uid, sess.name); } }, 'Changes'),
-                steer ? h(A.Button, { variant: 'quiet', icon: 'connector', onClick: function () { setMore(false); p.onExtensions(sess.uid, sess.name); } }, 'Extensions') : null,
-                ask ? h(A.Button, { variant: 'quiet', icon: 'approve', onClick: function () { setMore(false); always(); }, title: 'Approve and allow this from now on: ' + ask.always }, 'Always allow ' + clip(ask.always, 28)) : null,
-                // The DS meter shows dollars only, so an agent that reports no cost gets none (it would read $0.00).
-                sess.headless && !sess.costUnknown && (sess.cost || usage) ? h(A.CostMeter, { tokens: usage ? usage.tokens : 0, cost: sess.cost || 0, cached: usage && usage.input ? usage.cached / usage.input : undefined }) : null,
-                sess.headless && steer ? h(A.Select, { id: 'c-model', label: 'Model', options: modelOpts, value: sess.model || '', onChange: function (v) { ctl('model', v); } }) : null,
-                sess.headless && steer ? h(A.Select, { id: 'c-mode', label: 'Permissions', options: modeOpts, value: sess.mode || '', onChange: function (v) { ctl('mode', v); } }) : null,
-                sess.headless && !steer ? h('p', { className: 'strip-more-note' }, window.officeAdapter.kindWord(sess) + ' · ' + modelWord(kinds.list, sess) + '. Open a new session to use another model.') : null) : null) : null),
-          // The city HUD has its own Search actions button, so the dock shows this one in the office only.
-          p.view === 'office' ? h(A.Button, { variant: 'quiet', icon: 'search', className: 'strip-search', title: 'Search actions, sessions and buildings', onClick: openPalette }, 'Search actions', h('kbd', { className: 'ao-kbd strip-kbd', 'aria-hidden': 'true' }, 'Ctrl+K')) : null),
-        sess ? h('div', { className: 'strip-group strip-bot' },
-          h('span', { className: 'strip-id' }, h(A.StatusDot, { status: statusOf(sess) }), h('b', null, sess.name), ctxPct != null ? h('span', { className: 'mono' }, 'context ' + ctxPct + '%') : null),
-          sess.headless ? h(Tip, { text: working ? '' : 'Nothing runs now' }, h(A.Button, { variant: 'quiet', icon: 'pause', disabled: !working, onClick: stopTurn }, 'Stop turn')) : null) : null));
+  // ---------- the Reception (#92): the archetype memo, the floors, the office's actions, the tour ----------
+  // The reception memo and the directory board in the lobby open it, and so does Ctrl+K. Each floor change is one call
+  // (POST /api/layout). A rename shows in place; a switch, an added, hidden or moved floor builds the scene again.
+  function aName(n) { return (/^[AEIOU]/.test(String(n)) ? 'an ' : 'a ') + n; }
+  function ReceptionDialog(p) {
+    var snap = useSnapshot();
+    var lay = snap && snap.layouts && snap.layouts[p.repo], cat = (snap && snap.catalog) || { functions: [], archetypes: [] };
+    var bz = useState(''), busy = bz[0], setBusy = bz[1];
+    var er = useState(''), err = er[0], setErr = er[1];
+    var nm = useState({}), names = nm[0], setNames = nm[1];
+    var ar = useState(''), arch = ar[0], setArch = ar[1];
+    var ad = useState(''), add = ad[0], setAdd = ad[1];
+    function change(body, done) {
+      var key = body.action + ':' + (body.floor || body.archetype || '');
+      setBusy(key); setErr('');
+      api('/api/layout', Object.assign({ building: p.repo }, body)).then(function () { setBusy(''); if (done) done(); }, function (x) { setBusy(''); setErr(x.message); });
+    }
+    if (!lay) return h(A.Dialog, { open: true, title: 'Reception', onClose: p.onClose, actions: [h(A.Button, { key: 'c', variant: 'quiet', onClick: p.onClose }, 'Close')] },
+      h(A.EmptyState, { icon: 'building', compact: true, title: 'No floors yet', text: 'The office has not read this building yet. Open a session in it first.' }));
+    var shown = lay.floors.filter(function (f) { return !f.hidden; });
+    var archOpts = cat.archetypes.map(function (a) { return { value: a.id, label: a.name }; });
+    var pick = arch || lay.archetype;
+    var addOpts = [{ value: '', label: 'Choose a floor' }].concat(cat.functions.filter(function (f) { return !shown.some(function (x) { return x.id === f.id; }); })
+      .map(function (f) { return { value: f.id, label: f.name + ' · ' + f.wingName }; }));
+    var fnFloors = lay.floors.filter(function (f) { return !f.fixed; });
+    return h(A.Dialog, {
+      open: true, title: 'Reception', onClose: p.onClose,
+      actions: [h(A.Button, { key: 't', variant: 'quiet', icon: 'chevron-right', onClick: function () { p.onClose(); p.onTour(); } }, 'Replay the tour'),
+        h(A.Button, { key: 'c', variant: 'primary', onClick: p.onClose }, 'Close')]
+    }, h('div', { className: 'form reception' },
+      h('h3', { className: 'reception-h' }, 'Memo'),
+      lay.confirmed
+        ? h('p', { className: 'note' }, 'This building is ' + aName(lay.archetypeName) + '. Its floors: ' + shown.map(function (f) { return f.name; }).join(', ') + '.')
+        : h('p', { className: 'note' }, 'The office thinks this building is ' + aName(lay.proposedName) + '. ' + lay.why + ' Confirm it once, or pick another kind.'),
+      lay.confirmed ? null : h('div', { className: 'inline-actions' },
+        h(A.Button, { variant: 'primary', icon: 'approve', loading: busy === 'confirm:', onClick: function () { change({ action: 'confirm' }); } }, 'Confirm ' + lay.proposedName)),
+      h('div', { className: 'reception-floor' },
+        h(A.Select, { id: 'r-arch', label: 'Kind of building', options: archOpts, value: pick, onChange: setArch }),
+        h(A.Button, { variant: 'quiet', disabled: pick === lay.archetype && lay.confirmed, loading: busy === 'switch:' + pick, onClick: function () { change({ action: 'switch', archetype: pick }); } }, 'Use these floors')),
+      h('p', { className: 'note' }, 'A new kind of building sets its floors. Rooms and notes stay. The scene is built again.'),
+      h('h3', { className: 'reception-h' }, 'Floors'),
+      err ? h('p', { className: 'note reception-err', role: 'alert' }, err) : null,
+      h('ul', { className: 'reception-floors' }, lay.floors.slice().reverse().map(function (f) {
+        var v = names[f.id] != null ? names[f.id] : f.name, i = fnFloors.indexOf(f);
+        return h('li', { key: f.id, className: 'reception-floor' + (f.hidden ? ' is-hidden' : '') },
+          h(A.TextInput, { id: 'r-n-' + f.id, label: (f.wingName ? f.wingName + ' wing' : 'Ground floor') + (f.hidden ? ' · hidden' : ''), value: v, onChange: function (t) { var n = Object.assign({}, names); n[f.id] = t; setNames(n); } }),
+          h('div', { className: 'inline-actions' },
+            h(A.Button, { variant: 'quiet', disabled: v.trim() === f.name, loading: busy === 'rename:' + f.id, onClick: function () { change({ action: 'rename', floor: f.id, name: v }, function () { var n = Object.assign({}, names); delete n[f.id]; setNames(n); }); } }, 'Rename'),
+            f.fixed ? null : h(A.Button, { variant: 'quiet', disabled: i >= fnFloors.length - 1, onClick: function () { change({ action: 'move', floor: f.id, by: 1 }); } }, 'Move up'),
+            f.fixed ? null : h(A.Button, { variant: 'quiet', disabled: i <= 0, onClick: function () { change({ action: 'move', floor: f.id, by: -1 }); } }, 'Move down'),
+            f.id === 'lobby' ? null : h(A.Button, { variant: 'quiet', onClick: function () { change({ action: f.hidden ? 'show' : 'hide', floor: f.id }); } }, f.hidden ? 'Show' : 'Hide')));
+      })),
+      h('div', { className: 'reception-floor' },
+        h(A.Select, { id: 'r-add', label: 'Add a floor', options: addOpts, value: add, onChange: setAdd }),
+        h(A.Button, { variant: 'quiet', icon: 'add', disabled: !add, loading: busy === 'add:' + add, onClick: function () { change({ action: 'add', floor: add }, function () { setAdd(''); }); } }, 'Add floor')),
+      h('h3', { className: 'reception-h' }, 'Office'),
+      h('div', { className: 'reception-actions' }, p.actions.map(function (x) {
+        return h(A.Button, { key: x.id, variant: 'quiet', icon: x.icon, onClick: function () { p.onClose(); x.run(); } }, x.label);
+      }))));
   }
+
+  // The lobby tour: four stops (lobby.js tourSteps). It shows once per browser and replays from the Reception. Each stop flies
+  // the camera (lobby.js tour) where it can; the elevator stop marks the elevator panel. One button ends it: Skip the tour on the
+  // first stops, Done on the last (#92 review: the last stop had Close and Done, two buttons for one result).
+  function TourCard(p) {
+    var steps = window.OfficeLobby ? window.OfficeLobby.pure.tourSteps() : [];
+    var ix = useState(0), i = ix[0], setI = ix[1];
+    var step = steps[i];
+    useEffect(function () { if (step) p.onStep(step.key); }, [i]);
+    if (!step) return null;
+    var last = i === steps.length - 1;
+    return h('div', { className: 'tour-card', role: 'dialog', 'aria-label': 'Lobby tour', 'aria-live': 'polite' },
+      h('div', { className: 'tour-h' }, h('b', null, step.title), h('span', { className: 'mono tour-n' }, (i + 1) + ' of ' + steps.length)),
+      h('p', { className: 'note' }, step.text),
+      h('div', { className: 'inline-actions' },
+        last ? null : h(A.Button, { variant: 'quiet', onClick: p.onDone }, 'Skip the tour'),
+        i > 0 ? h(A.Button, { variant: 'quiet', onClick: function () { setI(i - 1); } }, 'Back') : null,
+        last ? h(A.Button, { variant: 'primary', onClick: p.onDone }, 'Done') : h(A.Button, { variant: 'primary', icon: 'chevron-right', onClick: function () { setI(i + 1); } }, 'Next')));
+  }
+  function tourSeen() { try { return localStorage.getItem('ao-tour') === '1'; } catch (x) { return false; } }
+  function setTourSeen() { try { localStorage.setItem('ao-tour', '1'); } catch (x) { /* private window */ } }
 
   // ---------- app ----------
   function winSize() { return { w: window.innerWidth, h: window.innerHeight }; }
@@ -1821,7 +1826,7 @@
     var s2 = useState(null), dlg = s2[0], setDlg = s2[1];
     var s3 = useState({ recent: [], templates: [], schedules: [] }), info = s3[0], setInfo = s3[1];
     var ws = useState(winSize), win = ws[0], setWin = ws[1];   // the window size: the scene height follows it (#55)
-    // The DS Since you left card shows (OfficeScene onSinceYouLeft). The welcome card waits until it closes (#66).
+    // The DS Since you left card shows (OfficeScene onSinceYouLeft, #66).
     var sy = useState(false), syl = sy[0], setSyl = sy[1];
     // Toasts (toasts.js): an error or a toast with an action stays until closed; the others close after 8 s, and wait while the pointer or focus is on them, or while the stack has no room (is-off).
     var tt = useState([]), toasts = tt[0], setToasts = tt[1], tid = React.useRef(0), toastBox = React.useRef(null);
@@ -1862,14 +1867,14 @@
       return function () { clearInterval(iv); };
     }, [timed]);
     // Where the stack stands, at every width and window height (#79): toasts.js place decides from the boxes measured here.
-    // KEEP: never covered: the top controls, the floors card, the zoom column, the dock and its More list, every request
+    // KEEP: never covered: the top controls, the elevator panel, the zoom column, the lobby tour, every request
     // bar (Approve, Decline), message box and Back button of a panel, a pinned screen or the chat, the bezel count, the
     // decisions inbox, the city controls.
     // AVOID: covered only when no band is free of them: the DS HUD boxes (chat, roster, room card, Since you left), the
     // pinned screens, the board, stats and notes panels, the welcome card. A new box goes in one of the two lists.
     // It measures again when a box appears, goes or changes size (ResizeObserver), when a toast comes or goes, when
     // --strip-clear changes, on resize, and when a box scrolls. With no free band the stack waits out of sight (is-off) and its clocks wait.
-    var KEEP = '.ao-hud-top, .ao-hud-left, .ao-hud-zoom, .ao-hud-inbox, .ao-hud-cast, .strip, .strip-more, .asks, .pin-head, .pin .ao-tablist, .pin-input, .term-input, .term-note, .bezel, .board-b > .inline-actions, .look-bar, .city-hud, .city-zoom, .ao-hud-chat .ao-chat-h, .ao-hud-chat .ao-tablist, .ao-hud-chat .ao-act, .ao-hud-chat .ao-chips, .ao-hud-chat .ao-composer';
+    var KEEP = '.ao-hud-top, .ao-hud-left, .ao-hud-zoom, .ao-hud-inbox, .ao-hud-cast, .tour-card, .asks, .pin-head, .pin .ao-tablist, .pin-input, .term-input, .term-note, .bezel, .board-b > .inline-actions, .look-bar, .city-hud, .city-zoom, .ao-hud-chat .ao-chat-h, .ao-hud-chat .ao-tablist, .ao-hud-chat .ao-act, .ao-hud-chat .ao-chips, .ao-hud-chat .ao-composer';
     var AVOID = '.ao-hud > *, .board-panel, .pin, .notes-edit, .welcome';
     var placeRef = React.useRef(null);
     useEffect(function () {
@@ -1993,10 +1998,10 @@
         var snapNow = window.officeAdapter.latest();
         var next = view === 'office' && snapNow ? window.officeAdapter.mount(shown) : null;
         // The floor on screen in the scene we leave (a rebuild, another building, the city). Floor ids are new for each
-        // mount, so every match is by branch. All rules of the choice are in OfficeBuilding.floorMemory (#85, #111).
+        // mount, so every match is by floor key. All rules of the choice are in OfficeBuilding.floorMemory (#85, #111).
         var was = null;
         if (cur2.mount && cur2.view === 'office' && hostRef.current) {
-          try { was = cur2.mount.floorBranch(hostRef.current.floorId()); } catch (x) { was = null; }
+          try { was = cur2.mount.floorKey(hostRef.current.floorId()); } catch (x) { was = null; }
           floorMem.current.see(cur2.repo, was);
         }
         if (offFloor.current) { offFloor.current(); offFloor.current = null; }
@@ -2030,6 +2035,9 @@
     // the Security room's wall screens (security.js): the user picks the permission rules on them
     var securityRef = React.useRef(null);
     useEffect(function () { if (securityRef.current) securityRef.current.refresh(); }, [snap]);
+    // the lobby and the desks (lobby.js): open desks, the reception memo, the directory board, the nameplates (#92)
+    var lobbyRef = React.useRef(null);
+    useEffect(function () { if (lobbyRef.current) lobbyRef.current.refresh(); }, [snap]);
     // the screen the camera looks at (step 1 of a screen: scene-host.js focus), or null
     var lk = useState(null), look = lk[0], setLook = lk[1];
     // The pinned layer of the screen in focus (scene-host.js layer, #89): its screen, state and waiting count, not its box
@@ -2067,13 +2075,16 @@
       }
       requestAnimationFrame(wantDesk);
     }
-    // The bezel count: go to the oldest request of every building, at the desk of its session.
+    // Needs you (the scene's top bar, the city panel, the bezel count of a screen in focus): one tap goes to the oldest open request
+    // of every building (needs is officeAdapter.requests, oldest first, the count of the one Notifier), at the desk screen of its
+    // session (#89), where the request shows with Approve and Decline.
     function goOldest() { var r = needs[0]; if (r) openDesk(r.uid, 'chat'); }
     function noteKey(roomId) { return mount ? mount.noteKey(roomId) : ''; }   // the server's key for the room (place.mjs)
     useEffect(function () { return function () {
       if (boardRef.current) { boardRef.current.dispose(); boardRef.current = null; }
       if (terminalRef.current) { terminalRef.current.dispose(); terminalRef.current = null; }
       if (securityRef.current) { securityRef.current.dispose(); securityRef.current = null; }
+      if (lobbyRef.current) { lobbyRef.current.dispose(); lobbyRef.current = null; }
       if (hostRef.current) { hostRef.current.dispose(); hostRef.current = null; }
       setBoard(null); setLook(null); setLayer(null); setChg(null);
     }; }, [sceneKey, cur2.view]);
@@ -2113,31 +2124,6 @@
         if (b && b.doorPulse) b.doorPulse(prev.sessions[u].room, 'out');
       });
     }, [snap]);
-    // side panels sit above the control strip, however tall it is
-    useEffect(function () {
-      var strip = null, ro = null;
-      function set() {
-        if (!strip) return;
-        var v = Math.ceil(window.innerHeight - strip.getBoundingClientRect().top + 8);
-        var was = document.documentElement.style.getPropertyValue('--strip-clear');
-        document.documentElement.style.setProperty('--strip-clear', v + 'px');
-        if (was && was !== v + 'px' && hostRef.current) hostRef.current.refit();   // a taller dock: the screen in focus is framed above it
-      }
-      function find() {
-        var s2 = document.querySelector('.strip');
-        if (s2 === strip) return;
-        strip = s2;
-        if (!strip) document.documentElement.style.removeProperty('--strip-clear');
-        if (ro) { ro.disconnect(); ro = null; }
-        if (strip && window.ResizeObserver) { ro = new ResizeObserver(set); ro.observe(strip); }
-        set();
-      }
-      var mo = new MutationObserver(find);
-      mo.observe(document.body, { childList: true, subtree: true });
-      window.addEventListener('resize', set);
-      find();
-      return function () { mo.disconnect(); if (ro) ro.disconnect(); window.removeEventListener('resize', set); document.documentElement.style.removeProperty('--strip-clear'); };
-    }, []);
     // One panel at a time: while a pinned screen (the desk chat and terminal, the room's changes), the board or the stats panel
     // is open, the DS right column (chat or roster) is hidden. The pinned screens show the open requests (RequestBar, bezel).
     var pinned = !!(layer && layer.pin);
@@ -2221,8 +2207,10 @@
     }, [cur2.view]);
     // notifier: false: the page runs the one Notifier (alerts and the tab title for every building, below).
     // Since you left shows on every scene: the adapter seeds the state it sends again, so the card counts only news.
-    var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter, onHq: function () { setDlg({ name: 'hq' }); } }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: mount.adapter, floor: cur2.floor == null ? undefined : cur2.floor, height: win.h, quality: 'auto', intro: intro, editable: false, simulate: false, toasts: false,
-      inbox: inbox, onInbox: setInbox, notifier: false, onSinceYouLeft: setSyl,
+    var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter, needs: needs.length, onNeeds: goOldest, onHq: function () { setDlg({ name: 'hq' }); } }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: mount.adapter, floor: cur2.floor == null ? undefined : cur2.floor, height: win.h, quality: 'auto', intro: intro, editable: false, simulate: false, toasts: false,
+      inbox: inbox, onInbox: setInbox, notifier: false, onSinceYouLeft: setSyl, floorsTitle: 'Elevator',
+      // Needs you in the top bar, at every width (#92 review: with no dock, a request in another building showed only in the tab title)
+      waitingCount: needs.length, onWaiting: goOldest,
       // The scene's live request and error toasts go to the page stack, where they stay until closed. Seeded events
       // (a scene mounted again) send none: an open request stays in Needs you, the inbox and the tab title.
       onNotify: function (n) {
@@ -2250,7 +2238,7 @@
         if (offFloor.current) { offFloor.current(); offFloor.current = null; }
         if (host && mount) {
           var seenRepo = cur2.repo, seenMount = mount;
-          offFloor.current = host.frame(function () { floorMem.current.see(seenRepo, seenMount.floorBranch(host.floorId())); });
+          offFloor.current = host.frame(function () { floorMem.current.see(seenRepo, seenMount.floorKey(host.floorId())); });
         }
         // A screen in focus: a look shows the look bar; a look, a look at another screen or a way back closes the panels.
         // The second step opens a panel through the board's onOpen. A pinned screen (a desk monitor, the room's changes) has
@@ -2272,6 +2260,7 @@
             stats: function (id) { return mount.figures(id); },
             pin: function (id) { var n = latestSnap.current && latestSnap.current.pins && latestSnap.current.pins[noteKey(id)]; return n && n.text ? { text: n.text, by: n.by } : null; },
             onDoor: function (id) { setDlg({ name: 'room', roomId: id }); },
+            state: function (id) { return mount.rollup().rooms[id] || null; },
             onOpen: function (id, kind) { if (kind !== 'changes') setBoard({ id: id, kind: kind }); }
           });
         }
@@ -2286,6 +2275,24 @@
             onError: function (text) { toast({ tone: 'error', title: 'Security', text: text }); }
           });
           window.officeSecurity = securityRef.current;   // the Security room screens (open a screen), for the console and tests
+        }
+        if (st && host && window.OfficeLobby) {
+          var lobMount = mount;
+          if (lobbyRef.current) lobbyRef.current.dispose();
+          lobbyRef.current = window.OfficeLobby.attach(o, {
+            host: host,
+            layout: function () { var sn = latestSnap.current; return (sn && sn.layouts && sn.layouts[lobMount.repo]) || null; },
+            since: function () { try { var sm = o.summary ? o.summary() : null; return ((sm && sm.top) || []).map(function (x) { return typeof x === 'string' ? x : String(x && x.text || ''); }); } catch (x) { return []; } },
+            floors: function () { return lobMount.floors(); },
+            states: function () { return lobMount.rollup().floors; },
+            agents: function () { return lobMount.agentsByFloor(); },
+            session: function (botName) { return lobMount.session(botName); },
+            onDesk: function (roomId) { deskOpen(roomId); },
+            // the tour's monitor stop: an agent's monitor on the floor first (terminal.js look), else an open desk's
+            monitor: function () { return !!(terminalRef.current && terminalRef.current.look && terminalRef.current.look()); },
+            onReception: function (part) { if (part === 'directory') openPalette(); else setDlg({ name: 'reception' }); }
+          });
+          window.officeLobby = lobbyRef.current;   // the lobby (open desks, memo, directory, nameplates), for the console and tests
         }
         if (st && host && window.OfficeTerminal) {
           terminalRef.current = window.OfficeTerminal.attach(o, {
@@ -2322,6 +2329,36 @@
     // the folder of the shown building, for Open session to start in
     var shownRepo = snap && (snap.repos || []).filter(function (r) { return r.key === shown; })[0];
     var shownPath = shownRepo ? shownRepo.path : '';
+    // An open desk (#92): the Open dialog starts the agent with the desk's floor as its role, in the room's folder
+    // (the building's folder for a room of open desks). Phase 2 (#90) starts it at the desk with no dialog.
+    function deskOpen(roomId) {
+      var fn = mount ? mount.roomFloor(roomId) : null, fl = mount && fn ? mount.floors().filter(function (f) { return f.key === fn; })[0] : null;
+      var pl = mount ? mount.roomInfo(roomId).place : null;
+      refresh().then(function () { setDlg({ name: 'open', role: fn, roleName: fl ? fl.name : '', folder: (pl && pl.path) || shownPath }); });
+    }
+    // The lobby tour: once per browser, on the Lobby of the first building shown; Replay from the Reception or Ctrl+K.
+    var tr = useState(false), touring = tr[0], setTouring = tr[1];
+    function startTour() {
+      var o = officeRef.current;
+      if (o && mount && o.setFloor) { var lid = mount.floorId('lobby'); if (lid != null) o.setFloor(lid); }
+      setTouring(true);
+    }
+    function endTour() {
+      setTourSeen(); setTouring(false);
+      var el = document.getElementById('office'); if (el) el.classList.remove('tour-elevator');
+      if (hostRef.current) hostRef.current.blur();
+    }
+    function tourStep(key) {
+      var el = document.getElementById('office'); if (el) el.classList.toggle('tour-elevator', key === 'elevator');
+      if (lobbyRef.current) lobbyRef.current.tour(key);
+    }
+    var readyFor = mount ? mount.id : null;
+    useEffect(function () {
+      if (!readyFor || ambient || touring || !window.OfficeLobby || !window.OfficeLobby.pure.tourDue(tourSeen(), cur2.view === 'office')) return undefined;
+      // after the intro flight, once the scene and its lobby are ready (at most 10 s)
+      var n = 0, t = setInterval(function () { if (lobbyRef.current && lobbyRef.current.idle()) { clearInterval(t); startTour(); } else if (++n > 40) clearInterval(t); }, reduced() ? 50 : 250);
+      return function () { clearInterval(t); };
+    }, [readyFor]);
 
     // A request toast goes once its request is answered.
     var needIds = needs.map(function (r) { return r.uid; }).join('|');
@@ -2368,15 +2405,19 @@
     // the page's own commands in Ctrl+K, built from this render's state and handed to the palette after the render
     var actions = [];
     [['open', 'Open a session', 'add', function () { show('open'); }], ['sessions', 'All sessions', 'identity', function () { setDlg({ name: 'sessions' }); }],
-     ['city', 'City view', 'building', function () { go('city'); }], ['office', 'Office view', 'floor', function () { go('office'); }], ['floors', 'Floors and rooms', 'floor', function () { setDlg({ name: 'floors' }); }],
+     ['city', 'City view', 'building', function () { go('city'); }], ['office', 'Office view', 'floor', function () { go('office'); }], ['floors', 'Branches and worktrees', 'floor', function () { setDlg({ name: 'floors' }); }],
      ['past', 'Past sessions', 'session', function () { show('past'); }], ['schedules', 'Schedules', 'schedule', function () { show('schedules'); }],
-     ['hooks', 'Attach sessions', 'terminal', function () { show('hooks'); }], ['kinds', 'Agent kinds', 'bot', function () { setDlg({ name: 'kinds' }); }], ['compact', 'Compact view', 'zoom-out', function () { setAmbient(true); }]]
+     ['hooks', 'Attach sessions', 'terminal', function () { show('hooks'); }], ['kinds', 'Agent kinds', 'bot', function () { setDlg({ name: 'kinds' }); }], ['compact', 'Compact view', 'zoom-out', function () { setAmbient(true); }],
+     ['reception', 'Reception: floors and the kind of building', 'building', function () { setDlg({ name: 'reception' }); }], ['tour', 'Replay the lobby tour', 'chevron-right', function () { startTour(); }]]
       .forEach(function (a) { actions.push({ id: 'page-' + a[0], label: a[1], icon: a[2], group: 'Office', run: a[3] }); });
     var selKind = selSess ? kindOf(window.officeAdapter.kinds(), selSess.provider) : null;
     if (selSess && (!selKind || selKind.control)) actions.push({ id: 'page-ext', label: 'Extensions of ' + selSess.name, icon: 'connector', group: 'Office', run: function () { extensions(selSess.uid, selSess.name); } });
     actions.push({ id: 'page-needs', label: needs.length ? 'Needs you (' + needs.length + ')' : 'Needs you', icon: 'waiting', group: 'Office', keywords: 'requests approve decline questions decisions', run: function () { setDlg({ name: 'needs' }); } });
     if (snap && snap.hq) actions.push({ id: 'page-hq', label: 'Paperclip HQ', icon: 'hq', group: 'Office', keywords: 'paperclip company agents budget heartbeats routines supervise', run: function () { setDlg({ name: 'hq' }); } });
     list.forEach(function (b) { if (b.key !== shown) actions.push({ id: 'page-b-' + b.key, label: 'Go to ' + b.name, icon: 'building', group: 'Buildings', keywords: 'building repository ' + b.name, run: function () { pick(b.key); } }); });
+    // The Reception lists the office's own actions (the dock had them before #92), so a touch screen reaches them with no keyboard.
+    var officeActions = actions.filter(function (a) { return ['page-open', 'page-needs', 'page-sessions', 'page-past', 'page-schedules', 'page-hooks', 'page-kinds', 'page-floors', 'page-city', 'page-compact'].indexOf(a.id) >= 0; })
+      .concat([{ id: 'page-search', label: 'Search actions', icon: 'search', run: openPalette }]);
 
     // Room tools and sessions are built when the palette draws, so the rooms of the floor on screen are current.
     function liveActions() {
@@ -2394,8 +2435,21 @@
           tools.forEach(function (k) { out.push({ id: 'page-room-' + id + '-' + k[0], label: k[1] + rn, icon: k[2], group: 'Rooms', keywords: 'room ' + k[3], run: function () { b.open(id, k[0]); } }); });
         });
       }
+      // an open desk on each floor of the building on screen: the keyboard path of a click on an empty desk (#92)
+      if (mount && cur2.view === 'office' && mount.repo === shown) mount.floors().forEach(function (f) {
+        out.push({ id: 'page-desk-' + f.key, label: 'Start an agent on ' + f.name, icon: 'add', group: 'Floors', keywords: 'desk open start agent role floor ' + f.name + ' ' + f.wingName,
+          run: function () { var rid = mount.spareRoomOf(f.key); if (rid) deskOpen(rid); else refresh().then(function () { setDlg({ name: 'open', role: f.key, roleName: f.name, folder: shownPath }); }); } });
+      });
       ((sn && sn.sessions) || []).filter(function (s) { return s.status !== 'ended'; }).forEach(function (s) {
         var where = ((s.place && s.place.building) || '') + (s.place && s.place.room ? ' · ' + s.place.room : ''), kw = 'session ' + where, nm = sceneName(s);
+        // the dock's per-agent actions (#92): Always allow, the model and the permission mode
+        var ask = window.OfficeVocab.alwaysOffer(s), skd = kindOf(window.officeAdapter.kinds(), s.provider), steer = s.headless && (!skd || skd.control);
+        if (ask) out.push({ id: 'page-s-always-' + s.uid, label: 'Always allow ' + clip(ask.always, 40) + ' for ' + nm, icon: 'approve', group: 'Sessions', hint: where, keywords: kw + ' permission rule approve',
+          run: function () { api('/api/answer', { id: ask.id, allow: true, always: true }).then(function () { toast({ tone: 'success', title: s.name, text: 'Allowed from now on: ' + ask.always }); }, function (x) { toast({ tone: 'error', title: s.name, text: x.message }); }); } });
+        if (steer) MODELS.slice(1).forEach(function (mo) { if (mo.value !== s.model) out.push({ id: 'page-s-model-' + mo.value + '-' + s.uid, label: 'Model of ' + nm + ': ' + mo.label, icon: 'bot', group: 'Sessions', hint: where, keywords: kw + ' model lane',
+          run: function () { api('/api/control', { uid: s.uid, action: 'model', value: mo.value }).catch(function (x) { toast({ tone: 'error', title: s.name, text: x.message }); }); } }); });
+        if (steer) MODES.forEach(function (md) { if (md.value && md.value !== s.mode) out.push({ id: 'page-s-mode-' + md.value + '-' + s.uid, label: 'Permissions of ' + nm + ': ' + md.label, icon: 'security', group: 'Sessions', hint: where, keywords: kw + ' permission mode',
+          run: function () { api('/api/control', { uid: s.uid, action: 'mode', value: md.value }).catch(function (x) { toast({ tone: 'error', title: s.name, text: x.message }); }); } }); });
         out.push({ id: 'page-s-go-' + s.uid, label: 'Go to session ' + nm, icon: 'chevron-right', group: 'Sessions', hint: where, keywords: kw, run: function () { goTo(s); } });
         out.push({ id: 'page-s-term-' + s.uid, label: 'Terminal of ' + nm, icon: 'terminal', group: 'Sessions', hint: where, keywords: kw + ' output', run: function () { openDesk(s.uid, 'terminal'); } });
         out.push({ id: 'page-s-chg-' + s.uid, label: 'Changes of ' + nm, icon: 'trace', group: 'Sessions', hint: where, keywords: kw + ' diff files', run: function () { changes(s.uid, nm); } });
@@ -2407,9 +2461,9 @@
 
     return h(React.Fragment, null,
       h('div', { className: 'view' + (fading ? ' is-fading' : '') }, scene),
-      ambient ? null : h(Controls, { sel: cur2.view === 'office' ? sel : null, syl: syl && cur2.view === 'office', look: !!look, buildings: list, shown: shown, shownName: (list.filter(function (b) { return b.key === shown; })[0] || def || {}).name, toast: toast, needs: needs.length, onNeeds: function () { setDlg({ name: 'needs' }); }, onBuilding: function (k) { pick(k); if (view === 'city') go('office'); }, onCity: function () { go('city'); }, onOffice: function () { introNext.current = true; go('office'); }, view: cur2.view, onSessions: function () { setDlg({ name: 'sessions' }); }, onCompact: function () { setAmbient(true); },
-        onFloors: function () { setDlg({ name: 'floors' }); }, onExtensions: extensions, onTerminal: function (uid) { openDesk(uid, 'terminal'); }, onOpen: function () { show('open'); }, onPast: function () { show('past'); }, onSchedules: function () { show('schedules'); }, onHooks: function () { show('hooks'); }, onKinds: function () { setDlg({ name: 'kinds' }); }, onChanges: changes }),
-      d === 'open' ? h(OpenDialog, { shownPath: shownPath, kind: dlg.kind, spendLimit: info.spendLimit, recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
+      !ambient && touring && cur2.view === 'office' ? h(TourCard, { onStep: tourStep, onDone: endTour }) : null,
+      d === 'reception' ? h(ReceptionDialog, { repo: shown, actions: officeActions, onTour: startTour, onClose: close }) : null,
+      d === 'open' ? h(OpenDialog, { shownPath: shownPath, kind: dlg.kind, role: dlg.role, roleName: dlg.roleName, folder: dlg.folder, spendLimit: info.spendLimit, recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
       d === 'kinds' ? h(KindsDialog, { onOpen: function (kind) { refresh().then(function () { setDlg({ name: 'open', kind: kind }); }); }, onClose: close }) : null,
       d === 'past' ? h(PastDialog, { onClose: close, onChanges: changes, toast: toast }) : null,
       d === 'schedules' ? h(SchedulesDialog, { recent: info.recent, spendLimit: info.spendLimit, onInfo: setInfo, toast: toast, onClose: close }) : null,

@@ -5,6 +5,9 @@
    import it for its side effect and read globalThis.OfficeVocab.
 
      status(s)        -> { key, word, live }  key is a DS status: working, waiting, error, finished, resting
+     worst(keys)      -> the worst state of a set of desks (error, waiting, review, working, finished, resting), or null
+     stateWord(key)   -> the word of a worst state ('Needs you', 'Review ready', ...), '' for none
+     laneOf(model)    -> the model lane (Haiku, Sonnet, Opus, Fable) of a model id, or ''
      isWaiting(s)     -> true when the session has a pending permission prompt or an open question.
                          A subagent's tool call does not change it.
      taskLine(s)      -> the task text next to the state word
@@ -83,6 +86,17 @@
     if (s.status === 'working') return { key: 'working', word: 'Working', live: true };
     if (s.error) return { key: 'error', word: 'Error', live: true };
     return s.turns > 0 ? { key: 'finished', word: 'Finished', live: true } : { key: 'resting', word: 'Resting', live: true };
+  }
+
+  // The worst state of a set of desks (#92) is the DS's one order, AgentOffice.worstOf (error, needs you, review ready, working,
+  // finished, resting): the elevator lights its buttons with it, and building.js the room doors and the city windows. review is the
+  // state of a change that waits for the user's review (the paper flow, #93); no session status gives it yet. The words:
+  var STATE_WORD = { error: 'Error', waiting: 'Needs you', review: 'Review ready', working: 'Working', finished: 'Finished', resting: 'Resting' };
+  function stateWord(k) { return STATE_WORD[k] || ''; }
+  // The model lane of a session (#88): Haiku, Sonnet, Opus or Fable, from its model id; '' for another model.
+  function laneOf(model) {
+    var m = /\b(haiku|sonnet|opus|fable)\b/i.exec(String(model || '').replace(/[-_.]/g, ' '));
+    return m ? m[1][0].toUpperCase() + m[1].slice(1).toLowerCase() : '';
   }
 
   // The HUD adds the state word ("Working · ..."), so the task text carries only the task.
@@ -364,5 +378,5 @@
     return label + ' does not report cost, so the office shows it as unknown and no spend limit can stop it. Check the spend in its own account.';
   }
 
-  root.OfficeVocab = { limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform, hq: hq };
+  root.OfficeVocab = { stateWord: stateWord, laneOf: laneOf, limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform, hq: hq };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

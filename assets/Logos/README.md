@@ -1,4 +1,4 @@
-# Logos (Agent Office DS x1.7.13)
+# Logos (Agent Office DS x1.7.14)
 
 The Agent Office mark is a square with one centred dot (diameter = 40% of the size). Its corner comes from the theme: the `logo-mark-radius` token (25% of the size, a rounded square, in most themes; 50%, a circle, in Sublevel). The wordmark is "Agent Office", converted to paths. The lockup puts the mark and the wordmark side by side. The gap is 0.4 x the mark size. The wordmark cap height is 0.5 x the mark size and the cap band is centred on the mark.
 

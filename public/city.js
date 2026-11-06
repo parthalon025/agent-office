@@ -286,7 +286,7 @@
       band.userData.city = glass.userData.city = core.userData.city = b.key;
       g.scale.y = 0.001;
       b.body.add(g);
-      b.floors.push({ g: g, name: f.name });
+      b.floors.push({ g: g, name: f.name, glass: glass, lit: null });
       tween(s, cssMs('duration-floor', 450), 0.001, 1, function (v) { g.scale.y = v; });
     }
     function removeFloor(b) {
@@ -382,7 +382,20 @@
       if (gridKey !== cols + 'x' + rows) { gridKey = cols + 'x' + rows; buildStreets(cols, rows); }
     }
 
-    // list: [{ key, name, sessions, waiting, floors: [{ name, key }], bots: [{ name, status, floor }] }]
+    // The windows of a building light in the worst state of its desks when it needs the user (#92, AgentOffice.worstOf): an error
+    // or a request. The beacon and the count in the list say it too, so it is not in color alone.
+    var GLASS = { transparent: true, opacity: 0.42, roughness: 0.06, metalness: 0.1, depthWrite: false };
+    function litWindows(b, state) {
+      var lit = state === 'error' || state === 'waiting' ? state : null;
+      b.floors.forEach(function (f) {
+        if (f.lit === lit || !f.glass) return;
+        f.lit = lit;
+        var m = lit ? mat('status-' + lit, { transparent: true, opacity: 0.55, roughness: 0.2, depthWrite: false }) : mat('scene-glass', GLASS);
+        if (lit) { m.emissive.set(K.tok['status-' + lit]); m.emissiveIntensity = 0.6; }
+        f.glass.material = m;
+      });
+    }
+    // list: [{ key, name, sessions, waiting, state, floors: [{ name, key }], bots: [{ name, status, floor }] }]
     function update(list) {
       var seen = {};
       list.forEach(function (d) {
@@ -398,6 +411,7 @@
         setSign(b);
         syncPips(b);
         b.beacon.visible = d.waiting > 0;
+        litWindows(b, d.state);
       });
       Object.keys(items).forEach(function (k) { if (!seen[k]) removeBuilding(k); });
       layout();

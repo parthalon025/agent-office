@@ -1,4 +1,4 @@
-# Agent Office DS x1.7.13 (design system README)
+# Agent Office DS x1.7.14 (design system README)
 
 Agent Office is **the control room for any agent harness**. A harness (Claude Code, Hermes Agent, Copilot Studio, the Claude or OpenAI Agents SDK, a local model in LM Studio with an agent loop) runs the agents. Agent Office shows what they do and lets people steer them. Each agent is a bot. Bots sit in rooms, rooms sit on floors, floors stack into a building.
 
@@ -71,7 +71,7 @@ Start from `kit/page.html` and `kit/adapter.js`. The starter page runs the mock 
 - Change the scene only with adapter events. Never move bots with your own code; the engine walks them around objects.
 - Map risky steps (dangerous tools, spend, publishing) to `request` events.
 - Respect `prefers-reduced-motion`. Keep the HUD keyboard path complete.
-- Keep the x version prefix (x1.7.13) until the design is a SKU: in file names, titles, scene signs and the changelog.
+- Keep the x version prefix (x1.7.14) until the design is a SKU: in file names, titles, scene signs and the changelog.
 
 ## Definition of done
 
