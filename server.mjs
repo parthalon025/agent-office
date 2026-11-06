@@ -33,6 +33,7 @@ import { createClaudeCode, claudeVersion, MODEL_RE, MODES } from './providers/cl
 import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, cleanRecent, recentChoices, securityRoomIdOf, seatOf, cleanRooms, settleRooms, viewRooms } from './place.mjs';
 import { detect, newRecord, cleanRecord, edit as editLayout, layoutView, shownFloors, catalogView, functionOf } from './archetypes.mjs';
 import * as startup from './startup.mjs';
+import { createManager, createPlanBoard, officeSource } from './manager.mjs';
 import { createNotes, cleanPin, PIN_MAX, NOTES_MAX, AGENT_WRITE_MAX } from './notes.mjs';
 import { createSkills } from './skills.mjs';
 import { cleanRules, setRule, decide, preToolDecision, permissionModeFor, openRefusal, costAsk, enforcement, addCost, costThisMonth } from './security.mjs';
@@ -1386,6 +1387,57 @@ async function probeHttp() {
   return { ok, mode: hooksMode, version: CLAUDE_VERSION, seen, missing, error: run.err || null };
 }
 
+// ---------- Manager goals: the office plan source (#156, spec #130) ----------
+// manager.mjs holds the rules; this is the wiring. A goal is split into steps (one per line of the goal: the planner is injected, and the
+// model ladder of #74 replaces it later), approved first, and each step goes to an idle agent that sits in the same building. The spend limit is
+// checked by the Manager before each dispatch. Goals are saved in the state file. While a Paperclip company is connected the office is not the
+// planner (one planner per building): a goal is refused (409, confirm: 'goal') until the same call comes with confirmed: true.
+const planLines = async (goal) => String(goal).split(/\r?\n/).map((l) => l.replace(/^\s*(?:[-*]|\d+[.)])\s+/, '').trim()).filter(Boolean).map((text) => ({ text }));
+const goalAgents = (building) => [...sessions.values()].filter((s) => s.status !== 'ended' && buildingOfSession(s) === building).map((s) => {
+  let paid = true; try { paid = isPaid(providers.of(s)); } catch { /* a kind that left: count it as paid */ }
+  return { id: s.uid, name: s.name, role: s.deskRole || '', room: '', free: s.status === 'idle' && !s.error, paid };
+});
+const stepSeen = new Set(); // agents that began the turn of their step (a terminal session starts it with its next hook)
+const manager = createManager({
+  planner: planLines,
+  agents: goalAgents,
+  dispatch: (agent, task) => { sendMessage(agent.id, task, [], { answers: false }); stepSeen.delete(agent.id); },
+  interrupt: (id) => { const s = sessions.get(id); if (s && s.status === 'working') tracker.interrupt(s); },
+  spendOf: (id) => Number(sessions.get(id)?.cost) || 0,
+  onChange: () => { persisted.goals = manager.export(); savePersisted(); broadcast(); },
+});
+manager.restore(persisted.goals);
+const planBoard = createPlanBoard({ sources: [officeSource(manager)] });
+// Called after every state change: a step ends with the turn of its agent, and a freed agent may take a waiting step.
+let goalTickQueued = false, freeSig = '';
+function goalTick() {
+  if (goalTickQueued) return;
+  goalTickQueued = true;
+  setImmediate(async () => {
+    goalTickQueued = false;
+    try {
+      for (const id of manager.workingAgents()) {
+        const s = sessions.get(id);
+        if (!s || s.status === 'ended') { stepSeen.delete(id); await manager.finish(id, { ok: false, text: 'The agent left the office.' }); }
+        else if (s.status !== 'idle') stepSeen.add(id);
+        else if (stepSeen.has(id)) { stepSeen.delete(id); await manager.finish(id, { ok: !s.error, text: s.error ? s.error.text : '' }); }
+      }
+      const sig = [...sessions.values()].filter((s) => s.status === 'idle').map((s) => s.uid + '@' + buildingOfSession(s)).sort().join();
+      if (sig !== freeSig) { freeSig = sig; await manager.agentFreed(); }
+    } catch (e) { console.warn(`Manager: ${e.message}`); }
+  });
+}
+function startGoal(body) {
+  const building = String(body.building || '');
+  const company = persisted.paperclip?.company || hq.view()?.company;
+  if (company && body.confirmed !== true) throw Object.assign(httpError(409, 'A Paperclip company is connected, so Paperclip plans the work. Start an office goal anyway? Two planners then assign work at once.'), { confirm: 'goal' });
+  const limit = body.spendLimit == null ? defaultSpend() : Number(body.spendLimit);
+  if (!Number.isFinite(limit) || limit < 0) throw httpError(400, 'The spend limit must be a number of dollars, 0 or more.');
+  return manager.submit(building, body.goal, { approveFirst: body.approveFirst !== false, spendLimit: limit })
+    .then((id) => ({ ok: true, id, plans: planBoard.snapshot().plans.filter((p) => p.id === id) }))
+    .catch((e) => { throw e.status ? e : httpError(400, e.message); });
+}
+
 // ---------- templates and schedules ----------
 persisted.templates = persisted.templates || [];
 persisted.schedules = persisted.schedules || [];
@@ -1647,6 +1699,7 @@ const snapshot = () => (W.lean({
   // (security.mjs enforcement), and the Spend screen (the default spend limit, cost per agent kind this month).
   security: { rules: persisted.security, enforce: ENFORCE, spend: { limit: defaultSpend(), ...costThisMonth(persisted.costs, Date.now()) } },
   kinds: KINDS,             // the agent kinds: the label of each session's kind, and the Open dialog's options before readiness comes
+  plans: planBoard.snapshot(), // Manager board (#154, #156): every plan of every source, with its source word and the steps' state words
   hq: hq.view(),            // Paperclip HQ (#76): null until connected; company, budget, agents (role, task, supervision, run), routines
   // Function floors (#92): each building's floors (archetypes.mjs layoutView), each room's floors and name, and the catalog
   layouts: layoutsView(), rooms: roomsView(), catalog: CATALOG,
@@ -1659,6 +1712,7 @@ const wire = W.sender();
 let pending = null;
 readPlan();
 function broadcast() {
+  goalTick();    // a step ends with its agent's turn (#156)
   noteRooms();   // every state change: a room gets its floor and its name even while no page is connected (#92)
   if (!pending) pending = setTimeout(flush, BROADCAST_MS);
 }
@@ -1860,6 +1914,11 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/paperclip/connect') return send(res, 200, await connectHq(body));
     if (url.pathname === '/api/paperclip/disconnect') return send(res, 200, disconnectHq());
     if (url.pathname === '/api/paperclip/supervise') return send(res, 200, await superviseHq(body));
+    // Manager goals (#156): start { building, goal, approveFirst?, spendLimit?, confirmed? }, approve, cancel and retry { id, step }.
+    if (url.pathname === '/api/goal/start') return send(res, 200, await startGoal(body));
+    if (url.pathname === '/api/goal/approve') { if (!await manager.approve(String(body.id))) throw httpError(409, 'That goal does not wait for approval.'); return send(res, 200, { ok: true }); }
+    if (url.pathname === '/api/goal/cancel') { if (!manager.cancel(String(body.id))) throw httpError(409, 'That goal is done or stopped.'); return send(res, 200, { ok: true }); }
+    if (url.pathname === '/api/goal/retry') { const r = await manager.retry(String(body.id), String(body.step)); if (!r.ok) throw httpError(409, r.reason); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/template/save') return send(res, 200, saveTemplate(body));
     if (url.pathname === '/api/template/delete') { persisted.templates = persisted.templates.filter((t) => t.id !== String(body.id)); savePersisted(); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/schedule/save') return send(res, 200, saveSchedule(body));

@@ -5,7 +5,7 @@
    timers. The page loads it as a script (window.OfficeWire). The server and the tests import it for its side effect
    and read globalThis.OfficeWire.
 
-     lean(state)        -> the snapshot the page gets. state: { sessions (each with place and seat), plan, figures, notes, pins, repos, kinds, security, layouts, rooms, catalog, changes }
+     lean(state)        -> the snapshot the page gets. state: { sessions (each with place and seat), plan, plans, figures, notes, pins, repos, kinds, security, layouts, rooms, catalog, changes }
      leanCall(c)        -> one tool call as the page reads it
      diff(prev, next)   -> the patch from one lean snapshot to the next, or null when nothing changed
      apply(prev, patch) -> the next snapshot. prev does not change; the parts that did not change are shared
@@ -79,6 +79,7 @@
       repos: state.repos || [],
       kinds: state.kinds || [],   // the agent kinds (providers/index.mjs kinds): fixed while the server runs, so no patch repeats them
       security: state.security || null,  // the Security room (#70): rules, what is enforced, the Spend screen
+      plans: state.plans || { plans: [], unreadable: [] }, // Manager board (#154, #156)
       hq: state.hq || null,              // Paperclip HQ (#76, paperclip.mjs view): null until the user connects it
       // Function floors (#92): building key -> floors (archetypes.mjs layoutView); notes key -> { floors, title } of each room;
       // the function catalog (fixed while the server runs)
