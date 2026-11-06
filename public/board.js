@@ -708,7 +708,7 @@
 
     // Per frame, before the engine draws. The host tells us when the scene was rebuilt (a bot joins or leaves,
     // the floor or view changes, a theme change): scan and paint now, so the decor is in this frame.
-    var offRebuild = host.onRebuild(function () { try { refresh(); } catch (x) { repaint = false; /* the timer tries again */ } });
+    function rebuilt() { try { refresh(); } catch (x) { repaint = false; /* the timer tries again */ } }
     function frame(dt) {
       if (dead) return;
       try { if (repaint || K.tok !== lastTok) refresh(); } catch (x) { repaint = false; }
@@ -717,7 +717,6 @@
         stepDoors(dt);
       } catch (x) { /* one bad frame must not stop the office */ }
     }
-    var offFrame = host.frame(frame);
 
     // Clicks come from the host (not drags, one winner). The blackboard, the notes board and the stats display are
     // screens: the host flies to one on the first click and calls open() on the second. The door has no look: one click.
@@ -751,19 +750,14 @@
       find: function (key) { var it = allItems().concat(changesList).filter(function (x) { return keyOf(x) === key && inScene(x.mesh); })[0]; return it ? { item: it, mesh: it.mesh } : null; },
       anchors: function () { return []; }
     };
-    var offTarget = host.register(target);
-    var timer = setInterval(function () {
-      if (st.dead) { dispose(); return; }
-      try { refresh(); } catch (x) { /* next time */ }
-    }, 1500);
+    var free = host.screen({ target: target, rebuild: rebuilt, frame: frame, tick: refresh, gone: function () { return st.dead; }, onGone: function () { dispose(); } });
     try { refresh(); } catch (x) { /* the first frame tries again */ }
 
     // Remove the decor and give the engine's boards their own pictures back.
     function dispose() {
       if (dead) return;
-      dead = true; clearInterval(timer);
-      offFrame(); offRebuild(); offTarget();
-      host.leave();
+      dead = true;
+      free();
       if (hintSprite) { if (hintSprite.parent) hintSprite.parent.remove(hintSprite); hintSprite.material.dispose(); hintSprite = null; }
       Object.keys(hints).forEach(function (h) { hints[h].dispose(); }); hints = {};
       decorRooms.forEach(function (r) {

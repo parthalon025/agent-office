@@ -321,8 +321,6 @@
       },
       anchors: function () { return []; }
     };
-    var offTarget = host.register(target);
-    var offRebuild = host.onRebuild(function () { try { refresh(); } catch (x) { /* the timer tries again */ } });
     var pv = null;
     function placePlates() {
       if (!plates.length) return;
@@ -341,15 +339,15 @@
       var show = declutter(boxes, 4);
       plates.forEach(function (p, i) { p.mesh.visible = !!show[i] || !boxes[i]; });
     }
-    var offFrame = host.frame(function (dt) {
+    function paintFrame(dt) {
       placePlates();
       if (!hint) return;
       var op = hint.material.opacity;
       if (op !== hintOn) { op += (hintOn - op) * (st.rm ? 1 : Math.min(1, dt * 9)); if (Math.abs(hintOn - op) < 0.02) op = hintOn; hint.material.opacity = op; }
       hint.visible = op > 0 && !!hint.material.map;
       if (hint.visible) placeHint();
-    });
-    var timer = setInterval(function () { if (st.dead) { dispose(); return; } try { refresh(); } catch (x) { /* next time */ } }, 1500);
+    }
+    var free = host.screen({ target: target, rebuild: refresh, frame: paintFrame, tick: refresh, gone: function () { return st.dead; }, onGone: function () { dispose(); } });
     try { refresh(); } catch (x) { /* the first frame tries again */ }
 
     // The tour's flights: look at the first open desk, at a monitor, or at the memo of the shown floor; the elevator is in the
@@ -373,7 +371,7 @@
     }
     function dispose() {
       if (dead) return;
-      dead = true; clearInterval(timer); offTarget(); offRebuild(); offFrame(); host.leave();
+      dead = true; free();
       plates.forEach(dropPlate);
       boards.forEach(function (b) { delete b.mesh.userData.lobbyItem; });
       if (hint) { if (hint.parent) hint.parent.remove(hint); if (hint.material.map) hint.material.map.dispose(); hint.material.dispose(); hint = null; }

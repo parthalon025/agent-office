@@ -37,6 +37,12 @@
      host.frame(fn)                    -> off(); fn(dt, t) runs every frame before the engine draws
      host.onRebuild(fn)                -> off(); fn(reasons) runs before the frame when the scene changed
      host.register(target)             -> off(); a pick target (see below)
+     host.screen(spec)                 -> free(); the shared lifecycle of a painted screen (#182): registers spec.target, runs
+                                          spec.rebuild(reasons) on a rebuild, spec.frame(dt, t) every frame, spec.focus(f) on a
+                                          focus change, and spec.tick() every spec.every ms (default 1500) as the safety net;
+                                          a tick that finds spec.gone() true frees it (then spec.onGone()). free() takes it all
+                                          off, host.leave() last. Every callback is guarded: one bad frame or scan never stops
+                                          the office. The screen keeps its own paint and its own dispose (the decor it made).
      host.leave()                      -> the target drops its hover (the host clears the cursor)
      host.rehover()                    -> pick again under the pointer on the next frame
      host.focused()                    -> { key, name, open, item, verb, kind, pin } of the item in focus, or null
@@ -374,7 +380,35 @@
     if (up && !next.ready) { next.ready = true; next.until = now + ms; }
     return { w: next, expired: now > (next.ready ? next.until : next.hard) };
   }
-  var pure = { wantClock: wantClock, inScene: inScene, shown: shown, floorOf: floorOf, floorGroups: floorGroups, shownFloor: shownFloor, viewOf: viewOf, roomGroups: roomGroups, rebuilt: rebuilt, choose: choose,
+  // The lifecycle every painted screen shares (#182): register a pick target, repaint on a rebuild, per frame, on a focus change,
+  // and on a timer that is the safety net when no rebuild event came; free it all in one call. host and timers are injected
+  // (timers: { set(fn, ms) -> id, clear(id) }), so it runs on a fake host in test/scene-host.test.mjs.
+  function screenLifecycle(host, spec, timers) {
+    var offs = [], timer = null, freed = false;
+    function guard(fn) { return function () { try { return fn.apply(null, arguments); } catch (x) { /* one bad frame must not stop the office */ } }; }
+    function free() {
+      if (freed) return;
+      freed = true;
+      if (timer !== null) timers.clear(timer);
+      timer = null;
+      offs.forEach(function (off) { off(); });
+      offs = [];
+      host.leave();
+    }
+    if (spec.target) offs.push(host.register(spec.target));
+    if (spec.rebuild) offs.push(host.onRebuild(guard(spec.rebuild)));
+    if (spec.focus) offs.push(host.onFocus(guard(spec.focus)));
+    if (spec.frame) offs.push(host.frame(guard(spec.frame)));
+    if (spec.tick || spec.gone) {
+      timer = timers.set(function () {
+        if (spec.gone && spec.gone()) { free(); if (spec.onGone) guard(spec.onGone)(); return; }
+        if (spec.tick) guard(spec.tick)();
+      }, spec.every || 1500);
+    }
+    return free;
+  }
+
+  var pure = { screenLifecycle: screenLifecycle, wantClock: wantClock, inScene: inScene, shown: shown, floorOf: floorOf, floorGroups: floorGroups, shownFloor: shownFloor, viewOf: viewOf, roomGroups: roomGroups, rebuilt: rebuilt, choose: choose,
     focusStep: focusStep, freeRect: freeRect, facing: facing, framePose: framePose, uvOn: uvOn, bezelAt: bezelAt, projectRect: projectRect, layerSame: layerSame, hitBox: hitBox, hitAt: hitAt, panDelta: panDelta, roomStep: roomStep, panTarget: panTarget, roomInView: roomInView, pivotOn: pivotOn, keyOk: keyOk, parts: parts };
 
   // ---------- browser ----------
@@ -852,6 +886,7 @@
       frame: function (fn) { return add(frames, fn); },
       onRebuild: function (fn) { return add(rebuildFns, fn); },
       register: register,
+      screen: function (spec) { return screenLifecycle(api, spec, { set: function (fn, ms) { return setInterval(fn, ms); }, clear: function (id) { clearInterval(id); } }); },
       leave: release,
       rehover: function () { if (ptr) ptr.dirty = true; },
       hovered: function () { return hoverT ? { target: hoverT, item: hoverItem } : null; },

@@ -744,11 +744,11 @@
 
     // The host tells us when a bot joins or leaves, the floor changes, or the engine rebuilds the floors
     // (a theme change does that, with the same bot list): patch the new screens before this frame draws.
-    var offRebuild = host.onRebuild(function (why) {
+    function rebuilt(why) {
       if (self.dead) return;
       try { scan(); } catch (x) { /* the timer scans again */ }
       if (why.some(function (w) { return w === 'gone' || w === 'floors' || w === 'floor'; })) acc = 1;
-    });
+    }
     // Per frame: keep the terminal texture on the glass (a theme change puts the DS picture back),
     // blink the cursors, and repaint at most every 400 ms.
     function frame(dt, t) {
@@ -772,7 +772,6 @@
     try { if (document.fonts && document.fonts.addEventListener) { document.fonts.addEventListener('loadingdone', fontsReady); fontsHooked = true; } } catch (x) { fontsHooked = false; }
     loadFont(K.f && K.f.mono);
     if (K.term) loadFont(K.f && K.f.term);
-    var offFrame = host.frame(frame);
     var target = {
       name: 'terminal',
       active: function () { return !self.dead; },
@@ -787,7 +786,7 @@
       find: function (key) { var e = entries.filter(function (x) { return keyOf(x) === key && inScene(x.mesh); })[0]; return e ? { item: e, mesh: e.mesh } : null; },
       anchors: function () { return entries.map(function (e) { return e.mesh; }); }
     };
-    var offTarget = host.register(target);
+    var free = host.screen({ target: target, rebuild: rebuilt, frame: frame, tick: function () { if (!self.dead) scan(); }, gone: function () { return st.dead; }, onGone: function () { dispose(); } });
     // The keyboard path (Ctrl+K, the dock, the bezel count): the monitor of a session on the shown floor, the terminal one first.
     function open(uid) {
       if (self.dead || !uid) return false;
@@ -796,17 +795,14 @@
       mine.sort(function (a, b) { return (a.kind === 'term' ? 0 : 1) - (b.kind === 'term' ? 0 : 1); });
       return !!mine[0] && host.show(target, mine[0], false);
     }
-    var timer = setInterval(function () { if (st.dead) { dispose(); return; } if (!self.dead) { try { scan(); } catch (x) { /* next time */ } } }, 1500);
     try { scan(); } catch (x) { /* the first frame scans again */ }
 
     function dispose() {
       if (self.dead) return;
       self.dead = true;
-      clearInterval(timer);
-      offFrame(); offRebuild(); offTarget();
+      free();
       if (fontsHooked) { try { document.fonts.removeEventListener('loadingdone', fontsReady); } catch (x) { /* gone */ } }
       hover = null;
-      host.leave();
       entries.forEach(function (e) {
         e.hover = '';
         if (e.mesh.onBeforeRender === e.hook) delete e.mesh.onBeforeRender;
