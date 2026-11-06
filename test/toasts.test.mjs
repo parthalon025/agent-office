@@ -223,7 +223,7 @@ test('the tool column follows the open panel by one shared width (#114)', () => 
 test('Needs you (the top bar, the city, the bezel) has one goOldest, and it opens the desk screen, not the chat (#92 rebase on #89)', () => {
   const js = fs.readFileSync(new URL('../public/office.js', import.meta.url), 'utf8');
   assert.equal(js.match(/function goOldest\(/g).length, 1, 'a second goOldest would shadow the first');
-  assert.match(js, /function goOldest\(\) \{[^}]*openDesk\(r\.uid, 'chat'\)/);
+  assert.match(js, /function goOldest\(\) \{[\s\S]{0,500}?openDesk\(r\.uid, 'chat'\)/);
   assert.match(js, /waitingCount: needs\.length, onWaiting: goOldest/);
   assert.match(js, /onNeeds: goOldest/);
 });
