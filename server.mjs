@@ -1689,7 +1689,7 @@ setInterval(readPlan, 15000).unref();
 // handshake. The page shows a feature only when the kind declares it (vocab.js featuresOf).
 const kindInfo = (s) => { try { const p = providers.of(s); return { agent: p.label, features: featuresOf(p) }; } catch { return { agent: '', features: [] }; } };
 // hq: a Paperclip run's label (its agent, role, company, task and budget, #76), while the office watches that company.
-const fullSession = (s) => ({ ...s, ...kindInfo(s), place: s.placed ? roomPlace(s) : null, seat: seatOfSession(s), hq: s.paperclip ? hq.labelOf(s.paperclip) : null });
+const fullSession = (s) => ({ ...s, ...kindInfo(s), persona: personaOf(persisted.personas, s.name), place: s.placed ? roomPlace(s) : null, seat: seatOfSession(s), hq: s.paperclip ? hq.labelOf(s.paperclip) : null });
 const CATALOG = catalogView();
 // What /events sends: only what the page reads, with caps per session (public/wire.js lean).
 const snapshot = () => (W.lean({
@@ -1743,7 +1743,7 @@ setInterval(() => { for (const c of clients) c.write(': ping\n\n'); }, 20000).un
 const MIME = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
 const FONT_FILES = fs.readdirSync(path.join(PUBLIC, 'vendor', 'fonts')).filter((f) => /^[a-z0-9-]+\.woff2$/.test(f));
 const STATIC_FILES = new Map([
-  ['/office.js', 'public/office.js'], ['/scene-host.js', 'public/scene-host.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/lobby.js', 'public/lobby.js'], ['/desk.js', 'public/desk.js'], ['/security.js', 'public/security.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/vocab.js', 'public/vocab.js'], ['/wire.js', 'public/wire.js'], ['/format.js', 'public/format.js'], ['/wheel-gate.js', 'public/wheel-gate.js'], ['/building.js', 'public/building.js'], ['/toasts.js', 'public/toasts.js'], ['/tokens.css', 'tokens.css'],
+  ['/office.js', 'public/office.js'], ['/scene-host.js', 'public/scene-host.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/persona.js', 'public/persona.js'], ['/lobby.js', 'public/lobby.js'], ['/desk.js', 'public/desk.js'], ['/security.js', 'public/security.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/vocab.js', 'public/vocab.js'], ['/wire.js', 'public/wire.js'], ['/format.js', 'public/format.js'], ['/wheel-gate.js', 'public/wheel-gate.js'], ['/building.js', 'public/building.js'], ['/toasts.js', 'public/toasts.js'], ['/tokens.css', 'tokens.css'],
   ['/components/bundle.css', 'components/bundle.css'], ['/components/bundle.js', 'components/bundle.js'],
   ['/components/lib/three.min.js', 'components/lib/three.min.js'],
   ['/components/lib/three-orbit-controls.js', 'components/lib/three-orbit-controls.js'],
@@ -1846,8 +1846,8 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/launch-link') return send(res, 200, { url: auth.launchUrl(PORT, launchCodes.mint()) }); // a second npm start asks for one
     if (url.pathname === '/api/probe-http') return send(res, 200, await probeHttp());
-    if (url.pathname === '/api/persona/save') { const p = setPersona(persisted.personas, String(body.name || ''), body); savePersisted(); return send(res, 200, { ok: true, persona: p }); }
-    if (url.pathname === '/api/persona/delete') { removePersona(persisted.personas, String(body.name || '')); savePersisted(); return send(res, 200, { ok: true }); }
+    if (url.pathname === '/api/persona/save') { const p = setPersona(persisted.personas, String(body.name || ''), body); savePersisted(); broadcast(); return send(res, 200, { ok: true, persona: p }); }
+    if (url.pathname === '/api/persona/delete') { removePersona(persisted.personas, String(body.name || '')); savePersisted(); broadcast(); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/notes/save') {
       // the notes board of a room: the user's own reminders, kept in state.json
       const key = String(body.key || '');

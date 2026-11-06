@@ -4,7 +4,9 @@
 // never reads a persona (test/personas.test.mjs proves the decision is the same). A cue comes from a status
 // (adapter events) only, so a bot never moves by itself, and it is none under reduced motion.
 //
-// Pure: no I/O, no clock. The map is injected; the server saves it in state.json (persisted.personas).
+// Pure: no I/O, no clock (the cue rule is read from public/vocab.js, which is shared with the page). The map is injected; the server saves it in state.json (persisted.personas).
+
+import './public/vocab.js';
 
 export const NAME_MAX = 40;
 export const SHAPES = ['round', 'square', 'tall', 'wide'];
@@ -50,6 +52,5 @@ export function personaOf(map, name) { const k = keyOf(name); return k && own(ma
 /** The tone line for the system prompt: '' for no persona or no style. */
 export function stylePrompt(p) { return p && typeof p.style === 'string' && own(STYLES, p.style) ? STYLES[p.style].tone : ''; }
 
-const CUES = { waiting: 'raise-hand', error: 'scratch-head', finished: 'stretch' };
-/** The body cue of a DS status key, or null. Reduced motion gives none. */
-export function bodyCue(status, { reduced = false } = {}) { return reduced || !own(CUES, status) ? null : CUES[status]; }
+/** The body cue of a DS status key, or null. Reduced motion gives none. The rule is one copy, in vocab.js (the page reads it too). */
+export function bodyCue(status, { reduced = false } = {}) { return globalThis.OfficeVocab.persona.cueOf(status, reduced); }

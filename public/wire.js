@@ -24,7 +24,7 @@
 
   // Every session field the page reads (building.js, office.js, terminal.js, board.js, chat-extras.js, vocab.js).
   // A field the page does not read stays on the server. Add a field here when the page starts to read it.
-  var SESSION_FIELDS = ['uid', 'provider', 'name', 'status', 'cwd', 'headless', 'note', 'model', 'mode', 'tool', 'prompt', 'promptAt', 'live',
+  var SESSION_FIELDS = ['persona', 'uid', 'provider', 'name', 'status', 'cwd', 'headless', 'note', 'model', 'mode', 'tool', 'prompt', 'promptAt', 'live',
     'error', 'turns', 'cost', 'costUnknown', 'supervision', 'usage', 'ctxTokens', 'ctxWindow', 'todos', 'agents', 'calls', 'replies', 'pending', 'questions',
     'inbox', 'commands', 'skills', 'features', 'scheduleId', 'startedAt', 'endedAt', 'lastEvent', 'git', 'place', 'seat', 'olderReplies', 'hq'];
   // Per session and broadcast. calls: the tracker's own limit (MAX_CALLS); the boards and the terminal count all of them.

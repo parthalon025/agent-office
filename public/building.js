@@ -72,7 +72,11 @@
   // A Paperclip run (#76, s.hq from the server): the card's owner line is its company and its Paperclip agent. cardOf is what
   // the card shows that only bot.add sets (the owner and the role in the platform line), to seat the bot again on a change.
   function ownerOf(s) { return s && s.hq ? s.hq.company + ' (' + s.hq.agent + ')' : ''; }
-  function cardOf(s) { return s && s.hq ? ownerOf(s) + '|' + s.hq.role : ''; }
+  // A persona's shape and color (#150) are part of the card too: a change seats the bot again. Its accessory and its body cue are
+  // the 3D script's (persona.js), not a seat.
+  function botColors() { var c = root.AgentOffice && root.AgentOffice.BODY_COLORS; return c ? Array.prototype.slice.call(c) : []; }
+  function lookOf(s) { return V.persona.lookOf(s && s.persona, botColors()); }
+  function cardOf(s) { var l = lookOf(s); return (s && s.hq ? ownerOf(s) + '|' + s.hq.role : '') + (l ? '|' + (l.shape || '') + '|' + (l.color || '') : ''); }
   function clip(t, n) { t = String(t || ''); return t.length > n ? t.slice(0, n - 1) + '…' : t; }
   function base(p) { return String(p || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() || ''; }
   // A subagent's type picks its role: the workstation and the icon.
@@ -580,6 +584,9 @@
             var bot = withColor({ name: name, role: (fdef && fdef.role) || 'coder', shape: shapeOf(s.uid), status: k.status, task: k.task, platform: V.platform(s, snapshot.kinds), identity: s.cwd }, s.uid);
             // a Paperclip run (#76): the company and the Paperclip agent own it (its budget is on the stats display, terminal.js)
             if (s.hq) bot.owner = ownerOf(s);
+            var look = lookOf(s);   // the persona's shape and color replace the uid's (#150)
+            if (look && look.shape) bot.shape = look.shape;
+            if (look && look.color) bot.color = look.color;
             if (s.skills && s.skills.length) bot.skills = s.skills.slice(0, 16);
             if (s.scheduleId) bot.triggers = [s.name];
             emit(stamp({ type: 'bot.add', roomId: k.room, bot: bot }, s.startedAt));

@@ -272,3 +272,24 @@ test('desk: the approval paper, the stamps, the question note and the pause key 
     assert.doesNotMatch(body, /tok\[['"]|tok\.[a-z]|#[0-9a-f]{3}\b/i, fn + ' paints with FACES only');
   }
 });
+
+test('agent character: the accessory and arm marks read on every bot body color a persona can pick, in the better of scene-dark and bubble', async () => {
+  const { loadBundle } = await import('./fixtures/ds-bundle.mjs');
+  await import('../public/vocab.js');
+  const P = globalThis.OfficeVocab.persona;
+  const bodies = Array.from(loadBundle().AO.BODY_COLORS).slice(0, 8);
+  assert.equal(bodies.length, 8, 'the eight persona colors');
+  const hex = (n, th) => val(n, th);
+  each((T, th) => {
+    for (const b of bodies) {
+      const pick = P.markOn(b, hex('scene-dark', th), hex('bubble', th));
+      atLeast('persona mark (' + pick + ') on body ' + b, 3, T(pick === 'dark' ? 'scene-dark' : 'bubble'), rgb(b), th);
+    }
+  });
+});
+
+test('agent character: persona.js draws with scene-dark and bubble only, no literal color and no status color', () => {
+  const js = read('public/persona.js').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  assert.ok(!/#[0-9a-fA-F]{3,6}\b|rgba?\(/.test(js), 'no literal color');
+  assert.ok(!/status-/.test(js), 'no status color');
+});

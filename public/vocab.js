@@ -511,5 +511,49 @@
     unknown: { word: 'PR state unknown', place: 'desk', mark: 'grey', glyph: 'pull-request' }
   };
   function folderOf(state) { var f = FOLDER[state] || FOLDER.unknown; return { word: f.word, place: f.place, mark: f.mark, glyph: f.glyph }; }
-  root.OfficeVocab = { stateWord: stateWord, laneOf: laneOf, limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform, hq: hq, plan: plan, layers: layers, holdMs: holdMs, folderOf: folderOf };
+  // Agent character (#150). The record is personas.mjs; these are the words, the look and the body cue the page and the
+  // server share. A persona shape is a plain word; the DS bot shape it draws is below. The cue comes from a DS status key only
+  // (adapter events), and is none under reduced motion. pose() is the arm angle (0 hangs down, PI points up) and lift of a cue at a time in seconds: small,
+  // bounded, smooth. The 3D part (public/persona.js) only applies it.
+  var PERSONA_SHAPE = { round: 'blob', square: 'octa', tall: 'cone', wide: 'capsule' };
+  var STYLE_WORD = { careful: 'Careful', fast: 'Fast', chatty: 'Chatty' };
+  var ACCESSORY_WORD = { none: 'None', glasses: 'Glasses', hat: 'Hat', headset: 'Headset', scarf: 'Scarf' };
+  var COLOR_WORD = ['Blue', 'Green', 'Orange', 'Purple', 'Pink', 'Teal', 'Yellow', 'Violet'];   // the first 8 of the DS body colors (AgentOffice.BODY_COLORS)
+  var CUE = { waiting: 'raise-hand', error: 'scratch-head', finished: 'stretch' };
+  function pshape(p) { return p && own(PERSONA_SHAPE, p.shape) ? PERSONA_SHAPE[p.shape] : undefined; }
+  function lookOf(p, colors) {
+    if (!p) return null;
+    var c = colors && p.color != null && p.color >= 0 && p.color < colors.length ? colors[p.color] : undefined;
+    return { shape: pshape(p), color: c, accessory: p.accessory };
+  }
+  function cueOf(statusKey, reduced) { return reduced || !own(CUE, statusKey) ? null : CUE[statusKey]; }
+  function pose(cue, t) {
+    var s = Math.sin(t * 2 * Math.PI * 0.8);
+    if (cue === 'raise-hand') return { arm: Math.PI * 0.85 + s * 0.2, lift: 0 };
+    if (cue === 'scratch-head') return { arm: Math.PI * 0.75 + s * 0.35, lift: 0 };
+    if (cue === 'stretch') return { arm: Math.PI * 0.97 + s * 0.03, lift: 0.15 + 0.1 * s };
+    return { arm: 0, lift: 0 };
+  }
+  // The token an accessory or the arm is drawn in on a body color: the dark scene token or the light bubble token, whichever
+  // reads better (WCAG ratio). Colors are #rrggbb. A body that is not a hex color gets the dark one.
+  function lum(h) {
+    var m = /^#([0-9a-f]{6})$/i.exec(String(h || ''));
+    if (!m) return null;
+    return [0, 2, 4].map(function (i) { var c = parseInt(m[1].substr(i, 2), 16) / 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); })
+      .reduce(function (a, c, i) { return a + c * [0.2126, 0.7152, 0.0722][i]; }, 0);
+  }
+  function ratio(a, b) { var x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+  function markOn(body, dark, light) {
+    if (lum(body) == null || lum(dark) == null || lum(light) == null) return 'dark';
+    return ratio(dark, body) >= ratio(light, body) ? 'dark' : 'light';
+  }
+  var persona = {
+    markOn: markOn, ratio: ratio,
+    shapeOf: pshape, lookOf: lookOf, cueOf: cueOf, pose: pose,
+    colorWord: function (i) { return COLOR_WORD[i] || ''; }, COLOR_COUNT: COLOR_WORD.length,
+    styleWord: function (k) { return own(STYLE_WORD, k) ? STYLE_WORD[k] : ''; },
+    accessoryWord: function (k) { return own(ACCESSORY_WORD, k) ? ACCESSORY_WORD[k] : ''; }
+  };
+
+  root.OfficeVocab = { stateWord: stateWord, laneOf: laneOf, limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform, hq: hq, plan: plan, layers: layers, holdMs: holdMs, folderOf: folderOf, persona: persona };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

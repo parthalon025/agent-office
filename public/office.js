@@ -88,6 +88,11 @@
   }
   // A bot's body color, the same one the scene uses (building.js). BotAvatar draws an SVG with a fill color, so it needs the value.
   function colorOf(uid) { return window.officeAdapter.colorOf(uid); }
+  // The look of a session's bot in lists and previews: its persona's shape and color (#150), else the uid's.
+  function look(s) {
+    var l = window.OfficeVocab.persona.lookOf(s && s.persona, Array.prototype.slice.call(window.AgentOffice.BODY_COLORS || []));
+    return { shape: (l && l.shape) || window.officeAdapter.shapeOf(s.uid), color: (l && l.color) || colorOf(s.uid) };
+  }
   function cssMs(name, fallback) { var v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--' + name)); return isFinite(v) && v > 0 ? v : fallback; }
   function reduced() { return !!(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches); }
   var plural = F.plural;
@@ -841,6 +846,82 @@
         }))));
   }
 
+  // ---------- agent characters (#150) ----------
+  // A persona is the look (shape, color, accessory) and the working style of an agent, saved by its name. The style changes
+  // how the agent talks and nothing it may do. The office reads the look at once; the style applies to the next session the
+  // office opens with that name. The record is personas.mjs; the words are OfficeVocab.persona.
+  var PV = window.OfficeVocab.persona;
+  var P_SHAPES = [['round', 'Round'], ['square', 'Square'], ['tall', 'Tall'], ['wide', 'Wide']];
+  var P_ACC = ['none', 'glasses', 'hat', 'headset', 'scarf'];
+  var P_STYLES = ['careful', 'fast', 'chatty'];
+  var P_STYLE_NOTE = { careful: 'Checks its work and says what it is unsure about.', fast: 'Short replies. The result comes first.', chatty: 'Friendly. Says what it plans to do next.' };
+  function PersonasDialog(p) {
+    var snap = useSnapshot();
+    var ls = useState(null), list = ls[0], setList = ls[1];
+    var fm = useState(null), form = fm[0], setForm = fm[1];     // the persona in the editor, or null
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var er = useState(''), err = er[0], setErr = er[1];
+    function load() { call('/api/personas').then(function (r) { return r.json(); }).then(function (j) { setList(j.personas || {}); }, function (x) { setList({}); setErr(x.message); }); }
+    useEffect(load, []);
+    var colors = Array.prototype.slice.call(window.AgentOffice.BODY_COLORS || []);
+    var saved = Object.keys(list || {}).map(function (k) { return list[k]; });
+    var live = ((snap && snap.sessions) || []).filter(function (s) { return s.status !== 'ended' && !s.pseudo; }).map(function (s) { return s.name; })
+      .filter(function (n, i, a) { return n && a.indexOf(n) === i && !(list && list[String(n).trim().toLowerCase()]); });
+    function set(k) { return function (v) { var n = Object.assign({}, form); n[k] = v; setForm(n); }; }
+    function save() {
+      setBusy(true); setErr('');
+      api('/api/persona/save', form).then(function () { setBusy(false); setForm(null); load(); p.toast({ tone: 'success', title: 'Character saved', text: form.name }); },
+        function (x) { setBusy(false); setErr(x.message); });
+    }
+    function del(name) {
+      setBusy(true); setErr('');
+      api('/api/persona/delete', { name: name }).then(function () { setBusy(false); setForm(null); load(); p.toast({ tone: 'success', title: 'Character removed', text: name }); },
+        function (x) { setBusy(false); setErr(x.message); });
+    }
+    function look(r) { var l = PV.lookOf(r, colors) || {}; return { shape: l.shape || 'blob', color: l.color || colors[0] }; }
+    function row(r) {
+      var l = look(r);
+      return h('li', { key: r.name, className: 'past-row' },
+        h('div', { className: 'past-main' },
+          h('div', { className: 'past-title' }, h(A.BotAvatar, { shape: l.shape, color: l.color, status: 'resting', size: 28 }), h('b', null, r.name)),
+          h('div', { className: 'past-meta' }, [PV.styleWord(r.style) || 'No style', r.accessory && r.accessory !== 'none' ? PV.accessoryWord(r.accessory) : null].filter(Boolean).join(' · '))),
+        h('div', { className: 'past-actions' },
+          h(A.Button, { variant: 'quiet', onClick: function () { setForm(Object.assign({}, r)); } }, 'Edit'),
+          h(A.Button, { variant: 'quiet', icon: 'remove', disabled: busy, onClick: function () { del(r.name); } }, 'Remove')));
+    }
+    if (form) {
+      var fl = look(form);
+      return h(A.Dialog, { open: true, title: 'Agent character', onClose: p.onClose, actions: [
+        h(A.Button, { key: 'b', variant: 'quiet', onClick: function () { setForm(null); setErr(''); } }, 'Back'),
+        h(A.Button, { key: 's', variant: 'primary', loading: busy, disabled: !String(form.name || '').trim(), onClick: save }, 'Save character')] },
+        h('div', { className: 'form' },
+          h('div', { className: 'persona-preview', 'aria-label': 'Preview of the bot' },
+            h(A.BotAvatar, { shape: fl.shape, color: fl.color, status: 'working', size: 64 }),
+            h('span', { className: 'persona-acc' }, form.accessory && form.accessory !== 'none' ? 'Wears: ' + PV.accessoryWord(form.accessory).toLowerCase() : 'No accessory')),
+          h(A.TextInput, { id: 'p-name', label: 'Agent name', value: form.name || '', onChange: set('name'), hint: 'The bot name in the office. A new session with this name gets the character.', error: err || undefined }),
+          Pair(
+            h(A.Select, { id: 'p-style', label: 'Working style', options: [{ value: '', label: 'No style' }].concat(P_STYLES.map(function (k) { return { value: k, label: PV.styleWord(k) }; })), value: form.style || '', onChange: set('style') }),
+            h(A.Select, { id: 'p-acc', label: 'Accessory', options: P_ACC.map(function (k) { return { value: k, label: PV.accessoryWord(k) }; }), value: form.accessory || 'none', onChange: set('accessory') })),
+          Pair(
+            h(A.Select, { id: 'p-shape', label: 'Shape', options: P_SHAPES.map(function (s) { return { value: s[0], label: s[1] }; }), value: form.shape || 'round', onChange: set('shape') }),
+            h(A.Select, { id: 'p-color', label: 'Color', options: colors.slice(0, PV.COLOR_COUNT).map(function (c, i) { return { value: String(i), label: PV.colorWord(i) }; }), value: String(form.color == null ? 0 : form.color), onChange: function (v) { set('color')(+v); } })),
+          h('p', { className: 'note' }, (form.style ? P_STYLE_NOTE[form.style] + ' ' : '') + 'A style changes only how the agent talks. It never changes what the agent may do. The Security room decides that.'),
+          h('p', { className: 'note' }, 'The bot raises a hand when it needs you, scratches its head after an error and stretches when it is finished. Reduced motion turns this off.')));
+    }
+    return h(A.Dialog, { open: true, title: 'Agent characters', onClose: p.onClose, actions: [
+      h(A.Button, { key: 'n', variant: 'quiet', icon: 'add', onClick: function () { setForm({ name: '', style: '', shape: 'round', color: 0, accessory: 'none' }); } }, 'New character'),
+      h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
+      h('div', { className: 'form wide' },
+        h('p', { className: 'note' }, 'Give an agent a look and a working style. The style changes how it talks, not what it may do.'),
+        h(Busy, { on: list === null }),
+        err ? h('p', { className: 'note', role: 'alert' }, err) : null,
+        list !== null && !saved.length ? h(A.EmptyState, { icon: 'bot', title: 'No characters yet', text: 'A bot has its default look until you give it a character.' }) : null,
+        saved.length ? h('ul', { className: 'past' }, saved.map(row)) : null,
+        live.length ? h('div', { className: 'persona-live' },
+          h('span', { className: 'note' }, 'Bots in the office:'),
+          live.map(function (n) { return h(A.Button, { key: n, variant: 'quiet', icon: 'add', onClick: function () { setForm({ name: n, style: '', shape: 'round', color: 0, accessory: 'none' }); } }, n); })) : null));
+  }
+
   // A row of a dialog list goes (answered, kept). If the focus was on it, it falls to the page. Move it inside the dialog:
   // to the button of the row that took its place, else to the first dialog button. inner = any element inside the dialog.
   function refocusRow(inner, idx) {
@@ -948,7 +1029,7 @@
                 var here = (snap ? snap.sessions : []).filter(function (s) { return s.status !== 'ended' && s.place && s.place.rootKey === w.place.rootKey; });
                 return h('div', { key: w.root, className: 'room-row' },
                   h(A.OfficeTypeBadge, { type: 'lab', label: w.place.room }), h('span', { className: 'past-sub mono', title: w.root }, F.shortPath(w.root)),
-                  here.map(function (s) { return h('span', { key: s.uid, className: 'room-bot', title: s.name }, h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: colorOf(s.uid), status: statusOf(s), size: 20 }), s.name); }),
+                  here.map(function (s) { return h('span', { key: s.uid, className: 'room-bot', title: s.name }, h(A.BotAvatar, { shape: look(s).shape, color: look(s).color, status: statusOf(s), size: 20 }), s.name); }),
                   w.main ? null : h(A.Button, { variant: 'ghost', icon: 'remove', onClick: function () { setErr(''); setConfirm({ kind: 'room', branch: w.branch, floor: b, root: w.root }); } }, 'Remove room'));
               }),
               newRoom && newRoom.branch === b ? h('div', { className: 'inline-actions' },
@@ -1121,7 +1202,7 @@
           h('tbody', null, agents.map(function (s) {
             var st = window.OfficeVocab.status(s);
             return h('tr', { key: s.uid },
-              h('td', null, h('span', { className: 'sess-who' }, h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: colorOf(s.uid), status: statusOf(s), size: 20 }), h('b', null, sceneName(s)))),
+              h('td', null, h('span', { className: 'sess-who' }, h(A.BotAvatar, { shape: look(s).shape, color: look(s).color, status: statusOf(s), size: 20 }), h('b', null, sceneName(s)))),
               h('td', null, window.officeAdapter.kindWord(s)),
               h('td', { className: 'mono', title: s.cwd }, (s.git && s.git.branch ? s.git.branch + ' · ' : '') + F.folderName(s.cwd)),
               h('td', null, h('span', { className: 'sess-state' }, h(A.StatusDot, { status: st.key }), st.word)),
@@ -1133,7 +1214,7 @@
         teams.length ? h('h3', { className: 'ext-h' }, 'Subagents at work', h('span', { className: 'ext-n' }, teams.length)) : null,
         teams.map(function (s) {
           var kids = s.agents.filter(function (a) { return !a.done; }).map(function (a) { return { name: a.type, shape: 'blob', status: 'working', task: a.task, ephemeral: true }; });
-          return h(A.DelegationTree, { key: s.uid, max: Math.max(3, kids.length), tree: { name: s.name, shape: window.officeAdapter.shapeOf(s.uid), status: statusOf(s), task: s.prompt ? clip(s.prompt, 80) : '', children: kids }, onSelect: function () { p.onGo(s); } });
+          return h(A.DelegationTree, { key: s.uid, max: Math.max(3, kids.length), tree: { name: s.name, shape: look(s).shape, status: statusOf(s), task: s.prompt ? clip(s.prompt, 80) : '', children: kids }, onSelect: function () { p.onGo(s); } });
         })));
   }
 
@@ -1458,7 +1539,7 @@
         : h(React.Fragment, null,
           list.length ? h('ul', { className: 'agent-list' }, list.map(function (s) {
             return h('li', { key: s.uid, className: 'agent-row' },
-              h(A.BotAvatar, { shape: window.officeAdapter.shapeOf(s.uid), color: colorOf(s.uid), status: statusOf(s), size: 28 }),
+              h(A.BotAvatar, { shape: look(s).shape, color: look(s).color, status: statusOf(s), size: 28 }),
               h('span', { className: 'agent-who' }, h('b', null, s.name), h('span', { className: 'agent-sub' }, window.OfficeVocab.status(s).word + ' · ' + window.officeAdapter.kindWord(s) + ' · ' + modelWord(KA.list, s)), h(FeatureTags, { session: s })),
               h(A.Button, { variant: 'quiet', icon: 'remove', onClick: function () { setErr(''); setConfirm(s.uid); } }, 'Close session'));
           })) : h(A.EmptyState, { icon: 'identity', compact: true, title: 'No agents here', text: 'Add an agent to start work in this room.' }),
@@ -2166,6 +2247,7 @@
     var latestSnap = React.useRef(null); latestSnap.current = snap;
     // the desk monitors (terminal.js): each is a pinned screen with the chat and the terminal of its session
     var terminalRef = React.useRef(null);
+    var personaRef = React.useRef(null);   // body language of the bots that have a persona (#150)
     // the scene host (scene-host.js): the one reader of the DS stage; board, terminal, streets and birds are its adapters
     var hostRef = React.useRef(null);
     // the Security room's wall screens (security.js): the user picks the permission rules on them
@@ -2233,6 +2315,7 @@
     useEffect(function () { return function () {
       if (boardRef.current) { boardRef.current.dispose(); boardRef.current = null; }
       if (terminalRef.current) { terminalRef.current.dispose(); terminalRef.current = null; }
+      if (personaRef.current) { personaRef.current.dispose(); personaRef.current = null; }
       if (securityRef.current) { securityRef.current.dispose(); securityRef.current = null; }
       if (lobbyRef.current) { lobbyRef.current.dispose(); lobbyRef.current = null; }
       if (deskRef.current) { deskRef.current.dispose(); deskRef.current = null; }
@@ -2376,6 +2459,7 @@
         var st = o.inspect && o.inspect().stage;
         if (boardRef.current) boardRef.current.dispose();
         if (terminalRef.current) terminalRef.current.dispose();
+        if (personaRef.current) personaRef.current.dispose();
         if (securityRef.current) { securityRef.current.dispose(); securityRef.current = null; }
         if (hostRef.current) hostRef.current.dispose();
         // waiting: the bezel of the screen in focus counts every request of every building (Needs you)
@@ -2463,6 +2547,11 @@
             // a click on the monitor in focus outside its layer: the desk screen shows its chat
             onOpen: function () { setDeskTab('chat'); }
           });
+        }
+        if (st && host && window.OfficePersona) {
+          if (personaRef.current) personaRef.current.dispose();
+          personaRef.current = window.OfficePersona.attach(o, { host: host, session: function (botName) { return mount.session(botName); } });
+          window.officePersona = personaRef.current;   // for the console and tests
         }
         if (st && host && window.OfficeDesk) {
           var deskMount = mount;
@@ -2590,7 +2679,7 @@
     [['open', 'Open a session', 'add', function () { show('open'); }], ['sessions', 'All sessions', 'identity', function () { setDlg({ name: 'sessions' }); }],
      ['city', 'City view', 'building', function () { go('city'); }], ['office', 'Office view', 'floor', function () { go('office'); }], ['floors', 'Branches and worktrees', 'floor', function () { setDlg({ name: 'floors' }); }],
      ['past', 'Past sessions', 'session', function () { show('past'); }], ['schedules', 'Schedules', 'schedule', function () { show('schedules'); }],
-     ['hooks', 'Attach sessions', 'terminal', function () { show('hooks'); }], ['kinds', 'Agent kinds', 'bot', function () { setDlg({ name: 'kinds' }); }], ['compact', 'Compact view', 'zoom-out', function () { setAmbient(true); }],
+     ['hooks', 'Attach sessions', 'terminal', function () { show('hooks'); }], ['kinds', 'Agent kinds', 'bot', function () { setDlg({ name: 'kinds' }); }], ['personas', 'Agent characters', 'bot', function () { setDlg({ name: 'personas' }); }], ['compact', 'Compact view', 'zoom-out', function () { setAmbient(true); }],
      ['reception', 'Reception: floors and the kind of building', 'building', function () { setDlg({ name: 'reception' }); }], ['tour', 'Replay the lobby tour', 'chevron-right', function () { startTour(); }]]
       .forEach(function (a) { actions.push({ id: 'page-' + a[0], label: a[1], icon: a[2], group: 'Office', run: a[3] }); });
     var selKind = selSess ? kindOf(window.officeAdapter.kinds(), selSess.provider) : null;
@@ -2662,6 +2751,7 @@
       !ambient && touring && cur2.view === 'office' ? h(TourCard, { onStep: tourStep, onDone: endTour }) : null,
       d === 'reception' ? h(ReceptionDialog, { repo: shown, actions: officeActions, onTour: startTour, onClose: close }) : null,
       d === 'open' ? h(OpenDialog, { shownPath: shownPath, kind: dlg.kind, role: dlg.role, roleName: dlg.roleName, folder: dlg.folder, spendLimit: info.spendLimit, recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
+      d === 'personas' ? h(PersonasDialog, { toast: toast, onClose: close }) : null,
       d === 'kinds' ? h(KindsDialog, { onOpen: function (kind) { refresh().then(function () { setDlg({ name: 'open', kind: kind }); }); }, onClose: close }) : null,
       d === 'flow' ? h(FlowDialog, { toast: toast, onClose: close }) : null,
       d === 'past' ? h(PastDialog, { onClose: close, onChanges: changes, toast: toast }) : null,
