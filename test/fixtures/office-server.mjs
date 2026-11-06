@@ -47,7 +47,7 @@ const killTree = (pid) => new Promise((resolve) => {
  * busy port has `busy: true`.  `script` is for a test that starts a stand-in instead of the server.
  */
 export function startOffice(dir, env, { ms = START_MS, script = path.join(dir, 'server.mjs'), execPath = process.execPath } = {}) {
-  const child = spawn(execPath, [script], { cwd: dir, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(execPath, [script], { cwd: dir, env: { OFFICE_EXPLAIN: 'off', ...env }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   // A child that cannot start gives `error` and no `exit`: exited settles with null then, so no caller waits for ever.
   const exited = new Promise((r) => { child.once('exit', r); child.once('error', () => r(null)); });

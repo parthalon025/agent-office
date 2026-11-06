@@ -1828,6 +1828,29 @@
         M.node));
   }
 
+  // The three layers of a request (#149): intent and reason (written by a local model when one is ready, else only the agent's
+  // own reason), then the raw command. The raw command is always there: a summary never replaces it.
+  function RequestLayers(p) {
+    var L = window.OfficeVocab.explainLayers(p.r);
+    return h('div', { className: 'req-layers' },
+      L.intent ? h('div', { className: 'past-snip req-intent' }, L.intent) : h('div', { className: 'past-snip' }, p.r.text),
+      L.reason ? h('div', { className: 'past-snip' }, h('em', null, 'reason: '), L.reason) : null,
+      h('div', { className: 'req-raw mono', title: L.raw }, h('em', null, 'command: '), clip(L.raw.replace(/\s+/g, ' '), 300)),
+      L.explained ? h('div', { className: 'past-meta mono' }, 'Written by ' + (L.model || 'a local model') + '. Check the command.') : null);
+  }
+  // Similar open requests, answered together. Each request still gets its own answer.
+  function GroupRow(p) {
+    var g = p.g, first = g.items[0], off = p.busy === g.key;
+    return h('li', { className: 'past-row req-group' },
+      h('div', { className: 'past-main' },
+        h('div', { className: 'past-title' }, h(A.Icon, { name: 'waiting', size: 16 }), h('b', null, plural(g.count, 'similar request', 'similar requests')), h(Tag, null, first.tool), h(A.RiskBadge, { risk: first.risk })),
+        h(RequestLayers, { r: g.items.filter(function (r) { return r.explain; })[0] || first }),
+        h('div', { className: 'past-meta mono' }, g.items.map(function (r) { return sceneName({ uid: r.uid, name: r.bot }) + ' in ' + r.buildingName; }).join(' · '))),
+      h('div', { className: 'past-actions' },
+        h(A.Button, { variant: 'emphasis', icon: 'approve', disabled: off, onClick: function () { p.onAnswer(g, true); } }, 'Approve ' + g.count),
+        h(A.Button, { variant: 'quiet', icon: 'decline', disabled: off, onClick: function () { p.onAnswer(g, false); } }, 'Decline ' + g.count)));
+  }
+
   // ---------- Needs you: every open request and question of every building ----------
   function NeedsDialog(p) {
     var snap = useSnapshot();
@@ -1835,6 +1858,15 @@
     var bz = useState(''), busy = bz[0], setBusy = bz[1], box = React.useRef(null), lastIdx = React.useRef(0), M = useMerge(p.toast);
     // After an answer the row goes. Keep the focus inside the dialog, on the row that took its place.
     useEffect(function () { refocusRow(box.current, lastIdx.current); }, [list.map(function (r) { return r.id; }).join('|')]);
+    var groups = window.OfficeVocab.requestGroups(list);
+    // A group answer is one answer per request: each goes to the server by itself, so each is recorded by itself (#149).
+    function answerGroup(g, allow) {
+      var answers = window.OfficeVocab.groupAnswers(g, allow);
+      lastIdx.current = list.indexOf(g.items[0]);
+      setBusy(g.key);
+      answers.reduce(function (chain, a) { return chain.then(function () { return api('/api/answer', a); }); }, Promise.resolve())
+        .then(function () { setBusy(''); }, function (x) { setBusy(''); p.toast({ tone: 'error', title: g.items[0].tool, text: x.message }); });
+    }
     function answer(r, allow) {
       lastIdx.current = list.indexOf(r);
       setBusy(r.id);
@@ -1844,7 +1876,9 @@
       h('div', { className: 'form wide' },
         list.length ? h('p', { className: 'note' }, plural(list.length, 'request waits', 'requests wait') + ' for you, oldest first. This is every building.') : null,
         !list.length ? h(A.EmptyState, { icon: 'finished', compact: true, title: 'Nothing needs you', text: 'New requests show here when an agent asks.' }) : null,
-        h('div', { ref: box }, h('ul', { className: 'past' }, list.map(function (r) {
+        h('div', { ref: box }, h('ul', { className: 'past' }, groups.map(function (g) {
+          if (g.groupable) return h(GroupRow, { key: g.key, g: g, busy: busy, onAnswer: answerGroup });
+          var r = g.items[0];
           if (r.kind === 'plan') return h('li', { key: r.id, className: 'past-row' }, h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h(A.Icon, { name: 'plan', size: 16 }), h('b', null, r.text), h(Tag, null, r.buildingName))),
             h('div', { className: 'past-actions' }, h(A.Button, { variant: 'emphasis', icon: 'plan', onClick: function () { p.onManager(); } }, 'Open Manager board')));
           if (r.kind === 'merge') return h(MergeRow, { key: r.id, r: r, busy: M.busy, onMerge: function (x) { M.start(x); } });
@@ -1852,9 +1886,7 @@
           return h('li', { key: r.id, className: 'past-row' },
             h('div', { className: 'past-main' },
               h('div', { className: 'past-title' }, h('b', null, sceneName({ uid: r.uid, name: r.bot })), h(Tag, null, r.buildingName), q ? null : h(A.RiskBadge, { risk: r.risk })),
-              h('div', { className: 'past-snip' }, r.text),
-              r.reason ? h('div', { className: 'past-snip' }, h('em', null, 'reason: '), r.reason) : null,
-              !q && r.preview && r.preview !== r.detail ? h('div', { className: 'past-sub mono', title: r.preview }, clip(String(r.preview).replace(/\s+/g, ' '), 140)) : null,
+              q ? h('div', { className: 'past-snip' }, r.text) : h(RequestLayers, { r: r }),
               h('div', { className: 'past-meta mono' }, r.roomName + ' · ' + ago(r.t))),
             h('div', { className: 'past-actions' },
               h(A.Button, { variant: 'emphasis', icon: 'approve', disabled: busy === r.id, onClick: function () { answer(r, true); } }, q ? 'Yes' : 'Approve'),

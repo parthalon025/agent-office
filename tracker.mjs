@@ -203,6 +203,16 @@ export function createTracker(deps = {}) {
     unwait(s);
   }
 
+  // An explanation of a request that waits (#149): a local model wrote it after the hold began. It is shown, nothing more: it
+  // changes no risk, no rule and no answer. True when the request still waited and took it.
+  function explainRequest(uid, id, e) {
+    const r = sessions.get(uid)?.pending.find((x) => x.id === id);
+    if (!r || !e || typeof e.intent !== 'string') return false;
+    r.explain = { intent: e.intent, reason: typeof e.reason === 'string' ? e.reason : '', model: String(e.model || '') };
+    changed();
+    return true;
+  }
+
   function findSession(p) {
     if (p.office_id) for (const s of sessions.values()) if (s.officeId === p.office_id) return s;
     for (const s of sessions.values()) if (s.sid === p.session_id) return s;
@@ -478,7 +488,7 @@ export function createTracker(deps = {}) {
 
   return {
     sessions, feed, addFeed, newSession, findSession, placeSession,
-    onHook, permissionRequest, refuseCall, rootOf, askQuestion, settle, interrupt, userMessage, startTurn, dismissError, fail, failReopen,
+    onHook, permissionRequest, explainRequest, refuseCall, rootOf, askQuestion, settle, interrupt, userMessage, startTurn, dismissError, fail, failReopen,
     onStream, pushReply, endSession, dropPending, dropQuestions,
   };
 }
