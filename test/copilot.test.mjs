@@ -525,12 +525,13 @@ test('a recorded turn: the token usage of the answer counts once, usage_update i
     await started(r, s);
     r.say(s, 'Reply with the word ok.');
     await r.idle(s);
-    assert.deepEqual(lines.filter((m) => m.type === 'usage'), [{ type: 'usage', used: 15259, size: 128000 }]);
+    assert.deepEqual(lines.filter((m) => m.type === 'usage'), [{ type: 'usage', used: 15259, ctx: { used: 15259, size: 128000 } }]);
     const turns = lines.filter((m) => m.type === 'assistant' && m.message.usage);
     assert.equal(turns.length, 1, 'one usage line for one turn');
     assert.deepEqual(turns[0].message.usage, { input_tokens: 14182, output_tokens: 5, cache_read_input_tokens: 0 });
     assert.equal(s.usage.tokens, 15259, 'the total from usage_update, not added to again by the turn usage');
     assert.equal(s.usage.input, 14182, 'the turn counted once');
+    assert.deepEqual([s.ctxTokens, s.ctxWindow], [15259, 128000], 'Copilot usage_update is the tokens in context (#164)');
   } finally { await r.done(s); }
 });
 

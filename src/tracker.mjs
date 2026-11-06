@@ -441,14 +441,16 @@ export function createTracker(deps = {}) {
     } else if (m.type === 'assistant' && !m.parent_tool_use_id) {
       s.live = '';
       const u = m.message?.usage;
-      if (u) s.ctxTokens = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+      // Input tokens of this call. An agent that reports its context itself (a usage line with ctx) owns ctxTokens.
+      const inTok = u ? (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0) : 0;
+      if (u && !s.ctxReported) s.ctxTokens = inTok;
       // One API call can arrive as several assistant lines with the same id; count its usage once.
       const mid = m.message?.id;
       if (u && mid && mid !== s.lastUsageId) {
         s.lastUsageId = mid;
         // An agent that reports totals (a usage line) already counts this turn in its total: no second count.
-        if (!s.usageTotal) s.usage.tokens += s.ctxTokens + (u.output_tokens || 0);
-        s.usage.input += s.ctxTokens;
+        if (!s.usageTotal) s.usage.tokens += inTok + (u.output_tokens || 0);
+        s.usage.input += inTok;
         s.usage.cached += u.cache_read_input_tokens || 0;
       }
       for (const b of m.message?.content || []) if (b.type === 'text' && b.text && b.text.trim()) pushReply(s, b.text);
@@ -459,6 +461,10 @@ export function createTracker(deps = {}) {
       // From the first total on, the total is the Tokens figure (usageTotal): per-turn usage no longer adds to it.
       const used = Number(m.used);
       if (Number.isFinite(used) && used >= 0) { s.usage.tokens = used; s.usageTotal = true; }
+      // The tokens in context and the window of the model, when the provider knows both (#164): the one rule for every agent kind.
+      // Both numbers or nothing: a half-known context stays unknown, never a guess.
+      const cu = Number(m.ctx?.used), cs = Number(m.ctx?.size);
+      if (m.ctx && Number.isFinite(cu) && cu >= 0 && Number.isFinite(cs) && cs > 0 && m.ctx.used !== null && m.ctx.size !== null) { s.ctxTokens = cu; s.ctxWindow = cs; s.ctxReported = true; }
       changed();
     } else if (m.type === 'result') {
       s.live = '';

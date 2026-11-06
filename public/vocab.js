@@ -192,6 +192,14 @@
     var t = String(label || ''), i = t.indexOf(': ');
     return !t ? [] : i < 0 ? [t] : [t.slice(0, i + 1), t.slice(i + 2)];
   }
+  // The context window of a session (#164): the percent of it in use when the agent reported both the tokens and the window
+  // (tracker.mjs, a usage line with ctx, or Claude Code's own numbers); otherwise the word "unknown", never a guessed number.
+  function context(s) {
+    var u = s && Number(s.ctxTokens), w = s && Number(s.ctxWindow);
+    if (!s || s.ctxTokens == null || s.ctxWindow == null || !(u >= 0) || !(w > 0)) return { pct: null, word: 'unknown' };
+    var pct = Math.min(100, Math.round(100 * u / w));
+    return { pct: pct, word: pct + '%' };
+  }
   // A Paperclip run says so first, with its role: "Paperclip Engineer, Claude Code" (#76).
   function platform(s, kinds) {
     var base = supervision(s) || kindWord(s, kinds) || 'Claude Code';
@@ -631,5 +639,5 @@
   }
   var rituals = { on: ritualsOn, dayKey: dayKey, standupDue: standupDue, standupDone: standupDone, moments: moments, STANDUP: STANDUP, MOMENT_MS: MOMENT_MS };
 
-  root.OfficeVocab = { rituals: rituals, explainLayers: explainLayers, requestGroups: requestGroups, groupAnswers: groupAnswers, stateWord: stateWord, laneOf: laneOf, limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform, hq: hq, plan: plan, layers: layers, holdMs: holdMs, folderOf: folderOf, persona: persona, wall: wall };
+  root.OfficeVocab = { rituals: rituals, explainLayers: explainLayers, requestGroups: requestGroups, groupAnswers: groupAnswers, stateWord: stateWord, laneOf: laneOf, limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, context: context, platform: platform, hq: hq, plan: plan, layers: layers, holdMs: holdMs, folderOf: folderOf, persona: persona, wall: wall };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

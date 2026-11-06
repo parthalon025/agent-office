@@ -876,3 +876,20 @@ test('makePreview says how much a Write or MultiEdit preview left out', async ()
   assert.match(makePreview('MultiEdit', { file_path: 'a.txt', edits }), /3 more edits/);
   assert.doesNotMatch(makePreview('MultiEdit', { file_path: 'a.txt', edits: edits.slice(0, 2) }), /more edit/);
 });
+
+// #164: one rule for the context of an agent that reports it. A usage line carries `ctx: { used, size }` only when the
+// provider knows `used` is the tokens in context. Both numbers or nothing: a half-known context stays unknown.
+test('a usage line with ctx sets the Context bar; a ctx without a usable window or count changes nothing', () => {
+  const r = rig();
+  const s = r.tracker.newSession({ uid: 'c1', headless: true });
+  r.line(s, { type: 'usage', ctx: { used: 15259, size: 128000 } });
+  assert.deepEqual([s.ctxTokens, s.ctxWindow], [15259, 128000]);
+  assert.equal(s.usage.tokens, 0, 'a ctx line alone is no session total');
+  r.line(s, { type: 'usage', used: 20000, ctx: { used: 16000, size: 128000 } });
+  assert.deepEqual([s.ctxTokens, s.ctxWindow, s.usage.tokens], [16000, 128000, 20000], 'a line can carry both');
+  for (const bad of [{ used: 5 }, { size: 100 }, { used: 5, size: 0 }, { used: -1, size: 10 }, { used: 'x', size: 10 }, { used: 1, size: null }]) r.line(s, { type: 'usage', ctx: bad });
+  assert.deepEqual([s.ctxTokens, s.ctxWindow], [16000, 128000], 'bad numbers are ignored, never guessed');
+  const t = r.tracker.newSession({ uid: 'c2', headless: true });
+  r.line(t, { type: 'usage', ctx: { used: 5, size: 0 } });
+  assert.deepEqual([t.ctxTokens, t.ctxWindow], [null, null]);
+});

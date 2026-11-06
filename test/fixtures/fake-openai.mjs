@@ -1,6 +1,6 @@
 // A fake OpenAI-compatible chat server for provider tests. No model, no cost, 127.0.0.1 on a free port.
 // script: one entry per chat request, in order. { text } streams a reply; { toolCalls: [{ name, args }] } asks for tools;
-// { status: 500 } fails; { delayMs } waits before it answers; { usage } sets the token numbers. The last entry repeats. models: ids for GET /v1/models. `requests` holds the chat bodies, `calls` every method and path.
+// { status: 500 } fails; { delayMs } waits before it answers; { usage } sets the token numbers. The last entry repeats. models: ids (or { id, max_context_length, loaded_context_length, ... } entries) for GET /v1/models. `requests` holds the chat bodies, `calls` every method and path.
 import http from 'node:http';
 
 export async function startFakeOpenAI({ script = [{ text: 'ok' }], models = ['fake-model'] } = {}) {
@@ -16,7 +16,7 @@ export async function startFakeOpenAI({ script = [{ text: 'ok' }], models = ['fa
       calls.push({ method: req.method, path: url.pathname });
       if (req.method === 'GET' && url.pathname === '/v1/models') {
         res.writeHead(200, { 'content-type': 'application/json' });
-        return res.end(JSON.stringify({ object: 'list', data: models.map((id) => ({ id, object: 'model' })) }));
+        return res.end(JSON.stringify({ object: 'list', data: models.map((m) => (typeof m === 'string' ? { id: m, object: 'model' } : { object: 'model', ...m })) }));
       }
       if (req.method === 'POST' && url.pathname === '/v1/chat/completions') {
         let json = {};

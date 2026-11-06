@@ -452,3 +452,32 @@ test('office_ask waits for the user and an interrupt frees it', async () => {
 test('a local agent says it cannot resume a past session', () => {
   assert.equal(createLocal({ events: {}, kind: 'ollama' }).canResume, false);
 });
+
+// #164: the window comes from the model list the provider already reads (GET /models), the used tokens from the last chat usage.
+test('the Context bar: the loaded context length of the model list, and the last chat usage (prompt plus completion)', async () => {
+  const o = await rig([{ text: 'hi', usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 } }], { models: [{ id: 'qwen', max_context_length: 131072, loaded_context_length: 32768 }, 'plain'] });
+  try {
+    await o.provider.models(); // the page asks the list before a session opens
+    const s = o.session();
+    o.provider.open(s, { model: 'qwen' });
+    o.say(s, 'x');
+    await until(() => s.status === 'idle' && s.replies.length, 'the reply');
+    assert.deepEqual([s.ctxTokens, s.ctxWindow], [120, 32768]);
+    assert.deepEqual(o.fake.calls.map((c) => c.path), ['/v1/models', '/v1/chat/completions'], 'no new endpoint: a session asks only the chat');
+  } finally { await o.done(); }
+});
+
+test('the Context bar: the maximum when no length is loaded; unknown when the list says nothing, never a guess', async () => {
+  const o = await rig([{ text: 'hi' }], { models: [{ id: 'big', max_context_length: 8192 }, 'plain'] });
+  try {
+    await o.provider.models();
+    assert.equal(o.provider.windowOf('big'), 8192);
+    assert.equal(o.provider.windowOf('plain'), null);
+    assert.equal(o.provider.windowOf('nope'), null);
+    const s = o.session();
+    o.provider.open(s, { model: 'plain' });
+    o.say(s, 'x');
+    await until(() => s.status === 'idle' && s.replies.length, 'the reply');
+    assert.equal(s.ctxWindow, null);
+  } finally { await o.done(); }
+});

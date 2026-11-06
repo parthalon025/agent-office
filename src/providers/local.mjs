@@ -114,6 +114,14 @@ export function createToolGate({ events, office = null }) {
   return { call };
 }
 
+// The context window a model-list entry names: the length loaded now (LM Studio), else the most the model takes. A positive
+// whole number only; anything else is unknown.
+const WINDOW_KEYS = ['loaded_context_length', 'max_context_length', 'context_length', 'context_window'];
+export function windowOfEntry(m) {
+  for (const k of WINDOW_KEYS) { const n = Number(m?.[k]); if (Number.isInteger(n) && n > 0) return n; }
+  return null;
+}
+
 /**
  * @param {object} deps
  * @param {object} deps.events the provider events (providers/index.mjs providerEvents).
@@ -138,6 +146,10 @@ export function createLocal(deps) {
   /** @type {Map<string, object>} uid -> the agent state of an open session */
   const agents = new Map();
 
+  // The context window of each model, from the same model list (#164). Only what the server says: no endpoint is added for it.
+  /** @type {Map<string, number>} */
+  const windows = new Map();
+
   // ----- the chat server -----
   async function listModels(ms = READY_MS) {
     const ctl = new AbortController();
@@ -146,7 +158,9 @@ export function createLocal(deps) {
       const r = await doFetch(baseUrl + '/models', { signal: ctl.signal });
       if (!r.ok) throw new Error(`the server answered ${r.status}`);
       const j = await r.json();
-      return (Array.isArray(j.data) ? j.data : []).map((m) => String(m.id)).filter((id) => id && !EMBEDDING.test(id));
+      const list = Array.isArray(j.data) ? j.data : [];
+      for (const m of list) { const w = windowOfEntry(m); if (w) windows.set(String(m.id), w); else windows.delete(String(m.id)); }
+      return list.map((m) => String(m.id)).filter((id) => id && !EMBEDDING.test(id));
     } finally { clearTimeout(t); }
   }
 
@@ -227,6 +241,8 @@ export function createLocal(deps) {
         if (st.interrupted || st.closed) break;
         const u = res.usage || {};
         emit(st, () => events.stream(s, { type: 'assistant', message: { id, content: res.text.trim() ? [{ type: 'text', text: res.text }] : [], usage: { input_tokens: u.prompt_tokens || 0, output_tokens: u.completion_tokens || 0 } } }));
+        const win = windows.get(st.model);
+        if (win && res.usage) emit(st, () => events.stream(s, { type: 'usage', ctx: { used: (u.prompt_tokens || 0) + (u.completion_tokens || 0), size: win } }));
         if (res.text.trim()) last = res.text;
         st.messages.push({ role: 'assistant', content: res.text || null, ...(res.toolCalls.length ? { tool_calls: res.toolCalls.map((c) => ({ id: c.id, type: 'function', function: { name: c.name, arguments: c.args || '{}' } })) } : {}) });
         if (!res.toolCalls.length) {
@@ -277,6 +293,9 @@ export function createLocal(deps) {
       if (!ids.length) return { ready: false, version: null, needs: [...spec.needs] };
       return { ready: true, version: `${ids.length} model${ids.length === 1 ? '' : 's'}`, needs: [] };
     },
+
+    /** The context window (tokens) the server's model list gave for a model, or null (unknown). Fills when the list is read. */
+    windowOf(model) { return windows.get(String(model)) || null; },
 
     async models() { return (await listModels()).map((id) => ({ id, label: id })); },
 

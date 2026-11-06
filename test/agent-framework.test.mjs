@@ -705,3 +705,24 @@ test('the real runner: a message that comes while a run runs is kept and runs ne
   send({ type: 'close' });
   await until(() => child.exitCode !== null, 'the runner exit', 10000);
 });
+
+// #164: the team's model server gives the window (providers/local.mjs windowOf); the used tokens are the last response's
+// prompt plus completion. A server that does not know the window leaves the Context bar unknown.
+for (const [name, windowOf, want] of [['a known window', () => 32768, [240, 32768]], ['an unknown window', () => null, null]]) {
+  test(`the Context bar of a team: ${name}`, async () => {
+    const o = rig({ rules: INSIDE, servers: [{ ...LMSTUDIO, windowOf }, OLLAMA_DOWN] });
+    const s = o.session();
+    o.provider.open(s, { model: 'lmstudio:qwen/qwen3-8b' });
+    const child = o.child();
+    o.say(s, 'Fix a.txt');
+    await until(() => child.lines().some((m) => m.type === 'message'), 'the message on stdin');
+    const playing = play(child, RECORDED);
+    await until(() => s.pending.length === 1, 'the approval');
+    o.release(s.pending[0].id, { allow: true });
+    await playing;
+    await until(() => s.status === 'idle', 'the end of the turn');
+    if (want) assert.deepEqual([s.ctxTokens, s.ctxWindow], want);
+    else assert.equal(s.ctxWindow, null);
+    o.done();
+  });
+}

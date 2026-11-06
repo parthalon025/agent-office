@@ -1366,6 +1366,16 @@ test('openclaw: usage_update token totals go to the session stats; the cost stay
   } finally { await r.done(s); }
 });
 
+test('hermes: usage_update is the tokens in context and its window: the Context bar fills (#164)', async () => {
+  const r = rig({ kind: 'hermes' });
+  const s = await started(r, r.session({ costUnknown: true }));
+  try {
+    r.steps(s, [{ usageUpdate: { used: 4200, size: 128000 } }, { say: 'ok' }]);
+    await r.idle(s);
+    assert.deepEqual([s.usage.tokens, s.ctxTokens, s.ctxWindow], [4200, 4200, 128000]);
+  } finally { await r.done(s); }
+});
+
 test('openclaw: with no Gateway a session says so and ends; nothing runs', async () => {
   const r = rig({ kind: 'openclaw', gatewayUp: async () => false });
   const s = r.session();
