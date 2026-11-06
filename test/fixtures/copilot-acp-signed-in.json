@@ -1,0 +1,205 @@
+{
+  "about": "GitHub Copilot CLI 1.0.105 in ACP mode, SIGNED IN, recorded on Windows 11, 2026-11-06 with the office readiness check: copilot --acp --no-auto-update --disable-builtin-mcps --log-dir <temp>, cwd %SystemRoot%, initialize with fs and terminal, session/list, session/new with mcpServers [], session/list, session/close, session/list. No prompt was sent. Redacted: the session id, the login command path, and the available_commands_update list is cut to 3 of its 100 entries (the rest are the owner's own skills). No account name, token or user id appears in any answer.",
+  "initialize": {
+    "protocolVersion": 1,
+    "agentCapabilities": {
+      "auth": {
+        "logout": {}
+      },
+      "loadSession": true,
+      "mcpCapabilities": {
+        "http": true,
+        "sse": true
+      },
+      "promptCapabilities": {
+        "image": true,
+        "audio": false,
+        "embeddedContext": true
+      },
+      "sessionCapabilities": {
+        "close": {},
+        "list": {}
+      }
+    },
+    "agentInfo": {
+      "name": "Copilot",
+      "title": "Copilot",
+      "version": "1.0.105"
+    },
+    "authMethods": [
+      {
+        "id": "copilot-login",
+        "name": "Log in with Copilot CLI",
+        "description": "Run `copilot login` in the terminal",
+        "_meta": {
+          "terminal-auth": {
+            "command": "C:...GitHubCopilotCLIcopilot.exe",
+            "args": [
+              "login"
+            ],
+            "label": "Copilot Login"
+          }
+        }
+      }
+    ]
+  },
+  "sessionList": {
+    "sessions": []
+  },
+  "sessionNew": {
+    "models": {
+      "availableModels": [
+        {
+          "modelId": "auto",
+          "name": "Auto",
+          "description": "Let Copilot pick the best model"
+        },
+        {
+          "modelId": "auto",
+          "name": "Auto",
+          "description": "Auto",
+          "_meta": {
+            "copilotUsage": "1x",
+            "copilotEnablement": "enabled"
+          }
+        }
+      ],
+      "currentModelId": "auto"
+    },
+    "configOptions": [
+      {
+        "type": "select",
+        "id": "mode",
+        "name": "Mode",
+        "category": "mode",
+        "description": "Controls how Copilot responds: a conversational agent, planning multi-step work, or autonomous autopilot.",
+        "currentValue": "https://agentclientprotocol.com/protocol/session-modes#agent",
+        "options": [
+          {
+            "value": "https://agentclientprotocol.com/protocol/session-modes#agent",
+            "name": "Agent",
+            "description": "Default agent mode for conversational interactions"
+          },
+          {
+            "value": "https://agentclientprotocol.com/protocol/session-modes#plan",
+            "name": "Plan",
+            "description": "Plan mode for creating and executing multi-step plans"
+          },
+          {
+            "value": "https://agentclientprotocol.com/protocol/session-modes#autopilot",
+            "name": "Autopilot",
+            "description": "Autonomous mode that enables allow-all and runs until task completion without user interaction (experimental)"
+          }
+        ]
+      },
+      {
+        "type": "select",
+        "id": "model",
+        "name": "Model",
+        "category": "model",
+        "description": "The AI model Copilot uses to generate responses.",
+        "currentValue": "auto",
+        "options": [
+          {
+            "value": "auto",
+            "name": "Auto",
+            "description": "Let Copilot pick the best model",
+            "_meta": null
+          },
+          {
+            "value": "auto",
+            "name": "Auto",
+            "description": "Auto",
+            "_meta": {
+              "copilotUsage": "1x",
+              "copilotEnablement": "enabled"
+            }
+          }
+        ]
+      },
+      {
+        "type": "select",
+        "id": "allow_all",
+        "name": "Allow All",
+        "category": "permissions",
+        "description": "Controls whether Copilot prompts for approval before using tools, accessing paths, or fetching URLs.",
+        "currentValue": "off",
+        "options": [
+          {
+            "value": "on",
+            "name": "On",
+            "description": "Automatically approve all tool, path, and URL requests"
+          },
+          {
+            "value": "off",
+            "name": "Off",
+            "description": "Require approval for tool, path, and URL requests"
+          }
+        ]
+      }
+    ],
+    "modes": {
+      "availableModes": [
+        {
+          "id": "https://agentclientprotocol.com/protocol/session-modes#agent",
+          "name": "Agent",
+          "description": "Default agent mode for conversational interactions"
+        },
+        {
+          "id": "https://agentclientprotocol.com/protocol/session-modes#plan",
+          "name": "Plan",
+          "description": "Plan mode for creating and executing multi-step plans"
+        },
+        {
+          "id": "https://agentclientprotocol.com/protocol/session-modes#autopilot",
+          "name": "Autopilot",
+          "description": "Autonomous mode that enables allow-all and runs until task completion without user interaction (experimental)"
+        }
+      ],
+      "currentModeId": "https://agentclientprotocol.com/protocol/session-modes#agent"
+    },
+    "sessionId": "00000000-0000-4000-8000-000000000000"
+  },
+  "sessionListAfterNew": {
+    "sessions": []
+  },
+  "sessionClose": {},
+  "sessionListAfterClose": {
+    "sessions": []
+  },
+  "notifications": [
+    {
+      "method": "session/update",
+      "params": {
+        "sessionId": "00000000-0000-4000-8000-000000000000",
+        "update": {
+          "sessionUpdate": "available_commands_update",
+          "availableCommands": [
+            {
+              "name": "add-dir",
+              "description": "Allow file access to a directory and load its .github skills and agents as trusted configuration",
+              "input": {
+                "hint": "directory"
+              }
+            },
+            {
+              "name": "allow-all",
+              "description": "Enable all permissions",
+              "input": {
+                "hint": "[on|off|show]"
+              }
+            },
+            {
+              "name": "permissions",
+              "description": "Switch between permission modes",
+              "input": {
+                "hint": "[default|allow-all|show]"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "leftBehind": "After session/close, ~/.copilot/session-state/<sessionId> (workspace.yaml, empty checkpoints/files/research folders) and session-state/.session-operation-locks/<sessionId>.lock stay. session/list never showed the session (before, after new, after close). copilot sessions has only import; there is no delete in ACP (sessionCapabilities close and list only)."
+}

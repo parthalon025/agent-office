@@ -99,14 +99,15 @@ export const AGENTS = {
   // The extras ACP does not carry (providers/copilot.mjs): probeArgs and logDirArg (the readiness check writes its log to a
   // temp folder of its own, removed after the check); envDrop (the switches that approve calls by themselves, any case);
   // probeSession (a signed-out Copilot answers initialize, so the check opens and closes one session: session/new answers
-  // -32000 "Authentication required", ACP auth_required, and gives the models); probeMs (a cold start can take more than
+  // -32000 "Authentication required", ACP auth_required, and gives the models; each check leaves an empty session folder in
+  // ~/.copilot/session-state that Copilot cannot delete, so readyTtlMs is an hour); probeMs (a cold start can take more than
   // 10 s); modelArg (the model the Open dialog picks, from the models session/new listed); callOf (its permission requests
   // carry its own request body, not the tool's arguments); argsOf (the tool's own arguments of a later update, read against
   // that body, so a call changed after the request is seen, #125); signIn (the step for a sign-in error).
   copilot: {
     label: 'Copilot CLI', program: 'copilot', args: COPILOT.SESSION_ARGS,
     probeArgs: COPILOT.PROBE_ARGS, logDirArg: COPILOT.LOG_DIR_ARG, envDrop: COPILOT.SELF_APPROVE,
-    probeSession: true, probeMs: 60_000, readyTtlMs: 10 * 60_000, notReadyTtlMs: 10_000, modelArg: '--model', modelRe: COPILOT.MODEL_RE,
+    probeSession: true, probeMs: 60_000, readyTtlMs: 60 * 60_000, notReadyTtlMs: 10_000, modelArg: '--model', modelRe: COPILOT.MODEL_RE,
     callOf: COPILOT.requestCall, argsOf: COPILOT.argsCall, signIn: COPILOT.SIGN_IN,
     gated: false, supervision: 'Partly supervised: edits and most commands ask, reads do not',
     // The Security room cells (security.mjs enforcement). A write asks (session/request_permission), also of a settings file.
@@ -298,7 +299,7 @@ export function createAcp(deps) {
   let models = [];
   function learnModels(r) {
     const list = spec.modelArg && r && r.models && Array.isArray(r.models.availableModels) ? r.models.availableModels : null;
-    if (list) models = list.filter((m) => m && typeof m.modelId === 'string' && spec.modelRe.test(m.modelId)).slice(0, 60).map((m) => ({ id: m.modelId, label: clip(String(m.name || m.modelId), 60) }));
+    if (list) models = list.filter((m, i) => m && typeof m.modelId === 'string' && spec.modelRe.test(m.modelId) && list.findIndex((x) => x && x.modelId === m.modelId) === i).slice(0, 60).map((m) => ({ id: m.modelId, label: clip(String(m.name || m.modelId), 60) }));
   }
   /** @type {Map<string, object>} uid -> the agent state of an open session */
   const agents = new Map();

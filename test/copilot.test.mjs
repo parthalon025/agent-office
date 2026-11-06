@@ -165,6 +165,26 @@ test('readiness: one handshake and one session in a temp folder, the version fro
   } finally { await r.done(); }
 });
 
+test('readiness: the signed-in recording (1.0.105): ready, one entry per model id, the check ends with session/close', async () => {
+  const r = rig({ fake: { FAKE_COPILOT: 'recorded' } });
+  try {
+    const st = await r.p.readiness();
+    assert.deepEqual([st.ready, st.version, st.needs], [true, '1.0.105', []]);
+    // The recording lists the model "auto" twice (a plain entry and one with copilotUsage): the office shows it once.
+    assert.deepEqual(await r.p.models(), [{ id: 'auto', label: 'Auto' }]);
+    await until(() => r.log().some((m) => m.in && m.in.method === 'session/close'), 'session/close');
+    const sent = r.log().filter((m) => m.in && m.in.method).map((m) => m.in.method);
+    assert.deepEqual(sent, ['initialize', 'session/new', 'session/close'], 'no prompt, no session/list');
+  } finally { await r.done(); }
+});
+
+test('readiness: a ready answer is kept for an hour (each check leaves an empty session folder in ~/.copilot), a failed one for 10 s', () => {
+  // Copilot has no way to delete the session of a check (test/fixtures/copilot-acp-signed-in.json, leftBehind), so a ready
+  // answer is asked again rarely. A later sign-out shows at the next session start, which reports the sign-in step.
+  assert.equal(AGENTS.copilot.readyTtlMs, 60 * 60_000);
+  assert.equal(AGENTS.copilot.notReadyTtlMs, 10_000);
+});
+
 test('readiness: signed out is the Sign in step, with the version; a -32000 that is not about sign-in is not', async () => {
   const r = rig({ fake: { FAKE_COPILOT: 'signed-out' } });
   try {

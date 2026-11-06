@@ -25,7 +25,7 @@
 //   swap   a shell request for npm test; once approved, an update of the same call whose own arguments run npm publish
 //   swapwait  a shell request for npm test; while it waits, an update of the same call whose own arguments run npm publish
 //   swapfile  a write request for a.txt; once approved, an update with a.txt spelled another way, then one for b.txt
-// Environment: FAKE_COPILOT=signed-out (session/new and session/load need a sign-in), server-error (session/new fails
+// Environment: FAKE_COPILOT=recorded (the signed-in recording answers), FAKE_COPILOT=signed-out (session/new and session/load need a sign-in), server-error (session/new fails
 // with -32000 for another reason) or no-acp (an old version without --acp); FAKE_COPILOT_DELAY=<ms> waits that long
 // before it answers initialize (a slow cold start); FAKE_COPILOT_LOG=<file> gets one JSON line per start
 // ({ args, env }) and per message the office sent.
@@ -34,6 +34,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REC = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'copilot-acp.json'), 'utf8'));
+// The signed-in handshake recorded from 1.0.105 on 2026-11-06 (copilot-acp-signed-in.json), used by FAKE_COPILOT=recorded:
+// session/new lists the model "auto" twice and is followed by an available_commands_update.
+const SIGNED = JSON.parse(fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'copilot-acp-signed-in.json'), 'utf8'));
 const args = process.argv.slice(2);
 const mode = process.env.FAKE_COPILOT || 'ok';
 const delay = Number(process.env.FAKE_COPILOT_DELAY) || 0;
@@ -204,10 +207,15 @@ async function handle(m) {
   switch (m.method) {
     case 'initialize':
       if (delay) await new Promise((r) => setTimeout(r, delay));
-      return reply(REC.initialize);
+      return reply(mode === 'recorded' ? SIGNED.initialize : REC.initialize);
     case 'session/new':
     case 'session/load': {
       if (mode === 'signed-out') return send({ id: m.id, error: REC.sessionNewSignedOut });
+      if (mode === 'recorded' && m.method === 'session/new') {
+        reply(SIGNED.sessionNew);
+        for (const n of SIGNED.notifications) send({ method: n.method, params: n.params });
+        return;
+      }
       if (mode === 'server-error') return fail(-32000, 'Server error: the quota service did not answer');
       if (p.cwd) cwd = p.cwd;
       if (m.method === 'session/load') {
