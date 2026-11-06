@@ -82,7 +82,7 @@ function rig(over = {}) {
     const layouts = {};
     for (const key of new Set([...repos.map((x) => x.key), ...sessions.filter((s) => s.place).map((s) => s.place.buildingKey)])) layouts[key] = layoutView(recOf(key));
     return {
-      sessions, figures, notes: {}, pins: {}, plan: r.plan || null, now: r.t, kinds: over.kinds || [], repos, layouts, rooms,
+      sessions, figures, notes: {}, pins: {}, plan: r.plan || null, plans: r.plans, now: r.t, kinds: over.kinds || [], repos, layouts, rooms,
     };
   };
   // as over SSE. wire: the server's way (wire.js): the lean snapshot, whole once, then patches; r.reconnect() starts again.
@@ -738,6 +738,22 @@ test('requests: every open request and question of every building, oldest first,
   // the same list for a snapshot passed in, and an ended session adds nothing
   r.tracker.sessions.forEach((s) => { s.status = 'ended'; });
   r.push();
+  assert.deepEqual(r.store.requests(), []);
+});
+
+// The Manager board (#157): an office goal that waits for approval, and a failed office step, are in Needs you with the other
+// requests. A Paperclip step is not the office's to answer, so it is not.
+test('requests: a goal that waits for approval and a failed office step are in Needs you; Paperclip steps are not', async () => {
+  const r = rig();
+  const step = (id, state) => ({ id, title: 'Step ' + id, state, word: '', owner: '', cost: null, raw: '', model: '', budget: null, uid: '', skipped: false, skippedWhy: '' });
+  const plan = (o) => ({ building: KEY_A, goal: 'Ship it', status: 'running', reason: '', frozen: false, steps: [], ...o });
+  r.plans = { plans: [plan({ id: 'g1', source: 'office', status: 'awaiting-approval', steps: [step('a', 'pending')] }), plan({ id: 'g2', source: 'office', steps: [step('b', 'error')] }),
+    plan({ id: 'p', source: 'paperclip', steps: [step('c', 'error')] })], unreadable: [] };
+  r.push();
+  const list = r.store.requests();
+  assert.deepEqual(list.map((x) => [x.kind, x.id, x.text, x.building]), [['plan', 'plan:g1', 'Approve the plan: Ship it', KEY_A], ['plan', 'plan:g2:b', 'Step failed: Step b', KEY_A]]);
+  assert.deepEqual(r.store.alerts().map((x) => x.kind), ['request', 'request']);
+  r.plans = { plans: [], unreadable: [] }; r.push();
   assert.deepEqual(r.store.requests(), []);
 });
 

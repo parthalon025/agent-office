@@ -420,6 +420,7 @@ const basename = (p) => (p ? p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : '')
 // Paperclip owns the budgets of its runs: the office shows them and sets no second limit (a hook session has no spend limit).
 const PAPERCLIP = { uid: 'paperclip', name: 'Paperclip' };
 const hq = createHq({
+  sessions: () => [...sessions.values()], // the plan source links a Paperclip task to the session that runs it (#155)
   hooksFile: () => HOOKS_CMD_FILE.replace(/\\/g, '/'),
   onChange: () => broadcast(),
   onFeed: (text, kind) => addFeed(PAPERCLIP, kind, text),
@@ -1407,7 +1408,7 @@ const manager = createManager({
   onChange: () => { persisted.goals = manager.export(); savePersisted(); broadcast(); },
 });
 manager.restore(persisted.goals);
-const planBoard = createPlanBoard({ sources: [officeSource(manager)] });
+const planBoard = createPlanBoard({ sources: [officeSource(manager), hq.planSource] });
 // Called after every state change: a step ends with the turn of its agent, and a freed agent may take a waiting step.
 let goalTickQueued = false, freeSig = '';
 function goalTick() {

@@ -112,6 +112,14 @@ test('connect: the HQ in the snapshot with its company, budget, agents and routi
   assert.deepEqual(state().paperclip, { url: pc.url, company: COMPANY.id }, 'state.json keeps the address and company, no secret');
 });
 
+test('the snapshot plans field carries the Paperclip plan beside the office goals, read only (#157)', async () => {
+  const s = await snapshot();
+  const p = s.plans.plans.find((x) => x.source === 'paperclip');
+  assert.ok(p, 'the Paperclip plan is on the board');
+  assert.deepEqual([p.sourceWord, p.frozen, p.steps.length > 0], ['Paperclip', false, true]);
+  assert.deepEqual(s.plans.unreadable, []);
+});
+
 test('Supervise in office: 409 without the Confirm (no PATCH), then one PATCH with this office\'s own hooks file', async () => {
   const no = await page('/api/paperclip/supervise', { agent: ADA.id });
   assert.equal(no.status, 409);

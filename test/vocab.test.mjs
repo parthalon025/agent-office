@@ -459,3 +459,31 @@ test('#101: before the first answer Claude Code uses the fallback; a local kind 
   assert.equal(V.modelWord(OL, 'opus', FALL), 'opus', 'a local kind has no Claude labels');
   assert.deepEqual(V.modelSwitch({ ...OL, models: [] }, '', FALL), []);
 });
+
+// The Manager board (#157): one view of the snapshot's plans field, for the panel, the room wall, Ctrl+K and Needs you.
+const st = (id, state, o = {}) => ({ id, title: 'Step ' + id, state, word: V.plan.stepWord(state), owner: '', cost: null, raw: '', model: '', budget: null, uid: '', skipped: false, skippedWhy: '', ...o });
+const pl = (o) => ({ id: 'g1', building: 'b', goal: 'Ship it', status: '', reason: '', frozen: false, source: 'office', sourceWord: 'Office', steps: [], ...o });
+test('plan board: the source word, the read-only state and the counts of each goal', () => {
+  const v = V.plan.board({ plans: [pl({ status: 'running', steps: [st('a', 'finished'), st('b', 'working')] }), pl({ id: 'p', source: 'paperclip', sourceWord: 'Paperclip', goal: 'Co tasks', steps: [st('t', 'pending')] })], unreadable: [] });
+  assert.deepEqual(v.groups.map((g) => [g.sourceWord, g.readOnly, g.stateWord, g.done, g.total]), [['Office', false, 'Running', 1, 2], ['Paperclip', true, '', 0, 1]]);
+  assert.equal(v.groups[1].note, 'Read only. Paperclip plans this work.');
+  assert.equal(v.groups[0].note, '');
+});
+test('plan board: a frozen plan says Not connected, an unreadable source says it could not be read', () => {
+  const v = V.plan.board({ plans: [pl({ source: 'paperclip', sourceWord: 'Paperclip', status: 'not-connected', frozen: true, reason: V.plan.notConnectedReason('gone'), steps: [st('t', 'working')] })], unreadable: [{ source: 'paperclip', word: 'Paperclip' }] });
+  assert.equal(v.groups[0].stateWord, 'Not connected');
+  assert.equal(v.groups[0].note, 'Not connected. gone The steps are the last ones read.');
+  assert.deepEqual(v.unreadable, ['The Paperclip plan could not be read. It is not shown.']);
+});
+test('plan board: a building filter, and the goals that wait for the owner', () => {
+  const plans = [pl({ id: 'x', building: 'b', status: 'awaiting-approval', steps: [st('a', 'pending')] }), pl({ id: 'y', building: 'c', status: 'awaiting-approval' }), pl({ id: 'z', building: 'b', status: 'running', steps: [st('e', 'error', { title: 'Fix' })] })];
+  assert.deepEqual(V.plan.board({ plans, unreadable: [] }, 'b').groups.map((g) => g.id), ['x', 'z']);
+  assert.deepEqual(V.plan.waits({ plans, unreadable: [] }).map((w) => [w.id, w.text]), [['x', 'Approve the plan: Ship it'], ['y', 'Approve the plan: Ship it'], ['z', 'Step failed: Fix']]);
+  assert.deepEqual(V.plan.board(undefined).groups, []);
+});
+test('plan board: no plans is one empty answer, and an unknown state is neutral, never done', () => {
+  assert.equal(V.plan.board({ plans: [], unreadable: [] }).empty, true);
+  const g = V.plan.board({ plans: [pl({ source: 'paperclip', sourceWord: 'Paperclip', steps: [st('u', 'unknown', { raw: 'weird' })] })], unreadable: [] }).groups[0];
+  assert.equal(g.done, 0);
+  assert.equal(g.steps[0].word, 'Unknown');
+});

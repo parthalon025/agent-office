@@ -217,6 +217,16 @@
     return out;
   }
 
+  // What waits for the owner on the Manager board (#157): a goal to approve, an office step that failed (OfficeVocab.plan.waits).
+  // A plan has no time, so these come after the sessions' requests.
+  function planRequests(snap) {
+    var names = {};
+    ((snap && snap.repos) || []).forEach(function (r) { names[r.key] = r.name; });
+    return V.plan.waits(snap && snap.plans).map(function (w) {
+      return { id: 'plan:' + w.id + (w.step ? ':' + w.step : ''), kind: 'plan', text: w.text, goal: w.id, step: w.step || '', action: w.kind, uid: null, bot: 'Manager', building: w.building, buildingName: names[w.building] || 'Other folders', roomName: 'Plan', t: Number.MAX_SAFE_INTEGER };
+    });
+  }
+
   // Every open request and question of every building, oldest first. This is the Needs you list.
   // The rule for one session's items is OfficeVocab.requests (one owner); this adds who and where, and the
   // preview of a request. kind is 'permission' or 'question'; a question has no risk, so a bulk action never answers one.
@@ -229,7 +239,7 @@
         out.push(Object.assign({}, r, base, { preview: pend ? (pend.preview || pend.detail || '') : '' }));
       });
     });
-    return out.concat(mergeRequests(snap, now)).sort(function (a, b) { return a.t - b.t; });
+    return out.concat(mergeRequests(snap, now), planRequests(snap)).sort(function (a, b) { return a.t - b.t; });
   }
   // The one queue (#146): everything that waits on the user, across buildings, oldest first. Every surface that shows a
   // request count or opens a request reads this, so the counts agree and no request is out of reach. reach(item) says how

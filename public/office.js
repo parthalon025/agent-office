@@ -742,6 +742,45 @@
         h(A.Button, { variant: 'quiet', disabled: busy, onClick: function () { connect(company || choose[0].id); } }, 'Watch this company')) : null);
   }
 
+  // ---------- the Manager board (#157): one plan per goal, from the Office or from Paperclip ----------
+  // One snapshot field (plans), one view (OfficeVocab.plan.board). A Paperclip goal is read only: no button writes to Paperclip.
+  // An Office goal can be approved, cancelled and, for a failed step, retried (the goal routes of #156).
+  function ManagerDialog(p) {
+    var snap = useSnapshot(), V = window.OfficeVocab, v = V.plan.board(snap && snap.plans);
+    var bz = useState(''), busy = bz[0], setBusy = bz[1];
+    function act(route, body, key) {
+      setBusy(key);
+      api(route, body).then(function () { setBusy(''); }, function (x) { setBusy(''); p.toast({ tone: 'error', title: 'Manager', text: x.message }); });
+    }
+    var buildingName = function (key) { var r = ((snap && snap.repos) || []).filter(function (x) { return x.key === key; })[0]; return r ? r.name : ''; };
+    return h(A.Dialog, { open: true, title: 'Manager board', onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
+      h('div', { className: 'form wide manager-board' },
+        v.unreadable.map(function (t) { return h('p', { key: t, className: 'note manager-warn', role: 'status' }, t); }),
+        v.empty ? h(A.EmptyState, { icon: 'plan', compact: true, title: 'No plan yet', text: 'A goal and its steps show here. Paperclip tasks show here when a company is connected.' }) : null,
+        v.groups.map(function (g) {
+          var open = g.status === 'planning' || g.status === 'awaiting-approval' || g.status === 'running' || g.status === 'blocked';
+          return h('section', { key: g.id, className: 'manager-goal' + (g.frozen ? ' is-frozen' : ''), 'aria-label': g.goal },
+            h('div', { className: 'past-title' }, h('b', null, g.goal), h(Tag, null, g.sourceWord), g.readOnly ? h(Tag, null, 'Read only') : null, g.building ? h(Tag, null, buildingName(g.building) || 'Other folders') : null,
+              g.stateWord ? h('span', { className: 'sess-state' }, g.stateWord) : null),
+            g.note ? h('p', { className: 'note', role: g.frozen ? 'status' : undefined }, g.note) : null,
+            g.total ? h('p', { className: 'note mono' }, g.done + ' of ' + plural(g.total, 'step', 'steps') + ' done') : null,
+            g.total ? h('ul', { className: 'past' }, g.steps.map(function (x) {
+              var facts = [x.owner ? 'Agent ' + x.owner : '', x.model, x.budget ? 'Budget ' + window.OfficeFormat.cost(x.budget.spent) + (x.budget.limit ? ' of ' + window.OfficeFormat.cost(x.budget.limit) : '') : '', x.cost != null ? window.OfficeFormat.cost(x.cost) : ''].filter(Boolean).join(' · ');
+              return h('li', { key: x.id, className: 'past-row' },
+                h('div', { className: 'past-main' },
+                  h('div', { className: 'past-title' }, h('span', { className: 'sess-state' }, h(A.StatusDot, { status: x.state === 'pending' || x.state === 'unknown' ? 'resting' : x.state }), x.state === 'unknown' && x.raw ? 'Unknown: ' + x.raw : x.word), h('b', null, x.title)),
+                  facts ? h('div', { className: 'past-meta' }, facts) : null,
+                  x.skipped ? h('div', { className: 'past-meta' }, 'This run skipped the office. ' + (x.skippedWhy || '')) : null),
+                h('div', { className: 'past-actions' },
+                  x.uid ? h(A.Button, { variant: 'ghost', icon: 'chevron-right', onClick: function () { var s = window.officeAdapter.sessionByUid(x.uid); if (s) p.onGo(s); } }, 'Go to desk') : null,
+                  !g.readOnly && x.state === 'error' ? h(A.Button, { variant: 'quiet', icon: 'retry', disabled: busy === g.id + x.id, onClick: function () { act('/api/goal/retry', { id: g.id, step: x.id }, g.id + x.id); } }, 'Retry step') : null));
+            })) : null,
+            !g.readOnly && open ? h('div', { className: 'inline-actions' },
+              g.status === 'awaiting-approval' ? h(A.Button, { variant: 'emphasis', icon: 'approve', disabled: busy === g.id, onClick: function () { act('/api/goal/approve', { id: g.id }, g.id); } }, 'Approve plan') : null,
+              h(A.Button, { variant: 'quiet', icon: 'decline', disabled: busy === g.id, onClick: function () { act('/api/goal/cancel', { id: g.id }, g.id); } }, 'Cancel goal')) : null);
+        })));
+  }
+
   // The HQ: what Paperclip says about its company. Read only: Paperclip runs its heartbeats, routines and budgets. Supervise
   // in office is on the Agents screen of a Security room, with its painted Confirm (no button here: one place for a write).
   function HqDialog(p) {
@@ -1806,6 +1845,8 @@
         list.length ? h('p', { className: 'note' }, plural(list.length, 'request waits', 'requests wait') + ' for you, oldest first. This is every building.') : null,
         !list.length ? h(A.EmptyState, { icon: 'finished', compact: true, title: 'Nothing needs you', text: 'New requests show here when an agent asks.' }) : null,
         h('div', { ref: box }, h('ul', { className: 'past' }, list.map(function (r) {
+          if (r.kind === 'plan') return h('li', { key: r.id, className: 'past-row' }, h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h(A.Icon, { name: 'plan', size: 16 }), h('b', null, r.text), h(Tag, null, r.buildingName))),
+            h('div', { className: 'past-actions' }, h(A.Button, { variant: 'emphasis', icon: 'plan', onClick: function () { p.onManager(); } }, 'Open Manager board')));
           if (r.kind === 'merge') return h(MergeRow, { key: r.id, r: r, busy: M.busy, onMerge: function (x) { M.start(x); } });
           var q = r.kind === 'question';
           return h('li', { key: r.id, className: 'past-row' },
@@ -2376,6 +2417,7 @@
             note: function (id) { var n = latestSnap.current && latestSnap.current.notes && latestSnap.current.notes[noteKey(id)]; return n ? n.text : ''; },
             tree: function (root) { return api('/api/tree', { root: root }); },
             stats: function (id) { return mount.figures(id); },
+            goals: function (id, building) { return window.OfficeVocab.plan.board(latestSnap.current && latestSnap.current.plans, building).groups; },   // the Manager board on the wall (#157)
             pin: function (id) { var n = latestSnap.current && latestSnap.current.pins && latestSnap.current.pins[noteKey(id)]; return n && n.text ? { text: n.text, by: n.by } : null; },
             onDoor: function (id) { setDlg({ name: 'room', roomId: id }); },
             state: function (id) { return mount.rollup().rooms[id] || null; },
@@ -2555,6 +2597,9 @@
     if (selSess && (!selKind || selKind.control)) actions.push({ id: 'page-ext', label: 'Extensions of ' + selSess.name, icon: 'connector', group: 'Office', run: function () { extensions(selSess.uid, selSess.name); } });
     actions.push({ id: 'page-needs', label: needs.length ? 'Needs you (' + needs.length + ')' : 'Needs you', icon: 'waiting', group: 'Office', keywords: 'requests approve decline questions decisions', run: function () { setDlg({ name: 'needs' }); } });
     actions.push({ id: 'page-flow', label: 'Changes: pipeline and Ready to merge', icon: 'pull-request', group: 'Office', keywords: 'pull request pr merge pipeline folder review checks tray', run: function () { setDlg({ name: 'flow' }); } });
+    var planWaits = snap ? window.OfficeVocab.plan.waits(snap.plans) : [], planAll = snap ? window.OfficeVocab.plan.board(snap.plans) : { groups: [], unreadable: [] };
+    if (planAll.groups.length || planAll.unreadable.length) actions.push({ id: 'page-manager', label: planWaits.length ? 'Manager board (' + planWaits.length + ' waits for you)' : 'Manager board', icon: 'plan', group: 'Office', keywords: 'manager plan goal steps paperclip office tasks approve', run: function () { setDlg({ name: 'manager' }); } });
+    planWaits.forEach(function (w, i) { actions.push({ id: 'page-plan-' + i, label: w.text, icon: 'waiting', group: 'Office', keywords: 'manager plan goal approve retry step', run: function () { setDlg({ name: 'manager' }); } }); });
     if (snap && snap.hq) actions.push({ id: 'page-hq', label: 'Paperclip HQ', icon: 'hq', group: 'Office', keywords: 'paperclip company agents budget heartbeats routines supervise', run: function () { setDlg({ name: 'hq' }); } });
     list.forEach(function (b) { if (b.key !== shown) actions.push({ id: 'page-b-' + b.key, label: 'Go to ' + b.name, icon: 'building', group: 'Buildings', keywords: 'building repository ' + b.name, run: function () { pick(b.key); } }); });
     // The Reception lists the office's own actions (the dock had them before #92), so a touch screen reaches them with no keyboard.
@@ -2648,8 +2693,9 @@
         onPlaced: function () { if (hostRef.current) hostRef.current.refit(); },
         onBack: blurScene, onOpen: function () { if (hostRef.current) hostRef.current.open(); } }) : null,
       d === 'sessions' ? h(SessionsDialog, { onClose: close, onGo: goTo }) : null,
+      d === 'manager' ? h(ManagerDialog, { toast: toast, onClose: close, onGo: function (x) { goTo(x); } }) : null,
       d === 'hq' ? h(HqDialog, { snap: snap, onAttach: function () { show('hooks'); }, onClose: close }) : null,
-      d === 'needs' ? h(NeedsDialog, { toast: toast, onClose: close, onGo: function (r) { var s = snap && snap.sessions.filter(function (x) { return x.uid === r.uid; })[0]; if (s) goTo(s); else close(); } }) : null,
+      d === 'needs' ? h(NeedsDialog, { toast: toast, onClose: close, onManager: function () { setDlg({ name: 'manager' }); }, onGo: function (r) { var s = snap && snap.sessions.filter(function (x) { return x.uid === r.uid; })[0]; if (s) goTo(s); else close(); } }) : null,
       // The one Notifier (the scene has notifier: false). The tab title counts every request of every building, in the
       // city too. Browser alerts for the requests and errors of every building; the DS alert toggle decides, and they
       // show only while the page is hidden. A click goes to the session.
