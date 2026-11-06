@@ -1,60 +1,22 @@
 /* Agent Office for Claude Code x0.2: page styles. Only Agent Office DS tokens, no literal colors.
    The 3D office and its HUD come from the design system; this file styles what the page adds:
-   the control strip, the dialogs, the diff, and the chat grips and slash list. */
-/* The height of the dock plus a gap. office.js measures the dock and updates it; this is the value before that. */
-:root { --strip-clear: 200px; --panel-w: min(420px, calc(100vw - 2 * var(--space-4))); }
+   the Reception, the lobby tour, the dialogs, the diff, and the chat grips and slash list. */
+/* The bottom edge of the DS chat, the roster, the Since you left card, the page panels and the toast stack: above the DS
+   broadcast bar and activity log lane. There is no dock since #92; the value follows the DS HUD at each width. */
+:root { --strip-clear: 84px; --panel-w: min(420px, calc(100vw - 2 * var(--space-4))); }
+@media (max-width: 1100px) { :root { --strip-clear: 120px; } }
+@media (max-width: 820px) { :root { --strip-clear: var(--space-4); } }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font-family: var(--font-sans); }
 #office { height: 100vh; }
 /* The DS scene sets its height inline from the height prop. office.js renders it again when the window changes (#55). */
 
 .mono { font-family: var(--font-mono); font-size: var(--type-data-size); line-height: var(--type-data-line); font-variant-numeric: tabular-nums; }
 
-/* ---------- control strip ---------- */
-/* The dock. At 1360 px and up its edges line up with the DS broadcast bar (left 362, right 376 when a chat is open).
-   Below that it takes the full width. office.js measures it and sets --strip-clear (its height plus a gap) on <html>;
-   the DS chat, the roster, the Since you left card and the page panels stop above that line. */
-.strip {
-  position: fixed; z-index: var(--z-sheet); left: 362px; right: 376px; bottom: 76px;
-  display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-2) var(--space-3);
-  background: var(--panel); backdrop-filter: blur(var(--blur-panel)); border: 1px solid var(--line);
-  border-radius: var(--radius-lg); box-shadow: var(--shadow-panel);
-}
-.strip-group { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
-.strip-bot { padding-left: var(--space-3); border-left: 1px solid var(--line); }
-.strip-nav { gap: var(--space-1); }
-.strip-id { display: inline-flex; align-items: center; gap: var(--space-2); font: var(--type-title-weight) var(--type-title-size)/var(--type-title-line) var(--font-sans); }
-.strip-id .mono { color: var(--muted); font-weight: 400; }
-.strip-total { margin-left: auto; color: var(--muted); }
-.strip-note { margin: 0; }
-.strip .ao-field { width: auto; min-width: 112px; }
-
-.welcome {
-  position: fixed; z-index: var(--z-hud); top: 40%; translate: -50% -50%;
-  background: var(--panel); backdrop-filter: blur(var(--blur-panel)); border: 1px solid var(--line);
-  border-radius: var(--radius-lg); box-shadow: var(--shadow-panel); padding: var(--space-3); box-sizing: border-box;   /* max-width includes the padding */
-  --rail-clear: 302px;   /* the DS right rail: 270px wide, 16px from the edge, and a gap */
-  left: calc((100vw - var(--rail-clear)) / 2); width: max-content; max-width: calc(100vw - var(--rail-clear) - var(--space-4));
-}
 /* The palette sits above every dialog (both are --z-dialog, and DOM order put the dialog on top) and above the toast stack, so a toast never covers an option (#79). */
 .ao-cmdk-o { z-index: calc(var(--z-dialog) + 2); }
 
-/* the dock stops before the HUD rail column (right 300px, up to 68px wide) and, when narrow, clears the log lane */
-@media (max-width: 1359px) { .strip { right: 380px; } }
-@media (max-width: 1100px) { .strip { left: var(--space-4); bottom: 112px; } }
-@media (max-width: 820px) { .strip { left: var(--space-4); right: var(--space-4); bottom: var(--space-3); } .welcome { top: 50%; --rail-clear: 0px; left: 50%; max-width: calc(100vw - 2 * var(--space-4)); } }
-.strip-search { margin-left: auto; }
-.strip-kbd { margin-left: var(--space-2); }
-.strip-more-host { position: relative; display: inline-flex; }
-.strip-more { position: absolute; right: 0; bottom: calc(100% + var(--space-3)); z-index: var(--z-sheet); min-width: 240px; max-height: calc(100vh - var(--strip-clear, 200px) - 16px); overflow: auto; display: flex; flex-direction: column; align-items: stretch; gap: var(--space-1); padding: var(--space-2); background: var(--panel); backdrop-filter: blur(var(--blur-panel)); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-panel); }
-.strip-more .ao-btn { justify-content: flex-start; }
-.strip-more .ao-tip { display: flex; }
-.strip-more .ao-tip > .ao-btn { flex: 1; justify-content: flex-start; }
-.strip-more-set { display: flex; flex-direction: column; gap: var(--space-2); padding-top: var(--space-2); border-top: 1px solid var(--line); }
-.strip-more-set .ao-select select { max-width: none; }
-.strip-more-h { color: var(--muted); font: var(--type-eyebrow-weight) var(--type-eyebrow-size)/var(--type-eyebrow-line) var(--font-sans); letter-spacing: var(--type-eyebrow-tracking); text-transform: uppercase; }
-.strip-more-note { margin: 0; max-width: 260px; color: var(--muted); font: var(--type-caption-weight) var(--type-caption-size)/var(--type-caption-line) var(--font-sans); }
 @media (max-width: 1359px) {
-  /* the chat and the roster stop above the dock */
+  /* the chat and the roster stop above the broadcast bar and the log lane */
   /* important: chat-extras.js writes a saved bottom as an inline style */
   .ao-hud-chat { bottom: var(--strip-clear, 200px) !important; }
   .ao-grip-b, .ao-grip-bl { display: none; }
@@ -65,20 +27,12 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
   .ao-hud-left { max-height: calc(100% - 68px - var(--strip-clear, 200px)); }
 }
 @media (max-width: 820px) {
-  .strip-more-host { position: static; }
-  .strip-more { left: 0; right: 0; }
-  .strip-kbd { display: none; }
-  .strip-bot { flex-basis: 100%; padding-left: 0; border-left: 0; }
-  .strip .ao-btn, .strip .ao-select select { min-height: 40px; }
-  .strip .ao-select { min-width: 0; }
   .ao-hud-chat { height: min(55%, calc(100% - var(--strip-clear, 200px) - 72px)); }
   .ao-hud-right:not(.ao-hud-chat) { bottom: var(--strip-clear, 200px); max-height: min(40%, calc(100% - 68px - var(--strip-clear, 200px))); }
   .ao-hud-syl, .ao-hud-scrub, .ao-office:has(.ao-hud-scrub) .ao-hud-scrub { bottom: var(--strip-clear, 200px); }
   /* with a chat open, the card goes back to the top so it does not cover the message box */
   .ao-office:has(.ao-hud-chat) .ao-hud-syl { top: 64px; bottom: auto; }
-  /* with no live session the welcome card is shown and the room card only repeats it (No sessions, 0 working), so the card gives way; the Decisions inbox stays */
-  #office:has(.welcome) .ao-hud-right:not(.ao-hud-inbox) { display: none; }
-  /* the Since you left card and the room card both sit on the dock, so the room card waits until the card closes (#66) */
+  /* the Since you left card and the room card share the bottom, so the room card waits until the card closes (#66) */
   #office:has(.ao-hud-syl) .ao-hud-right:not(.ao-hud-inbox):not(.ao-hud-chat) { display: none; }
 }
 /* One panel at a time: a pinned screen (desk chat and terminal, room changes) and the board and stats panels take the right column. */
@@ -140,27 +94,6 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 /* sticky request and error toasts stay until answered, so on a narrow screen the stack is capped (about one toast, then it scrolls) */
 @media (max-width: 820px) { .page-toasts { max-height: min(calc(var(--space-6) * 3), var(--toast-room)); } }
 
-/* welcome card */
-.welcome-logo { display: flex; justify-content: center; padding-top: var(--space-2); }
-/* the wordmark shrinks to the card: the Sublevel one is wider than the card on a phone */
-.welcome-logo .ao-lockup { min-width: 0; max-width: 100%; }
-.welcome-logo .ao-lockup .ao-mark { flex: none; }
-.welcome-logo .ao-lockup svg { min-width: 0; max-width: 100%; height: auto; }
-/* Short windows (#52 follow-up): the card keeps its copy and gives up logo size, padding and gaps, so it fits between the top tools and the dock. */
-@media (max-height: 760px) {
-  .welcome { padding: var(--space-2); }
-  .welcome-logo { padding-top: 0; }
-  .welcome-logo .ao-lockup { zoom: 0.6; }
-  .welcome .ao-empty { padding: var(--space-2) var(--space-3); gap: var(--space-1); }
-}
-@media (max-height: 640px) {
-  .welcome-logo { display: none; }
-  .welcome .ao-empty { padding: var(--space-1) var(--space-3); }
-  .welcome .ao-empty-i { display: none; }
-}
-@media (max-height: 460px) {
-  .welcome { top: calc(50% + var(--space-4)); }   /* landscape: the floor bar sits under the top tools, so the card drops into the clear band above the dock */
-}
 
 /* buildings dialog */
 .bld-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--space-3); }
@@ -247,16 +180,36 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
    and fades in when it mounts. New rows in lists slide in. Reduced motion turns all of it off. */
 .view { position: relative; transition: opacity var(--duration-base) var(--ease-in); }
 .view.is-fading { opacity: 0; }
-/* Fill backwards, not both: a held fill keeps an opacity animation on .ao-office, which is then a stacking context that traps the DS palette (z 51) below the welcome card and the dialog overlay. */
+/* Fill backwards, not both: a held fill keeps an opacity animation on .ao-office, which is then a stacking context that traps the DS palette (z 51) below the dialog overlay. */
 .view > * { animation: page-fade var(--duration-base) var(--ease-out) backwards; }
 @keyframes page-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes page-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
-.past-row, .ext-row, .room-row, .agent-row, .city-row, .strip-bot { animation: page-in var(--duration-base) var(--ease-out) both; }
-.welcome { animation: page-fade var(--duration-base) var(--ease-out) both; }
-.strip { transition: box-shadow var(--duration-base) var(--ease-standard); }
+.past-row, .ext-row, .room-row, .agent-row, .city-row, .reception-floor { animation: page-in var(--duration-base) var(--ease-out) both; }
+.tour-card { animation: page-fade var(--duration-base) var(--ease-out) both; }
 @media (prefers-reduced-motion: reduce) {
-  .view, .view > *, .past-row, .ext-row, .room-row, .agent-row, .city-row, .strip-bot, .welcome, .city-tag { animation: none; transition: none; }
+  .view, .view > *, .past-row, .ext-row, .room-row, .agent-row, .city-row, .reception-floor, .tour-card, .city-tag { animation: none; transition: none; }
 }
+
+/* ---------- the Reception and the lobby tour (#92) ---------- */
+.reception-h { margin: var(--space-2) 0 0; color: var(--muted); font: var(--type-eyebrow-weight) var(--type-eyebrow-size)/var(--type-eyebrow-line) var(--font-sans); letter-spacing: var(--type-eyebrow-tracking); text-transform: uppercase; }
+.reception-err { color: var(--status-error-text); }
+.reception-floors { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.reception-floor { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-2); }
+.reception-floor > .ao-field { flex: 1 1 200px; min-width: 0; }
+.reception-floor.is-hidden { opacity: var(--opacity-resting); }
+.reception-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+/* the tour card sits at the top of the view, under the HUD top bar, clear of the look bar at the bottom */
+.tour-card {
+  position: fixed; z-index: var(--z-sheet); top: 76px; left: 50%; translate: -50% 0; box-sizing: border-box;
+  width: min(440px, calc(100vw - 2 * var(--space-4))); padding: var(--space-3);
+  display: flex; flex-direction: column; gap: var(--space-2);
+  background: var(--panel); backdrop-filter: blur(var(--blur-panel)); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-panel);
+}
+.tour-h { display: flex; justify-content: space-between; align-items: baseline; gap: var(--space-2); font: var(--type-title-weight) var(--type-title-size)/var(--type-title-line) var(--font-sans); }
+.tour-n { color: var(--muted); }
+@media (max-width: 820px) { .tour-card { top: auto; bottom: var(--space-4); } }
+/* the elevator stop of the tour marks the elevator panel */
+#office.tour-elevator .ao-hud-left > .ao-panel:first-child { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* ---------- city ---------- */
 .city { position: relative; height: 100vh; background: var(--bg); }
@@ -270,7 +223,9 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .city-main { flex: 1 1 100%; min-width: 0; display: flex; align-items: baseline; gap: var(--space-2); }
 .city-dots { flex: 1 1 100%; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
 .city-dot { display: inline-flex; }
-.city-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); container-type: inline-size; }   /* a container, so the DS mode toggle shows icons, and the label of the pressed theme only: five labels do not fit 320 px */
+.city-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); container-type: inline-size; }
+.city-needs { white-space: nowrap; min-height: 36px; }   /* Needs you: the same button as the scene's top bar (#92 review), a target a finger finds */
+@media (pointer: coarse) { .city-needs { min-height: 44px; } }   /* a container, so the DS mode toggle shows icons, and the label of the pressed theme only: five labels do not fit 320 px */
 .city-counts { display: inline-flex; }
 .city-kbd { margin-left: var(--space-2); }
 .city-name { flex: 1; min-width: 0; font-weight: var(--type-title-weight); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

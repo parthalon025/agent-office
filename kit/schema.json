@@ -191,7 +191,7 @@
    }
   },
   "room.add": {
-   "desc": "Add a room to a floor. A room of type security has no bots and six wall screens that a page repaints; room.screens gives their six titles.",
+   "desc": "Add a room to a floor. A room of type security has no bots and six wall screens that a page repaints; room.screens gives their six titles. A room of type lobby is a Reception: a reception desk with a memo and a directory board that a page repaints. room.note is the small print on the room sign; room.spare adds that many open desks (no bot, at most 6) of role room.spareRole, for a page to pick.",
    "fields": {
     "floorId": "number",
     "room": "object"
@@ -205,7 +205,7 @@
    }
   },
   "room.update": {
-   "desc": "Rename a room, give it a new id, or change its type. Its bots stay and follow the new id.",
+   "desc": "Rename a room, give it a new id, or change its type, note, spare or spareRole. Its bots stay and follow the new id.",
    "fields": {
     "roomId": "string",
     "room": "object"

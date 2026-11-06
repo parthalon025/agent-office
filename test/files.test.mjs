@@ -9,12 +9,13 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as auth from '../auth.mjs';
 import * as startup from '../startup.mjs';
 import { officeFiles, portArg, portArgs, DEFAULT_PORT } from '../files.mjs';
 import { startOffice, startOnFreePort } from './fixtures/office-server.mjs';
+import * as git from '../git.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const win = process.platform === 'win32';
@@ -314,6 +315,50 @@ test('a second office in the same folder never rewrites the first office\'s file
   } finally {
     for (const o of [again, b, a]) await stopOffice(o);
     // The server's helpers start in %SystemRoot% (git.helperCwd), so once the copies are gone nothing is in the folder.
+    fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+  }
+});
+
+// #92 review: a recent folder in git becomes a building at start, and a building gets its floor record at once (archetypes.mjs).
+// A copy on a busy port asks the running office for a launch link before it exits; the stand-in office here answers after 3 s,
+// so the copy has time to make that record. It must keep it in memory: the copy writes nothing, and makes no file.
+test('a copy on a busy port writes no state while it waits for a launch link, also when a recent folder becomes a building', { timeout: 120000 }, async () => {
+  const tmp = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'ao-busy-')));
+  const dir = path.join(tmp, 'office'), lad = path.join(tmp, 'local'), repo = path.join(tmp, 'repo');
+  copyOffice(dir);
+  fs.mkdirSync(repo);
+  const GIT = git.resolveExe('git'), id = ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false'];
+  const run = (...a) => execFileSync(GIT, [...id, ...a], { cwd: repo, windowsHide: true, stdio: 'pipe' });
+  run('init', '-q', '-b', 'main');
+  fs.writeFileSync(path.join(repo, 'package.json'), '{}');
+  fs.mkdirSync(path.join(repo, 'test'));
+  fs.writeFileSync(path.join(repo, 'test', 'a.test.mjs'), '');
+  run('add', '-A'); run('commit', '-q', '-m', 'one');
+  // the running office: it holds the port and answers the launch link after 3 s (the copy waits at most 5 s)
+  let asked = 0;
+  const held = http.createServer((req, res) => {
+    asked++;
+    setTimeout(() => { res.setHeader('content-type', 'application/json'); res.end(JSON.stringify({ url: `http://127.0.0.1:${held.address().port}/#n=${'ab'.repeat(16)}` })); }, 3000);
+  });
+  await new Promise((r) => held.listen(0, '127.0.0.1', r));
+  const port = held.address().port;
+  const env = cleanEnv({ OFFICE_OPEN: '0', OFFICE_HOOKS: 'command', LOCALAPPDATA: lad, APPDATA: path.join(tmp, 'roaming'), OFFICE_RATE_FILE: path.join(tmp, 'no-rate.json'), OFFICE_PORT: String(port) });
+  env.PATH = [path.dirname(GIT), env.PATH].join(path.delimiter);   // the copy finds git, so the recent folder becomes a building
+  fs.writeFileSync(officeFiles(dir, port).state, JSON.stringify({ recent: [repo] }));
+  fs.mkdirSync(path.dirname(auth.pageFile(env, port)), { recursive: true });
+  fs.writeFileSync(auth.pageFile(env, port), JSON.stringify({ token: 'p'.repeat(48), port }));
+  const before = filesOf(dir);
+  let copy = null;
+  try {
+    copy = startOffice(dir, env, { ms: 60000 });
+    assert.equal(await copy.done, 'exited', copy.out());
+    assert.equal(asked, 1, 'the copy asked the running office for a link, and waited for it');
+    assertUnchanged(dir, before, 'after a copy on a busy port');
+    assert.deepEqual(Object.keys(filesOf(dir)).sort(), Object.keys(before).sort(), 'the copy made no file');
+  } finally {
+    await stopOffice(copy);
+    held.closeAllConnections();
+    await new Promise((r) => held.close(r));
     fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   }
 });

@@ -103,6 +103,9 @@ export function createTracker(deps = {}) {
       // startDir: the folder the session started in (the office's launch folder, or the first cwd a hook
       // reported). It does not follow cwd, so a later cd cannot widen what counts as low risk.
       startDir: '',
+      // Function floors (#92): what seats the bot (place.mjs seatOf). assignedRole: the Manager's role for it; deskRole: the floor
+      // of the empty desk the user clicked; agentType: its agent definition (SessionStart agent_type). firstPrompt and goal name its room.
+      assignedRole: null, deskRole: null, agentType: null, firstPrompt: '', goal: '',
       startedAt: t, lastEvent: t, endedAt: null,
       pid: null, launched: false, ...fields,
     };
@@ -253,10 +256,11 @@ export function createTracker(deps = {}) {
     switch (ev) {
       case 'SessionStart':
         s.status = 'idle'; s.tool = null; s.note = ''; closeAll(s, 'The session restarted.');
+        if (p.agent_type && !p.agent_id) s.agentType = p.agent_type;
         addFeed(s, 'start', `sat down (${p.source || 'startup'})`);
         break;
       case 'UserPromptSubmit':
-        s.status = 'working'; s.prompt = p.prompt || ''; s.note = ''; s.turns += 1; s.error = null; s.promptAt = now();
+        s.status = 'working'; s.prompt = p.prompt || ''; if (!s.firstPrompt) s.firstPrompt = s.prompt; s.note = ''; s.turns += 1; s.error = null; s.promptAt = now();
         out = deliver(s, ev);
         addFeed(s, 'prompt', clip(s.prompt, 140));
         break;
@@ -364,11 +368,11 @@ export function createTracker(deps = {}) {
   }
 
   // The user sent a message: a failure after this is an error again.
-  function userMessage(s, text) { s.interrupted = false; if (text !== undefined) s.prompt = text; }
+  function userMessage(s, text) { s.interrupted = false; if (text !== undefined) { s.prompt = text; if (!s.firstPrompt) s.firstPrompt = text; } }
 
   // The office sent a new turn: working at once, and the last error is gone (no Finished between Error and Working).
   function startTurn(s, prompt) {
-    s.error = null; s.status = 'working'; s.prompt = prompt;
+    s.error = null; s.status = 'working'; s.prompt = prompt; if (!s.firstPrompt) s.firstPrompt = prompt;
     addFeed(s, 'prompt', 'sent from the office: ' + clip(prompt, 100));
     changed();
   }

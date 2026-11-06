@@ -5,16 +5,9 @@
 // (the method react-test-renderer/shallow uses). No DOM, no browser, no server.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import vm from 'node:vm';
+import { loadBundle } from './fixtures/ds-bundle.mjs';
 
-const src = (f) => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8');
-const sb = { console, URL };
-sb.window = sb.self = sb; // the UMD build registers React on self
-vm.createContext(sb);
-vm.runInContext(src('public/vendor/react.production.min.js'), sb, { filename: 'react.production.min.js' });
-vm.runInContext(src('components/bundle.js'), sb, { filename: 'bundle.js' });
-const React = sb.React, AO = sb.AgentOffice, rich = AO.rich;
+const { React, AO } = loadBundle(), rich = AO.rich;
 const DISPATCHER = React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.ReactCurrentDispatcher;
 
 /** One component instance: render() calls it with hooks that keep state between calls. Effects do not run. */
@@ -137,4 +130,39 @@ test('the image viewer asks before it shows a remote image that was not clicked'
   tree = box.render();
   assert.ok(imgs(tree).some((e) => e.props.src === b && e.props.referrerPolicy === 'no-referrer'), 'B shows after its click, with no referrer');
   assert.ok(imgs(shallow(rich.Lightbox, { items, index: 0, onClose() {}, onMove() {} }).render()).some((e) => e.props.src === a));
+});
+
+// #92 review: the elevator panel has one header per wing, also when a preset mixes wings (the Software product preset has
+// Support, a Go to market floor, between Product and tech floors). The rows of a wing go together, top floor first, and the
+// arrow keys follow the rows as they show.
+test('FloorList: one header per wing when the floors mix wings; the arrow keys follow the rows as shown, skipping empty floors', () => {
+  const F = (id, name, wing, empty) => ({ id, name, wing, statuses: empty ? [] : ['working'], rooms: 1, empty: !!empty });
+  // what OfficeScene passes: the top floor first (Software product: Lobby, Engineering ... Support, Docs, Records)
+  const floors = [F(9, 'Records', 'Operations', true), F(8, 'Docs', 'Product and tech', true), F(7, 'Support', 'Go to market'), F(6, 'Design', 'Product and tech', true),
+    F(5, 'IT and Ops', 'Product and tech', true), F(4, 'Security', 'Product and tech', true), F(3, 'Quality', 'Product and tech'), F(2, 'Engineering', 'Product and tech'), F(1, 'Lobby', '')];
+  const picked = [];
+  const tree = shallow(AO.FloorList, { title: 'Elevator', floors, current: 3, onSelect: (id) => picked.push(id) }).render();
+  const all = elements(tree);
+  const wings = all.filter((e) => e.props.className === 'ao-wing').map(text);
+  assert.deepEqual(wings, ['Operations', 'Product and tech', 'Go to market'], 'each wing once');
+  const rows = all.filter((e) => e.type === 'button' && /^ao-row/.test(e.props.className));
+  assert.deepEqual(rows.map((r) => r.key), ['9', '8', '6', '5', '4', '3', '2', '7', '1'], 'the floors of a wing together, top floor first');
+  // the header comes right before the first row of its wing
+  const order = all.filter((e) => e.props.className === 'ao-wing' || rows.includes(e)).map((e) => (e.props.className === 'ao-wing' ? 'W:' + text(e) : e.key));
+  assert.deepEqual(order, ['W:Operations', '9', 'W:Product and tech', '8', '6', '5', '4', '3', '2', 'W:Go to market', '7', '1']);
+  // the Lobby has no wing: a rule sets it apart from the Go to market floors above it, with no name
+  const gaps = all.filter((e) => e.props.className === 'ao-wing ao-wing-gap');
+  assert.equal(gaps.length, 1);
+  assert.equal(text(gaps[0]), '');
+  const flat = all.filter((e) => /^ao-wing/.test(e.props.className || '') || rows.includes(e)).map((e) => e.key);
+  assert.equal(flat[flat.indexOf('1') - 1], gaps[0].key, 'right above the Lobby row');
+  const key = (row, k) => row.props.onKeyDown({ key: k, preventDefault() {} });
+  key(rows[6], 'ArrowDown');                    // from Engineering down the panel: Support (shown next), not the Lobby
+  key(rows[5], 'ArrowUp');                      // from Quality up: Docs to Security are empty, Records too: nothing
+  key(rows[7], 'ArrowDown');                    // from Support down: the Lobby
+  assert.deepEqual(picked, [7, 1]);
+  // a list without wings (not the elevator) keeps its order and has no header
+  const plain = elements(shallow(AO.FloorList, { floors: [{ id: 2, name: 'B', statuses: [] }, { id: 1, name: 'A', statuses: [] }] }).render());
+  assert.deepEqual(plain.filter((e) => e.type === 'button' && /^ao-row/.test(e.props.className)).map((r) => r.key), ['2', '1']);
+  assert.equal(plain.filter((e) => e.props.className === 'ao-wing').length, 0);
 });

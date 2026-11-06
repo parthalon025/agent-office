@@ -47,10 +47,11 @@
 (function (root) {
   'use strict';
   var V = root.OfficeVocab;
+  // The worst state of a set of desks: the DS's one order (AgentOffice.worstOf, the order the elevator lights its buttons in),
+  // read at the call, so this file loads without the DS (the page loads the bundle first; the tests give it the bundle too).
+  function worst(list) { return root.AgentOffice.worstOf(list); }
   var SHAPES = ['cone', 'blob', 'octa', 'capsule'];
-  var FLOOR_KEYS = ['ops', 'sales', 'research', 'content', 'hq'];
   var OTHER = 'Other folders';
-  var SPARE_ROOM = 'spare-room';   // the room of an empty building, renamed when the first session comes
   var REMOVE_AFTER_MS = 6000;
   var HISTORY_CALLS = 12;   // calls shown in the trace when the page opens mid-session
   var USAGE_REPEAT_MS = 15000;
@@ -86,10 +87,10 @@
   function stamp(e, t) { if (typeof t === 'number' && t > 0) e.at = t; return e; }
   function hostOf(url) { return String(url).replace(/^https?:\/\//, '').split('/')[0] || String(url); }
 
-  // Where a session sits: building (repo), floor (branch), room (worktree folder). The server computes it
+  // Where a session sits: building (repo), room (worktree folder), and the branch as a label. The server computes it
   // (place.mjs) and sends it as session.place and worktree.place; this only renames the fields.
   function fromPlace(p) {
-    return { repo: p.buildingKey, repoName: p.building, branch: p.floor, root: p.rootKey, roomName: p.room, roomId: p.roomId, noteKey: p.noteKey, path: p.root, securityRoomId: p.securityRoomId };
+    return { repo: p.buildingKey, repoName: p.building, branch: p.branch != null ? p.branch : p.floor, root: p.rootKey, roomName: p.room, roomId: p.roomId, noteKey: p.noteKey, path: p.root, securityRoomId: p.securityRoomId, repoPath: p.repoPath || '', agentRoom: !!p.baseBranch };
   }
   // The Security room (#70): first on the ground floor of every building, no bots, never a worktree (no layout entry, no
   // notes key, never stale). Its id comes from the server (place.mjs securityRoomIdOf, in each place and repo entry).
@@ -98,33 +99,85 @@
     return { id: id, type: 'security', name: S.roomName, bots: [], screens: S.screens.map(function (x) { return x.title; }) };
   }
   function placeOf(s) { return fromPlace(s.place); }
-  function placeKey(pl) { return pl.repo + '|' + pl.branch + '|' + pl.root; }
+  // A seat: building, floor key and workspace. A change of any of them seats the bot again.
+  function placeKey(pl, fn) { return pl.repo + '|' + (fn || '') + '|' + pl.root; }
   function repoOf(snap, key) { return ((snap && snap.repos) || []).filter(function (r) { return r.key === key; })[0] || null; }
   function live(snap) { return (snap ? snap.sessions : []).filter(function (s) { return s.status !== 'ended' && s.place; }); }
-  function floorDef(id, branch, rooms) { return { id: id, key: FLOOR_KEYS[(id - 1) % FLOOR_KEYS.length], name: clip(branch, 22), rooms: rooms }; }  // long branch names overlap the floor tag
-  function roomDef(pl) { return { id: pl.roomId, type: 'lab', name: pl.roomName, bots: [] }; }
 
-  // Rooms that exist now for one building, as "branch|root": worktrees and the folders of open sessions.
+  // ---------- function floors (#92) ----------
+  // The floors of a building come from its archetype (the server's snapshot.layouts[building], archetypes.mjs layoutView):
+  // the Lobby on the ground floor, the function floors, Records on top. A building the server has no layout for yet has
+  // the Lobby only. DS floor ids are 1, 2, ... in that order for one mount; every match across mounts is by floor key
+  // (the function id: 'lobby', 'engineering', ...).
+  var LOBBY = 'lobby', RECEPTION = 'reception', SPARE = 'spare-';
+  var WING_KEY = { '': 'ops', product: 'research', market: 'sales', corporate: 'content', operations: 'ops', leadership: 'hq' };
+  var BARE = [{ id: LOBBY, name: 'Lobby', wing: '', wingName: '', role: 'planner', hidden: false, fixed: true }];
+  function layoutOf(snap, repo) { var l = snap && snap.layouts && snap.layouts[repo]; return l && Array.isArray(l.floors) && l.floors.length ? l : null; }
+  function shownFloors(snap, repo) { var l = layoutOf(snap, repo); return (l ? l.floors : BARE).filter(function (f) { return !f.hidden; }); }
+  // The floor of a session: the server's seat (place.mjs seatOf), or the Lobby when the building does not show that floor.
+  function seatOf(s, shown) { var f = s.seat && s.seat.floor; return f && shown.some(function (x) { return x.id === f; }) ? f : LOBBY; }
+  function roomRec(snap, nk) { return (snap && snap.rooms && snap.rooms[nk]) || null; }
+  // A room's name comes from its task (the server's room record, place.mjs roomTitle); the folder name until it has one.
+  function titleOf(snap, pl) { var r = roomRec(snap, pl.noteKey); return clip((r && r.title && r.title.name) || pl.roomName, 40); }
+  // A workspace two or more agents work in, or the main checkout (ad-hoc sessions there can collide), is shared. An isolated
+  // room (an agent worktree with at most one agent) is private. A folder outside git with one agent has no tag.
+  function tagOf(snap, pl) {
+    var n = live(snap).filter(function (x) { var p = placeOf(x); return p.repo === pl.repo && p.root === pl.root; }).length;
+    if (n >= 2 || (pl.repo && pl.root === pl.repo)) return 'shared';
+    return pl.repo ? 'private' : '';
+  }
+  var TAG_WORD = { shared: 'Shared workspace', private: 'Private' };
+  // The small print on the room sign: the branch (or the folder outside git) and the tag.
+  function noteOf(snap, pl) { var t = TAG_WORD[tagOf(snap, pl)]; return clip(pl.repo ? pl.branch : base(pl.path), 28) + (t ? ' · ' + t : ''); }
+  function floorDef(id, f, rooms) { return { id: id, key: WING_KEY[f.wing] || 'ops', name: clip(f.name, 22), wing: f.wing || '', wingName: f.wingName || '', fn: f.id, rooms: rooms }; }
+  // A room is a workspace on one floor. A workspace with agents on two floors is a room on each; the first one (its home)
+  // keeps the place room id, the other gets the floor key added, so DS room ids stay unique in the building.
+  function roomIdOn(pl, fn, home) { return fn === home ? pl.roomId : pl.roomId + '~' + fn; }
+  function baseRoomId(id) { return String(id || '').split('~')[0]; }
+  var EMPTY_NOTE = 'No agents here. Click a desk to start one.';
+  // role: the DS role of the floor; the open desks are its desk type
+  function roomDef(snap, pl, id, role) { return { id: id, type: 'lab', name: titleOf(snap, pl), note: noteOf(snap, pl), bots: [], spare: 1, spareRole: role || 'coder' }; }
+  function spareDef(fn, role) { return { id: SPARE + fn, type: 'lab', name: 'Open desks', note: EMPTY_NOTE, bots: [], spare: 2, spareRole: role || 'coder' }; }
+  function receptionDef() { return { id: RECEPTION, type: 'lobby', name: 'Reception', note: 'Open desks for agents with no role', bots: [], spare: 2 }; }
+
+  // The rooms a building wants now, in order, as [{ fn, pl }]: each worktree room on each floor its record names, then each
+  // live session's room on the floor of its seat. homes: root -> the floor of its first room.
+  function wanted(snap, repo, shown) {
+    var out = [], seen = {}, homes = {}, has = function (fn) { return shown.some(function (f) { return f.id === fn; }); };
+    function want(fn, pl) { var k = fn + '|' + pl.root; if (seen[k]) return; seen[k] = true; if (!homes[pl.root]) homes[pl.root] = fn; out.push({ fn: fn, pl: pl }); }
+    var rp = repoOf(snap, repo);
+    if (rp) rp.worktrees.forEach(function (w) {
+      var pl = fromPlace(w.place), rec = roomRec(snap, pl.noteKey);
+      if (rec && Array.isArray(rec.floors)) rec.floors.forEach(function (fn) { if (has(fn)) want(fn, pl); });
+    });
+    live(snap).slice().sort(function (a, b) { return (a.startedAt || 0) - (b.startedAt || 0); }).forEach(function (s) {
+      var pl = placeOf(s);
+      if (pl.repo === repo) want(seatOf(s, shown), pl);
+    });
+    return { list: out, homes: homes };
+  }
+
+  // Rooms that exist now for one building, as roots: worktrees and the folders of open sessions.
   function roomsNow(snap, repo) {
     var rp = repoOf(snap, repo), out = {};
-    if (rp) rp.worktrees.forEach(function (w) { out[w.place.floor + '|' + w.place.rootKey] = true; });
-    live(snap).forEach(function (s) { var pl = placeOf(s); if (pl.repo === repo) out[pl.branch + '|' + pl.root] = true; });
+    if (rp) rp.worktrees.forEach(function (w) { out[w.place.rootKey] = true; });
+    live(snap).forEach(function (s) { var pl = placeOf(s); if (pl.repo === repo) out[pl.root] = true; });
     return out;
   }
 
-  // The buildings: one per repository known or in use, busiest first.
+  // The buildings: one per repository known or in use, busiest first. state: the worst state of its desks (the city windows).
   function buildings(snap) {
     var by = {};
     ((snap && snap.repos) || []).forEach(function (r) {
-      var b = by[r.key] = { key: r.key, name: r.name, path: r.path, sessions: 0, waiting: 0, last: 0, branches: {} };
-      r.worktrees.forEach(function (w) { b.branches[w.branch] = true; });
+      by[r.key] = { key: r.key, name: r.name, path: r.path, sessions: 0, waiting: 0, last: 0, floors: shownFloors(snap, r.key).length, states: [] };
     });
     live(snap).forEach(function (s) {
-      var pl = placeOf(s), b = by[pl.repo] || (by[pl.repo] = { key: pl.repo, name: pl.repoName, sessions: 0, waiting: 0, last: 0, branches: {} });
-      b.sessions++; b.branches[pl.branch] = true; b.last = Math.max(b.last, s.lastEvent || 0);
+      var pl = placeOf(s), b = by[pl.repo] || (by[pl.repo] = { key: pl.repo, name: pl.repoName, sessions: 0, waiting: 0, last: 0, floors: shownFloors(snap, pl.repo).length, states: [] });
+      b.sessions++; b.last = Math.max(b.last, s.lastEvent || 0);
       b.waiting += V.requests(s).length;
+      b.states.push(V.status(s).key);
     });
-    return Object.keys(by).map(function (k) { var b = by[k]; b.branches = Object.keys(b.branches).length; return b; })
+    return Object.keys(by).map(function (k) { var b = by[k]; b.state = worst(b.states); delete b.states; return b; })
       .sort(function (a, b) { return b.waiting - a.waiting || b.sessions - a.sessions || b.last - a.last || a.name.localeCompare(b.name); });
   }
 
@@ -162,42 +215,44 @@
     return n;
   }
 
-  // A building definition: a floor per branch, a room per worktree, the default branch at the bottom.
-  // With bots, each room also lists its sessions (for previews); the scene gets its bots from events instead.
-  // Returns { def, floors: { branch: { id, rooms: { root: roomId } } }, nextId, keys: { roomId: noteKey }, empty }.
+  // A building definition: the shown floors of its layout, bottom up. The Lobby holds the Security room, the Reception (open
+  // desks for agents with no role) and the rooms of agents seated there. A function floor holds the rooms of its agents, or
+  // one room of open desks when it has none. With bots, each room also lists its sessions (for previews); the scene gets
+  // its bots from events instead.
+  // Returns { def, floors: { fn: { id, rooms: { root: roomId }, spare } }, homes, keys: { roomId: noteKey }, roots: { roomId: root },
+  //           security, sig }. sig: the floor keys in order (a change of it needs a new mount).
   function describe(repo, snap, withBots) {
-    var byBranch = {}, order = [], name = repo ? '' : OTHER, bots = {}, taken = {};
-    var rp = repoOf(snap, repo), places = rp ? rp.worktrees.map(function (w) { return fromPlace(w.place); }) : [];
+    var name = repo ? '' : OTHER, bots = {}, taken = {};
+    var shown = shownFloors(snap, repo), w = wanted(snap, repo, shown);
     live(snap).forEach(function (s) {
       var pl = placeOf(s);
-      places.push(pl);
-      if (withBots && pl.repo === repo) (bots[pl.root] = bots[pl.root] || []).push(withColor({ uid: s.uid, name: previewName(taken, s.name), role: 'coder', shape: shapeOf(s.uid), status: V.status(s).key, word: V.status(s).word, task: V.taskLine(s) }, s.uid));
+      if (pl.repo === repo) name = pl.repoName;
+      if (withBots && pl.repo === repo) {
+        var fn = seatOf(s, shown), fl = shown.filter(function (f) { return f.id === fn; })[0];
+        (bots[fn + '|' + pl.root] = bots[fn + '|' + pl.root] || []).push(withColor({ uid: s.uid, name: previewName(taken, s.name), role: (fl && fl.role) || 'coder', shape: shapeOf(s.uid), status: V.status(s).key, word: V.status(s).word, task: V.taskLine(s) }, s.uid));
+      }
     });
-    places.forEach(function (pl) {
-      if (pl.repo !== repo) return;
-      name = pl.repoName;
-      if (!byBranch[pl.branch]) { byBranch[pl.branch] = {}; order.push(pl.branch); }
-      byBranch[pl.branch][pl.root] = pl;
-    });
-    order.sort(function (a, b) { return (/^(main|master|trunk)$/.test(b) ? 1 : 0) - (/^(main|master|trunk)$/.test(a) ? 1 : 0); });
-    var map = {}, nextId = 1, keys = {}, roomPlaces = {};
-    var floors = order.map(function (br) {
-      var f = map[br] = { id: nextId++, rooms: {} };
-      var rooms = Object.keys(byBranch[br]).map(function (rootKey) {
-        var r = roomDef(byBranch[br][rootKey]); f.rooms[rootKey] = r.id; keys[r.id] = byBranch[br][rootKey].noteKey; roomPlaces[r.id] = byBranch[br][rootKey];
-        if (withBots) r.bots = bots[rootKey] || [];
-        return r;
+    var rp = repoOf(snap, repo);
+    if (rp) name = rp.name;
+    var map = {}, keys = {}, roots = {}, signs = {}, places = {};
+    var floors = shown.map(function (f, i) {
+      var id = i + 1, rooms = [], m = map[f.id] = { id: id, rooms: {}, spare: false };
+      w.list.forEach(function (x) {
+        if (x.fn !== f.id) return;
+        var rid = roomIdOn(x.pl, f.id, w.homes[x.pl.root]), r = roomDef(snap, x.pl, rid, f.role);
+        m.rooms[x.pl.root] = rid; keys[rid] = x.pl.noteKey; roots[rid] = x.pl.root; places[rid] = x.pl; signs[rid] = r.name + '\n' + r.note;
+        if (withBots) r.bots = bots[f.id + '|' + x.pl.root] || [];
+        rooms.push(r);
       });
-      return floorDef(f.id, br, rooms);
+      if (f.id === LOBBY) rooms.unshift(receptionDef());
+      else if (!rooms.length) { rooms.push(spareDef(f.id, f.role)); m.spare = true; }
+      return floorDef(id, f, rooms);
     });
-    // An empty building still needs a floor to stand on.
-    var empty = !floors.length;
-    // It holds one spare room: the first session renames the floor and the room in place (floor.update, room.update), so the scene is not mounted again.
-    if (empty) { floors = [floorDef(1, 'No sessions', [{ id: SPARE_ROOM, type: 'lab', name: 'Empty room', bots: [] }])]; nextId = 2; }
-    var mine = places.filter(function (pl) { return pl.repo === repo && pl.securityRoomId; })[0];
+    var mine = live(snap).map(placeOf).filter(function (pl) { return pl.repo === repo && pl.securityRoomId; })[0];
     var sec = (rp && rp.securityRoomId) || (mine && mine.securityRoomId) || null;
     if (sec) floors[0].rooms.unshift(securityDef(sec));
-    return { def: { name: name || (repo ? base(repo) : OTHER), sessions: 'agent', floors: floors }, floors: map, nextId: nextId, keys: keys, places: roomPlaces, empty: empty, security: sec };
+    return { def: { name: name || (repo ? base(repo) : OTHER), sessions: 'agent', floors: floors }, floors: map, homes: w.homes, keys: keys, roots: roots, places: places, signs: signs, security: sec,
+      sig: shown.map(function (f) { return f.id; }).join('|') };
   }
 
   function createStore(opts) {
@@ -278,12 +333,16 @@
 
     store.mount = function (repo) {
       var d = describe(repo, latest, false);
-      function freshLayout() { return { floors: JSON.parse(JSON.stringify(d.floors)), nextId: d.nextId, keys: Object.assign({}, d.keys), places: Object.assign({}, d.places), spare: d.empty }; }
+      function freshLayout() { return { floors: JSON.parse(JSON.stringify(d.floors)), homes: Object.assign({}, d.homes), keys: Object.assign({}, d.keys), roots: Object.assign({}, d.roots), places: Object.assign({}, d.places), signs: Object.assign({}, d.signs) }; }
       var layout = freshLayout();
+      // The shown floors this scene was built with: their keys in order (a change needs a new mount) and their names (a
+      // rename is a floor.update in place).
+      var shown0 = shownFloors(latest, repo), names = {};
+      shown0.forEach(function (f) { names[f.id] = clip(f.name, 22); });
       // Rooms that were a worktree of this building. Only a worktree that goes makes the scene stale: a room a
       // session made stays on screen, empty, when the session ends, and the next session in that folder uses it.
       var wtSeen = {};
-      function seeWorktrees(snap) { var rp = repoOf(snap, repo); if (rp) rp.worktrees.forEach(function (w) { wtSeen[w.place.floor + '|' + w.place.rootKey] = true; }); }
+      function seeWorktrees(snap) { var rp = repoOf(snap, repo); if (rp) rp.worktrees.forEach(function (w) { wtSeen[w.place.rootKey] = true; }); }
       seeWorktrees(latest);
       var known = {};   // uid -> mirror of what the scene was told
       var taken = {};   // bot name -> true. A helper name stays here for the life of the mount (#94).
@@ -294,32 +353,51 @@
       function uniqueName(b) {
         return previewName(taken, b);
       }
-      // The room of a session in this building. Adds its floor or room when it is new.
-      function roomOf(pl, emit) {
-        var f = layout.floors[pl.branch];
-        if (!f) {
-          var r = roomDef(pl);
-          layout.keys[r.id] = pl.noteKey; layout.places[r.id] = pl;
-          if (layout.spare) {   // the empty building's spare floor and room become this floor and room
-            layout.spare = false;
-            f = layout.floors[pl.branch] = { id: 1, rooms: {} };
-            f.rooms[pl.root] = r.id;
-            emit({ type: 'floor.update', floorId: 1, floor: { name: floorDef(1, pl.branch, []).name } });
-            emit({ type: 'room.update', roomId: SPARE_ROOM, room: { id: r.id, name: r.name } });
-            return r.id;
-          }
-          f = layout.floors[pl.branch] = { id: layout.nextId++, rooms: {} };
-          f.rooms[pl.root] = r.id;
-          emit({ type: 'floor.add', floor: floorDef(f.id, pl.branch, [r]) });
-          return r.id;
+      // The room of a workspace on one floor of this building (fn: a shown floor key). Adds the room when it is new: the floor's
+      // room of open desks becomes it (room.update), or it joins the floor (room.add). A room never changes floor.
+      function roomOf(pl, fn, emit, snap) {
+        var f = layout.floors[fn] || layout.floors[LOBBY];
+        if (!layout.floors[fn]) fn = LOBBY;
+        if (f.rooms[pl.root]) return f.rooms[pl.root];
+        if (!layout.homes[pl.root]) layout.homes[pl.root] = fn;
+        var fr = shownFloors(snap, repo).filter(function (x) { return x.id === fn; })[0];
+        var id = roomIdOn(pl, fn, layout.homes[pl.root]), r = roomDef(snap, pl, id, fr && fr.role);
+        layout.keys[id] = pl.noteKey; layout.roots[id] = pl.root; layout.places[id] = pl; layout.signs[id] = r.name + '\n' + r.note;
+        f.rooms[pl.root] = id;
+        if (f.spare) {
+          f.spare = false;
+          emit({ type: 'room.update', roomId: SPARE + fn, room: { id: id, name: r.name, note: r.note, spare: r.spare, spareRole: r.spareRole } });
+          return id;
         }
-        if (!f.rooms[pl.root]) {
-          var r2 = roomDef(pl);
-          layout.keys[r2.id] = pl.noteKey; layout.places[r2.id] = pl;
-          f.rooms[pl.root] = r2.id;
-          emit({ type: 'room.add', floorId: f.id, room: r2 });
-        }
-        return f.rooms[pl.root];
+        emit({ type: 'room.add', floorId: f.id, room: r });
+        return id;
+      }
+      // Names and small print of the rooms on screen follow the snapshot (a first prompt names a room; a second agent makes it shared).
+      function syncRooms(snap, emit) {
+        Object.keys(layout.floors).forEach(function (fn) {
+          var f = layout.floors[fn];
+          Object.keys(f.rooms).forEach(function (root) {
+            var id = f.rooms[root], pl = placeFor(snap, root);
+            if (!pl) return;
+            var name = titleOf(snap, pl), note = noteOf(snap, pl), sig = name + '\n' + note;
+            if (layout.signs[id] === sig) return;
+            layout.signs[id] = sig;
+            emit({ type: 'room.update', roomId: id, room: { name: name, note: note } });
+          });
+        });
+        shownFloors(snap, repo).forEach(function (fl) {
+          var n = clip(fl.name, 22), f = layout.floors[fl.id];
+          if (!f || names[fl.id] === n) return;
+          names[fl.id] = n;
+          emit({ type: 'floor.update', floorId: f.id, floor: { name: n } });
+        });
+      }
+      // The place of a workspace of this building: a live session's, else its worktree's.
+      function placeFor(snap, root) {
+        var s0 = live(snap).filter(function (x) { var p = placeOf(x); return p.repo === repo && p.root === root; })[0];
+        if (s0) return placeOf(s0);
+        var rp = repoOf(snap, repo), w = rp && rp.worktrees.filter(function (x) { return x.place.rootKey === root; })[0];
+        return w ? fromPlace(w.place) : null;
       }
 
       function syncHelpers(s, k, emit) {
@@ -407,15 +485,20 @@
         var restore = function (e) { delete e.at; seeded(e); };
         var base = seedAll ? seeded : out;
         // empty rooms: worktrees of this building that no session uses
-        var rp = repoOf(snapshot, repo);
-        if (rp) rp.worktrees.forEach(function (w) { roomOf(fromPlace(w.place), base); });
+        var shownNow = shownFloors(snapshot, repo), want = wanted(snapshot, repo, shownNow);
+        want.list.forEach(function (x) { if (!layout.homes[x.pl.root] && want.homes[x.pl.root]) layout.homes[x.pl.root] = want.homes[x.pl.root]; });
+        // rooms with no agent of this building on that floor (a worktree's record); a session's room comes when it is seated
+        var seated = {};
+        live(snapshot).forEach(function (s) { var p = placeOf(s); if (p.repo === repo) seated[seatOf(s, shownNow) + '|' + p.root] = true; });
+        want.list.forEach(function (x) { if (!seated[x.fn + '|' + x.pl.root]) roomOf(x.pl, x.fn, base, snapshot); });
+        syncRooms(snapshot, base);
         snapshot.sessions.forEach(function (s) {
           if (!s.place) return;   // wait until the server knows the repo and branch
-          var pl = placeOf(s), k = known[s.uid], emit = base, prev = null;
+          var pl = placeOf(s), k = known[s.uid], emit = base, prev = null, fn = pl.repo === repo ? seatOf(s, shownNow) : '';
           // the session checked out another branch, or moved to another folder: seat it again. So does a changed card line
           // (a supervision label: an agent whose config turned out not to ask; a Paperclip role and company, #76, once the office
           // watches that company): the DS sets the card's platform and owner lines only when the bot is added.
-          if (k && !k.ended && (k.place !== placeKey(pl) || k.sup !== V.supervision(s) || k.card !== cardOf(s))) {
+          if (k && !k.ended && (k.place !== placeKey(pl, fn) || k.sup !== V.supervision(s) || k.card !== cardOf(s))) {
             dismissHelpers(k, emit, 'Moved with its session');
             emit({ type: 'bot.remove', bot: k.name }); delete taken[k.name]; delete known[s.uid];
             prev = k; k = null;
@@ -428,14 +511,15 @@
           if (!k) {
             if (s.status === 'ended') return;
             var name = uniqueName(s.name);
-            k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: V.status(s).key, task: V.taskLine(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, olderDone: false, held: false, firstKind: seedAll ? 'seed' : 'restore', prevSeen: prev ? prev.replySeen : null, errKind: seedAll ? 'seed' : 'restore', errPrev: prev ? prev.errorSeen : null, model: s.model, ended: false, place: placeKey(pl), sup: V.supervision(s), card: cardOf(s), room: roomOf(pl, emit) };
+            k = known[s.uid] = { asked: {}, inbox: 0, replySeen: 0, name: name, status: V.status(s).key, task: V.taskLine(s), calls: {}, helpers: {}, helpersDone: {}, planSig: '', planState: [], errorSeen: 0, olderDone: false, held: false, firstKind: seedAll ? 'seed' : 'restore', prevSeen: prev ? prev.replySeen : null, errKind: seedAll ? 'seed' : 'restore', errPrev: prev ? prev.errorSeen : null, model: s.model, ended: false, place: placeKey(pl, fn), sup: V.supervision(s), room: roomOf(pl, fn, emit, snapshot), fn: fn, card: cardOf(s) };
             // platform: the line on the bot's card: the supervision label of an ungated agent, else its agent kind (Claude Code,
             // Ollama, ...), the same word every list shows (vocab.js)
             // The old seat held its replies (the older ones were still loading), so it told none of them: this seat tells them
             // the way the old seat would have (a first sight, or what it had seen before), and keeps the wait for newer ones.
             // The same for its error: errKind and errPrev say how the error is told, because the pass that tells it may come later.
             if (prev && prev.held) { k.firstKind = prev.firstKind; k.prevSeen = prev.prevSeen; k.holdTop = prev.holdTop; k.errKind = prev.errKind; k.errPrev = prev.errPrev; k.errTop = prev.errTop; }
-            var bot = withColor({ name: name, role: 'coder', shape: shapeOf(s.uid), status: k.status, task: k.task, platform: V.platform(s, snapshot.kinds), identity: s.cwd }, s.uid);
+            var fdef = shownNow.filter(function (x) { return x.id === k.fn; })[0];
+            var bot = withColor({ name: name, role: (fdef && fdef.role) || 'coder', shape: shapeOf(s.uid), status: k.status, task: k.task, platform: V.platform(s, snapshot.kinds), identity: s.cwd }, s.uid);
             // a Paperclip run (#76): the company and the Paperclip agent own it (its budget is on the stats display, terminal.js)
             if (s.hq) bot.owner = ownerOf(s);
             if (s.skills && s.skills.length) bot.skills = s.skills.slice(0, 16);
@@ -578,40 +662,84 @@
 
       // The id of this building's Security room, or null (the server gave none: a building with no place yet).
       m.securityRoom = function () { return d.security; };
+      // The workspaces on screen, as roots (a workspace with rooms on two floors once).
       m.roomsShown = function () {
-        var out = [];
-        Object.keys(layout.floors).forEach(function (br) { Object.keys(layout.floors[br].rooms).forEach(function (root) { out.push(br + '|' + root); }); });
-        return out;
+        var out = {};
+        Object.keys(layout.floors).forEach(function (fn) { Object.keys(layout.floors[fn].rooms).forEach(function (root) { out[root] = true; }); });
+        return Object.keys(out);
       };
-      // The branch a DS floor id stands for in this scene (the layout follows the floors added later), or null.
-      m.floorBranch = function (id) {
-        for (var br in layout.floors) { if (layout.floors[br].id === id) return br; }
+      // The floor key ('lobby', 'engineering', ...) a DS floor id stands for in this scene, or null.
+      m.floorKey = function (id) {
+        for (var fn in layout.floors) { if (layout.floors[fn].id === id) return fn; }
         return null;
       };
-      // The id of the floor of a branch in the definition this scene starts with, or null.
-      m.floorId = function (branch) { var f = d.floors[branch]; return f ? f.id : null; };
-      m.stale = function (snap) {
-        var nowRooms = roomsNow(snap || latest, repo);
-        seeWorktrees(snap || latest);
-        if (m.roomsShown().some(function (k) { return !nowRooms[k] && wtSeen[k]; })) return true;
-        return false;
+      // The DS id of a floor key in this scene, or null.
+      m.floorId = function (fn) { var f = layout.floors[fn]; return f ? f.id : null; };
+      // The floor key of a DS room id in this scene (a room of open desks too), or null.
+      m.roomFloor = function (roomId) {
+        if (roomId === RECEPTION) return LOBBY;
+        if (String(roomId).indexOf(SPARE) === 0 && layout.floors[String(roomId).slice(SPARE.length)]) return String(roomId).slice(SPARE.length);
+        for (var fn in layout.floors) { var rs = layout.floors[fn].rooms; for (var r in rs) if (rs[r] === roomId) return fn; }
+        return null;
       };
-      // The empty building's spare room has no place and no notes key: it holds no board, notes or room tools until a session or worktree takes it.
-      m.spare = function () { return !!layout.spare; };
+      // The floors this scene shows, bottom up: { id, key, name, wing, wingName, role }.
+      m.floors = function () { return shown0.map(function (f) { return { id: layout.floors[f.id].id, key: f.id, name: names[f.id] || f.name, wing: f.wing, wingName: f.wingName, role: f.role }; }); };
+      // True when the scene shows a worktree room that is gone, or the building's floors are not the ones it was built with
+      // (an archetype switch, a floor added, hidden or moved: the DS has no event that removes or moves a floor).
+      m.stale = function (snap) {
+        var sn = snap || latest, nowRooms = roomsNow(sn, repo);
+        seeWorktrees(sn);
+        if (m.roomsShown().some(function (k) { return !nowRooms[k] && wtSeen[k]; })) return true;
+        return shownFloors(sn, repo).map(function (f) { return f.id; }).join('|') !== d.sig;
+      };
+      // The empty building has no workspace room: only rooms of open desks and the Reception, which hold no board, notes or room tools.
+      m.spare = function () { return !Object.keys(layout.keys).length; };
       m.usable = function (roomId, snap) { return !!m.noteKey(roomId, snap); };
-      // The open sessions in one room of this building, and that room's place.
+      // The open sessions in one room of this building, and that room's place. A room on a second floor shows only the
+      // sessions seated on that floor.
       m.roomInfo = function (roomId, snap) {
-        var s = snap || latest, out = { sessions: [], place: null };
-        live(s).forEach(function (x) { var pl = placeOf(x); if (pl.repo === repo && pl.roomId === roomId) { out.sessions.push(x); out.place = pl; } });
-        if (!out.place) {
-          var rp = repoOf(s, repo);
-          (rp ? rp.worktrees : []).forEach(function (w) { var pl = fromPlace(w.place); if (pl.roomId === roomId) out.place = pl; });
-          if (!out.place) out.place = layout.places[roomId] || null;   // a room a session made, empty now: the layout remembers its place
-        }
+        var s = snap || latest, out = { sessions: [], place: null }, root = layout.roots[roomId], fn = m.roomFloor(roomId), sh = shownFloors(s, repo);
+        if (!root) return out;
+        live(s).forEach(function (x) { var pl = placeOf(x); if (pl.repo === repo && pl.root === root) { out.place = pl; if (seatOf(x, sh) === fn) out.sessions.push(x); } });
+        if (!out.place) out.place = placeFor(s, root) || layout.places[roomId] || null;   // a room a session made, empty now: the layout remembers its place
+        return out;
+      };
+      // The names of the bots seated on each floor of this scene: { floorId: [names] } (the directory board).
+      m.agentsByFloor = function () {
+        var out = {};
+        Object.keys(known).forEach(function (uid) { var k = known[uid], f = layout.floors[k.fn] || layout.floors[LOBBY]; if (!k.ended) (out[f.id] = out[f.id] || []).push(k.name); });
+        return out;
+      };
+      // The room of open desks of a floor while it has no agent room, else its first room (an open desk is in every room), or null.
+      m.spareRoomOf = function (fn) {
+        var f = layout.floors[fn];
+        if (!f) return null;
+        if (f.spare) return SPARE + fn;
+        if (fn === LOBBY) return RECEPTION;
+        var ids = Object.keys(f.rooms).map(function (r) { return f.rooms[r]; });
+        return ids[0] || null;
+      };
+      // The worst state of the desks of this building, its floors and its rooms (vocab.js worst): the room doors, the elevator
+      // buttons and the city windows. { building, floors: { floorId: state }, rooms: { roomId: state } }; null where no desk is.
+      m.rollup = function () {
+        var rooms = {}, floors = {}, all = [];
+        Object.keys(known).forEach(function (uid) {
+          var k = known[uid];
+          if (k.ended) return;
+          (rooms[k.room] = rooms[k.room] || []).push(k.status);
+          var f = layout.floors[k.fn] || layout.floors[LOBBY];
+          (floors[f.id] = floors[f.id] || []).push(k.status);
+          all.push(k.status);
+        });
+        var out = { building: worst(all), floors: {}, rooms: {} };
+        Object.keys(rooms).forEach(function (r) { out.rooms[r] = worst(rooms[r]); });
+        Object.keys(floors).forEach(function (f) { out.floors[f] = worst(floors[f]); });
         return out;
       };
       // The key of a room's notes board and pin, from the server (the layout remembers it for a room the snapshot dropped).
       m.noteKey = function (roomId, snap) { var p = m.roomInfo(roomId, snap).place; return p ? p.noteKey : (layout.keys[roomId] || ''); };
+      // The DS room id of a place room id on screen (its home room), or null.
+      m.dsRoom = function (placeRoomId) { for (var id in layout.roots) if (baseRoomId(id) === placeRoomId) return id; return null; };
       // The server's figures for one room (computed once per snapshot, keyed by the notes key). Zeros for a room with no session.
       m.figures = function (roomId, snap) {
         var s = snap || latest, nk = m.noteKey(roomId, s);
@@ -643,54 +771,54 @@
     return store;
   }
 
-  // The floor a new scene of a building starts on (#85, #111), as { id, branch }. The page always gets a floor, so it
-  // never relies on the DS default (the third floor, often empty). Null only for no mount. In this order:
-  //   was     the branch on screen before a rebuild of the same building (#85); null for another building or the city
-  //   busy    the floor with the most live sessions; a tie goes to the lower floor
-  //   picked  the branch the user chose last in this building
-  //   first   the first floor of the building (the default branch), or its spare floor when it is empty (branch null)
-  // Floor ids are new for each mount, so every match is by branch.
+  // The floor a new scene of a building starts on (#85, #111), as { id, key } (key: the floor key, 'lobby', 'engineering', ...).
+  // The page always gets a floor, so it never relies on the DS default. Null only for no mount. In this order:
+  //   was     the floor on screen before a rebuild of the same building (#85); null for another building or the city
+  //   busy    the floor with the most live sessions (by seat); a tie goes to the lower floor
+  //   picked  the floor the user chose last in this building
+  //   first   the ground floor (the Lobby)
+  // Floor ids are new for each mount, so every match is by floor key.
   function startFloor(toMount, snap, was, picked) {
     if (!toMount) return null;
-    function by(branch) { var id = branch == null ? null : toMount.floorId(branch); return id == null ? null : { id: id, branch: branch }; }
+    function by(key) { var id = key == null ? null : toMount.floorId(key); return id == null ? null : { id: id, key: key }; }
     var hit = by(was);
     if (hit) return hit;
-    var count = {}, best = null;
-    live(snap).forEach(function (s) { var pl = placeOf(s); if (pl.repo === toMount.repo) count[pl.branch] = (count[pl.branch] || 0) + 1; });
-    Object.keys(count).forEach(function (br) {
-      var bid = toMount.floorId(br);
+    var count = {}, best = null, shown = shownFloors(snap, toMount.repo);
+    live(snap).forEach(function (s) { var pl = placeOf(s); if (pl.repo === toMount.repo) { var fn = seatOf(s, shown); count[fn] = (count[fn] || 0) + 1; } });
+    Object.keys(count).forEach(function (fn) {
+      var bid = toMount.floorId(fn);
       if (bid == null) return;
-      if (!best || count[br] > best.n || (count[br] === best.n && bid < best.id)) best = { id: bid, branch: br, n: count[br] };
+      if (!best || count[fn] > best.n || (count[fn] === best.n && bid < best.id)) best = { id: bid, key: fn, n: count[fn] };
     });
-    if (best) return { id: best.id, branch: best.branch };
+    if (best) return { id: best.id, key: best.key };
     hit = by(picked);
     if (hit) return hit;
     var f0 = toMount.def && toMount.def.floors && toMount.def.floors[0];
-    return f0 ? { id: f0.id, branch: toMount.floorBranch(f0.id) } : null;
+    return f0 ? { id: f0.id, key: toMount.floorKey(f0.id) } : null;
   }
 
   // What the page remembers of floors, per building, for the life of the page (#111). One rule owns the whole choice:
   //   start(mount, snap, was)  the floor a new scene opens on (startFloor); the page opens exactly that floor
-  //   see(repo, branch)        the floor on screen now (a poll while the scene shows, and when it is left). A floor
+  //   see(repo, key)           the floor on screen now (a poll while the scene shows, and when it is left). A floor
   //                            other than the last one seen is a move of the user: the page itself moves nobody. The
   //                            floor the page opened is not a pick. null (the building view) changes nothing.
-  //   picked(repo)             the branch the user moved to last, or null
+  //   picked(repo)             the floor key the user moved to last, or null
   function floorMemory() {
     var picked = {}, last = {};
     return {
       start: function (mount, snap, was) {
         var f = startFloor(mount, snap, was, mount ? picked[mount.repo] : null);
-        if (mount) last[mount.repo] = f ? f.branch : null;
+        if (mount) last[mount.repo] = f ? f.key : null;
         return f;
       },
-      see: function (repo, branch) {
-        if (branch == null) return;
-        if (last[repo] != null && branch !== last[repo]) picked[repo] = branch;
-        last[repo] = branch;
+      see: function (repo, key) {
+        if (key == null) return;
+        if (last[repo] != null && key !== last[repo]) picked[repo] = key;
+        last[repo] = key;
       },
       picked: function (repo) { return picked[repo] == null ? null : picked[repo]; }
     };
   }
 
-  root.OfficeBuilding = { createStore: createStore, startFloor: startFloor, floorMemory: floorMemory, shapeOf: shapeOf, colorOf: colorOf, buildings: buildings, requests: requests, describe: describe, roomsNow: roomsNow };
+  root.OfficeBuilding = { createStore: createStore, startFloor: startFloor, floorMemory: floorMemory, shapeOf: shapeOf, colorOf: colorOf, buildings: buildings, requests: requests, describe: describe, roomsNow: roomsNow, tagOf: tagOf, baseRoomId: baseRoomId, EMPTY_NOTE: EMPTY_NOTE };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

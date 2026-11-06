@@ -20,7 +20,7 @@ for (const f of files) {
   });
 }
 
-// #47 and #48: the palette sits above every dialog, and the welcome card sits below both and fits a narrow screen.
+// #47 and #48: the palette sits above every dialog.
 const css = readFileSync(join(pub, 'office.css'), 'utf8').replace(/\r\n/g, '\n');
 const rule = (sel) => {
   const at = css.indexOf(`\n${sel} {`);
@@ -65,20 +65,49 @@ test('office.js: only Check again asks the server for a fresh provider round; op
   assert.equal([...office.matchAll(/'\/api\/providers/g)].length, 2, 'no other page code asks for the provider status');
 });
 
-test('office.js: the welcome card waits while the Since you left card shows, and the dock holds the primary button then (#66)', () => {
+// #92: the dock goes away. Its actions are in the scene (open desks, the reception memo, the elevator) and in Ctrl+K, and the
+// Reception lists the office's own actions, so a touch screen reaches them with no keyboard.
+test('office.js: no dock and no welcome card; the Reception holds the office actions; the scene reports Since you left (#66, #92)', () => {
   assert.match(office, /h\(A\.OfficeScene, \{[^\n]*\n(?:[^\n]*\n){0,12}?[^\n]*onSinceYouLeft: setSyl/, 'the scene reports the card');
-  // It also waits while the camera looks at a screen: the Security room screens work with no session (#70).
-  assert.match(office, /var welcome = !!snap && !live\.length && !p\.syl && !p\.look;/);
-  assert.match(office, /h\(Controls, \{[^\n]*\blook: !!look\b/);
-  assert.match(office, /welcome \? h\('div', \{ className: 'welcome' \}/);
-  assert.match(office, /h\(A\.Button, \{ variant: welcome \? 'quiet' : 'primary', icon: 'add'/);
-  assert.match(office, /h\(Controls, \{[^\n]*\bsyl: syl && cur2\.view === 'office'/);
+  assert.doesNotMatch(office, /className: 'strip'|function Controls\(|className: 'welcome'/);
+  assert.doesNotMatch(css, /\.strip\b|\.welcome\b/);
+  const ids = office.match(/var officeActions = actions\.filter\(function \(a\) \{ return \[([^\]]*)\]/);
+  assert.ok(ids, 'the Reception actions');
+  for (const id of ['page-open', 'page-needs', 'page-sessions', 'page-past', 'page-schedules', 'page-hooks', 'page-kinds', 'page-city', 'page-compact']) assert.ok(ids[1].includes(`'${id}'`), id);
+  assert.match(office, /d === 'reception' \? h\(ReceptionDialog, \{ repo: shown, actions: officeActions/);
+  assert.match(office, /floorsTitle: 'Elevator'/);
 });
 
-test('office.css: at 820 px and below the empty room card gives way to the welcome card, not the inbox (#53)', () => {
-  assert.match(css, /#office:has\(\.welcome\) \.ao-hud-right:not\(\.ao-hud-inbox\) \{ display: none; \}/);
-  const m = css.match(/@media \(max-width: 820px\) \{[^@]*?#office:has\(\.welcome\) \.ao-hud-right/);
-  assert.ok(m, 'the rule sits in the 820 px block');
+// #92 review: the dock had Needs you for every building. Without it, the scene's top bar and the city panel show the count of the
+// one Notifier (officeAdapter.requests), and one tap goes to the oldest request: needs[0], as the bezel of #89 does.
+test('office.js: Needs you in the scene top bar and the city panel: the Notifier count, and one tap goes to the oldest request', () => {
+  assert.match(office, /waitingCount: needs\.length, onWaiting: goOldest,/, 'the scene: the page total and the oldest request');
+  assert.match(office, /h\(A\.Notifier, \{ enabled: alertsOn\(\), count: needs\.length,/, 'the same count as the tab title');
+  assert.match(office, /function goOldest\(\) \{ var r = needs\[0\]; if \(r\) openDesk\(r\.uid, 'chat'\); \}/, 'the oldest request opens its desk screen (#89)');
+  assert.match(office, /h\(CityView, \{ key: 'city', shown: shown, onEnter: enter, needs: needs\.length, onNeeds: goOldest, onHq: function \(\) \{ setDlg\(\{ name: 'hq' \}\); \} \}\)/, 'the city too');
+  assert.match(office, /p\.needs > 0 \? h\(A\.Button, \{ variant: 'emphasis', icon: 'waiting', className: 'city-needs',[^\n]*onClick: p\.onNeeds \}, 'Needs you · ' \+ p\.needs\)/);
+  assert.match(css, /@media \(pointer: coarse\) \{ \.city-needs \{ min-height: 44px; \} \}/);
+});
+
+// #92 review: one button ends the tour on each stop. The last stop had Close and Done, both onDone.
+test('office.js: the lobby tour has one way to end it on each stop: Skip the tour, then Done on the last stop', () => {
+  const card = office.match(/function TourCard\(p\) \{[\s\S]*?\n  \}\n/);
+  assert.ok(card, 'TourCard');
+  assert.equal((card[0].match(/onClick: p\.onDone/g) || []).length, 2, 'two places end the tour');
+  assert.match(card[0], /last \? null : h\(A\.Button, \{ variant: 'quiet', onClick: p\.onDone \}, 'Skip the tour'\)/, 'Skip only before the last stop');
+  assert.match(card[0], /last \? h\(A\.Button, \{ variant: 'primary', onClick: p\.onDone \}, 'Done'\)/, 'Done only on the last stop');
+  assert.doesNotMatch(card[0], /'Close'/);
+});
+
+// #92: the lobby tour card centres with translate (not transform, #47), only fades, fits a phone, and leaves the look bar free.
+test('office.css: the tour card centres with translate, only fades and fits the viewport (#47, #92)', () => {
+  const r = (css.match(/\n\.tour-card \{\n([\s\S]*?)\n\}/) || [])[1] || '';
+  assert.match(r, /z-index:\s*var\(--z-sheet\)/);
+  assert.match(r, /translate:\s*-50%\s+0/);
+  assert.doesNotMatch(r, /transform:/);
+  assert.match(r, /width:\s*min\(440px, calc\(100vw - 2 \* var\(--space-4\)\)\)/);
+  assert.match(r, /box-sizing:\s*border-box/);
+  assert.match(css, /\n\.tour-card \{ animation: page-fade /);
 });
 
 test('office.css: the page fade holds no fill, so .ao-office is no stacking context (#47 #48)', () => {
@@ -88,46 +117,9 @@ test('office.css: the page fade holds no fill, so .ao-office is no stacking cont
   assert.doesNotMatch(m[1], /\b(both|forwards)\b/);
 });
 
-test('office.css: the welcome card centres with translate (not transform), only fades and fits the viewport (#47)', () => {
-  const r = rule('.welcome');
-  assert.match(r, /z-index:\s*var\(--z-(hud|sheet|tag)\)/);
-  assert.match(r, /max-width:/);
-  assert.match(r, /translate:\s*-50%\s+-50%/);
-  assert.doesNotMatch(r, /transform:/);
-  assert.match(css, /\n\.welcome \{ animation: page-fade /);
-});
-
-test('office.css: the welcome card max-width includes its padding, and the wordmark shrinks to the card (Sublevel at 400 px)', () => {
-  assert.match(rule('.welcome'), /box-sizing:\s*border-box/);
-  assert.match(css, /\n\.welcome-logo \.ao-lockup \{ min-width: 0; max-width: 100%; \}/);
-  assert.match(css, /\n\.welcome-logo \.ao-lockup svg \{ min-width: 0; max-width: 100%; height: auto; \}/);
-});
-
 test('office.css: at 820 px and below the Since you left card and the room card do not share the dock edge (#66)', () => {
   const m = css.match(/@media \(max-width: 820px\) \{[^@]*?#office:has\(\.ao-hud-syl\) \.ao-hud-right:not\(\.ao-hud-inbox\):not\(\.ao-hud-chat\) \{ display: none; \}/);
   assert.ok(m, 'the rule sits in the 820 px block');
-});
-
-test('office.css: at 820 px and below the welcome card centres in the screen, between the top tools and the dock (#52)', () => {
-  const m = css.match(/@media \(max-width: 820px\) \{[^\n]*\.welcome \{([^}]*)\}/);
-  assert.ok(m, 'narrow .welcome rule');
-  assert.match(m[1], /top:\s*50%/);
-  assert.match(m[1], /left:\s*50%/);
-});
-
-test('office.css: short windows shrink the welcome card, and landscape drops it into the band above the dock (#52 follow-up)', () => {
-  const tier = css.match(/@media \(max-height: 760px\) \{([\s\S]*?)\n\}/);
-  assert.ok(tier, 'max-height 760 query');
-  assert.match(tier[1], /\.welcome \{[^}]*padding:/);
-  assert.match(tier[1], /\.welcome-logo \.ao-lockup \{[^}]*zoom:/);
-  const tight = css.match(/@media \(max-height: 640px\) \{([\s\S]*?)\n\}/);
-  assert.ok(tight, 'max-height 640 query');
-  assert.match(tight[1], /\.welcome-logo \{ display: none/);
-  const land = css.match(/@media \(max-height: 460px\) \{\s*\.welcome \{([^}]*)\}/);
-  assert.ok(land, 'max-height 460 .welcome rule');
-  assert.match(land[1], /top:\s*calc\(50% \+ var\(--space-4\)\)/);
-  // none of the short rules touches the centring, z-index or animation (#47)
-  for (const m of [tier[1], tight[1], land[1]]) { assert.doesNotMatch(m, /z-index|animation|transform|translate/); }
 });
 
 // Review minor: the security office type (#70) had no picture, so OfficeTypeCard showed its badge only. Every office type has a
