@@ -235,10 +235,16 @@ export function scrubIssue(i) {
 }
 // a project or a routine: its id and the key names of its env, nothing else of the env
 const envOnly = (x) => ({ ...x, env: Object.fromEntries(envKeys(x && x.env).map((k) => [k, ''])) });
+// The two lists above are what the office knows of Claude Code 2.1.318 and Node: they cannot be complete. So a key of the
+// families that configure Claude Code or the hook program (CLAUDE_CODE_*, CLAUDE_BG_*, NODE_*) that the office has not
+// read is Partly supervised, except these, which only carry a login, a provider choice or a size (review 76, round 4).
+const ENV_KNOWN_SAFE = new Set(['NODE_ENV', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY', 'CLAUDE_CODE_MAX_OUTPUT_TOKENS']);
+const ENV_FAMILY = /^(CLAUDE_CODE_|CLAUDE_BG_|NODE_)/;
 function envRead(keys) {
   const names = strings(keys).map((k) => k.toUpperCase());
   for (const k of names) if (Object.hasOwn(ENV_OFF, k)) return { why: `Its env has ${k}, which ${ENV_OFF[k]}.`, partly: '' };
   for (const k of names) if (Object.hasOwn(ENV_LOAD, k)) return { why: '', partly: `Its env has ${k}, which ${ENV_LOAD[k]}.` };
+  for (const k of names) if (ENV_FAMILY.test(k) && !ENV_KNOWN_SAFE.has(k)) return { why: '', partly: `Its env has ${k}, a setting of Claude Code or Node that the office does not know, so it cannot tell if it keeps the office hooks.` };
   return { why: '', partly: '' };
 }
 
@@ -344,8 +350,8 @@ export function supervisionOf(agent, hooksFile, { issues = [], lastRun = null, u
     if (e.why) return { state: 'unsupervised', label: 'Unsupervised: its env turns off the office', why: `For ${l.name}: ${e.why} Supervise in office does not change env: change it in Paperclip.`, can: false };
     if (e.partly) return { state: 'partly', label: `Partly supervised: ${PARTLY.env[0]}`, why: `For ${l.name}: ${e.partly}`, can: false };
   }
-  // A model profile or an issue's adapter overrides are merged over the config for some runs (heartbeat.ts), on their own or
-  // together, and a layer of env adds keys, so every combination is read.
+  // A model profile or an issue's adapter overrides are merged over the config for some runs (heartbeat.ts). Each bad setting
+  // is a fault on its own (a later layer replaces a key, and env keys only add), so each layer is read over the config alone.
   const merged = (...os) => {
     const m = { ...cfg }; let env = { ...obj(cfg.env) };
     for (const o of os) { Object.assign(m, obj(o)); env = { ...env, ...obj(obj(o).env) }; }
@@ -362,10 +368,6 @@ export function supervisionOf(agent, hooksFile, { issues = [], lastRun = null, u
   for (const [i, o] of overs) {
     const why = merged(o);
     if (why) return { state: 'partly', label: 'Partly supervised: an issue skips the office', why: `For ${issueName(i)}: ${why}`, can: false };
-    for (const [key, p] of profiles) {
-      const both = merged(p.adapterConfig, o);
-      if (both) return { state: 'partly', label: 'Partly supervised: an issue skips the office', why: `For ${issueName(i)} with the ${key} model profile: ${both}`, can: false };
-    }
   }
   return { state: 'supervised', label: '', why: '', can: false };
 }
@@ -388,7 +390,7 @@ export function supervisePatch(agent, hooksFile) {
   const kept = args.filter((_, k) => !drop.has(k));
   // A flag at the end that takes a value and has none would take the next argument we add as its value: the office's
   // arguments go in front of it. (Not a flag the patch drops.)
-  const dangling = r.flags.find((f) => !drop.has(f.first) && (f.e.takes === 1 || f.e.takes === '+') && !f.values.length && f.last === args.length - 1);
+  const dangling = r.flags.find((f) => (f.e.takes === 1 || f.e.takes === '+') && !f.values.length && f.last === args.length - 1);
   const stop = Math.min(r.end, dangling ? dangling.first : args.length);
   const cut = stop - [...drop].filter((k) => k < stop).length;
   return { adapterConfig: { engine: 'cli', dangerouslySkipPermissions: false, extraArgs: [...kept.slice(0, cut), '--permission-mode', 'default', '--settings', hooksFile, ...kept.slice(cut)] } };
@@ -404,6 +406,7 @@ const ms = (t) => { const v = t ? Date.parse(t) : NaN; return Number.isFinite(v)
 const text = (v, n = 120) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
 const httpError = (status, message) => Object.assign(new Error(message), { status });
 // Run states that end a run (heartbeat.ts). A run that ends refreshes the budgets (Paperclip records its cost).
+const ISSUE_LIST_LIMIT = 500;
 const ENDED = new Set(['succeeded', 'failed', 'cancelled', 'timed_out', 'error']);
 
 /**
@@ -446,12 +449,17 @@ export function createHq(deps = {}) {
     const [company, agents, issues, routines, projects, live] = await Promise.all([
       call(conn, `/api/companies/${id}`),
       call(conn, `/api/companies/${id}/agents`),
-      opt('issues', `/api/companies/${id}/issues?status=todo,in_progress,in_review`),
+      opt('issues', `/api/companies/${id}/issues?status=backlog,todo,in_progress,in_review,blocked`),
       opt('routines', `/api/companies/${id}/routines`),
       opt('projects', `/api/companies/${id}/projects`),
       call(conn, `/api/companies/${id}/live-runs`).catch(() => []),
     ]);
     if (c !== conn) return;
+    // What the office cannot tell fails closed (review 76, round 4). Paperclip lists at most 500 issues by default, so a list
+    // that long may be cut; and a project or routine with no env field may come from a Paperclip that has none.
+    if (list(issues).length >= ISSUE_LIST_LIMIT) unread.push('issues (the list may be cut)');
+    if (list(projects).some((x) => x && typeof x === 'object' && !('env' in x))) unread.push('project env');
+    if (list(routines).some((x) => x && typeof x === 'object' && !('env' in x))) unread.push('routine env');
     const runs = d && d.company && d.company.id === conn.companyId ? d.runs : new Map();
     for (const r of list(live)) if (r && r.agentId && r.id) runs.set(r.agentId, { id: r.id, status: r.status || 'running' });
     // env values are dropped here: only the key names are kept (scrubAgent, scrubIssue, envOnly)
@@ -565,6 +573,8 @@ export function createHq(deps = {}) {
       throw e;
     }
   }
+  // What the watcher holds of Paperclip, for tests: the env of every part is key names only.
+  const held = () => (d ? { agents: [...d.agents.values()], issues: d.issues, routines: d.routines, projects: d.projects } : null);
   function disconnect() { const had = !!c; stop(); if (had) changed(); }
 
   const issueOf = (agentId) => {
@@ -573,13 +583,11 @@ export function createHq(deps = {}) {
   };
   function layersOf(a) {
     if (!d) return [];
-    const mine = d.issues.filter((i) => i && i.assigneeAgentId === a.id && i.status !== 'done');
     const out = [];
-    for (const pid of new Set(mine.map((i) => i.projectId).filter(Boolean))) {
-      const p = d.projects.find((x) => x && x.id === pid);
-      if (p) out.push({ name: `its project ${text(p.name, 60) || pid}`, keys: envKeys(p.env) });
-    }
-    for (const r of d.routines) if (r && r.assigneeAgentId === a.id) out.push({ name: `its routine ${text(r.title, 60) || r.id}`, keys: envKeys(r.env) });
+    // A project env applies to every run on an issue of the project, and an agent can be given an issue of any project (or
+    // woken on one in a status the office does not list), so every project counts.
+    for (const p of d.projects) if (p && p.id) out.push({ name: `its project ${text(p.name, 60) || p.id}`, keys: envKeys(p.env) });
+    for (const r of d.routines) if (r && (r.assigneeAgentId === a.id || !r.assigneeAgentId)) out.push({ name: `its routine ${text(r.title, 60) || r.id}`, keys: envKeys(r.env) });
     return out;
   }
   const supOf = (a) => supervisionOf(a, hooksFile(), { issues: d ? d.issues.filter((i) => i && i.assigneeAgentId === a.id && i.status !== 'done') : [], lastRun: d ? d.last.get(a.id) : null, unread: d ? d.unread : [], layers: layersOf(a) });
@@ -675,5 +683,5 @@ export function createHq(deps = {}) {
     } finally { conn.busy.delete(id); changed(); }
   }
 
-  return { connect, disconnect, supervise, view, labelOf, state: () => (c ? c.state : 'off') };
+  return { connect, disconnect, supervise, view, labelOf, held, state: () => (c ? c.state : 'off') };
 }

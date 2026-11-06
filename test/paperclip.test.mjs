@@ -554,3 +554,100 @@ test('round 3: the watcher holds no env value, and a failed read of projects is 
     assert.match(ada.supervision.why, /projects/);
   } finally { hq2.disconnect(); await pc2.close(); }
 });
+
+// ---------- review 76, round 4: red first (each test failed on the round 3 code) ----------
+test('round 4: every env key the office knows turns hooks off or loads what it cannot read; one that looks like Claude Code or Node but is unknown is Partly supervised', () => {
+  for (const key of ['CLAUDE_CODE_SIMPLE', 'CLAUDE_CODE_SAFE_MODE', 'CLAUDE_CODE_PERSONAL_HOOKS_OFF', 'CLAUDE_CODE_RESTRICT_PERSONAL_CONFIG', 'CLAUDE_CODE_MANAGED_SETTINGS_PATH', 'CLAUDE_BG_SESSION_PERMISSION_RULES', 'CLAUDE_CODE_REMOTE_TOOLS_HOST_ALLOWS_UNATTENDED', 'CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS']) {
+    assert.equal(supervisionOf(agent({ ...SUPERVISED, env: { [key]: '1' } }), HOOKS).state, 'unsupervised', key);
+  }
+  for (const key of ['CLAUDE_CODE_PLUGIN_DIRS', 'CLAUDE_CODE_REMOTE_SETTINGS_PATH', 'CLAUDE_CHROME_PERMISSION_MODE', 'CLAUDE_CODE_DISABLE_HOOK_FORWARDING', 'claude_code_plugin_dirs']) {
+    const s = supervisionOf(agent({ ...SUPERVISED, env: { [key]: '1' } }), HOOKS);
+    assert.deepEqual([s.state, s.can], ['partly', false], key);
+  }
+  // the lists above are not complete, so a key of those families that the office does not know is not Supervised
+  for (const key of ['CLAUDE_CODE_SOME_NEW_SWITCH', 'NODE_COMPILE_CACHE', 'NODE_DEBUG_NATIVE', 'CLAUDE_BG_SOMETHING']) {
+    const s = supervisionOf(agent({ ...SUPERVISED, env: { [key]: '1' } }), HOOKS);
+    assert.deepEqual([s.state, s.can], ['partly', false], key);
+    assert.match(s.why, new RegExp(key));
+  }
+  for (const key of ['ANTHROPIC_API_KEY', 'GITHUB_TOKEN', 'NODE_ENV', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_MAX_OUTPUT_TOKENS']) {
+    assert.equal(supervisionOf(agent({ ...SUPERVISED, env: { [key]: '1' } }), HOOKS).state, 'supervised', key);
+  }
+  // the same on a run's command line
+  assert.equal(runCheck('claude', SUPERVISED.extraArgs, HOOKS, ['NODE_COMPILE_CACHE']).partly, true);
+  assert.equal(runCheck('claude', SUPERVISED.extraArgs, HOOKS, ['BASH_ENV']).ok, false);
+  assert.equal(runCheck('claude', SUPERVISED.extraArgs, HOOKS, ['bash_env']).partly, false);
+});
+
+test('round 4: the env of a project or a routine is read like the agent env, in both strengths', () => {
+  const layer = (keys) => supervisionOf(agent(SUPERVISED), HOOKS, { layers: [{ name: 'its routine R', keys }] });
+  assert.deepEqual([layer(['BASH_ENV']).state, layer(['BASH_ENV']).can], ['unsupervised', false]);
+  const w = layer(['CLAUDE_CODE_PLUGIN_DIRS']);
+  assert.deepEqual([w.state, w.can], ['partly', false]);
+  assert.match(w.why, /^For its routine R: Its env has CLAUDE_CODE_PLUGIN_DIRS/);
+  assert.match(w.label, /^Partly supervised/);
+});
+
+test('round 4: a model profile that is switched off does not count; an issue of another agent does not count; an active profile and an issue override both do', () => {
+  const profile = (enabled) => ({ runtimeConfig: { modelProfiles: { cheap: { enabled, adapterConfig: { command: 'C:/w.cmd' } } } } });
+  assert.equal(supervisionOf(agent(SUPERVISED, profile(false)), HOOKS).state, 'supervised');
+  assert.equal(supervisionOf(agent(SUPERVISED, profile(true)), HOOKS).state, 'partly');
+  assert.equal(supervisionOf(agent(SUPERVISED, profile(undefined)), HOOKS).state, 'partly', 'a profile with no enabled value is on');
+  const issue = (who) => ({ id: 'i', identifier: 'ACM-9', assigneeAgentId: who, assigneeAdapterOverrides: { adapterConfig: { dangerouslySkipPermissions: true } } });
+  assert.equal(supervisionOf(agent(SUPERVISED), HOOKS, { issues: [issue('someone-else')] }).state, 'supervised');
+  const mine = supervisionOf(agent(SUPERVISED), HOOKS, { issues: [issue('a1')] });
+  assert.equal(mine.state, 'partly');
+  assert.match(mine.why, /^For ACM-9: Skip permissions is on/);
+});
+
+test('round 4: a trailing flag that takes a list of values keeps the office arguments out of its list', () => {
+  const a = agent({ engine: 'cli', extraArgs: ['--max-turns', '8', '--add-dir'] });
+  assert.deepEqual(supervisePatch(a, HOOKS).adapterConfig.extraArgs, ['--max-turns', '8', '--permission-mode', 'default', '--settings', HOOKS, '--add-dir']);
+  // a flag that Supervise takes out and that ends the list leaves no trace
+  assert.deepEqual(supervisePatch(agent({ engine: 'cli', extraArgs: ['--model', 'x', '--allowedTools'] }), HOOKS).adapterConfig.extraArgs, ['--model', 'x', '--permission-mode', 'default', '--settings', HOOKS]);
+});
+
+test('round 4: the watcher keeps no env value: agents, profiles, issue overrides, routines and projects hold key names only', async () => {
+  const demo = DEMO(HOOKS), cid = demo.companies[0].id;
+  Object.assign(demo.agents[1], { runtimeConfig: { modelProfiles: { cheap: { adapterConfig: { model: 'h', env: { PROFILE_KEY: 'sk-profile' } } } } } });
+  demo.agents[0].adapterConfig.env = { AGENT_KEY: 'sk-agent' };
+  demo.issues[0].assigneeAdapterOverrides = { adapterConfig: { env: { ISSUE_KEY: 'sk-issue' } } };
+  demo.routines[0].env = { ROUTINE_KEY: { type: 'plain', value: 'sk-routine' } };
+  demo.projects = [{ id: 'p1', companyId: cid, name: 'Web', env: { PROJECT_KEY: 'sk-project' } }];
+  const pc = await startFakePaperclip(demo);
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS });
+  try {
+    await hq.connect({ url: pc.url });
+    const held = JSON.stringify(hq.held());
+    for (const key of ['AGENT_KEY', 'PROFILE_KEY', 'ISSUE_KEY', 'ROUTINE_KEY', 'PROJECT_KEY']) assert.ok(held.includes(key), `${key} is read as a name`);
+    assert.equal(held.includes('sk-'), false);
+    assert.equal(held.includes('plain'), false);
+  } finally { hq.disconnect(); await pc.close(); }
+});
+
+test('round 4: the watcher fails closed on what it cannot read of a company: any project env, blocked and backlog issues, a cut list, a Paperclip with no env field', async () => {
+  const run = async (mutate, check) => {
+    const demo = DEMO(HOOKS), cid = demo.companies[0].id;
+    demo.routines.forEach((r) => { r.env = null; });
+    demo.projects = [{ id: 'p1', companyId: cid, name: 'Web', env: null }];
+    mutate(demo, cid);
+    const pc = await startFakePaperclip(demo), hq = createHq({ ...fast, hooksFile: () => HOOKS });
+    try { await hq.connect({ url: pc.url }); await check(hq.view().agents.find((a) => a.name === 'Ada').supervision); } finally { hq.disconnect(); await pc.close(); }
+  };
+  const ADA = 'a1000000-0000-4000-8000-000000000002';
+  await run(() => {}, (s) => assert.equal(s.state, 'supervised', 'the baseline'));
+  // a project env applies to any issue of the project, and an agent can be given one at any time
+  await run((d) => { d.projects[0].env = { BASH_ENV: 'x' }; }, (s) => { assert.deepEqual([s.state, s.can], ['unsupervised', false]); assert.match(s.why, /its project Web/); });
+  // a blocked or backlog issue can still wake an agent
+  for (const status of ['blocked', 'backlog']) {
+    await run((d, cid) => d.issues.push({ id: 'ib', companyId: cid, identifier: 'ACM-40', status, assigneeAgentId: ADA, assigneeAdapterOverrides: { adapterConfig: { command: 'C:/w.cmd' } } }), (s) => assert.match(s.why, /ACM-40/, status));
+  }
+  // Paperclip lists at most 500 issues by default: a list that long may be cut
+  await run((d, cid) => { for (let n = 0; n < 500; n++) d.issues.push({ id: `x${n}`, companyId: cid, identifier: `X-${n}`, status: 'todo', assigneeAgentId: null }); }, (s) => { assert.equal(s.state, 'partly'); assert.match(s.why, /issues/); });
+  // a project or a routine with no env field at all: this Paperclip may not have one, so the office cannot say it has none
+  await run((d) => { delete d.projects[0].env; }, (s) => { assert.equal(s.state, 'partly'); assert.match(s.why, /project env/); });
+  // a routine of nobody may run as anyone; a routine of another agent does not run as Ada
+  await run((d) => { d.routines[0].assigneeAgentId = null; d.routines[0].env = { BASH_ENV: 'x' }; }, (s) => { assert.equal(s.state, 'unsupervised'); assert.match(s.why, /its routine Weekly status report/); });
+  await run((d) => { d.routines[0].env = { BASH_ENV: 'x' }; }, (s) => assert.equal(s.state, 'supervised', 'a routine of Grace is not a layer of Ada'));
+  await run((d) => { delete d.routines[0].env; }, (s) => { assert.equal(s.state, 'partly'); assert.match(s.why, /routine env/); });
+});

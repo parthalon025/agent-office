@@ -59,7 +59,7 @@ export const DEMO = (hooksFile = null) => {
       { id: 'i1000000-0000-4000-8000-000000000013', companyId, identifier: 'ACM-13', title: 'Plan the Q1 roadmap', status: 'todo', assigneeAgentId: 'a1000000-0000-4000-8000-000000000001', assigneeAdapterOverrides: null },
     ],
     routines: [
-      { id: 'r1000000-0000-4000-8000-000000000001', companyId, title: 'Weekly status report', status: 'active', assigneeAgentId: 'a1000000-0000-4000-8000-000000000001', lastTriggeredAt: '2026-11-03T09:00:00.000Z',
+      { id: 'r1000000-0000-4000-8000-000000000001', companyId, title: 'Weekly status report', status: 'active', env: null, assigneeAgentId: 'a1000000-0000-4000-8000-000000000001', lastTriggeredAt: '2026-11-03T09:00:00.000Z',
         triggers: [{ id: 't1', kind: 'schedule', label: null, enabled: true, cronExpression: '0 9 * * 1', timezone: 'UTC', nextRunAt: '2026-11-10T09:00:00.000Z', lastFiredAt: '2026-11-03T09:00:00.000Z', lastResult: 'ok' }] },
     ],
     liveRuns: [{ id: 'run-linus-1', agentId: 'a1000000-0000-4000-8000-000000000003', status: 'running', agentName: 'Linus', adapterType: 'codex_local' }],
