@@ -11,6 +11,7 @@
      onSnapshot(fn)        fn(snap) now (when there is one) and on each snapshot; returns an unsubscribe function
      buildings(snap?)      the buildings, busiest first
      requests(snap?)       every open request and question of every building, oldest first (Needs you)
+     queue(snap?)          the one queue: { items (requests), count, oldest, find(id), reach(item) }; every surface that counts or opens a request reads it
      alerts(snap?)         those requests and the error of each session, as DS Notifier notifications
      preview(repo, snap?)  a building definition with its bots (cards and the city); it mounts nothing
      session(botName)      the open session of a bot in the building that is on screen
@@ -230,6 +231,17 @@
     });
     return out.concat(mergeRequests(snap, now)).sort(function (a, b) { return a.t - b.t; });
   }
+  // The one queue (#146): everything that waits on the user, across buildings, oldest first. Every surface that shows a
+  // request count or opens a request reads this, so the counts agree and no request is out of reach. reach(item) says how
+  // an item opens with Approve and Decline in view: at its desk (a session), else in the Needs you list (a merge decision).
+  function queue(snap, now) {
+    var items = requests(snap, now);
+    return {
+      items: items, count: items.length, oldest: items[0] || null,
+      find: function (id) { return items.filter(function (r) { return r.id === id; })[0] || null; },
+      reach: function (r) { return !r ? null : r.uid ? { via: 'desk', uid: r.uid, id: r.id } : { via: 'list' }; }
+    };
+  }
   // Browser alerts for the page's one Notifier: each open request and each failed turn of every building.
   // An error id holds the error's own id, so a new failure is a new alert.
   function alerts(snap) {
@@ -351,6 +363,7 @@
     };
     store.buildings = function (snap) { return buildings(snap || latest); };
     store.requests = function (snap) { return requests(snap || latest); };
+    store.queue = function (snap) { return queue(snap || latest); };
     store.alerts = function (snap) { return alerts(snap || latest); };
     store.preview = function (repo, snap) { return describe(repo, snap || latest, true).def; };
     store.shapeOf = shapeOf;
@@ -873,5 +886,5 @@
     };
   }
 
-  root.OfficeBuilding = { createStore: createStore, startFloor: startFloor, floorMemory: floorMemory, shapeOf: shapeOf, colorOf: colorOf, buildings: buildings, requests: requests, changes: changes, folderAt: folderAt, describe: describe, roomsNow: roomsNow, tagOf: tagOf, baseRoomId: baseRoomId, EMPTY_NOTE: EMPTY_NOTE };
+  root.OfficeBuilding = { createStore: createStore, startFloor: startFloor, floorMemory: floorMemory, shapeOf: shapeOf, colorOf: colorOf, buildings: buildings, requests: requests, queue: queue, changes: changes, folderAt: folderAt, describe: describe, roomsNow: roomsNow, tagOf: tagOf, baseRoomId: baseRoomId, EMPTY_NOTE: EMPTY_NOTE };
 })(typeof globalThis !== 'undefined' ? globalThis : window);
