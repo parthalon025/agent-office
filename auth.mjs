@@ -137,7 +137,7 @@ export function checkRequest(req, site) {
   return pass ? { ok: true, group } : deny(401, NO_ACCESS);
 }
 
-// ---------- remote access (#133, ADR 0005) ----------
+// ---------- remote access (#133, ADR 0008) ----------
 // The owner can open the office at an address such as office.kurat0r.ai through a Cloudflare Tunnel and a Cloudflare
 // Access application. Access signs every request it lets through with an RS256 token (header Cf-Access-Jwt-Assertion).
 // The office does not trust the tunnel: it checks that token itself on every request whose Host is the remote host,

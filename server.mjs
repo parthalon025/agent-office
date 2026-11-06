@@ -110,7 +110,7 @@ const AGENT_TOKEN = readToken(TOKEN_FILE) || OLD_PLAIN_TOKEN || auth.newAgentTok
 const PAGE_TOKEN = auth.newPageToken();
 const PAGE_FILE = auth.pageFile(process.env, PORT);
 const launchCodes = auth.createLaunchCodes();
-// Remote access (#133, ADR 0005): off unless the four OFFICE_REMOTE_* settings are set, and only on the port they name.
+// Remote access (#133, ADR 0008): off unless the four OFFICE_REMOTE_* settings are set, and only on the port they name.
 // Access signs each request it lets through; the gate checks that token itself (auth.gateRequest). The server still
 // listens on 127.0.0.1 only: cloudflared on this PC forwards to it.
 const REMOTE = auth.remoteConfig(process.env, { port: PORT, branch: !!BRANCH_PORT });
