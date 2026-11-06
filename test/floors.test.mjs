@@ -10,8 +10,9 @@ import crypto from 'node:crypto';
 import http from 'node:http';
 import { execFileSync } from 'node:child_process';
 import * as git from '../src/git.mjs';
+import * as launch from '../src/launch.mjs';
 
-const GIT = git.resolveExe('git');
+const GIT = launch.resolveExe('git');
 const IDENT = ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false'];
 const plain = (cwd, ...a) => execFileSync(GIT, [...IDENT, ...a], { cwd, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
 
@@ -487,7 +488,7 @@ const DUBIOUS = "To add an exception for this directory, call:  \tgit config --g
 // The error resolveExe gives when there is no git, as `run` passes it on.
 const NO_GIT = (() => {
   const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-nogit-'));
-  try { git.resolveExe('git', { PATH: empty, SystemRoot: process.env.SystemRoot }); return 'git was found'; } catch (e) { return e.message; } finally { fs.rmSync(empty, { recursive: true, force: true }); }
+  try { launch.resolveExe('git', { PATH: empty, SystemRoot: process.env.SystemRoot }); return 'git was found'; } catch (e) { return e.message; } finally { fs.rmSync(empty, { recursive: true, force: true }); }
 })();
 
 test('locateOrKeep gives the place when git answers', async () => {

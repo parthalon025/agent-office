@@ -11,8 +11,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import * as git from '../src/git.mjs';
+import * as launch from '../src/launch.mjs';
 
-const GIT = git.resolveExe('git');
+const GIT = launch.resolveExe('git');
 const IDENT = ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false'];
 
 function scratch() {

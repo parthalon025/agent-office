@@ -5,6 +5,7 @@ import { placeOfSession, placeOfWorktree, legacyNoteKey, legacyRoomId, roomIdOf,
 import { seatOf, roomTitle, betterTitle, linkedIssue, cleanRooms, settleRooms, viewRooms } from '../src/place.mjs';
 import { shownFloors, newRecord, edit } from '../src/archetypes.mjs';
 import * as git from '../src/git.mjs';
+import * as launch from '../src/launch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -121,8 +122,8 @@ test('adoptLegacy returns false when nothing is under the old key', () => {
 test('one repository has one building name and path whatever the cwd case', { skip: process.platform !== 'win32' }, async () => {
   const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'Ao-Case-')));
   try {
-    execFileSync(git.resolveExe('git'), ['init', '-q'], { cwd: dir });
-    execFileSync(git.resolveExe('git'), ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: dir });
+    execFileSync(launch.resolveExe('git'), ['init', '-q'], { cwd: dir });
+    execFileSync(launch.resolveExe('git'), ['-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'init'], { cwd: dir });
     const g = await git.locate(dir.toUpperCase());
     assert.ok(g, 'locate finds the repository');
     assert.equal(g.repo, path.win32.normalize(dir), 'repo path has the case git stores');

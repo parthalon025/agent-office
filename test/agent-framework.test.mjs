@@ -15,7 +15,7 @@ import { providerEvents, checkProvider, createRegistry, describe as describeKind
 import { createAgentFramework, readTeam, teamOf, runnerEnv, DEFAULT_TEAM, TEAM_FILE, TOOL_NAMES, RUNNER, SETUP, MAX_STEPS } from '../src/providers/agent-framework.mjs';
 import { TOOL_DEFINITIONS } from '../src/providers/local-tools.mjs';
 import { createLocal } from '../src/providers/local.mjs';
-import { resolveExe } from '../src/git.mjs';
+import { resolveExe } from '../src/launch.mjs';
 import { cleanRules, setRule, decide } from '../src/security.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { createLocalTools, TOOL_DEFINITIONS, killTree, LIMITS } from '../src/providers/local-tools.mjs';
+import { createLocalTools, TOOL_DEFINITIONS, LIMITS } from '../src/providers/local-tools.mjs';
+import { killTree } from '../src/launch.mjs';
 import { startFakeOpenAI } from './fixtures/fake-openai.mjs';
 
 function scratch() {

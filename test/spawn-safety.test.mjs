@@ -1,17 +1,18 @@
 // Spawn safety (audit #27, C1): on Windows a bare program name is looked up in the child's folder before PATH,
 // so a git.exe planted in a session folder would run with no click. The office starts every program from an
-// absolute path (git.mjs resolveExe), and its entry points set NoDefaultCurrentDirectoryInExePath first.
+// absolute path (launch.mjs resolveExe), and its entry points set NoDefaultCurrentDirectoryInExePath first.
 // Offline: real git and a copy of the harmless hostname.exe, no network, no paid call.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as git from '../src/git.mjs';
+import * as launch from '../src/launch.mjs';
 
-const { resolveExe } = git;
+const { resolveExe } = launch;
 const win = process.platform === 'win32';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SYS32 = path.join(process.env.SystemRoot || process.env.windir || 'C:\\Windows', 'System32');
@@ -99,7 +100,7 @@ test('resolveExe refuses a .cmd shim: it cannot start without a shell', { skip: 
 
 // ---------- the planted program ----------
 
-test('a git.exe planted in a session folder never runs from git.mjs', { skip: !win }, async () => {
+test('a git.exe planted in a session folder never runs from launch.mjs', { skip: !win }, async () => {
   const s = scratch('ao-plant-');
   const saved = process.env[GUARD];
   try {
@@ -176,7 +177,7 @@ test('the source check finds a bare program name and allows resolved paths', () 
   assert.ok(flagged("spawn(win ? 'cmd.exe' : 'sh', a)"));
   assert.ok(flagged("execFile(resolveExe('taskkill') && 'git', [])"));
   assert.ok(!flagged("spawn(resolveExe('git'), ['x'], { cwd })"));
-  assert.ok(!flagged("execFile(git.resolveExe(win ? 'cmd.exe' : 'sh'), ['/c'])"));
+  assert.ok(!flagged("execFile(launch.resolveExe(win ? 'cmd.exe' : 'sh'), ['/c'])"));
   assert.ok(!flagged("spawn(resolveExe('git', { Path: 'x' }), [])"));
   assert.ok(!flagged('spawn(exe, args)'));
   assert.ok(!flagged('execFileSync(process.execPath, [file])'));
@@ -199,7 +200,7 @@ function sources() {
 
 test('no source starts a program by a bare name, through a shell, or with shell: true', () => {
   const files = sources();
-  assert.ok(files.some((f) => path.basename(f) === 'server.mjs') && files.some((f) => path.basename(f) === 'git.mjs'));
+  assert.ok(files.some((f) => path.basename(f) === 'server.mjs') && files.some((f) => path.basename(f) === 'git.mjs') && files.some((f) => path.basename(f) === 'launch.mjs'));
   for (const p of ['claude-code.mjs', 'local.mjs', 'local-tools.mjs', 'acp.mjs']) assert.ok(files.includes(path.join(ROOT, 'src', 'providers', p)), `src/providers/${p} is scanned`);
   const bad = [];
   for (const f of files) {
@@ -211,14 +212,14 @@ test('no source starts a program by a bare name, through a shell, or with shell:
       if (/\b(exec|execSync)\b/.test(m[1])) bad.push(`${rel}: imports exec or execSync (runs a shell)`);
     }
   }
-  assert.deepEqual(bad, [], 'start programs with resolveExe(name) from git.mjs:\n' + bad.join('\n'));
+  assert.deepEqual(bad, [], 'start programs with resolveExe(name) from launch.mjs:\n' + bad.join('\n'));
 });
 
 // ---------- the folder a program starts in (#78) ----------
 // On Windows a running process keeps its current folder busy: nobody can remove or rename that folder until the process
 // ends. A helper that inherits the office's folder (the walkToClaude PowerShell, icacls, the ACL reader) kept a temp
 // office busy for about a second after a test killed the server (EBUSY in fs.rmSync). So every program the office
-// starts names its folder: the session folder for work in it, git.helperCwd() for a helper that works on no folder.
+// starts names its folder: the session folder for work in it, launch.helperCwd() for a helper that works on no folder.
 
 /** Top-level arguments of the call whose opening parenthesis ends at `from`. */
 function argsOf(src, from) {
@@ -260,17 +261,17 @@ test('every program the office starts names the folder it starts in', () => {
   assert.ok(files.some((f) => path.basename(f) === 'server.mjs') && files.some((f) => path.basename(f) === 'local-tools.mjs'));
   const bad = [];
   for (const f of files) for (const b of inheritedCwd(fs.readFileSync(f, 'utf8'))) bad.push(`${path.relative(ROOT, f)}:${b.line} ${b.call}`);
-  assert.deepEqual(bad, [], 'give every spawn a cwd (git.helperCwd() for a helper):\n' + bad.join('\n'));
+  assert.deepEqual(bad, [], 'give every spawn a cwd (launch.helperCwd() for a helper):\n' + bad.join('\n'));
 });
 
 test('helperCwd is a folder that exists, outside the office folder and the temp folder', () => {
-  const dir = git.helperCwd();
+  const dir = launch.helperCwd();
   assert.ok(path.isAbsolute(dir) && fs.statSync(dir).isDirectory(), dir);
   const inside = (a, b) => { const r = path.relative(b, a); return r === '' || (!r.startsWith('..') && !path.isAbsolute(r)); };
   assert.ok(!inside(dir, ROOT), 'not in the office folder');
   assert.ok(!inside(dir, os.tmpdir()), 'not in the temp folder, where tests make offices and session folders');
   if (win) assert.ok(same(dir, process.env.SystemRoot || process.env.windir), 'Windows: %SystemRoot%');
-  if (win) assert.ok(same(git.helperCwd({ SystemRoot: 'relative\\dir' }), git.helperCwd({})), 'a relative SystemRoot is not used');
+  if (win) assert.ok(same(launch.helperCwd({ SystemRoot: 'relative\\dir' }), launch.helperCwd({})), 'a relative SystemRoot is not used');
 });
 
 test('server, hook, MCP and probe set the guard as their first statement', () => {
@@ -279,4 +280,25 @@ test('server, hook, MCP and probe set the guard as their first statement', () =>
       .map((l) => l.trim()).find((l) => l && !l.startsWith('#!') && !l.startsWith('//'));
     assert.equal(first, `process.env.${GUARD} = '1';`, name);
   }
+});
+
+// ---------- killTree (launch.mjs) ----------
+
+test('killTree ends a process and does nothing for no pid', async () => {
+  await launch.killTree(0);
+  await launch.killTree(undefined);
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: launch.helperCwd(), stdio: 'ignore', windowsHide: true, detached: !win });
+  const ended = new Promise((resolve) => child.once('exit', resolve));
+  await launch.killTree(child.pid);
+  await Promise.race([ended, new Promise((_, rej) => setTimeout(() => rej(new Error('the process still runs')), 10000))]);
+});
+
+test('killTree on Windows runs taskkill /T /F by its absolute path from the helper folder', { skip: !win }, async () => {
+  const calls = [];
+  await launch.killTree(4242, (file, args, opts, cb) => { calls.push({ file, args, opts }); cb(null); });
+  assert.equal(calls.length, 1);
+  assert.ok(same(calls[0].file, resolveExe('taskkill')) && path.isAbsolute(calls[0].file));
+  assert.deepEqual(calls[0].args, ['/PID', '4242', '/T', '/F']);
+  assert.ok(same(calls[0].opts.cwd, launch.helperCwd()));
+  await launch.killTree(1, () => { throw new Error('no taskkill'); }); // never rejects
 });

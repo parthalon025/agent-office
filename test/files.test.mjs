@@ -16,6 +16,7 @@ import * as startup from '../src/startup.mjs';
 import { officeFiles, portArg, portArgs, DEFAULT_PORT } from '../src/files.mjs';
 import { startOffice, startOnFreePort, copyOffice } from './fixtures/office-server.mjs';
 import * as git from '../src/git.mjs';
+import * as launch from '../src/launch.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const win = process.platform === 'win32';
@@ -310,7 +311,7 @@ test('a second office in the same folder never rewrites the first office\'s file
     assertUnchanged(dir, ownerFiles, 'at the end');
   } finally {
     for (const o of [again, b, a]) await stopOffice(o);
-    // The server's helpers start in %SystemRoot% (git.helperCwd), so once the copies are gone nothing is in the folder.
+    // The server's helpers start in %SystemRoot% (launch.helperCwd), so once the copies are gone nothing is in the folder.
     fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   }
 });
@@ -323,7 +324,7 @@ test('a copy on a busy port writes no state while it waits for a launch link, al
   const dir = path.join(tmp, 'office'), lad = path.join(tmp, 'local'), repo = path.join(tmp, 'repo');
   copyOffice(dir);
   fs.mkdirSync(repo);
-  const GIT = git.resolveExe('git'), id = ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false'];
+  const GIT = launch.resolveExe('git'), id = ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false'];
   const run = (...a) => execFileSync(GIT, [...id, ...a], { cwd: repo, windowsHide: true, stdio: 'pipe' });
   run('init', '-q', '-b', 'main');
   fs.writeFileSync(path.join(repo, 'package.json'), '{}');

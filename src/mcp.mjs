@@ -16,7 +16,7 @@
 // It identifies its session by OFFICE_ID (sessions the office opened) or by its parent pid. It finds its office from
 // the token file of the port in its first argument (none: the default port; files.mjs has the names).
 // Zero dependencies; speaks newline-delimited JSON-RPC 2.0.
-// First statement: Windows never looks for a program in the current folder (git.mjs resolveExe has the reason).
+// First statement: Windows never looks for a program in the current folder (launch.mjs resolveExe has the reason).
 process.env.NoDefaultCurrentDirectoryInExePath = '1';
 import fs from 'node:fs';
 import readline from 'node:readline';

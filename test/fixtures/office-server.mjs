@@ -13,7 +13,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, execFile } from 'node:child_process';
-import { resolveExe, helperCwd } from '../../src/git.mjs';
+import { killTree } from '../../src/launch.mjs';
 
 // The repository root, and the copy a test makes of the office layout: package.json, launch.ps1, src/ (every server module),
 // public/, and with `components` also tokens.css and components/ (what the static routes serve). The copy has the same layout
@@ -48,10 +48,6 @@ export async function until(fn, what, { ms = START_MS, log = () => '', step = 50
   }
 }
 
-// Ends a process and its children by pid. A pid that is already gone is no failure.
-const killTree = (pid) => new Promise((resolve) => {
-  execFile(resolveExe('taskkill'), ['/PID', String(pid), '/T', '/F'], { cwd: helperCwd(), windowsHide: true }, () => resolve());
-});
 
 /**
  * Starts server.mjs in `dir` and returns { child, done, exited, out, stop }.
