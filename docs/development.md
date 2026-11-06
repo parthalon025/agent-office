@@ -50,7 +50,9 @@ The server code is in `src/`. The repository root is the office folder: the offi
 
 | File | Purpose |
 | --- | --- |
-| `src/server.mjs` | The server: state, hooks, sessions, REST, SSE, schedules, history. |
+| `src/server.mjs` | The HTTP adapter: port, tokens, the gate, the response, the files written at start. |
+| `src/office.mjs` | The office: state, hooks, sessions, schedules, history and the route table, behind `createOffice`. |
+| `src/office-core.mjs` | The core: `handle(request)`, the route groups of the table, the static files. Tests call it in process. |
 | `src/auth.mjs` | Access rules: the agent token and the page token, the launch code, the request checks, files that only you, SYSTEM and Administrators can read. |
 | `src/files.mjs` | The names of the files an office keeps in this folder, per port. |
 | `src/git.mjs` | Worktrees, the changes view, remove worktree, pull request. |

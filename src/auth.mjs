@@ -102,6 +102,9 @@ export function routeOf(method, pathname, isStatic = () => false) {
   return null;
 }
 
+// The route group: the office's route table first (site.groupOf, office-core.mjs), else the prefix rule above, which keeps an
+// unlisted path under /api/ or /hook/ behind the token of its group.
+const groupOf = (req, site) => site.groupOf?.(req.method, req.path) ?? routeOf(req.method, req.path, site.isStatic);
 const isJson = (type) => /^application\/json\s*(;|$)/i.test(String(type || '').trim());
 const deny = (status, error) => ({ ok: false, status, error });
 
@@ -121,7 +124,7 @@ export function checkRequest(req, site) {
   const h = req.headers || {};
   if (!ownHosts(site.port).includes(h.host)) return deny(403, 'Forbidden');
   if (h.origin !== undefined && !ownOrigins(site.port).includes(h.origin)) return deny(403, 'Forbidden: the request comes from another site.');
-  const group = routeOf(req.method, req.path, site.isStatic);
+  const group = groupOf(req, site);
   if (!group) return deny(404, 'Not found');
   if (group === 'public') return { ok: true, group };
   const fetchSite = h['sec-fetch-site'];
@@ -318,7 +321,7 @@ export async function checkRemoteRequest(req, site) {
   try { who = await verifyAccessToken(h[ACCESS_HEADER], cfg, site.remote.keys, site.now || Date.now); } catch { who = { ok: false }; }
   if (!who.ok) return deny(403, 'Forbidden');
   if (h.origin !== undefined && h.origin !== `https://${cfg.host}`) return deny(403, 'Forbidden: the request comes from another site.');
-  const group = routeOf(req.method, req.path, site.isStatic);
+  const group = groupOf(req, site);
   if (!group) return deny(404, 'Not found');
   if (group === 'agent') return deny(403, 'Forbidden');
   if (group === 'public') return { ok: true, group };

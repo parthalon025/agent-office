@@ -1,38 +1,23 @@
-// The customization store (#152) against a real server.mjs copy: starters, team templates, export and import, and that the
-// export carries no Security rules. Same rig as test/security-routes.test.mjs: a throwaway copy of the code on a free port.
+// The customization store (#152) through the office core, in process: starters, team templates, export and import, and that the
+// export carries no Security rules. The office is the real one (src/office.mjs), called through core.handle: no spawned server.
 // Run: node --test test/customization-routes.test.mjs
 import test, { before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { pageFile } from '../src/auth.mjs';
-import { startOnFreePort, copyOffice } from './fixtures/office-server.mjs';
+import { startInProcess, removeTree } from './fixtures/office-inproc.mjs';
 
-const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-let base, office, port, pageToken;
-const call = async (route, body) => {
-  const r = await fetch(`http://127.0.0.1:${port}${route}`, { method: body === undefined ? 'GET' : 'POST', headers: { 'content-type': 'application/json', 'x-office-token': pageToken }, body: body === undefined ? undefined : JSON.stringify(body) });
-  const text = await r.text();
-  return { status: r.status, json: (() => { try { return JSON.parse(text); } catch { return null; } })() };
-};
+let base, rig;
+const call = (route, body) => rig.call(route, body);
 
 before(async () => {
   base = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-cus-'));
-  const copy = path.join(base, 'office'), home = path.join(base, 'home');
-  for (const d of [copy, home]) fs.mkdirSync(d);
-  copyOffice(copy);
-  const env = { ...process.env, OFFICE_HOOKS: 'command', OFFICE_RATE_FILE: path.join(base, 'no-rate.json'), OFFICE_OPEN: '0', LOCALAPPDATA: path.join(base, 'local'), USERPROFILE: home, HOME: home };
-  const started = await startOnFreePort(copy, env);
-  ({ office, port } = started);
-  pageToken = JSON.parse(fs.readFileSync(pageFile(started.env, port), 'utf8')).token;
-  assert.ok(pageToken, office.out().slice(-800));
+  rig = await startInProcess({ dir: base });
 });
 after(async () => {
-  if (office) await office.stop();
-  await new Promise((r) => setTimeout(r, 300));
-  if (base) fs.rmSync(base, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+  if (rig) rig.stop();
+  if (base) await removeTree(base);
 });
 
 test('starters add the three personas and one team, once; the user can add a team and start none without a folder', async () => {
