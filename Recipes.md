@@ -143,6 +143,18 @@ A theme is a token set plus a component set. Add the parts below in this order. 
 14. **Mode control fit.** One more theme makes the mode toggle longer. If the test says the top bar needs more room, raise the width under which the toggle shows icons only (`@container (max-width:...)` rule of `.ao-hud-top .ao-seg` in `bundle.css`; the bar with the Needs you button has its own rule, `.ao-hud-top:has(.ao-hud-needs) .ao-seg`).
 15. **Code reads flags, not the id.** No code compares a look or theme id with a string. A behavior of one theme is a token or a field of its MODES or LOOKS entry (as `dark`, `retro`, `caps`, `term`), so the next theme can turn it on too.
 
+## Add a wall screen
+
+A room has wall screens: the chalkboard of a lab room, and the six screens of a Security room (`room.screens` gives their titles). The DS draws each one as a plain plane with a default face. A page repaints it. This is the extension point for a screen of your own:
+
+1. **Take the slot.** Read the screen planes of the room through the scene host (`OfficeSceneHost`, `host.rooms()`), match them to rooms by order, and paint your own canvas texture on the plane. Do not read the DS stage yourself.
+2. **Rebuild.** The engine rebuilds a floor when a bot joins or the theme changes. Listen to the host rebuild event and paint again.
+3. **Click.** Register a pick target with the host (`host.register`). The first click looks at the screen, the second opens it. Never add a raycaster or pointer listener of your own.
+4. **Choose it.** The choice of which screen shows in a room is page data. The office keeps it in `persisted.screens` (a map of room kind to screen id) and exports it with the rest of the setup (`GET /api/custom/export`).
+5. **Colors from tokens.** Paint with the theme tokens only, and check contrast like every other screen.
+
+A custom theme is the other extension point. Follow "Add a theme" below.
+
 ## Add a component
 
 Use tokens only. Write a README with a props table and a "consumer provides" line, a preview with every state, types in `index.d.ts`, and a changelog row.
