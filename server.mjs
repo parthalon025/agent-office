@@ -37,7 +37,7 @@ import { detect, newRecord, cleanRecord, edit as editLayout, layoutView, shownFl
 import * as startup from './startup.mjs';
 import { createManager, createPlanBoard, officeSource } from './manager.mjs';
 import { setPersona, removePersona, personaOf, personaPrompt, addStarters, addStarterTeams, setTeam, removeTeam, teamOf, exportCustom, importCustom, cleanPersonas, cleanTeams, cleanScreens } from './personas.mjs';
-import { createNotes, cleanPin, PIN_MAX, NOTES_MAX, AGENT_WRITE_MAX } from './notes.mjs';
+import { createNotes, scanNote, cleanPin, PIN_MAX, NOTES_MAX, AGENT_WRITE_MAX } from './notes.mjs';
 import { createSkills } from './skills.mjs';
 import { cleanTrust, record as recordTrust, patternOf, propose, grant as grantTrust, withdraw as withdrawTrust, cards as trustCards } from './trust.mjs';
 import { cleanRules, setRule, ruleOf, decide, preToolDecision, permissionModeFor, openRefusal, costAsk, enforcement, addCost, costThisMonth } from './security.mjs';
@@ -186,7 +186,7 @@ const askSeconds = 1000;
 const hookCommand = [`"${NODE}" "${path.join(ROOT, 'hook.mjs').replace(/\\/g, '/')}"`, ...portArgs(PORT)].join(' ');
 // The office tools are safe to pre-allow: they only talk to this server, and office_room_update
 // changes only the caller's own room boards (notes and blackboard pin in state.json).
-const PERMISSIONS = { allow: ['mcp__office__office_inbox', 'mcp__office__office_ask', 'mcp__office__office_room', 'mcp__office__office_room_update'] };
+const PERMISSIONS = { allow: ['mcp__office__office_inbox', 'mcp__office__office_ask', 'mcp__office__office_room', 'mcp__office__office_room_update', 'mcp__office__office_mail'] };
 
 // Command hooks: one Node process per event (~60 ms). Works on every Claude Code version.
 const commandSettings = {
@@ -429,6 +429,7 @@ const officeTools = {
   ask: async (s, question) => (await askUser(s, question).done).text,
   room: async (s) => describeRoom(await roomOf(s)),
   roomUpdate: async (s, args) => updateRoom(await roomOf(s), args),
+  mail: (s, to, text) => mailText(s, to, text),
 };
 const ollama = createLocal({ events, kind: 'ollama', baseUrl: process.env.OFFICE_OLLAMA_URL, officeTools });
 const lmstudio = createLocal({ events, kind: 'lmstudio', baseUrl: process.env.OFFICE_LMSTUDIO_URL, officeTools });
@@ -917,6 +918,28 @@ function inboxText(s) {
   const text = s.inbox.map((m) => '- ' + m.text).join('\n');
   s.inbox = []; addFeed(s, 'tool', 'read the office inbox'); broadcast();
   return text;
+}
+// office_mail (#21): one agent writes to another agent of its goal. manager.mail() applies the rules (a running goal, a named agent of the
+// building, the hop and message caps); what an agent writes is scanned like a notes line, because the next agent reads it as context.
+// The receiver gets it as a message (a turn, or its inbox while it works), and the sender gets a feed line.
+function mailText(s, to, text) {
+  const body = String(text ?? '').trim().slice(0, 2000);
+  if (!body) return 'Mail failed: the text is empty.';
+  const why = scanNote(body);
+  if (why) return 'Mail refused: ' + why + '.';
+  const r = manager.mail({ from: s.uid, to, text: body });
+  if (!r.ok) return 'Mail not sent: ' + r.reason;
+  addFeed(s, 'tool', `mailed ${r.to}: ${clip(body, 80)}`);
+  broadcast();
+  return `Mail sent to ${r.to}.`;
+}
+function deliverMail(toId, fromName, text) {
+  try { sendMessage(toId, `Mail from ${fromName}: ${text}`, [], { answers: false }); return true; }
+  catch (e) { console.warn(`Manager: mail to ${toId} was not delivered: ${e.message}`); return false; }
+}
+function onMcpMail(p, res) {
+  const s = sessionFor(p);
+  send(res, 200, { text: s ? mailText(s, p.to, p.text) : 'Agent Office does not recognise this session, so the mail was not sent.' });
 }
 function onMcpInbox(p, res) {
   const s = sessionFor(p);
@@ -1529,6 +1552,7 @@ const manager = createManager({
   },
   ready: (building) => [...new Set(goalAgents(building).flatMap((a) => a.tiers))],
   callsOf: (id, since) => (sessions.get(id)?.calls || []).filter((c) => c.t >= since && !c.agent).map((c) => ({ key: `${c.name}:${c.detail}`, ok: c.ok, changed: c.ok === true && EDIT_TOOLS.has(c.name) })),
+  deliver: (to, from, text) => deliverMail(to, from, text), // false: not delivered, so the mail is refused and not counted
   paperclip: () => !!(persisted.paperclip?.company || hq.view()?.company),
   interrupt: (id) => { const s = sessions.get(id); if (s && s.status === 'working') tracker.interrupt(s); },
   spendOf: (id) => Number(sessions.get(id)?.cost) || 0,
@@ -2028,6 +2052,7 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/hook/openclaw') return onOpenClawCall(body, res);
     if (url.pathname === '/mcp/inbox') return onMcpInbox(body, res);
     if (url.pathname === '/mcp/ask') return onMcpAsk(body, res);
+    if (url.pathname === '/mcp/mail') return onMcpMail(body, res);
     if (url.pathname === '/mcp/room') return send(res, 200, { text: describeRoom(await callerRoom(body)) });
     if (url.pathname === '/mcp/room/update') return send(res, 200, { text: updateRoom(await callerRoom(body), body) });
     if (url.pathname === '/api/message') return send(res, 200, { ok: true, ...sendMessage(String(body.uid), body.text, Array.isArray(body.attachments) ? body.attachments : [], { answers: body.answers !== false }) });

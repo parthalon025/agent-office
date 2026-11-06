@@ -30,6 +30,8 @@ export const OFFICE_TOOLS = [
   { name: 'office_inbox', description: 'Read new messages the user sent to this session from Agent Office. Returns them and clears the queue.', parameters: { type: 'object', properties: {} } },
   { name: 'office_ask', description: 'Ask the user a question in Agent Office and wait for the answer (up to 10 minutes). Use it for decisions you cannot make alone.',
     parameters: { type: 'object', properties: { question: { type: 'string', description: 'A short, specific question. A yes or no question works best.' } }, required: ['question'] } },
+  { name: 'office_mail', description: 'Send a short message to another agent in the same goal, by its name. Works only while you take part in a goal.',
+    parameters: { type: 'object', properties: { to: { type: 'string' }, text: { type: 'string' } }, required: ['to', 'text'] } },
   { name: 'office_room', description: 'Describe your place in Agent Office: building, floor, room, the other sessions, the notes board and the blackboard pin. Call it first when the user talks about their room.', parameters: { type: 'object', properties: {} } },
   { name: 'office_room_update', description: 'Change your room when the user asks: give notes_append, notes_replace (not both) or pin. Returns what changed.',
     parameters: { type: 'object', properties: { notes_append: { type: 'string' }, notes_replace: { type: 'string' }, pin: { type: 'string' } } } },
@@ -87,6 +89,10 @@ export function createToolGate({ events, office = null }) {
         if (c.name === 'office_inbox') text = await office.inbox(s);
         else if (c.name === 'office_room') text = await office.room(s);
         else if (c.name === 'office_room_update') text = await office.roomUpdate(s, shown);
+        else if (c.name === 'office_mail') {
+          if (typeof shown.to !== 'string' || typeof shown.text !== 'string') return failed('to and text must be text.');
+          text = await office.mail(s, shown.to.slice(0, 100), shown.text.slice(0, 2000));
+        }
         else {
           if (typeof shown.question !== 'string' || !shown.question.trim()) return failed('question must be text.');
           text = await office.ask(s, shown.question.slice(0, 1000));

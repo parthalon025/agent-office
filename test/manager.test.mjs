@@ -18,7 +18,7 @@ function world(over = {}) {
     agents: () => agents,
     dispatch: async (a, task, ctx) => { if (over.dispatchError) throw new Error(over.dispatchError); a.free = false; w.dispatched.push({ agent: a.name, task, ...ctx }); },
     interrupt: (id) => w.interrupted.push(id),
-    deliver: (to, from, text, hops) => w.mail.push({ to, from, text, hops }),
+    deliver: (to, from, text, hops) => { if (over.deliverFails) return false; w.mail.push({ to, from, text, hops }); },
     spendOf: (id) => w.spend[id] || 0,
     clock: () => 1000,
     makeId: () => String(++n),
@@ -184,6 +184,43 @@ test('mail is refused when the goal is not running', async () => {
   const w = world();
   const id = await w.m.submit('b1', 'g', { approveFirst: true });
   assert.equal(w.m.route({ goalId: id, from: 'a', to: 'b', text: 'x' }).ok, false);
+});
+
+test('mail by agent: the sender holds a step, the receiver is a named agent of the building, replies count hops', async () => {
+  const w = world({ limits: { maxHops: 2 } });
+  await w.m.submit('b1', 'g');
+  await w.m.agentFreed();
+  assert.equal(w.dispatched[0].agent, 'Scout');
+  let r = w.m.mail({ from: 'a1', to: 'coder', text: 'look at x' });
+  assert.deepEqual(r, { ok: true, hops: 1, to: 'Coder' });
+  assert.deepEqual(w.mail[0], { to: 'a2', from: 'Scout', text: 'look at x', hops: 1 });
+  r = w.m.mail({ from: 'a2', to: 'Scout', text: 'ok' }); // a reply: the receiver may answer, one hop more
+  assert.deepEqual(r, { ok: true, hops: 2, to: 'Scout' });
+  r = w.m.mail({ from: 'a1', to: 'Coder', text: 'again' });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /reply chain reached 2/);
+  assert.equal(w.m.snapshot()[0].mail.length, 2, 'the goal keeps the mail it routed, for the cable tray');
+});
+
+test('mail by agent: refused for an agent with no goal, an unknown name, or to oneself', async () => {
+  const w = world();
+  await w.m.submit('b1', 'g');
+  await w.m.agentFreed();
+  assert.equal(w.m.mail({ from: 'zz', to: 'Coder', text: 'x' }).ok, false);
+  assert.match(w.m.mail({ from: 'a1', to: 'Nobody', text: 'x' }).reason, /No agent named Nobody/);
+  assert.match(w.m.mail({ from: 'a1', to: 'Scout', text: 'x' }).reason, /yourself/);
+  assert.equal(w.mail.length, 0);
+});
+
+test('mail by agent: a mail the receiver could not take is refused and not counted', async () => {
+  const w = world({ deliverFails: true });
+  await w.m.submit('b1', 'g');
+  await w.m.agentFreed();
+  const r = w.m.mail({ from: 'a1', to: 'Coder', text: 'ok' });
+  assert.equal(r.ok, false);
+  assert.match(r.reason, /could not take/);
+  assert.equal(w.m.snapshot()[0].messages, 0);
+  assert.equal(w.m.snapshot()[0].mail.length, 0);
 });
 
 test('cancel interrupts the running step and stops the goal; a finished goal cannot be cancelled', async () => {
