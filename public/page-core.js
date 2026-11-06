@@ -44,7 +44,7 @@
       .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) {
         if (!r.ok) { var e = new Error(j.error || 'The office could not do that (' + r.status + ').'); e.status = r.status; e.body = j; throw e; }
         // A question before the call can run (the cost question: 200 { confirm, question }): the caller asks, as for a 409.
-        if (j && j.confirm && j.question) { var q = new Error(j.question); q.status = r.status; q.body = j; throw q; }
+        if (window.OfficeAsk.isQuestion(j)) { var q = new Error(j.question); q.status = r.status; q.body = j; throw q; }
         return j;
       }); });
   }
@@ -122,7 +122,7 @@
   }
   // An agent that reports no cost asks once before it runs while its Security room cell is Ask (security.mjs costAsk): the
   // server answers 200 with confirm: 'cost' and the question (api() turns it into an Error with .body); the page asks, then sends the same call with confirmCost: true.
-  function costAsked(x) { return !!(x && x.body && x.body.confirm === 'cost'); }
+  function costAsked(x) { return !!window.OfficeAsk.asked(x, 'cost'); }
   // p: { title, text (the server's question), busy, err, onCancel, onRun }
   function CostDialog(p) {
     return h(A.Dialog, { open: true, title: p.title, onClose: p.onCancel, actions: [
