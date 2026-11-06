@@ -245,7 +245,8 @@ for (const [index, skin] of SKINS.entries()) {
           ok(/^(#[0-9a-f]{6}|none)$/.test(c), `the ${type} picture has a color that is not #rrggbb: ${c}`);
           if (c !== 'none' && c === b[i]) ok(BOT_PALETTE.has(c), `the ${type} picture has ${c}, which is not from a token`);
         });
-        for (const n of [`type-${type}`, 'scene-floor']) ok(svg.includes(`"${tok(n)}"`), `the ${type} picture does not use ${n} (${tok(n)})`);
+        // the type's own color: type-<type>, or the type-* token the type names (tok in AO.office.TYPES: the lobby takes the team color)
+        for (const n of [`type-${AO.office.TYPES[type].tok || type}`, 'scene-floor']) ok(svg.includes(`"${tok(n)}"`), `the ${type} picture does not use ${n} (${tok(n)})`);
       }
     });
 

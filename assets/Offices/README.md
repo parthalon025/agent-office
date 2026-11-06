@@ -9,6 +9,7 @@ Flat isometric (30 degree) room pictures. viewBox `0 0 320 200`. Each room has a
 | Studio | `studio.svg` | A stage in front of a curved cyc wall, a light on a stand, a camera on a tripod. |
 | War room / HQ | `hq.svg` | A long table with seats on all sides, a wall of screens, a map screen. |
 | Security | `security.svg` | Six wall screens, three on each wall, each a small rule grid (Allow, Deny and Ask cells) in a frame of the type colour. No bots: the room has none. The room shell is the HQ one. |
+| Lobby / Reception | `lobby.svg` | An L reception counter with a memo on it and a receptionist behind it, a directory board on the back wall, one open desk and a visitor. The stripe is the team colour (`type-team`), as in the scene. |
 
 ## Drawn from the tokens of the theme
 
