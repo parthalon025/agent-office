@@ -2,8 +2,8 @@
    Each lab room gets four things that the user can see and click:
    - The blackboard on the back wall is the agents' overview: plan progress, browser steps, last steps
      and the top of the repository. An agent can pin a note on it. The page shows the same data in full
-     (office.js, BoardPanel). It is also the room's wall screen for its changes: open(roomId, 'changes') flies to it,
-     and the page pins the diff over it (office.js ChangesScreen, #89).
+     (panels.js, BoardPanel). It is also the room's wall screen for its changes: open(roomId, 'changes') flies to it,
+     and the page pins the diff over it (panels.js ChangesScreen, #89).
    - The whiteboard left of it holds the user's own notes. The page lays a text box over the board itself,
      so the user writes on the board.
    - A small wall display on the left wall shows the room's numbers: sessions, tool calls, tokens, cost.
