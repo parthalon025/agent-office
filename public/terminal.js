@@ -4,16 +4,17 @@
    monitors (the coder desk) shows the terminal on the left and the session's stats on the right
    (agent kind, model, context, spend, time, to-do list). A desk with one monitor shows a stats line at the bottom.
    In a dark theme (Night, Fluent Dark: stage.K.dark) a soft pool of screen light falls on the desk; it turns amber when the bot needs you and
-   red after an error. A monitor takes two clicks (the scene host runs the steps): the first click flies
-   the camera to it so the user can read the screen, a second click calls onOpen(uid, name), so the page
-   opens the terminal.
+   red after an error. A monitor is a pinned screen (#89): a click flies the camera to it, and once it lands the page lays
+   the chat and the terminal of that session over the monitor (scene-host.js layer). open(uid) is the keyboard path.
    The engine builds the desks and walks the bots. This file only repaints the screens and adds the
    cursor and the light pool (decor, noNav). Colors and fonts come from the DS tokens (stage.K).
    Helpers (subagents) have no session of their own; their monitors show what the engine traced.
 
    window.OfficeTerminal
-     attach(office, { session(botName) -> session or null, onOpen(uid, name), host? }) -> { refresh(), dispose(), screens() }
+     attach(office, { session(botName) -> session or null, onOpen(uid, name), host? }) -> { refresh(), open(uid), dispose(), screens() }
        host: the scene host (scene-host.js). Without it, attach makes its own.
+       open(uid): fly to the desk monitor of that session on the shown floor (the pinned screen); false when it is not there.
+       onOpen: a click on the monitor in focus outside its layer, or host.open().
      lines(session, cols, rows?) -> [{ text, tone, mark?, ask? }]
        tone: 'prompt' | 'out' | 'tool' | 'ok' | 'err' | 'muted'. Without rows: the full transcript
        (for the page panel). With rows: what fits on a screen of that many rows, newest last.
@@ -212,7 +213,7 @@
     if (full) {
       var all = flat(before).concat(head, flat(after), tail);
       all = all.length > 400 ? all.slice(-400) : all;
-      // An ungated agent (ADR 0001): the label stays at the top of the terminal panel.
+      // An ungated agent (ADR 0001): the label stays at the top of the terminal view of the desk screen.
       var sup = window.OfficeVocab.supervision(s);
       return sup ? [{ text: sup, tone: 'muted' }].concat(all) : all;
     }
@@ -732,9 +733,9 @@
     }
 
     // The host picks: one raycast over all targets, a bot in front wins (then the click is the engine's), and the host owns the cursor.
-    // The badge says the next click: look closer, or open the terminal when this screen is in focus.
+    // The badge says the next click: it flies to the monitor and opens the chat on it (a pinned screen, #89).
     function keyOf(e) { return 'screen:' + e.name + ':' + e.kind; }
-    function labelOf(e) { var f = host.focused(); return f && f.key === keyOf(e) ? 'Open terminal' : 'Look closer'; }
+    function labelOf() { return 'Open chat'; }
     function setHover(h) {
       var lb = h ? labelOf(h) : '';
       if (h === hover && (!h || h.hover === lb)) return;
@@ -775,20 +776,29 @@
     loadFont(K.f && K.f.mono);
     if (K.look === 'sublevel') loadFont(K.f && K.f.term);
     var offFrame = host.frame(frame);
-    var offTarget = host.register({
+    var target = {
       name: 'terminal',
       active: function () { return !self.dead; },
       meshes: function () { return entries.filter(function (e) { return e.uid && shown(e.mesh); }).map(function (e) { return e.mesh; }); },
       itemOf: function (mesh) { return mesh.userData.officeTerm || null; },
       hover: function (e) { try { setHover(e); } catch (x) { hover = null; } },
-      // a monitor is a screen: the first click looks at it, the second opens the terminal
+      // a monitor is a pinned screen: the click flies to it and the page lays the chat and the terminal over it (#89)
       // clear: the bot sits in front of its screen; the cut keeps the desk top and drops the bot and its bubble
-      look: function (e) { return { key: keyOf(e), mesh: e.mesh, verb: 'Open terminal', kind: 'terminal', clear: 0.5 }; },
+      look: function (e) { return { key: keyOf(e), mesh: e.mesh, verb: 'Open chat', kind: 'terminal', clear: 0.5, pin: true }; },
       open: function (e) { if (e.uid && typeof o.onOpen === 'function') o.onOpen(e.uid, e.name); },
       // after a floor rebuild the screen in focus is a new mesh
       find: function (key) { var e = entries.filter(function (x) { return keyOf(x) === key && inScene(x.mesh); })[0]; return e ? { item: e, mesh: e.mesh } : null; },
       anchors: function () { return entries.map(function (e) { return e.mesh; }); }
-    });
+    };
+    var offTarget = host.register(target);
+    // The keyboard path (Ctrl+K, the dock, the bezel count): the monitor of a session on the shown floor, the terminal one first.
+    function open(uid) {
+      if (self.dead || !uid) return false;
+      try { scan(); } catch (x) { /* the list is still good */ }
+      var fg = host.shownFloor(), mine = entries.filter(function (e) { return e.uid === uid && host.onShownFloor(e.mesh, fg); });
+      mine.sort(function (a, b) { return (a.kind === 'term' ? 0 : 1) - (b.kind === 'term' ? 0 : 1); });
+      return !!mine[0] && host.show(target, mine[0], false);
+    }
     var timer = setInterval(function () { if (st.dead) { dispose(); return; } if (!self.dead) { try { scan(); } catch (x) { /* next time */ } } }, 1500);
     try { scan(); } catch (x) { /* the first frame scans again */ }
 
@@ -812,6 +822,7 @@
     }
     return {
       refresh: function () { if (self.dead) return; scan(); entries.forEach(function (e) { e.sig = ''; }); pass(); },
+      open: open,
       dispose: dispose,
       // the patched screens, for tests and the console
       screens: function () { return entries.map(function (e) { return { name: e.name, kind: e.kind, uid: e.uid, shown: shown(e.mesh), hover: e.hover }; }); }

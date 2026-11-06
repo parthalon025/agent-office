@@ -204,7 +204,8 @@ test('the stack is placed by office.js at every width: no width rule moves it, a
   assert.doesNotMatch(css, /@media \(min-width: 821px\) and \(max-width: 1100px\) \{ \.page-toasts/, 'no 821 to 1100 px literal');
   assert.match(js, /OfficeToasts\.place\(/);
   const keep = /var KEEP = '([^']*)'/.exec(js)?.[1] || '';
-  for (const sel of ['.ao-hud-top', '.ao-hud-left', '.ao-hud-zoom', '.strip', '.asks', '.term-input', '.ao-hud-chat .ao-act', '.ao-hud-chat .ao-composer']) {
+  // the pinned screens (#89): their head (Back, the bezel count), tabs and message boxes, and the bezel count of any screen in focus
+  for (const sel of ['.ao-hud-top', '.ao-hud-left', '.ao-hud-zoom', '.strip', '.asks', '.term-input', '.pin-head', '.pin .ao-tablist', '.pin-input', '.bezel', '.ao-hud-chat .ao-act', '.ao-hud-chat .ao-composer']) {
     assert.ok(keep.split(',').map((x) => x.trim()).includes(sel), 'KEEP lists ' + sel);
   }
   const z = (sel) => /calc\(var\(--z-dialog\) \+ (\d+)\)/.exec(css.slice(css.indexOf(sel + ' {')))?.[1];
@@ -214,7 +215,7 @@ test('the stack is placed by office.js at every width: no width rule moves it, a
 test('the tool column follows the open panel by one shared width (#114)', () => {
   const css = fs.readFileSync(new URL('../public/office.css', import.meta.url), 'utf8');
   assert.match(css, /#office\.has-panel \.ao-hud-zoom \{[^}]*var\(--panel-w\)/);
-  for (const c of ['board-panel', 'terminal-panel']) {
+  for (const c of ['board-panel']) { // the terminal panel is gone (#89): the desk screen is pinned on the monitor
     assert.match(css, new RegExp('\\.' + c + ' \\{[^}]*width: var\\(--panel-w\\)'), c + ' reads the shared width');
   }
 });

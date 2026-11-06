@@ -1,5 +1,6 @@
 /* Agent Office for Claude Code x0.1: page script.
-   Mounts the DS office, the control strip, and the dialogs (open, past sessions, schedules, changes, hooks). */
+   Mounts the DS office, the control strip, the dialogs (open, past sessions, schedules, changes, hooks), and the pinned
+   screens (#89): the chat and terminal on a desk monitor and the changes on a room's wall screen, laid over the 3D scene. */
 (function () {
   'use strict';
   var h = React.createElement, A = window.AgentOffice, useState = React.useState, useEffect = React.useEffect, useMemo = React.useMemo;
@@ -525,64 +526,86 @@
       return h('span', { key: i, className: 'dl ' + cls }, l === '' ? ' ' : l);
     }));
   }
-  function ChangesDialog(p) {
+  // The changes of one session (its folder): the diff, and the pull request and worktree removal behind a confirm dialog.
+  // The room's wall screen (ChangesScreen, pinned) and the fallback dialog (ChangesDialog) share it.
+  function useChanges(uid, toast) {
     var d = useState(null), data = d[0], setData = d[1];
     var er = useState(''), err = er[0], setErr = er[1];
     var cf = useState(null), confirm = cf[0], setConfirm = cf[1];
     var bz = useState(false), busy = bz[0], setBusy = bz[1];
     var rs = useState(null), result = rs[0], setResult = rs[1];
-    function load() { setErr(''); api('/api/changes', { uid: p.uid }).then(setData, function (x) { setErr(x.message); setData({ files: [], diff: '', branch: '', stat: '' }); }); }
-    useEffect(load, [p.uid]);
-    var wt = data && data.worktree;
+    function load() { setErr(''); api('/api/changes', { uid: uid }).then(setData, function (x) { setErr(x.message); setData({ files: [], diff: '', branch: '', stat: '' }); }); }
+    useEffect(load, [uid]);
     function run(fn) {
       setBusy(true); setErr('');
       fn().then(function (r) {
         setBusy(false); setConfirm(null); setResult(r); load();
-        if (p.toast && r && r.url) p.toast({ tone: 'success', title: 'Pull request created', text: r.url });
-        if (p.toast && r && r.removed) p.toast({ tone: 'info', title: 'Worktree removed', text: r.branchKept ? 'The branch was kept.' : 'The folder is gone.' });
+        if (toast && r && r.url) toast({ tone: 'success', title: 'Pull request created', text: r.url });
+        if (toast && r && r.removed) toast({ tone: 'info', title: 'Worktree removed', text: r.branchKept ? 'The branch was kept.' : 'The folder is gone.' });
       }, function (x) { setBusy(false); setErr(x.message); });
     }
-    function pr() { run(function () { return api('/api/pr', { uid: p.uid }); }); }
-    function remove(force) { run(function () { return api('/api/worktree/remove', { uid: p.uid, force: force }); }); }
-    if (confirm === 'pr') {
-      return h(A.Dialog, { open: true, title: 'Create a pull request', onClose: function () { setConfirm(null); }, actions: [
-        h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setConfirm(null); } }, 'Cancel'),
-        h(A.Button, { key: 'p', variant: 'primary', icon: 'send', loading: busy, onClick: pr }, 'Create pull request')] },
+    return { data: data, err: err, setErr: setErr, confirm: confirm, setConfirm: setConfirm, busy: busy, result: result, load: load, wt: data && data.worktree,
+      pr: function () { run(function () { return api('/api/pr', { uid: uid }); }); },
+      remove: function (force) { run(function () { return api('/api/worktree/remove', { uid: uid, force: force }); }); } };
+  }
+  // The confirm dialog of a pull request or a worktree removal, or null. Push, pull request and removal always ask here.
+  function ChangesConfirm(p) {
+    var c = p.c, wt = c.wt;
+    if (c.confirm === 'pr') {
+      return h(A.Dialog, { open: true, title: 'Create a pull request', onClose: function () { c.setConfirm(null); }, actions: [
+        h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { c.setConfirm(null); } }, 'Cancel'),
+        h(A.Button, { key: 'p', variant: 'primary', icon: 'send', loading: c.busy, onClick: c.pr }, 'Create pull request')] },
         h('div', { className: 'form' },
           h('p', { className: 'note' }, 'This sends your changes to the remote repository. It does these steps in order:'),
           h('pre', { className: 'code' }, '1. git add -A and git commit\n2. git push -u origin ' + (wt ? wt.branch : '') + '\n3. gh pr create --fill'),
-          err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
+          c.err ? h('p', { className: 'ao-err', role: 'alert' }, c.err) : null));
     }
-    if (confirm === 'rm') {
-      var dirty = /uncommitted/i.test(err);
-      return h(A.Dialog, { open: true, title: 'Remove the worktree', onClose: function () { setConfirm(null); setErr(''); }, actions: [
-        h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setConfirm(null); setErr(''); } }, 'Keep it'),
-        h(A.Button, { key: 'r', variant: 'danger', icon: 'remove', loading: busy, onClick: function () { remove(dirty); } }, dirty ? 'Remove and discard changes' : 'Remove worktree')] },
+    if (c.confirm === 'rm') {
+      var dirty = /uncommitted/i.test(c.err);
+      return h(A.Dialog, { open: true, title: 'Remove the worktree', onClose: function () { c.setConfirm(null); c.setErr(''); }, actions: [
+        h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { c.setConfirm(null); c.setErr(''); } }, 'Keep it'),
+        h(A.Button, { key: 'r', variant: 'danger', icon: 'remove', loading: c.busy, onClick: function () { c.remove(dirty); } }, dirty ? 'Remove and discard changes' : 'Remove worktree')] },
         h('div', { className: 'form' },
           h('p', { className: 'note' }, 'Deletes the folder ' + (wt ? wt.root : '') + '. The branch ' + (wt ? wt.branch : '') + ' stays if it has commits that are not merged.'),
-          err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null));
+          c.err ? h('p', { className: 'ao-err', role: 'alert' }, c.err) : null));
     }
-    return h(A.Dialog, { open: true, title: 'Changes in ' + (p.name || 'this session'), onClose: p.onClose, actions: [
-      h(A.Button, { key: 'rf', variant: 'quiet', icon: 'retry', onClick: load }, 'Refresh'),
-      wt ? h(A.Button, { key: 'rm', variant: 'quiet', icon: 'remove', disabled: !p.ended, title: p.ended ? '' : 'Close the session first', onClick: function () { setConfirm('rm'); } }, 'Remove worktree') : null,
-      wt ? h(A.Button, { key: 'pr', variant: 'primary', icon: 'send', disabled: !data || (!data.files.length && !data.ahead), onClick: function () { setConfirm('pr'); } }, 'Create pull request') : null,
-      h(A.Button, { key: 'd', variant: wt ? 'quiet' : 'primary', onClick: p.onClose }, 'Done')] },
-      h('div', { className: 'form wide' },
-        err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
-        result && result.url ? h('p', { className: 'note' }, 'Pull request created: ', h('a', { href: result.url, target: '_blank', rel: 'noreferrer' }, result.url)) : null,
-        result && result.removed ? h('p', { className: 'note' }, 'Worktree removed.' + (result.branchKept ? ' The branch was kept.' : '')) : null,
-        h(Busy, { on: !data }),
-        data ? h('div', { className: 'chg-head' },
-          data.branch ? h(Tag, null, data.branch) : null,
-          h('span', { className: 'mono' }, data.stat || (data.files.length ? data.files.length + ' changed' : 'No changes')),
-          data.ahead ? h('span', { className: 'mono' }, data.ahead + ' commit' + (data.ahead > 1 ? 's' : '') + ' ahead') : null) : null,
-        data && data.files.length ? h('ul', { className: 'files' }, data.files.map(function (f, i) { return h('li', { key: i }, h('span', { className: 'fcode fc-' + f.code.charAt(0) }, f.word), h('span', { className: 'mono' }, f.path)); })) : null,
-        data && data.diff ? h(DiffView, { text: data.diff }) : null,
-        data && data.commits && data.commits.length ? h('h3', { className: 'ext-h' }, 'Recent commits on ' + (data.branch || 'this branch'), h('span', { className: 'ext-n' }, data.commits.length)) : null,
-        data && data.commits && data.commits.length ? h(A.CheckpointTimeline, { checkpoints: data.commits }) : null,
-        data && data.truncated ? h('p', { className: 'note' }, 'The diff is long, so only the start is shown.') : null,
-        data && !data.diff && data.files.length ? h('p', { className: 'note' }, 'These files are new, so git has no diff for them yet.') : null,
-        data && !data.files.length && !err ? h(A.EmptyState, { icon: 'checkpoint', compact: true, title: 'Nothing changed yet', text: 'Changes show here as the session edits files.' }) : null));
+    return null;
+  }
+  // The buttons of the changes: Refresh, Remove worktree (a closed session only), Create pull request. Each of the last two opens its confirm.
+  function changesActions(c, ended) {
+    var data = c.data, wt = c.wt;
+    return [
+      h(A.Button, { key: 'rf', variant: 'quiet', icon: 'retry', onClick: c.load }, 'Refresh'),
+      wt ? h(A.Button, { key: 'rm', variant: 'quiet', icon: 'remove', disabled: !ended, title: ended ? '' : 'Close the session first', onClick: function () { c.setConfirm('rm'); } }, 'Remove worktree') : null,
+      wt ? h(A.Button, { key: 'pr', variant: 'primary', icon: 'send', disabled: !data || (!data.files.length && !data.ahead), onClick: function () { c.setConfirm('pr'); } }, 'Create pull request') : null];
+  }
+  function ChangesBody(p) {
+    var c = p.c, data = c.data, result = c.result;
+    return h(React.Fragment, null,
+      c.err && !c.confirm ? h('p', { className: 'ao-err', role: 'alert' }, c.err) : null,
+      result && result.url ? h('p', { className: 'note' }, 'Pull request created: ', h('a', { href: result.url, target: '_blank', rel: 'noreferrer' }, result.url)) : null,
+      result && result.removed ? h('p', { className: 'note' }, 'Worktree removed.' + (result.branchKept ? ' The branch was kept.' : '')) : null,
+      h(Busy, { on: !data }),
+      data ? h('div', { className: 'chg-head' },
+        data.branch ? h(Tag, null, data.branch) : null,
+        h('span', { className: 'mono' }, data.stat || (data.files.length ? data.files.length + ' changed' : 'No changes')),
+        data.ahead ? h('span', { className: 'mono' }, data.ahead + ' commit' + (data.ahead > 1 ? 's' : '') + ' ahead') : null) : null,
+      data && data.files.length ? h('ul', { className: 'files' }, data.files.map(function (f, i) { return h('li', { key: i }, h('span', { className: 'fcode fc-' + f.code.charAt(0) }, f.word), h('span', { className: 'mono' }, f.path)); })) : null,
+      data && data.diff ? h(DiffView, { text: data.diff }) : null,
+      data && data.commits && data.commits.length ? h('h3', { className: 'ext-h' }, 'Recent commits on ' + (data.branch || 'this branch'), h('span', { className: 'ext-n' }, data.commits.length)) : null,
+      data && data.commits && data.commits.length ? h(A.CheckpointTimeline, { checkpoints: data.commits }) : null,
+      data && data.truncated ? h('p', { className: 'note' }, 'The diff is long, so only the start is shown.') : null,
+      data && !data.diff && data.files.length ? h('p', { className: 'note' }, 'These files are new, so git has no diff for them yet.') : null,
+      data && !data.files.length && !c.err ? h(A.EmptyState, { icon: 'checkpoint', compact: true, title: 'Nothing changed yet', text: 'Changes show here as the session edits files.' }) : null);
+  }
+  // The changes of a session that has no room in the scene on screen (a past session, another building). In the office the
+  // changes show on the room's wall screen (ChangesScreen).
+  function ChangesDialog(p) {
+    var c = useChanges(p.uid, p.toast);
+    if (c.confirm) return h(ChangesConfirm, { c: c });
+    return h(A.Dialog, { open: true, title: 'Changes in ' + (p.name || 'this session'), onClose: p.onClose, actions: changesActions(c, p.ended).concat([
+      h(A.Button, { key: 'd', variant: c.wt ? 'quiet' : 'primary', onClick: p.onClose }, 'Done')]) },
+      h('div', { className: 'form wide' }, h(ChangesBody, { c: c })));
   }
 
   // ---------- hooks ----------
@@ -1295,7 +1318,7 @@
   }
 
   // ---------- requests of one session: Approve, Decline, Yes and No ----------
-  // The terminal panel and the room panels show this bar. A panel hides the DS chat (one panel at a time), so the
+  // The desk screen (pinned) and the room panels show this bar. They hide the DS chat (one panel at a time), so the
   // answer must never need the chat. It uses the same answer route as the DS card (/api/answer).
   function RequestBar(p) {
     var an = useState(''), answering = an[0], setAnswering = an[1];   // the request being answered
@@ -1323,7 +1346,7 @@
 
   // ---------- a screen in the room, looked at up close (scene-host.js focus) ----------
   // The page's boxes over the 3D scene. The scene host frames a screen in the part of the view they leave free.
-  var COVERS = '.ao-hud-top, .ao-hud-left, .ao-hud-right, .ao-hud-zoom, .ao-hud-use, .ao-hud-syl, .ao-hud-scrub, .ao-hud-cast, .ao-hud-log, .strip, .board-panel, .terminal-panel, .look-bar';
+  var COVERS = '.ao-hud-top, .ao-hud-left, .ao-hud-right, .ao-hud-zoom, .ao-hud-use, .ao-hud-syl, .ao-hud-scrub, .ao-hud-cast, .ao-hud-log, .strip, .board-panel, .look-bar';
   function sceneCovers(skip) {
     return [].slice.call(document.querySelectorAll(COVERS)).filter(function (el) {
       if (el === skip) return false;
@@ -1364,10 +1387,139 @@
       p.verb ? h(A.Button, { variant: 'quiet', icon: p.icon, onClick: p.onOpen }, p.verb) : null);
   }
 
-  // ---------- one session as a full terminal ----------
-  function TerminalPanel(p) {
+  // ---------- pinned screens (#89): a real DOM layer exactly over the screen in focus ----------
+  // The scene host gives the screen's box (host.layer, host.onLayer) every frame it moves, and hides the layer while the
+  // camera flies. The page puts the box on its element with setProperty, never a style attribute (the CSP), and renders
+  // again only when the screen or its state changes, not on every move.
+  var WANT_MS = 5000;   // a wait for a screen to settle (a flight, another building): a deadline in time, not a count of frames
+  function px(v) { return Math.round(v * 10) / 10 + 'px'; }
+  function putBox(el, r) {
+    el.style.setProperty('--pin-x', px(r.left)); el.style.setProperty('--pin-y', px(r.top));
+    el.style.setProperty('--pin-w', px(r.width)); el.style.setProperty('--pin-h', px(r.height));
+  }
+  // A small screen (a phone, a desk monitor seen from afar) gets the compact layout. It is React state, not a class set
+  // by hand: a render that changes className would drop a class set from outside.
+  function smallBox(r) { return r.width < 520 || r.height < 300; }
+  function usePinBox(host, ref, put) {
+    var sm = useState(false), small = sm[0], setSmall = sm[1];
+    React.useLayoutEffect(function () {
+      if (!host) return undefined;
+      function at(l) { var el = ref.current; if (el && l && l.rect) { put(el, l.rect); setSmall(smallBox(l.rect)); } }
+      at(host.layer());
+      return host.onLayer(at);
+    }, [host]);
+    return small;
+  }
+  // The count of waiting requests on the bezel of the screen in focus. One tap goes to the oldest request (the page decides
+  // where that is). inline: in the head of a pinned screen; else on the top right corner of the screen's frame.
+  // compact (a small pinned screen): the icon and the count, with the whole name as the label, so the head keeps one row.
+  function Bezel(p) {
+    var ref = React.useRef(null);
+    // the corner of the screen, kept inside the free part of the view (host.free), compact on a small screen
+    var small = usePinBox(p.inline ? null : p.host, ref, function (el, r) {
+      var b = window.OfficeSceneHost.pure.bezelAt(r, p.host.free(), 18);
+      el.style.setProperty('--pin-x', px(b.x)); el.style.setProperty('--pin-y', px(b.y));
+    });
+    if (!(p.count > 0)) return null;
+    var compact = p.compact || (!p.inline && small);
+    return h('div', { ref: ref, className: 'bezel' + (p.inline ? ' is-inline' : ''), hidden: !p.inline && !p.shown },
+      h(A.Button, { variant: 'emphasis', icon: 'waiting', label: compact ? 'Needs you · ' + p.count + '. Go to the oldest request' : null, title: 'Go to the oldest request', onClick: p.onGo }, compact ? String(p.count) : 'Needs you · ' + p.count));
+  }
+  // Focus moves into a pinned screen when it shows, and back to where it was when it goes (the DS Definition of done).
+  function usePinFocus(shown, find) {
+    var opener = React.useRef(null), entered = React.useRef(false);
+    useEffect(function () {
+      opener.current = document.activeElement;
+      return function () { var o = opener.current; if (o && o.isConnected && o.focus) o.focus({ preventScroll: true }); };
+    }, []);
+    useEffect(function () {
+      if (!shown || entered.current || (window.OfficeBoard && window.OfficeBoard.layerOpen())) return;
+      var el = find();
+      if (el && el.focus) { entered.current = true; el.focus({ preventScroll: true }); }
+    });
+  }
+
+  // The chat of the bot at the desk: the DS chat messages (office.chatOf, the same mirror as the HUD chat) and the DS composer.
+  var CHAT_QUICK = [['Status', 'What is your status?', 'info'], ['Summarize', 'Summarize your work today.', 'chat']];
+  function ChatTab(p) {
+    var ms = useState(function () { return p.office && p.office.chatOf ? p.office.chatOf(p.bot) : []; }), msgs = ms[0], setMsgs = ms[1];
+    var log = React.useRef(null), stick = React.useRef(true);
+    useEffect(function () {
+      function read() {
+        var l = p.office && p.office.chatOf ? p.office.chatOf(p.bot) : [];
+        setMsgs(function (o) { return o.length === l.length && o[o.length - 1] === l[l.length - 1] ? o : l; });
+      }
+      read();
+      var iv = setInterval(read, 400);
+      return function () { clearInterval(iv); };
+    }, [p.office, p.bot]);
+    useEffect(function () { var v = log.current; if (v && stick.current) v.scrollTop = v.scrollHeight; }, [msgs.length]);
+    function onScroll() { var v = log.current; if (v) stick.current = v.scrollHeight - v.scrollTop - v.clientHeight < 24; }
+    function act(t) { var o = p.office; if (!o) return; if (t === 'approve') o.approve(p.bot); else if (t === 'decline') o.decline(p.bot); else o.send({ type: t, bot: p.bot }); }
+    function send(t, att) { if (p.office) { stick.current = true; p.office.message(p.bot, t, att); } }
+    return h('div', { className: 'pin-chat' },
+      h('div', { className: 'pin-log', ref: log, onScroll: onScroll, role: 'log', 'aria-live': 'polite', 'aria-label': 'Messages', tabIndex: 0 },
+        msgs.length ? msgs.map(function (m, i) { return h(A.ChatMessage, { key: i, message: m, onAction: act }); })
+          : h(A.EmptyState, { compact: true, icon: 'chat', title: 'No messages yet', text: 'Send a message to ' + p.name + '. Try: what is your status?' })),
+      h('div', { className: 'pin-input' },
+        h('div', { className: 'pin-chips' }, CHAT_QUICK.map(function (q) { return h(A.Button, { key: q[0], variant: 'quiet', icon: q[2], onClick: function () { send(q[1]); } }, q[0]); })),
+        h(A.Composer, { id: 'pin-chat-input', placeholder: 'Message ' + p.name, label: 'Message ' + p.name, onSend: send, attach: true })));
+  }
+
+  // The desk monitor of one session, pinned (#89): its chat, its terminal and the timeline of its tool calls, the open
+  // requests (RequestBar, so an approval never hides behind the hidden HUD chat), Export, Stop turn and Back.
+  // The requests come first, right under the head (review 89): no approval can hide. On a small screen the head takes one
+  // row (the bezel shows its icon and count, Stop turn and Export their icon), and while a request is open the bar takes the
+  // whole screen under the head and the tabs wait (has-asks), so Approve and Decline are always on the screen.
+  var DESK_TABS = [{ id: 'chat', label: 'Chat', icon: 'chat' }, { id: 'terminal', label: 'Terminal', icon: 'terminal' }, { id: 'timeline', label: 'Timeline', icon: 'trace' }];
+  function DeskScreen(p) {
     var snap = useSnapshot();
     var s = snap ? snap.sessions.filter(function (x) { return x.uid === p.uid; })[0] : null;
+    var ref = React.useRef(null);
+    var small = usePinBox(p.host, ref, putBox);
+    usePinFocus(p.shown, function () { var el = ref.current; return el && (el.querySelector('.asks button') || el.querySelector('#pin-chat-input, .term-field') || el.querySelector('.ao-tab[aria-selected="true"]')); });
+    var working = s && (s.status === 'working' || s.status === 'waiting');
+    var asks = window.OfficeVocab.requests(s).length > 0;
+    function stop() { api('/api/interrupt', { uid: s.uid }).catch(function (x) { p.toast({ tone: 'error', title: s.name, text: x.message }); }); }
+    var tab = p.tab || 'chat';
+    // small: the button shows its icon, and its name is its label (and its tooltip)
+    function act(icon, text, title, onClick) { return h(A.Button, { variant: 'quiet', icon: icon, label: small ? text : null, title: small ? (title || text) : title, onClick: onClick }, small ? null : text); }
+    return h('section', { ref: ref, className: 'pin pin-desk' + (small ? ' is-small' : '') + (asks ? ' has-asks' : ''), hidden: !p.shown, 'aria-label': 'Desk screen of ' + p.name },
+      h('div', { className: 'pin-head' },
+        h(A.StatusDot, { status: s ? statusOf(s) : 'resting' }),
+        h('b', { className: 'pin-name' }, p.name),   // the scene's name of the bot (unique in the building), as on its desk
+        h('span', { className: 'pin-sub mono' }, s ? window.officeAdapter.kindWord(s) + ' · ' + modelWord(s.model) : ''),
+        h(Bezel, { inline: true, count: p.waiting, onGo: p.onGo, compact: small }),
+        s && s.headless && working ? act('pause', 'Stop turn', null, stop) : null,
+        s ? act('copy', 'Export', 'Save this session as a Markdown file', function () { exportSession(s.uid, p.toast); }) : null,
+        h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onBack }, 'Back')),
+      h(RequestBar, { session: s, name: p.name, toast: p.toast }),
+      h(A.Tabs, { label: 'Desk screen', tabs: DESK_TABS, value: tab, onChange: p.onTab, render: function (id) {
+        if (id === 'chat') return h(ChatTab, { office: p.office, bot: p.bot, name: p.name });
+        return h(TermTab, { s: s, name: p.name, toast: p.toast, timeline: id === 'timeline' });
+      } }));
+  }
+
+  // The changes of a room on its wall screen, pinned (#89). Pull request and worktree removal keep their confirm dialog.
+  function ChangesScreen(p) {
+    var c = useChanges(p.uid, p.toast);
+    var ref = React.useRef(null);
+    var small = usePinBox(p.host, ref, putBox);
+    usePinFocus(p.shown, function () { var el = ref.current; return el && el.querySelector('.diff, .pin-body'); });
+    return h(React.Fragment, null,
+      h('section', { ref: ref, className: 'pin pin-changes' + (small ? ' is-small' : ''), hidden: !p.shown, 'aria-label': 'Changes in ' + (p.name || 'this session') },
+        h('div', { className: 'pin-head' },
+          h('b', { className: 'pin-name' }, 'Changes in ' + (p.name || 'this session')),
+          h(Bezel, { inline: true, count: p.waiting, onGo: p.onGo, compact: small }),
+          changesActions(c, p.ended),
+          h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onBack }, 'Back')),
+        h('div', { className: 'pin-body', tabIndex: -1 }, h(ChangesBody, { c: c }))),
+      h(ChangesConfirm, { c: c }));
+  }
+
+  // ---------- one session as a full terminal (the Terminal and Timeline tabs of the desk screen) ----------
+  function TermTab(p) {
+    var s = p.s;
     var vw = React.useRef(null), stick = React.useRef(true), probe = React.useRef(null);
     var cl = useState(60), cols = cl[0], setCols = cl[1];
     var tx = useState(''), text = tx[0], setText = tx[1];
@@ -1396,25 +1548,8 @@
         if (fonts && fonts.removeEventListener) fonts.removeEventListener('loadingdone', measure);
       };
     }, []);
-    // focus: into the input when the panel opens, back to the opener when it closes
-    var opener = React.useRef(null), entered = React.useRef(false);
-    useEffect(function () {
-      opener.current = document.activeElement;
-      return function () { var o = opener.current; if (o && o.isConnected && o.focus) o.focus(); };
-    }, []);
-    useEffect(function () {
-      if (entered.current || !s) return;   // the first render has no snapshot, so no input yet
-      entered.current = true;
-      var f = document.querySelector('.terminal-panel .term-field') || vw.current;
-      if (f && f.focus) f.focus();
-    }, [!!s]);
-    useEffect(function () {
-      function onKey(e) { if (e.key === 'Escape' && !(window.OfficeBoard && window.OfficeBoard.escTaken ? window.OfficeBoard.escTaken(e) : e.defaultPrevented)) { e.preventDefault(); p.onClose(); } }
-      window.addEventListener('keydown', onKey);
-      return function () { window.removeEventListener('keydown', onKey); };
-    }, []);
-    // The Timeline view lists the tool calls with their times (#72); Export saves the whole session as Markdown (every agent kind).
-    var tl = useState(false), showTimeline = tl[0], setShowTimeline = tl[1];
+    // The Timeline tab lists the tool calls with their times (#72); Export (in the head) saves the whole session as Markdown.
+    var showTimeline = !!p.timeline;
     var OT = window.OfficeTerminal;
     var rows = OT ? (showTimeline ? OT.timeline(s, cols) : OT.lines(s, cols)) : [{ text: 'The terminal view is not loaded.', tone: 'muted' }];
     if (!showTimeline && s && s.headless && rows.length && rows[rows.length - 1].text === '> ') rows = rows.slice(0, -1);
@@ -1426,29 +1561,18 @@
       setBusy(true);
       api('/api/message', { uid: s.uid, text: t }).then(function () { setBusy(false); setText(''); stick.current = true; }, function (x) { setBusy(false); p.toast({ tone: 'error', title: s.name, text: x.message }); });
     }
-    function stop() { api('/api/interrupt', { uid: s.uid }).catch(function (x) { p.toast({ tone: 'error', title: s.name, text: x.message }); }); }
-    var working = s && (s.status === 'working' || s.status === 'waiting');
     var ended = !s || s.status === 'ended';
-    return h('aside', { className: 'terminal-panel', 'aria-label': 'Terminal of ' + p.name },
-      h('div', { className: 'term-head' },
-        h(A.StatusDot, { status: s ? statusOf(s) : 'resting' }),
-        h('b', { className: 'term-name' }, s ? s.name : p.name),
-        h('span', { className: 'term-model mono' }, s ? window.officeAdapter.kindWord(s) + ' · ' + modelWord(s.model) : ''),
-        s ? h(A.Button, { variant: 'quiet', icon: 'trace', 'aria-pressed': showTimeline, title: showTimeline ? 'Show the terminal' : 'Show the tool calls with their times', onClick: function () { setShowTimeline(!showTimeline); stick.current = true; } }, showTimeline ? 'Terminal' : 'Timeline') : null,
-        s ? h(A.Button, { variant: 'quiet', icon: 'copy', title: 'Save this session as a Markdown file', onClick: function () { exportSession(s.uid, p.toast); } }, 'Export') : null,
-        h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onClose }, 'Back')),
-      h('div', { className: 'term-view', ref: vw, onScroll: onScroll, role: 'log', 'aria-live': 'off', tabIndex: 0 },
+    return h('div', { className: 'pin-term' },
+      h('div', { className: 'term-view', ref: vw, onScroll: onScroll, role: 'log', 'aria-live': 'off', 'aria-label': showTimeline ? 'Timeline' : 'Terminal', tabIndex: 0 },
         h('span', { className: 'term-probe', ref: probe, 'aria-hidden': 'true' }, 'MMMMMMMMMM'),
         rows.map(function (r, i) { return h('div', { key: i, className: 'term-line tone-' + r.tone + (r.ask ? ' is-ask' : '') }, r.text || '\u00a0'); })),
-      h(RequestBar, { session: s, name: p.name, toast: p.toast }),
-      s && s.headless && !ended
-        ? h('div', { className: 'term-input' },
+      showTimeline ? null : s && s.headless && !ended
+        ? h('div', { className: 'term-input pin-input' },
             h('span', { className: 'term-caret mono', 'aria-hidden': 'true' }, '>'),
             h('input', { className: 'term-field', type: 'text', value: text, placeholder: 'Message ' + s.name, 'aria-label': 'Message ' + s.name, autoComplete: 'off', spellCheck: false,
               onChange: function (e) { setText(e.target.value); },
-              onKeyDown: function (e) { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } } }),
-            working ? h(A.Button, { variant: 'quiet', icon: 'pause', onClick: stop }, 'Stop turn') : null)
-        : s && !s.headless && !ended ? h('p', { className: 'term-note' }, 'This session runs in its own terminal window. Type there.') : null);
+              onKeyDown: function (e) { if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } } }))
+        : s && !s.headless && !ended ? h('p', { className: 'term-note' }, 'This session runs in its own terminal window. Type there, or use the Chat tab.') : null);
   }
 
   // ---------- page commands in the DS command palette (Ctrl+K) ----------
@@ -1636,13 +1760,14 @@
     }, [timed]);
     // Where the stack stands, at every width and window height (#79): toasts.js place decides from the boxes measured here.
     // KEEP: never covered: the top controls, the floors card, the zoom column, the dock and its More list, every request
-    // bar (Approve, Decline), message box and Back button of a panel or the chat, the decisions inbox, the city controls.
+    // bar (Approve, Decline), message box and Back button of a panel, a pinned screen or the chat, the bezel count, the
+    // decisions inbox, the city controls.
     // AVOID: covered only when no band is free of them: the DS HUD boxes (chat, roster, room card, Since you left), the
-    // terminal, board, stats and notes panels, the welcome card. A new box goes in one of the two lists.
+    // pinned screens, the board, stats and notes panels, the welcome card. A new box goes in one of the two lists.
     // It measures again when a box appears, goes or changes size (ResizeObserver), when a toast comes or goes, when
     // --strip-clear changes, on resize, and when a box scrolls. With no free band the stack waits out of sight (is-off) and its clocks wait.
-    var KEEP = '.ao-hud-top, .ao-hud-left, .ao-hud-zoom, .ao-hud-inbox, .ao-hud-cast, .strip, .strip-more, .asks, .term-head, .term-input, .board-b > .inline-actions, .look-bar, .city-hud, .city-zoom, .ao-hud-chat .ao-chat-h, .ao-hud-chat .ao-tablist, .ao-hud-chat .ao-act, .ao-hud-chat .ao-chips, .ao-hud-chat .ao-composer';
-    var AVOID = '.ao-hud > *, .board-panel, .terminal-panel, .notes-edit, .welcome';
+    var KEEP = '.ao-hud-top, .ao-hud-left, .ao-hud-zoom, .ao-hud-inbox, .ao-hud-cast, .strip, .strip-more, .asks, .pin-head, .pin .ao-tablist, .pin-input, .term-input, .term-note, .bezel, .board-b > .inline-actions, .look-bar, .city-hud, .city-zoom, .ao-hud-chat .ao-chat-h, .ao-hud-chat .ao-tablist, .ao-hud-chat .ao-act, .ao-hud-chat .ao-chips, .ao-hud-chat .ao-composer';
+    var AVOID = '.ao-hud > *, .board-panel, .pin, .notes-edit, .welcome';
     var placeRef = React.useRef(null);
     useEffect(function () {
       var wait = 0, trail = 0, ro = null, watched = new Set();
@@ -1703,9 +1828,33 @@
     React.useLayoutEffect(function () { if (placeRef.current) placeRef.current(); }, [toasts]);
     function refresh() { return getInfo(shownPath).then(function (i) { setInfo(i); return i; }, function () { return info; }); }
     function show(name) { refresh().then(function () { setDlg({ name: name }); }); }
-    function changes(uid, name) {
+    // The changes of a session with no room in the scene on screen (a past session, another building): the dialog.
+    function changesDialog(uid, name) {
       var s = window.officeAdapter.sessionByUid(uid);
       setDlg({ name: 'changes', uid: uid, label: name, ended: !s || s.status === 'ended' });
+    }
+    // The changes of a session: on the wall screen of its room (#89), the room's floor first. The board flies there when the
+    // floor shows its decor; until then this tries again each frame (at most 5 s), and the dialog takes over after that.
+    var chgWant = React.useRef(null);
+    function changes(uid, name) {
+      var s = window.officeAdapter.sessionByUid(uid), o = officeRef.current, host = hostRef.current, b = boardRef.current;
+      var roomId = s && s.place && s.place.roomId;
+      var here = !!(s && roomId && o && host && b && mount && cur2.view === 'office' && window.officeAdapter.buildingOf(s) === mount.repo);
+      var fl = here && o.getBuilding ? (o.getBuilding().floors || []).filter(function (f) { return (f.rooms || []).some(function (r) { return r.id === roomId; }); })[0] : null;
+      if (!fl) { changesDialog(uid, name); return; }
+      setDlg(null);
+      if (host.floorId() !== fl.id) { host.blur(); o.setFloor(fl.id); }
+      setChg({ uid: uid, name: name, roomId: roomId, ended: s.status === 'ended' });   // after the blur: its focus event clears chg
+      chgWant.current = { roomId: roomId, uid: uid, name: name, until: Date.now() + WANT_MS, host: host };
+      requestAnimationFrame(wantChanges);
+    }
+    function wantChanges() {
+      var w = chgWant.current, host = hostRef.current, b = boardRef.current;
+      if (!w) return;
+      if (host !== w.host) { chgWant.current = null; return; }   // the scene went: nothing to fly to
+      if (host && b && host.settled() && b.open(w.roomId, 'changes')) { chgWant.current = null; return; }
+      if (Date.now() > w.until) { chgWant.current = null; setChg(null); changesDialog(w.uid, w.name); return; }
+      requestAnimationFrame(wantChanges);
     }
     // Which building (repository) the scene shows. The choice is kept in the browser.
     var snap = useSnapshot();
@@ -1771,31 +1920,59 @@
     var boardRef = React.useRef(null);
     var bs = useState(null), board = bs[0], setBoard = bs[1];
     var latestSnap = React.useRef(null); latestSnap.current = snap;
-    // the terminal of one session (terminal.js), read in full beside the room
+    // the desk monitors (terminal.js): each is a pinned screen with the chat and the terminal of its session
     var terminalRef = React.useRef(null);
     // the scene host (scene-host.js): the one reader of the DS stage; board, terminal, streets and birds are its adapters
     var hostRef = React.useRef(null);
     // the Security room's wall screens (security.js): the user picks the permission rules on them
     var securityRef = React.useRef(null);
     useEffect(function () { if (securityRef.current) securityRef.current.refresh(); }, [snap]);
-    var tm = useState(null), term = tm[0], setTerm = tm[1];
     // the screen the camera looks at (step 1 of a screen: scene-host.js focus), or null
     var lk = useState(null), look = lk[0], setLook = lk[1];
+    // The pinned layer of the screen in focus (scene-host.js layer, #89): its screen, state and waiting count, not its box
+    // (the screens put the box on themselves). deskTab: the tab of the desk screen. chg: the session whose changes the wall shows.
+    var ly = useState(null), layer = ly[0], setLayer = ly[1];
+    var dt = useState('chat'), deskTab = dt[0], setDeskTab = dt[1];
+    var cg = useState(null), chg = cg[0], setChg = cg[1];
+    var needsRef = React.useRef(0); needsRef.current = needs.length;
     function blurScene() { if (hostRef.current) hostRef.current.blur(); }   // fly back from a screen; nothing when none is in focus
     function closeBoard() { blurScene(); setBoard(null); }
-    // the terminal from the More list: a screen in focus flies back first
-    function openTerminal(uid, name) {
-      blurScene();
-      setBoard(null);
-      setTerm({ uid: uid, name: name });
+    // The desk screen of a session (the dock, Ctrl+K, the bezel count): the scene goes to its building and floor, then
+    // the camera flies to its monitor. It tries again each frame (at most 5 s) until the desk is on screen.
+    var deskWant = React.useRef(null);
+    function openDesk(uid, tab) {
+      var s = window.officeAdapter.sessionByUid(uid);
+      if (!s) return;
+      setDeskTab(tab || 'chat'); setBoard(null);
+      var nm = window.officeAdapter.botName(uid), o = officeRef.current;
+      if (cur2.view !== 'office' || window.officeAdapter.buildingOf(s) !== shown || !o || !nm) goTo(s);
+      else o.select(nm);   // its floor, and the dock's actions for it
+      deskWant.current = { uid: uid, until: Date.now() + WANT_MS };
+      requestAnimationFrame(wantDesk);
     }
+    function wantDesk() {
+      var w = deskWant.current, t = terminalRef.current, host = hostRef.current;
+      if (!w) return;
+      var f = host && host.focused();
+      if (f && f.kind === 'terminal' && f.item && f.item.uid === w.uid) { deskWant.current = null; return; }
+      if (t && host && host.settled() && t.open(w.uid)) { deskWant.current = null; return; }
+      if (Date.now() > w.until) {
+        deskWant.current = null;
+        var s = window.officeAdapter.sessionByUid(w.uid);
+        toast({ tone: 'info', title: s ? s.name : 'Desk', text: 'The desk of this session is not on screen.' });
+        return;
+      }
+      requestAnimationFrame(wantDesk);
+    }
+    // The bezel count: go to the oldest request of every building, at the desk of its session.
+    function goOldest() { var r = needs[0]; if (r) openDesk(r.uid, 'chat'); }
     function noteKey(roomId) { return mount ? mount.noteKey(roomId) : ''; }   // the server's key for the room (place.mjs)
     useEffect(function () { return function () {
       if (boardRef.current) { boardRef.current.dispose(); boardRef.current = null; }
       if (terminalRef.current) { terminalRef.current.dispose(); terminalRef.current = null; }
       if (securityRef.current) { securityRef.current.dispose(); securityRef.current = null; }
       if (hostRef.current) { hostRef.current.dispose(); hostRef.current = null; }
-      setBoard(null); setTerm(null); setLook(null);
+      setBoard(null); setLook(null); setLayer(null); setChg(null);
     }; }, [sceneKey, cur2.view]);
     // doors: a session that comes into a room or leaves it of the shown building.
     // Room ids come from the board's rooms; the adapter says who sits in each.
@@ -1858,8 +2035,11 @@
       find();
       return function () { mo.disconnect(); if (ro) ro.disconnect(); window.removeEventListener('resize', set); document.documentElement.style.removeProperty('--strip-clear'); };
     }, []);
-    // One panel at a time: while the terminal, the board or the stats panel is open, the DS right column (chat or roster) is hidden.
-    var panelOpen = !!term || !!(board && (board.kind === 'board' || board.kind === 'stats'));
+    // One panel at a time: while a pinned screen (the desk chat and terminal, the room's changes), the board or the stats panel
+    // is open, the DS right column (chat or roster) is hidden. The pinned screens show the open requests (RequestBar, bezel).
+    var pinned = !!(layer && layer.pin);
+    var deskUid = pinned && layer.kind === 'terminal' && layer.item ? layer.item.uid : null;
+    var panelOpen = pinned || !!(board && (board.kind === 'board' || board.kind === 'stats'));
     useEffect(function () { var el = document.getElementById('office'); if (el) el.classList.toggle('has-panel', panelOpen); }, [panelOpen]);
     // A side panel changes the free part of the view: the screen in focus is framed again beside it. The window too.
     useEffect(function () { if (hostRef.current) hostRef.current.refit(); }, [panelOpen]);
@@ -1867,8 +2047,10 @@
     // Decisions inbox stays), so the screen gets the height of the view; it is framed again when that changes. The look bar
     // then shows the open requests (LookBar asks).
     var secLook = !!(look && look.kind === 'security');
-    React.useLayoutEffect(function () { var el = document.getElementById('office'); if (el) el.classList.toggle('sec-look', secLook); }, [secLook]);
-    useEffect(function () { if (hostRef.current) hostRef.current.refit(); }, [secLook]);
+    // A pinned desk or changes screen needs the height too (review 89: at 400x640 a request needs 140-170 px): the same columns go.
+    var hideHud = secLook || pinned;
+    React.useLayoutEffect(function () { var el = document.getElementById('office'); if (el) el.classList.toggle('sec-look', hideHud); }, [hideHud]);
+    useEffect(function () { if (hostRef.current) hostRef.current.refit(); }, [hideHud]);
     // The scene is as tall as the window. The DS sets its height inline from the height prop, so a resize renders
     // the page again with the new size (once per frame), and then frames the screen in focus again (#55).
     useEffect(function () {
@@ -1890,15 +2072,18 @@
       return function () { window.removeEventListener('keydown', onKey); };
     }, []);
     // When the office opens something new in the right column (the Decisions inbox, or the chat of another bot),
-    // the page panel steps aside. The chat of the bot the terminal belongs to is not new: the desk opens both.
+    // the page panel steps aside. The bot of the desk in focus is not new: the desk selects it. A desk the page is
+    // flying to (openDesk) is not new either. The desk in focus is read from the host now, not from the last render.
     var lastSel = React.useRef(sel);
     var selSess = sel ? window.officeAdapter.session(sel) : null;
     useEffect(function () {
       var prev = lastSel.current; lastSel.current = sel;
       if (!panelOpen) return;
-      if (inbox || (sel && sel !== prev && !(term && selSess && term.uid === selSess.uid))) {
+      var f = hostRef.current && hostRef.current.focused(), fu = f && f.kind === 'terminal' && f.item ? f.item.uid : null;
+      var mine = selSess && (selSess.uid === fu || (deskWant.current && deskWant.current.uid === selSess.uid));
+      if (inbox || (sel && sel !== prev && !mine)) {
         blurScene();
-        setBoard(null); setTerm(null);
+        setBoard(null);
       }
     }, [sel, inbox]);
     // The newest surface wins: a page panel that opens while the Decisions inbox is open closes the inbox.
@@ -1937,7 +2122,7 @@
       onNotify: function (n) {
         if (n.kind !== 'request' && n.kind !== 'error') return;
         var ns = mount ? mount.session(n.bot) : null;   // the session, so the toast and its Open outlive a scene change
-        toast({ tone: n.kind === 'error' ? 'error' : 'warning', title: n.bot, text: n.text, bot: n.bot, req: n.kind === 'request', uid: ns ? ns.uid : '', action: { label: 'Open', onClick: function () { if (ns) goTo(ns); else if (officeRef.current) officeRef.current.select(n.bot); } } });
+        toast({ tone: n.kind === 'error' ? 'error' : 'warning', title: n.bot, text: n.text, bot: n.bot, req: n.kind === 'request', uid: ns ? ns.uid : '', action: { label: 'Open', onClick: function () { if (ns && n.kind === 'request') openDesk(ns.uid, 'chat'); else if (ns) goTo(ns); else if (officeRef.current) officeRef.current.select(n.bot); } } });
       },
       ambient: ambient, onAmbientOpen: function () { setAmbient(false); }, onReady: function (o) {
         officeRef.current = o; readyKey.current = sceneKey;
@@ -1948,8 +2133,13 @@
         if (terminalRef.current) terminalRef.current.dispose();
         if (securityRef.current) { securityRef.current.dispose(); securityRef.current = null; }
         if (hostRef.current) hostRef.current.dispose();
-        var host = hostRef.current = window.OfficeSceneHost && st ? window.OfficeSceneHost.attach(o, { covers: sceneCovers }) : null;
+        // waiting: the bezel of the screen in focus counts every request of every building (Needs you)
+        var host = hostRef.current = window.OfficeSceneHost && st ? window.OfficeSceneHost.attach(o, { covers: sceneCovers, waiting: function () { return needsRef.current; } }) : null;
         window.officeHost = host;   // the scene host (focus, flights), for the console and tests
+        // The pinned layer: the page renders again when its screen, state or count changes; the box moves without a render.
+        if (host) host.onLayer(function (l) {
+          setLayer(function (p) { return p && l && p.key === l.key && p.shown === l.shown && p.pin === l.pin && p.waiting === l.waiting && p.item === l.item ? p : l; });
+        });
         // The floor the user looks at, for the memory of floors: a floor other than the one the page opened is a move (#111).
         if (offFloor.current) { offFloor.current(); offFloor.current = null; }
         if (host && mount) {
@@ -1957,11 +2147,14 @@
           offFloor.current = host.frame(function () { floorMem.current.see(seenRepo, seenMount.floorBranch(host.floorId())); });
         }
         // A screen in focus: a look shows the look bar; a look, a look at another screen or a way back closes the panels.
-        // The second step opens a panel through the board's or the terminal's onOpen.
+        // The second step opens a panel through the board's onOpen. A pinned screen (a desk monitor, the room's changes) has
+        // no look bar: its layer is the screen, with its own Back. A desk in focus selects its bot (the dock's actions for it).
         // A Security room screen keeps the look bar in focus: every click on it is a click on a cell, never a panel.
         if (host) host.onFocus(function (f) {
-          setLook(f && (!f.open || f.kind === 'security') ? f : null);
-          if (!f || !f.open) { setBoard(null); setTerm(null); }
+          setLook(f && !f.pin && (!f.open || f.kind === 'security') ? f : null);
+          if (!f || !f.open) setBoard(null);
+          if (!f || f.kind !== 'changes') setChg(null);
+          if (f && f.pin && f.kind === 'terminal' && f.item && f.item.name) o.select(f.item.name);
         });
         if (st && host && window.OfficeBoard) {
           boardRef.current = window.OfficeBoard.attach(o, {
@@ -1971,8 +2164,8 @@
             tree: function (root) { return api('/api/tree', { root: root }); },
             stats: function (id) { return mount.figures(id); },
             pin: function (id) { var n = latestSnap.current && latestSnap.current.pins && latestSnap.current.pins[noteKey(id)]; return n && n.text ? { text: n.text, by: n.by } : null; },
-            onDoor: function (id) { setTerm(null); setDlg({ name: 'room', roomId: id }); },
-            onOpen: function (id, kind) { setTerm(null); setBoard({ id: id, kind: kind }); }
+            onDoor: function (id) { setDlg({ name: 'room', roomId: id }); },
+            onOpen: function (id, kind) { if (kind !== 'changes') setBoard({ id: id, kind: kind }); }
           });
         }
         if (st && host && window.OfficeSecurity) {
@@ -1991,8 +2184,8 @@
           terminalRef.current = window.OfficeTerminal.attach(o, {
             host: host,
             session: function (botName) { return mount.session(botName); },
-            // the second click on a monitor: its screen stays in focus beside the terminal
-            onOpen: function (uid, name) { o.select(name); setBoard(null); setTerm({ uid: uid, name: name }); }
+            // a click on the monitor in focus outside its layer: the desk screen shows its chat
+            onOpen: function () { setDeskTab('chat'); }
           });
         }
         if (!st || !host || !window.OfficeCity) return;
@@ -2096,7 +2289,7 @@
       ((sn && sn.sessions) || []).filter(function (s) { return s.status !== 'ended'; }).forEach(function (s) {
         var where = ((s.place && s.place.building) || '') + (s.place && s.place.room ? ' · ' + s.place.room : ''), kw = 'session ' + where, nm = sceneName(s);
         out.push({ id: 'page-s-go-' + s.uid, label: 'Go to session ' + nm, icon: 'chevron-right', group: 'Sessions', hint: where, keywords: kw, run: function () { goTo(s); } });
-        out.push({ id: 'page-s-term-' + s.uid, label: 'Terminal of ' + nm, icon: 'terminal', group: 'Sessions', hint: where, keywords: kw + ' output', run: function () { openTerminal(s.uid, nm); } });
+        out.push({ id: 'page-s-term-' + s.uid, label: 'Terminal of ' + nm, icon: 'terminal', group: 'Sessions', hint: where, keywords: kw + ' output', run: function () { openDesk(s.uid, 'terminal'); } });
         out.push({ id: 'page-s-chg-' + s.uid, label: 'Changes of ' + nm, icon: 'trace', group: 'Sessions', hint: where, keywords: kw + ' diff files', run: function () { changes(s.uid, nm); } });
         if (s.headless && (s.status === 'working' || s.status === 'waiting')) out.push({ id: 'page-s-stop-' + s.uid, label: 'Stop turn of ' + nm, icon: 'pause', group: 'Sessions', hint: where, keywords: kw + ' interrupt', run: function () { api('/api/interrupt', { uid: s.uid }).catch(function (x) { toast({ tone: 'error', title: s.name, text: x.message }); }); } });
       });
@@ -2107,7 +2300,7 @@
     return h(React.Fragment, null,
       h('div', { className: 'view' + (fading ? ' is-fading' : '') }, scene),
       ambient ? null : h(Controls, { sel: cur2.view === 'office' ? sel : null, syl: syl && cur2.view === 'office', look: !!look, buildings: list, shown: shown, shownName: (list.filter(function (b) { return b.key === shown; })[0] || def || {}).name, toast: toast, needs: needs.length, onNeeds: function () { setDlg({ name: 'needs' }); }, onBuilding: function (k) { pick(k); if (view === 'city') go('office'); }, onCity: function () { go('city'); }, onOffice: function () { introNext.current = true; go('office'); }, view: cur2.view, onSessions: function () { setDlg({ name: 'sessions' }); }, onCompact: function () { setAmbient(true); },
-        onFloors: function () { setDlg({ name: 'floors' }); }, onExtensions: extensions, onTerminal: openTerminal, onOpen: function () { show('open'); }, onPast: function () { show('past'); }, onSchedules: function () { show('schedules'); }, onHooks: function () { show('hooks'); }, onKinds: function () { setDlg({ name: 'kinds' }); }, onChanges: changes }),
+        onFloors: function () { setDlg({ name: 'floors' }); }, onExtensions: extensions, onTerminal: function (uid) { openDesk(uid, 'terminal'); }, onOpen: function () { show('open'); }, onPast: function () { show('past'); }, onSchedules: function () { show('schedules'); }, onHooks: function () { show('hooks'); }, onKinds: function () { setDlg({ name: 'kinds' }); }, onChanges: changes }),
       d === 'open' ? h(OpenDialog, { shownPath: shownPath, kind: dlg.kind, spendLimit: info.spendLimit, recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
       d === 'kinds' ? h(KindsDialog, { onOpen: function (kind) { refresh().then(function () { setDlg({ name: 'open', kind: kind }); }); }, onClose: close }) : null,
       d === 'past' ? h(PastDialog, { onClose: close, onChanges: changes, toast: toast }) : null,
@@ -2117,13 +2310,20 @@
       d === 'floors' ? h(FloorsDialog, { repo: shown, toast: toast, onClose: close }) : null,
       d === 'room' && mount ? h(RoomDialog, { mount: mount, roomId: dlg.roomId, toast: toast, onClose: close }) : null,
       d === 'ext' ? h(ExtensionsDialog, { uid: dlg.uid, name: dlg.label, toast: toast, onClose: close }) : null,
-      term ? h(TerminalPanel, { key: term.uid, uid: term.uid, name: term.name, toast: toast, onClose: function () { setTerm(null); blurScene(); } }) : null,
-      !term && board && boardRef.current && board.kind === 'board' ? h(BoardPanel, { data: boardRef.current.dataOf(board.id), sessions: roomAndSel(board.id), toast: toast, onClose: closeBoard }) : null,
-      !term && board && boardRef.current && board.kind === 'stats' && mount ? h(StatsPanel, { mount: mount, extra: roomAndSel(board.id, true), toast: toast, roomId: board.id, onClose: closeBoard }) : null,
-      !term && board && boardRef.current && board.kind === 'notes' ? h(NotesEditor, { key: board.id, noteKey: noteKey(board.id), text: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).text || '', version: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).v || 0, toast: toast,
+      // The pinned screens (#89): the desk monitor in focus shows the chat and terminal of its session, the room's wall
+      // screen its changes. They mount with the look (hidden while the camera flies) and show once it lands.
+      deskUid && hostRef.current ? h(DeskScreen, { key: 'desk-' + deskUid, uid: deskUid, bot: layer.item.name, name: sceneName({ uid: deskUid, name: layer.item.name }), host: hostRef.current, office: officeRef.current,
+        shown: layer.shown, tab: deskTab, onTab: setDeskTab, waiting: layer.waiting, onGo: goOldest, toast: toast, onBack: blurScene }) : null,
+      pinned && layer.kind === 'changes' && chg && hostRef.current ? h(ChangesScreen, { key: 'chg-' + chg.uid, uid: chg.uid, name: chg.name, ended: chg.ended, host: hostRef.current,
+        shown: layer.shown, waiting: layer.waiting, onGo: goOldest, toast: toast, onBack: blurScene }) : null,
+      // The bezel count of a screen in focus that is not pinned (a board, the notes, the stats, a Security screen).
+      layer && !pinned && hostRef.current ? h(Bezel, { host: hostRef.current, shown: layer.shown, count: layer.waiting, onGo: goOldest }) : null,
+      board && boardRef.current && board.kind === 'board' ? h(BoardPanel, { data: boardRef.current.dataOf(board.id), sessions: roomAndSel(board.id), toast: toast, onClose: closeBoard }) : null,
+      board && boardRef.current && board.kind === 'stats' && mount ? h(StatsPanel, { mount: mount, extra: roomAndSel(board.id, true), toast: toast, roomId: board.id, onClose: closeBoard }) : null,
+      board && boardRef.current && board.kind === 'notes' ? h(NotesEditor, { key: board.id, noteKey: noteKey(board.id), text: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).text || '', version: ((snap && snap.notes && snap.notes[noteKey(board.id)]) || {}).v || 0, toast: toast,
         rect: function () { return hostRef.current ? hostRef.current.rect() : null; }, flying: function () { return hostRef.current ? hostRef.current.flying() : false; },
         onClose: function () { if (boardRef.current) boardRef.current.refresh(); blurScene(); } }) : null,
-      look && !term && !board && hostRef.current ? h(LookBar, { key: look.key, verb: look.verb, icon: LOOK_ICON[look.kind] || 'zoom-in', toast: toast, layout: secLook,
+      look && !board && hostRef.current ? h(LookBar, { key: look.key, verb: look.verb, icon: LOOK_ICON[look.kind] || 'zoom-in', toast: toast, layout: secLook,
         asks: secLook && snap ? (snap.sessions || []).filter(function (s) { return window.OfficeVocab.requests(s).length > 0; }) : [],
         free: function (el) { return hostRef.current ? hostRef.current.free(sceneCovers(el)) : null; },
         onPlaced: function () { if (hostRef.current) hostRef.current.refit(); },

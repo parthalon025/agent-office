@@ -2,7 +2,8 @@
    Each lab room gets four things that the user can see and click:
    - The blackboard on the back wall is the agents' overview: plan progress, browser steps, last steps
      and the top of the repository. An agent can pin a note on it. The page shows the same data in full
-     (office.js, BoardPanel).
+     (office.js, BoardPanel). It is also the room's wall screen for its changes: open(roomId, 'changes') flies to it,
+     and the page pins the diff over it (office.js ChangesScreen, #89).
    - The whiteboard left of it holds the user's own notes. The page lays a text box over the board itself,
      so the user writes on the board.
    - A small wall display on the left wall shows the room's numbers: sessions, tool calls, tokens, cost.
@@ -365,6 +366,7 @@
     var notes = [];       // whiteboards: { kind:'notes', ... }
     var statsList = [];   // wall displays: { kind:'stats', ... }
     var doors = [];       // doors: { kind:'door', ... }
+    var changesList = []; // the changes of a room on its blackboard (#89): { kind:'changes', mesh (the blackboard), roomId }, not picked
     var decorRooms = [];  // { rg, roomId, items, added, lamp, board } for each room group that has decor
     var pending = {};     // roomId -> { dir, at, t }: a door pulse that waits for its door (the floor is being rebuilt)
     var trees = {};       // root -> tree
@@ -416,6 +418,7 @@
       // a door that swings while its floor is rebuilt: the new door takes the swing over
       doors.forEach(function (d) { if (d.pulse && !inScene(d.mesh)) pending[d.roomId] = { dir: d.pulse.dir, at: Date.now(), t: d.pulse.t }; });
       boards = boards.filter(keep); notes = notes.filter(keep); statsList = statsList.filter(keep); doors = doors.filter(keep);
+      changesList = changesList.filter(function (n) { return inScene(n.mesh); });
       decorRooms = decorRooms.filter(function (r) { return inScene(r.rg); });
     }
 
@@ -450,6 +453,9 @@
       mt.map = t.tex; mt.emissive = new T.Color(0xffffff); mt.emissiveMap = t.tex; mt.emissiveIntensity = 0.55; mt.needsUpdate = true;
       var bd = { kind: 'board', mesh: m, roomId: id, tex: t.tex, canvas: t.canvas, sig: '', mat: mt, base: 0.55, hov: 0.85, g: 0, tgt: 0, hit: [m], hint: 'Open the overview', orig: orig };
       m.userData.item = bd; boards.push(bd); items.push(bd);
+      // the room's changes (the diff) show on the same wall screen, as a pinned screen; a click on the board still opens the overview
+      var cd = { kind: 'changes', mesh: m, roomId: id };
+      changesList.push(cd); items.push(cd);
       // a chalk ledge under the blackboard, with two pieces of chalk
       var ledge = new T.Group(); ledge.position.set(m.position.x, m.position.y - 1.25 - 0.04, m.position.z + 0.1); rg.add(ledge); added.push(ledge);
       box(3.9, 0.07, 0.2, themed('scene-wood'), 0, 0, 0, ledge);
@@ -717,17 +723,18 @@
 
     // Clicks come from the host (not drags, one winner). The blackboard, the notes board and the stats display are
     // screens: the host flies to one on the first click and calls open() on the second. The door has no look: one click.
-    var LOOK = { board: true, notes: true, stats: true };
+    var LOOK = { board: true, notes: true, stats: true, changes: true };
     // Open one tool of a room without the pointer (the keyboard path, Ctrl+K): kind is 'board', 'notes' or 'stats' (the host
-    // flies there and opens it, both steps at once; from another screen it flies straight on), or 'door' (the agents of the room).
+    // flies there and opens it, both steps at once; from another screen it flies straight on), 'changes' (the diff, pinned on
+    // the blackboard: the look is all it takes, #89), or 'door' (the agents of the room).
     // It works on the shown floor. Returns false when the room has no such tool.
     function open(roomId, kind) {
       if (dead) return false;
       try { scan(); } catch (x) { /* the lists are still good */ }
       if (kind === 'door') { if (!liveDoor(roomId)) return false; if (o.onDoor) o.onDoor(roomId); return true; }
       var fg = shownFloor();
-      var it = allItems().filter(function (x) { return x.roomId === roomId && x.kind === kind && LOOK[x.kind] && onShownFloor(x.mesh, fg); })[0];
-      return !!it && host.show(target, it, true);
+      var it = allItems().concat(changesList).filter(function (x) { return x.roomId === roomId && x.kind === kind && LOOK[x.kind] && onShownFloor(x.mesh, fg); })[0];
+      return !!it && host.show(target, it, kind !== 'changes');
     }
     var target = {
       name: 'board',
@@ -736,11 +743,14 @@
       itemOf: function (mesh) { return mesh.userData.item || null; },
       hover: onHover,
       // clear: the chalk ledge, the marker tray and the plant next to the boards stay in view; the desks and the bots in front are cut away
-      look: function (item) { return LOOK[item.kind] ? { key: keyOf(item), mesh: item.mesh, verb: item.hint, kind: item.kind, clear: 1.4 } : null; },
+      look: function (item) {
+        if (item.kind === 'changes') return { key: keyOf(item), mesh: item.mesh, verb: '', kind: 'changes', clear: 1.4, pin: true };
+        return LOOK[item.kind] ? { key: keyOf(item), mesh: item.mesh, verb: item.hint, kind: item.kind, clear: 1.4 } : null;
+      },
       open: function (item) { if (o.onOpen) o.onOpen(item.roomId, item.kind); },
       click: function (item) { if (item.kind === 'door' && o.onDoor) o.onDoor(item.roomId); },
       // after a floor rebuild the screen in focus is a new mesh
-      find: function (key) { var it = allItems().filter(function (x) { return keyOf(x) === key && inScene(x.mesh); })[0]; return it ? { item: it, mesh: it.mesh } : null; },
+      find: function (key) { var it = allItems().concat(changesList).filter(function (x) { return keyOf(x) === key && inScene(x.mesh); })[0]; return it ? { item: it, mesh: it.mesh } : null; },
       anchors: function () { return []; }
     };
     var offTarget = host.register(target);
@@ -767,7 +777,7 @@
         delete b.mesh.userData.item;
       });
       allItems().forEach(drop);
-      boards = []; notes = []; statsList = []; doors = []; decorRooms = []; pending = {};
+      boards = []; notes = []; statsList = []; doors = []; changesList = []; decorRooms = []; pending = {};
       hovered = null;
       if (ownHost) host.dispose();
     }

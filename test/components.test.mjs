@@ -165,14 +165,50 @@ test('OfficeTypeCard: each theme has a thumbnail set whose type stripe equals it
   }
 });
 
+// #89: the terminal and changes side panels are gone; the desk monitor and the room's wall screen are pinned screens. No
+// approval can hide: every screen in focus shows the bezel count, and the desk screen shows the requests of its session.
+test('office.js: pinned screens replace the terminal and changes panels, and every screen in focus has the bezel count (#89)', () => {
+  const js = readFileSync(join(pub, 'office.js'), 'utf8'), css = readFileSync(join(pub, 'office.css'), 'utf8');
+  assert.doesNotMatch(js, /TerminalPanel|terminal-panel/, 'no terminal side panel');
+  assert.doesNotMatch(css, /\.terminal-panel/, 'no terminal side panel style');
+  const fn = (name) => { const at = js.indexOf('function ' + name + '('); assert.ok(at >= 0, name); return js.slice(at, js.indexOf('\n  }\n', at)); };
+  assert.match(fn('DeskScreen'), /h\(RequestBar, \{ session: s/, 'the desk screen shows the requests of its session');
+  assert.match(fn('DeskScreen'), /h\(Bezel, \{ inline: true, count: p\.waiting/, 'the desk screen has the bezel count');
+  assert.match(fn('ChangesScreen'), /h\(Bezel, \{ inline: true, count: p\.waiting/, 'the changes screen has the bezel count');
+  assert.match(js, /layer && !pinned && hostRef\.current \? h\(Bezel, \{ host: hostRef\.current/, 'a screen that is not pinned has the bezel count too');
+  assert.match(js, /waiting: function \(\) \{ return needsRef\.current; \}/, 'the count is every request of every building');
+  assert.match(fn('ChangesScreen'), /h\(ChangesConfirm, \{ c: c \}\)/, 'pull request and worktree removal keep their confirm dialog');
+  assert.match(fn('putBox'), /setProperty\('--pin-x'/, 'the box is set with setProperty, never a style attribute');
+  assert.doesNotMatch(fn('DeskScreen') + fn('ChangesScreen') + fn('Bezel'), /style:/, 'no style prop on a pinned layer');
+});
+
+// Review 89, B2: at 400 px an open request pushed Approve and Decline below the desk screen (the bar sat under the tabs, capped
+// at 40%, and the head took two rows). The requests come first, under the head; on a small screen the head is one row, and while
+// a request is open the bar takes the screen under the head with no cap and the tabs wait. The browser check measures it.
+test('office.js and office.css: on the desk screen the requests come first, and on a small screen they take the screen (review 89)', () => {
+  const js = readFileSync(join(pub, 'office.js'), 'utf8'), css = readFileSync(join(pub, 'office.css'), 'utf8');
+  const at = js.indexOf('function DeskScreen('), desk = js.slice(at, js.indexOf('\n  }\n', at));
+  const head = desk.indexOf("h('div', { className: 'pin-head' }"), bar = desk.indexOf('h(RequestBar, { session: s'), tabs = desk.indexOf('h(A.Tabs, {');
+  assert.ok(head >= 0 && bar > head && tabs > bar, 'head, then the requests, then the tabs (DOM order is the reading and focus order)');
+  assert.match(desk, /className: 'pin pin-desk' \+ \(small \? ' is-small' : ''\) \+ \(asks \? ' has-asks' : ''\)/, 'small and has-asks are React state');
+  assert.doesNotMatch(js, /classList\.toggle\('is-small'/, 'no class set by hand: a render that changes className would drop it');
+  assert.doesNotMatch(css, /\.pin-desk\.is-small \.pin-head \{ flex-wrap: nowrap; \}/, 'a head too narrow wraps, never clips Back');
+  assert.match(css, /\.pin-desk\.is-small \.pin-head > \* \{ flex: none; \}/, 'its buttons keep their size; the name gives way');
+  assert.match(desk, /h\(Bezel, \{ inline: true, count: p\.waiting, onGo: p\.onGo, compact: small \}\)/, 'a small head shows the count, not the words');
+  assert.match(js, /compact \? 'Needs you · ' \+ p\.count \+ '\. Go to the oldest request' : null/, 'the compact bezel keeps its whole name as its label');
+  assert.match(css, /\.pin-desk\.is-small\.has-asks \.asks \{ flex: 1 1 auto; min-height: 0; max-height: none; border-bottom: 0; \}/, 'no cap on a small screen');
+  assert.match(css, /\.pin-desk\.is-small\.has-asks \.ao-tabs \{ display: none; \}/, 'the tabs wait while a request is open');
+  assert.match(js, /\.term-input, \.term-note, \.bezel, \.board-b > \.inline-actions,/, 'the toast stack keeps off the terminal note, the bezel and the room panel actions');
+});
+
 // Review M6: at 400 px the Security wall was a 172 px strip between the floor list and the room card. While a Security screen
 // is in focus at 820 px and below, the page hides those two (as has-panel hides the right column; the Decisions inbox stays),
 // frames the screen again, and the look bar shows the open requests, so an approval never hides.
 test('office.js and office.css: a Security screen in focus at 820 px and below gets the floor list and the room card out of the way (M6)', () => {
   const js = readFileSync(join(pub, 'office.js'), 'utf8');
-  assert.match(js, /useLayoutEffect\(function \(\) \{ var el = document\.getElementById\('office'\); if \(el\) el\.classList\.toggle\('sec-look', secLook\)/, 'set in the commit, before the look bar places itself');
+  assert.match(js, /useLayoutEffect\(function \(\) \{ var el = document\.getElementById\('office'\); if \(el\) el\.classList\.toggle\('sec-look', hideHud\)/, 'set in the commit, before the look bar places itself');
   assert.match(js, /layout: secLook/);
-  assert.match(js, /\[secLook\]\);/, 'the screen is framed again when the class changes');
+  assert.match(js, /\[hideHud\]\);/, 'the screen is framed again when the class changes');
   assert.match(js, /h\(LookBar, \{[^}]*asks:/, 'the look bar gets the open requests');
   const m = /@media \(max-width: 820px\) \{\s*#office\.sec-look \.ao-hud-left, #office\.sec-look \.ao-hud-right:not\(\.ao-hud-inbox\) \{ visibility: hidden; pointer-events: none; \}/.exec(css);
   assert.ok(m, 'the rule in office.css');
@@ -181,4 +217,13 @@ test('office.js and office.css: a Security screen in focus at 820 px and below g
 // From 1100 px down to 821 px the dock sits on the left edge; the left menu (floors, rooms, queue) stops above it, so no Approve button sits under the dock.
 test('the left menu stops above the dock from 1100 px down to 821 px', () => {
   assert.match(css, /@media \(min-width: 821px\) and \(max-width: 1100px\) \{\s*\.ao-hud-left \{ max-height: calc\(100% - 68px - var\(--strip-clear, 200px\)\); \}\s*\}/);
+});
+
+test('office.js: the screen waits are deadlines in time, a pinned screen hides the floor list, the first request takes focus, the bezel stays in the free part (review 89)', () => {
+  const js = readFileSync(join(pub, 'office.js'), 'utf8');
+  assert.doesNotMatch(js, /\+\+w\.n > 300/, 'no count of frames');
+  assert.equal((js.match(/Date\.now\(\) > w\.until/g) || []).length, 2, 'the changes and the desk wait end on a deadline');
+  assert.match(js, /var hideHud = secLook \|\| pinned;/, 'a pinned screen takes the same columns away as a Security screen');
+  assert.match(js, /el\.querySelector\('\.asks button'\) \|\| el\.querySelector\('#pin-chat-input/, 'an open request takes focus before the message box');
+  assert.match(js, /bezelAt\(r, p\.host\.free\(\), 18\)/, 'the bezel is kept inside host.free()');
 });
