@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Agent Office MCP server (stdio). Gives a Claude Code session four tools:
 //   office_inbox        read messages the user typed in the office
+//   office_mail         send a short message to another agent of the same goal (manager.mjs caps the hops and the count)
 //   office_ask          ask the user a question in the office and wait for the answer
 //   office_room         describe the session's room: building (repository), floor (branch), room
 //                       (worktree folder), the other sessions there and what they work on, the user's
@@ -46,6 +47,20 @@ const TOOLS = [
       type: 'object',
       properties: { question: { type: 'string', description: 'A short, specific question. A yes or no question works best.' } },
       required: ['question'],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: 'office_mail',
+    description: 'Send a short message to another agent in the same Agent Office goal, by its name. Use it to hand over a result or ask a teammate. ' +
+      'It works only while you take part in a goal. The office limits how many messages a goal sends and how long a reply chain gets.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        to: { type: 'string', description: 'The name of the other agent, as office_room lists it.' },
+        text: { type: 'string', description: 'The message. Keep it short and specific.' },
+      },
+      required: ['to', 'text'],
       additionalProperties: false,
     },
   },
@@ -105,6 +120,11 @@ async function callTool(name, args) {
     const question = String(args?.question || '').slice(0, 600);
     if (!question) throw new Error('office_ask needs a question.');
     return (await office('/mcp/ask', { question }, 11 * 60 * 1000)).text;
+  }
+  if (name === 'office_mail') {
+    const to = String(args?.to || '').slice(0, 100), text = String(args?.text || '').slice(0, 2000);
+    if (!to || !text) throw new Error('office_mail needs to and text.');
+    return (await office('/mcp/mail', { to, text }, 15000)).text;
   }
   // The room lookup may run git once (about 50 ms; git.locate gives up after 8 s,
   // and a lookup in a room that is being removed waits for the removal first).

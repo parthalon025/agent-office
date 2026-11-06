@@ -7,7 +7,7 @@
 //   agents(building)             -> [{ id, name, role, room, free, paid? }]    who could take a step right now. paid is false for a local model.
 //   dispatch(agent, task, ctx)   -> void | Promise                            start the step on that agent; ctx = { goalId, stepId }
 //   interrupt(agentId)           -> void                                       optional: stop a step on cancel
-//   deliver(to, from, text, hops)-> void                                       optional: put an allowed mail into the receiver's inbox
+//   deliver(to, from, text, hops, toName)-> void                                       optional: put an allowed mail into the receiver's inbox
 //   spendOf(agentId)             -> number                                     optional: dollars the agent has spent so far
 //   board(report)                -> void                                       optional: the user's view. Called with { goalId, building, goal, status, text, todos } after
 //                                                                              every change, only when the status, the to-dos or the text changed. Not wired to the server yet.
@@ -223,7 +223,7 @@ export function createManager(deps = {}) {
       const g = {
         id: 'g' + makeId(), building: String(building || ''), goal: text, status: 'planning', reason: '', steps: [],
         approveFirst: opts.approveFirst === true, spendLimit: limitOf(building, opts.spendLimit), messages: 0,
-        baseline: new Map(), lastBoard: '', waitingFor: '', pumping: false, createdAt: now(), updatedAt: now(),
+        baseline: new Map(), hops: new Map(), mail: [], lastBoard: '', waitingFor: '', pumping: false, createdAt: now(), updatedAt: now(),
       };
       const startTier = typeof deps.ready === 'function' ? ladderStart(deps.ready(g.building)) : '';
       g.paidAsked = startTier !== 'local'; // a goal that starts on a paid tier was asked when the user started it
@@ -283,6 +283,7 @@ export function createManager(deps = {}) {
 
     /** A step's agent finished its turn. ok = false marks the step failed and holds the goal for retry. */
     async finish(agentId, { ok = true, text = '' } = {}) {
+      for (const g of goals.values()) g.hops.delete(agentId); // its next mail starts a new chain
       for (const g of goals.values()) {
         const step = g.steps.find((s) => s.status === 'working' && s.agentId === agentId);
         if (!step) continue;
@@ -348,15 +349,37 @@ export function createManager(deps = {}) {
      * Agent mail inside a goal. hops counts the messages in a reply chain. Refused: the goal is not running,
      * the chain is too long, or the goal sent too many messages. Allowed mail goes to deps.deliver.
      */
-    route({ goalId, from, to, text, hops = 0 }) {
+    route({ goalId, from, to, text, hops = 0, toName }) {
       const g = goals.get(goalId);
       if (!g || g.status !== 'running') return { ok: false, reason: 'The goal is not running.' };
       if (hops >= limits.maxHops) return { ok: false, reason: `The reply chain reached ${limits.maxHops} messages.` };
       if (g.messages >= limits.maxMessages) return { ok: false, reason: `The goal reached ${limits.maxMessages} messages.` };
+      if (deps.deliver && deps.deliver(to, from, String(text ?? ''), hops + 1, toName) === false) return { ok: false, reason: 'The agent could not take the mail.' };
       g.messages += 1;
-      if (deps.deliver) deps.deliver(to, from, String(text ?? ''), hops + 1);
       touch(g);
       return { ok: true, hops: hops + 1 };
+    },
+
+    /**
+     * Mail from one agent to another by name (the office_mail tool). The sender is the agent that holds a step of a running goal, or one
+     * that got mail in it (so it may answer). The receiver is an agent of the goal's building. A reply is one hop more than the mail
+     * the sender got last; route() applies the caps. The goal keeps what it routed (the last 20) for the cable tray.
+     */
+    mail({ from, to, text }) {
+      const g = [...goals.values()].find((x) => x.status === 'running' && (x.steps.some((s) => s.status === 'working' && s.agentId === from) || x.hops.has(from)));
+      if (!g) return { ok: false, reason: 'You are not part of a running goal, so there is nobody to mail.' };
+      const all = deps.agents(g.building);
+      const key = String(to || '').trim().toLowerCase();
+      const dest = all.find((a) => a.name.toLowerCase() === key);
+      const me = all.find((a) => a.id === from);
+      if (!dest) return { ok: false, reason: `No agent named ${String(to || '').slice(0, 60)} is in this building.` };
+      if (dest.id === from) return { ok: false, reason: 'You cannot mail yourself.' };
+      const r = this.route({ goalId: g.id, from: me ? me.name : from, to: dest.id, text, hops: g.hops.get(from) || 0, toName: dest.name });
+      if (!r.ok) return r;
+      g.hops.set(dest.id, r.hops);
+      g.mail.push({ from: me ? me.name : from, to: dest.name, text: clip(String(text ?? ''), 200), t: now() });
+      if (g.mail.length > 20) g.mail.shift();
+      return { ok: true, hops: r.hops, to: dest.name };
     },
 
     get(goalId) { return goals.get(goalId) || null; },
@@ -384,7 +407,7 @@ export function createManager(deps = {}) {
           id: r.id, building: String(r.building || ''), goal: r.goal, status: st(r.status, Object.keys(WORD), 'failed'), reason: String(r.reason || ''),
           approveFirst: r.approveFirst === true, spendLimit: Number.isFinite(r.spendLimit) && r.spendLimit >= 0 ? r.spendLimit : 0,
           messages: Number.isInteger(r.messages) ? r.messages : 0, baseline: new Map((Array.isArray(r.baseline) ? r.baseline : []).filter((e) => Array.isArray(e) && Number.isFinite(e[1]))),
-          paidAsked: r.paidAsked === true, holdPaid: r.holdPaid === true, lastBoard: '', waitingFor: '', pumping: false, createdAt: Number(r.createdAt) || now(), updatedAt: Number(r.updatedAt) || now(),
+          hops: new Map(), mail: [], paidAsked: r.paidAsked === true, holdPaid: r.holdPaid === true, lastBoard: '', waitingFor: '', pumping: false, createdAt: Number(r.createdAt) || now(), updatedAt: Number(r.updatedAt) || now(),
           steps: r.steps.filter((s) => s && typeof s.id === 'string' && typeof s.text === 'string').slice(0, limits.maxSteps).map((s) => ({
             id: s.id, text: s.text, role: String(s.role || ''), room: String(s.room || ''), bot: String(s.bot || ''), status: st(s.status, Object.keys(MARK), 'pending'),
             owner: String(s.owner || ''), agentId: '', result: String(s.result || ''), attempts: Number.isInteger(s.attempts) ? s.attempts : 0, ...(LADDER.includes(s.tier) ? { tier: s.tier } : {}),
@@ -410,7 +433,7 @@ export function createManager(deps = {}) {
     snapshot() {
       return [...goals.values()].map((g) => ({
         id: g.id, building: g.building, goal: g.goal, status: g.status, reason: g.reason, approveFirst: g.approveFirst,
-        handoff: g.handoff || null, spendLimit: g.spendLimit, spent: spent(g), messages: g.messages, waitingFor: g.waitingFor, updatedAt: g.updatedAt,
+        handoff: g.handoff || null, spendLimit: g.spendLimit, spent: spent(g), messages: g.messages, mail: g.mail.map((m) => ({ ...m })), waitingFor: g.waitingFor, updatedAt: g.updatedAt,
         steps: g.steps.map((s) => ({ id: s.id, text: s.text, role: s.role, room: s.room, owner: s.owner, status: s.status, result: s.result, attempts: s.attempts, tier: s.tier || '' })),
       }));
     },
