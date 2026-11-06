@@ -700,6 +700,9 @@ details.panel summary .cnt.hot,.ao-ph .hot{color:var(--emphasis)}
       positioning keeps the fixed top. */
 @container (max-width:999px){.ao-hud-top .ao-seg button:not([aria-pressed="true"]) .ao-seg-l{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.ao-hud-top .ao-seg button:not([aria-pressed="true"]):has(.ao-seg-l){padding:6px 9px}}
 @container (max-width:1199px){[data-theme|="sublevel"] .ao-hud-top .ao-seg button:not([aria-pressed="true"]) .ao-seg-l{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}[data-theme|="sublevel"] .ao-hud-top .ao-seg button:not([aria-pressed="true"]):has(.ao-seg-l){padding:6px 9px}}
+/* with the Needs you button in the bar (a decision waits) the labels need more room (test/skin.test.mjs, part 14) */
+@container (max-width:1119px){.ao-hud-top:has(.ao-hud-needs) .ao-seg button:not([aria-pressed="true"]) .ao-seg-l{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.ao-hud-top:has(.ao-hud-needs) .ao-seg button:not([aria-pressed="true"]):has(.ao-seg-l){padding:6px 9px}}
+@container (max-width:1325px){[data-theme|="sublevel"] .ao-hud-top:has(.ao-hud-needs) .ao-seg button:not([aria-pressed="true"]) .ao-seg-l{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}[data-theme|="sublevel"] .ao-hud-top:has(.ao-hud-needs) .ao-seg button:not([aria-pressed="true"]):has(.ao-seg-l){padding:6px 9px}}
 @container (max-width:959px){.ao-hud-counts{display:none}}
 .ao-hud-top>.ao-seg{anchor-name:--ao-hud-seg}
 /* Needs you in the top bar (OfficeScene onWaiting, agent-office #92 review): one line, as tall as the brand panel; a finger target on a touch screen */

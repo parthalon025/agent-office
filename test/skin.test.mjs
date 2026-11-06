@@ -71,11 +71,11 @@ const CODE = ['components/bundle.js', ...fs.readdirSync(new URL('public/', root)
 const ICON_SCHEMA = JSON.parse(read('kit/schema.json')).icons;
 const CONTRAST_CARD = JSON.parse(read('components/ContrastCheck/preview.html').match(/var P=(\[\[[\s\S]*?\]\]);/)[1]);
 const modeOf = (id) => AO.MODES.filter((m) => m.theme === id);
-const MODE_FIELDS = { id: 'string', theme: 'string', label: 'string', icon: 'string', dark: 'boolean', retro: 'boolean', wordmark: 'string' };
+const MODE_FIELDS = { id: 'string', theme: 'string', label: 'string', icon: 'string', dark: 'boolean', retro: 'boolean', wordmark: 'string', wrapper: 'string' };
 const LOOK_FIELDS = Object.keys(AO.office.LOOKS[AO.MODES[0].id]);
 // The declared tables of components/bundle.js: the only code that names a theme or a look id (AO.MODES, the engine's LOOKS and FX,
-// the keys of AO.ICONS). Each runs from its marker to its matching bracket, and is blanked before part 15 reads the code. A named
-// wrapper may default its theme prop (FluentOffice: theme: p.theme || "fluent"); that default is blanked too.
+// the keys of AO.ICONS). Each runs from its marker to its matching bracket, and is blanked before part 15 reads the code. Nothing else
+// is blanked: a named office (SublevelOffice, FluentOffice) takes its default theme from the MODES entry that names it in "wrapper".
 const TABLES = ['AO.MODES=[', 'LOOKS={', 'var FX={', 'AO.ICONS = {'];
 function withoutTables(text) {
   let out = text;
@@ -92,7 +92,7 @@ function withoutTables(text) {
     }
     out = out.slice(0, at) + out.slice(at, i + 1).replace(/[^\n]/g, ' ') + out.slice(i + 1);
   }
-  return out.replace(/(\btheme\s*:\s*p\.theme\s*\|\|\s*)(['"])[a-z-]+\2/g, (m, pre) => pre + ' '.repeat(m.length - pre.length));
+  return out;
 }
 const CODE_TEXT = Object.fromEntries(CODE.map((f) => [f, withoutTables(read(f))]));
 const FIELD_NAMES = new Set([...Object.keys(AO.MODES[0]), ...LOOK_FIELDS]);
@@ -216,6 +216,15 @@ test('Logo and OfficeTypeCard on a page with no data-theme draw the theme of the
   }
 });
 
+test('the system dark block holds the values of the first dark theme of AO.MODES', () => {
+  const first = AO.MODES.find((m) => m.dark)?.theme;
+  assert.ok(first, 'no dark theme in AO.MODES');
+  const sys = block(':root:not([data-theme]) {');
+  assert.ok(sys, 'tokens.css has no :root:not([data-theme]) block (the system dark block)');
+  assert.equal(scheme(sys), 'dark', 'the system dark block has color-scheme dark');
+  for (const t of perTheme) assert.equal(prop(sys, t.name), t.value[first].replace(/^\{(.+)\}$/, 'var(--$1)'), `system dark block --${t.name} is not the value of ${first}`);
+});
+
 // ---- the parts of a skin, in the order of Recipes.md "Add a theme" ----
 
 for (const [index, skin] of SKINS.entries()) {
@@ -266,11 +275,6 @@ for (const [index, skin] of SKINS.entries()) {
         ok(prop(text, t.name) === want, `--${t.name} is ${prop(text, t.name)}, tokens.json says ${want}`);
       }
       ok(scheme(text) === (M?.dark ? 'dark' : 'light'), `color-scheme is ${scheme(text)}; AO.MODES says dark: ${M?.dark}`);
-      if (M?.dark && AO.MODES.find((m) => m.dark) === M) {   // the first dark skin is the system dark block: no theme set, OS dark mode
-        const sys = block(':root:not([data-theme]) {');
-        ok(scheme(sys) === 'dark', 'the system dark block has color-scheme dark');
-        for (const t of perTheme) ok(prop(sys, t.name) === t.value[id].replace(/^\{(.+)\}$/, 'var(--$1)'), `system dark block --${t.name} is not the value of ${id}`);
-      }
     });
 
     part('5. LOOKS and FX entries', 'components/bundle.js AO.office.LOOKS, FX, WINDOWS', (ok) => {
@@ -295,6 +299,7 @@ for (const [index, skin] of SKINS.entries()) {
       for (const [k, type] of Object.entries(MODE_FIELDS)) ok(M && typeof M[k] === type, `${k} is not a ${type}`);
       ok(M && Object.keys(M).length === Object.keys(MODE_FIELDS).length, `fields ${M && Object.keys(M)}: every entry has ${Object.keys(MODE_FIELDS)}`);
       ok(M && AO.modeOf(id) === M, 'AO.modeOf does not find it');
+      ok(M && typeof AO[M.wrapper] === 'function', `wrapper "${M?.wrapper}" is not an exported component of AgentOffice`);
       ok(M && AO.LOGO.wordmarks[M.wordmark]?.path && /^0 0 [\d.]+ [\d.]+$/.test(AO.LOGO.wordmarks[M.wordmark].viewBox || ''), `wordmark "${M?.wordmark}" is not a drawing of AO.LOGO.wordmarks`);
     });
 
@@ -388,6 +393,19 @@ for (const [index, skin] of SKINS.entries()) {
           ok(cells[col] === '`' + flat[name].value[id] + '`', `line ${i + 1}: ${name} is ${cells[col]}, tokens.json says ${flat[name].value[id]}`);
         }
       }
+      // a source table (a theme after an outside design system: "| Token | <id> (<source>) | ... |") starts each cell of the skin
+      // with the value of tokens.json in code ticks; the text after it names the source and the reason for a difference
+      lines.forEach((l, at) => {
+        const head = l.split('|').map((x) => x.trim()), col = head.findIndex((h) => h.startsWith(id + ' ('));
+        if (!/^\| Token \|/.test(l) || col < 0) return;
+        let rows = 0;
+        for (let i = at + 2; /^\|/.test(lines[i] || ''); i++, rows++) {
+          const cells = lines[i].split('|').map((x) => x.trim()), name = cells[1].replace(/`/g, '');
+          ok(flat[name], `line ${i + 1}: ${name} is not a per-theme token of tokens.json`);
+          ok(cells[col].startsWith('`' + flat[name].value[id] + '`'), `line ${i + 1}: the ${id} source cell of ${name} starts ${cells[col].slice(0, 30)}, tokens.json says ${flat[name].value[id]}`);
+        }
+        ok(rows > 0, `the source table at line ${at + 1} has no rows`);
+      });
       ok(new RegExp('\\| `shadow-panel` \\| [^\\n]*"' + id + '": "' + flat['shadow-panel'].value[id].replace(/[()]/g, '\\$&') + '"').test(reference), 'the shadow-panel row');
       ok(lines.some((l) => l.startsWith(`| \`${look}\` | \`${id}\` | ${skin.name} | \`${M?.icon}\` | ${M?.dark ? '`true`' : ''} |`)), 'the Themes row: look, data-theme, label, icon, dark');
       for (const n of [`light-${look}-sky`, `fx-bloom-${look}`]) ok(lines.some((l) => l.startsWith(`| \`${n}\` |`)), `the ${n} row`);
@@ -416,20 +434,27 @@ for (const [index, skin] of SKINS.entries()) {
 
     part('14. mode control fit', 'components/bundle.css', (ok) => {
       // The office top bar holds the brand, the mode toggle (every MODES entry, then Tour), the view toggle (Building, Floor),
-      // with 16 px edges and 10 px gaps. Below a container width the toggle shows icons only. That width must hold the bar with
-      // every label, so a new theme that makes the toggle longer must raise it. Pinned estimate (measured on the office page with
-      // the building name "agent-office"): a segment is PAD + CHAR x the label length; caps type (a family rule that sets
-      // text-transform:uppercase on .ao-seg button) is wider. MARGIN is what is left over.
-      const label = '.ao-hud-top .ao-seg button:not([aria-pressed="true"]) .ao-seg-l';
+      // with 16 px edges and 10 px gaps, and, when a decision waits, the "Needs you · N" button (.ao-hud-needs) between the brand and
+      // the mode toggle. Below a container width the toggle shows icons only. That width must hold the bar with every label, so a
+      // new theme that makes the toggle longer must raise it; the bar with the button needs its own, wider rule (a selector with
+      // :has(.ao-hud-needs)), so the labels stay at the widths where nothing waits. Pinned estimate (measured on the office page
+      // with the building name "agent-office"): a segment is PAD + CHAR x the label length, the button is BTN + CHAR x the length
+      // of its longest text (a two digit count); caps type (a family rule that sets text-transform:uppercase on .ao-seg button)
+      // is wider. MARGIN is what is left over.
+      const NEEDS_TEXT = 'Needs you \u00b7 99';
       const caps = rules.some((r) => !r.cond && r.sel.split(',').some((s) => /\.ao-seg button$/.test(s.trim()) && themeSels(s).length && appliesTo(s.trim(), id)) && /text-transform:uppercase/.test(r.body));
-      const T = caps ? { brand: 345, pad: 44, char: 7.8 } : { brand: 280, pad: 46, char: 5.2 }, MARGIN = 16;
+      const T = caps ? { brand: 345, pad: 44, char: 7.8, btn: 32 } : { brand: 280, pad: 46, char: 5.2, btn: 42 }, MARGIN = 16;
       const seg = (labels) => 8 + labels.reduce((n, l) => n + T.pad + T.char * l.length, 0);
-      const need = 16 + T.brand + 10 + seg(AO.MODES.map((m) => m.label).concat('Tour')) + 10 + seg(['Building', 'Floor']) + 16 + MARGIN;
-      const widths = rules.filter((r) => r.file === 'components/bundle.css' && /^@container \(max-width:(\d+)px\)$/.test(r.cond) && r.sel.split(',').some((s) => s.trim().endsWith(label) && appliesTo(s.trim(), id)) && /position:absolute/.test(r.body))
-        .map((r) => +r.cond.match(/(\d+)px/)[1]);
-      ok(widths.length, 'no icons-only rule for the top bar');
-      const at = Math.max(...widths);
-      ok(at >= need, `icons only below ${at + 1} px, but the bar with every label needs ${Math.ceil(need)} px (with ${MARGIN} px to spare)`);
+      for (const needs of [false, true]) {
+        const top = needs ? '.ao-hud-top:has(.ao-hud-needs)' : '.ao-hud-top', what = needs ? 'with the Needs you button' : 'with no decision waiting';
+        const label = `${top} .ao-seg button:not([aria-pressed="true"]) .ao-seg-l`;
+        const need = 16 + T.brand + 10 + (needs ? T.btn + T.char * NEEDS_TEXT.length + 10 : 0) + seg(AO.MODES.map((m) => m.label).concat('Tour')) + 10 + seg(['Building', 'Floor']) + 16 + MARGIN;
+        const widths = rules.filter((r) => r.file === 'components/bundle.css' && /^@container \(max-width:(\d+)px\)$/.test(r.cond) && r.sel.split(',').some((s) => s.trim().endsWith(label) && appliesTo(s.trim(), id)) && /position:absolute/.test(r.body))
+          .map((r) => +r.cond.match(/(\d+)px/)[1]);
+        ok(widths.length, `no icons-only rule for the top bar ${what}`);
+        const at = Math.max(...widths);
+        ok(at >= need, `${what}: icons only below ${at + 1} px, but the bar with every label needs ${Math.ceil(need)} px (with ${MARGIN} px to spare)`);
+      }
       // On the narrowest page (400 px, 16 px gutters) the toggle shows icons only and the pressed segment keeps its label: a
       // segment is its padding (10 + 10) and the 14 px icon, with 2 px between segments, and the label (6 px gap) of the longest name.
       const narrow = rules.some((r) => r.file === 'components/bundle.css' && /^@container \(max-width:(\d+)px\)$/.test(r.cond) && +r.cond.match(/(\d+)px/)[1] >= 400 &&
@@ -445,7 +470,8 @@ for (const [index, skin] of SKINS.entries()) {
       // indexOf, includes, startsWith, a selector), not in a regular expression, not as an object key. A key that is also a field
       // name of a MODES or LOOKS entry (dark) is the flag, not the id.
       const ids = [...new Set([id, look, family(id)])].map((x) => x.replace(/-/g, '\\-')).join('|');
-      const keys = [...new Set([id, look, family(id)])].filter((x) => /^[a-z]+$/.test(x) && !FIELD_NAMES.has(x)).join('|');
+      // a key that is a field name of a MODES or LOOKS entry (dark) passes only with a boolean value (a literal or !!x): it is the flag, not the id
+      const keys = [...new Set([id, look, family(id)])].filter((x) => /^[a-z]+$/.test(x)).map((x) => (FIELD_NAMES.has(x) ? x + String.raw`(?!\s*:\s*(?:(?:true|false|!0|!1)(?![\w$])|!!))` : x)).join('|');
       const forms = [
         ['names it in a string', new RegExp(`(['"\`])(?:${ids})\\1`, 'g')],
         ['names it in a regular expression', new RegExp(`(?:^|[(=,:!&|?{};[]|\\breturn)\\s*\\/(?:[^/\\n\\\\]|\\\\.)*\\b(?:${ids})\\b(?:[^/\\n\\\\]|\\\\.)*\\/[gimsuy]*`, 'gm')],

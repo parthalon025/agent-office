@@ -117,19 +117,20 @@ Globals: `AgentOffice.MODES` (the themes, see Themes below), `AgentOffice.modeOf
 
 `AgentOffice.MODES` is the one list of themes, in the order of the themes of `tokens.json`. The scene engine, `ModeToggle` (its default options), the `OfficeScene` HUD toggle, the command palette and the drawn parts (`Logo`, `OfficeTypeCard`) read it. A page that shows its own theme control reads it too and keeps no copy. Read it; do not change it. Every entry has every field.
 
-| `id` (look) | `theme` (`data-theme`) | `label` | `icon` | `dark` | `retro` | `wordmark` | Look |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `day` | `light` | Day | `day` |  |  | `sans` | Daylight office; the sun follows the clock. |
-| `night` | `dark` | Night | `night` | `true` |  | `sans` | Dark office, warm room lamps, glow and fog. |
-| `sublevel` | `sublevel` | Sublevel | `terminal` |  | `true` | `wide` | Retro corporate floor under fluorescent light. |
-| `fluent` | `fluent` | Fluent | `fluent` |  |  | `sans` | Bright, quiet office in soft daylight, low bloom and light haze. System faces, 4 px controls and 8 px panels. |
-| `fluent-dark` | `fluent-dark` | Fluent Dark | `fluentdark` | `true` |  | `sans` | Fluent at night: a dim, neutral office with soft room lamps, screen glow and a dusk window. The faces, corners, heads and accent pills of Fluent. |
+| `id` (look) | `theme` (`data-theme`) | `label` | `icon` | `dark` | `retro` | `wordmark` | `wrapper` | Look |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `day` | `light` | Day | `day` |  |  | `sans` | `OfficeScene` | Daylight office; the sun follows the clock. |
+| `night` | `dark` | Night | `night` | `true` |  | `sans` | `OfficeScene` | Dark office, warm room lamps, glow and fog. |
+| `sublevel` | `sublevel` | Sublevel | `terminal` |  | `true` | `wide` | `SublevelOffice` | Retro corporate floor under fluorescent light. |
+| `fluent` | `fluent` | Fluent | `fluent` |  |  | `sans` | `FluentOffice` | Bright, quiet office in soft daylight, low bloom and light haze. System faces, 4 px controls and 8 px panels. |
+| `fluent-dark` | `fluent-dark` | Fluent Dark | `fluentdark` | `true` |  | `sans` | `FluentOffice` | Fluent at night: a dim, neutral office with soft room lamps, screen glow and a dusk window. The faces, corners, heads and accent pills of Fluent. |
 
 The `id` names the look: the engine reads `light-<id>-*` and `fx-*-<id>`, and `AgentOffice.office.LOOKS[id]`. The theme of an element is `AgentOffice.themeOf(el)`, by the rules of `tokens.css`: the nearest `data-theme` on the element or a parent that is a theme. A value that is no theme is passed over, because no block of `tokens.css` matches it. With none, it is the first dark theme (Night) when `<html>` has no `data-theme` and the system scheme is dark, else the first theme (Day). The engine and the drawn parts read the theme there, so the tokens and the look always show one theme. `setMode` with a value that is no look leaves the look to `data-theme`. A theme of `AgentOffice.MODES` with no `LOOKS` entry or no `FX` value stops the Stage with an error that names the theme and the part: no theme takes the look of another.
 
 - `dark: true` marks a dark scene (Night, Fluent Dark): the window shows a night or dusk sky with lit windows, monitors glow more, the page lays a pool of screen light on each desk, the office type pictures show lit screens and lamp pools, and `tokens.css` sets `color-scheme: dark` in the theme's block, so the browser draws scrollbars and check boxes dark. The engine sets `stage.K.dark` from it.
 - `retro: true` (Sublevel) draws the office type pictures in the retro style: terminal desks with number grids, carpet tiles, a wainscot band, square-eyed bots.
 - `wordmark` names the theme's wordmark drawing in `AgentOffice.LOGO.wordmarks`: `sans` (IBM Plex Sans) or `wide` (Archivo, capitals).
+- `wrapper` names the office component that shows the theme: `OfficeScene` (any theme, by the `theme` prop) or a named office (`SublevelOffice`, `FluentOffice`). A named office with no `theme` prop shows the first entry that names it (`FluentOffice` shows Fluent, and `theme: "fluent-dark"` shows Fluent Dark), so the component holds no theme id.
 
 A theme can be a variant of another: its id is `<family>-<variant>` (Fluent Dark is `fluent-dark`). `bundle.css` and the page's own style sheet set the look of a family once, on `[data-theme|="<family>"]`, which matches the family id and every `<family>-*` id (Sublevel is `[data-theme|="sublevel"]`, Fluent and Fluent Dark `[data-theme|="fluent"]`). No style rule names one theme with `[data-theme="<id>"]`. Each variant has its own colors in `tokens.css`.
 
@@ -247,7 +248,7 @@ Each README has the full props table. Types: `components/index.d.ts`.
 | `ink` | `#18212b` | `#e6ebf0` | `#102a33` | `#242424` | `#ffffff` | Primary text on bg, panel and chip. |
 | `muted` | `#5f6b78` | `#8e9aa7` | `#4d6660` | `#616161` | `#adadad` | Secondary text: task lines, timestamps, counts. 4.6:1 or more on bg, panel and chip. |
 | `accent` | `#2f6fe4` | `#6c9dff` | `#1f6f8b` | `#0f6cbd` | `#479ef5` | Primary action (Approve, Retry), focus ring, routine markers. |
-| `accent-text` | `#2363dc` | `{accent}` | `#1e6d89` | `{accent}` | `#4aa0f6` | Accent as text on bg, card and chip: 4.5:1 or more in every theme. Fills, the focus ring and the 3D scene keep `accent`. |
+| `accent-text` | `#2363dc` | `{accent}` | `#1e6d89` | `{accent}` | `#62abf5` | Accent as text on bg, card and chip: 4.5:1 or more in every theme. Fills, the focus ring and the 3D scene keep `accent`. |
 | `on-accent` | `#ffffff` | `#0d1420` | `#ffffff` | `#ffffff` | `#141414` | Text on accent. |
 | `emphasis` | `{accent}` | `{accent}` | `#b5302b` | `{accent}` | `{accent}` | The 10% color: alerts and the one key action in a decision (Approve on a request, unread counts, room alert beacons). In Day, Night, Fluent and Fluent Dark it equals accent; in Sublevel it is red. Never a fill larger than a button. |
 | `on-emphasis` | `{on-accent}` | `{on-accent}` | `#ffffff` | `{on-accent}` | `{on-accent}` | Text on emphasis. |
@@ -326,8 +327,8 @@ Fluent and Fluent Dark follow the open Fluent 2 design tokens: `webLightTheme` a
 | `line` | `rgba(0,0,0,0.10)`: colorNeutralStencil1Alpha. The stroke token colorNeutralStrokeAlpha (0.05) is too faint on the glass panel. | `rgba(255,255,255,0.10)`: colorNeutralStrokeAlpha. Matches. |
 | `ink` | `#242424`: colorNeutralForeground1. Matches. | `#ffffff`: colorNeutralForeground1. Matches. |
 | `muted` | `#616161`: colorNeutralForeground3. Matches. | `#adadad`: colorNeutralForeground3. Matches. |
-| `accent` | `#0f6cbd`: colorBrandBackground. Matches. | `#479ef5`: colorBrandForeground1. Aligned from `#4aa0f6` (x1.7.16); `accent-text` keeps the lighter step. |
-| `accent-text` | `{accent}`: colorBrandForeground1. Matches. | `#4aa0f6`: colorBrandForeground1. Differs: `#479ef5` is 4.499:1 on chip; one step lighter is 4.6:1. |
+| `accent` | `#0f6cbd`: colorBrandBackground. Matches. | `#479ef5`: colorBrandForeground1. Aligned from `#4aa0f6` (x1.7.16); `accent-text` is the lighter `#62abf5`. |
+| `accent-text` | `{accent}`: colorBrandForeground1. Matches. | `#62abf5`: colorBrandForeground2. Differs from `accent` on purpose: `#479ef5` is 4.499:1 on chip, under 4.5:1. The next brand step, `#62abf5` (brandWeb[110]), is 5.2:1 on chip and 6.8:1 on bg. Aligned from the hand-nudged `#4aa0f6` (x1.7.16). |
 | `on-accent` | `#ffffff`: colorNeutralForegroundOnBrand. Matches. | `#141414`: colorNeutralBackground3. Accent is the light brand foreground, so the text on it is dark: white on `#479ef5` is 2.8:1. |
 | `emphasis` | `{accent}`: colorBrandBackground (= accent). Matches. | `{accent}`: colorBrandForeground1 (= accent). Matches. |
 | `on-emphasis` | `{on-accent}`: colorNeutralForegroundOnBrand (= on-accent). Matches. | `{on-accent}`: colorNeutralBackground3 (= on-accent). Matches. |
@@ -486,7 +487,7 @@ Layout breakpoints for the office HUD (container width).
 | `bp-compact` | `1100px` | At this width and below: the activity log hides and the broadcast bar moves left. |
 | `bp-wide` | `1360px` | The reference width for previews and the full HUD. |
 
-The office top bar (brand, mode toggle, view toggle, status counts) keeps to the rows above the side columns: one row above `bp-phone`, two rows to 521 px, three rows below. In the bar the mode toggle shows icons only (the pressed mode keeps its label) to 999 px, and to 1199 px in the Sublevel family, whose capitals are wider. `test/skin.test.mjs` checks the width for every theme against the number of `AgentOffice.MODES` entries and the label lengths (a pinned estimate with 16 px to spare), so a new theme that makes the toggle longer must raise the width. The status counts go to a second row between the columns, and hide below 960 px. When a toggle still goes to a lower row (Sublevel from 821 to 899 px, or a long building or agent name), the side columns start below the last toggle of the bar (CSS anchor positioning), so no toggle is under a column. A page that puts its own panel under the bar starts it at 68 px above `bp-phone`, as the columns do.
+The office top bar (brand, mode toggle, view toggle, status counts) keeps to the rows above the side columns: one row above `bp-phone`, two rows to 521 px, three rows below. In the bar the mode toggle shows icons only (the pressed mode keeps its label) to 999 px, and to 1199 px in the Sublevel family, whose capitals are wider. While a decision waits, the Needs you button is in the bar too, and the toggle shows icons only to 1119 px (1325 px in the Sublevel family). `test/skin.test.mjs` checks the width for every theme against the number of `AgentOffice.MODES` entries and the label lengths (a pinned estimate with 16 px to spare), so a new theme that makes the toggle longer must raise the width. The status counts go to a second row between the columns, and hide below 960 px. When a toggle still goes to a lower row (Sublevel from 821 to 899 px, or a long building or agent name), the side columns start below the last toggle of the bar (CSS anchor positioning), so no toggle is under a column. A page that puts its own panel under the bar starts it at 68 px above `bp-phone`, as the columns do.
 
 ### scene
 

@@ -731,7 +731,7 @@ function Skeleton(p){var n=p.lines||3,rows=[];for(var i=0;i<n;i++)rows.push(h("i
    dark = a dark scene: lit windows, screen glow and desk light (the engine sets stage.K.dark from it; the page reads K.dark), the dark color-scheme
    in tokens.css, and the lit office type pictures. retro = the retro drawing of the office type pictures. wordmark = the name of its AO.LOGO.wordmarks
    drawing. Code reads these fields and never compares a look or theme id with a string (test/skin.test.mjs). */
-AO.MODES=[{id:"day",theme:"light",label:"Day",icon:"day",dark:false,retro:false,wordmark:"sans"},{id:"night",theme:"dark",label:"Night",icon:"night",dark:true,retro:false,wordmark:"sans"},{id:"sublevel",theme:"sublevel",label:"Sublevel",icon:"terminal",dark:false,retro:true,wordmark:"wide"},{id:"fluent",theme:"fluent",label:"Fluent",icon:"fluent",dark:false,retro:false,wordmark:"sans"},{id:"fluent-dark",theme:"fluent-dark",label:"Fluent Dark",icon:"fluentdark",dark:true,retro:false,wordmark:"sans"}];
+AO.MODES=[{id:"day",theme:"light",label:"Day",icon:"day",dark:false,retro:false,wordmark:"sans",wrapper:"OfficeScene"},{id:"night",theme:"dark",label:"Night",icon:"night",dark:true,retro:false,wordmark:"sans",wrapper:"OfficeScene"},{id:"sublevel",theme:"sublevel",label:"Sublevel",icon:"terminal",dark:false,retro:true,wordmark:"wide",wrapper:"SublevelOffice"},{id:"fluent",theme:"fluent",label:"Fluent",icon:"fluent",dark:false,retro:false,wordmark:"sans",wrapper:"FluentOffice"},{id:"fluent-dark",theme:"fluent-dark",label:"Fluent Dark",icon:"fluentdark",dark:true,retro:false,wordmark:"sans",wrapper:"FluentOffice"}];
 /* modeOf(theme): the MODES entry of a data-theme value. A value that is no theme gets the first entry, as the engine shows the first look. */
 AO.modeOf=function(t){var M=AO.MODES;for(var i=0;i<M.length;i++)if(M[i].theme===t)return M[i];return M[0];};
 /* themeOf(el): the theme whose tokens el shows, by the rules of tokens.css. It is the nearest data-theme (on el or a parent) that is a
@@ -1972,8 +1972,10 @@ function OfficeScene(p){var A=AO,nt=R.useState([]),notes=nt[0],setNotes=nt[1],sn
  return h(AO.ThemeCtx.Provider,{value:snap?THEME_BY_LOOK[snap.mode]:null},h("div",{ref:boxRef,className:"ao-office",style:{height:p.height||600}},h("div",{ref:m[0],className:"ao-scene ao-scene-fill"}),D.ambient&&snap?null:hud,daily(),fly&&h("div",{className:"ao-fly","aria-hidden":true},AO.BotAvatar&&h(AO.BotAvatar,{shape:fly.shape,color:fly.color,size:34}))));}
 function HermesOffice(p){return h(OfficeScene,Object.assign({},p,{solution:"hermes"}));}
 function CopilotOffice(p){return h(OfficeScene,Object.assign({},p,{solution:"copilot"}));}
-function SublevelOffice(p){return h(OfficeScene,Object.assign({},p,{theme:p.theme||"sublevel",solution:p.solution||"microsoft"}));}
-function FluentOffice(p){return h(OfficeScene,Object.assign({},p,{theme:p.theme||"fluent"}));}
+/* A named office defaults its theme to the first AO.MODES entry that names it in `wrapper`, so no component names a theme. */
+function wrapperTheme(name){var M=AO.MODES;for(var i=0;i<M.length;i++)if(M[i].wrapper===name)return M[i].theme;}
+function SublevelOffice(p){return h(OfficeScene,Object.assign({},p,{theme:p.theme||wrapperTheme("SublevelOffice"),solution:p.solution||"microsoft"}));}
+function FluentOffice(p){return h(OfficeScene,Object.assign({},p,{theme:p.theme||wrapperTheme("FluentOffice")}));}
 function SolutionOffice(p){return h(OfficeScene,Object.assign({},p,{solution:p.solution||"microsoft"}));}
 Object.assign(AO,{HermesOffice:HermesOffice,CopilotOffice:CopilotOffice,SublevelOffice:SublevelOffice,FluentOffice:FluentOffice,SolutionOffice:SolutionOffice,OfficeScene:OfficeScene,BuildingView:BuildingView,RoomScene:RoomScene,Workstations:Workstations,BotLineup:BotLineup});
 })();

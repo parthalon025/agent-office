@@ -48,7 +48,7 @@ const cssProp = (text, name) => text.match(new RegExp(`\\n\\s*--${name}: ([^;]+)
 test('tokens.css has every non-color token of tokens.json, with the same value', () => {
   const { flat } = nonColorProps();
   assert.ok(flat.length > 100, `only ${flat.length} non-color tokens found`);
-  const root = cssBlock(css, ':root, [data-theme="light"] {');
+  const root = cssBlock(css, `:root, [data-theme="${JSON.parse(read('tokens.json')).color.themes[0].id}"] {`);
   for (const [name, value] of flat) {
     const got = cssProp(root, name);
     assert.ok(got !== undefined, `--${name} missing in tokens.css`);
@@ -56,8 +56,11 @@ test('tokens.css has every non-color token of tokens.json, with the same value',
   }
 });
 
-test('the schema lists every color token', () => {
-  for (const t of tokens) assert.ok(schema.tokens.includes(t.name), `${t.name} not in kit/schema.json tokens`);
+test('the schema lists every token of tokens.json (color, shadow, skin and every non-color group)', () => {
+  const j = JSON.parse(read('tokens.json'));
+  const groups = Object.keys(j).filter((g) => Array.isArray(j[g]?.tokens));
+  assert.ok(['color', 'shadow', 'skin', 'scene', 'fx'].every((g) => groups.includes(g)), `groups found: ${groups}`);
+  for (const g of groups) for (const t of j[g].tokens) assert.ok(schema.tokens.includes(t.name), `${g} token ${t.name} not in kit/schema.json tokens`);
 });
 
 test('the schema inside the bundle is the one in kit/schema.json', () => {

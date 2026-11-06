@@ -949,7 +949,7 @@ test('Stage.dispose still releases K.themed (#99)', () => {
 const tokensJson = JSON.parse(readFileSync(join(root, 'tokens.json'), 'utf8'));
 const tokensCss = readFileSync(join(root, 'tokens.css'), 'utf8').replace(/\r\n/g, '\n');
 const rootVals = (() => {
-  const at = tokensCss.indexOf(':root, [data-theme="light"] {'), text = tokensCss.slice(at, tokensCss.indexOf('\n}', at)), o = {};
+  const at = tokensCss.indexOf(`:root, [data-theme="${tokensJson.color.themes[0].id}"] {`), text = tokensCss.slice(at, tokensCss.indexOf('\n}', at)), o = {};
   for (const m of text.matchAll(/\n\s*--([a-z0-9-]+): ([^;]+);/g)) o[m[1]] = m[2];
   return o;
 })();
