@@ -21,7 +21,7 @@ import * as branchPort from './branch-port.mjs';
 import { createCampus } from './campus.mjs';
 import { slimPayload, cleanIds as cleanPaperclipIds } from './payload.mjs';
 import { createHq } from './paperclip.mjs';
-import { recap as recapOf, away as awayOf, MERGES_KEPT } from './rituals.mjs';
+import { recap as recapOf, away as awayOf } from './rituals.mjs';
 import { createTracker, clip } from './tracker.mjs';
 import { createAdmission } from './admission.mjs';
 import { createRegistry, providerEvents, traitsOf, spendLimitFor, DEFAULT_SPEND_LIMIT, DEFAULT_PROVIDER } from './providers/index.mjs';
@@ -35,17 +35,17 @@ import { createFoundry } from './providers/foundry.mjs';
 import { createCopilotStudio } from './providers/copilot-studio.mjs';
 import { createClaudeCode, claudeVersion, MODEL_RE, MODES } from './providers/claude-code.mjs';
 import { placeOfSession, adoptLegacy, normPath } from './place.mjs';
-import { addRecent, cleanRecent, recentChoices } from './recent.mjs';
-import { cleanRooms } from './rooms.mjs';
+import { createState } from './state.mjs';
+import { addRecent, recentChoices } from './recent.mjs';
 import { cleanRecord, layoutView, catalogView, functionOf } from './archetypes.mjs';
 import * as startup from './startup.mjs';
 import { createManager, createPlanBoard, officeSource } from './manager.mjs';
-import { setPersona, removePersona, personaOf, personaPrompt, addStarters, addStarterTeams, setTeam, removeTeam, teamOf, exportCustom, importCustom, cleanPersonas, cleanTeams, cleanScreens, setScreen } from './personas.mjs';
+import { setPersona, removePersona, personaOf, personaPrompt, addStarters, addStarterTeams, setTeam, removeTeam, teamOf, exportCustom, importCustom, setScreen } from './personas.mjs';
 import { createHolds } from './holds.mjs';
 import { createNotes, scanNote, cleanPin, PIN_MAX, NOTES_MAX, AGENT_WRITE_MAX } from './notes.mjs';
 import { createSkills } from './skills.mjs';
-import { cleanTrust, record as recordTrust, patternOf, propose, grant as grantTrust, withdraw as withdrawTrust, cards as trustCards } from './trust.mjs';
-import { cleanRules, setRule, ruleOf, decide, preToolDecision, permissionModeFor, openRefusal, enforcement, addCost, costThisMonth } from './security.mjs';
+import { record as recordTrust, patternOf, propose, grant as grantTrust, withdraw as withdrawTrust, cards as trustCards } from './trust.mjs';
+import { setRule, ruleOf, decide, preToolDecision, permissionModeFor, openRefusal, enforcement, addCost, costThisMonth } from './security.mjs';
 import { realInside } from './risk.mjs';
 import { mcpAddArgs, mcpRemoveArgs, pluginArgs } from './extensions.mjs';
 import * as auth from './auth.mjs';
@@ -156,31 +156,17 @@ const ASK_TIMEOUT_MS = (Number(process.env.OFFICE_ASK_TIMEOUT_S) || 60) * 1000;
 const PAPERCLIP_ASK_MS = (Number(process.env.OFFICE_PAPERCLIP_ASK_S) || HEADLESS_ASK_MS / 1000) * 1000;
 
 // ---------- setup: hook settings ----------
-let persisted = { recent: [] };
-try { persisted = { ...persisted, ...JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) }; } catch { /* first run */ }
-// Drop folders that are gone. cleanRecent (recent.mjs) drops agent room folders, also those of older runs.
-persisted.recent = cleanRecent(persisted.recent).filter((d) => fs.existsSync(d));
-// The office writes its saved state and past sessions only once it owns its port (the listen callback sets ownPort and writes
-// both whole). Before that a change stays in memory: a copy on a busy port writes nothing, also when its recent folders became
+// The saved state (state.mjs): each area owns its slice and its cleaner; the server reads a slice by name. Folders that are gone drop
+// out of Recent (cleanRecent, recent.mjs, also drops agent room folders, those of older runs). The Security room rules, the Spend
+// ledger, earned trust, function floors, room records and the rest are cleaned by their own area (SLICES).
+// The office writes its saved state only once it owns its port: the listen callback calls saved.claim(), which writes it whole and
+// owner-only. Before that a change stays in memory: a copy on a busy port writes nothing, also when its recent folders became
 // buildings (and got a floor record) while it asked the running office for a launch link (#92 review).
-let ownPort = false;
-const savePersisted = () => { if (!ownPort) return; try { fs.writeFileSync(STATE_FILE, JSON.stringify(persisted, null, 2)); } catch { /* ignore */ } };
-// The Security room rules (#70, security.mjs): office-wide, with per-building overrides. Saved in state.json, which is
-// written with writeSecret once at listen. costs: the Spend screen's ledger, dollars per agent kind per month.
-persisted.security = cleanRules(persisted.security);
-persisted.costs = persisted.costs && typeof persisted.costs === 'object' ? persisted.costs : {};
-// Earned trust (#153, trust.mjs): the user's answers to held requests, the rules granted from proposals, dismissed proposals.
-persisted.trust = cleanTrust(persisted.trust);
-// Function floors (#92, archetypes.mjs): one record per building (key: the building key, '' for Other folders). Detection
-// runs once, when the office first knows the building; after that only the user changes the record (POST /api/layout).
-persisted.layouts = Object.fromEntries(Object.entries(persisted.layouts && typeof persisted.layouts === 'object' ? persisted.layouts : {})
-  .map(([k, v]) => [k, cleanRecord(v)]).filter(([, v]) => v));
-// The rooms of git workspaces that had an agent (noteKey -> { building, root, floors, title }; rooms.mjs room records): a room
-// is on the floors where its agents sit now, and keeps its name from the task until its worktree is removed (refreshRepo drops
-// the record then). cleanRooms puts an older or hand-edited record in that form, so no broadcast throws on one.
-persisted.rooms = cleanRooms(persisted.rooms);
+let ownPort = false;   // the past sessions (saveHistory) follow the same rule
+const saved = createState({ file: STATE_FILE, writeFirst: writeSecret });
+const savePersisted = () => saved.save();
 const rememberDir = (dir) => {
-  persisted.recent = addRecent(persisted.recent, dir);
+  saved.set('recent', addRecent(saved.get('recent'), dir));
   savePersisted();
 };
 
@@ -221,7 +207,7 @@ const httpSettings = {
 
 // Use HTTP hooks only after a probe proved them on this Claude Code version (npm run probe).
 const CLAUDE_VERSION = claudeVersion();
-const httpProven = () => persisted.httpHooks?.ok === true && persisted.httpHooks.version === CLAUDE_VERSION;
+const httpProven = () => saved.get('httpHooks')?.ok === true && saved.get('httpHooks').version === CLAUDE_VERSION;
 let hooksMode = process.env.OFFICE_HOOKS === 'command' ? 'command' : (process.env.OFFICE_HOOKS === 'http' || httpProven() ? 'http' : 'command');
 const activeHooksFile = () => (hooksMode === 'http' ? HOOKS_HTTP_FILE : HOOKS_CMD_FILE);
 const mcpConfig = { mcpServers: { office: { command: process.execPath.replace(/\\/g, '/'), args: [path.join(ROOT, 'src', 'mcp.mjs').replace(/\\/g, '/'), ...portArgs(PORT)] } } };
@@ -308,13 +294,13 @@ const tracker = createTracker({
   onChange: () => broadcast(),
   releaseHold: (id, decision) => releaseHold(id, decision),
   // The check before a hold: the Security room rules answer Allow and Deny at once (security.mjs decide).
-  screen: (s, p, opts) => decide(persisted.security, callOf(s, p, opts)),
+  screen: (s, p, opts) => decide(saved.get('security'), callOf(s, p, opts)),
   persist: {
     history: (s) => recordHistory(s),
     recentDir: (dir) => rememberDir(dir),
-    commands: (list) => { persisted.commands = list; savePersisted(); },
+    commands: (list) => { saved.set('commands', list); savePersisted(); },
     placed: (s, g) => { adoptNotes(roomPlace(s)); if (g) addRepo(g.repo); },
-    spent: (s, dollars) => { persisted.costs = addCost(persisted.costs, Date.now(), V.security.columnOf(s.provider), dollars); savePersisted(); },
+    spent: (s, dollars) => { saved.set('costs', addCost(saved.get('costs'), Date.now(), V.security.columnOf(s.provider), dollars)); savePersisted(); },
   },
 });
 const { sessions, feed, addFeed, newSession, placeSession, findSession, onHook, endSession } = tracker;
@@ -343,7 +329,7 @@ function preToolGate(p) {
   if (p.hook_event_name !== 'PreToolUse') return null;
   const s = findSession(p);
   if (!s || s.status === 'ended' || providerOf(s) !== claude) return null;
-  const d = preToolDecision(persisted.security, callOf(s, p));
+  const d = preToolDecision(saved.get('security'), callOf(s, p));
   if (!d) return null;
   if (d.decision === 'deny') tracker.refuseCall(s, p, d.reason, d.line);
   return claude.preToolAnswer(d);
@@ -357,8 +343,8 @@ async function buildingOfFolder(cwd, worktree) {
 // One change from the wall (the page's Security room screens). Each change writes a feed line.
 function saveRule(body) {
   const scope = body.scope; // setRule checks it: 'office' or 'building'
-  const r = setRule(persisted.security, { scope, building: body.building, row: String(body.row || ''), col: String(body.col || ''), value: body.value ?? null, confirmed: body.confirmed === true });
-  persisted.security = r.rules;
+  const r = setRule(saved.get('security'), { scope, building: body.building, row: String(body.row || ''), col: String(body.col || ''), value: body.value ?? null, confirmed: body.confirmed === true });
+  saved.set('security', r.rules);
   savePersisted();
   const S = V.security, col = S.columns.find((c) => c.id === body.col);
   const where = scope === 'building' ? (body.building ? `the building ${basename(body.building) || body.building}` : 'Other folders') : 'all buildings';
@@ -374,30 +360,30 @@ function trustView() {
   const runs = [...history, ...[...sessions.values()].filter((x) => x.headless && x.status === 'ended' && x.sid && !history.some((h) => h.uid === x.uid))]
     .map((h) => ({ col: V.security.columnOf(h.provider), failed: !!(h.failed || h.error) }));
   return {
-    proposals: propose(persisted.trust.ledger, persisted.security, { dismissed: persisted.trust.dismissed }),
-    grants: persisted.trust.grants, cards: trustCards(persisted.trust, runs),
+    proposals: propose(saved.get('trust').ledger, saved.get('security'), { dismissed: saved.get('trust').dismissed }),
+    grants: saved.get('trust').grants, cards: trustCards(saved.get('trust'), runs),
   };
 }
 function applyProposal(body) {
-  const p = propose(persisted.trust.ledger, persisted.security, { dismissed: persisted.trust.dismissed }).find((x) => x.id === String(body.id || ''));
+  const p = propose(saved.get('trust').ledger, saved.get('security'), { dismissed: saved.get('trust').dismissed }).find((x) => x.id === String(body.id || ''));
   if (!p) throw httpError(404, 'That proposal is gone.');
-  const r = grantTrust(persisted.security, persisted.trust, p, Date.now(), body.confirmed === true);
-  persisted.security = r.rules; persisted.trust = r.trust; savePersisted();
+  const r = grantTrust(saved.get('security'), saved.get('trust'), p, Date.now(), body.confirmed === true);
+  saved.set('security', r.rules); saved.set('trust', r.trust); savePersisted();
   addFeed({ uid: 'security', name: 'Security' }, 'tool', `${p.rowLabel}, ${p.agent}: Allow (${p.buildingName}), earned by ${p.count} approvals`);
   broadcast(); providers.forgetStatus(); void refreshEnforce(true);
   return { ok: true, from: r.from, to: r.to };
 }
 function withdrawGrant(body) {
-  const r = withdrawTrust(persisted.security, persisted.trust, String(body.id || ''));
-  persisted.security = r.rules; persisted.trust = r.trust; savePersisted();
+  const r = withdrawTrust(saved.get('security'), saved.get('trust'), String(body.id || ''));
+  saved.set('security', r.rules); saved.set('trust', r.trust); savePersisted();
   addFeed({ uid: 'security', name: 'Security' }, 'tool', `a trust grant was withdrawn: ${r.to ? V.security.word(r.to) : 'unchanged'}`);
   broadcast(); providers.forgetStatus(); void refreshEnforce(true);
   return { ok: true };
 }
 function dismissProposal(body) {
   const id = String(body.id || '');
-  if (!propose(persisted.trust.ledger, persisted.security, { dismissed: persisted.trust.dismissed }).some((x) => x.id === id)) throw httpError(404, 'That proposal is gone.');
-  persisted.trust = { ...persisted.trust, dismissed: { ...persisted.trust.dismissed, [id]: Date.now() } }; savePersisted(); broadcast();
+  if (!propose(saved.get('trust').ledger, saved.get('security'), { dismissed: saved.get('trust').dismissed }).some((x) => x.id === id)) throw httpError(404, 'That proposal is gone.');
+  saved.set('trust', { ...saved.get('trust'), dismissed: { ...saved.get('trust').dismissed, [id]: Date.now() } }); savePersisted(); broadcast();
   return { ok: true };
 }
 // What each agent kind enforces (security.mjs enforcement): from the providers of this office, and for an agent whose
@@ -455,11 +441,11 @@ const providers = createRegistry([claude, ollama, lmstudio, agentFramework,
   // blocked: the Security room's answer to whether this kind may run now (its Agents screen: an ungated kind is off until
   // turned on, a no-cost Deny). One rule source. tokenFile: the OpenClaw plugin must read this office's token (#77).
   ...Object.keys(ACP_AGENTS).map((kind) => createAcp({ events, kind, tokenFile: TOKEN_FILE,
-    blocked: () => openRefusal(persisted.security, providers.get(kind)) })),
+    blocked: () => openRefusal(saved.get('security'), providers.get(kind)) })),
   // The Microsoft cloud kinds are off until the owner sets them up in the environment (docs/agents.md). Nothing here calls the network
   // or signs in. Like the ungated ACP agents, the Agents screen of the Security room keeps them off until it turns them on.
   ...[['foundry', createFoundry, CLOUD.foundry], ['copilot-studio', createCopilotStudio, CLOUD.studio]].map(([kind, create, config]) => create({ events, config,
-    blocked: () => openRefusal(persisted.security, providers.get(kind)) }))]);
+    blocked: () => openRefusal(saved.get('security'), providers.get(kind)) }))]);
 const providerOf = (s) => providers.of(s);
 ENFORCE = enforcement(providers.list());
 // The agent kinds as the page offers and shows them (providers/index.mjs describe). Fixed while the server runs.
@@ -495,7 +481,7 @@ async function connectHq(body) {
   const r = await hq.connect({ url: body.url, company: body.company ? String(body.company) : null });
   if (r && r.ok) {
     const v = hq.view();
-    persisted.paperclip = { url: v.url, company: v.company ? v.company.id : null };
+    saved.set('paperclip', { url: v.url, company: v.company ? v.company.id : null });
     savePersisted();
     addFeed(PAPERCLIP, 'start', `connected: ${v.company ? v.company.name : 'Paperclip'} at ${v.url}. The office watches it and never sends heartbeats or tasks.`);
   }
@@ -504,7 +490,7 @@ async function connectHq(body) {
 }
 function disconnectHq() {
   hq.disconnect();
-  if (persisted.paperclip) { delete persisted.paperclip; savePersisted(); addFeed(PAPERCLIP, 'end', 'disconnected. Paperclip runs on as before.'); }
+  if (saved.get('paperclip')) { saved.set('paperclip', undefined); savePersisted(); addFeed(PAPERCLIP, 'end', 'disconnected. Paperclip runs on as before.'); }
   broadcast();
   return { ok: true };
 }
@@ -533,9 +519,9 @@ async function superviseHq(body) {
 // records, change views, tree cache and floor actions; the server hands it the state slice, the live sessions and git.
 const repoKey = normPath;
 const campus = createCampus({
-  git, state: persisted, save: savePersisted, sessions: () => sessions.values(), roomPlace: (s) => roomPlace(s), changed: () => broadcast(),
+  git, state: saved.slice('layouts', 'rooms', 'merges'), save: savePersisted, sessions: () => sessions.values(), roomPlace: (s) => roomPlace(s), changed: () => broadcast(),
   adoptNotes: (pl) => adoptNotes(pl), feed: (s, k, t) => addFeed(s, k, t), fail: (st, m) => httpError(st, m), askFirst: (k, t) => askFirst(k, t),
-  recent: persisted.recent,
+  recent: saved.get('recent'),
 });
 const { addRepo, refreshRepo, layoutRecord, seatOfSession, noteRooms, roomsView, layoutsView, changeLayout, changesStale,
   changesView, mergeChange, repoTree, floorAction } = campus;
@@ -634,7 +620,7 @@ function noteDecision(id, s, allow) {
   if (!c || !s || c.building == null) return;
   const r = ruleOf(c);
   if (!r.col || !r.row || !V.security.rows[r.row]) return;
-  persisted.trust = recordTrust(persisted.trust, { at: Date.now(), col: r.col, building: c.building, row: r.row, pattern: patternOf(c.tool, c.input), allow, risk: r.risk });
+  saved.set('trust', recordTrust(saved.get('trust'), { at: Date.now(), col: r.col, building: c.building, row: r.row, pattern: patternOf(c.tool, c.input), allow, risk: r.risk }));
   savePersisted();
 }
 
@@ -735,21 +721,11 @@ function askUser(s, question) {
 
 // ---------- the room a session sits in (office_room, office_room_update) ----------
 // An agent can read its room and change two things in it: the notes board (the user's notes,
-// persisted.notes) and one short pin on the blackboard (persisted.pins). Both use the page's key for
+// the saved 'notes' slice) and one short pin on the blackboard (the 'pins' slice). Both use the page's key for
 // the room (place.mjs noteKey), so what an agent writes shows on the boards the user looks at.
 // notes.mjs owns the rules (versions, merge, caps); this file only calls it and saves the maps.
 // An agent changes only its own room: the room comes from the calling session, never from the arguments.
-persisted.notes = persisted.notes || {};
-persisted.merges = Array.isArray(persisted.merges) ? persisted.merges.slice(0, MERGES_KEPT) : []; // merges the user confirmed (#151): recap, merged moment
-persisted.standups = persisted.standups && typeof persisted.standups === 'object' ? persisted.standups : {}; // agent name -> the day of its last stand-up (#151)
-persisted.focus = persisted.focus === true; // Focus mode (#151): no rituals
-persisted.pins = persisted.pins || {};
-// The customization store (#152, personas.mjs): team templates and wall-screen choices live beside the personas, exported as one file.
-persisted.personas = cleanPersonas(persisted.personas);
-persisted.teams = cleanTeams(persisted.teams);
-persisted.screens = cleanScreens(persisted.screens);
-const board = createNotes({ notes: persisted.notes, pins: persisted.pins });
-for (const e of Object.values(persisted.notes)) if (!Number.isInteger(e.v)) e.v = 1; // notes saved before versions were counters
+const board = createNotes({ notes: saved.get('notes'), pins: saved.get('pins') });
 // notes.mjs rule errors carry a status; the HTTP layer reads `status`.
 
 // Where a session sits (place.mjs). The snapshot carries it, so the page keeps no copy of the rules.
@@ -757,7 +733,7 @@ const roomPlace = (s) => placeOfSession(s.git, s.cwd);
 // Room ids carry a hash now. A note or pin saved under the old key moves to the new one the first time its
 // room is seen, so nothing the user wrote is lost. Remove this when old state files are gone.
 function adoptNotes(pl) {
-  if (adoptLegacy([persisted.notes, persisted.pins], pl)) savePersisted();
+  if (adoptLegacy([saved.get('notes'), saved.get('pins')], pl)) savePersisted();
 }
 // The open sessions the page seats in a room (adapter.js live()).
 const inRoom = (key) => [...sessions.values()].filter((x) => x.status !== 'ended' && x.placed && roomPlace(x).noteKey === key);
@@ -935,8 +911,8 @@ function answer(id, allow, always = false) {
 const STANDUP_KINDS = new Set(['claude-code', 'ollama', 'lmstudio']);
 function standupLine(s) {
   const R = globalThis.OfficeVocab.rituals, t = Date.now();
-  if (!s.headless || !STANDUP_KINDS.has(s.provider) || !R.standupDue(persisted.standups, s.name, t, { focus: persisted.focus })) return '';
-  R.standupDone(persisted.standups, s.name, t); savePersisted();
+  if (!s.headless || !STANDUP_KINDS.has(s.provider) || !R.standupDue(saved.get('standups'), s.name, t, { focus: saved.get('focus') })) return '';
+  R.standupDone(saved.get('standups'), s.name, t); savePersisted();
   addFeed(s, 'tool', 'asked for a stand-up note');
   return R.STANDUP + '\n\n';
 }
@@ -1064,10 +1040,10 @@ function openHeadless(provider, { cwd, name, prompt, worktree = null, budget = n
   provider.check?.({}); // before the session exists: a missing program (claude.exe) leaves no ghost session
   // A Claude Code session opens in default mode while any of its Security cells is Ask, so Claude Code asks and the rules apply.
   const asked = permissionMode;
-  if (provider === claude) permissionMode = permissionModeFor(persisted.security, building, permissionMode);
+  if (provider === claude) permissionMode = permissionModeFor(saved.get('security'), building, permissionMode);
   const officeId = 'o' + crypto.randomBytes(4).toString('hex');
   // The last slash-command list came from a Claude Code init, so only a Claude Code session starts with it.
-  const known = provider === claude ? persisted.commands : null;
+  const known = provider === claude ? saved.get('commands') : null;
   // startDir: the launch folder (the worktree when there is one). Requests are rated against it, never against a later cd.
   // costUnknown: the agent reports no cost (ACP), so every surface shows "unknown", never $0.00.
   // supervision: the label of an ungated agent (ADR 0001), for every surface that shows the session.
@@ -1077,7 +1053,7 @@ function openHeadless(provider, { cwd, name, prompt, worktree = null, budget = n
   placeSession(s, true);
   if (prior) { s.replies = prior.replies || []; s.replySeq = s.replies.reduce((n, r) => Math.max(n, r.id || 0), 0); s.costBase = prior.cost || 0; s.cost = prior.cost || null; s.turns = prior.turns || 0; s.prompt = prior.prompt || ''; }
   // The persona's style is the tone of the system prompt only (#150). The Security room never reads it.
-  provider.open(s, { model, permissionMode, budget, resume, fork, tone: personaPrompt(personaOf(persisted.personas, name)) });
+  provider.open(s, { model, permissionMode, budget, resume, fork, tone: personaPrompt(personaOf(saved.get('personas'), name)) });
   if (!worktree) rememberDir(cwd); // a worktree folder is an implementation detail, not a place to start from
   addFeed(s, 'start', fork ? `forked from ${prior?.name || 'a past session'}, in a new worktree on branch ${worktree?.branch}` : resume ? 'reopened in the office' : worktree ? `started in the office on branch ${worktree.branch}` : 'started in the office');
   if (asked && permissionMode !== asked) addFeed(s, 'start', `opened in ${permissionMode} permission mode, not ${asked}: the Security room has Ask rules`);
@@ -1094,7 +1070,7 @@ function openHeadless(provider, { cwd, name, prompt, worktree = null, budget = n
 async function openSession(opts) {
   // Start from a persona (#152): its name, model and agent kind fill what the caller left out. The role and style are prompt text only.
   if (opts.persona) {
-    const p = personaOf(persisted.personas, String(opts.persona));
+    const p = personaOf(saved.get('personas'), String(opts.persona));
     if (!p) throw httpError(404, 'No such character.');
     opts = { ...opts, name: p.name, model: opts.model || p.model || null, provider: opts.provider || p.kind || undefined };
   }
@@ -1147,7 +1123,7 @@ async function openSession(opts) {
   const s = newSession({ uid: officeId, officeId, provider: provider.kind, name, cwd, startDir: cwd, launched: true, status: 'starting', model, deskRole: role });
   placeSession(s, true);
   // The window's Claude Code asks too while a Security cell is Ask; its own dialog answers what the office lets go back.
-  const windowMode = provider === claude ? permissionModeFor(persisted.security, await buildingOfFolder(cwd, null), permissionMode) : permissionMode;
+  const windowMode = provider === claude ? permissionModeFor(saved.get('security'), await buildingOfFolder(cwd, null), permissionMode) : permissionMode;
   provider.openWindow(s, { model, permissionMode: windowMode, prompt });
   rememberDir(cwd);
   addFeed(s, 'start', 'opened a new window');
@@ -1158,7 +1134,7 @@ async function openSession(opts) {
 // Admission (admission.mjs) is the one ordered check before a session starts: provider check, Security refusal, own room only
 // (ADR 0001), preflight, the cost question (an agent that reports no cost runs only after the user's yes, owner decision Q22;
 // a 200 with confirm: 'cost', not an error), the spend limit. `ruled` turns its answer into the route's error or question.
-const admission = createAdmission({ rules: () => persisted.security, defaultSpend: () => defaultSpend() });
+const admission = createAdmission({ rules: () => saved.get('security'), defaultSpend: () => defaultSpend() });
 function ruled(v) {
   if (v.kind === 'refusal') throw httpError(v.status, v.text);
   if (v.kind === 'question') throw askFirst(v.ask, v.text);
@@ -1251,7 +1227,7 @@ async function probeHttp() {
   for (const [uid, s] of sessions) if (s.officeId === 'probe') sessions.delete(uid);
   const missing = need.filter((e) => !seen.includes(e));
   const ok = !run.err && !missing.length;
-  persisted.httpHooks = { ok, version: CLAUDE_VERSION, at: new Date().toISOString(), seen, missing };
+  saved.set('httpHooks', { ok, version: CLAUDE_VERSION, at: new Date().toISOString(), seen, missing });
   savePersisted();
   if (!ok) hooksMode = 'command';
   else if (process.env.OFFICE_HOOKS !== 'command') hooksMode = 'http';
@@ -1291,12 +1267,12 @@ const manager = createManager({
   ready: (building) => [...new Set(goalAgents(building).flatMap((a) => a.tiers))],
   callsOf: (id, since) => (sessions.get(id)?.calls || []).filter((c) => c.t >= since && !c.agent).map((c) => ({ key: `${c.name}:${c.detail}`, ok: c.ok, changed: c.ok === true && EDIT_TOOLS.has(c.name) })),
   deliver: (to, from, text) => deliverMail(to, from, text), // false: not delivered, so the mail is refused and not counted
-  paperclip: () => !!(persisted.paperclip?.company || hq.view()?.company),
+  paperclip: () => !!(saved.get('paperclip')?.company || hq.view()?.company),
   interrupt: (id) => { const s = sessions.get(id); if (s && s.status === 'working') tracker.interrupt(s); },
   spendOf: (id) => Number(sessions.get(id)?.cost) || 0,
-  onChange: () => { persisted.goals = manager.export(); savePersisted(); broadcast(); },
+  onChange: () => { saved.set('goals', manager.export()); savePersisted(); broadcast(); },
 });
-manager.restore(persisted.goals);
+manager.restore(saved.get('goals'));
 const planBoard = createPlanBoard({ sources: [officeSource(manager), hq.planSource] });
 // Called after every state change: a step ends with the turn of its agent, and a freed agent may take a waiting step.
 let goalTickQueued = false, freeSig = '';
@@ -1320,7 +1296,7 @@ function goalTick() {
 }
 function startGoal(body) {
   const building = String(body.building || '');
-  const company = persisted.paperclip?.company || hq.view()?.company;
+  const company = saved.get('paperclip')?.company || hq.view()?.company;
   if (company && body.confirmed !== true) throw askFirst('goal', 'A Paperclip company is connected, so Paperclip plans the work. Start an office goal anyway? Two planners then assign work at once.');
   const limit = body.spendLimit == null ? defaultSpend() : Number(body.spendLimit);
   if (!Number.isFinite(limit) || limit < 0) throw httpError(400, 'The spend limit must be a number of dollars, 0 or more.');
@@ -1330,18 +1306,16 @@ function startGoal(body) {
 }
 
 // ---------- templates and schedules ----------
-persisted.templates = persisted.templates || [];
-persisted.schedules = persisted.schedules || [];
 // The default spend limit of new paid sessions, schedules and goals, in dollars (0 = none). The user changes it in the Attach
 // sessions dialog. Never saved means the built-in default.
-const defaultSpend = () => (Number.isFinite(persisted.spendLimit) && persisted.spendLimit >= 0 ? persisted.spendLimit : DEFAULT_SPEND_LIMIT);
+const defaultSpend = () => (Number.isFinite(saved.get('spendLimit')) && saved.get('spendLimit') >= 0 ? saved.get('spendLimit') : DEFAULT_SPEND_LIMIT);
 // No limit (0) is the loosest spend setting: a change to it needs confirmed: true (the wall's painted Confirm, or the
 // Save of the typed field in the Attach sessions dialog), so no single click on the wall removes the limit (#70).
 function saveSpendLimit(x) {
   const n = x.limit === null || x.limit === '' ? 0 : Number(x.limit);
   if (!Number.isFinite(n) || n < 0 || n > 1000) throw httpError(400, 'The spend limit is a number from 0 to 1000. 0 means no limit.');
   if (n === 0 && defaultSpend() !== 0 && x.confirmed !== true) throw httpError(409, 'Confirm No limit first.');
-  persisted.spendLimit = n;
+  saved.set('spendLimit', n);
   savePersisted();
   return { spendLimit: n };
 }
@@ -1350,9 +1324,9 @@ const newId = () => crypto.randomBytes(4).toString('hex');
 function saveTemplate(t) {
   const name = String(t.name || '').trim().slice(0, 60), text = String(t.text || '').trim().slice(0, 8000);
   if (!name || !text) throw httpError(400, 'A template needs a name and some text.');
-  const i = persisted.templates.findIndex((x) => x.id === t.id);
+  const i = saved.get('templates').findIndex((x) => x.id === t.id);
   const rec = { id: i >= 0 ? t.id : newId(), name, text };
-  if (i >= 0) persisted.templates[i] = rec; else persisted.templates.push(rec);
+  if (i >= 0) saved.get('templates')[i] = rec; else saved.get('templates').push(rec);
   savePersisted();
   return rec;
 }
@@ -1371,14 +1345,14 @@ function saveSchedule(x) {
   if (provider !== claude) provider.check?.({ model });
   const modes = KINDS.find((k) => k.kind === provider.kind)?.modes || [];
   const rec = {
-    id: persisted.schedules.find((y) => y.id === x.id)?.id || newId(), name, prompt, cwd, kind, every, at, provider: provider.kind,
+    id: saved.get('schedules').find((y) => y.id === x.id)?.id || newId(), name, prompt, cwd, kind, every, at, provider: provider.kind,
     model, permissionMode: MODES.has(x.permissionMode) && modes.includes(x.permissionMode) ? x.permissionMode : '',
     // A new one without a limit gets the default; 0 is "no limit" and stays 0. A free kind, or one whose cost is unknown, has none.
     isolation: x.isolation === 'worktree' ? 'worktree' : 'same', maxBudget: spendLimitFor({ paid: traitsOf(provider).paid, cost: traitsOf(provider).cost, requested: x.maxBudget, fallback: defaultSpend() }) ?? 0,
     enabled: x.enabled !== false, lastRun: Date.now(),
   };
-  const i = persisted.schedules.findIndex((y) => y.id === rec.id);
-  if (i >= 0) { rec.lastRun = persisted.schedules[i].lastRun; persisted.schedules[i] = rec; } else persisted.schedules.push(rec);
+  const i = saved.get('schedules').findIndex((y) => y.id === rec.id);
+  if (i >= 0) { rec.lastRun = saved.get('schedules')[i].lastRun; saved.get('schedules')[i] = rec; } else saved.get('schedules').push(rec);
   savePersisted();
   return rec;
 }
@@ -1417,7 +1391,7 @@ async function runSchedule(sch) {
 // repositories do not wait. git.createWorktree is serialized per repository too; this keeps the order and the load sane.
 const scheduleQueue = git.keyedQueue();
 async function runDue(now) {
-  for (const sch of persisted.schedules.filter((x) => dueNow(x, now))) {
+  for (const sch of saved.get('schedules').filter((x) => dueNow(x, now))) {
     sch.lastRun = now;
     const g = await git.locate(sch.cwd).catch(() => null);
     void scheduleQueue(normPath(g?.repo || sch.cwd || ''), () => runSchedule(sch));
@@ -1576,27 +1550,27 @@ setInterval(readPlan, 15000).unref();
 // handshake. The page shows a feature only when the kind declares it (vocab.js featuresOf).
 const kindInfo = (s) => { try { const p = providers.of(s); return { agent: p.label, features: traitsOf(p).features }; } catch { return { agent: '', features: [] }; } };
 // hq: a Paperclip run's label (its agent, role, company, task and budget, #76), while the office watches that company.
-const fullSession = (s) => ({ ...s, ...kindInfo(s), persona: personaOf(persisted.personas, s.name), place: s.placed ? roomPlace(s) : null, seat: seatOfSession(s), hq: s.paperclip ? hq.labelOf(s.paperclip) : null });
+const fullSession = (s) => ({ ...s, ...kindInfo(s), persona: personaOf(saved.get('personas'), s.name), place: s.placed ? roomPlace(s) : null, seat: seatOfSession(s), hq: s.paperclip ? hq.labelOf(s.paperclip) : null });
 const CATALOG = catalogView();
 // What /events sends: only what the page reads, with caps per session (public/wire.js lean).
 const snapshot = () => (W.lean({
   sessions: [...sessions.values()].map(fullSession),
   plan,
   figures: allFigures(),    // noteKey -> room figures (sessions, working, waiting, toolCalls, tokens, cost, priced, unknown, todosDone, todosTotal, lastEvent)
-  notes: persisted.notes,   // noteKey -> { text, at, v, by? }: each room's notes board (v: version counter; a cleared board stays with text '' and at 0; by: the agent session that last wrote it)
-  screens: persisted.screens,   // room key -> the blackboard view the user chose (personas.mjs setScreen); a room with none shows Overview
-  pins: persisted.pins,     // noteKey -> { text, by, at }: a short message an agent pinned on the room's blackboard
+  notes: saved.get('notes'),   // noteKey -> { text, at, v, by? }: each room's notes board (v: version counter; a cleared board stays with text '' and at 0; by: the agent session that last wrote it)
+  screens: saved.get('screens'),   // room key -> the blackboard view the user chose (personas.mjs setScreen); a room with none shows Overview
+  pins: saved.get('pins'),     // noteKey -> { text, by, at }: a short message an agent pinned on the room's blackboard
   repos: campus.reposView(),
   // The Security room (#70): the rules (office-wide and per building), why a cell is not enforced for an agent kind
   // (security.mjs enforcement), and the Spend screen (the default spend limit, cost per agent kind this month).
-  security: { rules: persisted.security, enforce: ENFORCE, trust: trustView(), spend: { limit: defaultSpend(), ...costThisMonth(persisted.costs, Date.now()) } },
+  security: { rules: saved.get('security'), enforce: ENFORCE, trust: trustView(), spend: { limit: defaultSpend(), ...costThisMonth(saved.get('costs'), Date.now()) } },
   kinds: KINDS,             // the agent kinds: the label of each session's kind, and the Open dialog's options before readiness comes
   plans: planBoard.snapshot(), // Manager board (#154, #156): every plan of every source, with its source word and the steps' state words
   hq: hq.view(),            // Paperclip HQ (#76): null until connected; company, budget, agents (role, task, supervision, run), routines
   // Function floors (#92): each building's floors (archetypes.mjs layoutView), each room's floors and name, and the catalog
   layouts: layoutsView(), rooms: roomsView(), catalog: CATALOG,
   changes: changesView(),   // paper flow (#93): building key -> { ok, at, error, mergedToday, prs, ready } from gh
-  rituals: { focus: persisted.focus, merges: persisted.merges.slice(0, 20) }, // Focus mode and the recent merges (the merged moment, #151)
+  rituals: { focus: saved.get('focus'), merges: saved.get('merges').slice(0, 20) }, // Focus mode and the recent merges (the merged moment, #151)
 }));
 // A page gets the whole snapshot when it connects, then one patch per broadcast with only what changed (wire.js).
 // State changes within BROADCAST_MS go out as one patch, so a burst of hooks sends at most 10 messages a second.
@@ -1689,20 +1663,20 @@ const server = http.createServer(async (req, res) => {
       // feed: what the session did, in short lines (the last 200 of the office keep them; the snapshot does not carry them)
       return s ? send(res, 200, { session: fullSession(s), feed: feed.filter((f) => f.uid === s.uid) }) : send(res, 404, { error: 'No such session.' });
     }
-    if (req.method === 'GET' && url.pathname === '/api/choices') return send(res, 200, { folders: recentChoices(persisted.recent, url.searchParams.get('first') || '') });
+    if (req.method === 'GET' && url.pathname === '/api/choices') return send(res, 200, { folders: recentChoices(saved.get('recent'), url.searchParams.get('first') || '') });
     // Each agent kind with its readiness, what it needs and its models (providers/index.mjs status), for the settings view (#20).
     if (req.method === 'GET' && url.pathname === '/api/providers') { const list = await providers.statusCached({ fresh: url.searchParams.get('fresh') === '1' }); void refreshEnforce(); return send(res, 200, { providers: list }); }
     // Paperclip HQ (#76): what the office reads from it now (tests and scripts; the page gets it in the snapshot).
     if (req.method === 'GET' && url.pathname === '/api/paperclip') return send(res, 200, { hq: hq.view() });
     if (req.method === 'GET' && url.pathname === '/api/info') {
       return send(res, 200, {
-        port: PORT, hooksFile: activeHooksFile(), recent: persisted.recent, home: os.homedir(),
+        port: PORT, hooksFile: activeHooksFile(), recent: saved.get('recent'), home: os.homedir(),
         settingsSnippet: JSON.stringify(hooksMode === 'http' ? httpSettings : commandSettings, null, 2),
         agentToken: AGENT_TOKEN, // the Attach sessions dialog hides it until the user clicks Show (#60)
         launchCommand: `claude --settings "${activeHooksFile()}" --mcp-config "${MCP_FILE}"`,
         startup: startup.status(STARTUP_DIR, ROOT, PORT),
         remote: auth.remoteInfo(REMOTE), // off, on with its address, or the setting that is missing (the Attach sessions dialog)
-        hooksMode, claudeVersion: CLAUDE_VERSION, templates: persisted.templates, schedules: persisted.schedules, spendLimit: defaultSpend(),
+        hooksMode, claudeVersion: CLAUDE_VERSION, templates: saved.get('templates'), schedules: saved.get('schedules'), spendLimit: defaultSpend(),
       });
     }
     // The weekly recap and the while-you-were-away list (#151): computed from the feed, the merges and the history (rituals.mjs).
@@ -1710,10 +1684,10 @@ const server = http.createServer(async (req, res) => {
       const now = Date.now(), since = Number(url.searchParams.get('since')) || 0;
       const live = [...sessions.values()].filter((s) => s.headless).map((s) => ({ name: s.name, cost: s.cost, startedAt: s.startedAt, endedAt: s.endedAt, worktree: s.worktree }));
       const hist = [...live, ...history.filter((h) => !sessions.has(h.uid))];
-      return send(res, 200, { ...recapOf({ feed, merges: persisted.merges, history: hist, now }), away: awayOf({ feed, since, now }), focus: persisted.focus });
+      return send(res, 200, { ...recapOf({ feed, merges: saved.get('merges'), history: hist, now }), away: awayOf({ feed, since, now }), focus: saved.get('focus') });
     }
-    if (req.method === 'GET' && url.pathname === '/api/personas') return send(res, 200, { personas: persisted.personas, teams: persisted.teams, screens: persisted.screens });
-    if (req.method === 'GET' && url.pathname === '/api/custom/export') return send(res, 200, exportCustom(persisted));
+    if (req.method === 'GET' && url.pathname === '/api/personas') return send(res, 200, { personas: saved.get('personas'), teams: saved.get('teams'), screens: saved.get('screens') });
+    if (req.method === 'GET' && url.pathname === '/api/custom/export') return send(res, 200, exportCustom(saved.slice('personas', 'teams', 'screens', 'layouts')));
     if (req.method !== 'POST') return send(res, 404, { error: 'Not found' });
 
     const body = await readBody(req);
@@ -1743,13 +1717,13 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/launch-link') return send(res, 200, { url: auth.launchUrl(PORT, launchCodes.mint()) }); // a second npm start asks for one
     if (url.pathname === '/api/probe-http') return send(res, 200, await probeHttp());
-    if (url.pathname === '/api/persona/save') { const p = setPersona(persisted.personas, String(body.name || ''), body); savePersisted(); broadcast(); return send(res, 200, { ok: true, persona: p }); }
-    if (url.pathname === '/api/persona/starters') { const n = addStarters(persisted.personas) + addStarterTeams(persisted.teams); if (n) { savePersisted(); broadcast(); } return send(res, 200, { ok: true, added: n }); }
-    if (url.pathname === '/api/team/save') { const t = setTeam(persisted.teams, String(body.name || ''), body); savePersisted(); return send(res, 200, { ok: true, team: t }); }
-    if (url.pathname === '/api/team/delete') { removeTeam(persisted.teams, String(body.name || '')); savePersisted(); return send(res, 200, { ok: true }); }
+    if (url.pathname === '/api/persona/save') { const p = setPersona(saved.get('personas'), String(body.name || ''), body); savePersisted(); broadcast(); return send(res, 200, { ok: true, persona: p }); }
+    if (url.pathname === '/api/persona/starters') { const n = addStarters(saved.get('personas')) + addStarterTeams(saved.get('teams')); if (n) { savePersisted(); broadcast(); } return send(res, 200, { ok: true, added: n }); }
+    if (url.pathname === '/api/team/save') { const t = setTeam(saved.get('teams'), String(body.name || ''), body); savePersisted(); return send(res, 200, { ok: true, team: t }); }
+    if (url.pathname === '/api/team/delete') { removeTeam(saved.get('teams'), String(body.name || '')); savePersisted(); return send(res, 200, { ok: true }); }
     // A squad: each member opens as its own agent from its persona, one after the other, each in a room of its own. A member that fails does not stop the rest.
     if (url.pathname === '/api/team/start') {
-      const team = teamOf(persisted.teams, String(body.team || ''));
+      const team = teamOf(saved.get('teams'), String(body.team || ''));
       if (!team) throw httpError(404, 'No such team.');
       const started = [];
       for (const member of team.members) {
@@ -1760,12 +1734,12 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/custom/import') {
       const c = importCustom(body.data, { cleanLayout: cleanRecord });
-      Object.assign(persisted.personas, c.personas); Object.assign(persisted.teams, c.teams); Object.assign(persisted.screens, c.screens); Object.assign(persisted.layouts, c.layouts);
+      Object.assign(saved.get('personas'), c.personas); Object.assign(saved.get('teams'), c.teams); Object.assign(saved.get('screens'), c.screens); Object.assign(saved.get('layouts'), c.layouts);
       savePersisted(); broadcast();
       return send(res, 200, { ok: true, personas: Object.keys(c.personas).length, teams: Object.keys(c.teams).length, screens: Object.keys(c.screens).length, layouts: Object.keys(c.layouts).length });
     }
-    if (url.pathname === '/api/screen/set') { setScreen(persisted.screens, String(body.key ?? ''), body.view); savePersisted(); broadcast(); return send(res, 200, { ok: true }); }
-    if (url.pathname === '/api/persona/delete') { removePersona(persisted.personas, String(body.name || '')); savePersisted(); broadcast(); return send(res, 200, { ok: true }); }
+    if (url.pathname === '/api/screen/set') { setScreen(saved.get('screens'), String(body.key ?? ''), body.view); savePersisted(); broadcast(); return send(res, 200, { ok: true }); }
+    if (url.pathname === '/api/persona/delete') { removePersona(saved.get('personas'), String(body.name || '')); savePersisted(); broadcast(); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/notes/save') {
       // the notes board of a room: the user's own reminders, kept in state.json
       const key = String(body.key || '');
@@ -1828,7 +1802,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, out);
     }
     if (url.pathname === '/api/merge') return send(res, 200, await mergeChange(body));
-    if (url.pathname === '/api/settings/focus') { persisted.focus = body.on === true; savePersisted(); broadcast(); return send(res, 200, { focus: persisted.focus }); }
+    if (url.pathname === '/api/settings/focus') { saved.set('focus', body.on === true); savePersisted(); broadcast(); return send(res, 200, { focus: saved.get('focus') }); }
     if (url.pathname === '/api/settings/spend') { const r = saveSpendLimit(body); broadcast(); return send(res, 200, r); }
     // One Security room rule from the wall: { scope: 'office' | 'building', building, row, col, value, confirmed } (security.mjs setRule).
     if (url.pathname === '/api/security/set') return send(res, 200, saveRule(body));
@@ -1848,10 +1822,10 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/goal/cancel') { if (!manager.cancel(String(body.id))) throw httpError(409, 'That goal is done or stopped.'); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/goal/retry') { const r = await manager.retry(String(body.id), String(body.step)); if (!r.ok) throw httpError(409, r.reason); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/template/save') return send(res, 200, saveTemplate(body));
-    if (url.pathname === '/api/template/delete') { persisted.templates = persisted.templates.filter((t) => t.id !== String(body.id)); savePersisted(); return send(res, 200, { ok: true }); }
+    if (url.pathname === '/api/template/delete') { saved.set('templates', saved.get('templates').filter((t) => t.id !== String(body.id))); savePersisted(); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/schedule/save') return send(res, 200, saveSchedule(body));
-    if (url.pathname === '/api/schedule/delete') { persisted.schedules = persisted.schedules.filter((t) => t.id !== String(body.id)); savePersisted(); return send(res, 200, { ok: true }); }
-    if (url.pathname === '/api/schedule/run') { const sch = persisted.schedules.find((t) => t.id === String(body.id)); if (!sch) throw httpError(404, 'No such schedule.'); return send(res, 200, { uid: await runSchedule(sch) }); }
+    if (url.pathname === '/api/schedule/delete') { saved.set('schedules', saved.get('schedules').filter((t) => t.id !== String(body.id))); savePersisted(); return send(res, 200, { ok: true }); }
+    if (url.pathname === '/api/schedule/run') { const sch = saved.get('schedules').find((t) => t.id === String(body.id)); if (!sch) throw httpError(404, 'No such schedule.'); return send(res, 200, { uid: await runSchedule(sch) }); }
     if (url.pathname === '/api/close') { await closeSession(String(body.uid)); return send(res, 200, { ok: true }); }
     return send(res, 404, { error: 'Not found' });
   } catch (e) {
@@ -1907,14 +1881,14 @@ server.listen(PORT, HOST, () => {
   // Saved state (schedule prompts, notes) and past sessions (replies) are limited too (#27 L10): once here, with
   // what this office loaded. savePersisted and saveHistory then write plainly, and a plain write keeps the ACL.
   // After listen, so a second copy that exits on EADDRINUSE never rewrites them.
-  writeSecret(STATE_FILE, JSON.stringify(persisted, null, 2));
+  saved.claim();
   writeSecret(HISTORY_FILE, JSON.stringify(history));
   // An entry that starts the office at sign-in and still names the old root server.mjs now names src/server.mjs (only the owner office may).
   if (startup.migrate(STARTUP_DIR, ROOT, process.execPath, PORT)) console.log('The Start with Windows entry now points at src/server.mjs.');
   // What an ungated agent's own config carries, for the Security room wall (read-only; nothing is read while it is off).
   void refreshEnforce();
   // Paperclip HQ (#76): the connection the user made before, again (a Paperclip that is not up yet is tried again later).
-  if (persisted.paperclip && persisted.paperclip.url) hq.connect({ url: persisted.paperclip.url, company: persisted.paperclip.company || null, keep: true }).catch((e) => console.warn(`Paperclip: ${e.message}`));
+  if (saved.get('paperclip') && saved.get('paperclip').url) hq.connect({ url: saved.get('paperclip').url, company: saved.get('paperclip').company || null, keep: true }).catch((e) => console.warn(`Paperclip: ${e.message}`));
   try {
     fs.mkdirSync(path.dirname(PAGE_FILE), { recursive: true });
     writeSecret(PAGE_FILE, JSON.stringify({ token: PAGE_TOKEN, port: PORT }));
