@@ -9,6 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { slimPayload } from './payload.mjs';
 import { officeFiles, portArg } from './files.mjs';
+import { httpPost } from './post.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -39,14 +40,15 @@ const ask = payload.hook_event_name === 'PermissionRequest';
 // (permissionDecision deny) or its ask (#70).
 const reads = ['PostToolUse', 'UserPromptSubmit', 'Stop', 'PreToolUse'].includes(payload.hook_event_name);
 try {
-  const res = await fetch(`http://127.0.0.1:${cfg.port}/hook${ask ? '/permission' : ''}`, {
-    method: 'POST',
+  // node:http (post.mjs), not fetch: fetch gives up after 300 s without headers, a held request waits 15 min (#128).
+  const res = await httpPost({
+    port: cfg.port, path: `/hook${ask ? '/permission' : ''}`,
     headers: { 'content-type': 'application/json', 'x-office-token': cfg.token },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(ask ? 1000000 : 1500),
   });
   if (ask || reads) {
-    const out = await res.text();
+    const out = res.text;
     // Only forward real hook output; {} or {"ok":true} means nothing to say.
     // For a permission prompt, empty means no decision: the terminal dialog decides.
     if (/"(hookSpecificOutput|decision)"/.test(out)) process.stdout.write(out);
