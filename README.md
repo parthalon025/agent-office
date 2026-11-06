@@ -4,7 +4,7 @@
 
 A 3D office that shows your Claude Code sessions as bots at desks, and lets you run them without a terminal. Open a session, talk to it in a chat, approve its steps, see what it changed, and close it, all from one browser tab.
 
-It is built on the Agent Office design system (x1.7.5), which lives in this folder. The design system documents are in [DS-README.md](DS-README.md).
+It is built on the Agent Office design system (x1.7.6), which lives in this folder. The design system documents are in [DS-README.md](DS-README.md).
 
 ## What it does
 

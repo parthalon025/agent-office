@@ -328,3 +328,11 @@ test('native scrollbars follow the theme: color-scheme in each theme block, and 
 });
 
 function fileUrl(rel) { return new URL(rel, root).pathname.replace(/^\/([A-Za-z]:)/, '$1').replace(/%20/g, ' '); }
+
+test("bundle.js defines FloorList and BotRow once; the first IIFE exports neither (#110)", () => {
+  const b = read("components/bundle.js");
+  assert.equal(b.match(/function FloorList\(/g).length, 1, "one FloorList definition");
+  assert.equal(b.match(/function BotRow\(/g).length, 1, "one BotRow definition");
+  const ns = b.match(/var NS=\{[^}]*\}/)[0];
+  assert.ok(!/FloorList:/.test(ns) && !/BotRow:/.test(ns), "NS has neither FloorList nor BotRow");
+});
