@@ -6,15 +6,15 @@ Agent Office is a 3D office that shows your Claude Code sessions as bots at desk
 
 ## Screenshots
 
-![The city in Day: one tall building with a beacon above it and the City panel on the left](docs/img/day-city-1360.png)
+![The city in Day: three buildings on a street grid, the orbit-api building with lit windows and a beacon, and the City panel on the left with a Needs you button](docs/img/day-city-1360.png)
 
-The city shows every repository as a building. A beacon marks a building with a request that waits for you.
+The city shows every repository as a building. A beacon and lit windows mark a building with a request that waits for you, and the City panel lists each building with its sessions.
 
-![The desk screen in Day: a chat with an Approve and a Decline button under the line Allow Bash: npm test?](docs/img/day-desk-1360.png)
+![A lab room in Day with three desks, and the chat of one agent on the right with an Approve and a Decline button under the line Allow Bash: npm test?](docs/img/day-desk-1360.png)
 
-Click a desk monitor twice to open the chat of its agent. The held request shows its command with Approve and Decline.
+Click a bot to open the chat of its agent. The held request shows its command with Approve and Decline, and the same line shows in a speech bubble at the desk.
 
-![The building in Day with one request listed under Waiting on me in the left column](docs/img/day-needs-you-1360.png)
+![The orbit-api building in Day with a Needs you button in the top bar and one request, with Approve and Decline, under Waiting on me in the left column](docs/img/day-needs-you-1360.png)
 
 Needs you lists every held request of every building. Approve or decline it from the left column. More screenshots are in [Using the office](docs/using-the-office.md#screenshots).
 
