@@ -9,7 +9,7 @@
   var O = window.OfficePage;
   var h = React.createElement, A = window.AgentOffice, useState = React.useState, useEffect = React.useEffect,
       useMemo = React.useMemo;
-  var Bezel = O.Bezel, BoardPanel = O.BoardPanel, ChangesDialog = O.ChangesDialog, ChangesScreen = O.ChangesScreen,
+  var Bezel = O.Bezel, BoardPanel = O.BoardPanel, Changes = O.Changes,
       DEFAULT_KIND = O.DEFAULT_KIND, DeskScreen = O.DeskScreen, ExtensionsDialog = O.ExtensionsDialog, F = O.F,
       FloorsDialog = O.FloorsDialog, FlowDialog = O.FlowDialog, HooksDialog = O.HooksDialog, HqDialog = O.HqDialog,
       KindsDialog = O.KindsDialog, LOOK_ICON = O.LOOK_ICON, LookBar = O.LookBar, MODELS = O.MODELS, MODES = O.MODES,
@@ -869,7 +869,7 @@
           run: function () { client.control({ uid: s.uid, action: 'mode', value: md.value }).catch(function (x) { toast({ tone: 'error', title: s.name, text: x.message }); }); } }); });
         out.push({ id: 'page-s-go-' + s.uid, label: 'Go to session ' + nm, icon: 'chevron-right', group: 'Sessions', hint: where, keywords: kw, run: function () { goTo(s); } });
         out.push({ id: 'page-s-term-' + s.uid, label: 'Terminal of ' + nm, icon: 'terminal', group: 'Sessions', hint: where, keywords: kw + ' output', run: function () { openDesk(s.uid, 'terminal'); } });
-        out.push({ id: 'page-s-chg-' + s.uid, label: 'Changes of ' + nm, icon: 'trace', group: 'Sessions', hint: where, keywords: kw + ' diff files', run: function () { changes(s.uid, nm); } });
+        out.push(Changes.paletteAction(s, nm, where, kw, changes));
         if (s.headless && (s.status === 'working' || s.status === 'waiting')) out.push({ id: 'page-s-stop-' + s.uid, label: 'Stop turn of ' + nm, icon: 'pause', group: 'Sessions', hint: where, keywords: kw + ' interrupt', run: function () { client.interrupt({ uid: s.uid }).catch(function (x) { toast({ tone: 'error', title: s.name, text: x.message }); }); } });
       });
       return out;
@@ -891,7 +891,7 @@
       d === 'flow' ? h(FlowDialog, { toast: toast, onClose: close }) : null,
       d === 'past' ? h(PastDialog, { onClose: close, onChanges: changes, toast: toast }) : null,
       d === 'schedules' ? h(SchedulesDialog, { recent: info.recent, spendLimit: info.spendLimit, onInfo: setInfo, toast: toast, onClose: close }) : null,
-      d === 'changes' ? h(ChangesDialog, { uid: dlg.uid, name: dlg.label, ended: dlg.ended, toast: toast, onClose: close }) : null,
+      d === 'changes' ? h(Changes.Dialog, { uid: dlg.uid, name: dlg.label, ended: dlg.ended, toast: toast, onClose: close }) : null,
       d === 'hooks' ? h(HooksDialog, { info: info, snap: snap, onSaved: refresh, toast: toast, onClose: close }) : null,
       d === 'floors' ? h(FloorsDialog, { repo: shown, toast: toast, onClose: close }) : null,
       d === 'room' && mount ? h(RoomDialog, { mount: mount, roomId: dlg.roomId, toast: toast, onClose: close }) : null,
@@ -901,7 +901,7 @@
       deskUid && hostRef.current ? h(DeskScreen, { key: 'desk-' + deskUid, uid: deskUid, bot: layer.item.name, name: sceneName({ uid: deskUid, name: layer.item.name }), host: hostRef.current, office: officeRef.current,
         shown: layer.shown, tab: deskTab, onTab: setDeskTab, waiting: layer.waiting, onGo: goOldest, toast: toast, onBack: blurScene,
         onRules: function () { var d2 = window.officeAdapter.sessionByUid(deskUid); if (d2 && d2.place) noteLayer(d2.place.roomId, 'deep'); blurScene(); setTimeout(function () { if (securityRef.current && !securityRef.current.open('files')) toast({ tone: 'info', title: 'Permissions', text: 'This building shows no Security room yet.' }); }, 0); } }) : null,
-      pinned && layer.kind === 'changes' && chg && hostRef.current ? h(ChangesScreen, { key: 'chg-' + chg.uid, uid: chg.uid, name: chg.name, ended: chg.ended, host: hostRef.current,
+      pinned && layer.kind === 'changes' && chg && hostRef.current ? h(Changes.Screen, { key: 'chg-' + chg.uid, uid: chg.uid, name: chg.name, ended: chg.ended, host: hostRef.current,
         shown: layer.shown, waiting: layer.waiting, onGo: goOldest, toast: toast, onBack: blurScene }) : null,
       pinned && layer.kind === 'note' && layer.item && layer.item.data && hostRef.current ? h(NoteScreen, { key: 'note-' + layer.item.id, note: layer.item.data, host: hostRef.current,
         shown: layer.shown, waiting: layer.waiting, onGo: goOldest, toast: toast, onBack: blurScene }) : null,

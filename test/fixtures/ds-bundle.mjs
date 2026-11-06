@@ -14,5 +14,5 @@ export function loadBundle() {
   vm.createContext(sb);
   vm.runInContext(src('public/vendor/react.production.min.js'), sb, { filename: 'react.production.min.js' });
   vm.runInContext(src('components/bundle.js'), sb, { filename: 'bundle.js' });
-  return { React: sb.React, AO: sb.AgentOffice };
+  return { React: sb.React, AO: sb.AgentOffice, sb };
 }

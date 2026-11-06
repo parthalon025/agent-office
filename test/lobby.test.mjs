@@ -90,7 +90,7 @@ test('every lobby object has a Ctrl+K action: an open desk on each floor, the Re
   assert.match(office, /\['tour', 'Replay the lobby tour', 'chevron-right'/);
   assert.match(office, /onReception: function \(part\) \{ if \(part === 'directory'\) openPalette\(\);/, 'the directory opens the search, which is Ctrl+K itself');
   // the dock's per-agent actions moved into Ctrl+K
-  for (const id of ["'page-s-always-'", "'page-s-model-'", "'page-s-mode-'", "'page-s-stop-'", "'page-s-term-'", "'page-s-chg-'"]) assert.ok(office.includes(id), id);
+  for (const id of ["'page-s-always-'", "'page-s-model-'", "'page-s-mode-'", "'page-s-stop-'", "'page-s-term-'", "'page-s-chg-'"]) assert.ok(office.includes(id) || (id === "'page-s-chg-'" && fs.readFileSync(new URL('../public/changes.js', import.meta.url), 'utf8').includes(id)), id);
 });
 
 // ---------- the tour's flights (#92 review): lobby.js on the real scene host, on a plain scene graph (no THREE, no DOM) ----------

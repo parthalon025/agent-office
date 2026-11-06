@@ -6,9 +6,9 @@
   'use strict';
   var O = window.OfficePage;
   var h = React.createElement, A = window.AgentOffice, useState = React.useState, useEffect = React.useEffect;
-  var ChangesBody = O.ChangesBody, ChangesConfirm = O.ChangesConfirm, F = O.F, ago = O.ago, client = O.client,
-      changesActions = O.changesActions, clip = O.clip, exportSession = O.exportSession, modelWord = O.modelWord,
-      plural = O.plural, statusOf = O.statusOf, useChanges = O.useChanges, useKinds = O.useKinds,
+  var F = O.F, ago = O.ago, client = O.client,
+      clip = O.clip, exportSession = O.exportSession, modelWord = O.modelWord,
+      plural = O.plural, statusOf = O.statusOf, useKinds = O.useKinds,
       useSnapshot = O.useSnapshot;
 
   // ---------- the room board, read up close ----------
@@ -346,23 +346,6 @@
       } }));
   }
 
-  // The changes of a room on its wall screen, pinned (#89). Pull request and worktree removal keep their confirm dialog.
-  function ChangesScreen(p) {
-    var c = useChanges(p.uid, p.toast);
-    var ref = React.useRef(null);
-    var small = usePinBox(p.host, ref, putBox);
-    usePinFocus(p.shown, function () { var el = ref.current; return el && el.querySelector('.diff, .pin-body'); });
-    return h(React.Fragment, null,
-      h('section', { ref: ref, className: 'pin pin-changes' + (small ? ' is-small' : ''), hidden: !p.shown, 'aria-label': 'Changes in ' + (p.name || 'this session') },
-        h('div', { className: 'pin-head' },
-          h('b', { className: 'pin-name' }, 'Changes in ' + (p.name || 'this session')),
-          h(Bezel, { inline: true, count: p.waiting, onGo: p.onGo, compact: small }),
-          changesActions(c, p.ended),
-          h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onBack }, 'Back')),
-        h('div', { className: 'pin-body', tabIndex: -1 }, h(ChangesBody, { c: c }))),
-      h(ChangesConfirm, { c: c }));
-  }
-
   // The question note of a desk, pinned (#90): the question and a text field over the note in the scene. The answer goes to the
   // agent as its next message (the server gives a pending question the next message, the message command).
   function NoteScreen(p) {
@@ -446,7 +429,7 @@
         : s && !s.headless && !ended ? h('p', { className: 'term-note' }, 'This session runs in its own terminal window. Type there, or use the Chat tab.') : null);
   }
 
-  Object.assign(O, { Bezel: Bezel, BoardPanel: BoardPanel, ChangesScreen: ChangesScreen, DeskScreen: DeskScreen,
+  Object.assign(O, { Bezel: Bezel, BoardPanel: BoardPanel, DeskScreen: DeskScreen,
       LOOK_ICON: LOOK_ICON, LookBar: LookBar, NoteScreen: NoteScreen, NotesEditor: NotesEditor, StatsPanel: StatsPanel,
-      WANT_MS: WANT_MS, noteLayer: noteLayer, sceneCovers: sceneCovers, layerMemory: function () { return layerMem; } });
+      WANT_MS: WANT_MS, putBox: putBox, usePinBox: usePinBox, usePinFocus: usePinFocus, noteLayer: noteLayer, sceneCovers: sceneCovers, layerMemory: function () { return layerMem; } });
 })();
