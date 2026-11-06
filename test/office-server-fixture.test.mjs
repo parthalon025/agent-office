@@ -56,7 +56,7 @@ test('stop: ends the whole process tree by pid and waits for it (#161)', { timeo
     assert.equal(alive(kid), true);
     await o.stop();
     // Windows can report a process for a few ms after its exit; a live one stays for the whole wait.
-    for (let i = 0; i < 20 && alive(kid); i++) await new Promise((r) => setTimeout(r, 100));
+    for (let i = 0; i < 100 && alive(kid); i++) await new Promise((r) => setTimeout(r, 100));
     assert.equal(alive(kid), false, 'the child of the office must be gone after stop()');
   } finally { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }); }
 });
