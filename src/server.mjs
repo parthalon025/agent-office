@@ -32,7 +32,9 @@ import { cloudConfig } from './providers/cloud.mjs';
 import { createFoundry } from './providers/foundry.mjs';
 import { createCopilotStudio } from './providers/copilot-studio.mjs';
 import { createClaudeCode, claudeVersion, MODEL_RE, MODES } from './providers/claude-code.mjs';
-import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, cleanRecent, recentChoices, securityRoomIdOf, seatOf, cleanRooms, settleRooms, viewRooms } from './place.mjs';
+import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, securityRoomIdOf, seatOf } from './place.mjs';
+import { addRecent, cleanRecent, recentChoices } from './recent.mjs';
+import { cleanRooms, settleRooms, viewRooms } from './rooms.mjs';
 import { detect, newRecord, cleanRecord, edit as editLayout, layoutView, shownFloors, catalogView, functionOf } from './archetypes.mjs';
 import * as startup from './startup.mjs';
 import { createManager, createPlanBoard, officeSource } from './manager.mjs';
@@ -153,7 +155,7 @@ const PAPERCLIP_ASK_MS = (Number(process.env.OFFICE_PAPERCLIP_ASK_S) || HEADLESS
 // ---------- setup: hook settings ----------
 let persisted = { recent: [] };
 try { persisted = { ...persisted, ...JSON.parse(fs.readFileSync(STATE_FILE, 'utf8')) }; } catch { /* first run */ }
-// Drop folders that are gone. cleanRecent (place.mjs) drops agent room folders, also those of older runs.
+// Drop folders that are gone. cleanRecent (recent.mjs) drops agent room folders, also those of older runs.
 persisted.recent = cleanRecent(persisted.recent).filter((d) => fs.existsSync(d));
 // The office writes its saved state and past sessions only once it owns its port (the listen callback sets ownPort and writes
 // both whole). Before that a change stays in memory: a copy on a busy port writes nothing, also when its recent folders became
@@ -170,7 +172,7 @@ persisted.trust = cleanTrust(persisted.trust);
 // runs once, when the office first knows the building; after that only the user changes the record (POST /api/layout).
 persisted.layouts = Object.fromEntries(Object.entries(persisted.layouts && typeof persisted.layouts === 'object' ? persisted.layouts : {})
   .map(([k, v]) => [k, cleanRecord(v)]).filter(([, v]) => v));
-// The rooms of git workspaces that had an agent (noteKey -> { building, root, floors, title }; place.mjs room records): a room
+// The rooms of git workspaces that had an agent (noteKey -> { building, root, floors, title }; rooms.mjs room records): a room
 // is on the floors where its agents sit now, and keeps its name from the task until its worktree is removed (refreshRepo drops
 // the record then). cleanRooms puts an older or hand-edited record in that form, so no broadcast throws on one.
 persisted.rooms = cleanRooms(persisted.rooms);
@@ -565,13 +567,13 @@ function seatOfSession(s) {
   const pl = roomPlace(s);
   return seatOf({ assigned: s.assignedRole, desk: s.deskRole, agentType: s.agentType }, shownFloors(layoutRecord(pl.buildingKey, pl.repoPath)));
 }
-// The live sessions as the room rules read them (place.mjs settleRooms, viewRooms), oldest first.
+// The live sessions as the room rules read them (rooms.mjs settleRooms, viewRooms), oldest first.
 function liveRooms() {
   return [...sessions.values()].filter((s) => s.status !== 'ended' && s.placed).sort((a, b) => a.startedAt - b.startedAt)
     .map((s) => ({ pl: roomPlace(s), seat: seatOfSession(s), goal: s.goal, firstPrompt: s.firstPrompt }));
 }
 // Rooms by task (git rooms only: a room outside git shows while its session lives): each room is on the floors where its agents
-// sit now and takes the best name its sessions offer (place.mjs settleRooms). Returns true when a record changed.
+// sit now and takes the best name its sessions offer (rooms.mjs settleRooms). Returns true when a record changed.
 function noteRooms() {
   const r = settleRooms(persisted.rooms, liveRooms());
   if (r.moved) { persisted.rooms = r.rooms; savePersisted(); }

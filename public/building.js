@@ -122,7 +122,7 @@
   // The floor of a session: the server's seat (place.mjs seatOf), or the Lobby when the building does not show that floor.
   function seatOf(s, shown) { var f = s.seat && s.seat.floor; return f && shown.some(function (x) { return x.id === f; }) ? f : LOBBY; }
   function roomRec(snap, nk) { return (snap && snap.rooms && snap.rooms[nk]) || null; }
-  // A room's name comes from its task (the server's room record, place.mjs roomTitle); the folder name until it has one.
+  // A room's name comes from its task (the server's room record, rooms.mjs roomTitle); the folder name until it has one.
   function titleOf(snap, pl) { var r = roomRec(snap, pl.noteKey); return clip((r && r.title && r.title.name) || pl.roomName, 40); }
   // A workspace two or more agents work in, or the main checkout (ad-hoc sessions there can collide), is shared. An isolated
   // room (an agent worktree with at most one agent) is private. A folder outside git with one agent has no tag.

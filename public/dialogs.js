@@ -71,7 +71,7 @@
     function delTemplate() { api('/api/template/delete', { id: form.template }).then(function () { setForm(Object.assign({}, form, { template: '' })); p.onTemplates(); }, function (x) { setErr(x.message); }); }
     var terminal = canWindow && form.where === 'terminal';
     var blocked = KV.noModelFor(k) || KV.notConfigured(k);
-    // The server owns the folder rules (place.mjs recentChoices); until its answer comes, show the stored list.
+    // The server owns the folder rules (recent.mjs recentChoices); until its answer comes, show the stored list.
     var fc = useState(null), fetched = fc[0], setFetched = fc[1];
     useEffect(function () {
       call('/api/choices?first=' + encodeURIComponent(p.shownPath || ''))
