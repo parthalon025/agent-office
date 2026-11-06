@@ -713,5 +713,45 @@ export function createHq(deps = {}) {
   }
   const planSource = { kind: 'paperclip', list: planList, subscribe(fn) { subs.add(fn); return () => subs.delete(fn); } };
 
-  return { connect, disconnect, supervise, view, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
+  // ---------- the goal handoff (ADR 0007): the one function that sends a task POST ----------
+  // Paperclip's create-issue body (packages/shared validators/issue.ts, 0.3.1) has no metadata field and takes no idempotency key,
+  // so the marker is the first line of the description. The office assigns nobody: the suggested agent is text. Status backlog.
+  const markerOf = (goalId, stepId) => `Agent Office goal ${goalId} step ${stepId}`;
+  const ALL_STATUS = 'backlog,todo,in_progress,in_review,blocked,done,cancelled';
+  /** The tasks the office would create for a goal: what the painted Confirm shows, and what handoffGoal posts. */
+  function handoffTasks(goal) {
+    return list(goal.steps).map((st) => ({ step: st.id, title: text(st.text, 120) || 'Task', description: `${markerOf(goal.id, st.id)}\n\n${text(goal.goal, 300)}\n\nStep: ${text(st.text, 300)}${st.bot || st.role ? `\nSuggested agent: ${text(st.bot || st.role, 60)}` : ''}`, status: 'backlog' }));
+  }
+  /**
+   * Create one task per step of an office goal, after the caller checked the Confirm. goal: { id, goal, steps: [{ id, text, bot?, role? }] };
+   * done: { stepId: taskId } already written. It reads the company again first, lists its tasks before each POST and skips a step whose
+   * marker is there (so a retry never doubles a task). Resolves to { written: { stepId: taskId }, company }. On a failure it throws an
+   * error with `written` (every step written so far, the earlier ones included). It never deletes, assigns or changes a task.
+   */
+  async function handoffGoal(goal, done = {}) {
+    const conn = c;
+    if (!conn || !d || conn.state === 'choose' || !conn.companyId) throw httpError(409, 'Paperclip is not connected.');
+    const written = { ...done };
+    const id = encodeURIComponent(conn.companyId);
+    try {
+      const co = obj(await call(conn, `/api/companies/${id}`));
+      if (co.id !== conn.companyId) throw httpError(409, 'Paperclip answered for another company.');
+      for (const t of handoffTasks(goal)) {
+        if (written[t.step]) continue;
+        const have = list(await call(conn, `/api/companies/${id}/issues?status=${ALL_STATUS}`));
+        if (have.length >= ISSUE_LIST_LIMIT) throw httpError(502, 'Paperclip lists too many tasks for the office to check for a copy. Nothing more was written.');
+        const mark = markerOf(goal.id, t.step);
+        const same = have.find((i) => i && typeof i.description === 'string' && i.description.split(/\r?\n/, 1)[0] === mark);
+        if (same) { written[t.step] = String(same.id); continue; }
+        const { step, ...body } = t;
+        const made = obj(await call(conn, `/api/companies/${id}/issues`, { method: 'POST', body: JSON.stringify(body) }));
+        if (!made.id) throw httpError(502, 'Paperclip did not name the task it made.');
+        written[step] = String(made.id);
+      }
+    } catch (e) { throw Object.assign(e, { written }); }
+    refetchSoon(conn);
+    return { written, company: text(d.company.name, 80) || 'Paperclip' };
+  }
+
+  return { connect, disconnect, supervise, handoffGoal, handoffTasks, view, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
 }

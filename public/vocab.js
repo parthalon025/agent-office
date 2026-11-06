@@ -104,7 +104,7 @@
   // The Manager board (#154): who plans a goal (the source) and the state of a plan step. Words are the board's only copy.
   var PLAN_SOURCE = { office: 'Office', paperclip: 'Paperclip' };
   var PLAN_STEP = { pending: 'Waiting', working: 'Working', finished: 'Done', error: 'Error', unknown: 'Unknown' }; // unknown: a state the source has no word for (never done)
-  var GOAL_WORD = { planning: 'Planning', 'awaiting-approval': 'Waiting for your approval', running: 'Running', finished: 'Done', blocked: 'Blocked', stopped: 'Stopped', failed: 'Failed', cancelled: 'Cancelled' };
+  var GOAL_WORD = { planning: 'Planning', 'awaiting-approval': 'Waiting for your approval', running: 'Running', finished: 'Done', blocked: 'Blocked', stopped: 'Stopped', failed: 'Failed', cancelled: 'Cancelled', 'handed-off': 'Handed to Paperclip', 'handoff-failed': 'Handoff failed' };
   var plan = {
     sourceWord: function (kind) { return PLAN_SOURCE[kind] || ''; },
     stepState: function (state) { return PLAN_STEP[state] ? state : 'pending'; },

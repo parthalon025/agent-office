@@ -91,7 +91,7 @@ export function suggestSwitch({ errors = 0, model = '' } = {}) {
 
 const STATUS_TO_DS = { pending: 'resting', working: 'working', finished: 'finished', error: 'error' };
 const MARK = { pending: '[ ]', working: '[~]', finished: '[x]', error: '[!]' };
-const WORD = { planning: 1, 'awaiting-approval': 1, running: 1, finished: 1, blocked: 1, stopped: 1, failed: 1, cancelled: 1 }; // the goal states; their words are OfficeVocab.plan.goalWord
+const WORD = { planning: 1, 'awaiting-approval': 1, running: 1, finished: 1, blocked: 1, stopped: 1, failed: 1, cancelled: 1, 'handed-off': 1, 'handoff-failed': 1 }; // the goal states; their words are OfficeVocab.plan.goalWord
 const GOAL_MAX = 2000; // a longer goal is refused (never planned from a cut text); the board shows 300
 const BOARD_GOAL = 300, BOARD_STEP = 240, BOARD_OWNER = 40; // 12 steps of 240 and a goal of 300 leave room for status, reason and spend
 const clip = (s, n) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
@@ -265,6 +265,31 @@ export function createManager(deps = {}) {
       return { ok: true };
     },
 
+    /**
+     * Hand a goal to another planner (ADR 0007). send(goal, written) writes the steps and resolves to { written: { stepId: taskId }, company }, or
+     * throws an error with `written`. Only a goal that runs nothing may go: waiting for approval, blocked, stopped, or a failed handoff. It ends as
+     * handed-off (the office never dispatches it again) or handoff-failed (the written tasks stay in the record; the next call continues from them).
+     */
+    async handoff(goalId, send) {
+      const g = goals.get(goalId);
+      if (!g) return { ok: false, status: 404, reason: 'No such goal.' };
+      if (!['awaiting-approval', 'blocked', 'stopped', 'handoff-failed'].includes(g.status) || g.steps.some((s) => s.status === 'working') || !g.steps.length) return { ok: false, status: 409, reason: 'This goal cannot be handed over now.' };
+      if (g.handing) return { ok: false, status: 409, reason: 'The office is handing this goal over.' };
+      g.handing = true;
+      try {
+        const r = await send({ id: g.id, goal: g.goal, steps: g.steps.map((s) => ({ id: s.id, text: s.text, role: s.role, bot: s.bot })) }, { ...(g.handoff && g.handoff.tasks) });
+        g.handoff = { company: r.company || '', tasks: r.written };
+        stop(g, 'handed-off', '');
+        return { ok: true };
+      } catch (e) {
+        const tasks = { ...((e && e.written) || (g.handoff && g.handoff.tasks) || {}) };
+        g.handoff = { company: (g.handoff && g.handoff.company) || '', tasks };
+        const left = g.steps.filter((s) => !tasks[s.id]).length;
+        stop(g, 'handoff-failed', `Handoff failed: ${Object.keys(tasks).length} of ${g.steps.length} tasks written, ${left} left. ${clip(e && e.message || e, 200)}`);
+        return { ok: false, status: 502, reason: g.reason };
+      } finally { g.handing = false; }
+    },
+
     /** Something freed an agent: try to give the waiting step out. */
     async agentFreed() { for (const g of goals.values()) await pump(g); },
 
@@ -301,7 +326,7 @@ export function createManager(deps = {}) {
     export() {
       return [...goals.values()].map((g) => ({
         id: g.id, building: g.building, goal: g.goal, status: g.status, reason: g.reason, approveFirst: g.approveFirst, spendLimit: g.spendLimit,
-        messages: g.messages, createdAt: g.createdAt, updatedAt: g.updatedAt, baseline: [...g.baseline],
+        messages: g.messages, createdAt: g.createdAt, updatedAt: g.updatedAt, baseline: [...g.baseline], handoff: g.handoff || null,
         steps: g.steps.map((s) => ({ id: s.id, text: s.text, role: s.role, room: s.room, bot: s.bot, status: s.status, owner: s.owner, result: s.result, attempts: s.attempts })),
       }));
     },
@@ -322,6 +347,8 @@ export function createManager(deps = {}) {
             owner: String(s.owner || ''), agentId: '', result: String(s.result || ''), attempts: Number.isInteger(s.attempts) ? s.attempts : 0,
           })),
         };
+        const h = r.handoff;
+        if (h && typeof h === 'object' && h.tasks && typeof h.tasks === 'object') g.handoff = { company: String(h.company || ''), tasks: Object.fromEntries(Object.entries(h.tasks).filter(([k, v]) => typeof v === 'string' && g.steps.some((s) => s.id === k))) };
         if (g.status === 'planning') { g.status = 'failed'; g.reason = 'The office restarted before the plan was ready.'; }
         const ran = g.steps.filter((s) => s.status === 'working');
         for (const s of ran) { s.status = 'error'; s.result = 'The office restarted while this step ran.'; }
@@ -340,7 +367,7 @@ export function createManager(deps = {}) {
     snapshot() {
       return [...goals.values()].map((g) => ({
         id: g.id, building: g.building, goal: g.goal, status: g.status, reason: g.reason, approveFirst: g.approveFirst,
-        spendLimit: g.spendLimit, spent: spent(g), messages: g.messages, waitingFor: g.waitingFor, updatedAt: g.updatedAt,
+        handoff: g.handoff || null, spendLimit: g.spendLimit, spent: spent(g), messages: g.messages, waitingFor: g.waitingFor, updatedAt: g.updatedAt,
         steps: g.steps.map((s) => ({ id: s.id, text: s.text, role: s.role, room: s.room, owner: s.owner, status: s.status, result: s.result, attempts: s.attempts })),
       }));
     },
