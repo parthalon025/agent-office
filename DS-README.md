@@ -84,4 +84,5 @@ Use visual inspection: take screenshots and look at them.
 - [ ] Approve, decline, chat and broadcast send commands; the scene changes only after the adapter replies.
 - [ ] ContrastCheck passes in each theme. Focus is visible on every control.
 - [ ] Every new state (loading, empty, error, long text) has a preview. The changelog row is updated.
+- [ ] `npm run gate:jobs` passes (start an agent, answer an approval, read the change, discard a room, find a past session, at 1360 and 400 px, within the step limits in `test/core-jobs.mjs`). Run it before every UI merge.
 - Exception: in-scene controls have no keyboard or screen reader path (owner decision, 2026-11-04, ADR 0003 in `docs/adr/`).

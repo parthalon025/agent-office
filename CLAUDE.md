@@ -22,6 +22,7 @@ npm start            # server on 127.0.0.1:4317; prints and opens a one-time lau
 npm run start:branch # server on the port of this checkout's branch (4330-4399); OFFICE_OPEN=0, so it only prints the link
 npm run probe        # prove HTTP hooks on this Claude Code version (one tiny call); npm run probe -- <port> for an office on another port
 npm run smoke        # end-to-end test with real Haiku sessions, a few cents; needs the office running; npm run smoke -- <port> for an office on another port
+npm run gate:jobs    # core-jobs gate (#147): five jobs at 1360 and 400 px, fails over the step limits in test/core-jobs.mjs; own office on a free port, own headless Chrome or Edge, no paid call, about 2 minutes; not in CI. Run it before every UI merge
 ```
 
 Stop the server by the pid that owns port 4317 (`netstat -ano | grep :4317`, then `taskkill //PID <pid> //F`). Never kill by image name: that would kill other Claude Code sessions.
