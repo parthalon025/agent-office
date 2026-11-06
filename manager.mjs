@@ -26,8 +26,10 @@
 //
 //   { kind, list(building?), subscribe?(fn) }
 //   kind                  'office' | 'paperclip'   who plans: the word is OfficeVocab.plan.sourceWord(kind)
-//   list(building?)       -> [{ id, building, goal, status?, reason?, steps: [{ id, title, state, owner?, cost? }] }]
+//   list(building?)       -> [{ id, building, goal, status?, reason?, frozen?, steps: [{ id, title, state, owner?, cost?, ...extra }] }]
 //                            state is pending, working, finished or error (OfficeVocab.plan.stepWord); owner is the agent's name; cost is dollars or null.
+//                            A source may add per step: raw (its own state name), model, budget { spent, limit }, uid (the agent's desk), skipped and skippedWhy (a run that skipped
+//                            the office). frozen: the plan is the last one read and the source is not connected (status 'not-connected'); the board never shows it as current.
 //                            list may throw when the plan cannot be read: the board then names the source as unreadable (never a stale plan).
 //   subscribe(fn)         -> unsubscribe()          optional: fn() is called after every change of the plan
 //
@@ -300,8 +302,12 @@ export function createPlanBoard({ sources = [], onChange = () => {} } = {}) {
         let mapped;
         try {
           mapped = src.list(building).map((p) => ({
-            id: p.id, building: p.building, goal: p.goal, status: p.status || '', reason: p.reason || '', source: src.kind, sourceWord: P.sourceWord(src.kind),
-            steps: p.steps.map((s) => { const state = P.stepState(s.state); return { id: s.id, title: s.title, state, word: P.stepWord(state), owner: s.owner || '', cost: Number.isFinite(s.cost) ? s.cost : null }; }),
+            id: p.id, building: p.building, goal: p.goal, status: p.status || '', reason: p.reason || '', frozen: p.frozen === true, source: src.kind, sourceWord: P.sourceWord(src.kind),
+            steps: p.steps.map((s) => {
+              const state = P.stepState(s.state);
+              return { id: s.id, title: s.title, state, word: P.stepWord(state), owner: s.owner || '', cost: Number.isFinite(s.cost) ? s.cost : null,
+                raw: s.raw || '', model: s.model || '', budget: s.budget || null, uid: s.uid || '', skipped: s.skipped === true, skippedWhy: s.skippedWhy || '' };
+            }),
           }));
         } catch { unreadable.push({ source: src.kind, word: P.sourceWord(src.kind) }); continue; }
         plans.push(...mapped);
