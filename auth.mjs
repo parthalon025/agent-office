@@ -12,6 +12,7 @@
 // Pure: no I/O and no clock of its own (both injected), so the route matrix runs without a server
 // (test/auth.test.mjs). writeOwnerOnly is the one helper that writes; it gets the file system and icacls injected.
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -140,6 +141,39 @@ export function checkRequest(req, site) {
 export function pageFile(env = process.env, port = 4317, home = os.homedir()) {
   const base = env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, 'AgentOffice') : path.join(home, '.agent-office');
   return path.join(base, `office-page-${Number(port) | 0}.json`);
+}
+
+/**
+ * Page files of offices that are gone (#126). Nothing else owns the file's life, and `taskkill /F` runs no exit
+ * handler, so an office sweeps once at start: every `office-page-<port>.json` next to `file` whose port has no
+ * listener is removed. The own port, any other name, and a non-number port stay. A listener that is not an office
+ * keeps its file (safe). Reads, probes and removes are injected; nothing throws. Returns the names removed.
+ */
+export async function stalePageFiles({ file, port, readdir, isListening, unlink }) {
+  const dir = path.dirname(file);
+  let names;
+  try { names = await readdir(dir); } catch { return []; }
+  const removed = [];
+  for (const name of names) {
+    const m = /^office-page-(\d+)\.json$/.exec(name);
+    const n = m ? Number(m[1]) : NaN;
+    if (!m || !Number.isSafeInteger(n) || n < 1 || n > 65535 || n === (Number(port) | 0)) continue;
+    try {
+      if (await isListening(n)) continue;
+      await unlink(path.join(dir, name));
+      removed.push(name);
+    } catch { /* one file that stays is not a failed start */ }
+  }
+  return removed;
+}
+
+/** Remove this office's own page file at exit, only while it still holds this process's token (a newer office on the port keeps its file). */
+export function removeOwnPageFile(file, token, { readFile, unlink } = { readFile: (f) => fs.readFileSync(f, 'utf8'), unlink: (f) => fs.unlinkSync(f) }) {
+  try {
+    if (!tokenEqual(JSON.parse(readFile(file))?.token, token)) return false;
+    unlink(file);
+    return true;
+  } catch { return false; }
 }
 
 /**
