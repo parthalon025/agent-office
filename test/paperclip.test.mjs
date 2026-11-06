@@ -368,10 +368,13 @@ test('Supervise in office sends one PATCH with the whole change, and the agent s
 test('Supervise in office reads the agent again just before its PATCH, so a change made in Paperclip since the last read is kept', async () => {
   const pc = await startFakePaperclip();
   const feed = [];
-  const hq = createHq({ ...fast, hooksFile: () => HOOKS, onFeed: (t) => feed.push(t) });
+  // #144: the socket opening starts one background read after refetchMs. Its requests would interleave with the click's
+  // GET and PATCH (the old wait only saw its first request, not its end). A long refetchMs means no background read runs,
+  // so the requests after n are only the click's, in order.
+  const hq = createHq({ ...fast, refetchMs: 600000, hooksFile: () => HOOKS, onFeed: (t) => feed.push(t) });
   try {
     await hq.connect({ url: pc.url });
-    await until(() => hq.state() === 'on' && pc.requests.filter((q) => q.path.endsWith('/agents')).length >= 2, 'the read after the socket opened', { ms: 5000 });
+    await until(() => hq.state() === 'on' && pc.sockets() === 1, 'the socket opened', { ms: 5000 });
     const [grace, ada] = hq.view().agents;
     // the user changes Ada in Paperclip, and no event tells the office before the click
     pc.state.agents[1].adapterConfig.extraArgs = ['--max-turns', '12', '--settings', 'C:/mine.json', '--allowedTools', 'Bash'];
