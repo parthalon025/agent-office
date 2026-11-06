@@ -1,4 +1,4 @@
-/* Agent Office for Claude Code x0.1: the toast list rules.
+/* Agent Office for Claude Code x0.2: the toast list rules.
    Pure: no DOM, no timers. The page (office.js) owns the timer and calls these with the time.
    - A toast with an action or an error stays until the user closes it.
    - Every other toast closes after AFTER_MS. The time stands still while the pointer or the focus is on the stack.

@@ -1,4 +1,4 @@
-/* Agent Office for Claude Code x0.1: the desk terminals.
+/* Agent Office for Claude Code x0.2: the desk terminals.
    Each bot's desk monitor shows that bot's Claude Code session as a terminal: the last prompt, the
    tool calls with their outcome, and the reply as it streams, with a blinking cursor. A desk with two
    monitors (the coder desk) shows the terminal on the left and the session's stats on the right

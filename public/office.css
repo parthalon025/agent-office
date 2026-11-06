@@ -1,4 +1,4 @@
-/* Agent Office for Claude Code x0.1: page styles. Only Agent Office DS tokens, no literal colors.
+/* Agent Office for Claude Code x0.2: page styles. Only Agent Office DS tokens, no literal colors.
    The 3D office and its HUD come from the design system; this file styles what the page adds:
    the control strip, the dialogs, the diff, and the chat grips and slash list. */
 /* The height of the dock plus a gap. office.js measures the dock and updates it; this is the value before that. */

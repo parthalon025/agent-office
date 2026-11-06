@@ -1,4 +1,4 @@
-/* Agent Office for Claude Code x0.1: the Security room's wall screens (#70).
+/* Agent Office for Claude Code x0.2: the Security room's wall screens (#70).
    The user picks the permission rules on six wall screens (Files, Commands, Network, Secrets, Agents, Spend) in the scene.
    The DS builds the room (type security) and its six screen planes; this file repaints them and handles clicks on them.
    A host adapter like board.js and terminal.js: it registers one pick target and a frame with the scene host, and it
