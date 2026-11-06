@@ -7,7 +7,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createTracker } from '../src/tracker.mjs';
 import { slimPayload } from '../src/payload.mjs';
-import { placeOfSession, placeOfWorktree, normPath, securityRoomIdOf, seatOf, settleRooms, viewRooms } from '../src/place.mjs';
+import { placeOfSession, placeOfWorktree, normPath, securityRoomIdOf, seatOf } from '../src/place.mjs';
+import { settleRooms, viewRooms } from '../src/rooms.mjs';
 import { newRecord, shownFloors, layoutView, edit as editLayout } from '../src/archetypes.mjs';
 import '../public/vocab.js';
 import '../public/wire.js';
@@ -59,7 +60,7 @@ function rig(over = {}) {
   });
   r.store = B.createStore({ now: () => r.t, reduced: over.reduced, defer: over.defer || ((fn) => fn()), setTimer: (fn, ms) => { r.timers.push({ fn, ms }); }, fetchReplies: over.fetchReplies, onProblem: over.onProblem });
   // Function floors (#92), as the server does them: one record per building (r.layouts[key]; default General), the seat of
-  // each session (place.mjs seatOf), and the room records (place.mjs settleRooms, viewRooms), kept across snapshots like persisted.rooms.
+  // each session (place.mjs seatOf), and the room records (rooms.mjs settleRooms, viewRooms), kept across snapshots like persisted.rooms.
   r.layouts = over.layouts || {};
   r.rooms = {};
   const recOf = (key) => r.layouts[key] || (r.layouts[key] = newRecord(null));
