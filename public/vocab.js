@@ -441,5 +441,21 @@
     return label + ' does not report cost, so the office shows it as unknown and no spend limit can stop it. Check the spend in its own account.';
   }
 
-  root.OfficeVocab = { stateWord: stateWord, laneOf: laneOf, limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform, hq: hq, plan: plan, layers: layers, holdMs: holdMs };
+  // The folder of a change (#93, spec #88): where it sits in the scene (place), the mark on it (mark) and a DS icon (glyph), so a state
+  // shows by shape and position, never by color alone. word: the state in plain words. Unknown is a grey folder, "PR state unknown".
+  var FOLDER = {
+    draft: { word: 'Draft', place: 'desk', mark: 'open', glyph: 'pull-request' },
+    open: { word: 'Open', place: 'outbox', mark: 'tab', glyph: 'pull-request' },
+    checks: { word: 'Checks running', place: 'outbox', mark: 'checklist', glyph: 'pull-request' },
+    review: { word: 'In review', place: 'inbox', mark: 'handoff', glyph: 'pull-request' },
+    changes: { word: 'Changes requested', place: 'inbox', mark: 'note', glyph: 'pull-request' },
+    approved: { word: 'Approved', place: 'inbox', mark: 'stamp', glyph: 'pull-request' },
+    conflict: { word: 'Conflict', place: 'outbox', mark: 'tab', glyph: 'conflict' },
+    ready: { word: 'Ready to merge', place: 'ready-tray', mark: 'stamp', glyph: 'merge' },
+    merged: { word: 'Merged', place: 'cabinet', mark: 'filed', glyph: 'merge' },
+    closed: { word: 'Closed', place: 'archive', mark: 'box', glyph: 'branch' },
+    unknown: { word: 'PR state unknown', place: 'desk', mark: 'grey', glyph: 'pull-request' }
+  };
+  function folderOf(state) { var f = FOLDER[state] || FOLDER.unknown; return { word: f.word, place: f.place, mark: f.mark, glyph: f.glyph }; }
+  root.OfficeVocab = { stateWord: stateWord, laneOf: laneOf, limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform, hq: hq, plan: plan, layers: layers, holdMs: holdMs, folderOf: folderOf };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

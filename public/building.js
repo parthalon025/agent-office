@@ -181,10 +181,45 @@
       .sort(function (a, b) { return b.waiting - a.waiting || b.sessions - a.sessions || b.last - a.last || a.name.localeCompare(b.name); });
   }
 
+  // ---------- paper flow (#93): a change is a folder that travels, agents and rooms stay ----------
+  // The server reads `gh` (read-only) and the snapshot carries `changes` per building. A building with no read yet, a failed read or
+  // a read older than STALE_MS is unknown: the page never shows old data as live. The folder shapes and words are OfficeVocab.folderOf.
+  var STALE_MS = 3 * 60000;
+  var ADVANCE = ['unknown', 'closed', 'merged', 'draft', 'open', 'conflict', 'checks', 'changes', 'review', 'approved', 'ready'];   // which folder shows when a desk has several
+  var STAGES = [['intake', 'Intake'], ['build', 'Build'], ['check', 'Check'], ['review', 'Review'], ['gate', 'Gate'], ['merge', 'Merge'], ['release', 'Release'], ['record', 'Record']];
+  // One building: { unknown, line, folders, tray, pipeline, mergedToday, at }. now: the clock, for tests.
+  function changes(snap, key, now) {
+    var e = snap && snap.changes && snap.changes[key], t = now == null ? Date.now() : now;
+    var unknownOut = function (line) { return { unknown: true, line: line, folders: [], tray: [], mergedToday: 0, at: e ? e.at : 0, pipeline: STAGES.map(function (s) { return { id: s[0], name: s[1], count: 0, unknown: true }; }) }; };
+    if (!e) return unknownOut('PR state unknown');
+    if (!e.ok) return unknownOut(e.error || 'PR state unknown');
+    if (t - e.at > STALE_MS) return unknownOut('PR state unknown');
+    var folders = (e.prs || []).map(function (p) { var f = V.folderOf(p.state); return { number: p.number, title: p.title, head: p.head, base: p.base, url: p.url, state: p.state, stage: p.stage, checks: p.checks, reviewer: p.reviewer, diff: p.diff, word: f.word, place: f.place, mark: f.mark, glyph: f.glyph }; });
+    var STAGE_HAS = { build: 1, check: 1, review: 1, gate: 1, merge: 1, record: 1 };
+    var pipeline = STAGES.map(function (s) { return { id: s[0], name: s[1], count: folders.filter(function (f) { return f.stage === s[0] && f.state !== 'merged' && f.state !== 'closed'; }).length, unknown: !STAGE_HAS[s[0]] }; });
+    return { unknown: false, line: '', folders: folders, tray: e.ready || [], pipeline: pipeline, mergedToday: e.mergedToday || 0, at: e.at };
+  }
+  // The folder on a desk or in a room, by its branch: the most advanced change shows, the rest are a count (`more`). null: none.
+  function folderAt(c, branch) {
+    var mine = ((c && c.folders) || []).filter(function (f) { return f.head === branch && f.state !== 'merged' && f.state !== 'closed'; });
+    if (!mine.length) return null;
+    mine.sort(function (a, b) { return ADVANCE.indexOf(b.state) - ADVANCE.indexOf(a.state) || b.number - a.number; });
+    return Object.assign({}, mine[0], { more: mine.length - 1 });
+  }
+  // The Ready to merge entries of every building, oldest first: a decision with no session behind it (uid null). They count toward Needs you.
+  function mergeRequests(snap, now) {
+    var out = [];
+    ((snap && snap.repos) || []).forEach(function (r) {
+      var c = changes(snap, r.key, now);
+      c.tray.forEach(function (m) { out.push(Object.assign({}, m, { uid: null, bot: 'Ready to merge', building: r.key, buildingName: r.name, roomName: '#' + m.number, t: c.at })); });
+    });
+    return out;
+  }
+
   // Every open request and question of every building, oldest first. This is the Needs you list.
   // The rule for one session's items is OfficeVocab.requests (one owner); this adds who and where, and the
   // preview of a request. kind is 'permission' or 'question'; a question has no risk, so a bulk action never answers one.
-  function requests(snap) {
+  function requests(snap, now) {
     var out = [];
     live(snap).forEach(function (s) {
       var pl = placeOf(s), base = { uid: s.uid, bot: s.name, building: pl.repo, buildingName: pl.repoName, roomName: pl.roomName };
@@ -193,7 +228,7 @@
         out.push(Object.assign({}, r, base, { preview: pend ? (pend.preview || pend.detail || '') : '' }));
       });
     });
-    return out.sort(function (a, b) { return a.t - b.t; });
+    return out.concat(mergeRequests(snap, now)).sort(function (a, b) { return a.t - b.t; });
   }
   // Browser alerts for the page's one Notifier: each open request and each failed turn of every building.
   // An error id holds the error's own id, so a new failure is a new alert.
@@ -838,5 +873,5 @@
     };
   }
 
-  root.OfficeBuilding = { createStore: createStore, startFloor: startFloor, floorMemory: floorMemory, shapeOf: shapeOf, colorOf: colorOf, buildings: buildings, requests: requests, describe: describe, roomsNow: roomsNow, tagOf: tagOf, baseRoomId: baseRoomId, EMPTY_NOTE: EMPTY_NOTE };
+  root.OfficeBuilding = { createStore: createStore, startFloor: startFloor, floorMemory: floorMemory, shapeOf: shapeOf, colorOf: colorOf, buildings: buildings, requests: requests, changes: changes, folderAt: folderAt, describe: describe, roomsNow: roomsNow, tagOf: tagOf, baseRoomId: baseRoomId, EMPTY_NOTE: EMPTY_NOTE };
 })(typeof globalThis !== 'undefined' ? globalThis : window);
