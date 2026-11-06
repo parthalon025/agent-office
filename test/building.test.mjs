@@ -1850,3 +1850,32 @@ test('queue: one model over every building, oldest first, every item reachable (
   assert.equal(r.store.queue().count, 0);
   assert.equal(r.store.queue().oldest, null);
 });
+
+test('phone: the Glance and Look layers and the queue as one list from the store (#148)', async () => {
+  const none = B.createStore().phone();
+  assert.deepEqual([none.buildings, none.queue.count], [[], 0], 'no snapshot: an empty list');
+  const r = rig();
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'a', cwd: REPO_A });
+  await r.hook({ ...HOOKS.turnWithEdit[0], session_id: 'b', cwd: REPO_B });
+  r.t += 10;
+  r.tracker.permissionRequest(slimPayload({ ...HOOKS.permission, session_id: 'b', cwd: REPO_B }, null));
+  r.push();
+  const ph = r.store.phone();
+  assert.deepEqual(ph.queue.items, r.store.queue().items, 'the queue is the one queue');
+  assert.deepEqual(ph.buildings.map((b) => b.key), r.store.buildings().map((b) => b.key), 'the same buildings in the same order');
+  const waiting = ph.buildings.find((b) => b.key === KEY_B), calm = ph.buildings.find((b) => b.key === KEY_A);
+  assert.equal(waiting.glance.text, '1 needs you', 'text only when something needs the owner');
+  assert.equal(waiting.glance.mood.word, 'Needs you');
+  assert.equal(calm.glance.text, '');
+  assert.equal(waiting.rooms.length, 1);
+  const room = waiting.rooms[0], s = r.store.sessionByUid(room.agents[0].uid);
+  assert.equal(room.agents.length, 1);
+  assert.equal(room.name, s.place.room, 'the room name is the place name');
+  assert.deepEqual(room.look, V.layers.lookRoom([s]), 'the Look layer is the shared rule');
+  assert.deepEqual(room.agents[0].look, V.layers.look(s));
+  assert.equal(room.agents[0].glance.state, V.status(s).key);
+  assert.equal(room.agents[0].waiting, 1);
+  r.tracker.sessions.forEach((x) => { x.status = 'ended'; });
+  r.push();
+  assert.deepEqual(r.store.phone().queue.items, [], 'ended sessions leave the list');
+});
