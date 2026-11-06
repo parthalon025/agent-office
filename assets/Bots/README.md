@@ -1,4 +1,4 @@
-# Bot portraits (Agent Office DS x1.7.14)
+# Bot portraits (Agent Office DS x1.7.15)
 
 Front three-quarter flat portraits of the four bot shapes. viewBox `0 0 96 96`. Each portrait has a body colour, a shade tone (body darkened 24%), a highlight (body lightened 32%), two eyes in `#11161c` and a soft ellipse shadow. The far eye is a little narrower to give the three-quarter turn.
 

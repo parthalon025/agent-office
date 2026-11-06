@@ -1,4 +1,4 @@
-# Logos (Agent Office DS x1.7.14)
+# Logos (Agent Office DS x1.7.15)
 
 The Agent Office mark is a rounded square (corner radius = 25% of the size) with one centred dot (diameter = 40% of the size). The wordmark is "Agent Office" in IBM Plex Sans SemiBold, converted to paths. The lockup puts the mark and the wordmark side by side. The gap is 0.4 x the mark size. The wordmark cap height is 0.5 x the mark size and the cap band is centred on the mark.
 

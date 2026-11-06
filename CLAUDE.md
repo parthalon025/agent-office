@@ -1,6 +1,6 @@
 # CLAUDE.md: Agent Office for Claude Code
 
-A browser office for Claude Code sessions: bots at desks, a chat per bot, approvals, diffs, schedules. Node ES modules, no dependencies, Windows first. User docs are in `README.md`. The UI is the Agent Office design system (DS x1.7.14), documented in `DS-README.md`, `Recipes.md`, `Reference.md`, `Concepts.md`.
+A browser office for Claude Code sessions: bots at desks, a chat per bot, approvals, diffs, schedules. Node ES modules, no dependencies, Windows first. User docs are in `README.md`. The UI is the Agent Office design system (DS x1.7.15), documented in `DS-README.md`, `Recipes.md`, `Reference.md`, `Concepts.md`.
 
 ## UI rules (the DS is law for anything visual)
 
@@ -8,7 +8,7 @@ Read `DS-README.md`, `Recipes.md` and `Reference.md` before you change the UI, a
 
 - Use DS tokens for every color, size and duration. No literal colors. Use the DS icon set and DS components (`Button`, `Dialog`, `Select`, `TextInput`, `EmptyState`, ...). No emoji.
 - Write copy in Simplified Technical English: short sentences, active voice, buttons say the result. No "Oops", "Sorry", exclamation marks, "please".
-- Keep the `x` version prefix (page `x0.2`, DS `x1.7.14`) in titles.
+- Keep the `x` version prefix (page `x0.2`, DS `x1.7.15`) in titles.
 - The DS lives in this repo and its owner may change it. DS changes go in `components/`, `kit/`, the tokens and the DS docs, with a Changelog row and the DS Definition of done (`DS-README.md`). Page code still uses only DS APIs: no DOM patching of DS internals.
 - A new theme follows Recipes, "Add a theme". `test/theme-contract.test.mjs` reads the theme list from `tokens.json` and checks every part of each theme; a failure names the theme, the part and the owner file. Do not type a theme list into a test.
 - Never move bots yourself. The scene changes only from adapter events.
