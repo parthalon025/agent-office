@@ -20,9 +20,24 @@
 // Steps run one after the other. A spend limit is checked before every dispatch, never after. Agent mail has two caps:
 // a hop cap (a reply chain is cut) and a message cap per goal. snapshot() and events() let the server show the same
 // plan again on every scene mount (the design system does not restore a plan itself).
+//
+// Plan source contract (#154, spec #130). The board, the page and the snapshot read plans only through createPlanBoard, never from a
+// planner. A plan source is one object:
+//
+//   { kind, list(building?), subscribe?(fn) }
+//   kind                  'office' | 'paperclip'   who plans: the word is OfficeVocab.plan.sourceWord(kind)
+//   list(building?)       -> [{ id, building, goal, status?, reason?, steps: [{ id, title, state, owner?, cost? }] }]
+//                            state is pending, working, finished or error (OfficeVocab.plan.stepWord); owner is the agent's name; cost is dollars or null.
+//                            list may throw when the plan cannot be read: the board then names the source as unreadable (never a stale plan).
+//   subscribe(fn)         -> unsubscribe()          optional: fn() is called after every change of the plan
+//
+// The office Manager below is one implementation (officeSource(manager)). Another source (Paperclip) needs no change here.
+// createPlanBoard({ sources, onChange }).snapshot() -> { plans: [... + source, sourceWord, steps with word], unreadable: [{ source, word }] }.
+// The model ladder is not part of this contract (#74).
 import crypto from 'node:crypto';
 import { DEFAULT_SPEND_LIMIT, spendLimitFor } from './providers/index.mjs';
 import { NOTES_MAX } from './notes.mjs';
+import './public/vocab.js';
 
 export const DEFAULT_LIMITS = { maxSteps: 12, maxHops: 4, maxMessages: 30, maxAttempts: 3, boardMax: NOTES_MAX - 100 }; // boardMax: the board text must fit a notes board
 const STATUS_TO_DS = { pending: 'resting', working: 'working', finished: 'finished', error: 'error' };
@@ -44,6 +59,7 @@ export function createManager(deps = {}) {
   const limits = { ...DEFAULT_LIMITS, ...(deps.limits || {}) };
   const managerName = deps.managerName || ((b) => 'Manager');
   const goals = new Map();
+  const listeners = new Set();
   const reserved = new Set(); // agents given a step here, whether or not the server shows them busy yet
 
   /** The plan as a to-do list (TodoWrite shape, read by OfficeVocab.todoStatus): the step that works is in_progress, a failed step is error (not a TodoWrite status; the vocab shows it as error). */
@@ -80,7 +96,7 @@ export function createManager(deps = {}) {
     try { deps.board({ goalId: g.id, building: g.building, goal: g.goal, status: g.status, text, todos }); } catch { /* the board is a view only */ }
   }
 
-  const touch = (g) => { g.updatedAt = now(); report(g); onChange(g.id); };
+  const touch = (g) => { g.updatedAt = now(); report(g); onChange(g.id); for (const fn of [...listeners]) { try { fn(g.id); } catch { /* a listener never stops a goal */ } } };
   const spent = (g) => {
     let total = 0;
     for (const [id, base] of g.baseline) total += Math.max(0, (Number(spendOf(id)) || 0) - base);
@@ -229,6 +245,9 @@ export function createManager(deps = {}) {
 
     get(goalId) { return goals.get(goalId) || null; },
 
+    /** Call fn after every change of any goal. Returns the function that stops it. */
+    subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
+
     /** The goal's plan as a to-do list, or [] for an unknown goal. */
     todos(goalId) { const g = goals.get(goalId); return g ? todosOf(g) : []; },
 
@@ -253,5 +272,42 @@ export function createManager(deps = {}) {
       }
       return out;
     },
+  };
+}
+
+/** The office Manager as a plan source (the contract at the top of this file). Office steps carry no cost of their own: the goal's spend is on the goal. */
+export function officeSource(manager) {
+  return {
+    kind: 'office',
+    list(building) {
+      return manager.snapshot().filter((g) => !building || g.building === building).map((g) => ({
+        id: g.id, building: g.building, goal: g.goal, status: g.status, reason: g.reason,
+        steps: g.steps.map((s) => ({ id: s.id, title: s.text, state: s.status, owner: s.owner, cost: null })),
+      }));
+    },
+    subscribe: (fn) => manager.subscribe(fn),
+  };
+}
+
+/** The one reader of plan sources: the board, the page and the snapshot read this. A source that throws is listed as unreadable, and its plans are left out. */
+export function createPlanBoard({ sources = [], onChange = () => {} } = {}) {
+  const P = globalThis.OfficeVocab.plan;
+  const stops = sources.map((src) => { try { return typeof src.subscribe === 'function' ? src.subscribe(() => onChange(src.kind)) : () => {}; } catch { return () => {}; } });
+  return {
+    snapshot(building) {
+      const plans = [], unreadable = [];
+      for (const src of sources) {
+        let mapped;
+        try {
+          mapped = src.list(building).map((p) => ({
+            id: p.id, building: p.building, goal: p.goal, status: p.status || '', reason: p.reason || '', source: src.kind, sourceWord: P.sourceWord(src.kind),
+            steps: p.steps.map((s) => { const state = P.stepState(s.state); return { id: s.id, title: s.title, state, word: P.stepWord(state), owner: s.owner || '', cost: Number.isFinite(s.cost) ? s.cost : null }; }),
+          }));
+        } catch { unreadable.push({ source: src.kind, word: P.sourceWord(src.kind) }); continue; }
+        plans.push(...mapped);
+      }
+      return { plans, unreadable };
+    },
+    close() { for (const stop of stops) stop(); },
   };
 }
