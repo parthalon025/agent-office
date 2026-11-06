@@ -215,7 +215,8 @@ test('the left menu stops above the dock from 1100 px down to 821 px', () => {
 test('office.js: the screen waits are deadlines in time, a pinned screen hides the floor list, the first request takes focus, the bezel stays in the free part (review 89)', () => {
   const js = office;
   assert.doesNotMatch(pageAll, /\+\+w\.n > 300/, 'no count of frames');
-  assert.equal((pageAll.match(/Date\.now\(\) > w\.until/g) || []).length, 2, 'the changes and the desk wait end on a deadline');
+  assert.equal((pageAll.match(/Date\.now\(\) > w\.until/g) || []).length, 1, 'the changes wait ends on a deadline');
+  assert.match(js, /wantClock\(w, Date\.now\(\)/, 'the desk wait ends on a deadline in time (wantClock, #189)');
   assert.match(js, /var hideHud = secLook \|\| pinned;/, 'a pinned screen takes the same columns away as a Security screen');
   assert.match(panels, /el\.querySelector\('#pin-chat-input, \.term-field'\)/, 'the message box takes focus');
   assert.match(panels, /bezelAt\(r, p\.host\.free\(\), 18\)/, 'the bezel is kept inside host.free()');

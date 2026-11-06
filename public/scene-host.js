@@ -41,6 +41,7 @@
      host.rehover()                    -> pick again under the pointer on the next frame
      host.focused()                    -> { key, name, open, item, verb, kind, pin } of the item in focus, or null
      host.flying()                     -> true while the camera flies to an item or back
+     host.skipIntro()                  -> finish the engine's intro flythrough on the next frame (a page that wants a screen now)
      host.settled()                    -> true when nothing moves the camera: no flight, no engine framing, no intro
      host.layer()                      -> the pinned layer: { key, kind, pin, item, rect, shown, waiting } of the screen in
                                           focus, or null. rect: the screen's box in client px, every frame; shown: false
@@ -365,7 +366,15 @@
     return true;
   }
 
-  var pure = { inScene: inScene, shown: shown, floorOf: floorOf, floorGroups: floorGroups, shownFloor: shownFloor, viewOf: viewOf, roomGroups: roomGroups, rebuilt: rebuilt, choose: choose,
+  // The wait for a screen (the page asks for a desk; #189). Its `ms` clock starts when the scene is up and settled, because a
+  // scene that is still mounting (the phone list, another building) or in its intro on a loaded machine can take longer than
+  // `ms` before it can fly at all. Until then only the hard limit `w.hard` counts. Returns the wait to keep and whether to give up.
+  function wantClock(w, now, up, ms) {
+    var next = { ready: !!w.ready, until: w.until, hard: w.hard };
+    if (up && !next.ready) { next.ready = true; next.until = now + ms; }
+    return { w: next, expired: now > (next.ready ? next.until : next.hard) };
+  }
+  var pure = { wantClock: wantClock, inScene: inScene, shown: shown, floorOf: floorOf, floorGroups: floorGroups, shownFloor: shownFloor, viewOf: viewOf, roomGroups: roomGroups, rebuilt: rebuilt, choose: choose,
     focusStep: focusStep, freeRect: freeRect, facing: facing, framePose: framePose, uvOn: uvOn, bezelAt: bezelAt, projectRect: projectRect, layerSame: layerSame, hitBox: hitBox, hitAt: hitAt, panDelta: panDelta, roomStep: roomStep, panTarget: panTarget, roomInView: roomInView, pivotOn: pivotOn, keyOk: keyOk, parts: parts };
 
   // ---------- browser ----------
@@ -848,6 +857,9 @@
       hovered: function () { return hoverT ? { target: hoverT, item: hoverItem } : null; },
       focused: info,
       flying: function () { return !!fly; },
+      // The engine's intro flythrough runs on frame time, so a slow renderer stretches it far past any wait. A page that wants a screen
+      // now finishes it: the next frame ends it the way it ends itself (camera in place, floor set). Nothing when none runs (#189).
+      skipIntro: function () { if (!dead && st.intro) st.intro.t = 1; },
       settled: function () { return !dead && !fly && !goalVal && !st.intro; },
       layer: function () { return lastLayer; },
       onLayer: function (fn) { return add(layerFns, fn); },
