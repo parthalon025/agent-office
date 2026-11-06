@@ -1013,12 +1013,15 @@
       return { key: b.key, name: b.name, sessions: b.sessions, waiting: b.waiting, floors: def.floors.map(function (f) { return { name: f.name, key: f.key }; }), bots: bots };
     });
   }
-  // The themes come from the DS (AgentOffice.MODES: Day, Night, Sublevel, Fluent, Fluent Dark); the page keeps no copy of the list.
+  // The themes come from the DS (AgentOffice.MODES); the page keeps no copy of the list and names no theme. With no theme set,
+  // the first theme whose dark flag matches the system scheme (the DS engine reads the system scheme the same way).
   var CITY_MODES = A.MODES;
   function themeMode() {
-    var t = document.documentElement.getAttribute('data-theme');
-    for (var i = 0; i < CITY_MODES.length; i++) if (CITY_MODES[i].theme === t) return CITY_MODES[i].id;
-    return window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'night' : 'day';
+    var t = document.documentElement.getAttribute('data-theme'), i;
+    for (i = 0; i < CITY_MODES.length; i++) if (CITY_MODES[i].theme === t) return CITY_MODES[i].id;
+    var os = !!(window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches);
+    for (i = 0; i < CITY_MODES.length; i++) if (!!CITY_MODES[i].dark === os) return CITY_MODES[i].id;
+    return CITY_MODES[0].id;
   }
   // How many bots are in each state across all buildings (DS StatusCounts keys; a finished bot is at rest).
   function cityCounts(list) {

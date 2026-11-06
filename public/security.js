@@ -574,7 +574,7 @@
       return s + '…';
     }
     function paint(c, p) {
-      var col = colors(), f = K.f || {}, sl = K.look === 'sublevel';
+      var col = colors(), f = K.f || {}, sl = !!K.caps;
       p.items.forEach(function (d) {
         var cc = col[d.c] || col.ink;
         if (d.t === 'fill') { c.fillStyle = cc; if (d.r) { rr(c, d.x, d.y, d.w, d.h, d.r); c.fill(); } else c.fillRect(d.x, d.y, d.w, d.h); }

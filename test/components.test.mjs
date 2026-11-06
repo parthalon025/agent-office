@@ -128,41 +128,24 @@ test('office.css: short windows shrink the welcome card, and landscape drops it 
   for (const m of [tier[1], tight[1], land[1]]) { assert.doesNotMatch(m, /z-index|animation|transform|translate/); }
 });
 
-// Review minor: the security office type (#70) had no picture, so OfficeTypeCard showed its badge only. Every office type has a
-// flat picture in each theme, and the bundle's copy is the asset file byte for byte; the DS preview shows the security card.
-test('OfficeTypeCard: every office type has a picture in Day, Night and Sublevel, the same as its file in assets/Offices', () => {
+// The asset files are the parts of the first theme (the :root block of tokens.css), for use as files: each office type picture and
+// each bot portrait is the DS drawing with those tokens, byte for byte. The other themes draw theirs from their tokens (#131).
+test('assets/Offices and assets/Bots: each file is the DS drawing in the first theme of tokens.json', async () => {
   const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-  const bundle = readFileSync(join(root, 'components', 'bundle.js'), 'utf8');
-  const at = bundle.indexOf('AO.THUMBS = {'), end = bundle.indexOf('\n  };', bundle.indexOf('sublevel: {', at));
-  const block = bundle.slice(at, end);
-  for (const [theme, sfx] of [['light', ''], ['dark', '-night'], ['sublevel', '-sublevel']]) {
-    const part = theme === 'light' ? block.slice(0, block.indexOf('AO.THUMBS_BY_THEME')) : block.slice(block.indexOf(theme + ': {'));
-    for (const type of ['team', 'lab', 'studio', 'hq', 'security']) {
-      const m = new RegExp('"' + type + '": ("(?:[^"\\\\]|\\\\.)*")').exec(part);
-      assert.ok(m, `${type} in ${theme}`);
-      assert.equal(JSON.parse(m[1]), readFileSync(join(root, 'assets', 'Offices', `${type}${sfx}.svg`), 'utf8').trim(), `${type}${sfx}.svg`);
-    }
+  const vm = await import('node:vm');
+  const sb = { console, URL }; sb.window = sb.self = sb; vm.createContext(sb);
+  vm.runInContext(readFileSync(join(root, 'public', 'vendor', 'react.production.min.js'), 'utf8'), sb);
+  vm.runInContext(readFileSync(join(root, 'components', 'bundle.js'), 'utf8'), sb);
+  const AO = sb.AgentOffice, J = JSON.parse(readFileSync(join(root, 'tokens.json'), 'utf8')), first = J.color.themes[0].id;
+  const all = Object.fromEntries([...J.color.tokens, ...J.skin.tokens].map((t) => [t.name, t.value]));
+  const tok = (n) => { let v = all[n][first]; while (/^\{/.test(v)) v = all[v.slice(1, -1)][first]; return v; };
+  const M = AO.MODES[0];
+  for (const type of AO.OFFICE_PICTURES) {
+    assert.equal(readFileSync(join(root, 'assets', 'Offices', type + '.svg'), 'utf8').trim(), AO.officePicture(type, tok, { dark: M.dark, retro: M.retro }), `assets/Offices/${type}.svg`);
   }
+  const look = { ink: tok('portrait-ink'), gloss: tok('portrait-gloss'), outline: tok('portrait-outline'), eyesSquare: tok('portrait-eyes-square') };
+  for (const shape of Object.keys(AO.PORTRAITS)) assert.equal(readFileSync(join(root, 'assets', 'Bots', shape + '.svg'), 'utf8').trim(), AO.PORTRAITS[shape](undefined, look), `assets/Bots/${shape}.svg`);
   assert.match(readFileSync(join(root, 'components', 'OfficeTypeCard', 'preview.html'), 'utf8'), /\["security",/);
-});
-
-// #112: every theme of tokens.json has a set, and the type stripe in each picture (its third and fourth path) is the theme's type-* color.
-test('OfficeTypeCard: each theme has a thumbnail set whose type stripe equals its type-* token (#112)', () => {
-  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-  const bundle = readFileSync(join(root, 'components', 'bundle.js'), 'utf8');
-  const tokens = JSON.parse(readFileSync(join(root, 'tokens.json'), 'utf8'));
-  const flat = []; (function walk(o) { if (Array.isArray(o)) o.forEach(walk); else if (o && typeof o === 'object') { if (o.name && o.value) flat.push(o); Object.values(o).forEach(walk); } })(tokens);
-  const themes = Object.keys(flat.find((t) => t.name === 'type-team').value);
-  assert.deepEqual(themes.sort(), ['dark', 'fluent', 'fluent-dark', 'light', 'sublevel']);
-  const sfx = { light: '', dark: '-night', sublevel: '-sublevel', fluent: '-fluent', 'fluent-dark': '-fluent-dark' };
-  for (const theme of themes) {
-    assert.ok(bundle.includes(`${/^[a-z]+$/.test(theme) ? theme : '"' + theme + '"'}: ${theme === 'light' ? 'AO.THUMBS' : '{'}`), `set for ${theme}`);
-    for (const type of ['team', 'lab', 'studio', 'hq', 'security']) {
-      const svg = readFileSync(join(root, 'assets', 'Offices', `${type}${sfx[theme]}.svg`), 'utf8');
-      const fills = [...svg.matchAll(/<path d="[^"]*" fill="(#[0-9a-f]{6})"/g)].map((m) => m[1]);
-      assert.equal(fills[2], flat.find((t) => t.name === 'type-' + type).value[theme], `${type} stripe in ${theme}`);
-    }
-  }
 });
 
 // #89: the terminal and changes side panels are gone; the desk monitor and the room's wall screen are pinned screens. No

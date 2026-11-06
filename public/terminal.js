@@ -540,7 +540,7 @@
     }
 
     function measure(e) {
-      var f = K.f || {}, sub = K.look === 'sublevel', fam = sub && f.term ? f.term : (f.mono || 'monospace'), px = sub ? 27 : 20;
+      var f = K.f || {}, sub = !!K.term, fam = sub && f.term ? f.term : (f.mono || 'monospace'), px = sub ? 27 : 20;
       var P = {
         px: px, padX: 18, headH: 50,
         mono: (sub ? '400 ' : '500 ') + px + 'px ' + fam,
@@ -688,7 +688,7 @@
     }
     function paint(e, force) {
       if (!e.P) measure(e);
-      var s = sessionFor(e), info = status(s), p = palette(K), dark = !!K.dark, sub = K.look === 'sublevel';
+      var s = sessionFor(e), info = status(s), p = palette(K), dark = !!K.dark, sub = !!K.term;
       e.uid = s && !s.pseudo && s.uid && s.status !== 'ended' ? s.uid : null;   // a closed session has no terminal to open
       if (e.hover && !e.uid) { e.hover = ''; if (hover === e) { hover = null; host.rehover(); } }
       var closed = info.word === 'Closed', calm = info.key === 'resting' || info.key === 'finished';
@@ -719,7 +719,7 @@
     function retheme() {
       themeN++;
       entries.forEach(function (e) { e.em.set(K.tok.bubble); measure(e); e.sig = ''; });
-      if (K.look === 'sublevel') loadFont(K.f && K.f.term);
+      if (K.term) loadFont(K.f && K.f.term);
       acc = 1;
     }
     function fontsReady() {
@@ -774,7 +774,7 @@
     var fontsHooked = false;
     try { if (document.fonts && document.fonts.addEventListener) { document.fonts.addEventListener('loadingdone', fontsReady); fontsHooked = true; } } catch (x) { fontsHooked = false; }
     loadFont(K.f && K.f.mono);
-    if (K.look === 'sublevel') loadFont(K.f && K.f.term);
+    if (K.term) loadFont(K.f && K.f.term);
     var offFrame = host.frame(frame);
     var target = {
       name: 'terminal',

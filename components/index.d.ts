@@ -1,11 +1,15 @@
 import type { ReactNode } from "react";
 export type Status = "working" | "waiting" | "error" | "resting" | "finished";
-/** A theme: the data-theme value. */
-export type ThemeId = "light" | "dark" | "sublevel" | "fluent" | "fluent-dark";
-/** A look: the scene light and effects of a theme (day = light, night = dark). */
-export type Look = "day" | "night" | "sublevel" | "fluent" | "fluent-dark";
-/** One entry of AgentOffice.MODES, the one list of themes. dark: a dark scene (lit windows, screen glow, desk light); the engine sets stage.K.dark from it. */
-export interface ModeDef { id: Look; theme: ThemeId; label: string; icon: string; dark?: boolean }
+/** A theme (a skin): the data-theme value, a theme id of tokens.json (light, dark, sublevel, fluent, fluent-dark). The list is AgentOffice.MODES; no type copies it. */
+export type ThemeId = string;
+/** A look: the scene light and effects of a theme, the id of its AgentOffice.MODES entry (day, night, sublevel, fluent, fluent-dark). */
+export type Look = string;
+/** One entry of AgentOffice.MODES, the one list of themes. Every entry has every field. dark: a dark scene (lit windows, screen glow, desk light, the dark
+ * color-scheme, the lit office type pictures); the engine sets stage.K.dark from it. retro: the retro drawing of the office type pictures. wordmark: the
+ * name of its drawing in AgentOffice.LOGO.wordmarks. */
+export interface ModeDef { id: Look; theme: ThemeId; label: string; icon: string; dark: boolean; retro: boolean; wordmark: string }
+/** A scene look of the engine (AgentOffice.office.LOOKS[look]). */
+export interface LookDef { hi: number; hc: number; hg: number; si: number; sc: number; lamp: number; sp: [number, number, number]; win: string; frame: string; leaf: string; beacon: [string, string]; clock: boolean; flicker: boolean; caps: boolean; term: boolean }
 export type FloorKey = "ops" | "sales" | "research" | "content";
 export interface PanelProps { title?: string; count?: ReactNode; flush?: boolean; className?: string; children?: ReactNode }
 export interface StatusDotProps { status: Status }
@@ -102,8 +106,18 @@ export interface AgentSchema { version: string; events: Record<string, { desc: s
 export interface AgentOfficeGlobals {
   /** The 10 bot body colors, in the order the scene gives them to new bots. A page that sets bot.color reads them from here, so a bot looks the same in every list. */
   BODY_COLORS: readonly string[];
-  /** The themes: Day, Night, Sublevel, Fluent, Fluent Dark. The engine, ModeToggle, the OfficeScene HUD and the command palette read this list. Read it; do not change it. */
+  /** The themes, one entry for each theme of tokens.json, in the same order. The engine, ModeToggle, the OfficeScene HUD, the command palette and the drawn parts read this list. Read it; do not change it. */
   MODES: readonly ModeDef[];
+  /** The MODES entry of a data-theme value; a value that is no theme gets the first entry. */
+  modeOf(theme: string | null | undefined): ModeDef;
+  /** Bot portraits, one drawing per shape. In the page the theme's portrait-* tokens style it; pass look (the token values of a theme) for a portrait file of that theme. */
+  PORTRAITS: Readonly<Record<Shape, (color?: string, look?: { ink: string; gloss: number | string; outline: number | string; eyesSquare: number | string }) => string>>;
+  /** The picture of an office type (320 x 200 SVG), drawn from a theme's tokens: tok(name) returns a token value; style comes from the theme's MODES entry. */
+  officePicture(type: OfficeType, tok: (name: string) => string, style?: { dark?: boolean; retro?: boolean }): string;
+  /** The office types that have a picture: every type of office.TYPES. */
+  OFFICE_PICTURES: readonly OfficeType[];
+  /** The logo: mark(ink, dot, radius) as an SVG string (radius a share of the size, 0.25 by default), and the wordmark drawings by name. */
+  LOGO: { mark(ink?: string, dot?: string, radius?: number): string; wordmarks: Readonly<Record<string, { path: string; viewBox: string }>> };
   /** One portrait color for each bot shape (4 colors). The portraits use it when a bot has no color. For a bot color, use BODY_COLORS. */
   BOT_COLORS: Readonly<Record<Shape, string>>;
   /** Checks one event (or, with kind "commands", one command) against the schema. Reports missing fields, wrong types and unknown fields. */
@@ -114,7 +128,8 @@ export interface AgentOfficeGlobals {
   /** The one money format of the DS: "$0.26", "<$0.01" for a cost above zero and under one cent. A string passes through. */
   money(n: number | string | null | undefined): string;
   adapters: { mock(opts?: Record<string, unknown>): AgentAdapter; create(o: { name?: string; subscribe?(emit: (ev: AgentEvent) => void, ctx: AdapterContext): void; send?(cmd: AgentCommand, ctx: AdapterContext | null): Promise<unknown> | unknown; dispose?(): void }): AgentAdapter };
-  office: { mount(el: HTMLElement, opts?: Record<string, unknown>): OfficeApi; [name: string]: unknown };
+  /** The engine. LOOKS, FX and WINDOWS are the scene parts of each theme (read them; a page that adds a theme adds its entries before mount). */
+  office: { mount(el: HTMLElement, opts?: Record<string, unknown>): OfficeApi; LOOKS: Record<Look, LookDef>; FX: { bloom: Record<Look, number>; thr: Record<Look, number>; exp: Record<Look, number>; fog: Record<Look, number>; vig: Record<Look, number>; rad: number; knee: number; pad: number }; WINDOWS: Record<string, (c: CanvasRenderingContext2D, w: number, h: number, rnd: () => number) => void>; [name: string]: unknown };
   [name: string]: unknown;
 }
 declare global { interface Window { AgentOffice: AgentOfficeGlobals } }

@@ -1,4 +1,4 @@
-# Agent Office DS x1.7.10 (design system README)
+# Agent Office DS x1.7.11 (design system README)
 
 Agent Office is **the control room for any agent harness**. A harness (Claude Code, Hermes Agent, Copilot Studio, the Claude or OpenAI Agents SDK, a local model in LM Studio with an agent loop) runs the agents. Agent Office shows what they do and lets people steer them. Each agent is a bot. Bots sit in rooms, rooms sit on floors, floors stack into a building.
 
@@ -33,7 +33,7 @@ Read four files. Do not guess a value, a prop or an event name.
 | 6 | `components/lib/three-postprocessing.js` (without it, the office renders as quality `low`) |
 | 7 | `components/bundle.js` (sets `window.AgentOffice`) |
 
-Set the theme with `data-theme="light" | "dark" | "sublevel" | "fluent" | "fluent-dark"` on `<html>` or on any parent: Day, Night, Sublevel, Fluent and Fluent Dark. `AgentOffice.MODES` lists the themes (Reference, Themes).
+Set the theme with `data-theme="light" | "dark" | "sublevel" | "fluent" | "fluent-dark"` on `<html>` or on any parent: Day, Night, Sublevel, Fluent and Fluent Dark. `AgentOffice.MODES` lists the themes (Reference, Themes). A theme is a token set plus a component set (Reference, Skins).
 
 **2. Mount.**
 
@@ -64,20 +64,22 @@ Start from `kit/page.html` and `kit/adapter.js`. The starter page runs the mock 
 ## Rules (must)
 
 - Use tokens for every color, size, duration, light level and effect. No literal colors.
+- Read a theme through its tokens and its `AgentOffice.MODES` entry. Never compare a look or theme id with a string, and never style one theme with `[data-theme="<id>"]`: use the family selector `[data-theme|="<family>"]`.
 - Use the icon set for every symbol. No emoji or text glyphs.
 - Keep the color meanings: status = state, floor = floor, type = office type, `accent` = action and focus, `emphasis` = look now (one per decision, about 10% of the screen).
 - Pair every status color with a word or an icon. Pair every sound with a visible change.
 - Change the scene only with adapter events. Never move bots with your own code; the engine walks them around objects.
 - Map risky steps (dangerous tools, spend, publishing) to `request` events.
 - Respect `prefers-reduced-motion`. Keep the HUD keyboard path complete.
-- Keep the x version prefix (x1.7.10) until the design is a SKU: in file names, titles, scene signs and the changelog.
+- Keep the x version prefix (x1.7.11) until the design is a SKU: in file names, titles, scene signs and the changelog.
 
 ## Definition of done
 
 Use visual inspection: take screenshots and look at them.
 
 - [ ] `python3 kit/check.py <your files>` passes (tokens, icons, version marks, event log). A custom property that a checked file defines counts as a known token: `--name:` in a CSS file, in an HTML `<style>` block or in an HTML `style=""` attribute, or `setProperty('--name', ...)` in a script or an HTML file. A name that the code builds at run time, such as `"var(--status-" + s` or `"role-" + r`, is checked by its prefix: a name that ends in "-" must start some token or icon.
-- [ ] Screenshots in all five themes (Day, Night, Sublevel, Fluent and Fluent Dark), at 1360, 1100 and 400 px, with `quality: "low"` and with reduced motion.
+- [ ] Screenshots in every theme (Day, Night, Sublevel, Fluent and Fluent Dark), at 1360, 1100 and 400 px, with `quality: "low"` and with reduced motion.
+- [ ] A new or changed theme passes `test/skin.test.mjs`: the same checks for every theme (Recipes, "Add a theme").
 - [ ] Bots walk around objects: send `status: "resting"` to a room, then `"working"`, and look while they walk.
 - [ ] Approve, decline, chat and broadcast send commands; the scene changes only after the adapter replies.
 - [ ] ContrastCheck passes in each theme. Focus is visible on every control.

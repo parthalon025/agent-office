@@ -1,5 +1,5 @@
 // Readable in every theme: the text and ink pairs that the page and the 3D scripts draw, from tokens.json.
-// Each pair needs 4.5:1 (text) or 3:1 (a dot or another mark) in every theme of tokens.json (Day, Night, Sublevel, Fluent, Fluent Dark). The CSS checks pin the rules
+// Each pair needs 4.5:1 (text) or 3:1 (a dot or another mark) in every theme of tokens.json, with no exception for one theme. The CSS checks pin the rules
 // that use those pairs, so a later edit cannot put a status color back on text.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,7 +8,7 @@ import fs from 'node:fs';
 const root = new URL('../', import.meta.url);
 const read = (f) => fs.readFileSync(new URL(f, root), 'utf8');
 const tokens = JSON.parse(read('tokens.json')).color.tokens;
-const TH = JSON.parse(read('tokens.json')).color.themes.map((t) => t.id);   // every theme, Fluent and Fluent Dark included
+const TH = JSON.parse(read('tokens.json')).color.themes.map((t) => t.id);   // every theme: a new one is checked at once
 const val = (name, th) => { let v = tokens.find((t) => t.name === name).value[th]; while (/^\{/.test(v)) v = tokens.find((t) => t.name === v.slice(1, -1)).value[th]; return v; };
 const rgb = (h) => {
   const m = h.match(/rgba?\(([^)]+)\)/);
@@ -21,11 +21,7 @@ const lum = (c) => { const f = (x) => { x /= 255; return x <= 0.03928 ? x / 12.9
 const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
 
 function each(fn) { for (const th of TH) { const T = (n) => rgb(val(n, th)); fn(T, th, over(T('panel'), T('bg'))); } }
-function atLeast(label, min, a, b, th) { const r = ratio(a, b); assert.ok(r >= min, `${label} in ${th}: ${r.toFixed(3)} < ${min}`); }
-
-test('the pairs run in every theme: Day, Night, Sublevel, Fluent and Fluent Dark', () => {
-  assert.deepEqual(TH, ['light', 'dark', 'sublevel', 'fluent', 'fluent-dark']);
-});
+function atLeast(label, min, a, b, th) { const r = ratio(a, b); assert.ok(r >= min, `${th}: contrast pair ${label} missing or wrong (tokens.json): ${r.toFixed(3)} < ${min}`); }
 
 test('notes editor: ink and placeholder on the whiteboard face', () => each((T, th) => {
   const ink = mix(T('scene-dark'), T('status-finished'), 0.7), hint = mix(T('scene-dark'), T('bubble'), 0.82);
@@ -64,8 +60,7 @@ test('accent-text on chip: 4.5:1 in every theme', () => each((T, th) => {
   atLeast('accent-text on chip', 4.5, T('accent-text'), T('chip'), th);
 }));
 
-test('accent-text on card and bg: 4.5:1 in Day, Night, Fluent and Fluent Dark', () => each((T, th, panel) => {
-  if (th === 'sublevel') return;   // accent on bg is 4.47:1 there: not pinned (#117)
+test('accent-text on card and bg: 4.5:1', () => each((T, th, panel) => {
   atLeast('accent-text on bg', 4.5, T('accent-text'), T('bg'), th);
   atLeast('accent-text on card', 4.5, T('accent-text'), panel, th);
 }));
@@ -165,7 +160,7 @@ test('the City label draws on bg, not a bubble', () => {
 });
 
 // Review minor: the Security room's wall screens (public/security.js) paint canvas text on token colors and token mixes. Every
-// text item of every screen state, on the fill drawn under it, reads at 4.5:1 in Day, Night and Sublevel. The colors come from
+// text item of every screen state, on the fill drawn under it, reads at 4.5:1 in every theme. The colors come from
 // the table the page paints with (OfficeSecurity.pure.TONES, resolved by toneColors as THREE.Color.lerp does in three r147:
 // sRGB, legacy color management), so a new tone or a new pair cannot slip past.
 test('Security room wall: every canvas text reads at 4.5:1 on the fill under it, in every theme', async () => {
