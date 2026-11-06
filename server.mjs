@@ -36,7 +36,7 @@ import { placeOfSession, placeOfWorktree, adoptLegacy, normPath, addRecent, clea
 import { detect, newRecord, cleanRecord, edit as editLayout, layoutView, shownFloors, catalogView, functionOf } from './archetypes.mjs';
 import * as startup from './startup.mjs';
 import { createManager, createPlanBoard, officeSource } from './manager.mjs';
-import { setPersona, removePersona, personaOf, stylePrompt } from './personas.mjs';
+import { setPersona, removePersona, personaOf, personaPrompt, addStarters, addStarterTeams, setTeam, removeTeam, teamOf, exportCustom, importCustom, cleanPersonas, cleanTeams, cleanScreens } from './personas.mjs';
 import { createNotes, cleanPin, PIN_MAX, NOTES_MAX, AGENT_WRITE_MAX } from './notes.mjs';
 import { createSkills } from './skills.mjs';
 import { cleanRules, setRule, decide, preToolDecision, permissionModeFor, openRefusal, costAsk, enforcement, addCost, costThisMonth } from './security.mjs';
@@ -901,8 +901,11 @@ persisted.notes = persisted.notes || {};
 persisted.merges = Array.isArray(persisted.merges) ? persisted.merges.slice(0, MERGES_KEPT) : []; // merges the user confirmed (#151): recap, merged moment
 persisted.standups = persisted.standups && typeof persisted.standups === 'object' ? persisted.standups : {}; // agent name -> the day of its last stand-up (#151)
 persisted.focus = persisted.focus === true; // Focus mode (#151): no rituals
-persisted.personas = persisted.personas && typeof persisted.personas === 'object' ? persisted.personas : {}; // agent character (#150), by agent name
 persisted.pins = persisted.pins || {};
+// The customization store (#152, personas.mjs): team templates and wall-screen choices live beside the personas, exported as one file.
+persisted.personas = cleanPersonas(persisted.personas);
+persisted.teams = cleanTeams(persisted.teams);
+persisted.screens = cleanScreens(persisted.screens);
 const board = createNotes({ notes: persisted.notes, pins: persisted.pins });
 for (const e of Object.values(persisted.notes)) if (!Number.isInteger(e.v)) e.v = 1; // notes saved before versions were counters
 // notes.mjs rule errors carry a status; the HTTP layer reads `status`.
@@ -1231,7 +1234,7 @@ function openHeadless(provider, { cwd, name, prompt, worktree = null, budget = n
   placeSession(s, true);
   if (prior) { s.replies = prior.replies || []; s.replySeq = s.replies.reduce((n, r) => Math.max(n, r.id || 0), 0); s.costBase = prior.cost || 0; s.cost = prior.cost || null; s.turns = prior.turns || 0; s.prompt = prior.prompt || ''; }
   // The persona's style is the tone of the system prompt only (#150). The Security room never reads it.
-  provider.open(s, { model, permissionMode, budget, resume, fork, tone: stylePrompt(personaOf(persisted.personas, name)) });
+  provider.open(s, { model, permissionMode, budget, resume, fork, tone: personaPrompt(personaOf(persisted.personas, name)) });
   if (!worktree) rememberDir(cwd); // a worktree folder is an implementation detail, not a place to start from
   addFeed(s, 'start', fork ? `forked from ${prior?.name || 'a past session'}, in a new worktree on branch ${worktree?.branch}` : resume ? 'reopened in the office' : worktree ? `started in the office on branch ${worktree.branch}` : 'started in the office');
   if (asked && permissionMode !== asked) addFeed(s, 'start', `opened in ${permissionMode} permission mode, not ${asked}: the Security room has Ask rules`);
@@ -1246,6 +1249,12 @@ function openHeadless(provider, { cwd, name, prompt, worktree = null, budget = n
 // opts.provider: the agent kind (default Claude Code). The Open dialog offers every kind (#20); a kind without openWindow
 // opens in the office only.
 async function openSession(opts) {
+  // Start from a persona (#152): its name, model and agent kind fill what the caller left out. The role and style are prompt text only.
+  if (opts.persona) {
+    const p = personaOf(persisted.personas, String(opts.persona));
+    if (!p) throw httpError(404, 'No such character.');
+    opts = { ...opts, name: p.name, model: opts.model || p.model || null, provider: opts.provider || p.kind || undefined };
+  }
   if (process.platform !== 'win32') throw httpError(501, 'Opening sessions is only implemented for Windows.');
   const cwd = String(opts.cwd || '').trim();
   let stat;
@@ -1889,7 +1898,8 @@ const server = http.createServer(async (req, res) => {
       const hist = [...live, ...history.filter((h) => !sessions.has(h.uid))];
       return send(res, 200, { ...recapOf({ feed, merges: persisted.merges, history: hist, now }), away: awayOf({ feed, since, now }), focus: persisted.focus });
     }
-    if (req.method === 'GET' && url.pathname === '/api/personas') return send(res, 200, { personas: persisted.personas });
+    if (req.method === 'GET' && url.pathname === '/api/personas') return send(res, 200, { personas: persisted.personas, teams: persisted.teams });
+    if (req.method === 'GET' && url.pathname === '/api/custom/export') return send(res, 200, exportCustom(persisted));
     if (req.method !== 'POST') return send(res, 404, { error: 'Not found' });
 
     const body = await readBody(req);
@@ -1920,6 +1930,26 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/launch-link') return send(res, 200, { url: auth.launchUrl(PORT, launchCodes.mint()) }); // a second npm start asks for one
     if (url.pathname === '/api/probe-http') return send(res, 200, await probeHttp());
     if (url.pathname === '/api/persona/save') { const p = setPersona(persisted.personas, String(body.name || ''), body); savePersisted(); broadcast(); return send(res, 200, { ok: true, persona: p }); }
+    if (url.pathname === '/api/persona/starters') { const n = addStarters(persisted.personas) + addStarterTeams(persisted.teams); if (n) { savePersisted(); broadcast(); } return send(res, 200, { ok: true, added: n }); }
+    if (url.pathname === '/api/team/save') { const t = setTeam(persisted.teams, String(body.name || ''), body); savePersisted(); return send(res, 200, { ok: true, team: t }); }
+    if (url.pathname === '/api/team/delete') { removeTeam(persisted.teams, String(body.name || '')); savePersisted(); return send(res, 200, { ok: true }); }
+    // A squad: each member opens as its own agent from its persona, one after the other, each in a room of its own. A member that fails does not stop the rest.
+    if (url.pathname === '/api/team/start') {
+      const team = teamOf(persisted.teams, String(body.team || ''));
+      if (!team) throw httpError(404, 'No such team.');
+      const started = [];
+      for (const member of team.members) {
+        try { started.push({ name: member, uid: await openSession({ cwd: body.cwd, persona: member, prompt: body.prompt, isolation: body.isolation, where: 'office', confirmCost: body.confirmCost === true }) }); }
+        catch (e) { started.push({ name: member, error: e.message }); }
+      }
+      return send(res, 200, { ok: started.some((m) => m.uid), started });
+    }
+    if (url.pathname === '/api/custom/import') {
+      const c = importCustom(body.data, { cleanLayout: cleanRecord });
+      Object.assign(persisted.personas, c.personas); Object.assign(persisted.teams, c.teams); Object.assign(persisted.screens, c.screens); Object.assign(persisted.layouts, c.layouts);
+      savePersisted(); broadcast();
+      return send(res, 200, { ok: true, personas: Object.keys(c.personas).length, teams: Object.keys(c.teams).length, screens: Object.keys(c.screens).length, layouts: Object.keys(c.layouts).length });
+    }
     if (url.pathname === '/api/persona/delete') { removePersona(persisted.personas, String(body.name || '')); savePersisted(); broadcast(); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/notes/save') {
       // the notes board of a room: the user's own reminders, kept in state.json
