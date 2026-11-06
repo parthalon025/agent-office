@@ -17,7 +17,8 @@ import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process'; // execFileSync: icacls for writeSecret
 import { fileURLToPath } from 'node:url';
 import * as git from './git.mjs';
-import { slimPayload } from './payload.mjs';
+import { slimPayload, cleanIds as cleanPaperclipIds } from './payload.mjs';
+import { createHq } from './paperclip.mjs';
 import { createTracker, clip } from './tracker.mjs';
 import { createRegistry, providerEvents, isPaid, isGated, supervisionOf, costOf, spendLimitFor, featuresOf, DEFAULT_SPEND_LIMIT, DEFAULT_PROVIDER } from './providers/index.mjs';
 import { createLocal } from './providers/local.mjs';
@@ -138,6 +139,8 @@ const TOOL_EVENTS = new Set(['PreToolUse', 'PostToolUse', 'PostToolUseFailure', 
 // How long the office holds a permission prompt before handing it back to the terminal dialog.
 const HEADLESS_ASK_MS = 15 * 60 * 1000; // sessions run inside the office have no terminal dialog to fall back to
 const ASK_TIMEOUT_MS = (Number(process.env.OFFICE_ASK_TIMEOUT_S) || 60) * 1000;
+// A Paperclip run's call (#76): `claude --print` has no terminal dialog, so it waits as long as an office session's (tests: shorter).
+const PAPERCLIP_ASK_MS = (Number(process.env.OFFICE_PAPERCLIP_ASK_S) || HEADLESS_ASK_MS / 1000) * 1000;
 
 // ---------- setup: hook settings ----------
 let persisted = { recent: [] };
@@ -394,6 +397,54 @@ const KINDS = providers.kinds();
 
 const basename = (p) => (p ? p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : '');
 
+// ---------- Paperclip as an optional HQ (#76, paperclip.mjs) ----------
+// Off until the user connects it (Attach sessions); the connection is kept in state.json (url and company, no secret) and
+// made again at start. The office reads Paperclip and never drives it: no heartbeat, no task, no routine. The one write is
+// Supervise in office (one PATCH of one agent's adapter config, after the Security room's painted Confirm; ADR 0005). Its
+// Claude Code runs then come in through the command hooks file of this office, like terminal sessions, with the run's ids.
+// Paperclip owns the budgets of its runs: the office shows them and sets no second limit (a hook session has no spend limit).
+const PAPERCLIP = { uid: 'paperclip', name: 'Paperclip' };
+const hq = createHq({
+  hooksFile: () => HOOKS_CMD_FILE.replace(/\\/g, '/'),
+  onChange: () => broadcast(),
+  onFeed: (text, kind) => addFeed(PAPERCLIP, kind, text),
+  // A run ended. One whose held call timed out (the office denied it) and that Paperclip marks succeeded is named, so the
+  // success in Paperclip is not read as "the work was done" (spike #75).
+  onRun: ({ runId, status }) => {
+    if (status !== 'succeeded') return;
+    for (const s of sessions.values()) {
+      if (!s.paperclip || s.paperclip.run !== runId || s.paperclipDenied !== runId) continue;
+      s.paperclipDenied = null;
+      addFeed(s, 'wait', 'Paperclip marked this run succeeded, but the office denied a call of it that waited with no answer.');
+      broadcast();
+    }
+  },
+});
+async function connectHq(body) {
+  const r = await hq.connect({ url: body.url, company: body.company ? String(body.company) : null });
+  if (r && r.ok) {
+    const v = hq.view();
+    persisted.paperclip = { url: v.url, company: v.company ? v.company.id : null };
+    savePersisted();
+    addFeed(PAPERCLIP, 'start', `connected: ${v.company ? v.company.name : 'Paperclip'} at ${v.url}. The office watches it and never sends heartbeats or tasks.`);
+  }
+  broadcast();
+  return { ...r, hq: hq.view() };
+}
+function disconnectHq() {
+  hq.disconnect();
+  if (persisted.paperclip) { delete persisted.paperclip; savePersisted(); addFeed(PAPERCLIP, 'end', 'disconnected. Paperclip runs on as before.'); }
+  broadcast();
+  return { ok: true };
+}
+// Supervise in office (#76): one PATCH, only with the Confirm the Security room's Agents screen paints.
+async function superviseHq(body) {
+  if (body.confirmed !== true) throw httpError(409, 'Confirm Supervise in office first. It writes to the agent\'s config in Paperclip.');
+  const r = await hq.supervise(String(body.agent || ''));
+  broadcast();
+  return r;
+}
+
 // ---------- buildings: repositories and their worktrees ----------
 // A repository is known when a session works in it or it is a recent folder. Its worktrees are
 // read with `git worktree list` when it is added, after each floor or room change, and every 30 s.
@@ -611,13 +662,24 @@ function holdRequest({ s, id, suggestions, auto }, res = null) {
     if (res) replyOn(res, answer()); else setImmediate(answer);
     return;
   }
-  const hold = s.headless ? HEADLESS_ASK_MS : ASK_TIMEOUT_MS;
-  const timer = setTimeout(() => { if (releaseHold(id, {})) addFeed(s, 'wait', s.headless ? `question timed out, ${providerOf(s).label} moved on` : 'question went back to the terminal'); }, hold);
+  // A Paperclip run (#76) is a terminal session with no terminal: `claude --print` has no dialog to fall back to, so an
+  // unanswered call is denied. It gets the hold of an office session, and the feed says what Paperclip will not (spike #75: a
+  // run whose held call timed out was still marked succeeded). Every session with Paperclip run ids gets it, also one of a
+  // company the office does not watch or while Paperclip is not connected: the company match is for its labels only.
+  const paperclip = !s.headless && !!s.paperclip;
+  const hold = s.headless ? HEADLESS_ASK_MS : paperclip ? PAPERCLIP_ASK_MS : ASK_TIMEOUT_MS;
+  const timer = setTimeout(() => {
+    // A Paperclip run gets a deny that says why (fail closed by the office's own answer, not by what print mode does with none).
+    if (!releaseHold(id, paperclip ? { allow: false, message: 'Agent Office got no answer in time, so this call is denied.' } : {})) return;
+    if (paperclip) { s.paperclipDenied = s.paperclip.run || true; addFeed(s, 'wait', 'question timed out, the office denied the call. Paperclip may still mark this run succeeded.'); }
+    else addFeed(s, 'wait', s.headless ? `question timed out, ${providerOf(s).label} moved on` : 'question went back to the terminal');
+  }, hold);
   const reply = (d) => { const body = providerOf(s).answer(s, { id, suggestions }, d); if (res) replyOn(res, body); };
   holds.set(id, { uid: s.uid, timer, suggestions, reply });
 }
 
 function onPermission(p, res) {
+  p.paperclip = cleanPaperclipIds(p.paperclip); // plain ids or nothing, as on /hook (the command hook posts a permission request here)
   const r = tracker.permissionRequest(p);
   if (!r) { res.writeHead(200, { 'content-type': 'application/json' }); return res.end('{}'); }
   holdRequest(r, res);
@@ -1422,7 +1484,8 @@ setInterval(readPlan, 15000).unref();
 // agent and features: the agent kind's name and what it has beyond the seam (#72), read now because an ACP agent says some of it at its
 // handshake. The page shows a feature only when the kind declares it (vocab.js featuresOf).
 const kindInfo = (s) => { try { const p = providers.of(s); return { agent: p.label, features: featuresOf(p) }; } catch { return { agent: '', features: [] }; } };
-const fullSession = (s) => ({ ...s, ...kindInfo(s), place: s.placed ? roomPlace(s) : null });
+// hq: a Paperclip run's label (its agent, role, company, task and budget, #76), while the office watches that company.
+const fullSession = (s) => ({ ...s, ...kindInfo(s), place: s.placed ? roomPlace(s) : null, hq: s.paperclip ? hq.labelOf(s.paperclip) : null });
 // What /events sends: only what the page reads, with caps per session (public/wire.js lean).
 const snapshot = () => W.lean({
   sessions: [...sessions.values()].map(fullSession),
@@ -1435,6 +1498,7 @@ const snapshot = () => W.lean({
   // (security.mjs enforcement), and the Spend screen (the default spend limit, cost per agent kind this month).
   security: { rules: persisted.security, enforce: ENFORCE, spend: { limit: defaultSpend(), ...costThisMonth(persisted.costs, Date.now()) } },
   kinds: KINDS,             // the agent kinds: the label of each session's kind, and the Open dialog's options before readiness comes
+  hq: hq.view(),            // Paperclip HQ (#76): null until connected; company, budget, agents (role, task, supervision, run), routines
 });
 // A page gets the whole snapshot when it connects, then one patch per broadcast with only what changed (wire.js).
 // State changes within BROADCAST_MS go out as one patch, so a burst of hooks sends at most 10 messages a second.
@@ -1528,6 +1592,8 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/choices') return send(res, 200, { folders: recentChoices(persisted.recent, url.searchParams.get('first') || '') });
     // Each agent kind with its readiness, what it needs and its models (providers/index.mjs status), for the settings view (#20).
     if (req.method === 'GET' && url.pathname === '/api/providers') { const list = await providers.statusCached({ fresh: url.searchParams.get('fresh') === '1' }); void refreshEnforce(); return send(res, 200, { providers: list }); }
+    // Paperclip HQ (#76): what the office reads from it now (tests and scripts; the page gets it in the snapshot).
+    if (req.method === 'GET' && url.pathname === '/api/paperclip') return send(res, 200, { hq: hq.view() });
     if (req.method === 'GET' && url.pathname === '/api/info') {
       return send(res, 200, {
         port: PORT, hooksFile: activeHooksFile(), recent: persisted.recent, home: os.homedir(),
@@ -1543,6 +1609,7 @@ const server = http.createServer(async (req, res) => {
 
     const body = await readBody(req);
     if (url.pathname === '/hook') {
+      body.paperclip = cleanPaperclipIds(body.paperclip); // plain ids or nothing (hook.mjs reads them from a Paperclip run's environment)
       const out = onHook(body);
       const pre = preToolGate(body); // a Security room Deny refuses the call before it runs (hook.mjs forwards the answer)
       if (pre) return send(res, 200, pre);
@@ -1631,6 +1698,11 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/settings/spend') { const r = saveSpendLimit(body); broadcast(); return send(res, 200, r); }
     // One Security room rule from the wall: { scope: 'office' | 'building', building, row, col, value, confirmed } (security.mjs setRule).
     if (url.pathname === '/api/security/set') return send(res, 200, saveRule(body));
+    // Paperclip HQ (#76): { url, company? } (127.0.0.1 only: 400 for any other address, before any request), and
+    // Supervise in office { agent, confirmed: true } (409 without the Confirm), the one write to Paperclip.
+    if (url.pathname === '/api/paperclip/connect') return send(res, 200, await connectHq(body));
+    if (url.pathname === '/api/paperclip/disconnect') return send(res, 200, disconnectHq());
+    if (url.pathname === '/api/paperclip/supervise') return send(res, 200, await superviseHq(body));
     if (url.pathname === '/api/template/save') return send(res, 200, saveTemplate(body));
     if (url.pathname === '/api/template/delete') { persisted.templates = persisted.templates.filter((t) => t.id !== String(body.id)); savePersisted(); return send(res, 200, { ok: true }); }
     if (url.pathname === '/api/schedule/save') return send(res, 200, saveSchedule(body));
@@ -1695,6 +1767,8 @@ server.listen(PORT, HOST, () => {
   writeSecret(HISTORY_FILE, JSON.stringify(history));
   // What an ungated agent's own config carries, for the Security room wall (read-only; nothing is read while it is off).
   void refreshEnforce();
+  // Paperclip HQ (#76): the connection the user made before, again (a Paperclip that is not up yet is tried again later).
+  if (persisted.paperclip && persisted.paperclip.url) hq.connect({ url: persisted.paperclip.url, company: persisted.paperclip.company || null, keep: true }).catch((e) => console.warn(`Paperclip: ${e.message}`));
   try {
     fs.mkdirSync(path.dirname(PAGE_FILE), { recursive: true });
     writeSecret(PAGE_FILE, JSON.stringify({ token: PAGE_TOKEN, port: PORT }));

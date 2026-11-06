@@ -294,7 +294,7 @@ test('openRefusal: an ungated agent kind is off until turned on; an agent withou
 test('enforcement: a gated provider enforces every cell; a missing or ungated one says why not', () => {
   const e = enforcement([{ kind: 'claude-code', label: 'Claude Code' }, { kind: 'ollama', label: 'Ollama' }, { kind: 'copilot', label: 'Copilot CLI', gated: false, enforces: ['shell'] }]);
   assert.equal(e['claude-code'].reason, '');
-  assert.equal(e['claude-code'].rows.supervise, 'Paperclip is not connected to this office.');
+  assert.deepEqual(e['claude-code'].rows, {}, 'Paperclip agents are not a kind: no row of theirs here (#76)');
   assert.equal(e.local.reason, '');
   assert.equal(e.hermes.reason, 'The office has no provider for this agent kind yet. The rule applies when it has one.');
   assert.equal(e.copilot.rows.shell, undefined, 'a row the agent asks about is enforced');

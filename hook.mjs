@@ -7,7 +7,7 @@ process.env.NoDefaultCurrentDirectoryInExePath = '1';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { slimPayload } from './payload.mjs';
+import { slimPayload, runIds } from './payload.mjs';
 import { officeFiles, portArg } from './files.mjs';
 import { httpPost } from './post.mjs';
 
@@ -32,6 +32,8 @@ if (process.argv[2] !== undefined && process.argv[2] !== '' && cfg.port !== port
 const body = {
   ...slimPayload(payload, process.env.OFFICE_ID || null),
   hook_ppid: payload.hook_event_name === 'SessionStart' && !process.env.OFFICE_ID ? process.ppid : null,
+  // A Paperclip run (#76): its agent, company, run and task ids, from the environment Paperclip gives Claude Code.
+  paperclip: runIds(process.env),
 };
 
 // A permission prompt waits for the office to answer; every other event is fire-and-forget.

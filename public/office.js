@@ -695,7 +695,78 @@
           h(A.TextInput, { id: 'h-token', label: 'Agent token', type: tokenShown ? 'text' : 'password', value: token, onChange: function () { /* read only */ } }),
           h('div', { className: 'btn-row' },
             h(A.Button, { variant: 'quiet', onClick: function () { setTokenShown(!tokenShown); } }, tokenShown ? 'Hide token' : 'Show token'),
-            h(A.Button, { variant: 'quiet', icon: 'copy', onClick: function () { copy(token, 'The agent token', 'Click Show token, then select the token and copy it by hand.'); } }, 'Copy token'))) : null));
+            h(A.Button, { variant: 'quiet', icon: 'copy', onClick: function () { copy(token, 'The agent token', 'Click Show token, then select the token and copy it by hand.'); } }, 'Copy token'))) : null,
+        h(PaperclipConnect, { hq: p.snap && p.snap.hq, toast: p.toast })));
+  }
+
+  // ---------- Paperclip HQ (#76): connect, and what the office reads from it ----------
+  // Off until the user connects it. Paperclip must run on this computer: the server refuses any address that is not on
+  // 127.0.0.1 (paperclip.mjs checkUrl), and the field says so before the first try.
+  function PaperclipConnect(p) {
+    var q = p.hq, H = window.OfficeVocab.hq;
+    var u = useState((q && q.url) || 'http://127.0.0.1:3100'), url = u[0], setUrl = u[1];
+    var b = useState(false), busy = b[0], setBusy = b[1];
+    var e = useState(''), err = e[0], setErr = e[1];
+    var c = useState(''), company = c[0], setCompany = c[1];
+    var choose = q && q.state === 'choose' ? q.companies || [] : null;
+    function connect(co) {
+      setBusy(true); setErr('');
+      api('/api/paperclip/connect', { url: url, company: co || undefined }).then(function (r) {
+        setBusy(false);
+        if (r.choose) { setCompany(r.choose[0] ? r.choose[0].id : ''); return; }
+        if (p.toast) p.toast({ tone: 'success', title: 'Paperclip connected', text: H.state(r.hq) + '. The office only reads it.' });
+      }, function (x) { setBusy(false); setErr(x.message); });
+    }
+    function disconnect() {
+      setBusy(true);
+      api('/api/paperclip/disconnect', {}).then(function () { setBusy(false); if (p.toast) p.toast({ tone: 'info', title: 'Paperclip disconnected', text: 'Paperclip runs on as before. The office no longer watches it.' }); },
+        function (x) { setBusy(false); setErr(x.message); });
+    }
+    var on = q && q.state !== 'choose';
+    return h(React.Fragment, null,
+      h('h3', { className: 'ext-h' }, 'Paperclip HQ'),
+      h('p', { className: 'note' }, 'Watch a Paperclip company from the office: its agents, tasks, budgets, heartbeats and routines show as an HQ building in the city. The office only reads Paperclip. It never sends heartbeats or assigns tasks. Paperclip must run on this computer, at 127.0.0.1.'),
+      q ? h('p', { className: 'note', role: 'status' }, H.state(q)) : null,
+      on ? h(A.Button, { variant: 'quiet', disabled: busy, onClick: disconnect }, 'Disconnect Paperclip')
+        : h('div', { className: 'copy-row' },
+          h(A.TextInput, { id: 'h-paperclip', label: 'Paperclip address', value: url, onChange: setUrl, error: err || undefined, hint: 'Only an address on 127.0.0.1, for example http://127.0.0.1:3100.' }),
+          h(A.Button, { variant: 'quiet', loading: busy && !choose, disabled: busy, onClick: function () { connect(null); } }, 'Connect')),
+      on && err ? h('p', { className: 'note', role: 'alert' }, err) : null,
+      choose && choose.length ? h('div', { className: 'copy-row' },
+        h(A.Select, { id: 'h-paperclip-co', label: 'Company', options: choose.map(function (x) { return { value: x.id, label: x.name }; }), value: company || choose[0].id, onChange: setCompany }),
+        h(A.Button, { variant: 'quiet', disabled: busy, onClick: function () { connect(company || choose[0].id); } }, 'Watch this company')) : null);
+  }
+
+  // The HQ: what Paperclip says about its company. Read only: Paperclip runs its heartbeats, routines and budgets. Supervise
+  // in office is on the Agents screen of a Security room, with its painted Confirm (no button here: one place for a write).
+  function HqDialog(p) {
+    var q = p.snap && p.snap.hq, H = window.OfficeVocab.hq;
+    var close = [h(A.Button, { key: 'a', variant: 'quiet', onClick: p.onAttach }, 'Connection'), h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')];
+    if (!q || !q.company) return h(A.Dialog, { open: true, title: 'Paperclip HQ', onClose: p.onClose, actions: close },
+      h(A.EmptyState, { icon: 'hq', compact: true, title: 'Paperclip is not connected', text: q ? H.state(q) : 'Connect it in Attach sessions.' }));
+    return h(A.Dialog, { open: true, title: q.company.name + ': Paperclip HQ', onClose: p.onClose, actions: close },
+      h('div', { className: 'form wide' },
+        h('p', { className: 'note', role: 'status' }, H.state(q)),
+        h('p', { className: 'note' }, 'Budget for its runs: ' + H.budget(q.budget) + '. Paperclip keeps this budget. The office sets no second limit on Paperclip runs.'),
+        h('h3', { className: 'ext-h' }, 'Agents'),
+        q.agents.length ? h('ul', { className: 'past' }, q.agents.map(function (a) {
+          var st = H.status(a), sup = H.supervision(a);
+          var facts = [a.kind || 'adapter', a.heartbeat.on ? 'Heartbeat ' + H.every(a.heartbeat.every) + (a.heartbeat.last ? ', last ' + ago(a.heartbeat.last) : '') : 'No heartbeat', H.budget(a.budget)].join(' · ');
+          return h('li', { key: a.id, className: 'past-row' },
+            h('div', { className: 'past-main' },
+              h('div', { className: 'past-title' }, h('b', null, a.name), h(Tag, null, a.title || a.role), h('span', { className: 'sess-state' }, h(A.StatusDot, { status: st.key }), st.word)),
+              h('div', { className: 'past-meta' }, a.task ? (a.task.identifier ? a.task.identifier + ' ' : '') + a.task.title : 'No open task'),
+              h('div', { className: 'past-sub mono' }, facts),
+              h('div', { className: 'past-meta', title: a.supervision.why || undefined }, sup + (a.supervision.why ? '. ' + a.supervision.why : ''))));
+        })) : h('p', { className: 'note' }, 'This company has no agents yet.'),
+        h('h3', { className: 'ext-h' }, 'Routines'),
+        q.routines.length ? h('ul', { className: 'past' }, q.routines.map(function (r) {
+          return h('li', { key: r.id, className: 'past-row' },
+            h('div', { className: 'past-main' },
+              h('div', { className: 'past-title' }, h('b', null, r.title), r.status ? h(Tag, null, r.status) : null),
+              h('div', { className: 'past-meta' }, [r.agent ? 'For ' + r.agent : '', r.cron ? 'Cron ' + r.cron : '', r.next ? 'Next ' + new Date(r.next).toLocaleString() : 'No next run'].filter(Boolean).join(' · '))));
+        })) : h('p', { className: 'note' }, 'No routines.'),
+        h('p', { className: 'note' }, 'Both schedulers run: Paperclip runs its heartbeats and routines, the office runs its own schedules. The office never starts, changes or stops a Paperclip run. To hold the Claude Code calls of an agent here, use Supervise in office on the Agents screen of a Security room.')));
   }
 
   // ---------- agent kinds: each provider, whether it is ready, and what it needs (#20) ----------
@@ -1024,11 +1095,26 @@
 
   // ---------- the city: every repository as a building ----------
   function cityData(snap) {
-    return window.officeAdapter.buildings(snap).map(function (b) {
+    var out = window.officeAdapter.buildings(snap).map(function (b) {
       var def = window.officeAdapter.preview(b.key, snap), bots = [];
       def.floors.forEach(function (f) { f.rooms.forEach(function (r) { (r.bots || []).forEach(function (x) { bots.push({ uid: x.uid, name: x.name, status: x.status, word: x.word, shape: x.shape, floor: f.name }); }); }); });
       return { key: b.key, name: b.name, sessions: b.sessions, waiting: b.waiting, floors: def.floors.map(function (f) { return { name: f.name, key: f.key }; }), bots: bots };
     });
+    var hq = hqBuilding(snap);
+    return hq ? [hq].concat(out) : out;
+  }
+  // Paperclip HQ (#76): its company as the first building, once the office has read it. A pip per Paperclip agent, in the
+  // state Paperclip reports (hq.status: never waiting, a Paperclip approval is not an office request). It is not a repository:
+  // a click opens the HQ dialog, not a scene. Its sign carries the company's budget for its runs.
+  var HQ_KEY = 'paperclip:hq';
+  function hqBuilding(snap) {
+    var q = snap && snap.hq, H = window.OfficeVocab.hq;
+    if (!q || !q.company) return null;
+    var bots = q.agents.map(function (a) { var st = H.status(a); return { uid: 'hq:' + a.id, name: a.name, status: st.key, word: st.word, floor: 'HQ' }; });
+    var money = q.budget ? (q.budget.limit > 0 ? F.money(q.budget.spent) + ' of ' + F.money(q.budget.limit) : F.money(q.budget.spent)) : '';
+    return { key: HQ_KEY, hq: true, name: q.company.name, sub: 'HQ · ' + plural(q.agents.length, 'agent', 'agents') + (money ? ' · ' + money : ''),
+      line: (q.state === 'on' ? 'Paperclip HQ' : 'Paperclip HQ, not live') + ' · ' + plural(q.agents.length, 'agent', 'agents') + (q.budget ? ' · ' + H.budget(q.budget) : ''),
+      sessions: 0, waiting: 0, live: q.state === 'on', floors: [{ name: 'HQ', key: 'hq' }], bots: bots };
   }
   // The themes come from the DS (AgentOffice.MODES: Day, Night, Sublevel, Fluent, Fluent Dark); the page keeps no copy of the list.
   var CITY_MODES = A.MODES;
@@ -1040,7 +1126,7 @@
   // How many bots are in each state across all buildings (DS StatusCounts keys; a finished bot is at rest).
   function cityCounts(list) {
     var c = { working: 0, waiting: 0, error: 0, resting: 0 };
-    list.forEach(function (b) { b.bots.forEach(function (x) { c[c[x.status] != null ? x.status : 'resting']++; }); });
+    list.forEach(function (b) { if (!b.hq) b.bots.forEach(function (x) { c[c[x.status] != null ? x.status : 'resting']++; }); });   // sessions only: HQ pips are Paperclip agents
     return c;
   }
   function CityView(p) {
@@ -1057,7 +1143,7 @@
     var list = snap ? cityData(snap) : [];
     useEffect(function () {
       if (!window.OfficeCity) return undefined;
-      city.current = window.OfficeCity.mount(ref.current, { root: document.documentElement, onHover: setHov, onPick: function (d) { p.onEnter(d.key, city.current); } });
+      city.current = window.OfficeCity.mount(ref.current, { root: document.documentElement, onHover: setHov, onPick: function (d) { if (d.hq) p.onHq(); else p.onEnter(d.key, city.current); } });
       return function () { if (city.current) city.current.dispose(); city.current = null; };
     }, []);
     useEffect(function () {
@@ -1069,7 +1155,7 @@
     var counts = cityCounts(list), total = counts.working + counts.waiting + counts.error + counts.resting;
     // Palette bots: the name the palette shows and returns must be unique over all buildings, and it maps back to a building and a session uid.
     var palBots = [], palPick = {};
-    list.forEach(function (b) { b.bots.forEach(function (x) {
+    list.forEach(function (b) { if (!b.hq) b.bots.forEach(function (x) {   // HQ pips are Paperclip agents, not sessions to go to
       var nm = x.name, i = 2;
       while (palPick[nm]) nm = x.name + ' ' + i++;
       palPick[nm] = { key: b.key, uid: x.uid };
@@ -1079,7 +1165,8 @@
     // Ctrl+K in the city: the page's own actions (they include Go to each building), the theme, and the city view.
     var palActions = A.CommandPalette.actions({ setMode: function (m) { if (city.current) city.current.setMode(m); } })
       .filter(function (a) { return a.id.indexOf('page-b-') !== 0 && a.id.indexOf('page-s-go-') !== 0 && a.id !== 'page-city'; })   // the page's Go to only picks the building, and the bot rows already go to a session
-      .concat(list.map(function (b) { return { id: 'city-go-' + b.key, label: 'Go to ' + b.name, icon: 'building', group: 'Buildings', keywords: 'building repository ' + b.name, run: function () { p.onEnter(b.key, city.current); } }; }))
+      .concat(list.map(function (b) { return b.hq ? { id: 'city-hq', label: 'Open Paperclip HQ', icon: 'hq', group: 'Buildings', keywords: 'paperclip hq company agents budget heartbeats routines ' + b.name, run: p.onHq }
+        : { id: 'city-go-' + b.key, label: 'Go to ' + b.name, icon: 'building', group: 'Buildings', keywords: 'building repository ' + b.name, run: function () { p.onEnter(b.key, city.current); } }; }))
       .concat([{ id: 'city-fit', label: 'Show all buildings', icon: 'building', group: 'City', run: function () { if (city.current) city.current.fit(false); } }]);
     return h('div', { className: 'city' },
       h('div', { ref: ref, className: 'city-scene' }),
@@ -1092,10 +1179,10 @@
           !list.length ? h(A.EmptyState, { icon: 'building', compact: true, title: 'No buildings yet', text: 'Open a session in a git repository to add its building.' }) : null,
           h('ul', { className: 'city-list' }, list.map(function (b) {
             return h('li', { key: b.key },
-              h('button', { type: 'button', className: 'city-row' + (b.key === p.shown ? ' is-shown' : '') + (hov && hov.key === b.key ? ' is-hover' : ''), onClick: function () { p.onEnter(b.key, city.current); } },
+              h('button', { type: 'button', className: 'city-row' + (b.key === p.shown ? ' is-shown' : '') + (hov && hov.key === b.key ? ' is-hover' : '') + (b.hq ? ' is-hq' : ''), onClick: function () { if (b.hq) p.onHq(); else p.onEnter(b.key, city.current); } },
                 h('span', { className: 'city-main' },
-                  h('span', { className: 'city-name' }, b.name),
-                  h('span', { className: 'city-sub mono' }, plural(b.floors.length, 'floor', 'floors') + ' · ' + plural(b.sessions, 'session', 'sessions')),
+                  h('span', { className: 'city-name' }, b.hq ? h(A.Icon, { name: 'hq', size: 14, label: 'Paperclip HQ' }) : null, b.name),
+                  h('span', { className: 'city-sub mono' }, b.hq ? b.line : plural(b.floors.length, 'floor', 'floors') + ' · ' + plural(b.sessions, 'session', 'sessions')),
                   b.waiting ? h('span', { className: 'city-wait' }, plural(b.waiting, 'request', 'requests')) : null),
                 b.bots.length ? h('span', { className: 'city-dots', role: 'img', 'aria-label': b.bots.map(function (x) { return x.name + ' ' + x.word; }).join(', ') },
                   b.bots.slice(0, 12).map(function (x, i) { return h('span', { key: i, className: 'city-dot', title: x.name + ' · ' + x.word }, h(A.StatusDot, { status: x.status })); }),
@@ -1103,7 +1190,7 @@
           })),
           h('p', { className: 'note' }, 'Each building is a repository. Each floor is a branch. Click a building, or zoom in on it, to go inside. In a building, zoom out to come back.'),
           waiting ? h('p', { className: 'note' }, plural(waiting, 'request waits', 'requests wait') + '. Buildings with a request show a beacon.') : null)),
-      hov ? h('div', { className: 'city-tag', role: 'status' }, h('b', null, hov.name), ' · ' + plural(hov.floors.length, 'floor', 'floors') + ' · ' + plural(hov.sessions, 'session', 'sessions') + (hov.waiting ? ' · ' + plural(hov.waiting, 'request', 'requests') : '')) : null,
+      hov ? h('div', { className: 'city-tag', role: 'status' }, h('b', null, hov.name), hov.hq ? ' · ' + hov.line : ' · ' + plural(hov.floors.length, 'floor', 'floors') + ' · ' + plural(hov.sessions, 'session', 'sessions') + (hov.waiting ? ' · ' + plural(hov.waiting, 'request', 'requests') : '')) : null,
       h('div', { className: 'city-zoom', role: 'toolbar', 'aria-label': 'City zoom' },
         h(A.Button, { variant: 'quiet', icon: 'zoom-in', title: 'Zoom in', onClick: function () { if (city.current) city.current.zoomBy(1.35); } }, 'Zoom in'),
         h(A.Button, { variant: 'quiet', icon: 'zoom-out', title: 'Zoom out', onClick: function () { if (city.current) city.current.zoomBy(1 / 1.35); } }, 'Zoom out'),
@@ -2131,7 +2218,7 @@
     }, [cur2.view]);
     // notifier: false: the page runs the one Notifier (alerts and the tab title for every building, below).
     // Since you left shows on every scene: the adapter seeds the state it sends again, so the card counts only news.
-    var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: mount.adapter, floor: cur2.floor == null ? undefined : cur2.floor, height: win.h, quality: 'auto', intro: intro, editable: false, simulate: false, toasts: false,
+    var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter, onHq: function () { setDlg({ name: 'hq' }); } }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: mount.adapter, floor: cur2.floor == null ? undefined : cur2.floor, height: win.h, quality: 'auto', intro: intro, editable: false, simulate: false, toasts: false,
       inbox: inbox, onInbox: setInbox, notifier: false, onSinceYouLeft: setSyl,
       // The scene's live request and error toasts go to the page stack, where they stay until closed. Seeded events
       // (a scene mounted again) send none: an open request stays in Needs you, the inbox and the tab title.
@@ -2191,7 +2278,7 @@
             host: host,
             roomId: function () { return secMount.securityRoom(); },
             // the rules, what each agent kind enforces and the Spend figures (snap.security), for this building
-            data: function () { var sn = latestSnap.current; return sn && sn.security ? { sec: sn.security, building: secMount.repo, buildingName: (def && def.name) || '' } : null; },
+            data: function () { var sn = latestSnap.current; return sn && sn.security ? { sec: sn.security, building: secMount.repo, buildingName: (def && def.name) || '', hq: sn.hq || null } : null; },
             post: function (route, body) { return api(route, body); },
             onError: function (text) { toast({ tone: 'error', title: 'Security', text: text }); }
           });
@@ -2285,6 +2372,7 @@
     var selKind = selSess ? kindOf(window.officeAdapter.kinds(), selSess.provider) : null;
     if (selSess && (!selKind || selKind.control)) actions.push({ id: 'page-ext', label: 'Extensions of ' + selSess.name, icon: 'connector', group: 'Office', run: function () { extensions(selSess.uid, selSess.name); } });
     actions.push({ id: 'page-needs', label: needs.length ? 'Needs you (' + needs.length + ')' : 'Needs you', icon: 'waiting', group: 'Office', keywords: 'requests approve decline questions decisions', run: function () { setDlg({ name: 'needs' }); } });
+    if (snap && snap.hq) actions.push({ id: 'page-hq', label: 'Paperclip HQ', icon: 'hq', group: 'Office', keywords: 'paperclip company agents budget heartbeats routines supervise', run: function () { setDlg({ name: 'hq' }); } });
     list.forEach(function (b) { if (b.key !== shown) actions.push({ id: 'page-b-' + b.key, label: 'Go to ' + b.name, icon: 'building', group: 'Buildings', keywords: 'building repository ' + b.name, run: function () { pick(b.key); } }); });
 
     // Room tools and sessions are built when the palette draws, so the rooms of the floor on screen are current.
@@ -2346,6 +2434,7 @@
         onPlaced: function () { if (hostRef.current) hostRef.current.refit(); },
         onBack: blurScene, onOpen: function () { if (hostRef.current) hostRef.current.open(); } }) : null,
       d === 'sessions' ? h(SessionsDialog, { onClose: close, onGo: goTo }) : null,
+      d === 'hq' ? h(HqDialog, { snap: snap, onAttach: function () { show('hooks'); }, onClose: close }) : null,
       d === 'needs' ? h(NeedsDialog, { toast: toast, onClose: close, onGo: function (r) { var s = snap && snap.sessions.filter(function (x) { return x.uid === r.uid; })[0]; if (s) goTo(s); else close(); } }) : null,
       // The one Notifier (the scene has notifier: false). The tab title counts every request of every building, in the
       // city too. Browser alerts for the requests and errors of every building; the DS alert toggle decides, and they

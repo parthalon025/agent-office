@@ -220,7 +220,8 @@ const REPORTS = 'This agent reports cost from the prices you set, so this rule i
  * cell shows "Not enforced for this agent" with the reason. rows: a reason for one row only. asks: a reason for one row
  * while its cell is Ask ("Partly enforced"): Claude Code decides itself whether to ask on some rows (CLAUDE_ASKS). Allow and
  * Deny on those rows are enforced. The no-cost cell is enforced: Ask asks once per session (costAsk), Deny refuses (openRefusal).
- * providers: the office's providers ({ kind, label, gated?, enforces? }). Paperclip is not built: its row says so.
+ * providers: the office's providers ({ kind, label, gated?, enforces? }). Paperclip agents are not a kind: the Agents
+ * screen lists them by name (public/security.js, #76).
  * policies: provider kind -> what an agent's own config was found to carry (provider.policy(): { config: { settings:
  * [{ path, have, ok, fix, rows }] }, gaps: [{ row, reason }] }, providers/openclaw.mjs). With one, a row is enforced when no
  * setting it needs is off and config can carry it; else the row says why. Without one (not read yet), the provider's own
@@ -243,7 +244,6 @@ export function enforcement(providers, policies = {}) {
       for (const [row, reason] of Object.entries(Object.assign({}, ...list.map((p) => p.partly || {})))) if (S.rows[row] && S.applies(row, c.id) && !takes.has(row)) partly[row] = reason;
       for (const row of CALL_ROWS) if (S.applies(row, c.id) && !takes.has(row) && !own(partly, row)) rows[row] = own(why, row) ? why[row] : UNGATED;
     }
-    if (S.applies('supervise', c.id)) rows.supervise = 'Paperclip is not connected to this office.';
     const reports = list.length > 0 && list.every((p) => p.paid !== false && p.cost !== 'unknown');
     if (reports && S.applies('no-cost', c.id)) rows['no-cost'] = REPORTS;
     const asks = {}, unset = {};

@@ -1394,3 +1394,19 @@ test('Stage.dispose: a controls dispose that throws does not keep the scene, the
   assert.equal(spent.get(t), 1, 'the Kit texture is freed');
   assert.deepEqual(order.slice(-3), ['renderer.dispose', 'forceContextLoss', 'canvas.remove']);
 });
+
+// The change record (emit) is what the HUD reads: the agent card gets its bot from it. BotDef documents owner, triggers and
+// cost as agent card fields, so the record carries them (agent-office #76: a Paperclip run's company is its owner; the
+// trigger of a scheduled session was dropped the same way before).
+test('the change record of a bot carries every agent card field of BotDef: owner, triggers and cost too', () => {
+  const start = 'bots:r.bots.map(function(b){return {name:b.name,color:b.color,';   // emit's (the other is the building view's)
+  const at = bundle.indexOf(start);
+  assert.ok(at >= 0 && bundle.indexOf(start, at + 1) === -1, 'one bot record in emit');
+  const literal = bundle.slice(at + 'bots:r.bots.map(function(b){return '.length, bundle.indexOf('};})', at) + 1);
+  const record = new Function('b', 'r', 'bld', 'openSessions', 'return ' + literal);
+  const b = { name: 'Ada', platform: 'Paperclip Engineer, Claude Code', owner: 'Acme Robotics (Ada)', triggers: ['Nightly'], cost: '$0.12', identity: 'C:/work', tools: ['Read'] };
+  const r = record(b, { id: 'room-1' }, {}, () => []);
+  assert.deepEqual([r.platform, r.owner, r.triggers, r.cost, r.identity, r.tools, r.room], [b.platform, b.owner, b.triggers, b.cost, b.identity, b.tools, 'room-1']);
+  const none = record({ name: 'x' }, { id: 'r' }, {}, () => []);
+  assert.deepEqual([none.owner, none.triggers, none.cost], [null, null, null]);
+});

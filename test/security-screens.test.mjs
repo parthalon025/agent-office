@@ -14,7 +14,7 @@ import { cloudConfig } from '../providers/cloud.mjs';
 const P = globalThis.OfficeSecurity.pure;
 const SET = '/api/security/set';
 const NOT_SET_UP = { reason: 'The office has no provider for this agent kind yet. The rule applies when it has one.', rows: {} };
-const enforce = { 'claude-code': { reason: '', rows: { supervise: 'Paperclip is not connected to this office.' } }, hermes: NOT_SET_UP, dsh: NOT_SET_UP, openclaw: NOT_SET_UP, copilot: NOT_SET_UP, local: { reason: '', rows: {} }, 'agent-framework': { reason: '', rows: {} } };
+const enforce = { 'claude-code': { reason: '', rows: {} }, hermes: NOT_SET_UP, dsh: NOT_SET_UP, openclaw: NOT_SET_UP, copilot: NOT_SET_UP, local: { reason: '', rows: {} }, 'agent-framework': { reason: '', rows: {} } };
 const B = 'c:/work/repo';
 const data = (rules = { office: {}, buildings: {} }, spend = { limit: 2, month: '2026-11', byColumn: { 'claude-code': 1.5 } }) => ({ sec: { rules, enforce, spend }, building: B, buildingName: 'repo' });
 const view = (o = {}) => ({ screen: 'files', w: 1280, h: 686, focused: true, paged: false, page: 0, scope: 'office', pending: null, edit: null, hover: null, busy: false, note: null, ...o });
@@ -107,13 +107,14 @@ test('below 700 px of free view a screen in focus shows one agent kind, with Pre
 test('Agents: turning on an ungated agent needs the Confirm; a gated kind has no cell, it says why', () => {
   const d = data(), v = view({ screen: 'agents', h: 738 }), p = P.plan(v, d);
   assert.deepEqual(p.hots.filter((h) => h.kind === 'cell').map((h) => h.id).sort(),
-    ['cell:no-cost|cloud', 'cell:no-cost|copilot', 'cell:no-cost|dsh', 'cell:no-cost|hermes', 'cell:no-cost|openclaw', 'cell:supervise|claude-code', 'cell:ungated|cloud', 'cell:ungated|copilot', 'cell:ungated|hermes'], 'Hermes and Copilot are ungated (M1, #22), and the cloud kinds (#24); OpenClaw is gated through its office plugin (#77)');
+    ['cell:no-cost|cloud', 'cell:no-cost|copilot', 'cell:no-cost|dsh', 'cell:no-cost|hermes', 'cell:no-cost|openclaw', 'cell:ungated|cloud', 'cell:ungated|copilot', 'cell:ungated|hermes'], 'Hermes and Copilot are ungated (M1, #22), and the cloud kinds (#24); OpenClaw is gated through its office plugin (#77)');
   assert.ok(texts(p).includes('Gated') && texts(p).includes('Reports cost') && texts(p).includes('Free'));
   const r = P.step(v, cell(p, 'ungated', 'copilot'), d);
   assert.deepEqual(r.view.pending, { row: 'ungated', col: 'copilot', to: 'on', office: null });
   assert.equal(P.step(v, cell(p, 'no-cost', 'hermes'), d).send, undefined, 'Ask to Allow on no cost reports is looser too');
   assert.equal(p.hots.some((h) => h.kind === 'scope'), false, 'the Agents rules are office-wide');
-  assert.ok(texts(p).includes('Office-wide'));
+  assert.ok(said(p).includes('Office-wide'), 'the Agents rules say they are office-wide');
+  assert.equal(p.hots.some((h) => h.kind === 'cell' && h.row === 'supervise'), false, 'Paperclip agents are listed by name in their own part (#76), not as one cell');
 });
 
 test('Spend: minus and plus in 1 dollar steps, minus never under $1; a click on the value types it; Enter saves, Esc cancels', () => {
@@ -435,4 +436,66 @@ test('every column head of a rules screen is painted in full: a long one takes t
       }
     }
   }
+});
+
+// #76: the Paperclip part of the Agents screen. Each agent of the watched company, by name, with its supervision and, when the
+// office can set it up, Supervise in office: a click paints the Confirm, Confirm sends one change for one agent.
+const HQ = { state: 'on', url: 'http://127.0.0.1:3100', error: '', company: { id: 'c1', name: 'Acme Robotics' }, budget: { spent: 12.4, limit: 100 }, routines: [], agents: [
+  { id: 'a1', name: 'Grace', role: 'CEO', title: '', supervision: { state: 'unsupervised', label: 'Unsupervised', why: 'It runs on the ACP engine (the default), which approves every call and ignores the office hooks.', can: true } },
+  { id: 'a2', name: 'Ada', role: 'Engineer', title: 'Backend engineer', supervision: { state: 'supervised', label: '', why: '', can: false } },
+  { id: 'a3', name: 'Linus', role: 'DevOps', title: '', supervision: { state: 'unsupervised', label: 'Unsupervised: runs without the office hooks', why: 'Its runs use codex_local, not Claude Code, so they never reach the office hooks.', can: false } },
+] };
+const withHq = (hq = HQ) => ({ ...data(), hq });
+const hqView = (o = {}) => view({ screen: 'agents', h: 738, section: 'hq', ...o });
+
+test('Agents, Paperclip part: two parts in the header; not connected says where to connect; no Supervise without agents', () => {
+  const v = view({ screen: 'agents', h: 738 }), p = P.plan(v, withHq());
+  const sec = p.hots.filter((h) => h.kind === 'section');
+  assert.deepEqual(sec.map((h) => h.section), ['kinds', 'hq']);
+  assert.ok(texts(p).includes('Agent kinds') && texts(p).includes('Paperclip'));
+  assert.equal(P.step(v, sec[1], withHq()).view.section, 'hq');
+  const off = P.plan(hqView(), { ...data(), hq: null });
+  assert.match(said(off), /Paperclip is not connected\. Connect it in Attach sessions/);
+  assert.equal(off.hots.some((h) => h.kind === 'supervise'), false);
+  assert.equal(off.hots.some((h) => h.kind === 'cell'), false, 'the kinds grid is the other part');
+});
+
+test('Agents, Paperclip part: each agent with its state in words; Supervise in office waits for the Confirm, then one change for one agent', () => {
+  const d = withHq(), v = hqView(), p = P.plan(v, d);
+  const t = said(p);
+  for (const w of ['Grace', 'Ada', 'Linus', 'Backend engineer', 'Supervised', 'Unsupervised', 'Watching Acme Robotics at http://127.0.0.1:3100']) assert.ok(t.includes(w), w);
+  assert.match(t, /codex_local, not Claude Code/, 'why an agent is not supervised, on the wall');
+  const sup = p.hots.filter((h) => h.kind === 'supervise');
+  assert.deepEqual(sup.map((h) => h.agent), ['a1'], 'only the agent the office can set up: not the supervised one, not the codex one');
+  assert.equal(P.hotAt(p, uvOf(sup[0], v), v.w, v.h), sup[0]);
+  const r = P.step(v, sup[0], d);
+  assert.equal(r.send, undefined, 'a write to Paperclip waits for the painted Confirm');
+  assert.deepEqual(r.view.pending, { hq: 'a1', name: 'Grace' });
+  const pp = P.plan(r.view, d);
+  assert.ok(texts(pp).includes('Confirm: Supervise Grace in office?'));
+  assert.match(said(pp), /The office writes to its config in Paperclip: engine cli, skip permissions off, permission mode default and the office hooks file/);
+  assert.ok(pp.items.some((i) => i.t === 'fill' && i.c === 'pending'), 'amber');
+  assert.equal(pp.hots.some((h) => h.kind === 'supervise'), false, 'no second click starts another write while one waits');
+  assert.deepEqual(P.step(r.view, hotOf(pp, 'confirm'), d).send, { route: '/api/paperclip/supervise', body: { agent: 'a1', confirmed: true } });
+  assert.equal(P.step(r.view, hotOf(pp, 'cancel'), d).view.pending, null);
+  for (const i of p.items.filter((x) => x.t === 'text' && x.maxW && x.align !== 'center')) assert.ok(i.text.length * P.charW(i.s, i.wt) <= i.maxW + 0.5 || i.text.endsWith('…'), `"${i.text}" fits`);
+});
+
+test('Agents, Paperclip part: many agents page in the full view; the narrow view shows one agent at a time with its Supervise', () => {
+  const many = { ...HQ, agents: Array.from({ length: 9 }, (_, i) => ({ ...HQ.agents[0], id: 'g' + i, name: 'Agent ' + (i + 1) })) };
+  const d = withHq(many), v = hqView(), p = P.plan(v, d);
+  assert.ok(hotOf(p, 'hq-next') && hotOf(p, 'hq-prev'));
+  const shown = p.hots.filter((h) => h.kind === 'supervise').length;
+  assert.ok(shown >= 3 && shown < 9, `${shown} rows on the first page`);
+  assert.match(said(p), new RegExp(`Agents 1 to ${shown} of 9`));
+  const p2 = P.plan(P.step(v, hotOf(p, 'hq-next'), d).view, d);
+  assert.equal(p2.hots.filter((h) => h.kind === 'supervise')[0].agent, 'g' + shown);
+  for (const h of p.hots) assert.ok(h.y + h.h <= v.h - 40, `${h.id} sits above the hint`);
+  // narrow: one agent, big, with Previous and Next
+  const nv = hqView({ paged: true }), np = P.plan(nv, withHq());
+  assert.deepEqual(np.hots.filter((h) => h.kind === 'supervise').map((h) => h.agent), ['a1']);
+  assert.ok(texts(np).includes('1 of 3') && hotOf(np, 'hq-next'));
+  const n2 = P.plan(P.step(nv, hotOf(np, 'hq-next'), withHq()).view, withHq());
+  assert.ok(texts(n2).includes('Ada') && texts(n2).includes('2 of 3'));
+  assert.equal(n2.hots.some((h) => h.kind === 'supervise'), false, 'Ada is supervised: nothing to set up');
 });
