@@ -23,6 +23,7 @@ import { slimPayload, cleanIds as cleanPaperclipIds } from './payload.mjs';
 import { createHq } from './paperclip.mjs';
 import { mergeRecord, recap as recapOf, away as awayOf, MERGES_KEPT } from './rituals.mjs';
 import { createTracker, clip } from './tracker.mjs';
+import { createAdmission } from './admission.mjs';
 import { createRegistry, providerEvents, traitsOf, spendLimitFor, DEFAULT_SPEND_LIMIT, DEFAULT_PROVIDER } from './providers/index.mjs';
 import { createLocal } from './providers/local.mjs';
 import { createExplainer } from './explain.mjs';
@@ -44,7 +45,7 @@ import { createHolds } from './holds.mjs';
 import { createNotes, scanNote, cleanPin, PIN_MAX, NOTES_MAX, AGENT_WRITE_MAX } from './notes.mjs';
 import { createSkills } from './skills.mjs';
 import { cleanTrust, record as recordTrust, patternOf, propose, grant as grantTrust, withdraw as withdrawTrust, cards as trustCards } from './trust.mjs';
-import { cleanRules, setRule, ruleOf, decide, preToolDecision, permissionModeFor, openRefusal, costAsk, enforcement, addCost, costThisMonth } from './security.mjs';
+import { cleanRules, setRule, ruleOf, decide, preToolDecision, permissionModeFor, openRefusal, enforcement, addCost, costThisMonth } from './security.mjs';
 import { realInside } from './risk.mjs';
 import { mcpAddArgs, mcpRemoveArgs, pluginArgs } from './extensions.mjs';
 import * as auth from './auth.mjs';
@@ -346,11 +347,6 @@ function preToolGate(p) {
   if (!d) return null;
   if (d.decision === 'deny') tracker.refuseCall(s, p, d.reason, d.line);
   return claude.preToolAnswer(d);
-}
-// Why the office does not open this agent kind now (an ungated kind that is off, a kind with no cost reports and Deny).
-function checkOpen(provider) {
-  const why = openRefusal(persisted.security, provider);
-  if (why) throw httpError(409, why);
 }
 // The building key of a folder for the rules at open: the repository of a worktree, or of the folder; '' outside git.
 async function buildingOfFolder(cwd, worktree) {
@@ -1323,14 +1319,14 @@ async function openSession(opts) {
   if (!stat || !stat.isDirectory()) throw httpError(400, `Folder not found: ${cwd || '(empty)'}`);
 
   const provider = providers.get(opts.provider);
-  provider.check?.(opts); // unknown model or mode: refused before a worktree is made
-  checkOpen(provider);    // the Agents screen of the Security room: also before a worktree is made
-  // An ungated agent needs a room of its own: in the office, without Use this folder, in a folder that is in git.
+  // Admission (admission.mjs): every refusal and the cost question come before a worktree or a session. An ungated agent needs a
+  // room of its own: in the office, without Use this folder, in a folder that is in git.
   const wantsRoom = opts.where !== 'terminal' && opts.isolation !== 'same';
-  const loc = wantsRoom ? await git.locate(cwd) : null;
-  ownRoomOnly(provider, !!loc, 'opens only in a room of its own: clear Use this folder, in a folder that is in a git repository.');
-  await preflight(provider);
-  confirmCost(provider, opts.confirmCost);
+  let located;
+  const locOf = async () => (located ??= { loc: wantsRoom ? await git.locate(cwd) : null });
+  const plan = ruled(await admission.admit({ mode: opts.scheduleId ? 'schedule' : 'open', provider, opts, requested: opts.maxBudget, confirmed: opts.confirmCost === true,
+    ownRoom: async () => !!(await locOf()).loc, ownRoomText: 'opens only in a room of its own: clear Use this folder, in a folder that is in a git repository.' }));
+  const { loc } = await locOf();
   const model = opts.model || null, permissionMode = opts.permissionMode || null;
   const prompt = String(opts.prompt || '').slice(0, 8000);
 
@@ -1354,7 +1350,7 @@ async function openSession(opts) {
     if (worktree) rememberDir(cwd);
     // A paid provider gets the default spend limit unless the caller sets one (0 clears it). A local provider has none (#33),
     // and neither has one whose cost is unknown: nothing could stop it at a limit.
-    const budget = spendLimitFor({ paid: traitsOf(provider).paid, cost: traitsOf(provider).cost, requested: opts.maxBudget, fallback: defaultSpend() });
+    const budget = plan.budget;
     const building = await buildingOfFolder(workdir, worktree);
     const uid = openHeadless(provider, { cwd: workdir, name, prompt, worktree, budget, scheduleId: opts.scheduleId || null, model, permissionMode, building, deskRole: role });
     if (noRoom) { const s = sessions.get(uid); if (s) { addFeed(s, 'start', 'This folder is not in git, so the agent has no room of its own.'); broadcast(); } }
@@ -1373,32 +1369,14 @@ async function openSession(opts) {
   return s.uid;
 }
 
-// An agent that reports no cost (cost 'unknown') runs only after the user said yes for this session (owner decision Q22),
-// while its "Run without cost reports" cell in the Security room is Ask (security.mjs costAsk); Allow runs it without the
-// question, Deny never gets here (checkOpen). The answer is 200 with confirm: 'cost' and the question (not an error); the
-// caller asks the user and sends the same request again with confirmCost: true. An ungated agent's label goes in the question too, so the yes is for what
-// it does (ADR 0001).
-// The provider's own gate check that needs no session (an OpenClaw config without workspace-only or the office plugin,
-// #77), before the cost question, so that question never comes for an agent
-// that would not start. 409 without confirm, before a worktree or a session.
-async function preflight(provider) {
-  const why = await traitsOf(provider).preflight();
-  if (why) throw httpError(409, `${provider.label} cannot start: ${why}`);
-}
-function confirmCost(provider, confirmed) {
-  if (confirmed === true || !costAsk(persisted.security, provider)) return;
-  const label = traitsOf(provider).supervision;
-  // A normal question, not an error (review minor): 200 { confirm: 'cost', question } and no uid, so the page logs no failed
-  // request each time it asks (ask.js).
-  throw askFirst('cost', `This agent does not report cost. ${label ? label + '. ' : ''}Run it?`);
-}
-
-// An ungated agent (ADR 0001) runs some tool calls without asking, so it runs only in a worktree the office made for it:
-// never in the user's own folder, never in a terminal window. ownRoom: this open has one. The answer is 409 before a worktree,
-// a session or the cost question.
-function ownRoomOnly(provider, ownRoom, rest) {
-  if (traitsOf(provider).gated || ownRoom) return;
-  throw httpError(409, `${provider.label} runs some tool calls without asking the office (${traitsOf(provider).supervision}), so it ${rest}`);
+// Admission (admission.mjs) is the one ordered check before a session starts: provider check, Security refusal, own room only
+// (ADR 0001), preflight, the cost question (an agent that reports no cost runs only after the user's yes, owner decision Q22;
+// a 200 with confirm: 'cost', not an error), the spend limit. `ruled` turns its answer into the route's error or question.
+const admission = createAdmission({ rules: () => persisted.security, defaultSpend: () => defaultSpend() });
+function ruled(v) {
+  if (v.kind === 'refusal') throw httpError(v.status, v.text);
+  if (v.kind === 'question') throw askFirst(v.ask, v.text);
+  return v;
 }
 
 // A past session opens again with its own provider (providers.reopenPlan). A provider that can resume continues the
@@ -1417,10 +1395,7 @@ async function reopenSession(uid, { confirmed = false } = {}) {
   };
   const first = check();
   const provider = providers.get(first.provider);
-  checkOpen(provider);
-  ownRoomOnly(provider, !!first.worktree, 'reopens only in its own worktree. This past session ran in your folder: open a new session instead.');
-  await preflight(provider);
-  confirmCost(provider, confirmed);
+  ruled(await admission.admit({ mode: 'reopen', provider, confirmed, ownRoom: !!first.worktree, ownRoomText: 'reopens only in its own worktree. This past session ran in your folder: open a new session instead.' }));
   // The building for the rules, and what a provider learns at a handshake (an ACP agent: whether it can resume), are looked
   // up before the last check: from that check to reopening.set nothing waits, so a second reopen that comes meanwhile is
   // refused (#54).
@@ -1441,22 +1416,16 @@ async function forkSession(uid, { confirmed = false } = {}) {
   const rec = history.find((h) => h.uid === uid);
   if (!rec) throw httpError(404, 'That past session is gone.');
   const provider = providers.get(rec.provider);
-  checkOpen(provider); // the Agents screen of the Security room, before the question and the worktree
-  await preflight(provider);
-  if (provider.learn) await provider.learn();
-  if (!traitsOf(provider).features.includes('fork')) throw httpError(409, `${provider.label} cannot fork a session.`);
-  if (!rec.sid) throw httpError(409, 'That session never started, so there is nothing to fork.');
   const from = rec.worktree?.repo && fs.existsSync(rec.worktree.repo) ? rec.worktree.repo : rec.cwd;
-  if (!from || !fs.existsSync(from)) throw httpError(409, `Its folder is gone: ${rec.cwd}.`);
-  if (confirmed !== true) {
-    throw askFirst('fork', `Fork ${rec.name} into a new worktree? The copy gets the conversation so far and its own branch. The files start from the current commit of the main folder, not from the changes of the old session. ${traitsOf(provider).cost === 'unknown' ? `${provider.label} does not report cost, so the office shows it as unknown and no spend limit can stop it.` : ''}`.trim());
-  }
-  provider.check?.({});
+  // The record's own problems come after the refusals and the capability check, before the question (admission.mjs recordProblem).
+  const recordProblem = () => !rec.sid ? 'That session never started, so there is nothing to fork.' : (!from || !fs.existsSync(from)) ? `Its folder is gone: ${rec.cwd}.` : null;
+  const plan = ruled(await admission.admit({ mode: 'fork', provider, confirmed, recordProblem,
+    forkText: `Fork ${rec.name} into a new worktree? The copy gets the conversation so far and its own branch. The files start from the current commit of the main folder, not from the changes of the old session. ${traitsOf(provider).cost === 'unknown' ? `${provider.label} does not report cost, so the office shows it as unknown and no spend limit can stop it.` : ''}`.trim() }));
   const name = `${rec.name} fork`.slice(0, 40);
   // An agent room of its own (#69): on the floor of the branch it was made from, known to the building before the bot sits.
   const wt = await git.createWorktree(from, name);
   rememberDir(from);
-  const budget = spendLimitFor({ paid: traitsOf(provider).paid, cost: traitsOf(provider).cost, requested: undefined, fallback: defaultSpend() });
+  const budget = plan.budget;
   const worktree = { root: wt.root, branch: wt.branch, repo: wt.repo, base: wt.base || null };
   try {
     addRepo(wt.repo); await refreshRepo(repoKey(wt.repo));
