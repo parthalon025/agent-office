@@ -71,3 +71,11 @@ export function away({ feed = [], since, now, max = 12 }) {
   }
   return out.slice(-max);
 }
+
+// ---------- the saved slices (state.mjs) ----------
+/** The merge list from a saved file: a list, at most MERGES_KEPT long. */
+export function cleanMerges(raw) { return Array.isArray(raw) ? raw.slice(0, MERGES_KEPT) : []; }
+/** Agent name -> the day of its last stand-up: a plain map. */
+export function cleanStandups(raw) { return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}; }
+/** Focus mode is on only when saved as true. */
+export function cleanFocus(raw) { return raw === true; }

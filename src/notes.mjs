@@ -240,3 +240,14 @@ export function createNotes({ notes, pins, now = Date.now }) {
     },
   };
 }
+
+// ---------- the saved slices (state.mjs) ----------
+const plainMap = (raw) => (raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {});
+/** The boards from a saved file. A board saved before versions were counters gets version 1. */
+export function cleanNotes(raw) {
+  const notes = plainMap(raw);
+  for (const e of Object.values(notes)) if (e && typeof e === 'object' && !Number.isInteger(e.v)) e.v = 1;
+  return notes;
+}
+/** The blackboard pins from a saved file. */
+export function cleanPins(raw) { return plainMap(raw); }

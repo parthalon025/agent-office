@@ -293,3 +293,6 @@ export function costThisMonth(ledger, at) {
   const month = monthOf(at);
   return { month, byColumn: { ...((ledger && ledger[month]) || {}) } };
 }
+
+/** The Spend ledger from a saved file: a plain map of months. */
+export function cleanCosts(raw) { return raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}; }
