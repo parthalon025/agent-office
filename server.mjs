@@ -71,8 +71,8 @@ const BRANCH_PORT = process.env.OFFICE_PORT === 'branch'
     let name;
     try {
       // A passing git failure (a time limit while the computer is busy) is not "outside git": locateOrKeep tries 3 times,
-      // then answers KEEP, and the message says so. Null (not in git, git missing, a folder git refuses) is checkoutName's error.
-      const loc = await git.locateOrKeep(ROOT);
+      // then answers KEEP, and the message says so. A lasting failure throws its own cause (startPlace, #132).
+      const loc = await git.startPlace(ROOT);
       if (loc === git.KEEP) throw new Error('git did not give the branch of this folder (it timed out, or the repository has no commit yet). Start the office again.');
       name = git.checkoutName(loc);
     } catch (e) { return stopAtStart(`Agent Office cannot pick a port for this folder: ${e.message}`); }
