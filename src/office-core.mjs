@@ -52,12 +52,11 @@ export function createCore({ routes }) {
     if (!route) return { status: 404, body: { error: 'Not found' } };
     const signal = req.signal || NEVER;
     if (signal.aborted) return GONE;
+    let leave = null;
     try {
       // A request whose client goes away is over: a held request (a prompt nobody will answer) does not wait for ever.
-      let leave;
       const gone = new Promise((resolve) => { leave = () => resolve(GONE); signal.addEventListener('abort', leave, { once: true }); });
       const out = await Promise.race([route.run({ body: req.body ?? {}, query: req.query || NO_QUERY, headers: req.headers || {}, signal, remote: req.remote || null }), gone]);
-      signal.removeEventListener('abort', leave);
       if (out === GONE) return GONE;
       if (out && out[REPLY]) { const { status, body, type, headers, bare, stream } = out; return { status, body, type, headers, bare, stream }; }
       return { status: 200, body: out };
@@ -65,6 +64,8 @@ export function createCore({ routes }) {
       // ask-first (ask.js): the request needs the user's yes first; the page asks and sends it again.
       if (e.answer) return { status: e.answer.status, body: e.answer.body };
       return { status: e.status || 500, body: { error: e.message } };
+    } finally {
+      if (leave) signal.removeEventListener('abort', leave);
     }
   }
   return { handle, groupOf, routes: routes.map(({ method, path: p, group }) => ({ method, path: p, group })) };
