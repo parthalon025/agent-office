@@ -125,7 +125,7 @@ Globals: `AgentOffice.MODES` (the themes, see Themes below), `AgentOffice.modeOf
 | `fluent` | `fluent` | Fluent | `fluent` |  |  | `sans` | Bright, quiet office in soft daylight, low bloom and light haze. System faces, 4 px controls and 8 px panels. |
 | `fluent-dark` | `fluent-dark` | Fluent Dark | `fluentdark` | `true` |  | `sans` | Fluent at night: a dim, neutral office with soft room lamps, screen glow and a dusk window. The faces, corners, heads and accent pills of Fluent. |
 
-The `id` names the look: the engine reads `light-<id>-*` and `fx-*-<id>`, and `AgentOffice.office.LOOKS[id]`. A `data-theme` value that is no theme shows the first look (Day).
+The `id` names the look: the engine reads `light-<id>-*` and `fx-*-<id>`, and `AgentOffice.office.LOOKS[id]`. A `data-theme` value that is no theme shows the first look (Day), and `setMode` with a value that is no look leaves the look to `data-theme`. A theme of `AgentOffice.MODES` with no `LOOKS` entry or no `FX` value stops the Stage with an error that names the theme and the part: no theme takes the look of another.
 
 - `dark: true` marks a dark scene (Night, Fluent Dark): the window shows a night or dusk sky with lit windows, monitors glow more, the page lays a pool of screen light on each desk, the office type pictures show lit screens and lamp pools, and `tokens.css` sets `color-scheme: dark` in the theme's block, so the browser draws scrollbars and check boxes dark. The engine sets `stage.K.dark` from it.
 - `retro: true` (Sublevel) draws the office type pictures in the retro style: terminal desks with number grids, carpet tiles, a wainscot band, square-eyed bots.
@@ -140,9 +140,9 @@ A skin (a theme) is a token set plus a component set. Code reads the skin only t
 | Part | Comes from |
 | --- | --- |
 | Colors, shadow, light, effects, faces, corners | The theme's tokens (`tokens.json`, `tokens.css`; faces and corners through a family rule in `bundle.css`). |
-| Bot portraits (`BotAvatar`) | One drawing per shape (`AgentOffice.PORTRAITS`), styled by the theme's `portrait-*` tokens through the `ao-pt-*` classes of `bundle.css`. For a file in a theme, pass `look = { ink, gloss, outline, eyesSquare }`, the theme's token values. |
+| Bot portraits (`BotAvatar`) | One drawing per shape (`AgentOffice.PORTRAITS`), styled by the theme's `portrait-*` tokens through the `ao-pt-*` classes of `bundle.css` (`portrait-ink` colors the eyes, the lines and the soft shadow). For a file in a theme, pass `look = { ink, gloss, outline, eyesSquare }`, the theme's token values. |
 | Logo | The mark takes `ink`, `bg` and `logo-mark-radius`; the wordmark is the drawing that the MODES entry names (`wordmark`). |
-| Office type pictures (`OfficeTypeCard`) | `AgentOffice.officePicture(type, tok, { dark, retro })`: one drawing per type, colored by the theme's scene, type and status tokens; `dark` and `retro` come from the MODES entry. `OfficeTypeCard` reads the tokens of the theme it sits in. `AgentOffice.OFFICE_PICTURES` lists the types. |
+| Office type pictures (`OfficeTypeCard`) | `AgentOffice.officePicture(type, tok, { dark, retro })`: one drawing per type. Every color is a token of the theme (the scene tokens with `scene-lamp`, `type-*`, the status tokens, `accent`, `ink`, `portrait-ink`), some darkened or lightened; only the tiny bots take `AgentOffice.BODY_COLORS`, with the portrait shade. `dark` and `retro` come from the MODES entry. `OfficeTypeCard` reads the tokens of the theme it sits in. `AgentOffice.OFFICE_PICTURES` lists the types. |
 | Mode icon | The `icon` of the MODES entry, from the icon set. Each theme has its own. |
 | Scene look | `AgentOffice.office.LOOKS[id]`: `hi`, `si`, `lamp` (from the `light-*` tokens), `hc`, `hg`, `sc` (sky, ground and sun light colors), `sp` (sun position), `win` (the window picture, a name of `AgentOffice.office.WINDOWS`: `sky`, `stars`, `corridor`, `clouds`, `dusk`), `frame` (window frame color), `leaf` (plant leaf color), `beacon` (the two tokens of the room alert beacon: for a request, for an error), `clock` (the sun follows the clock), `flicker` (the fill light flickers now and then), `caps` (signs and wall screen titles in capitals; the engine sets `stage.K.caps`), `term` (desk monitors in the terminal face; `stage.K.term`, which the page's desk terminals read too). `AgentOffice.office.FX` holds the post effects of each look, from the `fx-*` tokens. |
 
@@ -293,6 +293,7 @@ Each README has the full props table. Types: `components/index.d.ts`.
 | `scene-dark` | `#2b323b` | `#2b323b` | `#263238` | `#292929` | `#141414` | 3D monitors, lamps, racks, tripods. |
 | `scene-glass` | `#bcd3e6` | `#3d5468` | `#cfe3e0` | `#cfe4fa` | `#34506e` | 3D glass partitions between rooms and the room boxes in the building view. Used at 22–28% opacity. |
 | `scene-subagent` | `#9aa3ad` | `#6f7884` | `#b9c4bf` | `#a3a3a3` | `#6b6b6b` | 3D body of a temporary subagent. Grey so it reads as on loan; it leaves when it returns. |
+| `scene-lamp` | `#f2b766` | `#f2b766` | `#f2b766` | `#ffba66` | `#ffba66` | Warm lamp light: the lamp pools, bulbs and shades in the office type pictures of a dark theme (`dark` in AgentOffice.MODES). The 3D room lamps are lights with their own color. |
 
 #### Contrast pairs the DS checks
 
@@ -372,6 +373,7 @@ Fluent and Fluent Dark follow the open Fluent 2 design tokens: `webLightTheme` a
 | `scene-dark` | `#292929`: grey[16] (colorNeutralBackgroundInverted). Matches. | `#141414`: grey[8] (colorNeutralBackground3). Matches. |
 | `scene-glass` | `#cfe4fa`: brandWeb[150] (colorBrandBackground2Hover). Matches. | `#34506e`: no source. A 3D glass tint: no Fluent 2 source. |
 | `scene-subagent` | `#a3a3a3`: grey[64]. Neutral ramp. | `#6b6b6b`: grey[42]. Neutral ramp. |
+| `scene-lamp` | `#ffba66`: peach tint30. A lamp light: Fluent 2 has no scene tokens, so a warm shared palette color. | `#ffba66`: peach tint30. The same lamp. |
 
 ### spacing
 
@@ -410,7 +412,7 @@ The values of the drawn DS parts in each theme: the bot portraits (`BotAvatar`, 
 
 | Token | light | dark | sublevel | fluent | fluent-dark | Use |
 | --- | --- | --- | --- | --- | --- | --- |
-| `portrait-ink` | `#11161c` | `#11161c` | `#102a33` | `#11161c` | `#11161c` | Eyes and line art of a bot portrait (BotAvatar). |
+| `portrait-ink` | `#11161c` | `#11161c` | `#102a33` | `#11161c` | `#11161c` | Eyes, line art and soft shadow of a bot portrait (BotAvatar), and the bot eyes and shadows in the office type pictures. |
 | `portrait-gloss` | `1` | `1` | `0` | `1` | `1` | Bot portrait: 1 shows the highlight and the soft shadow under the bot, 0 draws the bot flat. |
 | `portrait-outline` | `0` | `0` | `1` | `0` | `0` | Bot portrait: 1 draws an outline, the inner facet edges and a floor line in portrait-ink, 0 draws none. |
 | `portrait-eyes-square` | `0` | `0` | `1` | `0` | `0` | Bot portrait: 1 draws square eyes, 0 round eyes. |

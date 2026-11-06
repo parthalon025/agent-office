@@ -81,6 +81,7 @@
 .ao-pt-gloss{opacity:var(--portrait-gloss)}
 .ao-pt-line{opacity:var(--portrait-outline);stroke:var(--portrait-ink)}
 .ao-pt-eyes{fill:var(--portrait-ink)}
+.ao-pt-shadow{fill:var(--portrait-ink)}
 .ao-pt-round{opacity:calc(1 - var(--portrait-eyes-square))}
 .ao-pt-square{opacity:var(--portrait-eyes-square)}
 .ao-avatar .ao-dot{position:absolute;right:-1px;bottom:0;box-shadow:0 0 0 2px var(--panel)}

@@ -12,11 +12,11 @@ Flat isometric (30 degree) room pictures. viewBox `0 0 320 200`. Each room has a
 
 ## Drawn from the tokens of the theme
 
-There is one drawing per type for every theme: `AgentOffice.officePicture(type, tok, style)`. Its colours are the theme's tokens: the scene tokens (floor, walls, wood, chair, rug, slab, glass, metal, dark), `type-*` for the stripe and the type items, and the status tokens for the LEDs and the rule cells, some of them darkened or lightened. Props (the bots, some fittings) keep their own colours. So a theme gets its pictures from its tokens, and has no picture files of its own. `OfficeTypeCard` reads the tokens of the theme it sits in.
+There is one drawing per type for every theme: `AgentOffice.officePicture(type, tok, style)`. Every colour comes from the theme's tokens: the scene tokens (floor, walls, wood, chair, rug, slab, glass, metal, dark, lamp), `type-*` for the stripe and the type items, the status tokens for the LEDs and the rule cells, `accent` for screen lines and glows, `ink` for the retro terminal faces and `portrait-ink` for the bot eyes and shadows, some of them darkened or lightened. The only colours that are not a token are the tiny bots: their bodies are `AgentOffice.BODY_COLORS`, with the shade a bot portrait has. No colour falls back to the colour of another theme. So a theme gets its pictures from its tokens, and has no picture files of its own. `OfficeTypeCard` reads the tokens of the theme it sits in. `test/skin.test.mjs` draws every picture in every theme and fails on a colour that does not come from a token or from the bot colours.
 
 The style comes from the theme's `AgentOffice.MODES` entry:
 
-- `dark: true` (Night, Fluent Dark): screens and LEDs glow (stacked soft circles, no filters), and small warm lamp pools (`#f2b766`) lie on the floor, the bench, the stage or the table.
+- `dark: true` (Night, Fluent Dark): screens and LEDs glow (stacked soft circles, no filters), and small warm lamp pools (`scene-lamp`) lie on the floor, the bench, the stage or the table.
 - `retro: true` (Sublevel): carpet tiles, a low wainscot band on the walls, boxy terminals with tiny number grids in place of monitors, and bots with square eyes.
 
 The glows use opacity only: no gradients, filters or ids, so many pictures can share one page.

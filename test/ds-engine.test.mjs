@@ -967,6 +967,23 @@ test('readScene reads the light-<look>-* and fx-*-<look> tokens of every look of
   }
 });
 
+// #131: no theme takes the scene look of another. A Stage starts only when every look of AO.MODES has its LOOKS entry and its FX
+// values; the error names the theme and the part. Only a value that is no theme (an unknown data-theme or mode) shows the first look.
+test('a theme of AO.MODES with no LOOKS entry or FX value stops the Stage with an error that names it, and no look borrows another', () => {
+  const gapOf = (MODES, LOOKS, FX) => new Function('AO', 'LOOKS', 'FX', source('function lookGap(){') + 'return lookGap();')({ MODES }, LOOKS, FX);
+  const M = modes(), look = {}, fx = () => Object.fromEntries(M.map((m) => [m.id, 1]));
+  const LOOKS = Object.fromEntries(M.map((m) => [m.id, look])), FX = { bloom: fx(), thr: fx(), exp: fx(), fog: fx(), vig: fx() };
+  assert.equal(gapOf(M, LOOKS, FX), '', 'every theme complete: no gap');
+  const last = M[M.length - 1];
+  const noLook = { ...LOOKS }; delete noLook[last.id];
+  assert.match(gapOf(M, noLook, FX), new RegExp(`the theme "${last.theme}" has no scene look\\. Add AgentOffice\\.office\\.LOOKS\\["${last.id}"\\]`));
+  const noFog = { ...FX, fog: { ...FX.fog } }; delete noFog.fog[last.id];
+  assert.match(gapOf(M, LOOKS, noFog), new RegExp(`the theme "${last.theme}" has no FX\\.fog value`));
+  assert.match(source('function Stage(el,o){', 'var s=this;'), /var gap=lookGap\(\);if\(gap\)throw new Error\(gap\);/, 'the Stage checks first');
+  assert.equal(source('function lookOf(K){'), 'function lookOf(K){return LOOKS[K.look];}\n', 'lookOf has no fallback look');
+  assert.match(source('Stage.prototype.applyMode=function', '\n'), /var lk=this\.look\(\),L=LOOKS\[lk\],K=this\.K,/, 'applyMode has no fallback look');
+});
+
 test('theme to look and back: Stage.look and setMode follow AO.MODES; a value that is no theme shows the first look', () => {
   function Stage() {}
   let theme = null;
@@ -985,6 +1002,8 @@ test('theme to look and back: Stage.look and setMode follow AO.MODES; a value th
   assert.equal(s.mode, 'auto', 'with a root the theme attribute decides the look');
   s.root = null; s.setMode(last.id);
   assert.equal(s.look(), last.id, 'without a root the mode is the look');
+  theme = M[1].theme; s.setMode('nope');
+  assert.equal(s.look(), M[1].id, 'a mode that is no look: the theme decides');
   assert.match(bundle, /var THEME_BY_LOOK=THEME_OF;/);
 });
 

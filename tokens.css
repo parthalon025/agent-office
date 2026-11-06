@@ -54,6 +54,7 @@
   --scene-dark: #2b323b;
   --scene-glass: #bcd3e6;
   --scene-subagent: #9aa3ad;
+  --scene-lamp: #f2b766;
   --shadow-panel: 0 6px 24px rgba(10,20,30,0.08);
   --portrait-ink: #11161c;
   --portrait-gloss: 1;
@@ -264,6 +265,7 @@
   --scene-dark: #2b323b;
   --scene-glass: #3d5468;
   --scene-subagent: #6f7884;
+  --scene-lamp: #f2b766;
   --shadow-panel: 0 6px 24px rgba(0,0,0,0.35);
   --portrait-ink: #11161c;
   --portrait-gloss: 1;
@@ -326,6 +328,7 @@
   --scene-dark: #263238;
   --scene-glass: #cfe3e0;
   --scene-subagent: #b9c4bf;
+  --scene-lamp: #f2b766;
   --shadow-panel: 0 1px 0 rgba(16,42,51,0.10);
   --portrait-ink: #102a33;
   --portrait-gloss: 0;
@@ -388,6 +391,7 @@
   --scene-dark: #292929;
   --scene-glass: #cfe4fa;
   --scene-subagent: #a3a3a3;
+  --scene-lamp: #ffba66;
   --shadow-panel: 0 0 2px rgba(0,0,0,0.12), 0 4px 8px rgba(0,0,0,0.14);
   --portrait-ink: #11161c;
   --portrait-gloss: 1;
@@ -450,6 +454,7 @@
   --scene-dark: #141414;
   --scene-glass: #34506e;
   --scene-subagent: #6b6b6b;
+  --scene-lamp: #ffba66;
   --shadow-panel: 0 0 2px rgba(0,0,0,0.24), 0 4px 8px rgba(0,0,0,0.28);
   --portrait-ink: #11161c;
   --portrait-gloss: 1;
@@ -513,6 +518,7 @@
     --scene-dark: #2b323b;
     --scene-glass: #3d5468;
     --scene-subagent: #6f7884;
+    --scene-lamp: #f2b766;
     --shadow-panel: 0 6px 24px rgba(0,0,0,0.35);
     --portrait-ink: #11161c;
     --portrait-gloss: 1;

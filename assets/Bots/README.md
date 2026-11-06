@@ -18,7 +18,7 @@ There is one drawing per shape for every theme. The theme's `portrait-*` tokens 
 | `portrait-gloss` | 1 shows the highlight and the soft shadow; 0 draws the bot flat (Sublevel). |
 | `portrait-outline` | 1 draws a 1.5 px outline, the inner facet edges of the octa (1 px) and a thin floor line under the bot, in `portrait-ink` (Sublevel); 0 draws none. |
 | `portrait-eyes-square` | 1 draws square eyes (Sublevel); 0 round eyes. |
-| `portrait-ink` | Colour of the eyes and the lines: `#11161c`, or `#102a33` in Sublevel. |
+| `portrait-ink` | Colour of the eyes, the lines and the soft shadow: `#11161c`, or `#102a33` in Sublevel. |
 
 `BotAvatar` draws `AgentOffice.PORTRAITS[shape](color)`. To use a different body colour, pass it: the function calculates the shade and highlight from the colour. Use the portraits at 24 px or larger. Do not add outlines or more colours by hand: set the tokens.
 

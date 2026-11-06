@@ -217,11 +217,12 @@ test('CI checks the DS files with kit/check.py', () => {
   for (const f of ['components/bundle.css', 'components/bundle.js', 'kit/page.html']) assert.ok(line.split(/\s+/).includes(f), `${f} is in the CI check list`);
 });
 
-test('the DS CSS uses tokens for the overlay and the Sublevel scan lines', () => {
+// A theme's own look rules (scan lines, faces) are its data: test/skin.test.mjs checks, the same way for every theme, that each one
+// uses tokens only. No test here names one theme.
+test('the DS CSS uses the scrim token for the overlay', () => {
   const b = read('components/bundle.css');
   assert.match(b, /\.ao-overlay\{[^}]*background:color-mix\(in srgb,var\(--scrim\) 45%,transparent\)/);
   assert.match(b, /\.ao-overlay\.is-inline\{[^}]*background:color-mix\(in srgb,var\(--scrim\) 25%,transparent\)/);
-  assert.match(b, /\.ao-fh\{background-image:repeating-linear-gradient\(0deg,color-mix\(in srgb,var\(--on-floor\) 6%,transparent\)/);
   assert.ok(tokens.some((t) => t.name === 'scrim'), 'scrim is in tokens.json');
 });
 

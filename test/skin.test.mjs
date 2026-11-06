@@ -73,6 +73,32 @@ const CONTRAST_CARD = JSON.parse(read('components/ContrastCheck/preview.html').m
 const modeOf = (id) => AO.MODES.filter((m) => m.theme === id);
 const MODE_FIELDS = { id: 'string', theme: 'string', label: 'string', icon: 'string', dark: 'boolean', retro: 'boolean', wordmark: 'string' };
 const LOOK_FIELDS = Object.keys(AO.office.LOOKS[AO.MODES[0].id]);
+// The declared tables of components/bundle.js: the only code that names a theme or a look id (AO.MODES, the engine's LOOKS and FX,
+// the keys of AO.ICONS). Each runs from its marker to its matching bracket, and is blanked before part 15 reads the code. A named
+// wrapper may default its theme prop (FluentOffice: theme: p.theme || "fluent"); that default is blanked too.
+const TABLES = ['AO.MODES=[', 'LOOKS={', 'var FX={', 'AO.ICONS = {'];
+function withoutTables(text) {
+  let out = text;
+  for (const mark of TABLES) {
+    const at = out.indexOf(mark);
+    if (at < 0) continue;
+    let i = at + mark.length - 1, depth = 0, q = null;
+    for (; i < out.length; i++) {
+      const c = out[i];
+      if (q) { if (c === '\\') i++; else if (c === q) q = null; continue; }
+      if (c === '"' || c === "'" || c === '`') q = c;
+      else if (c === '[' || c === '{') depth++;
+      else if ((c === ']' || c === '}') && --depth === 0) break;
+    }
+    out = out.slice(0, at) + out.slice(at, i + 1).replace(/[^\n]/g, ' ') + out.slice(i + 1);
+  }
+  return out.replace(/(\btheme\s*:\s*p\.theme\s*\|\|\s*)(['"])[a-z-]+\2/g, (m, pre) => pre + ' '.repeat(m.length - pre.length));
+}
+const CODE_TEXT = Object.fromEntries(CODE.map((f) => [f, withoutTables(read(f))]));
+const FIELD_NAMES = new Set([...Object.keys(AO.MODES[0]), ...LOOK_FIELDS]);
+// The bot colors: the colors a bot portrait has for each body color of AO.BODY_COLORS (body, shade, light), without the ink, which
+// is a token. The one prop palette of the drawn parts.
+const BOT_PALETTE = new Set(Array.from(AO.BODY_COLORS).flatMap((c) => Object.values(AO.PORTRAITS).flatMap((p) => p(c, { ink: 'currentColor', gloss: 1, outline: 1, eyesSquare: 1 }).match(/#[0-9a-f]{6}/g) || [])));
 
 // ---- the parts that are not one skin's: the two lists agree, the hooks exist ----
 
@@ -90,12 +116,12 @@ test('every per-theme token has a value for exactly the skins of tokens.json, no
 test('the drawn parts read their skin values from tokens and MODES, and are not files of one skin', () => {
   // portraits: one drawing, styled by the portrait-* tokens of the theme the portrait sits in
   for (const [cls, decl] of [['.ao-pt-gloss', 'opacity:var(--portrait-gloss)'], ['.ao-pt-line', 'opacity:var(--portrait-outline)'], ['.ao-pt-line', 'stroke:var(--portrait-ink)'],
-    ['.ao-pt-eyes', 'fill:var(--portrait-ink)'], ['.ao-pt-square', 'opacity:var(--portrait-eyes-square)'], ['.ao-pt-round', 'opacity:calc(1 - var(--portrait-eyes-square))'], ['.ao-mark', 'border-radius:var(--logo-mark-radius)']]) {
+    ['.ao-pt-eyes', 'fill:var(--portrait-ink)'], ['.ao-pt-shadow', 'fill:var(--portrait-ink)'], ['.ao-pt-square', 'opacity:var(--portrait-eyes-square)'], ['.ao-pt-round', 'opacity:calc(1 - var(--portrait-eyes-square))'], ['.ao-mark', 'border-radius:var(--logo-mark-radius)']]) {
     assert.ok(rules.some((r) => r.file === 'components/bundle.css' && !r.cond && r.sel === cls && r.body.split(';').includes(decl)), `bundle.css: ${cls}{${decl}}`);
   }
   for (const shape of Object.keys(AO.PORTRAITS)) {
     const svg = AO.PORTRAITS[shape]('#4f8cff');
-    for (const cls of ['ao-pt-gloss', 'ao-pt-line', 'ao-pt-eyes', 'ao-pt-round', 'ao-pt-square']) assert.ok(svg.includes(`class="${cls}"`), `PORTRAITS.${shape} has ${cls}`);
+    for (const cls of ['ao-pt-gloss', 'ao-pt-shadow', 'ao-pt-line', 'ao-pt-eyes', 'ao-pt-round', 'ao-pt-square']) assert.ok(svg.includes(`class="${cls}"`), `PORTRAITS.${shape} has ${cls}`);
   }
   assert.deepEqual(Array.from(AO.OFFICE_PICTURES), Object.keys(AO.office.TYPES), 'a picture for every office type (AO.officePicture)');
   for (const gone of ['PORTRAITS_SUBLEVEL', 'THUMBS', 'THUMBS_BY_THEME']) assert.equal(AO[gone], undefined, `AO.${gone}: a per-skin set is gone`);
@@ -200,12 +226,25 @@ for (const [index, skin] of SKINS.entries()) {
     });
 
     part('8. office type pictures', 'components/bundle.js AO.officePicture, tokens.json', (ok) => {
-      const tok = (n) => valueOf(n, id);
+      const read = new Set(), tok = (n) => { read.add(n); return valueOf(n, id); };
+      // A color of a picture comes from a token of the skin, or it is a bot color (a color a bot portrait has for a body color of
+      // AO.BODY_COLORS). To see which colors come from a token, draw the picture again with every token moved by half a channel:
+      // a color that comes from a token (also darkened or lightened) moves with it, a color that comes from anywhere else does not.
+      const moved = (n) => { const v = valueOf(n, id); return /^#[0-9a-f]{6}$/.test(v || '') ? '#' + [1, 3, 5].map((i) => ((parseInt(v.slice(i, i + 2), 16) + 128) % 256).toString(16).padStart(2, '0')).join('') : v; };
+      const colors = (svg) => [...svg.matchAll(/(?:fill|stroke)="([^"]*)"/g)].map((m) => m[1]);
+      const style = { dark: M?.dark, retro: M?.retro };
       for (const type of Object.keys(AO.office.TYPES)) {
-        const svg = AO.officePicture(type, tok, { dark: M?.dark, retro: M?.retro });
+        read.clear();
+        const svg = AO.officePicture(type, tok, style), probe = AO.officePicture(type, moved, style);
+        for (const n of read) ok(flat[n]?.group === 'color' || flat[n]?.group === 'skin', `the ${type} picture reads ${n}, which is not a color token of tokens.json`);
         ok(/^<svg [^>]*viewBox="0 0 320 200">.*<\/svg>$/s.test(svg), `no picture for ${type}`);
         ok(!/[{}]|NaN|undefined/.test(svg), `the ${type} picture has an unread slot`);
-        for (const c of svg.match(/(?:fill|stroke)="[^"]*"/g) || []) ok(/="(#[0-9a-f]{6}|none)"$/.test(c), `the ${type} picture has a color that is not #rrggbb: ${c}`);
+        const a = colors(svg), b = colors(probe);
+        ok(a.length === b.length, `the ${type} picture draws other items when the token values change`);
+        a.forEach((c, i) => {
+          ok(/^(#[0-9a-f]{6}|none)$/.test(c), `the ${type} picture has a color that is not #rrggbb: ${c}`);
+          if (c !== 'none' && c === b[i]) ok(BOT_PALETTE.has(c), `the ${type} picture has ${c}, which is not from a token`);
+        });
         for (const n of [`type-${type}`, 'scene-floor']) ok(svg.includes(`"${tok(n)}"`), `the ${type} picture does not use ${n} (${tok(n)})`);
       }
     });
@@ -214,7 +253,7 @@ for (const [index, skin] of SKINS.entries()) {
       const lk = { ink: valueOf('portrait-ink', id), gloss: valueOf('portrait-gloss', id), outline: valueOf('portrait-outline', id), eyesSquare: valueOf('portrait-eyes-square', id) };
       for (const shape of Object.keys(AO.PORTRAITS)) {
         const svg = AO.PORTRAITS[shape]('#4f8cff', lk);
-        ok(svg.includes(`<g class="ao-pt-line" fill="none" stroke="${lk.ink}"`) && svg.includes(`<g class="ao-pt-eyes" fill="${lk.ink}">`), `the ${shape} portrait does not take portrait-ink`);
+        ok(svg.includes(`<g class="ao-pt-line" fill="none" stroke="${lk.ink}"`) && svg.includes(`<g class="ao-pt-eyes" fill="${lk.ink}">`) && /<ellipse class="ao-pt-shadow" [^>]*fill="([^"]*)"/.exec(svg)?.[1] === lk.ink, `the ${shape} portrait does not take portrait-ink`);
         ok(svg.includes(`<g class="ao-pt-gloss" opacity="${+lk.gloss}">`) && svg.includes(`<g class="ao-pt-square" opacity="${+lk.eyesSquare}">`), `the ${shape} portrait does not take the portrait tokens`);
       }
       const r = parseFloat(valueOf('logo-mark-radius', id)) / 100;
@@ -260,8 +299,10 @@ for (const [index, skin] of SKINS.entries()) {
     });
 
     part('13. family style rules', 'components/bundle.css, public/office.css', (ok) => {
-      // a look rule names the theme family ([data-theme|="family"]), so a variant (family-dark) shares it and nothing is copied
+      // a look rule names the theme family ([data-theme|="family"]), so a variant (family-dark) shares it and nothing is copied;
+      // its colors are tokens, so a look rule holds no literal color
       for (const r of rules) for (const s of r.sel.split(',')) {
+        if (themeSels(s).length && appliesTo(s.trim(), id)) ok(!/#[0-9a-f]{3,8}\b|\b(?:rgb|hsl)a?\(/i.test(r.body), `${r.file}: ${s.trim()} has a literal color; use a token`);
         for (const t of themeSels(s)) {
           ok(!(t.id === id && !t.family), `${r.file}: ${s.trim()} names the theme alone; use [data-theme|="${family(id)}"]`);
           if (t.family && t.id === id) ok(t.id === family(id), `${r.file}: ${s.trim()}: a family selector names the family "${family(id)}"`);
@@ -272,8 +313,8 @@ for (const [index, skin] of SKINS.entries()) {
     part('14. mode control fit', 'components/bundle.css', (ok) => {
       // The office top bar holds the brand, the mode toggle (every MODES entry, then Tour), the view toggle (Building, Floor),
       // with 16 px edges and 10 px gaps. Below a container width the toggle shows icons only. That width must hold the bar with
-      // every label, so a new theme that makes the toggle longer must raise it. Pinned estimate (measured at x1.7.11 with the
-      // building name "agent-office"): a segment is PAD + CHAR x the label length; caps type (a family rule that sets
+      // every label, so a new theme that makes the toggle longer must raise it. Pinned estimate (measured on the office page with
+      // the building name "agent-office"): a segment is PAD + CHAR x the label length; caps type (a family rule that sets
       // text-transform:uppercase on .ao-seg button) is wider. MARGIN is what is left over.
       const label = '.ao-hud-top .ao-seg button:not([aria-pressed="true"]) .ao-seg-l';
       const caps = rules.some((r) => !r.cond && r.sel.split(',').some((s) => /\.ao-seg button$/.test(s.trim()) && themeSels(s).length && appliesTo(s.trim(), id)) && /text-transform:uppercase/.test(r.body));
@@ -285,14 +326,35 @@ for (const [index, skin] of SKINS.entries()) {
       ok(widths.length, 'no icons-only rule for the top bar');
       const at = Math.max(...widths);
       ok(at >= need, `icons only below ${at + 1} px, but the bar with every label needs ${Math.ceil(need)} px (with ${MARGIN} px to spare)`);
+      // On the narrowest page (400 px, 16 px gutters) the toggle shows icons only and the pressed segment keeps its label: a
+      // segment is its padding (10 + 10) and the 14 px icon, with 2 px between segments, and the label (6 px gap) of the longest name.
+      const narrow = rules.some((r) => r.file === 'components/bundle.css' && /^@container \(max-width:(\d+)px\)$/.test(r.cond) && +r.cond.match(/(\d+)px/)[1] >= 400 &&
+        r.sel.split(',').some((s) => /\.ao-seg button:not\(\[aria-pressed="true"\]\) \.ao-seg-l$/.test(s.trim()) && appliesTo(s.trim(), id)) && /position:absolute/.test(r.body));
+      ok(narrow, 'no icons-only rule for the toggle at 400 px');
+      const segs = AO.MODES.length + 1, longest = Math.max(...AO.MODES.map((m) => m.label.length), 'Tour'.length);
+      const small = 8 + segs * (10 + 10 + 14) + (segs - 1) * 2 + 6 + longest * Math.max(T.char, 7);
+      ok(small <= 400 - 2 * 16, `icons only, the toggle needs about ${Math.ceil(small)} px, and the 400 px page has ${400 - 2 * 16} px`);
     });
 
     part('15. code reads flags, not the id', 'components/bundle.js, public/*.js, kit/*.js', (ok) => {
-      const ids = [...new Set([id, look])].map((x) => x.replace(/[-]/g, '\\-'));
-      const q = `(['"\`])(?:${ids.join('|')})\\1`;
-      const re = new RegExp(`(?:===?|!==?)\\s*${q}|${q}\\s*(?:===?|!==?)|case\\s*${q}\\s*:`);
+      // Outside the declared tables, no code names the theme id, the look id or the family: not as a string (a compare, an array,
+      // indexOf, includes, startsWith, a selector), not in a regular expression, not as an object key. A key that is also a field
+      // name of a MODES or LOOKS entry (dark) is the flag, not the id.
+      const ids = [...new Set([id, look, family(id)])].map((x) => x.replace(/-/g, '\\-')).join('|');
+      const keys = [...new Set([id, look, family(id)])].filter((x) => /^[a-z]+$/.test(x) && !FIELD_NAMES.has(x)).join('|');
+      const forms = [
+        ['names it in a string', new RegExp(`(['"\`])(?:${ids})\\1`, 'g')],
+        ['names it in a regular expression', new RegExp(`(?:^|[(=,:!&|?{};[]|\\breturn)\\s*\\/(?:[^/\\n\\\\]|\\\\.)*\\b(?:${ids})\\b(?:[^/\\n\\\\]|\\\\.)*\\/[gimsuy]*`, 'gm')],
+        ...(keys ? [['keys an object by it', new RegExp(`[{,]\\s*(?:${keys})\\s*:`, 'g')]] : []),
+      ];
       for (const f of CODE) {
-        read(f).split('\n').forEach((l, i) => { const m = l.match(re); if (m) ok(false, `${f} line ${i + 1} compares the id with a string: ${l.slice(Math.max(0, m.index - 40), m.index + 40).trim()}`); });
+        const text = CODE_TEXT[f];
+        for (const [what, re] of forms) {
+          for (const m of text.matchAll(re)) {
+            const line = text.slice(0, m.index).split('\n').length;
+            ok(false, `${f} line ${line} ${what}: ${text.slice(Math.max(0, m.index - 40), m.index + m[0].length + 20).replace(/\s+/g, ' ').trim()}`);
+          }
+        }
       }
     });
   });

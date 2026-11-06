@@ -128,7 +128,7 @@ export interface AgentOfficeGlobals {
   /** The one money format of the DS: "$0.26", "<$0.01" for a cost above zero and under one cent. A string passes through. */
   money(n: number | string | null | undefined): string;
   adapters: { mock(opts?: Record<string, unknown>): AgentAdapter; create(o: { name?: string; subscribe?(emit: (ev: AgentEvent) => void, ctx: AdapterContext): void; send?(cmd: AgentCommand, ctx: AdapterContext | null): Promise<unknown> | unknown; dispose?(): void }): AgentAdapter };
-  /** The engine. LOOKS, FX and WINDOWS are the scene parts of each theme (read them; a page that adds a theme adds its entries before mount). */
+  /** The engine. LOOKS, FX and WINDOWS are the scene parts of each theme (read them; do not change them). A Stage stops with an error that names the theme when a theme of MODES has no LOOKS entry or FX value: no theme takes the look of another. */
   office: { mount(el: HTMLElement, opts?: Record<string, unknown>): OfficeApi; LOOKS: Record<Look, LookDef>; FX: { bloom: Record<Look, number>; thr: Record<Look, number>; exp: Record<Look, number>; fog: Record<Look, number>; vig: Record<Look, number>; rad: number; knee: number; pad: number }; WINDOWS: Record<string, (c: CanvasRenderingContext2D, w: number, h: number, rnd: () => number) => void>; [name: string]: unknown };
   [name: string]: unknown;
 }
