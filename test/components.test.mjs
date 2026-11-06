@@ -146,6 +146,25 @@ test('OfficeTypeCard: every office type has a picture in Day, Night and Sublevel
   assert.match(readFileSync(join(root, 'components', 'OfficeTypeCard', 'preview.html'), 'utf8'), /\["security",/);
 });
 
+// #112: every theme of tokens.json has a set, and the type stripe in each picture (its third and fourth path) is the theme's type-* color.
+test('OfficeTypeCard: each theme has a thumbnail set whose type stripe equals its type-* token (#112)', () => {
+  const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+  const bundle = readFileSync(join(root, 'components', 'bundle.js'), 'utf8');
+  const tokens = JSON.parse(readFileSync(join(root, 'tokens.json'), 'utf8'));
+  const flat = []; (function walk(o) { if (Array.isArray(o)) o.forEach(walk); else if (o && typeof o === 'object') { if (o.name && o.value) flat.push(o); Object.values(o).forEach(walk); } })(tokens);
+  const themes = Object.keys(flat.find((t) => t.name === 'type-team').value);
+  assert.deepEqual(themes.sort(), ['dark', 'fluent', 'fluent-dark', 'light', 'sublevel']);
+  const sfx = { light: '', dark: '-night', sublevel: '-sublevel', fluent: '-fluent', 'fluent-dark': '-fluent-dark' };
+  for (const theme of themes) {
+    assert.ok(bundle.includes(`${/^[a-z]+$/.test(theme) ? theme : '"' + theme + '"'}: ${theme === 'light' ? 'AO.THUMBS' : '{'}`), `set for ${theme}`);
+    for (const type of ['team', 'lab', 'studio', 'hq', 'security']) {
+      const svg = readFileSync(join(root, 'assets', 'Offices', `${type}${sfx[theme]}.svg`), 'utf8');
+      const fills = [...svg.matchAll(/<path d="[^"]*" fill="(#[0-9a-f]{6})"/g)].map((m) => m[1]);
+      assert.equal(fills[2], flat.find((t) => t.name === 'type-' + type).value[theme], `${type} stripe in ${theme}`);
+    }
+  }
+});
+
 // Review M6: at 400 px the Security wall was a 172 px strip between the floor list and the room card. While a Security screen
 // is in focus at 820 px and below, the page hides those two (as has-panel hides the right column; the Decisions inbox stays),
 // frames the screen again, and the look bar shows the open requests, so an approval never hides.

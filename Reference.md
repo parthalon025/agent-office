@@ -187,7 +187,7 @@ A theme can be a variant of another: its id is `<family>-<variant>` (Fluent Dark
 | `Notifier` | Daily | Alerts for a person who works in another tab. |
 | `OfficeScene` | 3D office | The 3D office itself and the main component of the system. |
 | `OfficeTypeBadge` | Office types | A chip that names an office type with its icon and type color. |
-| `OfficeTypeCard` | Office types | A flat picture and badge for one office type. The picture comes from `THUMBS_BY_THEME[theme]`. Fluent and Fluent Dark have no set yet: Fluent shows the Day set (`THUMBS`) and Fluent Dark, a dark theme, the Night set, with the type colors of that set in the picture (agent-office #112). |
+| `OfficeTypeCard` | Office types | A flat picture and badge for one office type. The picture comes from `THUMBS_BY_THEME[theme]`. Every theme has its own set (Fluent and Fluent Dark too), and the stripe in the picture is the `type-*` color of that theme. |
 | `Panel` | Surfaces | The glass surface for every HUD block over the 3D scene. |
 | `PlanCard` | Orchestration | The orchestrator's plan: the goal, each step with its status and owner, and steps done over total. |
 | `RichText` | Conversation | Safe Markdown for one chat message. |
