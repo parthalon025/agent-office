@@ -104,12 +104,37 @@
   // The Manager board (#154): who plans a goal (the source) and the state of a plan step. Words are the board's only copy.
   var PLAN_SOURCE = { office: 'Office', paperclip: 'Paperclip' };
   var PLAN_STEP = { pending: 'Waiting', working: 'Working', finished: 'Done', error: 'Error', unknown: 'Unknown' }; // unknown: a state the source has no word for (never done)
+  var GOAL_WORD = { planning: 'Planning', 'awaiting-approval': 'Waiting for your approval', running: 'Running', finished: 'Done', blocked: 'Blocked', stopped: 'Stopped', failed: 'Failed', cancelled: 'Cancelled' };
   var plan = {
     sourceWord: function (kind) { return PLAN_SOURCE[kind] || ''; },
     stepState: function (state) { return PLAN_STEP[state] ? state : 'pending'; },
     stepWord: function (state) { return PLAN_STEP[state] || PLAN_STEP.pending; },
     notConnected: 'Not connected',
-    notConnectedReason: function (why) { return 'Not connected.' + (why ? ' ' + why : '') + ' The steps are the last ones read.'; }
+    notConnectedReason: function (why) { return 'Not connected.' + (why ? ' ' + why : '') + ' The steps are the last ones read.'; },
+    // The state of an office goal (manager.mjs status). A Paperclip plan has none of its own: its steps carry the state.
+    goalWord: function (status) { return status === 'not-connected' ? 'Not connected' : GOAL_WORD[status] || ''; },
+    readOnlyNote: function (kind) { return kind === 'paperclip' ? 'Read only. Paperclip plans this work.' : ''; },
+    unreadable: function (word) { return 'The ' + word + ' plan could not be read. It is not shown.'; },
+    // One view of the snapshot's plans field (the Manager panel, the room wall, Ctrl+K). building: only that building's goals.
+    board: function (snap, building) {
+      var plans = (snap && snap.plans) || [], un = (snap && snap.unreadable) || [];
+      var groups = plans.filter(function (p) { return !building || p.building === building; }).map(function (p) {
+        var steps = p.steps || [], note = p.frozen ? p.reason : (p.source === 'paperclip' ? plan.readOnlyNote(p.source) : (p.reason || ''));
+        return { id: p.id, building: p.building, source: p.source, sourceWord: p.sourceWord, goal: p.goal, readOnly: p.source === 'paperclip', frozen: !!p.frozen, status: p.status,
+          stateWord: plan.goalWord(p.status), note: note, steps: steps, total: steps.length, done: steps.filter(function (x) { return x.state === 'finished'; }).length };
+      });
+      return { groups: groups, empty: !groups.length && !un.length, unreadable: un.map(function (u) { return plan.unreadable(u.word); }) };
+    },
+    // What waits for the owner: an office goal that needs approval, an office step that failed. Paperclip's steps are not the office's to answer.
+    waits: function (snap) {
+      var out = [];
+      ((snap && snap.plans) || []).forEach(function (p) {
+        if (p.source !== 'office') return;
+        if (p.status === 'awaiting-approval') out.push({ id: p.id, building: p.building, text: 'Approve the plan: ' + clip(p.goal, 60), kind: 'approve' });
+        (p.steps || []).forEach(function (x) { if (x.state === 'error' && p.status !== 'cancelled') out.push({ id: p.id, building: p.building, step: x.id, text: 'Step failed: ' + clip(x.title, 60), kind: 'retry' }); });
+      });
+      return out;
+    }
   };
   // The model lane of a session (#88): Haiku, Sonnet, Opus or Fable, from its model id; '' for another model.
   function laneOf(model) {

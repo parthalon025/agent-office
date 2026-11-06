@@ -67,7 +67,7 @@
   function isBrowser(c) { return /playwright|__browser_/i.test(c.name); }
 
   // What a room board shows, from the sessions in the room. pin: { text, by } or null.
-  function boardData(info, tree, pin) {
+  function boardData(info, tree, pin, goals) {
     var ss = info.sessions || [], calls = [];
     ss.forEach(function (s) { (s.calls || []).forEach(function (c) { calls.push(Object.assign({ who: s.name }, c)); }); });
     calls.sort(function (a, b) { return a.t - b.t; });
@@ -84,7 +84,8 @@
       recent: calls.filter(function (c) { return !isBrowser(c); }).slice(-6),
       tree: tree || null,
       touched: touched,
-      pin: pin && pin.text ? { text: String(pin.text), by: String(pin.by || 'an agent') } : null
+      pin: pin && pin.text ? { text: String(pin.text), by: String(pin.by || 'an agent') } : null,
+      goals: (goals || []).slice(0, 2).map(function (g) { return { source: g.sourceWord, goal: g.goal, state: g.stateWord, done: g.done, total: g.total, frozen: !!g.frozen, readOnly: !!g.readOnly }; })   // the Manager board's goals of this building (#157)
     };
   }
 
@@ -199,6 +200,18 @@
       c.font = '500 25px ' + sans;
       var stepTxt = cur ? 'Now: ' + cur.text : next ? 'Next: ' + next.text : 'All steps are done.';
       say(clipW(c, stepTxt, W2), X0, y);
+      y += 38;
+    } else if (d.goals.length) {
+      // The Manager board (#157): the goal of this building, who plans it, and how far it is. A plan that is not connected is said so.
+      var gl = d.goals[0];
+      c.font = '600 20px ' + sans; say('GOAL', X0, y + 3, dim);
+      c.font = '500 26px ' + sans; say(clipW(c, gl.source + ' · ' + gl.done + ' of ' + gl.total + ' steps done', W2 - 78), X0 + 78, y);
+      y += 38;
+      c.fillStyle = mix(slate, chalk, 0.14); rr(c, X0, y, W2, 18, 9); c.fill();
+      if (gl.done && gl.total) { c.fillStyle = tone(gl.frozen ? 'resting' : 'working'); c.globalAlpha = 0.9; rr(c, X0, y, Math.max(18, W2 * gl.done / gl.total), 18, 9); c.fill(); c.globalAlpha = 1; }
+      y += 30;
+      c.font = '500 25px ' + sans;
+      say(clipW(c, (gl.state ? gl.state + '. ' : gl.readOnly ? 'Read only. ' : '') + gl.goal, W2), X0, y);
       y += 38;
     } else {
       var work = d.sessions.filter(function (s) { return s.status === 'working'; }).length, wait = d.sessions.filter(function (s) { return s.status === 'waiting'; }).length;
@@ -353,7 +366,7 @@
   }
 
   // Attach boards to a mounted office.
-  // o: { room(roomId) -> info, tree(root) -> Promise, note(roomId) -> text, stats(roomId) -> numbers, pin(roomId) -> { text, by },
+  // o: { room(roomId) -> info, tree(root) -> Promise, note(roomId) -> text, stats(roomId) -> numbers, pin(roomId) -> { text, by }, goals(roomId, building) -> the Manager board goals (OfficeVocab.plan.board groups),
   //      state(roomId) -> the worst state of its desks for the door sign (#92),
   //      onOpen(roomId, kind: 'board' | 'notes' | 'stats'), onDoor(roomId), host? }
   //   The page learns from the host (host.onFocus) when the screen in focus changes (look, back).
@@ -564,7 +577,7 @@
             if (pr && pr.then) pr.then(function (t) { trees[root] = t; refresh(); }, function () { trees[root] = { total: 0, entries: [], note: 'No file list' }; refresh(); });
           }
         }
-        var d = boardData(info, root ? trees[root] : null, o.pin ? o.pin(bd.roomId) : null);
+        var d = boardData(info, root ? trees[root] : null, o.pin ? o.pin(bd.roomId) : null, o.goals ? o.goals(bd.roomId, info.place ? info.place.repo : '') : null);
         var sig = skinVersion + K.look + JSON.stringify(d);
         if (sig === bd.sig) return;
         bd.sig = sig; bd.data = d;

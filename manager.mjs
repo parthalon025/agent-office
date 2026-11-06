@@ -44,7 +44,7 @@ import './public/vocab.js';
 export const DEFAULT_LIMITS = { maxSteps: 12, maxHops: 4, maxMessages: 30, maxAttempts: 3, boardMax: NOTES_MAX - 100 }; // boardMax: the board text must fit a notes board
 const STATUS_TO_DS = { pending: 'resting', working: 'working', finished: 'finished', error: 'error' };
 const MARK = { pending: '[ ]', working: '[~]', finished: '[x]', error: '[!]' };
-const WORD = { planning: 'Planning', 'awaiting-approval': 'Waiting for your approval', running: 'Running', finished: 'Done', blocked: 'Blocked', stopped: 'Stopped', failed: 'Failed', cancelled: 'Cancelled' };
+const WORD = { planning: 1, 'awaiting-approval': 1, running: 1, finished: 1, blocked: 1, stopped: 1, failed: 1, cancelled: 1 }; // the goal states; their words are OfficeVocab.plan.goalWord
 const GOAL_MAX = 2000; // a longer goal is refused (never planned from a cut text); the board shows 300
 const BOARD_GOAL = 300, BOARD_STEP = 240, BOARD_OWNER = 40; // 12 steps of 240 and a goal of 300 leave room for status, reason and spend
 const clip = (s, n) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
@@ -70,7 +70,7 @@ export function createManager(deps = {}) {
   /** The board text: goal and status first, one line per step, then what the user must know (reason, waiting, spend). The plural of steps follows format.js `plural`. */
   function boardText(g) {
     const done = g.steps.filter((s) => s.status === 'finished').length;
-    const head = [`Goal: ${clip(g.goal, BOARD_GOAL)}`, `${WORD[g.status] || g.status}${g.steps.length ? `. ${done} of ${g.steps.length} ${g.steps.length === 1 ? 'step' : 'steps'} done.` : '.'}`];
+    const head = [`Goal: ${clip(g.goal, BOARD_GOAL)}`, `${globalThis.OfficeVocab.plan.goalWord(g.status) || g.status}${g.steps.length ? `. ${done} of ${g.steps.length} ${g.steps.length === 1 ? 'step' : 'steps'} done.` : '.'}`];
     const tail = [];
     if (g.reason) tail.push(clip(g.reason, BOARD_STEP));
     if (g.waitingFor) tail.push('The next step waits for a free agent.');

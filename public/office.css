@@ -74,6 +74,9 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 /* past sessions and schedules */
 .past { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
 .past-row { display: flex; justify-content: space-between; align-items: center; gap: var(--space-3); padding: var(--space-2) var(--space-3); background: var(--chip); border: 1px solid var(--line); border-radius: var(--radius-md); }
+.manager-goal { display: flex; flex-direction: column; gap: var(--space-2); padding-bottom: var(--space-3); border-bottom: 1px solid var(--line); }
+.manager-goal.is-frozen { opacity: 0.85; }
+.manager-warn { color: var(--ink); }
 .past-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .past-clip { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
 .past-title { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
