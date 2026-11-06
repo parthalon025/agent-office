@@ -47,6 +47,25 @@ It is built on the Agent Office design system (x1.7.12), which lives in this fol
 
 There is nothing to install. The server has no dependencies. The page needs no internet access: React and the fonts come with the office (`public/vendor`, with their versions and licenses in `public/vendor/README.md`).
 
+## Screenshots
+
+The same office in three themes. Each theme shows the building (one floor per branch) and a floor with its room, desks and boards. The Fluent themes look alike with other tokens.
+
+**Day**
+
+![The building in Day](docs/img/day-building-1360.png)
+![A room in Day](docs/img/day-room-1360.png)
+
+**Night**
+
+![The building in Night](docs/img/night-building-1360.png)
+![A room in Night](docs/img/night-room-1360.png)
+
+**Sublevel**
+
+![The building in Sublevel](docs/img/sublevel-building-1360.png)
+![A room in Sublevel](docs/img/sublevel-room-1360.png)
+
 ## Start it
 
 ```
@@ -328,7 +347,7 @@ What does not work from the remote address: hooks, MCP and the OpenClaw gate. Ag
 
 ## Troubleshooting
 
-The office knows six kinds of session. A session **in the office** runs `claude -p` with a pipe. A **terminal session** is one you start yourself with the office settings. A **local agent** runs a model on this PC through Ollama or LM Studio. An **Agent Framework team** runs a team of agents on such a model. A **cloud agent** runs in your Azure account (Azure AI Foundry or Copilot Studio). Find your kind below.
+The office knows several kinds of session, including the ACP agents and OpenClaw below. A session **in the office** runs `claude -p` with a pipe. A **terminal session** is one you start yourself with the office settings. A **local agent** runs a model on this PC through Ollama or LM Studio. An **Agent Framework team** runs a team of agents on such a model. A **cloud agent** runs in your Azure account (Azure AI Foundry or Copilot Studio). Find your kind below.
 
 ### Any session
 
@@ -391,6 +410,24 @@ The office knows six kinds of session. A session **in the office** runs `claude 
 - **Not ready: "Sign in to GitHub Copilot".** Run `copilot login` in a terminal and finish the sign-in. Click **Check again** after 10 seconds.
 - **Not ready: "Copilot CLI is still starting".** A first start after a restart of the PC can take more than 10 seconds. Click **Check again** after a few seconds. A check with no answer in 60 seconds says "did not answer the ACP handshake": then run `copilot` in a terminal and check that it starts.
 - **The feed says "Copilot CLI read ... without asking the office" or "ran a command without asking the office".** Copilot did a call it approves by itself (a read in its folder, a read-only command, a hook or an allowed URL). Check the call in the Terminal tab of its desk monitor. Remove the rule or the hook in Copilot's settings if you want it to ask.
+
+### ACP agents (Hermes Agent and DeepSeek Harness)
+
+- **Not ready: the office cannot find the program, or names a `.cmd` file.** The office starts `.exe` files only. Install the native program and put it on the PATH, then restart the office. DeepSeek Harness from npm is a `.cmd` install, so the office cannot start it yet.
+- **Not ready: "did not answer the ACP handshake".** The program started but does not speak ACP. A `hermes` program can also be another tool with the same name. Run `hermes acp` in a terminal and check it.
+- **Not ready: "is not signed in", or a turn fails with "is not signed in".** Sign in with the agent itself, then click **Check again** or send the message again.
+- **Not ready: the agent runs tool calls without asking the office.** Hermes Agent is partly supervised. Turn on **Hermes** on the Agents screen of the Security room (see **Partly supervised: Hermes Agent**).
+- **Open session answers "This agent does not report cost. Run it?"** This is a question, not an error. Choose Run, or set **Run without cost reports** on the Security room wall.
+- **A card disappears and the feed says the agent moved on.** Hermes Agent waits 60 s for an answer to an edit. The office dropped the card and declined the edit. Ask the agent to try again and answer sooner.
+- **Open is refused with "own room" text.** Hermes Agent opens only in a new git worktree. Turn off **Use this folder**, and use a folder that is in git.
+
+### OpenClaw
+
+- **"Not ready: start the OpenClaw Gateway".** Nothing listens on `127.0.0.1:18789`. Start the Gateway yourself (the office never does). If it uses another loopback port, set `OFFICE_OPENCLAW_PORT` before `npm start`.
+- **Not ready: the version is too old or unknown.** Use OpenClaw v2026.10.10 or later, as a native `openclaw.exe`. An npm install (`openclaw.cmd`) is not accepted.
+- **"OpenClaw cannot start: ..." with commands.** A setting in the OpenClaw config is off or unreadable: `tools.fs.workspaceOnly`, `tools.exec.host`, or the `agent-office` plugin (on, not denied, `tokenFile` is this office's). Run the commands the message gives. The office reads the config and never writes it. Nothing started yet, so no worktree was made.
+- **The session ends and the feed says the plugin "did not hold this call".** The plugin is not loaded. Restart the Gateway after `openclaw plugins enable agent-office`, and check the token file path in the plugin config.
+- **Every call is denied.** The plugin cannot reach the office: it must run, and `tokenFile` must name this office's token file (`.office-token-<port>` on a port other than 4317).
 
 ### Terminal sessions
 
