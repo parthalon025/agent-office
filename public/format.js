@@ -1,4 +1,4 @@
-/* Agent Office for Claude Code x0.1: display formats.
+/* Agent Office for Claude Code x0.2: display formats.
    One home for how the page and the server write money, counts and folder paths, so every surface reads the same.
    Plain script, no I/O, no timers. The page loads it as a script (window.OfficeFormat). The server and the tests
    import it for its side effect and read globalThis.OfficeFormat.

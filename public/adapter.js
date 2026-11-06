@@ -1,4 +1,4 @@
-/* Agent Office adapter x0.1 for Claude Code (bridge pattern, hooks in, process control out).
+/* Agent Office adapter x0.2 for Claude Code (bridge pattern, hooks in, process control out).
    The server (server.mjs) turns Claude Code hook events into session snapshots and streams them
    over SSE. This file is the browser side: the event stream, the REST calls for DS commands and the
    window.officeAdapter facade. The snapshot store and the per-building adapter are in building.js, where the

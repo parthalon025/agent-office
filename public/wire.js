@@ -1,4 +1,4 @@
-/* Agent Office for Claude Code x0.1: the /events wire format.
+/* Agent Office for Claude Code x0.2: the /events wire format.
    The server sends the whole snapshot when a page connects, then one patch per broadcast with only what changed.
    The snapshot is lean: per session only the fields the page reads, with caps. Full data of one session is on
    request (GET /api/session?uid=). Both ends use this one file, so they never disagree. Plain script, no I/O, no

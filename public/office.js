@@ -1,4 +1,4 @@
-/* Agent Office for Claude Code x0.1: page script.
+/* Agent Office for Claude Code x0.2: page script.
    Mounts the DS office, the control strip, the dialogs (open, past sessions, schedules, changes, hooks), and the pinned
    screens (#89): the chat and terminal on a desk monitor and the changes on a room's wall screen, laid over the 3D scene. */
 (function () {

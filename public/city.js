@@ -1,4 +1,4 @@
-/* Agent Office for Claude Code x0.1: the city.
+/* Agent Office for Claude Code x0.2: the city.
    Every git repository is a building on one plaza: a floor per branch, a pip per session, a beacon
    when a session needs you. Built on the DS stage (AgentOffice.office.Stage), so lights, theme, post
    effects and every color come from the DS tokens. Drag to turn, scroll or pinch to zoom, click a
@@ -235,7 +235,7 @@
       var r = Math.floor(i / cols), c = i % cols;
       return [(c - (cols - 1) / 2) * PITCH, (r - (Math.ceil(slots.length / cols) - 1) / 2) * PITCH];
     }
-    // the page version is in the title ("Agent Office x0.1"); no second copy of it lives in the code
+    // the page version is in the title ("Agent Office x0.2"); no second copy of it lives in the code
     function pageVersion() {
       var m = /x\d+(?:\.\d+)*/.exec(typeof document !== 'undefined' ? document.title : '');
       return m ? m[0] : '';
@@ -251,7 +251,7 @@
         g.strokeStyle = tok['line'] || tok['muted']; g.lineWidth = 3; g.stroke();
         g.textBaseline = 'middle'; g.fillStyle = tok['ink']; g.font = '600 62px ' + (f.sans || 'sans-serif');
         g.fillText(name.length > 15 ? name.slice(0, 14) + '…' : name, 32, 62);
-        // the page version (x0.1, from the title) sits small and right-aligned on the count line; the counts shrink to leave it room
+        // the page version (x0.2, from the title) sits small and right-aligned on the count line; the counts shrink to leave it room
         var mono = f.mono || 'monospace', ver = pageVersion(), vw = 0;
         g.fillStyle = tok['muted'];
         if (ver) { g.font = '500 26px ' + mono; vw = g.measureText(ver).width + 16; }

@@ -1,4 +1,4 @@
-/* Agent Office for Claude Code x0.1: snapshot store and building adapters.
+/* Agent Office for Claude Code x0.2: snapshot store and building adapters.
    Two parts, no DOM, no EventSource, no network, no timers of its own (they are injected). The page loads it as a
    script (window.OfficeBuilding). The tests import it for its side effect and read globalThis.OfficeBuilding.
 

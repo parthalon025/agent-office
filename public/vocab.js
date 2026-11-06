@@ -1,4 +1,4 @@
-/* Agent Office for Claude Code x0.1: session vocabulary.
+/* Agent Office for Claude Code x0.2: session vocabulary.
    One home for the words and rules that every surface shares: the status key and word of a session, its task
    line, the kind and short name of a tool, the status of a to-do, and the figures of a room.
    Plain script, no I/O, no timers. The page loads it as a script (window.OfficeVocab). The server and the tests

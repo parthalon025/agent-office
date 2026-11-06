@@ -1,4 +1,4 @@
-# Agent Office for Claude Code x0.1
+# Agent Office for Claude Code x0.2
 
 [![CI](https://github.com/parthalon025/agent-office/actions/workflows/ci.yml/badge.svg)](https://github.com/parthalon025/agent-office/actions/workflows/ci.yml)
 

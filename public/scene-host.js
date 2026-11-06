@@ -1,4 +1,4 @@
-/* Agent Office for Claude Code x0.1: scene host.
+/* Agent Office for Claude Code x0.2: scene host.
    The one module that reads the DS stage (office.inspect().stage) for the page's 3D additions. Board,
    terminal, street and bird decor are adapters: they ask the host for the shown floor and view, the room
    groups by DS room id, a rebuild event, a per-frame tick, one pick and the pointer cursor.
