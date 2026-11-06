@@ -367,6 +367,42 @@ test('a new schedule gets the default spend limit; the user can change or clear 
   await call('/api/settings/spend', { limit: 2 });
 });
 
+test('#102: a schedule keeps its agent kind; a free kind has no limit; a kind that needs a model needs one; an unknown kind is 400', { skip: SKIP }, async () => {
+  const sched = (extra) => call('/api/schedule/save', { name: 'k', prompt: 'p', cwd: work, ...extra });
+  const old = await sched({});
+  assert.equal(old.json.provider, 'claude-code', 'no provider: Claude Code');
+  assert.equal(old.json.maxBudget, 2, 'its limit rule is unchanged');
+  const free = await sched({ provider: 'ollama', model: 'fake-model', maxBudget: 9, permissionMode: 'plan' });
+  assert.equal(free.status, 200, JSON.stringify(free.json));
+  assert.deepEqual([free.json.provider, free.json.model, free.json.maxBudget, free.json.permissionMode], ['ollama', 'fake-model', 0, ''], 'a free kind saves no limit and no mode');
+  assert.ok((await info()).schedules.some((s) => s.id === free.json.id && s.provider === 'ollama'), 'info carries provider');
+  assert.equal((await sched({ provider: 'ollama' })).status, 400, 'a kind that needs a model needs one');
+  assert.equal((await sched({ provider: 'nope' })).status, 400, 'unknown kind');
+});
+
+test('#102: a schedule of a free kind runs with its kind and model; a kind that is not ready starts nothing and the schedule keeps the need until a good run', { skip: SKIP }, async () => {
+  const ok = (await call('/api/schedule/save', { name: 'nightly-local', prompt: 'p', cwd: work, provider: 'ollama', model: 'fake-model' })).json;
+  const run = await call('/api/schedule/run', { id: ok.id });
+  assert.equal(run.status, 200, JSON.stringify(run.json));
+  const s = await sessionOf(run.json.uid);
+  assert.deepEqual([s.provider, s.model, s.budget ?? null], ['ollama', 'fake-model', null], 'its own kind, model, no spend limit');
+  const bad = (await call('/api/schedule/save', { name: 'nightly-lm', prompt: 'p', cwd: work, provider: 'lmstudio', model: 'm' })).json;
+  const before = (await call('/api/history', {})).json.sessions.length;
+  const r = await call('/api/schedule/run', { id: bad.id });
+  assert.equal(r.json.uid, null, 'no session starts');
+  let row = (await info()).schedules.find((x) => x.id === bad.id);
+  assert.ok(row.lastError && row.lastError.length > 0, 'the need text is the last error: ' + JSON.stringify(row));
+  assert.equal((await call('/api/history', {})).json.sessions.length, before);
+  await call('/api/schedule/save', { ...row, model: 'm' });
+  row = (await info()).schedules.find((x) => x.id === bad.id);
+  assert.ok(!row.lastError, 'saving clears it');
+  await call('/api/schedule/run', { id: bad.id });
+  await call('/api/schedule/save', { ...row, provider: 'ollama', model: 'fake-model' });
+  await call('/api/schedule/run', { id: bad.id });
+  row = (await info()).schedules.find((x) => x.id === bad.id);
+  assert.ok(!row.lastError, 'a good run leaves none');
+});
+
 test('a Claude Code reopen that fails before init keeps the past session in history and shows the failure', { skip: SKIP }, async () => {
   const before = (await call('/api/history', {})).json.sessions.map((x) => x.uid);
   assert.ok(before.includes(PAST_UID), 'the seeded past session is listed');

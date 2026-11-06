@@ -83,7 +83,7 @@ test('office.js: no dock and no welcome card; the Reception holds the office act
 test('office.js: Needs you in the scene top bar and the city panel: the Notifier count, and one tap goes to the oldest request', () => {
   assert.match(office, /waitingCount: needs\.length, onWaiting: goOldest,/, 'the scene: the page total and the oldest request');
   assert.match(office, /h\(A\.Notifier, \{ enabled: alertsOn\(\), count: needs\.length,/, 'the same count as the tab title');
-  assert.match(office, /function goOldest\(\) \{ var r = needs\[0\]; if \(r\) openDesk\(r\.uid, 'chat'\); \}/, 'the oldest request opens its desk screen (#89)');
+  assert.match(office, /function goOldest\(\) \{\s+var r = needs\[0\];\s+if \(!r\) return;\s+if \(deskRef\.current && r\.id && cur2\.view === 'office' && deskRef\.current\.show\(r\.id, false\)\) return;\s+openDesk\(r\.uid, 'chat'\);/, 'the oldest request: the camera looks at its paper or note (#90), else the scene goes to its desk (#89)');
   assert.match(office, /h\(CityView, \{ key: 'city', shown: shown, onEnter: enter, needs: needs\.length, onNeeds: goOldest, onHq: function \(\) \{ setDlg\(\{ name: 'hq' \}\); \} \}\)/, 'the city too');
   assert.match(office, /p\.needs > 0 \? h\(A\.Button, \{ variant: 'emphasis', icon: 'waiting', className: 'city-needs',[^\n]*onClick: p\.onNeeds \}, 'Needs you · ' \+ p\.needs\)/);
   assert.match(css, /@media \(pointer: coarse\) \{ \.city-needs \{ min-height: 44px; \} \}/);
@@ -149,7 +149,6 @@ test('office.js: pinned screens replace the terminal and changes panels, and eve
   assert.doesNotMatch(js, /TerminalPanel|terminal-panel/, 'no terminal side panel');
   assert.doesNotMatch(css, /\.terminal-panel/, 'no terminal side panel style');
   const fn = (name) => { const at = js.indexOf('function ' + name + '('); assert.ok(at >= 0, name); return js.slice(at, js.indexOf('\n  }\n', at)); };
-  assert.match(fn('DeskScreen'), /h\(RequestBar, \{ session: s/, 'the desk screen shows the requests of its session');
   assert.match(fn('DeskScreen'), /h\(Bezel, \{ inline: true, count: p\.waiting/, 'the desk screen has the bezel count');
   assert.match(fn('ChangesScreen'), /h\(Bezel, \{ inline: true, count: p\.waiting/, 'the changes screen has the bezel count');
   assert.match(js, /layer && !pinned && hostRef\.current \? h\(Bezel, \{ host: hostRef\.current/, 'a screen that is not pinned has the bezel count too');
@@ -165,16 +164,15 @@ test('office.js: pinned screens replace the terminal and changes panels, and eve
 test('office.js and office.css: on the desk screen the requests come first, and on a small screen they take the screen (review 89)', () => {
   const js = readFileSync(join(pub, 'office.js'), 'utf8'), css = readFileSync(join(pub, 'office.css'), 'utf8');
   const at = js.indexOf('function DeskScreen('), desk = js.slice(at, js.indexOf('\n  }\n', at));
-  const head = desk.indexOf("h('div', { className: 'pin-head' }"), bar = desk.indexOf('h(RequestBar, { session: s'), tabs = desk.indexOf('h(A.Tabs, {');
-  assert.ok(head >= 0 && bar > head && tabs > bar, 'head, then the requests, then the tabs (DOM order is the reading and focus order)');
-  assert.match(desk, /className: 'pin pin-desk' \+ \(small \? ' is-small' : ''\) \+ \(asks \? ' has-asks' : ''\)/, 'small and has-asks are React state');
+  const head = desk.indexOf("h('div', { className: 'pin-head' }"), tabs = desk.indexOf('h(A.Tabs, {');
+  assert.ok(head >= 0 && tabs > head, 'head, then the tabs (DOM order is the reading and focus order)');
+  assert.doesNotMatch(js, /RequestBar/, 'the request bar is gone (#90): a request is a paper or a note on the desk');
+  assert.match(desk, /className: 'pin pin-desk' \+ \(small \? ' is-small' : ''\), hidden/, 'small is React state');
   assert.doesNotMatch(js, /classList\.toggle\('is-small'/, 'no class set by hand: a render that changes className would drop it');
   assert.doesNotMatch(css, /\.pin-desk\.is-small \.pin-head \{ flex-wrap: nowrap; \}/, 'a head too narrow wraps, never clips Back');
   assert.match(css, /\.pin-desk\.is-small \.pin-head > \* \{ flex: none; \}/, 'its buttons keep their size; the name gives way');
   assert.match(desk, /h\(Bezel, \{ inline: true, count: p\.waiting, onGo: p\.onGo, compact: small \}\)/, 'a small head shows the count, not the words');
   assert.match(js, /compact \? 'Needs you · ' \+ p\.count \+ '\. Go to the oldest request' : null/, 'the compact bezel keeps its whole name as its label');
-  assert.match(css, /\.pin-desk\.is-small\.has-asks \.asks \{ flex: 1 1 auto; min-height: 0; max-height: none; border-bottom: 0; \}/, 'no cap on a small screen');
-  assert.match(css, /\.pin-desk\.is-small\.has-asks \.ao-tabs \{ display: none; \}/, 'the tabs wait while a request is open');
   assert.match(js, /\.term-input, \.term-note, \.bezel, \.board-b > \.inline-actions,/, 'the toast stack keeps off the terminal note, the bezel and the room panel actions');
 });
 
@@ -201,6 +199,6 @@ test('office.js: the screen waits are deadlines in time, a pinned screen hides t
   assert.doesNotMatch(js, /\+\+w\.n > 300/, 'no count of frames');
   assert.equal((js.match(/Date\.now\(\) > w\.until/g) || []).length, 2, 'the changes and the desk wait end on a deadline');
   assert.match(js, /var hideHud = secLook \|\| pinned;/, 'a pinned screen takes the same columns away as a Security screen');
-  assert.match(js, /el\.querySelector\('\.asks button'\) \|\| el\.querySelector\('#pin-chat-input/, 'an open request takes focus before the message box');
+  assert.match(js, /el\.querySelector\('#pin-chat-input, \.term-field'\)/, 'the message box takes focus');
   assert.match(js, /bezelAt\(r, p\.host\.free\(\), 18\)/, 'the bezel is kept inside host.free()');
 });

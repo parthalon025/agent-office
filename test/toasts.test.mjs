@@ -205,7 +205,7 @@ test('the stack is placed by office.js at every width: no width rule moves it, a
   assert.match(js, /OfficeToasts\.place\(/);
   const keep = /var KEEP = '([^']*)'/.exec(js)?.[1] || '';
   // the pinned screens (#89): their head (Back, the bezel count), tabs and message boxes, and the bezel count of any screen in focus
-  for (const sel of ['.ao-hud-top', '.ao-hud-left', '.ao-hud-zoom', '.tour-card', '.asks', '.term-input', '.pin-head', '.pin .ao-tablist', '.pin-input', '.bezel', '.ao-hud-chat .ao-act', '.ao-hud-chat .ao-composer']) {
+  for (const sel of ['.ao-hud-top', '.ao-hud-left', '.ao-hud-zoom', '.tour-card', '.needs-go', '.term-input', '.pin-head', '.pin .ao-tablist', '.pin-input', '.bezel', '.ao-hud-chat .ao-act', '.ao-hud-chat .ao-composer']) {
     assert.ok(keep.split(',').map((x) => x.trim()).includes(sel), 'KEEP lists ' + sel);
   }
   const z = (sel) => /calc\(var\(--z-dialog\) \+ (\d+)\)/.exec(css.slice(css.indexOf(sel + ' {')))?.[1];

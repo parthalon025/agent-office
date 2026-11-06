@@ -247,3 +247,25 @@ test('lobby: the memo, the directory board and the nameplate read in every theme
     assert.match(body, /FACES\.(memo|directory|plate)/, fn);
   }
 });
+
+// #90: the desk objects' painted faces (public/desk.js FACES): the approval paper, its Approve stamp, the question note and the
+// pause key. Every text at 4.5:1 on its face, the bands (the strip on top of a paper) at 3:1.
+test('desk: the approval paper, the stamps, the question note and the pause key read in every theme (desk.js FACES)', async () => {
+  await import('../public/scene-host.js'); await import('../public/desk.js');
+  const F = globalThis.OfficeDesk.pure.FACES;
+  each((T, th) => {
+    atLeast('paper text', 4.5, T(F.paper.ink), T(F.paper.face), th);
+    atLeast('paper band', 3, T(F.paper.band), T(F.paper.face), th);
+    atLeast('paper high-risk band', 3, T(F.paper.high), T(F.paper.face), th);
+    atLeast('Approve stamp', 4.5, T(F.stamp.ink), T(F.stamp.face), th);
+    atLeast('note text', 4.5, T(F.note.ink), T(F.note.face), th);
+    atLeast('note band', 3, T(F.note.band), T(F.note.face), th);
+    atLeast('pause key', 4.5, T(F.key.ink), T(F.key.face), th);
+  });
+  const src = read('public/desk.js');
+  for (const fn of ['stamp', 'paintPaper', 'paintNote', 'paintKey']) {
+    const at = src.indexOf('function ' + fn + '('), body = src.slice(at, src.indexOf('\n    }\n', at));
+    assert.ok(body.length > 40, fn);
+    assert.doesNotMatch(body, /tok\[['"]|tok\.[a-z]|#[0-9a-f]{3}\b/i, fn + ' paints with FACES only');
+  }
+});

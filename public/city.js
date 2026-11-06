@@ -250,11 +250,12 @@
         g.beginPath(); g.moveTo(r, 4); g.arcTo(w - 4, 4, w - 4, hh - 4, r); g.arcTo(w - 4, hh - 4, 4, hh - 4, r); g.arcTo(4, hh - 4, 4, 4, r); g.arcTo(4, 4, w - 4, 4, r); g.closePath(); g.fill();
         g.strokeStyle = tok['line'] || tok['muted']; g.lineWidth = 3; g.stroke();
         g.textBaseline = 'middle'; g.fillStyle = tok['ink']; g.font = '600 62px ' + (f.sans || 'sans-serif');
-        g.fillText(name.length > 15 ? name.slice(0, 14) + '…' : name, 32, 62);
+        g.fillText(name.length > 15 ? name.slice(0, 14) + '…' : name, 32, sub ? 62 : hh / 2);
         // the page version (x0.2, from the title) sits small and right-aligned on the count line; the counts shrink to leave it room
         var mono = f.mono || 'monospace', ver = pageVersion(), vw = 0;
         g.fillStyle = tok['muted'];
         if (ver) { g.font = '500 26px ' + mono; vw = g.measureText(ver).width + 16; }
+        if (!sub) return;
         var fs = 38; g.font = '500 ' + fs + 'px ' + mono;
         while (g.measureText(sub).width > w - 64 - vw && fs > 18) { fs -= 2; g.font = '500 ' + fs + 'px ' + mono; }
         g.fillText(sub, 32, 124, w - 64 - vw); // maxWidth: the counts never run under the version
@@ -262,8 +263,9 @@
       });
     }
     function setSign(b) {
-      // sub: a building's own count line (the Paperclip HQ: its agents and budget, #76), else floors and sessions
-      var sub = b.data.sub || b.floors.length + (b.floors.length === 1 ? ' floor' : ' floors') + ' · ' + b.data.sessions + (b.data.sessions === 1 ? ' session' : ' sessions');
+      // sub: a building's own count line (the Paperclip HQ: its agents and budget, #76), else the Glance layer (ADR 0006):
+      // the name alone, and a line only when the building needs the owner (OfficeVocab.layers.glance).
+      var V = globalThis.OfficeVocab, sub = b.data.sub || V.layers.glance({ waiting: b.data.waiting }, b.data.state).text;
       var key = b.data.name + '|' + sub + '|' + K.look;
       if (b.signKey === key) return;
       b.signKey = key;

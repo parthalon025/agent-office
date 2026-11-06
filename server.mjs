@@ -1368,11 +1368,17 @@ function saveSchedule(x) {
   const kind = x.kind === 'daily' ? 'daily' : 'every';
   const every = Math.max(5, Math.min(7 * 24 * 60, Number(x.every) || 60));
   const at = /^\d{1,2}:\d{2}$/.test(String(x.at)) ? String(x.at) : '09:00';
+  // The agent kind (#102): none means Claude Code, so a schedule saved before this keeps running it. The kind checks its own model
+  // (a kind that needs one refuses an empty pick); Claude Code keeps its pattern and drops a model it does not know.
+  const provider = providers.get(x.provider || undefined);
+  const model = provider === claude ? (MODEL_RE.test(String(x.model || '')) ? x.model : '') : String(x.model || '');
+  if (provider !== claude) provider.check?.({ model });
+  const modes = KINDS.find((k) => k.kind === provider.kind)?.modes || [];
   const rec = {
-    id: persisted.schedules.find((y) => y.id === x.id)?.id || newId(), name, prompt, cwd, kind, every, at,
-    model: MODEL_RE.test(String(x.model || '')) ? x.model : '', permissionMode: MODES.has(x.permissionMode) ? x.permissionMode : '',
-    // A schedule runs Claude Code. A new one without a limit gets the default; 0 is "no limit" and stays 0.
-    isolation: x.isolation === 'worktree' ? 'worktree' : 'same', maxBudget: spendLimitFor({ paid: isPaid(claude), requested: x.maxBudget, fallback: defaultSpend() }) ?? 0,
+    id: persisted.schedules.find((y) => y.id === x.id)?.id || newId(), name, prompt, cwd, kind, every, at, provider: provider.kind,
+    model, permissionMode: MODES.has(x.permissionMode) && modes.includes(x.permissionMode) ? x.permissionMode : '',
+    // A new one without a limit gets the default; 0 is "no limit" and stays 0. A free kind, or one whose cost is unknown, has none.
+    isolation: x.isolation === 'worktree' ? 'worktree' : 'same', maxBudget: spendLimitFor({ paid: isPaid(provider), cost: costOf(provider), requested: x.maxBudget, fallback: defaultSpend() }) ?? 0,
     enabled: x.enabled !== false, lastRun: Date.now(),
   };
   const i = persisted.schedules.findIndex((y) => y.id === rec.id);
@@ -1394,9 +1400,17 @@ async function runSchedule(sch) {
   savePersisted();
   for (const s of sessions.values()) if (s.scheduleId === sch.id && s.status !== 'ended') return null; // still busy with the last run
   try {
-    const uid = await openSession({ cwd: sch.cwd, name: sch.name, prompt: sch.prompt, model: sch.model, permissionMode: sch.permissionMode, isolation: sch.isolation, maxBudget: sch.maxBudget, scheduleId: sch.id, where: 'office' });
+    // The kind must be ready, the same answer as GET /api/providers. If not, nothing starts and its need is the schedule's last error.
+    const kind = sch.provider || claude.kind;
+    const st = (await providers.statusCached()).find((p) => p.kind === kind);
+    if (!st || st.ready !== true) throw new Error((st?.needs || []).join(' ') || 'This agent kind is not ready.');
+    const uid = await openSession({ provider: kind, cwd: sch.cwd, name: sch.name, prompt: sch.prompt, model: sch.model, permissionMode: sch.permissionMode, isolation: sch.isolation, maxBudget: sch.maxBudget, scheduleId: sch.id, where: 'office' });
+    delete sch.lastError;
+    savePersisted();
     return uid;
   } catch (e) {
+    sch.lastError = String(e.message || e).slice(0, 400);
+    savePersisted();
     addFeed({ uid: 'schedule', name: sch.name }, 'end', 'schedule could not start: ' + e.message);
     broadcast();
     return null;
@@ -1617,7 +1631,7 @@ setInterval(() => { for (const c of clients) c.write(': ping\n\n'); }, 20000).un
 const MIME = { '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
 const FONT_FILES = fs.readdirSync(path.join(PUBLIC, 'vendor', 'fonts')).filter((f) => /^[a-z0-9-]+\.woff2$/.test(f));
 const STATIC_FILES = new Map([
-  ['/office.js', 'public/office.js'], ['/scene-host.js', 'public/scene-host.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/lobby.js', 'public/lobby.js'], ['/security.js', 'public/security.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/vocab.js', 'public/vocab.js'], ['/wire.js', 'public/wire.js'], ['/format.js', 'public/format.js'], ['/wheel-gate.js', 'public/wheel-gate.js'], ['/building.js', 'public/building.js'], ['/toasts.js', 'public/toasts.js'], ['/tokens.css', 'tokens.css'],
+  ['/office.js', 'public/office.js'], ['/scene-host.js', 'public/scene-host.js'], ['/city.js', 'public/city.js'], ['/board.js', 'public/board.js'], ['/terminal.js', 'public/terminal.js'], ['/lobby.js', 'public/lobby.js'], ['/desk.js', 'public/desk.js'], ['/security.js', 'public/security.js'], ['/office.css', 'public/office.css'], ['/chat-extras.js', 'public/chat-extras.js'], ['/adapter.js', 'public/adapter.js'], ['/vocab.js', 'public/vocab.js'], ['/wire.js', 'public/wire.js'], ['/format.js', 'public/format.js'], ['/wheel-gate.js', 'public/wheel-gate.js'], ['/building.js', 'public/building.js'], ['/toasts.js', 'public/toasts.js'], ['/tokens.css', 'tokens.css'],
   ['/components/bundle.css', 'components/bundle.css'], ['/components/bundle.js', 'components/bundle.js'],
   ['/components/lib/three.min.js', 'components/lib/three.min.js'],
   ['/components/lib/three-orbit-controls.js', 'components/lib/three-orbit-controls.js'],

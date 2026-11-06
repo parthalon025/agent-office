@@ -22,6 +22,10 @@
      projectRect(it, cam, view)        -> { left, top, width, height } in client px: the box of a plane on screen, through an
                                           orthographic camera that looks from cam.p at cam.t (the pinned layer, #89)
      layerSame(a, b)                   -> true when two layer states draw the same (a rect within 0.5 px)
+     hitBox(uvRect, planePx, min)      -> { left, top, width, height } in px from the plane's top left: the hit area of a control
+                                          drawn on a plane (uvRect: { x, y, w, h } as 0 to 1 from the bottom left), padded to at
+                                          least min px each way around its centre (a desk's controls, #90: 44 px)
+     hitAt(controls, uv, planePx, min) -> the id of the control whose padded box holds the point (the nearest centre wins), or null
      parts                             -> finders for the DS geometry: isWall, isBackWall, isSideWall, isSign, isBoard
 
    Browser part: attach(office, { covers() -> [rect], waiting() -> number }) -> host, one per mounted office.
@@ -278,8 +282,27 @@
     isBoard: function (m) { var p = geo(m, 'PlaneGeometry'); return !!p && p.width === 4 && p.height === 2.5; }
   };
 
+  // The hit area of a control drawn on a plane. The plane is planePx.w by planePx.h on screen; a control smaller than min px is
+  // padded to min around its centre. The box may reach past the plane; a pick still needs the ray to hit the plane.
+  function hitBox(r, planePx, min) {
+    var w = r.w * planePx.w, h = r.h * planePx.h, cx = (r.x + r.w / 2) * planePx.w, cy = (1 - r.y - r.h / 2) * planePx.h;
+    w = Math.max(w, min || 0); h = Math.max(h, min || 0);
+    return { left: cx - w / 2, top: cy - h / 2, width: w, height: h };
+  }
+  function hitAt(controls, uv, planePx, min) {
+    if (!uv || !planePx || !(planePx.w > 0) || !(planePx.h > 0)) return null;
+    var px = uv.x * planePx.w, py = (1 - uv.y) * planePx.h, best = null, bd = Infinity;
+    (controls || []).forEach(function (c) {
+      var b = hitBox(c.rect, planePx, min);
+      if (px < b.left || px > b.left + b.width || py < b.top || py > b.top + b.height) return;
+      var d = Math.pow(px - (b.left + b.width / 2), 2) + Math.pow(py - (b.top + b.height / 2), 2);
+      if (d < bd) { bd = d; best = c.id; }
+    });
+    return best;
+  }
+
   var pure = { inScene: inScene, shown: shown, floorOf: floorOf, floorGroups: floorGroups, shownFloor: shownFloor, viewOf: viewOf, roomGroups: roomGroups, rebuilt: rebuilt, choose: choose,
-    focusStep: focusStep, freeRect: freeRect, facing: facing, framePose: framePose, uvOn: uvOn, bezelAt: bezelAt, projectRect: projectRect, layerSame: layerSame, parts: parts };
+    focusStep: focusStep, freeRect: freeRect, facing: facing, framePose: framePose, uvOn: uvOn, bezelAt: bezelAt, projectRect: projectRect, layerSame: layerSame, hitBox: hitBox, hitAt: hitAt, parts: parts };
 
   // ---------- browser ----------
   // A token in px or ms from the page's CSS (no DOM in the tests: the fallback).

@@ -1750,3 +1750,39 @@ test('roll-up: the worst state of the desks shows on the room door, the elevator
   assert.equal(V.worst, undefined);
   assert.equal(globalThis.AgentOffice.worstOf(['finished', 'review', 'working']), 'review');
 });
+
+// #90: the desk objects come from a snapshot. A permission request is a paper, a question a note, each floor has an open desk.
+test('desk targets: a paper for each request, a note for each question, an open desk for each floor (#90)', async () => {
+  const r = rig(HUB());
+  r.push();
+  const m = r.mount(KEY_A);
+  const empty = m.deskTargets();
+  assert.deepEqual([empty.papers, empty.notes], [[], []], 'no request, no object');
+  assert.deepEqual(empty.empty.map((e) => e.floorKey), m.floors().map((f) => f.key), 'an open desk target on every floor');
+  assert.ok(empty.empty.every((e) => e.roomId && e.name && typeof e.role === 'string'), 'each names its room, its floor and its role');
+  const a = await busy(r, 'a', FEAT, 'quality');
+  await r.hook({ ...HOOKS.turnWithEdit[1], session_id: 'a', cwd: FEAT });
+  r.tracker.permissionRequest(slimPayload({ ...HOOKS.permission, session_id: 'a', cwd: FEAT }, null));
+  r.tracker.askQuestion(a, 'Which branch?');
+  r.push();
+  const t = m.deskTargets();
+  assert.equal(t.papers.length, 1);
+  assert.equal(t.notes.length, 1);
+  const p = t.papers[0], n = t.notes[0];
+  assert.equal(p.uid, a.uid);
+  assert.equal(p.bot, m.botName(a.uid), 'the paper is on the desk of the bot that asked');
+  assert.ok(p.id && p.tool && p.text, 'the request, as the page shows it');
+  assert.equal(n.text, 'Which branch?');
+  assert.equal(n.bot, p.bot);
+  assert.equal(p.until - p.t, V.holdMs(a), 'the paper knows when the hold ends');
+  assert.equal(V.holdMs({ headless: true }), 15 * 60 * 1000);
+  assert.equal(V.holdMs({}), 60 * 1000);
+  // a high-risk paper never offers Always allow
+  const pend = a.pending[0];
+  pend.risk = 'high'; pend.always = 'Bash(rm *)'; r.push();
+  const hi = m.deskTargets().papers[0];
+  assert.equal(hi.high, true);
+  assert.equal(hi.always, null, 'never Always allow for high risk');
+  pend.risk = 'low'; r.push();
+  assert.equal(m.deskTargets().papers[0].always, 'Bash(rm *)', 'a low-risk paper offers it');
+});

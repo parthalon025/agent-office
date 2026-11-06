@@ -307,19 +307,14 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .pin-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--space-3); padding: var(--space-3); outline: none; }
 .pin-body .diff { max-height: none; flex: none; }
 .pin-changes .pin-head .ao-btn { flex: none; }
-/* The requests sit right under the head (review 89): no approval can hide under the tabs. */
-.pin .asks { max-height: 40%; border-top: 0; border-bottom: 1px solid var(--line); }
 .pin.is-small .pin-sub, .pin.is-small .pin-chips { display: none; }
 .pin.is-small .pin-head { gap: var(--space-1); padding: 2px var(--space-1); }
 .pin.is-small .pin-log, .pin.is-small .pin-body { padding: var(--space-1) var(--space-2); }
 .pin.is-small .ao-composer { padding: var(--space-1); }
 /* A small desk screen: the head is one row (the bezel shows its icon and count, Stop turn and Export their icon; the buttons keep
-   their size and the name gives way; on a screen too narrow even for that the buttons wrap, never clip), and while a request is
-   open the requests take the whole screen under the head, with no cap, and the tabs wait: Approve and Decline stay on the screen. */
+   their size and the name gives way; on a screen too narrow even for that the buttons wrap, never clip). */
 .pin-desk.is-small .pin-head > * { flex: none; }
 .pin-desk.is-small .pin-head > .pin-name { flex: 1 1 0; }
-.pin-desk.is-small.has-asks .asks { flex: 1 1 auto; min-height: 0; max-height: none; border-bottom: 0; }
-.pin-desk.is-small.has-asks .ao-tabs { display: none; }
 @media (prefers-reduced-motion: reduce) { .pin { animation: none; } }
 /* the bezel count: on the top right corner of the frame of a screen in focus; in the head of a pinned screen */
 .bezel { position: fixed; z-index: var(--z-sheet); left: var(--pin-x, 0); top: var(--pin-y, 0); transform: translate(calc(-100% + var(--space-2)), -50%); }
@@ -343,17 +338,14 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .term-field:focus-visible { box-shadow: 0 1px 0 var(--accent); }
 .term-note { flex: none; margin: 0; padding: var(--space-2) var(--space-3); border-top: 1px solid var(--line); color: var(--muted); font: var(--type-caption-weight) var(--type-caption-size)/var(--type-caption-line) var(--font-sans); }
 
-/* ---------- requests inside a panel (RequestBar in office.js) ---------- */
-.asks { flex: none; display: flex; flex-direction: column; gap: var(--space-2); max-height: 45%; overflow: auto; padding: var(--space-2) var(--space-3); border-top: 1px solid var(--line); background: var(--panel); }
-.board-b .asks { max-height: none; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--chip); }
-.ask { display: flex; flex-direction: column; gap: var(--space-2); }
-.ask.is-high { padding-left: var(--space-2); border-left: 3px solid var(--status-error); }
-.ask-t { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); font: var(--type-body-weight) var(--type-body-size)/var(--type-body-line) var(--font-sans); }
-.ask-x { min-width: 0; overflow-wrap: anywhere; }
-.ask-why { margin: 0; color: var(--muted); overflow-wrap: anywhere; font: var(--type-caption-weight) var(--type-caption-size)/var(--type-caption-line) var(--font-sans); }
-.ask-why em { font-style: normal; color: var(--ink); }
-.ask-a { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-@media (max-width: 820px) { .ask-a .ao-btn { min-height: 40px; } }
+/* ---------- requests: the button that goes to the oldest one, and the question note's pinned screen (#90) ---------- */
+.needs-go { flex: none; display: flex; padding: var(--space-1) 0; }
+.needs-go .ao-btn { min-height: 44px; }
+.pin-note .note-body { gap: var(--space-2); }
+.note-q { margin: 0; overflow-wrap: anywhere; color: var(--ink); font: var(--type-body-weight) var(--type-body-size)/var(--type-body-line) var(--font-sans); }
+.note-field { flex: none; }
+.pin-note .inline-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.pin-note .inline-actions .ao-btn { min-height: 44px; }
 
 /* a back button points back */
 .btn-back .ao-icon { transform: scaleX(-1); }
