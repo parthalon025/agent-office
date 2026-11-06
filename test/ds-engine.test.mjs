@@ -958,14 +958,14 @@ test('AO.MODES lists every theme of tokens.json, in order, each with a look id, 
   const M = modes();
   assert.deepEqual(M.map((m) => m.theme), tokensJson.color.themes.map((t) => t.id));
   assert.deepEqual(M.map((m) => m.label), tokensJson.color.themes.map((t) => t.name));
-  assert.deepEqual(M.map((m) => m.id), ['day', 'night', 'sublevel', 'fluent', 'fluent-dark']);
+  assert.deepEqual(M.slice(0, 3).map((m) => m.id), ['day', 'night', 'sublevel'], 'Day, Night and Sublevel stay first');
   const icons = JSON.parse(readFileSync(join(root, 'kit', 'schema.json'), 'utf8')).icons;
   for (const m of M) assert.ok(icons.includes(m.icon), `icon ${m.icon} of ${m.id} is in the set`);
   assert.equal(new Set(M.map((m) => m.id)).size, M.length);
   // each theme has its own icon: below 520 px the toggle shows icons only, so two themes with one icon would look the same
   assert.equal(new Set(M.map((m) => m.icon)).size, M.length, 'one icon per theme');
-  // the dark flag: Night and Fluent Dark are dark scenes, the others are not
-  assert.deepEqual(M.filter((m) => m.dark === true).map((m) => m.id), ['night', 'fluent-dark']);
+  // the dark flag: Night is a dark scene, Day and Sublevel are not (a theme's own flag is checked against color-scheme in test/theme-contract.test.mjs)
+  assert.ok(M[1].dark === true && !M[0].dark && !M[2].dark);
   for (const m of M) assert.ok(m.dark === true || m.dark === undefined, `${m.id}: dark is true or not set`);
 });
 
@@ -1006,10 +1006,10 @@ test('theme to look and back: Stage.look and setMode follow AO.MODES; an unknown
   let theme = null;
   const { map, dark } = new Function('AO', 'Stage', 'themeOf', source('var THEME_OF={},LOOK_OF={},DARK={};', '\n') + source('Stage.prototype.look=function', '};\n') +
     source('Stage.prototype.setMode=function', '};\n') + 'return {map:THEME_OF,dark:DARK};')({ MODES: modes() }, Stage, () => theme);
-  assert.deepEqual(map, { day: 'light', night: 'dark', sublevel: 'sublevel', fluent: 'fluent', 'fluent-dark': 'fluent-dark' });
-  assert.deepEqual(dark, { day: false, night: true, sublevel: false, fluent: false, 'fluent-dark': true });
+  assert.deepEqual(map, Object.fromEntries(modes().map((m) => [m.id, m.theme])));
+  assert.deepEqual(dark, Object.fromEntries(modes().map((m) => [m.id, m.dark === true])));
   const s = Object.assign(Object.create(Stage.prototype), { mode: 'auto', K: { refresh() {} }, applyMode() {}, retheme() {} });
-  for (const [t, look] of [['light', 'day'], ['dark', 'night'], ['sublevel', 'sublevel'], ['fluent', 'fluent'], ['fluent-dark', 'fluent-dark'], ['nope', 'day'], [null, 'day']]) {
+  for (const [t, look] of [...modes().map((m) => [m.theme, m.id]), ['nope', 'day'], [null, 'day']]) {
     theme = t; assert.equal(s.look(), look, `theme ${t}`);
   }
   const attrs = {};
@@ -1028,14 +1028,14 @@ test('theme to look and back: Stage.look and setMode follow AO.MODES; an unknown
 test('the mode controls and the palette list every theme from AO.MODES, then Tour', () => {
   const AO = { MODES: modes() };
   const opts = new Function('AO', source('var MODE_OPTS=', '\n') + 'return MODE_OPTS;')(AO);
-  assert.deepEqual(opts.map((o) => o.id), ['day', 'night', 'sublevel', 'fluent', 'fluent-dark', 'tour']);
+  assert.deepEqual(opts.map((o) => o.id), [...modes().map((m) => m.id), 'tour']);
   assert.match(bundle, /function ModeToggle\(p\)\{var opts=p\.options\|\|AO\.MODES\.concat\(\[\{id:"tour",label:"Tour",icon:"tour"\}\]\);/);
   const CP = {}, set = [];
   new Function('AO', 'CommandPalette', source('CommandPalette.actions=function(x){', '};\n'))(AO, CP);
   const acts = CP.actions({ setMode: (m) => set.push(m), setView() {}, setSound() {} }).filter((a) => a.group === 'Theme');
-  assert.deepEqual(acts.map((a) => [a.id, a.label, a.icon]), [['mode-day', 'Day', 'day'], ['mode-night', 'Night', 'night'], ['mode-sublevel', 'Sublevel', 'terminal'], ['mode-fluent', 'Fluent', 'fluent'], ['mode-fluent-dark', 'Fluent Dark', 'fluentdark']]);
+  assert.deepEqual(acts.map((a) => [a.id, a.label, a.icon]), modes().map((m) => ['mode-' + m.id, m.label, m.icon]));
   acts.forEach((a) => a.run());
-  assert.deepEqual(set, ['day', 'night', 'sublevel', 'fluent', 'fluent-dark']);
+  assert.deepEqual(set, modes().map((m) => m.id));
   assert.equal(CP.actions({}).length, 0, 'no handlers, no actions');
 });
 

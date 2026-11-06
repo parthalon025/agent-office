@@ -153,8 +153,9 @@ test('OfficeTypeCard: each theme has a thumbnail set whose type stripe equals it
   const tokens = JSON.parse(readFileSync(join(root, 'tokens.json'), 'utf8'));
   const flat = []; (function walk(o) { if (Array.isArray(o)) o.forEach(walk); else if (o && typeof o === 'object') { if (o.name && o.value) flat.push(o); Object.values(o).forEach(walk); } })(tokens);
   const themes = Object.keys(flat.find((t) => t.name === 'type-team').value);
-  assert.deepEqual(themes.sort(), ['dark', 'fluent', 'fluent-dark', 'light', 'sublevel']);
-  const sfx = { light: '', dark: '-night', sublevel: '-sublevel', fluent: '-fluent', 'fluent-dark': '-fluent-dark' };
+  assert.deepEqual([...themes].sort(), tokens.color.themes.map((t) => t.id).sort(), 'the type tokens have a value for every theme of tokens.json');
+  // the picture files: Day has none, Night is -night, every other theme is -<id>
+  const sfx = Object.fromEntries(themes.map((id) => [id, id === 'light' ? '' : id === 'dark' ? '-night' : '-' + id]));
   for (const theme of themes) {
     assert.ok(bundle.includes(`${/^[a-z]+$/.test(theme) ? theme : '"' + theme + '"'}: ${theme === 'light' ? 'AO.THUMBS' : '{'}`), `set for ${theme}`);
     for (const type of ['team', 'lab', 'studio', 'hq', 'security']) {
