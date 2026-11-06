@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { resolveExe } from '../src/launch.mjs';
 import { pageFile, routeOf } from '../src/auth.mjs';
 import { officeFiles, portArg, OFFICE_ROOT } from '../src/files.mjs';
+import { inWorktreeOf, roomFiguresOf, roomAtRest } from './fixtures/smoke-checks.mjs';
 
 // Usage: npm run smoke (the office of npm start), or npm run smoke -- <port> (an office on another port).
 // Two tokens (auth.mjs): the agent token from the token file of the port (files.mjs) for /hook* and /mcp/*, the page
@@ -52,7 +53,7 @@ ok('open with worktree', !!o.uid, JSON.stringify(o));
 const uid = o.uid;
 let s = await me(uid);
 ok('worktree recorded', s?.worktree?.branch?.startsWith('agent/wt-test-'), s?.worktree?.branch);
-ok('cwd is the worktree', s?.cwd?.replace(/\\/g, '/').includes('/repo.worktrees/wt-test'), s?.cwd);
+ok('cwd is the worktree', inWorktreeOf(s?.cwd, repo, 'wt-test'), s?.cwd);
 ok('budget recorded', s?.budget === 1);
 
 // 2) permission request with preview (edit needs permission in default mode)
@@ -155,16 +156,18 @@ ok('open the watcher and the failing session', !!watcher.uid && !!failer.uid, JS
 const failed = await until(async () => { const x = await me(failer.uid); return x?.error ? x : null; }, 90000);
 ok('failed turn sets session.error', !!failed, JSON.stringify(failed?.error));
 // The figures of the watcher's own room (by its notes key). Other open sessions in the office can also make a room of two.
-const roomOf = (sn) => { const w = sn.sessions.find((x) => x.uid === watcher.uid); return w?.place ? (sn.figures || {})[w.place.noteKey] : undefined; };
+const roomOf = (sn) => roomFiguresOf(sn, watcher.uid);
+// A late prompt hook must not start the failed session again (#188); the states are in the line, so a failure names the session that works.
+const states = async () => JSON.stringify([await me(watcher.uid), await me(failer.uid)].map((x) => x && [x.name, x.status, x.turns, !!x.error]));
 let fig = roomOf(await snap());
-ok('failed turn: room figures show no working or waiting', !!fig && fig.working === 0 && fig.waiting === 0, JSON.stringify(fig));
+ok('failed turn: room figures show no working or waiting', roomAtRest(fig), JSON.stringify(fig) + ' ' + await states());
 const room1 = await api('/mcp/room', { office_id: watcher.uid });
 ok('office_room says "stopped with an error"', /stopped with an error/.test(room1.text || ''), (room1.text || '').slice(0, 200));
 await api('/api/dismiss', { uid: failer.uid });
 const cleared = await me(failer.uid);
 ok('Dismiss clears session.error', cleared?.error === null || cleared?.error === undefined, JSON.stringify(cleared?.error));
 fig = roomOf(await snap());
-ok('after Dismiss: room figures show no working or waiting', !!fig && fig.working === 0 && fig.waiting === 0, JSON.stringify(fig));
+ok('after Dismiss: room figures show no working or waiting', roomAtRest(fig), JSON.stringify(fig) + ' ' + await states());
 const room2 = await api('/mcp/room', { office_id: watcher.uid });
 ok('office_room says "finished its turn"', /finished its turn/.test(room2.text || ''), (room2.text || '').slice(0, 200));
 await api('/api/close', { uid: failer.uid }); await api('/api/close', { uid: watcher.uid });
