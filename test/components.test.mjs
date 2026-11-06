@@ -38,9 +38,9 @@ const office = readFileSync(join(pub, 'office.js'), 'utf8').replace(/\r\n/g, '\n
 // #1 story 26: office.js is split by concern into page files that share window.OfficePage. A rule about one part reads the file
 // that holds it; a rule that holds for the whole page (a name that must not come back, a count) reads all of them.
 const page = (f) => readFileSync(join(pub, f), 'utf8').replace(/\r\n/g, '\n');
-const PAGE_FILES = ['page-core.js', 'dialogs.js', 'dialogs-extra.js', 'panels.js', 'needs.js', 'office.js'];
+const PAGE_FILES = ['page-core.js', 'dialogs.js', 'dialogs-extra.js', 'panels.js', 'changes.js', 'needs.js', 'office.js'];
 const pageAll = PAGE_FILES.map(page).join('\n');
-const core = page('page-core.js'), panels = page('panels.js'), extra = page('dialogs-extra.js');
+const core = page('page-core.js'), panels = page('panels.js'), changesJs = page('changes.js'), extra = page('dialogs-extra.js');
 
 test('the page files load in order before chat-extras.js, and the server serves each one (#1 story 26)', () => {
   const html = readFileSync(join(pub, 'index.html'), 'utf8');
@@ -167,13 +167,14 @@ test('office.js: pinned screens replace the terminal and changes panels, and eve
   assert.doesNotMatch(pageAll, /TerminalPanel|terminal-panel/, 'no terminal side panel');
   assert.doesNotMatch(css, /\.terminal-panel/, 'no terminal side panel style');
   const fn = (name) => { const at = panels.indexOf('function ' + name + '('); assert.ok(at >= 0, name); return panels.slice(at, panels.indexOf('\n  }\n', at)); };
+  const fnC = (name) => { const at = changesJs.indexOf('function ' + name + '('); assert.ok(at >= 0, name); return changesJs.slice(at, changesJs.indexOf('\n  }\n', at)); };
   assert.match(fn('DeskScreen'), /h\(Bezel, \{ inline: true, count: p\.waiting/, 'the desk screen has the bezel count');
-  assert.match(fn('ChangesScreen'), /h\(Bezel, \{ inline: true, count: p\.waiting/, 'the changes screen has the bezel count');
+  assert.match(fnC('ChangesScreen'), /h\(Bezel, \{ inline: true, count: p\.waiting/, 'the changes screen has the bezel count');
   assert.match(js, /layer && !pinned && hostRef\.current \? h\(Bezel, \{ host: hostRef\.current/, 'a screen that is not pinned has the bezel count too');
   assert.match(js, /waiting: function \(\) \{ return needsRef\.current; \}/, 'the count is every request of every building');
-  assert.match(fn('ChangesScreen'), /h\(ChangesConfirm, \{ c: c \}\)/, 'pull request and worktree removal keep their confirm dialog');
+  assert.match(fnC('ChangesScreen'), /h\(ChangesConfirm, \{ c: c \}\)/, 'pull request and worktree removal keep their confirm dialog');
   assert.match(fn('putBox'), /setProperty\('--pin-x'/, 'the box is set with setProperty, never a style attribute');
-  assert.doesNotMatch(fn('DeskScreen') + fn('ChangesScreen') + fn('Bezel'), /style:/, 'no style prop on a pinned layer');
+  assert.doesNotMatch(fn('DeskScreen') + fnC('ChangesScreen') + fn('Bezel'), /style:/, 'no style prop on a pinned layer');
 });
 
 // Review 89, B2: at 400 px an open request pushed Approve and Decline below the desk screen (the bar sat under the tabs, capped
