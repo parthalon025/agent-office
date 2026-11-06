@@ -301,8 +301,72 @@
     return best;
   }
 
+  // ----- camera controls (#163): arrow keys pan in room steps, a rotation turns around the room in view -----
+  // The floor runs along world x and its depth along z, and the camera turns, so a key goes along the world axis that the
+  // screen direction is nearest to: right is the axis of the screen's right (x on a tie), up and down are the other axis.
+  function panDelta(key, cam, step) {
+    var sign = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: 1, ArrowDown: -1 }[key];
+    if (!sign) return null;
+    var dir = vnorm([cam.t[0] - cam.p[0], cam.t[1] - cam.p[1], cam.t[2] - cam.p[2]]);
+    if (!dir) return null;
+    var r = [-dir[2], dir[0]], f = [dir[0], dir[2]];   // the screen's right and forward on the floor, as (x, z)
+    var rx = Math.abs(r[0]) >= Math.abs(r[1]) * 0.9;   // a camera near the diagonal (the engine's) stays on x, not on rounding
+    var out = [0, 0, 0];
+    if (key === 'ArrowLeft' || key === 'ArrowRight') { if (rx) out[0] = sign * (r[0] < 0 ? -1 : 1) * step; else out[2] = sign * (r[1] < 0 ? -1 : 1) * step; }
+    else if (rx) out[2] = sign * (f[1] < 0 ? -1 : 1) * step; else out[0] = sign * (f[0] < 0 ? -1 : 1) * step;
+    return out;
+  }
+  // centres: [[x, y, z]] of the rooms of the shown floor. One room step is the usual gap between them.
+  function roomStep(centres) {
+    var xs = (centres || []).map(function (c) { return c[0]; }).sort(function (a, b) { return a - b; }), gaps = [];
+    for (var i = 1; i < xs.length; i++) if (xs[i] - xs[i - 1] > 0.01) gaps.push(xs[i] - xs[i - 1]);
+    gaps.sort(function (a, b) { return a - b; });
+    return gaps.length ? gaps[Math.floor(gaps.length / 2)] : 20;
+  }
+  // The new target after a pan of delta: no further than half a step beyond the rooms (a pan from outside never goes further out).
+  function panTarget(t, delta, centres, step) {
+    var out = [t[0] + delta[0], t[1] + delta[1], t[2] + delta[2]];
+    if (!centres || !centres.length) return out;
+    [0, 2].forEach(function (a) {
+      var lo = Infinity, hi = -Infinity;
+      centres.forEach(function (c) { lo = Math.min(lo, c[a]); hi = Math.max(hi, c[a]); });
+      lo -= step / 2; hi += step / 2;
+      if (delta[a] > 0) out[a] = Math.min(out[a], Math.max(hi, t[a]));
+      if (delta[a] < 0) out[a] = Math.max(out[a], Math.min(lo, t[a]));
+    });
+    return out;
+  }
+  // The index of the room nearest the middle of the view (its centre nearest the line of sight), or -1.
+  function roomInView(centres, cam) {
+    var dir = vnorm([cam.t[0] - cam.p[0], cam.t[1] - cam.p[1], cam.t[2] - cam.p[2]]), best = -1, bd = Infinity;
+    if (!dir) return -1;
+    (centres || []).forEach(function (c, i) {
+      var d = [c[0] - cam.t[0], c[1] - cam.t[1], c[2] - cam.t[2]], k = vdot(d, dir), q = vadd(d, dir, -k), l = vdot(q, q);
+      if (l < bd) { bd = l; best = i; }
+    });
+    return best;
+  }
+  // The pivot that turns around a room and leaves the picture as it is: the point of the line of sight at the room's depth.
+  function pivotOn(cam, c) {
+    var dir = vnorm([cam.t[0] - cam.p[0], cam.t[1] - cam.p[1], cam.t[2] - cam.p[2]]);
+    if (!dir) return cam.t.slice();
+    return vadd(cam.t, dir, vdot([c[0] - cam.t[0], c[1] - cam.t[1], c[2] - cam.t[2]], dir));
+  }
+  // May an arrow key move the view? Only a plain arrow, with the page or the scene focused: never in a field, a list, a
+  // control, a dialog or the palette (they keep their arrows), and never when something else already used the key.
+  var OWN_KEYS = 'input,textarea,select,button,a,summary,[contenteditable],[role=listbox],[role=menu],[role=menubar],[role=tablist],[role=tree],[role=grid],[role=slider],[role=radiogroup],[role=combobox],[role=spinbutton],.ao-dialog,.ao-cmdk,.ao-cmdk-o';
+  function keyOk(e, doc, cv) {
+    if (!e || ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].indexOf(e.key) < 0) return false;
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return false;
+    var el = e.target;
+    if (el && el !== cv && el !== doc.body && el !== doc.documentElement) return false;
+    if (el && el.closest && el.closest(OWN_KEYS)) return false;
+    try { if (doc.querySelector('.ao-dialog,.ao-cmdk,.ao-cmdk-o')) return false; } catch (x) { return false; }
+    return true;
+  }
+
   var pure = { inScene: inScene, shown: shown, floorOf: floorOf, floorGroups: floorGroups, shownFloor: shownFloor, viewOf: viewOf, roomGroups: roomGroups, rebuilt: rebuilt, choose: choose,
-    focusStep: focusStep, freeRect: freeRect, facing: facing, framePose: framePose, uvOn: uvOn, bezelAt: bezelAt, projectRect: projectRect, layerSame: layerSame, hitBox: hitBox, hitAt: hitAt, parts: parts };
+    focusStep: focusStep, freeRect: freeRect, facing: facing, framePose: framePose, uvOn: uvOn, bezelAt: bezelAt, projectRect: projectRect, layerSame: layerSame, hitBox: hitBox, hitAt: hitAt, panDelta: panDelta, roomStep: roomStep, panTarget: panTarget, roomInView: roomInView, pivotOn: pivotOn, keyOk: keyOk, parts: parts };
 
   // ---------- browser ----------
   // A token in px or ms from the page's CSS (no DOM in the tests: the fallback).
@@ -634,7 +698,46 @@
     // ----- clicks: one click, one action -----
     function onMove(e) { ptr = { x: e.clientX, y: e.clientY, dirty: true }; }
     function onLeave() { ptr = null; release(); }
-    function onDown(e) { down = e.button === 0 ? [e.clientX, e.clientY] : null; downFg = curShownFloor(); }
+    // ----- camera controls (#163): arrow keys pan in room steps; a rotation turns around the room in view -----
+    // dest: where a key pan ends (the controls' target). The camera and the target move there together, so the angle holds.
+    var dest = null;
+    function roomCentres() {
+      var out = [];
+      try {
+        api.rooms().forEach(function (r) {
+          var g = r.rg; if (g.updateWorldMatrix) g.updateWorldMatrix(true, false);
+          var e = g.matrixWorld && g.matrixWorld.elements;
+          out.push(e ? [e[12], e[13] + 2.6, e[14]] : [g.position.x, 2.6, g.position.z || 0]);
+        });
+      } catch (x) { out = []; }
+      return out;
+    }
+    // A rotation starts: the pivot moves along the line of sight to the depth of the room in view (the picture stays).
+    function repivot() {
+      if (dead || foc || fly || st.intro || st.goal || !st.cam.position || !curShownFloor()) return;
+      var cam = { p: vec(st.cam.position), t: vec(ctlTarget()) }, cs = roomCentres(), i = roomInView(cs, cam);
+      if (i < 0) return;
+      var t = pivotOn(cam, cs[i]); ctlTarget().set(t[0], t[1], t[2]);
+    }
+    function onKey(e, doc) {
+      if (dead || foc || fly || st.intro || !st.cam.position || !curShownFloor()) return false;
+      if (!keyOk(e, doc || root.document, cv)) return false;
+      var cs = roomCentres(), step = roomStep(cs), cam = { p: vec(st.cam.position), t: vec(ctlTarget()) }, d = panDelta(e.key, cam, step);
+      if (!d) return false;
+      dest = panTarget(dest || cam.t, d, cs, step);
+      if (e.preventDefault) e.preventDefault();
+      return true;
+    }
+    function stepPan(dt) {
+      if (!dest) return;
+      if (foc || fly || st.intro) { dest = null; return; }
+      var tg = ctlTarget(), r = [dest[0] - tg.x, dest[1] - tg.y, dest[2] - tg.z], len = Math.hypot(r[0], r[1], r[2]);
+      var k = st.rm || len < 0.02 ? 1 : Math.min(1, 1 - Math.exp(-(dt || 0) * 12));
+      st.cam.position.set(st.cam.position.x + r[0] * k, st.cam.position.y + r[1] * k, st.cam.position.z + r[2] * k);
+      tg.set(tg.x + r[0] * k, tg.y + r[1] * k, tg.z + r[2] * k);
+      if (k >= 1) dest = null;
+    }
+    function onDown(e) { down = e.button === 0 ? [e.clientX, e.clientY] : null; downFg = curShownFloor(); dest = null; if (e.button === 0) repivot(); }
     function onCancel() { down = null; }
     function onUp(e) {
       if (!down || dead) return;
@@ -656,6 +759,7 @@
     cv.addEventListener('pointercancel', onCancel);
     cv.addEventListener('pointermove', onMove);
     cv.addEventListener('pointerleave', onLeave);
+    if (root.addEventListener) root.addEventListener('keydown', onKey);
 
     // ----- rebuild: bots join or leave, the floor or view changes, the theme changes, a target's anchor is gone -----
     function state() {
@@ -684,6 +788,7 @@
         if (foc && st.goal) st.goal = null;   // a goal set before the focus began: the engine must not reframe while an item is in focus
         sizeStep();
         stepFly(dt);
+        stepPan(dt);
         if (fly && ptr) ptr.dirty = true;     // the item under the pointer moves while the camera flies
         if (ptr && ptr.dirty) { ptr.dirty = false; hoverStep(); }
       } catch (x) { /* one bad frame must not stop the office */ }
@@ -708,6 +813,7 @@
       cv.removeEventListener('pointercancel', onCancel);
       cv.removeEventListener('pointermove', onMove);
       cv.removeEventListener('pointerleave', onLeave);
+      if (root.removeEventListener) root.removeEventListener('keydown', onKey);
       setCursor(false);
       if (foc || fly) { fly = null; if (st.ctl) st.ctl.enabled = true; }
       restoreZoom();
@@ -718,7 +824,7 @@
       if (hadLayer) layerFns.slice().forEach(function (fn) { try { fn(null); } catch (x) { /* gone */ } });   // the layer goes with the scene
       targets = []; frames = []; rebuildFns = []; focusFns = []; layerFns = []; hoverT = null;
     }
-    return {
+    var api = {
       stage: st, canvas: cv,
       inScene: function (m) { return inScene(scene, m); },
       shown: function (m) { return shown(scene, m); },
@@ -754,8 +860,10 @@
       free: free,
       rect: rect,
       onFocus: function (fn) { return add(focusFns, fn); },
+      key: onKey,
       dispose: dispose
     };
+    return api;
   }
 
   root.OfficeSceneHost = { attach: attach, pure: pure };

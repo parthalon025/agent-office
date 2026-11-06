@@ -1460,7 +1460,7 @@ function Stage(el,o){o=o||{};var gap=lookGap();if(gap)throw new Error(gap);var s
  if(o.cam)s.dir=new T.Vector3(o.cam[0],o.cam[1],o.cam[2]).normalize();if(o.target)s.target.set(o.target[0],o.target[1],o.target[2]);s.cam.position.copy(s.target).addScaledVector(s.dir,s.dist);
  s.hemi=new T.HemisphereLight(0xffffff,0xb8c2cc,.75);s.scene.add(s.hemi);s.sun=new T.DirectionalLight(0xffffff,.9);s.sun.castShadow=true;s.sun.shadow.mapSize.set(s.q==="low"?1024:2048,s.q==="low"?1024:2048);s.sun.shadow.bias=-.0008;s.sun.shadow.radius=4;s.scene.add(s.sun);s.scene.add(s.sun.target);s.lamps=[];
  s.sun.position.copy(s.target).add(new T.Vector3(12,22,8));s.sun.target.position.copy(s.target);s.shadowFit(16);
- if(o.controls!==false&&T.OrbitControls){s.ctl=new T.OrbitControls(s.cam,cv);s.ctl.enableDamping=true;s.ctl.dampingFactor=.08;s.ctl.minPolarAngle=.35;s.ctl.maxPolarAngle=1.25;s.ctl.minZoom=.4;s.ctl.maxZoom=4;s.ctl.target.copy(s.target);s.ctl.autoRotateSpeed=.7;}
+ if(o.controls!==false&&T.OrbitControls){s.ctl=new T.OrbitControls(s.cam,cv);s.ctl.enableDamping=true;s.ctl.dampingFactor=.08;s.ctl.minPolarAngle=.35;s.ctl.maxPolarAngle=1.25;s.ctl.minZoom=.4;s.ctl.maxZoom=4;s.ctl.mouseButtons={LEFT:T.MOUSE.ROTATE,MIDDLE:T.MOUSE.PAN,RIGHT:T.MOUSE.PAN};s.ctl.target.copy(s.target);s.ctl.autoRotateSpeed=.7;}
  else s.cam.lookAt(s.target);
  if(o.spin&&s.ctl&&!s.rm){s.ctl.autoRotate=true;s.ctl.autoRotateSpeed=o.spin;}
  if(s.q!=="low"&&T.EffectComposer&&T.UnrealBloomPass&&T.ShaderPass&&T.RenderPass){try{var gl2=s.r.capabilities.isWebGL2,rt=new T.WebGLRenderTarget(2,2,{type:gl2?T.HalfFloatType:T.UnsignedByteType,samples:gl2?(s.q==="high"?4:2):0});
