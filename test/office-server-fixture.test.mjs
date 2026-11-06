@@ -22,7 +22,7 @@ test('startOffice: a child that cannot spawn settles exited and settle, no hang'
     assert.notEqual(r, 'HANG');
     assert.equal(r.listening, false);
     assert.equal(await within(o.stop(), 3000), undefined);
-  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  } finally { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }); }
 });
 
 test('settle: a stuck child fails at the limit, and closeHeld closes every held port', { timeout: 20000 }, async () => {
@@ -41,7 +41,7 @@ test('settle: a stuck child fails at the limit, and closeHeld closes every held 
     await closeHeld();
     assert.equal(await connects(port), false);
     await within(o.exited, 5000);
-  } finally { await closeHeld(); fs.rmSync(dir, { recursive: true, force: true }); }
+  } finally { await closeHeld(); fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }); }
 });
 
 test('stop: ends the whole process tree by pid and waits for it (#161)', { timeout: 30000, skip: process.platform !== 'win32' }, async () => {
@@ -61,7 +61,8 @@ test('stop: ends the whole process tree by pid and waits for it (#161)', { timeo
     assert.equal(alive(kid), false, 'the child of the office must be gone after stop()');
   } finally {
     // A child that outlived stop() holds the folder: end it here, so the assertion above, not EBUSY, is what fails.
-    if (kid) try { process.kill(kid); } catch { /* gone */ }
+    if (kid) { try { process.kill(kid); } catch { /* gone */ }
+      for (let i = 0; i < 40 && (() => { try { process.kill(kid, 0); return true; } catch { return false; } })(); i++) await new Promise((r) => setTimeout(r, 100)); }
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   }
 });
