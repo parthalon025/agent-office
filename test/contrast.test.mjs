@@ -283,7 +283,7 @@ test('agent character: the accessory and arm marks read on every bot body color 
   each((T, th) => {
     for (const b of bodies) {
       const pick = P.markOn(b, hex('scene-dark', th), hex('bubble', th));
-      atLeast('persona mark (' + pick + ') on body ' + b, 3, T(pick === 'dark' ? 'scene-dark' : 'bubble'), rgb(b), th);
+      atLeast('persona mark (' + pick + ') on body ' + b, 3, T(pick), rgb(b), th);
     }
   });
 });

@@ -572,9 +572,10 @@
       .reduce(function (a, c, i) { return a + c * [0.2126, 0.7152, 0.0722][i]; }, 0);
   }
   function ratio(a, b) { var x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
-  function markOn(body, dark, light) {
-    if (lum(body) == null || lum(dark) == null || lum(light) == null) return 'dark';
-    return ratio(dark, body) >= ratio(light, body) ? 'dark' : 'light';
+  // The token of the mark on a body color: 'scene-dark' or 'bubble', whichever reads better on it (the token name, never a theme word).
+  function markOn(body, deep, pale) {
+    if (lum(body) == null || lum(deep) == null || lum(pale) == null) return 'scene-dark';
+    return ratio(deep, body) >= ratio(pale, body) ? 'scene-dark' : 'bubble';
   }
   var persona = {
     markOn: markOn, ratio: ratio,

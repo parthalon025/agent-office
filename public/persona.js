@@ -31,8 +31,8 @@
 
     function inspect() { try { return office.inspect(); } catch (x) { return null; } }
     function mat(tok) { return K.m(K.tok[tok] || K.tok['scene-dark']); }
-    // The mark token on this bot's body: dark or light, whichever reads better (OfficeVocab.persona.markOn; test/contrast.test.mjs).
-    function markTok(b) { return V.persona.markOn(b.color, K.tok['scene-dark'], K.tok.bubble) === 'dark' ? 'scene-dark' : 'bubble'; }
+    // The mark token on this bot's body: scene-dark or bubble, whichever reads better (OfficeVocab.persona.markOn; test/contrast.test.mjs).
+    function markTok(b) { return V.persona.markOn(b.color, K.tok['scene-dark'], K.tok.bubble); }
     function add(g, geo, m, x, y, z) { var me = new T.Mesh(geo, m); me.position.set(x, y, z); me.castShadow = false; me.userData.noNav = 1; me.userData.officePersonaDecor = 1; g.add(me); return me; }
 
     // The accessory as a group on the bot's body. Shapes only: no texture, no text.
