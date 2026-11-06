@@ -119,10 +119,15 @@ const STRICT = { deny: 3, ask: 2, allow: 1 };
 // a guess that could be looser.
 // The inside rows are for a git worktree. The local model is the exception (review M4): it works only in its own folder and
 // ran its low calls there unasked before the Security room, also in a plain folder outside git, so that folder counts.
-function verdict(rules, call) {
+/** The wall row and risk of one call, and its agent kind column: { col, row, risk } (row is the call's action after the inside rule). */
+export function ruleOf(call) {
   const col = S.columnOf(call.kind);
   let { risk, action } = ratingOf(call.tool, call.input, call.root);
   if (INSIDE_ROWS.has(action) && ((call.worktree !== true && col !== 'local') || wideRoot(call.root))) action = 'files-outside';
+  return { col, row: action, risk };
+}
+function verdict(rules, call) {
+  const { col, risk, row: action } = ruleOf(call);
   if (!col || !S.rows[action] || S.rows[action].office || !S.applies(action, col)) return { risk, action, col, value: null, set: false, unsure: false };
   const office = S.valueOf(rules, null, action, col), officeSet = S.sourceOf(rules, null, action, col) !== 'default';
   if (call.building != null) return { risk, action, col, value: S.valueOf(rules, call.building, action, col), set: S.sourceOf(rules, call.building, action, col) !== 'default', unsure: false };

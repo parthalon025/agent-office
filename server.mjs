@@ -38,7 +38,8 @@ import { createManager, createPlanBoard, officeSource } from './manager.mjs';
 import { setPersona, removePersona, personaOf, stylePrompt } from './personas.mjs';
 import { createNotes, cleanPin, PIN_MAX, NOTES_MAX, AGENT_WRITE_MAX } from './notes.mjs';
 import { createSkills } from './skills.mjs';
-import { cleanRules, setRule, decide, preToolDecision, permissionModeFor, openRefusal, costAsk, enforcement, addCost, costThisMonth } from './security.mjs';
+import { cleanTrust, record as recordTrust, patternOf, propose, grant as grantTrust, withdraw as withdrawTrust, cards as trustCards } from './trust.mjs';
+import { cleanRules, setRule, ruleOf, decide, preToolDecision, permissionModeFor, openRefusal, costAsk, enforcement, addCost, costThisMonth } from './security.mjs';
 import { realInside } from './risk.mjs';
 import { mcpAddArgs, mcpRemoveArgs, pluginArgs } from './extensions.mjs';
 import * as auth from './auth.mjs';
@@ -161,6 +162,8 @@ const savePersisted = () => { if (!ownPort) return; try { fs.writeFileSync(STATE
 // written with writeSecret once at listen. costs: the Spend screen's ledger, dollars per agent kind per month.
 persisted.security = cleanRules(persisted.security);
 persisted.costs = persisted.costs && typeof persisted.costs === 'object' ? persisted.costs : {};
+// Earned trust (#153, trust.mjs): the user's answers to held requests, the rules granted from proposals, dismissed proposals.
+persisted.trust = cleanTrust(persisted.trust);
 // Function floors (#92, archetypes.mjs): one record per building (key: the building key, '' for Other folders). Detection
 // runs once, when the office first knows the building; after that only the user changes the record (POST /api/layout).
 persisted.layouts = Object.fromEntries(Object.entries(persisted.layouts && typeof persisted.layouts === 'object' ? persisted.layouts : {})
@@ -251,6 +254,7 @@ function recordHistory(s) {
     uid: s.uid, sid: s.sid, provider: s.provider, name: s.name, cwd: s.cwd, model: s.model, mode: s.mode, cost: s.cost, turns: s.turns,
     startedAt: s.startedAt, endedAt: s.endedAt, worktree: s.worktree, replies: s.replies.slice(-40), prompt: s.prompt, budget: s.budget,
     ...(s.costUnknown ? { costUnknown: true } : {}),
+    ...(s.error ? { failed: true } : {}), // a failed run, for the trust card (#153)
     // OpenClaw (#77): the Gateway session key its plugin knows the session by, so a Reopen keeps holding its calls.
     ...(s.gatewayKey ? { gatewayKey: s.gatewayKey } : {}),
     // For Export of a past session (#72): the tokens and the last calls, trimmed like the page's own list.
@@ -361,6 +365,38 @@ function saveRule(body) {
   providers.forgetStatus(); // readiness reads this rule (blocked), so the kept GET /api/providers answer is stale (#104)
   void refreshEnforce(true); // an agent whose own config carries the cells checks it again for the new cells
   return { ok: true, from: r.from, to: r.to };
+}
+// Earned trust (#153, trust.mjs). The snapshot carries proposals and trust cards; the user applies a proposal on the wall's
+// painted Confirm (the same looser-change path as a rule: 409 without confirmed: true), withdraws a grant, or dismisses one.
+function trustView() {
+  const runs = [...history, ...[...sessions.values()].filter((x) => x.headless && x.status === 'ended' && x.sid && !history.some((h) => h.uid === x.uid))]
+    .map((h) => ({ col: V.security.columnOf(h.provider), failed: !!(h.failed || h.error) }));
+  return {
+    proposals: propose(persisted.trust.ledger, persisted.security, { dismissed: persisted.trust.dismissed }),
+    grants: persisted.trust.grants, cards: trustCards(persisted.trust, runs),
+  };
+}
+function applyProposal(body) {
+  const p = propose(persisted.trust.ledger, persisted.security, { dismissed: persisted.trust.dismissed }).find((x) => x.id === String(body.id || ''));
+  if (!p) throw httpError(404, 'That proposal is gone.');
+  const r = grantTrust(persisted.security, persisted.trust, p, Date.now(), body.confirmed === true);
+  persisted.security = r.rules; persisted.trust = r.trust; savePersisted();
+  addFeed({ uid: 'security', name: 'Security' }, 'tool', `${p.rowLabel}, ${p.agent}: Allow (${p.buildingName}), earned by ${p.count} approvals`);
+  broadcast(); providers.forgetStatus(); void refreshEnforce(true);
+  return { ok: true, from: r.from, to: r.to };
+}
+function withdrawGrant(body) {
+  const r = withdrawTrust(persisted.security, persisted.trust, String(body.id || ''));
+  persisted.security = r.rules; persisted.trust = r.trust; savePersisted();
+  addFeed({ uid: 'security', name: 'Security' }, 'tool', `a trust grant was withdrawn: ${r.to ? V.security.word(r.to) : 'unchanged'}`);
+  broadcast(); providers.forgetStatus(); void refreshEnforce(true);
+  return { ok: true };
+}
+function dismissProposal(body) {
+  const id = String(body.id || '');
+  if (!propose(persisted.trust.ledger, persisted.security, { dismissed: persisted.trust.dismissed }).some((x) => x.id === id)) throw httpError(404, 'That proposal is gone.');
+  persisted.trust = { ...persisted.trust, dismissed: { ...persisted.trust.dismissed, [id]: Date.now() } }; savePersisted(); broadcast();
+  return { ok: true };
 }
 // What each agent kind enforces (security.mjs enforcement): from the providers of this office, and for an agent whose
 // own config carries the rules (OpenClaw: workspace-only and its office plugin, #77), from what that config was found to carry (provider.policy(), read-only). It is read
@@ -792,10 +828,12 @@ function sendMessage(uid, text, attachments = [], { answers = true } = {}) {
 /** @type {Map<string, {uid: string, timer: NodeJS.Timeout, kind?: 'ask', suggestions?: object[], reply: (decision: object) => void}>} */
 const holds = new Map();
 
+// The call behind each held permission request (callOf), for the earned-trust ledger: kept until the hold ends.
+const heldCalls = new Map();
 function forget(id) {
   const h = holds.get(id);
   if (!h) return null;
-  holds.delete(id); clearTimeout(h.timer);
+  holds.delete(id); heldCalls.delete(id); clearTimeout(h.timer);
   tracker.settle(h.uid, id);
   broadcast();
   return h;
@@ -811,11 +849,23 @@ function replyOn(res, body) {
   if (!res.writableEnded) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(body || {})); }
 }
 
+// The user answered a held permission request on the page: it is evidence for earned trust (trust.mjs). Only a call the wall
+// has a cell for counts. A hold that timed out or went back to the terminal is no answer and is not recorded.
+function noteDecision(id, s, allow) {
+  const c = heldCalls.get(id);
+  if (!c || !s || c.building == null) return;
+  const r = ruleOf(c);
+  if (!r.col || !r.row || !V.security.rows[r.row]) return;
+  persisted.trust = recordTrust(persisted.trust, { at: Date.now(), col: r.col, building: c.building ?? '', row: r.row, pattern: patternOf(c.tool, c.input), allow, risk: r.risk });
+  savePersisted();
+}
+
 // A permission request waits for the user. The session's provider turns the decision into its own answer; on a hook (res)
 // that answer is the hook's reply. A terminal session's request goes back to the terminal dialog after the short hold.
 // auto: the Security room rules decided (tracker screen). Nothing is held: a hook gets the answer now, a provider on a
 // later tick (its permission() returns the request id first, the seam's timing rule).
-function holdRequest({ s, id, suggestions, auto }, res = null) {
+function holdRequest({ s, id, suggestions, auto, call }, res = null) {
+  if (call && !auto) heldCalls.set(id, callOf(s, call));
   if (auto) {
     const answer = () => providerOf(s).answer(s, { id, suggestions: [] }, auto);
     if (res) replyOn(res, answer()); else setImmediate(answer);
@@ -1070,6 +1120,7 @@ function answer(id, allow, always = false) {
   // The page never offers Always allow on a high-risk request; the server holds the same line (#27 L2).
   if (always && allow && s?.pending.find((r) => r.id === id)?.risk === 'high') throw httpError(400, 'A high-risk request cannot be always allowed.');
   if (s) addFeed(s, 'tool', allow ? (always ? 'approved and always allowed from the office' : 'approved from the office') : 'declined from the office');
+  noteDecision(id, s, allow);
   releaseHold(id, { allow, always });
 }
 
@@ -1747,7 +1798,7 @@ const snapshot = () => (W.lean({
   repos: [...repos.entries()].map(([key, r]) => ({ key, ...r, securityRoomId: securityRoomIdOf(key), worktrees: r.worktrees.map((w) => ({ ...w, place: placeOfWorktree(r.path, w) })) })),
   // The Security room (#70): the rules (office-wide and per building), why a cell is not enforced for an agent kind
   // (security.mjs enforcement), and the Spend screen (the default spend limit, cost per agent kind this month).
-  security: { rules: persisted.security, enforce: ENFORCE, spend: { limit: defaultSpend(), ...costThisMonth(persisted.costs, Date.now()) } },
+  security: { rules: persisted.security, enforce: ENFORCE, trust: trustView(), spend: { limit: defaultSpend(), ...costThisMonth(persisted.costs, Date.now()) } },
   kinds: KINDS,             // the agent kinds: the label of each session's kind, and the Open dialog's options before readiness comes
   plans: planBoard.snapshot(), // Manager board (#154, #156): every plan of every source, with its source word and the steps' state words
   hq: hq.view(),            // Paperclip HQ (#76): null until connected; company, budget, agents (role, task, supervision, run), routines
@@ -1962,6 +2013,10 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/settings/spend') { const r = saveSpendLimit(body); broadcast(); return send(res, 200, r); }
     // One Security room rule from the wall: { scope: 'office' | 'building', building, row, col, value, confirmed } (security.mjs setRule).
     if (url.pathname === '/api/security/set') return send(res, 200, saveRule(body));
+    // Earned trust (#153): apply (needs confirmed: true), withdraw or dismiss a proposal. Never automatic.
+    if (url.pathname === '/api/trust/apply') return send(res, 200, applyProposal(body));
+    if (url.pathname === '/api/trust/withdraw') return send(res, 200, withdrawGrant(body));
+    if (url.pathname === '/api/trust/dismiss') return send(res, 200, dismissProposal(body));
     // Paperclip HQ (#76): { url, company? } (127.0.0.1 only: 400 for any other address, before any request), and
     // Supervise in office { agent, confirmed: true } (409 without the Confirm), the one write to Paperclip.
     if (url.pathname === '/api/paperclip/connect') return send(res, 200, await connectHq(body));

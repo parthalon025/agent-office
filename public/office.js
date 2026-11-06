@@ -818,6 +818,53 @@
         h('p', { className: 'note' }, 'Both schedulers run: Paperclip runs its heartbeats and routines, the office runs its own schedules. The office never starts, changes or stops a Paperclip run. To hold the Claude Code calls of an agent here, use Supervise in office on the Agents screen of a Security room.')));
   }
 
+  // ---------- earned trust (#153, trust.mjs, ADR 0009) ----------
+  // The office proposes a rule from the answers the user gave; it never applies one. A proposal is one building-scope cell for
+  // one agent kind. Allow is a looser change, so it asks for a second click (Confirm) and sends confirmed: true. A grant
+  // withdraws in one click and the cell goes back to what it was. The Secrets rows are never proposed.
+  function TrustDialog(p) {
+    var snap = useSnapshot(), t = snap && snap.security && snap.security.trust;
+    var sb = useState(null), sure = sb[0], setSure = sb[1];     // the proposal id waiting for its Confirm
+    var bz = useState(''), busy = bz[0], setBusy = bz[1];
+    var er = useState(''), err = er[0], setErr = er[1];
+    function run(id, route, body, done) {
+      setBusy(id); setErr('');
+      api(route, body).then(function () { setBusy(''); setSure(null); if (done) p.toast(done); }, function (x) { setBusy(''); setErr(x.message); });
+    }
+    var proposals = (t && t.proposals) || [], grants = (t && t.grants) || [], cards = (t && t.cards) || [];
+    function grantName(g) {
+      var S = window.OfficeVocab.security, col = S.columns.filter(function (c) { return c.id === g.col; })[0];
+      return (S.rows[g.row] ? S.rows[g.row].label : g.row) + ', ' + (col ? col.label : g.col) + ' in ' + (g.building ? g.building.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : 'Other folders');
+    }
+    return h(A.Dialog, { open: true, title: 'Earned trust', onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
+      h('div', { className: 'form wide' },
+        h('p', { className: 'note' }, 'The office reads your answers and proposes a rule. It never applies one by itself. Each rule needs your Confirm, and you can withdraw it here. Secrets rows are never proposed.'),
+        err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
+        h('h3', { className: 'ext-h' }, 'Proposals'),
+        proposals.length ? h('ul', { className: 'past' }, proposals.map(function (x) {
+          var asking = sure === x.id;
+          return h('li', { key: x.id, className: 'past-row' },
+            h('div', { className: 'past-main' },
+              h('div', { className: 'past-title' }, h('b', null, x.rowLabel), h(Tag, null, x.agent), h(Tag, null, x.buildingName)),
+              h('div', { className: 'past-meta' }, x.text)),
+            h('div', { className: 'past-actions' },
+              asking ? h(A.Button, { variant: 'primary', icon: 'approve', loading: busy === x.id, onClick: function () { run(x.id, '/api/trust/apply', { id: x.id, confirmed: true }, { tone: 'success', title: 'Rule granted', text: x.rowLabel + ' for ' + x.agent }); } }, 'Confirm allow') : h(A.Button, { variant: 'quiet', icon: 'approve', onClick: function () { setSure(x.id); setErr(''); } }, 'Allow'),
+              asking ? h(A.Button, { variant: 'quiet', onClick: function () { setSure(null); } }, 'Cancel') : h(A.Button, { variant: 'quiet', icon: 'decline', loading: busy === x.id, onClick: function () { run(x.id, '/api/trust/dismiss', { id: x.id }); } }, 'Not now')));
+        })) : h(A.EmptyState, { icon: 'security', compact: true, title: 'No proposals', text: 'A proposal shows after you approve the same kind of call five times with no decline.' }),
+        h('h3', { className: 'ext-h' }, 'Rules you granted'),
+        grants.length ? h('ul', { className: 'past' }, grants.map(function (g) {
+          return h('li', { key: g.id, className: 'past-row' },
+            h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h('b', null, grantName(g))), h('div', { className: 'past-meta' }, 'Granted ' + ago(g.at) + '. Withdraw puts the cell back as it was.')),
+            h('div', { className: 'past-actions' }, h(A.Button, { variant: 'quiet', icon: 'retry', loading: busy === g.id, onClick: function () { run(g.id, '/api/trust/withdraw', { id: g.id }, { tone: 'success', title: 'Rule withdrawn', text: grantName(g) }); } }, 'Withdraw')));
+        })) : h('p', { className: 'note' }, 'No rule was granted from a proposal.'),
+        h('h3', { className: 'ext-h' }, 'Trust per agent'),
+        cards.length ? h('ul', { className: 'past' }, cards.map(function (c) {
+          return h('li', { key: c.col, className: 'past-row' },
+            h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h('b', null, c.agent)),
+              h('div', { className: 'past-meta' }, c.clean + ' of ' + c.runs + ' ' + (c.runs === 1 ? 'run' : 'runs') + ' clean · ' + c.declined + ' declined ' + (c.declined === 1 ? 'call' : 'calls') + ' · ' + c.granted + ' ' + (c.granted === 1 ? 'rule' : 'rules') + ' granted')));
+        })) : h('p', { className: 'note' }, 'No agent has a history yet.')));
+  }
+
   // ---------- agent kinds: each provider, whether it is ready, and what it needs (#20) ----------
   function KindsDialog(p) {
     var K = useKinds();
@@ -2716,6 +2763,8 @@
       .forEach(function (a) { actions.push({ id: 'page-' + a[0], label: a[1], icon: a[2], group: 'Office', run: a[3] }); });
     var selKind = selSess ? kindOf(window.officeAdapter.kinds(), selSess.provider) : null;
     if (selSess && (!selKind || selKind.control)) actions.push({ id: 'page-ext', label: 'Extensions of ' + selSess.name, icon: 'connector', group: 'Office', run: function () { extensions(selSess.uid, selSess.name); } });
+    var trustN = snap && snap.security && snap.security.trust ? snap.security.trust.proposals.length : 0;
+    actions.push({ id: 'page-trust', label: trustN ? 'Earned trust (' + trustN + (trustN === 1 ? ' proposal)' : ' proposals)') : 'Earned trust', icon: 'security', group: 'Office', keywords: 'trust proposals rules allow withdraw grant security approvals', run: function () { setDlg({ name: 'trust' }); } });
     actions.push({ id: 'page-needs', label: needs.length ? 'Needs you (' + needs.length + ')' : 'Needs you', icon: 'waiting', group: 'Office', keywords: 'requests approve decline questions decisions', run: function () { setDlg({ name: 'needs' }); } });
     actions.push({ id: 'page-flow', label: 'Changes: pipeline and Ready to merge', icon: 'pull-request', group: 'Office', keywords: 'pull request pr merge pipeline folder review checks tray', run: function () { setDlg({ name: 'flow' }); } });
     var planWaits = snap ? window.OfficeVocab.plan.waits(snap.plans) : [], planAll = snap ? window.OfficeVocab.plan.board(snap.plans) : { groups: [], unreadable: [] };
@@ -2784,6 +2833,7 @@
       d === 'reception' ? h(ReceptionDialog, { repo: shown, actions: officeActions, onTour: startTour, onClose: close }) : null,
       d === 'open' ? h(OpenDialog, { shownPath: shownPath, kind: dlg.kind, role: dlg.role, roleName: dlg.roleName, folder: dlg.folder, spendLimit: info.spendLimit, recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
       d === 'personas' ? h(PersonasDialog, { toast: toast, onClose: close }) : null,
+      d === 'trust' ? h(TrustDialog, { toast: toast, onClose: close }) : null,
       d === 'kinds' ? h(KindsDialog, { onOpen: function (kind) { refresh().then(function () { setDlg({ name: 'open', kind: kind }); }); }, onClose: close }) : null,
       d === 'flow' ? h(FlowDialog, { toast: toast, onClose: close }) : null,
       d === 'past' ? h(PastDialog, { onClose: close, onChanges: changes, toast: toast }) : null,
