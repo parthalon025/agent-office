@@ -32,6 +32,7 @@ import { fileKey, riskOf } from '../risk.mjs';
 import { clip } from '../tracker.mjs';
 import { providerError } from './index.mjs';
 import { createLocalTools } from './local-tools.mjs';
+import { createAsks } from './asks.mjs';
 import { GATEWAY_HOST, DEFAULT_GATEWAY_PORT, MIN_VERSION, PLUGIN_ID, gatewayPort, probeGateway, versionAtLeast, wantedConfig, checkConfig, configReader, officeKey, toolCall } from './openclaw.mjs';
 import * as COPILOT from './copilot.mjs';
 
@@ -616,27 +617,11 @@ export function createAcp(deps) {
   const CANCELLED = { outcome: { outcome: 'cancelled' } };
   const pick = (o) => ({ outcome: { outcome: 'selected', optionId: o.optionId } });
   const norm = (st, p) => fileKey(st.root, p);
-  // The office answers request id itself, without the user: the agent stopped waiting for it, or changed the call it asks
-  // about. A request of the agent gets reject once (verdict 'withdraw'), never cancelled: in ACP that means the turn was
-  // cancelled. The hold goes (events.drop: the server frees it, and provider.answer then finds nothing), and the feed says why.
-  function withdraw(s, st, id, why) {
-    const ask = st.asks.get(id);
-    if (!ask) return;
-    ask.gaveUp = true;
-    ask.done('withdraw');
-    emit(st, () => events.drop(s, id, why));
-  }
-  // Ask the office about a request: the Security room rules answer it at once (on a later tick), else it is held until the
-  // user answers. done(verdict, message) gets 'allow', 'deny', 'cancel' or 'withdraw', and why the office refused (a Deny rule).
-  // firm: the user must answer this one, so an Allow rule does not (events.permission).
-  function hold(s, st, toolName, input, done, reason = null, firm = false) {
-    const id = emit(st, () => events.permission(s, { tool_name: toolName, tool_input: input, permission_suggestions: [], ask_reason: reason }, { firm }));
-    if (!id) { done('deny'); return null; }
-    const ask = { gaveUp: false, timer: null, done: (v, why) => { if (st.asks.get(id) !== ask) return; st.asks.delete(id); if (ask.timer) clearTimer(ask.timer); done(v, why); } };
-    st.asks.set(id, ask);
-    return id;
-  }
-  function cancelAsks(st) { for (const ask of [...st.asks.values()]) { ask.gaveUp = true; ask.done('cancel'); } }
+  // Ask the office and wait: providers/asks.mjs (the Security room rules answer at once, else the user; withdraw, cancel all).
+  // done(verdict, why) gets 'allow', 'deny', 'cancel' or 'withdraw', and why the office refused (a Deny rule). A request of
+  // the agent that is withdrawn gets reject once, never cancelled: in ACP that means the turn was cancelled.
+  const asks = createAsks({ events, setTimer, clearTimer });
+  const { withdraw } = asks;
 
   // The reason the agent gives for a request (dsh asks again with one), only for an agent kind that declares 'reason'. ACP names no
   // field for it: it is read from `reason` or `_meta.reason` of the request or its tool call. Not checked against a real dsh yet.
@@ -682,7 +667,7 @@ export function createAcp(deps) {
     shown.file = EDIT_KINDS.has(c.kind) && shown.tool_input.file_path ? norm(st, shown.tool_input.file_path) : null;
     return new Promise((resolve) => {
       let id = null;
-      id = hold(s, st, shown.tool_name, shown.tool_input, (v) => {
+      id = asks.hold(s, st, { tool_name: shown.tool_name, tool_input: shown.tool_input, ask_reason: reasonOf(params) }, (v) => {
         if (id) c.held.delete(id);
         if (v === 'allow' && once) { grant(st, shown, c.id); c.approved = shown; resolve(pick(once)); }
         else if (v === 'cancel') resolve(CANCELLED);
@@ -698,15 +683,14 @@ export function createAcp(deps) {
           else if (EDIT_KINDS.has(shown.kind)) st.deniedVague = true;
           resolve(pick(no));
         }
-      }, reasonOf(params));
+      }, {
+        // Hermes issue #63302: its edit approval stops after a fixed time (a command approval follows its own setting). When
+        // the agent reports the call as failed first, endCall frees the hold the same way.
+        ...(spec.askTimeoutMs && EDIT_KINDS.has(c.kind) ? { timeoutMs: spec.askTimeoutMs, onTimeout: (rid) => withdraw(s, st, rid, `${label} waits ${Math.round(spec.askTimeoutMs / 1000)} s for an answer to an edit. It moved on without yours.`) } : {}),
+        firm: false,
+      });
       if (!id) return;
       c.held.set(id, shown);
-      // Hermes issue #63302: its edit approval stops after a fixed time (a command approval follows its own setting). When
-      // the agent reports the call as failed first, endCall frees the hold the same way.
-      if (spec.askTimeoutMs && EDIT_KINDS.has(c.kind)) {
-        const ask = st.asks.get(id);
-        ask.timer = setTimer(() => withdraw(s, st, id, `${label} waits ${Math.round(spec.askTimeoutMs / 1000)} s for an answer to an edit. It moved on without yours.`), spec.askTimeoutMs);
-      }
     });
   }
   // An approved call lets the office serve that same command or that same file's write once, without a second prompt, until
@@ -729,7 +713,7 @@ export function createAcp(deps) {
     const key = toolName === 'Bash' ? 'Bash\n' + input.command : 'Write\n' + file;
     if ((toolName === 'Bash' || toolName === 'Write') && st.grants.delete(key)) return Promise.resolve({ ok: true });
     if (st.closed || st.interrupted) return Promise.resolve({ ok: false });
-    return new Promise((resolve) => { hold(s, st, toolName, input, (v, why) => resolve({ ok: v === 'allow', why }), null, strict); });
+    return new Promise((resolve) => { asks.hold(s, st, { tool_name: toolName, tool_input: input, ask_reason: null }, (v, why) => resolve({ ok: v === 'allow', why }), { firm: strict }); });
   }
   const declined = (why) => rpcError(REFUSED, why || 'Declined from Agent Office.');
   const short = (p) => clip(String(p), 120);
@@ -873,7 +857,7 @@ export function createAcp(deps) {
   function finishTurn(s, st, failure) {
     st.busy = false;
     st.endCancel = null;
-    cancelAsks(st); // an agent that ended its turn waits for nothing
+    asks.cancelAll(st); // an agent that ended its turn waits for nothing
     st.grants.clear(); st.denied.clear(); st.askFirst.clear(); st.wrote.clear(); st.gated.clear(); st.deniedVague = false;
     st.carry.push(...st.notes.splice(0)); // the inbox gave them up already: they go with the next prompt
     if (st.closed) return;
@@ -902,10 +886,10 @@ export function createAcp(deps) {
   // One call of the office plugin, held like every request (gate): { allow, reason }. signal: the plugin stopped waiting.
   function holdOne(s, st, m, signal) {
     return new Promise((resolve) => {
-      const held = hold(s, st, m.tool_name, m.tool_input, (v, why) => {
+      const held = asks.hold(s, st, { tool_name: m.tool_name, tool_input: m.tool_input, ask_reason: m.reason || null }, (v, why) => {
         if (v === 'allow') return resolve({ allow: true, reason: '' });
         resolve({ allow: false, reason: why || (v === 'cancel' ? 'The turn was stopped in Agent Office.' : v === 'withdraw' ? `${label} stopped waiting for the answer.` : 'Declined in Agent Office.') });
-      }, m.reason || null, m.firm === true);
+      }, { firm: m.firm === true });
       if (held && signal) {
         if (signal.aborted) withdraw(s, st, held, `${label} stopped waiting for your answer.`);
         else signal.addEventListener('abort', () => withdraw(s, st, held, `${label} stopped waiting for your answer.`), { once: true });
@@ -1202,10 +1186,8 @@ export function createAcp(deps) {
     // longer waits for it or the turn is being stopped: then the answer is cancelled.
     answer(s, request, d = {}) {
       const st = agents.get(s.uid);
-      const ask = st && st.asks.get(request?.id);
-      if (!ask) return;
       // d.message: why the Security room refused it (a Deny rule), for the agent.
-      ask.done(d.allow === true ? 'allow' : d.allow === false ? 'deny' : ask.gaveUp || st.interrupted || st.closed ? 'cancel' : 'deny', typeof d.message === 'string' ? d.message : '');
+      if (st) asks.answer(st, request?.id, d);
     },
 
     interrupt(s) {
@@ -1214,7 +1196,7 @@ export function createAcp(deps) {
       st.interrupted = true;
       st.queue.length = 0;
       st.rpc.notify('session/cancel', { sessionId: st.sid });
-      cancelAsks(st); // ACP: every request that waits gets the cancelled outcome
+      asks.cancelAll(st); // ACP: every request that waits gets the cancelled outcome
       st.tools.stop();
       // The agent answers the prompt with stopReason cancelled. One that never does still ends the turn.
       const end = st.endCancel;
@@ -1227,7 +1209,7 @@ export function createAcp(deps) {
       agents.delete(s.uid);
       if (!st) return Promise.resolve();
       st.closed = true;
-      cancelAsks(st);
+      asks.cancelAll(st);
       const stopped = st.tools.stop();
       st.rpc.fail('The session closed.');
       if (st.endCancel) st.endCancel({ stopReason: 'cancelled' });
