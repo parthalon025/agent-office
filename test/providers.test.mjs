@@ -13,7 +13,7 @@ import { slimPayload } from '../src/payload.mjs';
 import { createRegistry, providerEvents, checkProvider, providerError, DEFAULT_PROVIDER, PROVIDER_METHODS, DEFAULT_SPEND_LIMIT, isPaid, isGated, supervisionOf, spendLimitFor, featuresOf } from '../src/providers/index.mjs';
 import { createLocal } from '../src/providers/local.mjs';
 import { createClaudeCode, claudeVersion, programPath, MODEL_RE } from '../src/providers/claude-code.mjs';
-import { resolveExe } from '../src/git.mjs';
+import { resolveExe } from '../src/launch.mjs';
 
 const load = (f) => JSON.parse(fs.readFileSync(new URL('./fixtures/' + f, import.meta.url), 'utf8'));
 const HOOKS = load('hooks.json'), STREAM = load('stream.json');
@@ -1003,7 +1003,7 @@ test('launch.ps1 clears OFFICE_ID when claude returns, so a later session in the
 });
 
 test('processStart: a running pid has a stable start time; a pid that runs nothing has none', { skip: process.platform !== 'win32' }, async () => {
-  const { processStart } = await import('../src/git.mjs');
+  const { processStart } = await import('../src/launch.mjs');
   const a = await processStart(process.pid);
   assert.ok(a && a === await processStart(process.pid));
   assert.equal(await processStart(0), null);

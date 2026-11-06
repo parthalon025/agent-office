@@ -44,11 +44,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn as realSpawn, execFile as realExecFile } from 'node:child_process';
-import { resolveExe, helperCwd } from '../git.mjs';
+import { resolveExe, helperCwd, killTree } from '../launch.mjs';
 import { clip } from '../tracker.mjs';
 import { providerError } from './index.mjs';
 import { createToolGate, noteOf, OFFICE_TOOLS } from './local.mjs';
-import { createLocalTools, killTree, TOOL_DEFINITIONS } from './local-tools.mjs';
+import { createLocalTools, TOOL_DEFINITIONS } from './local-tools.mjs';
 
 export const KIND = 'agent-framework';
 export const RUNNER = path.join(path.dirname(fileURLToPath(import.meta.url)), 'agent_framework_runner.py');
@@ -151,7 +151,7 @@ const textOf = (e) => String((e && e.message) || e || 'unknown error');
  *   each gives kind, label, baseUrl and models().
  * @param {object} [deps.officeTools] the office tools as in-process calls (server.mjs officeTools).
  * @param {object} [deps.env] the office environment (process.env). OFFICE_AF_PYTHON: the Python that has the framework.
- * @param {Function} [deps.spawn] @param {Function} [deps.execFile] @param {(name: string) => string} [deps.exe] git.mjs resolveExe
+ * @param {Function} [deps.spawn] @param {Function} [deps.execFile] @param {(name: string) => string} [deps.exe] launch.mjs resolveExe
  * @param {(pid: number) => void} [deps.kill] killTree. @param {(root: string) => object} [deps.makeTools] createLocalTools.
  * @param {string} [deps.runner] the runner script (RUNNER).
  */

@@ -4,9 +4,9 @@
 // A path outside the folder is refused here also when the user approved the call: the tools are the last fence.
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn, execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { inside, realInside, isProtectedPart } from '../risk.mjs';
-import { resolveExe, helperCwd } from '../git.mjs'; // absolute program paths: a cmd.exe planted in the worktree never runs
+import { resolveExe, helperCwd, killTree } from '../launch.mjs'; // absolute program paths: a cmd.exe planted in the worktree never runs
 
 export const LIMITS = {
   readBytes: 200_000,     // most of one file the model gets back
@@ -47,19 +47,6 @@ function lastBytes(s, n) {
   let i = b.length - n;
   while (i < b.length && (b[i] & 0xc0) === 0x80) i++;
   return b.subarray(i).toString('utf8');
-}
-
-/** Kill a process and its children. Windows: taskkill /T by PID (a shell's children outlive a plain kill). */
-export function killTree(pid, run = execFile) {
-  if (!pid) return Promise.resolve();
-  if (process.platform === 'win32') {
-    return new Promise((resolve) => {
-      try { run(resolveExe('taskkill'), ['/PID', String(pid), '/T', '/F'], { cwd: helperCwd(), windowsHide: true }, () => resolve()); }
-      catch { resolve(); }
-    });
-  }
-  try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } }
-  return Promise.resolve();
 }
 
 /**

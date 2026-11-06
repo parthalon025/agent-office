@@ -1,6 +1,6 @@
 // Port per branch: one stable port sequence for each branch or worktree, in a reserved range, so final browser tests of
 // several worktrees never share a port with each other or with the owner's office on 4317 (#96, #106).
-// Pure rules (git.mjs) plus the real server with OFFICE_PORT=branch. Offline: no claude on PATH, no browser, no paid call.
+// Pure rules (launch.mjs) plus the real server with OFFICE_PORT=branch. Offline: no claude on PATH, no browser, no paid call.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -11,6 +11,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import * as git from '../src/git.mjs';
+import * as launch from '../src/launch.mjs';
 import { officeFiles } from '../src/files.mjs';
 import { pageFile } from '../src/auth.mjs';
 import { startOffice, settle, holdPort, hold, close, closeHeld, copyOffice } from './fixtures/office-server.mjs';
@@ -117,7 +118,7 @@ test('checkoutName: the branch, or the worktree folder name when HEAD is detache
   assert.throws(() => git.checkoutName(null), /not in a git repository/i);
 });
 
-const sh = (args, cwd) => execFileSync(git.resolveExe('git'), ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd, stdio: 'pipe' });
+const sh = (args, cwd) => execFileSync(launch.resolveExe('git'), ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false', ...args], { cwd, stdio: 'pipe' });
 // The office takes ports of a name's sequence, so the test picks a name whose whole sequence is free to hold now. Offices
 // that run at the same time hold other ports and cannot change what this test sees (#96).
 async function freeName() {
@@ -157,7 +158,7 @@ test('OFFICE_PORT=branch: the office takes the first free port of its sequence, 
   sh(['commit', '--allow-empty', '-m', 'x'], dir);
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => k.toLowerCase() !== 'path'));
   Object.assign(env, {
-    PATH: [path.dirname(process.execPath), path.dirname(git.resolveExe('git')), ...(win ? [path.join(process.env.SystemRoot || 'C:\\Windows', 'System32')] : [])].join(path.delimiter),
+    PATH: [path.dirname(process.execPath), path.dirname(launch.resolveExe('git')), ...(win ? [path.join(process.env.SystemRoot || 'C:\\Windows', 'System32')] : [])].join(path.delimiter),
     OFFICE_PORT: 'branch', OFFICE_OPEN: '0', OFFICE_HOOKS: 'command', LOCALAPPDATA: lad, APPDATA: path.join(tmp, 'roaming'),
     OFFICE_RATE_FILE: path.join(tmp, 'no-rate.json'),
   });

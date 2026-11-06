@@ -3,7 +3,7 @@
 // browser, and opens / closes Claude Code sessions. Zero dependencies. Windows-first.
 // First statement: Windows must never look for a program in a child's folder (Node reads this from the office's
 // own environment at each spawn; children inherit it). The imports load first, but none starts a process.
-// Every spawn also uses an absolute path from git.resolveExe.
+// Every spawn also uses an absolute path from launch.resolveExe.
 process.env.NoDefaultCurrentDirectoryInExePath = '1';
 // Second: the cloud kinds read their settings, and cloudConfig takes the token settings out of process.env, so no process the
 // office starts (a Claude Code session, a local agent's command) inherits them and no agent can print the token into the chat.
@@ -16,6 +16,7 @@ import os from 'node:os';
 import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process'; // execFileSync: icacls for writeSecret
 import * as git from './git.mjs';
+import * as launch from './launch.mjs';
 import { createReader as createPrReader, readyEntries, mergeArgs } from './changes.mjs';
 import { slimPayload, cleanIds as cleanPaperclipIds } from './payload.mjs';
 import { createHq } from './paperclip.mjs';
@@ -125,9 +126,9 @@ const REMOTE_SITE = REMOTE.on ? { config: REMOTE, keys: auth.createAccessKeys({ 
 function writeSecret(file, text) {
   const warning = auth.writeOwnerOnly(file, text, {
     fs,
-    icacls: (args) => execFileSync(git.resolveExe('icacls'), args, { cwd: git.helperCwd(), windowsHide: true, stdio: 'pipe', timeout: 15000 }),
-    readAcl: (f) => auth.parseAcl(execFileSync(git.resolveExe('powershell'), ['-NoProfile', '-NonInteractive', '-Command', auth.ACL_SCRIPT],
-      { cwd: git.helperCwd(), windowsHide: true, encoding: 'utf8', stdio: 'pipe', timeout: 30000, env: { ...process.env, AO_ACL_FILE: f } })),
+    icacls: (args) => execFileSync(launch.resolveExe('icacls'), args, { cwd: launch.helperCwd(), windowsHide: true, stdio: 'pipe', timeout: 15000 }),
+    readAcl: (f) => auth.parseAcl(execFileSync(launch.resolveExe('powershell'), ['-NoProfile', '-NonInteractive', '-Command', auth.ACL_SCRIPT],
+      { cwd: launch.helperCwd(), windowsHide: true, encoding: 'utf8', stdio: 'pipe', timeout: 30000, env: { ...process.env, AO_ACL_FILE: f } })),
   });
   if (warning) console.warn(`WARNING: ${warning}`);
 }
@@ -773,7 +774,7 @@ const WALK = [
 let walker = null;
 const walks = new Map();
 function startWalker() {
-  const child = spawn(git.resolveExe('powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', WALK], { cwd: git.helperCwd(), windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
+  const child = spawn(launch.resolveExe('powershell.exe'), ['-NoProfile', '-NonInteractive', '-Command', WALK], { cwd: launch.helperCwd(), windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
   let buf = '';
   child.stdout.on('data', (d) => {
     buf += d;
@@ -1985,7 +1986,7 @@ const server = http.createServer(async (req, res) => {
       if (pre) return send(res, 200, pre);
       if (body.hook_ppid && !body.office_id) {
         const s = findSession(body);
-        if (s && !s.pid) { const pid = await walkToClaude(body.hook_ppid); if (pid) { s.pid = pid; git.processStart(pid).then((t) => { s.pidStart = t; }); broadcast(); } }
+        if (s && !s.pid) { const pid = await walkToClaude(body.hook_ppid); if (pid) { s.pid = pid; launch.processStart(pid).then((t) => { s.pidStart = t; }); broadcast(); } }
       }
       return send(res, 200, out || { ok: true });
     }
@@ -2133,7 +2134,7 @@ function openBrowser(link) {
   if (process.platform !== 'win32' || process.env.OFFICE_OPEN === '0') return;
   if (!/^http:\/\/127\.0\.0\.1:\d+\/#n=[0-9a-f]+$/.test(link)) return; // nothing that cmd could read as a command
   try {
-    const c = spawn(git.resolveExe('cmd.exe'), ['/d', '/s', '/c', `start "" "${link}"`], { cwd: git.helperCwd(), windowsVerbatimArguments: true, windowsHide: true, stdio: 'ignore', detached: true });
+    const c = spawn(launch.resolveExe('cmd.exe'), ['/d', '/s', '/c', `start "" "${link}"`], { cwd: launch.helperCwd(), windowsVerbatimArguments: true, windowsHide: true, stdio: 'ignore', detached: true });
     c.on('error', () => {});
     c.unref();
   } catch { /* the printed link still works */ }

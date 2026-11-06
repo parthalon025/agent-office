@@ -12,7 +12,7 @@ import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as auth from '../src/auth.mjs';
-import { resolveExe } from '../src/git.mjs';
+import { resolveExe } from '../src/launch.mjs';
 import { officeFiles } from '../src/files.mjs';
 import { startOffice, startOnFreePort, until, copyOffice } from './fixtures/office-server.mjs';
 
@@ -691,7 +691,7 @@ test('route matrix, launch code and owner-only files on a real server', { timeou
       o.child.kill();
       await new Promise((r) => (o.child.exitCode !== null ? r() : o.child.once('exit', r)));
     }
-    // The server's helpers start in %SystemRoot% (git.helperCwd), so once both copies are gone nothing is in the folder.
+    // The server's helpers start in %SystemRoot% (launch.helperCwd), so once both copies are gone nothing is in the folder.
     fs.rmSync(tmp, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   }
 });

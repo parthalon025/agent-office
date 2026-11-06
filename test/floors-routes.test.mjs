@@ -15,10 +15,11 @@ import { pageFile } from '../src/auth.mjs';
 import { startOnFreePort, until as untilTrue, copyOffice } from './fixtures/office-server.mjs';
 import { officeFiles } from '../src/files.mjs';
 import * as git from '../src/git.mjs';
+import * as launch from '../src/launch.mjs';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SKIP = process.platform !== 'win32' ? 'opening sessions is only implemented for Windows' : false;
-const GIT = git.resolveExe('git');
+const GIT = launch.resolveExe('git');
 const IDENT = ['-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'commit.gpgsign=false'];
 const plain = (cwd, ...a) => execFileSync(GIT, [...IDENT, ...a], { cwd, encoding: 'utf8', windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
 const tag = 'aotest' + crypto.randomBytes(3).toString('hex');

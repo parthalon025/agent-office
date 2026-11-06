@@ -70,7 +70,7 @@ before(async () => {
   repo = path.join(base, 'repo');
   for (const d of [work, copy, home, repo]) fs.mkdirSync(d);
   // a git repository: a terminal session there is in a worktree (its main checkout)
-  const { resolveExe } = await import('../src/git.mjs');
+  const { resolveExe } = await import('../src/launch.mjs');
   const { execFileSync } = await import('node:child_process');
   const g = (...a) => execFileSync(resolveExe('git'), ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: repo, encoding: 'utf8', windowsHide: true });
   g('init', '-q', '-b', 'main'); fs.writeFileSync(path.join(repo, 'a.txt'), 'a\n'); g('add', '-A'); g('commit', '-q', '-m', 'init');

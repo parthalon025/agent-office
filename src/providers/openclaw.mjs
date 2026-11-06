@@ -18,7 +18,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import { execFile as realExecFile } from 'node:child_process';
 import { clip } from '../tracker.mjs';
-import { helperCwd } from '../git.mjs';
+import { helperCwd } from '../launch.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 

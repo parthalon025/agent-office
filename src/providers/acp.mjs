@@ -3,7 +3,7 @@
 // Hermes Agent (`hermes acp`), DeepSeek Harness (`dsh --profile acp`), OpenClaw (`openclaw acp`, behind a Gateway) and
 // GitHub Copilot CLI (`copilot --acp`, its extras in providers/copilot.mjs).
 //
-// The office is the ACP client. It starts the agent by its absolute path (git.mjs resolveExe), speaks newline-delimited
+// The office is the ACP client. It starts the agent by its absolute path (launch.mjs resolveExe), speaks newline-delimited
 // JSON-RPC 2.0 on its stdin and stdout, and reports everything in the tracker's vocabulary (events.hook, events.stream):
 //   session/update text            -> stream deltas and an assistant message
 //   session/update tool_call(_update) -> PreToolUse, PostToolUse, PostToolUseFailure
@@ -27,11 +27,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn as realSpawn, execFile as realExecFile } from 'node:child_process';
-import { resolveExe } from '../git.mjs';
+import { resolveExe, killTree } from '../launch.mjs';
 import { fileKey, riskOf } from '../risk.mjs';
 import { clip } from '../tracker.mjs';
 import { providerError } from './index.mjs';
-import { createLocalTools, killTree } from './local-tools.mjs';
+import { createLocalTools } from './local-tools.mjs';
 import { GATEWAY_HOST, DEFAULT_GATEWAY_PORT, MIN_VERSION, PLUGIN_ID, gatewayPort, probeGateway, versionAtLeast, wantedConfig, checkConfig, configReader, officeKey, toolCall } from './openclaw.mjs';
 import * as COPILOT from './copilot.mjs';
 
@@ -253,7 +253,7 @@ function within(p, ms, why, setTimer, clearTimer) {
  * @param {object} deps.events the provider events (providers/index.mjs providerEvents).
  * @param {string} deps.kind a key of AGENTS.
  * @param {Function} [deps.spawn] child_process.spawn.  @param {Function} [deps.execFile] child_process.execFile, for taskkill.
- * @param {(name: string) => string} [deps.exe] the program resolver: an absolute path, or it throws (git.mjs resolveExe).
+ * @param {(name: string) => string} [deps.exe] the program resolver: an absolute path, or it throws (launch.mjs resolveExe).
  * @param {object} [deps.env] the environment for the agent (process.env).
  * @param {(root: string) => object} [deps.makeTools] createLocalTools.
  * @param {Function} [deps.setTimer] setTimeout.  @param {Function} [deps.clearTimer] clearTimeout.

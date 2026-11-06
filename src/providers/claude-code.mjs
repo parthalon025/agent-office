@@ -4,12 +4,12 @@
 // Stdout messages go to the session tracker through events.stream; a control response goes back to its request here.
 // Hooks reach the tracker over the server's hook routes, not through this file, so a permission decision goes back as the
 // hook's answer (answer() below gives its body).
-// Every program starts from the absolute path that git.mjs resolveExe gives, never from a bare name: Windows would look in
+// Every program starts from the absolute path that launch.mjs resolveExe gives, never from a bare name: Windows would look in
 // the session folder first. The process calls are injected (deps.spawn, deps.execFile, deps.exe), so tests drive it with a
 // fake runner. Nothing starts on import.
 import crypto from 'node:crypto';
 import { spawn as realSpawn, execFile as realExecFile, execFileSync as realExecFileSync } from 'node:child_process';
-import { resolveExe, helperCwd, processStart } from '../git.mjs';
+import { resolveExe, helperCwd, processStart } from '../launch.mjs';
 import { clip } from '../tracker.mjs';
 import { providerError } from './index.mjs';
 
@@ -81,7 +81,7 @@ function blocksFor(text, attachments) {
  * @param {() => {settings: string, mcp: string, launcher: string}} deps.files the hook settings file in use, the office MCP
  *   config and launch.ps1. Read at each open, so a change of hooks mode applies to the next session.
  * @param {Function} [deps.spawn] child_process.spawn. @param {Function} [deps.execFile] child_process.execFile.
- * @param {(name: string) => string} [deps.exe] the program resolver: an absolute path, or it throws (git.mjs resolveExe).
+ * @param {(name: string) => string} [deps.exe] the program resolver: an absolute path, or it throws (launch.mjs resolveExe).
  * @param {object} [deps.env] the environment for Claude Code (process.env).
  * @param {() => string} [deps.makeId] control request ids.
  */

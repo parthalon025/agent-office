@@ -19,7 +19,7 @@ import { startFakeOpenAI } from './fixtures/fake-openai.mjs';
 import { pageFile, routeOf } from '../src/auth.mjs';
 import { officeFiles } from '../src/files.mjs';
 import { load as loadPlugin } from './fixtures/fake-openclaw.mjs';
-import { resolveExe } from '../src/git.mjs';
+import { resolveExe } from '../src/launch.mjs';
 import { startOnFreePort, freePort, until as untilTrue, copyOffice } from './fixtures/office-server.mjs';
 
 const SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -471,7 +471,7 @@ test('a live reopen swaps the past record for its own as soon as it has a sid', 
 
 // ---------- agent rooms (#69): POST /api/open makes a room for each agent ----------
 test('/api/open gives each agent a worktree on the base floor; isolation "same" and a folder outside git work in the folder', { skip: SKIP }, async () => {
-  const { resolveExe } = await import('../src/git.mjs');
+  const { resolveExe } = await import('../src/launch.mjs');
   const { execFileSync } = await import('node:child_process');
   const repo = path.join(base, 'rooms-repo');
   fs.mkdirSync(repo);
@@ -508,7 +508,7 @@ test('/api/open gives each agent a worktree on the base floor; isolation "same" 
 // Review minor: Remove room rewrote the past record to the main folder, so Reopen ran the agent in the user's own folder on
 // its branch (and a Claude Code resume would not find its conversation there). Reopen now says the room is gone, and opens nothing.
 test('Reopen of a session whose room was removed says the room is gone and opens nothing in the main folder', { skip: SKIP }, async () => {
-  const { resolveExe } = await import('../src/git.mjs');
+  const { resolveExe } = await import('../src/launch.mjs');
   const { execFileSync } = await import('node:child_process');
   const repo = path.join(base, 'gone-repo');
   fs.mkdirSync(repo);
@@ -536,7 +536,7 @@ test('Reopen of a session whose room was removed says the room is gone and opens
 
 // Review M5: agent rooms opened at once in one repository each write the repository config; they are made one at a time.
 test('agents opened at once in one repository all get a room of their own on the base floor', { skip: SKIP }, async () => {
-  const { resolveExe } = await import('../src/git.mjs');
+  const { resolveExe } = await import('../src/launch.mjs');
   const { execFileSync } = await import('node:child_process');
   const repo = path.join(base, 'busy-repo');
   fs.mkdirSync(repo);
