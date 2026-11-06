@@ -23,7 +23,7 @@
 // wideRoot: the home folder, a drive): any other root has no worktree, so its reads and edits are Read or edit outside it.
 // The rules apply only while the office runs: a stopped office answers no hook, and Claude Code then decides alone.
 import { ratingOf, wideRoot } from './risk.mjs';
-import '../public/vocab.js';
+import './vocab.mjs';
 import { traitsOf } from './providers/index.mjs';
 
 const S = globalThis.OfficeVocab.security;

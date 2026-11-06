@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createManager, createPlanBoard, officeSource, DEFAULT_LIMITS, LADDER, NO_CHANGE_CALLS, ladderStart, stageSignal, stepUp, suggestSwitch } from '../src/manager.mjs';
-import '../public/vocab.js';
+import '../src/vocab.mjs';
 import { NOTES_MAX } from '../src/notes.mjs';
 
 // A world of two agents. dispatched lists what the Manager handed out; spend is per agent, in dollars.
@@ -32,10 +32,9 @@ function world(over = {}) {
 }
 const free = (w, id) => { w.agents.find((a) => a.id === id).free = true; };
 
-test('importing starts nothing, and a manager needs a planner, agents and dispatch', () => {
-  assert.throws(() => createManager({}), /planner/);
-  assert.throws(() => createManager({ planner() {} }), /agents/);
-  assert.throws(() => createManager({ planner() {}, agents() {} }), /dispatch/);
+test('importing starts nothing, and a manager needs agents and dispatch', () => {
+  assert.throws(() => createManager({}), /agents/);
+  assert.throws(() => createManager({ agents() {} }), /dispatch/);
   assert.equal(DEFAULT_LIMITS.maxHops > 0, true);
 });
 
@@ -685,4 +684,10 @@ test('no signal, no agent, or Paperclip connected: the step stays', async () => 
   w.calls.c1 = fails(2); w.paperclip = true;
   assert.equal((await w.m.check('c1')).action, 'stay');
   assert.deepEqual(w.interrupted, []);
+});
+
+test('with no planner, a goal is one step per line, bullets and numbers cut', async () => {
+  const m = createManager({ agents: () => [], dispatch: async () => ({}) });
+  const id = await m.submit('', '- Find the bug\n2. Fix it\n\nWrite the test');
+  assert.deepEqual(m.get(id).steps.map((s) => s.text), ['Find the bug', 'Fix it', 'Write the test']);
 });

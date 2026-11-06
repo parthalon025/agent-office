@@ -14,7 +14,7 @@ function load(file) {
   const Stub = () => null;
   const store = {};
   sb.localStorage = { getItem: (k) => (k in store ? store[k] : null), setItem: (k, v) => { store[k] = String(v); } };
-  vm.runInContext(src('public/vocab.js'), sb, { filename: 'vocab.js' });
+  for (const f of ['vocab', 'vocab-security', 'vocab-layers', 'vocab-persona']) vm.runInContext(src('public/' + f + '.js'), sb, { filename: f + '.js' });
   // Every name the feature reads from the page core is a stand-in; the Interface is what the feature puts back.
   sb.OfficePage = new Proxy({}, { get: (t, k) => (k in t ? t[k] : Stub), has: () => true });
   vm.runInContext(src('public/' + file), sb, { filename: file });

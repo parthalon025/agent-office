@@ -7,7 +7,7 @@ import { slimPayload } from '../src/payload.mjs';
 import { createLocal } from '../src/providers/local.mjs';
 import { createExplainer, parseExplain, explainMessages, MAX_TEXT } from '../src/explain.mjs';
 import { startFakeOpenAI } from './fixtures/fake-openai.mjs';
-import '../public/vocab.js';
+import '../src/vocab.mjs';
 
 const V = globalThis.OfficeVocab;
 const HOOKS = JSON.parse(fs.readFileSync(new URL('./fixtures/hooks.json', import.meta.url), 'utf8'));

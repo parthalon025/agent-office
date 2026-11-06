@@ -10,7 +10,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { riskOf } from './risk.mjs';
 import { describeTool, callKey, settles } from './payload.mjs';
-import '../public/vocab.js'; // the waiting rule (isWaiting), shared with the page
+import './vocab.mjs'; // the waiting rule (isWaiting), shared with the page
 
 const V = globalThis.OfficeVocab;
 
@@ -58,12 +58,9 @@ const defaultId = (kind) => (ID_PREFIX[kind] ?? '') + crypto.randomBytes(ID_BYTE
  * @param {() => void} [deps.onChange] called after a state change (the server broadcasts).
  * @param {(id: string, decision: object) => void} [deps.releaseHold] frees a held permission request or question.
  * @param {(fn: Function, ms: number) => unknown} [deps.setTimer] timer for the throttled live text.
- * @param {object} [deps.persist] persistence sink.
- * @param {(s: object) => void} [deps.persist.history] a session reached a point worth saving.
- * @param {(dir: string) => void} [deps.persist.recentDir] a folder a session started in.
- * @param {(list: {commands: string[], skills: string[]}) => void} [deps.persist.commands] last known slash commands.
- * @param {(s: object, git: object|null) => void} [deps.persist.placed] a session's place was looked up.
- * @param {(s: object, dollars: number) => void} [deps.persist.spent] a turn result says the session spent more (the Spend screen).
+ * @param {(what: 'history'|'recentDir'|'commands'|'placed'|'spent', a: any, b?: any) => void} [deps.record] the one persistence call, by what happened:
+ *   'history' (s): a session reached a point worth saving; 'recentDir' (dir): a folder a session started in; 'commands' ({commands, skills}): last known
+ *   slash commands; 'placed' (s, git|null): a session's place was looked up; 'spent' (s, dollars): a turn result says the session spent more (the Spend screen).
  * @param {(s: object, p: object, opts: {provider?: boolean}) => ({allow: boolean, line?: string, message?: string, quiet?: boolean}|null)} [deps.screen]
  *   the check before a hold (the Security room rules, security.mjs decide): a decision answers the request at once,
  *   null holds it. Default: hold every request.
@@ -75,7 +72,7 @@ export function createTracker(deps = {}) {
   const changed = deps.onChange || (() => {});
   const releaseHold = deps.releaseHold || (() => {});
   const setTimer = deps.setTimer || ((fn, ms) => setTimeout(fn, ms));
-  const persist = deps.persist || {};
+  const record = deps.record || (() => {});
   const screen = deps.screen || (() => null);
 
   /** @type {Map<string, any>} uid -> session */
@@ -136,7 +133,7 @@ export function createTracker(deps = {}) {
       s.git = g; s.placed = true;
       // Only calls opened before the first place have no file yet. Later calls keep theirs when the folder changes.
       if (first) for (const c of s.calls) { const abs = callPaths.get(c); if (abs) c.file = fileOf(s, abs); }
-      persist.placed?.(s, g);
+      record('placed', s, g);
       if (diff) changed();
     });
   }
@@ -237,7 +234,7 @@ export function createTracker(deps = {}) {
     dropQuestions(s, 'The session ended before the user answered.');
     s.status = 'ended'; s.endedAt = now(); s.tool = null; s.live = ''; closeAll(s, 'The session ended.');
     addFeed(s, 'end', why);
-    persist.history?.(s);
+    record('history', s);
   }
 
   // ---------- input one: hook payloads ----------
@@ -257,7 +254,7 @@ export function createTracker(deps = {}) {
     if (p.model) s.model = p.model;
     // A Paperclip run (#76): the ids from its environment (hook.mjs; the server checked them). A resumed run keeps the session and gets the new run id.
     if (p.paperclip && typeof p.paperclip === 'object') s.paperclip = p.paperclip;
-    if (firstSid) persist.history?.(s); // it can be found again from now on, also before its first turn ends
+    if (firstSid) record('history', s); // it can be found again from now on, also before its first turn ends
     s.lastEvent = now();
     if (s.status === 'ended' && ev !== 'SessionEnd') { s.endedAt = null; s.status = 'idle'; }
     const input = p.tool_input || {};
@@ -325,7 +322,7 @@ export function createTracker(deps = {}) {
         break;
       default: break;
     }
-    if (p.cwd && ev === 'SessionStart') persist.recentDir?.(p.cwd);
+    if (p.cwd && ev === 'SessionStart') record('recentDir', p.cwd);
     void placeSession(s, ev === 'SessionStart' || ev === 'UserPromptSubmit' || ev === 'Stop');
     changed();
     return out;
@@ -437,11 +434,11 @@ export function createTracker(deps = {}) {
     } else if (m.type === 'system' && m.subtype === 'init') {
       if (m.model) s.model = m.model;
       if (m.permissionMode) s.mode = m.permissionMode;
-      if (!s.sid && m.session_id) { s.sid = m.session_id; persist.history?.(s); } // see onHook: saved as soon as it has a sid
+      if (!s.sid && m.session_id) { s.sid = m.session_id; record('history', s); } // see onHook: saved as soon as it has a sid
       if (Array.isArray(m.slash_commands)) s.commands = m.slash_commands.filter((x) => typeof x === 'string').slice(0, 400);
       if (Array.isArray(m.skills)) s.skills = m.skills.filter((x) => typeof x === 'string').slice(0, 400);
       // Claude reports these only after its first message, so keep the last list for sessions that have not spoken yet.
-      if (s.commands.length) persist.commands?.({ commands: s.commands, skills: s.skills });
+      if (s.commands.length) record('commands', { commands: s.commands, skills: s.skills });
     } else if (m.type === 'assistant' && !m.parent_tool_use_id) {
       s.live = '';
       const u = m.message?.usage;
@@ -475,7 +472,7 @@ export function createTracker(deps = {}) {
       if (typeof m.total_cost_usd === 'number') {
         const before = s.cost || 0;
         s.cost = (s.costBase || 0) + m.total_cost_usd;
-        if (s.cost > before) persist.spent?.(s, s.cost - before);
+        if (s.cost > before) record('spent', s, s.cost - before);
       }
       const mu = m.modelUsage && Object.values(m.modelUsage)[0];
       if (mu?.contextWindow) s.ctxWindow = mu.contextWindow;
@@ -492,7 +489,7 @@ export function createTracker(deps = {}) {
         pushReply(s, 'Stopped: ' + why);
         s.error = { id: ++s.errorSeq, text: clip(why, 200), at: now() };
       }
-      persist.history?.(s);
+      record('history', s);
       changed();
     }
   }

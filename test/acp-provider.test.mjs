@@ -16,7 +16,7 @@ import { createAcp, AGENTS } from '../src/providers/acp.mjs';
 import { commandLine } from '../src/providers/acp-files.mjs';
 import { createLocalTools } from '../src/providers/local-tools.mjs';
 import { decide, cleanRules } from '../src/security.mjs';
-import '../public/vocab.js';
+import '../src/vocab.mjs';
 
 // A fake OpenClaw config: path -> value. A path that is not there is unset. CLAW_OK: what an office session needs (#77):
 // workspace-only, and the office plugin enabled with this office's token file (CLAW_TOKEN, a path the rig hands the provider).

@@ -2,7 +2,7 @@
 // The rules are pure: the shared ones in public/vocab.js (OfficeVocab.rituals), the measure in rituals.mjs. No server, no clock.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import '../public/vocab.js';
+import '../src/vocab.mjs';
 import { metrics, recap, away, mergeRecord } from '../src/rituals.mjs';
 
 const R = globalThis.OfficeVocab.rituals;

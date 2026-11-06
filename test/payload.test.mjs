@@ -1,7 +1,7 @@
 // The server half of the waiting rule: which tool results settle a pending request.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import '../public/vocab.js';
+import '../src/vocab.mjs';
 import { describeTool, callKey, settles, slimPayload } from '../src/payload.mjs';
 
 const V = globalThis.OfficeVocab;
