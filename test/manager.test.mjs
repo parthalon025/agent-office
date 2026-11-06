@@ -563,3 +563,81 @@ test('a live chat only gets a suggestion after repeated errors, never a switch',
   assert.equal(suggestSwitch({ errors: 3 }), 'Switch to Opus?');
   assert.equal(suggestSwitch({ errors: 5, model: 'opus' }), null);
 });
+
+// ---- The ladder in the step loop (#74) ----
+function ladderWorld(over = {}) {
+  const w = world({ plan: [{ text: 'Fix it' }], ...over });
+  w.calls = {}; w.paperclip = false;
+  w.agents.length = 0;
+  w.agents.push({ id: 'l1', name: 'Local', free: true, paid: false, tiers: ['local'] }, { id: 'c1', name: 'Claude', free: true, paid: true, tiers: ['haiku', 'sonnet', 'opus'] });
+  let n = 100;
+  w.m = createManager({
+    planner: async () => w.plan, agents: () => w.agents,
+    dispatch: async (a, task, ctx) => { a.free = false; w.dispatched.push({ agent: a.name, task, ...ctx }); },
+    interrupt: (id) => w.interrupted.push(id), spendOf: (id) => w.spend[id] || 0,
+    ready: () => over.ready || ['local', 'haiku', 'sonnet', 'opus'],
+    callsOf: (id) => w.calls[id] || [],
+    paperclip: () => w.paperclip,
+    clock: () => 1000, makeId: () => String(++n), defaultSpendLimit: 2,
+  });
+  return w;
+}
+const fails = (n) => Array.from({ length: n }, (_, i) => ({ key: 'k' + i, ok: false }));
+
+test('a ladder step starts on the lowest ready tier and goes to the agent of that tier', async () => {
+  const w = ladderWorld();
+  await w.m.submit('b', 'g', { approveFirst: false });
+  assert.equal(w.dispatched[0].agent, 'Local');
+  assert.equal(w.dispatched[0].tier, 'local');
+  const w2 = ladderWorld({ ready: ['haiku', 'sonnet'] });
+  await w2.m.submit('b', 'g', { approveFirst: false });
+  assert.deepEqual([w2.dispatched[0].agent, w2.dispatched[0].tier], ['Claude', 'haiku']);
+});
+
+test('without ready() the ladder is off: no tier on the step', async () => {
+  const w = world();
+  await w.m.submit('b1', 'g');
+  assert.equal(w.dispatched[0].tier, undefined);
+  assert.equal(await w.m.check('a1'), null);
+});
+
+test('a stage signal on a local step asks before the first paid tier, and approve moves it up', async () => {
+  const w = ladderWorld();
+  const id = await w.m.submit('b', 'g', { approveFirst: false });
+  w.calls.l1 = fails(2);
+  const r = await w.m.check('l1');
+  assert.equal(r.action, 'ask');
+  assert.deepEqual(w.interrupted, ['l1']);
+  const g = w.m.get(id);
+  assert.equal(g.status, 'awaiting-approval');
+  assert.match(g.reason, /paid model/);
+  assert.equal(g.steps[0].status, 'pending');
+  await w.m.agentFreed();
+  assert.equal(w.dispatched.length, 1); // nothing runs while it waits
+  await w.m.approve(id);
+  assert.deepEqual([w.dispatched[1].agent, w.dispatched[1].tier], ['Claude', 'haiku']);
+});
+
+test('a signal on a paid tier steps up without a question, and the spend limit stops it', async () => {
+  const w = ladderWorld({ ready: ['haiku', 'sonnet', 'opus'] });
+  const id = await w.m.submit('b', 'g', { approveFirst: false });
+  w.calls.c1 = fails(2);
+  assert.equal((await w.m.check('c1')).action, 'up');
+  w.agents[1].free = true; await w.m.agentFreed();
+  assert.equal(w.dispatched[1].tier, 'sonnet');
+  w.spend.c1 = 5; // over the $2 limit
+  w.calls.c1 = fails(2);
+  assert.equal((await w.m.check('c1')).action, 'stop');
+  assert.equal(w.m.get(id).status, 'stopped');
+});
+
+test('no signal, no agent, or Paperclip connected: the step stays', async () => {
+  const w = ladderWorld({ ready: ['haiku', 'sonnet', 'opus'] });
+  await w.m.submit('b', 'g', { approveFirst: false });
+  w.calls.c1 = [{ key: 'a', ok: true }];
+  assert.equal(await w.m.check('c1'), null);
+  assert.equal(await w.m.check('nobody'), null);
+  w.calls.c1 = fails(2); w.paperclip = true;
+  assert.equal((await w.m.check('c1')).action, 'stay');
+  assert.deepEqual(w.interrupted, []);
+});
