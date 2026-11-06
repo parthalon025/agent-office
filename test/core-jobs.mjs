@@ -161,7 +161,7 @@ export async function run({ shots = true } = {}) {
       approveAfterDesk: {
         before: async () => approveJob.before(),
         steps: [palette, entry('Terminal of'),
-          { label: 'Back', run: async () => { await p.waitFor(seen('Back'), 15000, 'Back'); const ok = await p.click(control('Back')); await sleep(1500); return ok; } },
+          { label: 'Back', run: async () => { try { await p.waitFor(seen('Back'), 40000, 'Back'); } catch (e) { throw new Error(e.message + ' | page: ' + (await p.evaluate('document.body.innerText')).replace(/\s+/g, ' ').slice(-500)); } const ok = await p.click(control('Back')); await sleep(1500); return ok; } },
           ...approveJob.steps],
         goal: null,
         extra: (...a) => approveJob.extra(...a),

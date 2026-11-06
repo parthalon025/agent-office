@@ -1152,3 +1152,14 @@ test('DS controls: left rotates, middle and right pan', () => {
   const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'components', 'bundle.js'), 'utf8');
   assert.match(src, /mouseButtons\s*=\s*\{\s*LEFT:\s*T\.MOUSE\.ROTATE,\s*MIDDLE:\s*T\.MOUSE\.PAN,\s*RIGHT:\s*T\.MOUSE\.PAN\s*\}/);
 });
+
+test('wantClock: the clock starts when the scene is settled; before that only the hard limit counts (#189)', () => {
+  const w0 = { ready: false, until: 5000, hard: 30000 };
+  let r = P.wantClock(w0, 6000, false, 5000);   // past the old 5 s deadline, scene not up: keep waiting
+  assert.equal(r.expired, false);
+  r = P.wantClock(r.w, 12000, true, 5000);      // up and settled: the clock starts now
+  assert.equal(r.expired, false);
+  assert.equal(r.w.until, 17000);
+  assert.equal(P.wantClock(r.w, 17001, false, 5000).expired, true);   // the screen did not show within ms of settling
+  assert.equal(P.wantClock(w0, 30001, false, 5000).expired, true);    // never up: the hard limit
+});

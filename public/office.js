@@ -395,7 +395,8 @@
       var nm = window.officeAdapter.botName(uid), o = officeRef.current;
       if (cur2.view !== 'office' || window.officeAdapter.buildingOf(s) !== shown || !o || !nm) goTo(s);
       else o.select(nm);   // its floor, and the dock's actions for it
-      deskWant.current = { uid: uid, until: Date.now() + WANT_MS };
+      var t0 = Date.now();
+      deskWant.current = { uid: uid, until: t0 + WANT_MS, hard: t0 + 6 * WANT_MS, ready: false };
       requestAnimationFrame(wantDesk);
     }
     function wantDesk() {
@@ -403,8 +404,12 @@
       if (!w) return;
       var f = host && host.focused();
       if (f && f.kind === 'terminal' && f.item && f.item.uid === w.uid) { deskWant.current = null; return; }
+      if (host) host.skipIntro();   // the intro is decoration; a slow renderer would hold the desk behind it (#189)
       if (t && host && host.settled() && t.open(w.uid)) { deskWant.current = null; return; }
-      if (Date.now() > w.until) {
+      // the WANT_MS clock starts once the scene is up and settled (a loaded machine mounts and introduces it slowly, #189)
+      var c = window.OfficeSceneHost.pure.wantClock(w, Date.now(), !!(t && host && host.settled()), WANT_MS);
+      deskWant.current = Object.assign({}, w, c.w);
+      if (c.expired) {
         deskWant.current = null;
         var s = window.officeAdapter.sessionByUid(w.uid);
         toast({ tone: 'info', title: s ? s.name : 'Desk', text: 'The desk of this session is not on screen.' });
