@@ -165,6 +165,26 @@ test('readiness: one handshake and one session in a temp folder, the version fro
   } finally { await r.done(); }
 });
 
+test('readiness: the signed-in recording (1.0.105): ready, one entry per model id, the check ends with session/close', async () => {
+  const r = rig({ fake: { FAKE_COPILOT: 'recorded' } });
+  try {
+    const st = await r.p.readiness();
+    assert.deepEqual([st.ready, st.version, st.needs], [true, '1.0.105', []]);
+    // The recording lists the model "auto" twice (a plain entry and one with copilotUsage): the office shows it once.
+    assert.deepEqual(await r.p.models(), [{ id: 'auto', label: 'Auto' }]);
+    await until(() => r.log().some((m) => m.in && m.in.method === 'session/close'), 'session/close');
+    const sent = r.log().filter((m) => m.in && m.in.method).map((m) => m.in.method);
+    assert.deepEqual(sent, ['initialize', 'session/new', 'session/close'], 'no prompt, no session/list');
+  } finally { await r.done(); }
+});
+
+test('readiness: a ready answer is kept for an hour (each check leaves an empty session folder in ~/.copilot), a failed one for 10 s', () => {
+  // Copilot has no way to delete the session of a check (test/fixtures/copilot-acp-signed-in.json, leftBehind), so a ready
+  // answer is asked again rarely. A later sign-out shows at the next session start, which reports the sign-in step.
+  assert.equal(AGENTS.copilot.readyTtlMs, 60 * 60_000);
+  assert.equal(AGENTS.copilot.notReadyTtlMs, 10_000);
+});
+
 test('readiness: signed out is the Sign in step, with the version; a -32000 that is not about sign-in is not', async () => {
   const r = rig({ fake: { FAKE_COPILOT: 'signed-out' } });
   try {
@@ -475,4 +495,54 @@ test('requestCall: Copilot request bodies as the tool the office rates; anything
   assert.equal(requestCall({ kind: 'memory', intention: 'Remember the build' }).tool_name, 'Copilot memory');
   assert.equal(requestCall({ kind: 'mcp', serverName: 'a b', toolName: '../x' }).tool_name, 'mcp__a_b__.._x');
   for (const raw of [null, [], { command: 'ls' }, { kind: 'toString' }, { kind: '__proto__' }]) assert.equal(requestCall(raw), null);
+});
+
+// The prompt round trip recorded from Copilot CLI 1.0.105, signed in, 2026-11-06 (test/fixtures/copilot-acp-prompt.json): the
+// prompt "Reply with the word ok." with no tools. FAKE_COPILOT=recorded replays it for any prompt.
+test('a recorded turn: the reply "ok" reaches the tracker and the turn ends clean on end_turn; no cost, no error', async () => {
+  const r = rig({ fake: { FAKE_COPILOT: 'recorded' } });
+  const s = r.session();
+  try {
+    await started(r, s);
+    r.say(s, 'Reply with the word ok.');
+    await r.idle(s);
+    assert.deepEqual(s.replies.map((x) => x.text), ['ok']);
+    assert.equal(s.error, null, 'end_turn is a clean end');
+    assert.equal(s.status, 'idle');
+    assert.equal(s.cost, null, "the recording carries no cost field: the cost stays unknown");
+    const sent = r.log().filter((m) => m.in && m.in.method).map((m) => m.in.method);
+    assert.deepEqual(sent.filter((m) => m === 'session/prompt'), ['session/prompt'], 'one prompt');
+  } finally { await r.done(s); }
+});
+
+test('a recorded turn: the token usage of the answer counts once, usage_update is the total used and its window', async () => {
+  const r = rig({ fake: { FAKE_COPILOT: 'recorded' } });
+  const s = r.session();
+  const lines = [];
+  const stream = r.events.stream;
+  r.events.stream = (x, m) => { lines.push(m); return stream(x, m); };
+  try {
+    await started(r, s);
+    r.say(s, 'Reply with the word ok.');
+    await r.idle(s);
+    assert.deepEqual(lines.filter((m) => m.type === 'usage'), [{ type: 'usage', used: 15259, size: 128000 }]);
+    const turns = lines.filter((m) => m.type === 'assistant' && m.message.usage);
+    assert.equal(turns.length, 1, 'one usage line for one turn');
+    assert.deepEqual(turns[0].message.usage, { input_tokens: 14182, output_tokens: 5, cache_read_input_tokens: 0 });
+    assert.equal(s.usage.tokens, 15259, 'the total from usage_update, not added to again by the turn usage');
+    assert.equal(s.usage.input, 14182, 'the turn counted once');
+  } finally { await r.done(s); }
+});
+
+test('a recorded turn: session_info_update and config_option_update are ignored without an error or a feed line', async () => {
+  const r = rig({ fake: { FAKE_COPILOT: 'recorded' } });
+  const s = r.session();
+  try {
+    await started(r, s);
+    r.say(s, 'Reply with the word ok.');
+    await r.idle(s);
+    assert.equal(s.error, null);
+    assert.equal(s.replies.length, 1, 'neither update becomes a reply');
+    assert.ok(!r.feed.some((t) => /session_info|config_option|title|Reply with the word/i.test(t)), 'nothing in the feed: ' + JSON.stringify(r.feed));
+  } finally { await r.done(s); }
 });

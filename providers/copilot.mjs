@@ -7,7 +7,7 @@
 //   argsCall(card, raw, loc)   a call's own arguments in the shape of that card, so a change after the request is seen
 //   MODEL_RE                   a model id the office passes as --model
 // From Copilot CLI 1.0.105 (copilot help config, copilot help permissions, copilot help environment; the handshake in
-// test/fixtures/copilot-acp.json, signed out). Its request bodies come from the SDK schema of that version
+// test/fixtures/copilot-acp.json signed out, copilot-acp-signed-in.json signed in). Its request bodies come from the SDK schema of that version
 // (copilot-sdk/generated/session-events.d.ts PermissionRequest*), not from a signed-in run: no prompt was sent yet.
 // Pure: no I/O.
 
