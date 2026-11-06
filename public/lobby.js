@@ -9,6 +9,9 @@
      look, then open the Reception (o.onReception).
    - The directory board on the Reception's back wall lists every floor, top floor first, with its wing, its agents and the worst
      state of its desks. Two clicks: look, then open the search (o.onReception('directory')).
+   - The pipeline board on the Reception's back wall draws the eight stages of the building's changes (#93, o.changes). Two clicks: look,
+     then open the pipeline dialog (o.onReception('pipeline')). The DS paper props (ready tray, cabinet, archive box) get their count
+     from the same data (propCounts, userData.setCount); the page never builds them.
    - A nameplate stands at each bot's desk: name, model lane (Haiku, Sonnet, Opus, Fable) and cost. It faces the camera and keeps
      the DS body and caption sizes on screen at every zoom (plateBox; #92 review: a plate on the desk was 2 px text at the floor's zoom).
    Pure part (window.OfficeLobby.pure; tested in test/lobby.test.mjs): tourSteps, tourDue, plateLines, plateBox, directoryRows, memoLines,
@@ -70,6 +73,27 @@
     if (!layout.confirmed) return { title: 'Confirm the building', lines: ['Proposed: ' + layout.proposedName + '.', layout.why || '', 'Click the memo to confirm or change it.'].filter(Boolean) };
     return { title: layout.archetypeName, lines: (since && since.length ? since.slice(0, 3) : ['Nothing new since you left.']).concat(['Click the memo for the floors and the tour.']) };
   }
+  // The pipeline board (#93): the eight stages of the building's changes, one row each. c: the building's changes (building.js changes) or
+  // null. A stage with no data says "No data", also when the read failed. rows: { id, name, count, text }; foot: the line under them.
+  var STAGE_NAMES = [['intake', 'Intake'], ['build', 'Build'], ['check', 'Check'], ['review', 'Review'], ['gate', 'Gate'], ['merge', 'Merge'], ['release', 'Release'], ['record', 'Record']];
+  function pipelineLines(c) {
+    var by = {}; ((c && c.pipeline) || []).forEach(function (s) { by[s.id] = s; });
+    var rows = STAGE_NAMES.map(function (n) {
+      var s = by[n[0]], none = !s || s.unknown || (c && c.unknown), count = none ? 0 : s.count | 0;
+      return { id: n[0], name: n[1], count: count, text: none ? 'No data' : String(count) };
+    });
+    var foot = !c ? '' : c.unknown ? (c.line || '') : (c.mergedToday | 0) + ' merged today';
+    return { rows: rows, foot: foot };
+  }
+  // What each paper prop holds (the DS parts of the Reception): the ready tray, the inbox and outbox trays, the cabinet and the archive
+  // box, by the place of each folder (building.js folderAt). A building whose changes are unknown shows empty props.
+  function propCounts(c) {
+    var n = { ready: 0, inbox: 0, outbox: 0, cabinet: 0, archive: 0 };
+    if (!c || c.unknown) return n;
+    n.ready = (c.tray || []).length;
+    (c.folders || []).forEach(function (f) { if (f.place === 'inbox' || f.place === 'outbox' || f.place === 'cabinet' || f.place === 'archive') n[f.place]++; });
+    return n;
+  }
   // The painted faces, as DS token names. The memo and the directory board are paper in every theme (bubble, scene-dark ink, like
   // the notes card); the nameplate is the reverse. A lighter line keeps `alpha` of its ink over its face. A state dot on paper is the
   // on-bubble tone of its state (dot: the token suffix), since a raw status color is a fill and reads under 3:1 on paper at night; a
@@ -77,10 +101,11 @@
   var FACES = {
     memo: { face: 'bubble', ink: 'scene-dark', band: 'status-waiting-on-bubble' },
     directory: { face: 'bubble', ink: 'scene-dark', wingAlpha: 0.7, dot: '-on-bubble' },
-    plate: { face: 'scene-dark', ink: 'bubble', detailAlpha: 0.85 }
+    plate: { face: 'scene-dark', ink: 'bubble', detailAlpha: 0.85 },
+    pipeline: { face: 'bubble', ink: 'scene-dark', mutedAlpha: 0.7, barAlpha: 0.85 }
   };
   function dotOf(tok, state) { var t = state && tok['status-' + state + FACES.directory.dot]; return t || tok[FACES.directory.ink]; }
-  var pure = { tourSteps: tourSteps, tourDue: tourDue, plateLines: plateLines, plateBox: plateBox, declutter: declutter, directoryRows: directoryRows, memoLines: memoLines, FACES: FACES, dotOf: dotOf };
+  var pure = { tourSteps: tourSteps, tourDue: tourDue, plateLines: plateLines, plateBox: plateBox, declutter: declutter, directoryRows: directoryRows, memoLines: memoLines, pipelineLines: pipelineLines, propCounts: propCounts, FACES: FACES, dotOf: dotOf };
 
   // ---------- browser ----------
   function cssNum(name, fallback) { try { var v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--' + name)); return isFinite(v) && v > 0 ? v : fallback; } catch (x) { return fallback; } }
@@ -92,7 +117,7 @@
     var none = { refresh: function () {}, tour: function () { return false; }, dispose: function () {}, items: function () { return []; }, idle: function () { return false; }, desk: function () { return false; } };
     if (!T || !st || !host) return none;
     var K = st.K, dead = false, lastTok = K.tok;
-    var desks = [], boards = [], plates = [];   // { mesh, ... } of the shown floor; a desk also has its monitor (screen) when it has one
+    var desks = [], boards = [], plates = [], props = [];   // { mesh, ... } of the shown floor; a desk also has its monitor (screen) when it has one
     var paintedSig = {};
 
     function newTex(w, h) {
@@ -141,6 +166,27 @@
     // A nameplate is drawn at PLATE_K canvas pixels per CSS pixel, so it is sharp on a dense screen too. Its box (plateBox) comes
     // from the DS body and caption sizes; the frame scales the sprite to that many CSS pixels at every zoom.
     var PLATE_K = 3, PLATE_PAD = 8, PLATE_MAX = 200;
+    // The pipeline board: a bar per stage, as long as its count (a shape, not a color); "No data" is dimmer text with no bar.
+    function paintPipeline(c, w, h, p) {
+      var tok = K.tok, F0 = FACES.pipeline, ink = tok[F0.ink];
+      c.fillStyle = tok[F0.face]; c.fillRect(0, 0, w, h);
+      c.strokeStyle = ink; c.lineWidth = 14; c.strokeRect(7, 7, w - 14, h - 14);
+      c.fillStyle = ink; c.textBaseline = 'top';
+      c.font = font(44, 600); c.fillText('Pipeline', 32, 26);
+      var top = 92, foot = p.foot ? 44 : 0, lh = Math.max(24, Math.floor((h - top - foot - 24) / p.rows.length)), max = Math.max(1, p.rows.reduce(function (m, r) { return Math.max(m, r.count); }, 1));
+      p.rows.forEach(function (r, i) {
+        var y = top + i * lh, none = r.text === 'No data';
+        c.globalAlpha = none ? F0.mutedAlpha : 1; c.font = font(Math.round(lh * 0.6), 600); c.fillText(r.name, 32, y);
+        if (none) { c.font = font(Math.round(lh * 0.5), 500, true); c.fillText(r.text, 280, y + 2); }
+        else {
+          c.globalAlpha = F0.barAlpha; var bw = Math.round((w - 400) * r.count / max);
+          if (bw > 0) c.fillRect(280, y + lh * 0.12, bw, lh * 0.5);
+          c.globalAlpha = 1; c.font = font(Math.round(lh * 0.55), 600, true); c.fillText(r.text, 290 + bw, y);
+        }
+        c.globalAlpha = 1;
+      });
+      if (p.foot) { c.globalAlpha = F0.mutedAlpha; c.font = font(26, 500); c.fillText(fit(c, p.foot, w - 64), 32, h - 56); c.globalAlpha = 1; }
+    }
     function paintPlate(c, w, h, p, box, sz) {
       var tok = K.tok, F0 = FACES.plate, k = PLATE_K, pad = PLATE_PAD * k;
       c.fillStyle = tok[F0.face]; c.fillRect(0, 0, w, h);
@@ -170,11 +216,13 @@
     function scan() {
       var fg = host.shownFloor();
       desks = desks.filter(function (d) { return host.inScene(d.mesh); });
+      props = props.filter(function (m) { return host.inScene(m); });
       boards = boards.filter(function (b) { if (host.inScene(b.mesh)) return true; b.tex.dispose(); return false; });
       host.rooms().forEach(function (x) {
         x.rg.traverse(function (m) {
           if (m.userData.spareHit && !desks.some(function (d) { return d.mesh === m; })) desks.push({ kind: 'desk', mesh: m, roomId: m.userData.spareDesk.room, i: m.userData.spareDesk.i, screen: screenOf(m.parent) });
-          if (m.userData.lobby && !m.userData.lobbyItem) boards.push(adopt(m, 768, m.userData.lobby === 'memo' ? 520 : 470, m.userData.lobby, x.room.id));
+          if (m.userData.setCount && m.userData.prop && props.indexOf(m) < 0) props.push(m);
+          if (m.userData.lobby && !m.userData.lobbyItem) boards.push(adopt(m, 768, m.userData.lobby === 'memo' ? 520 : m.userData.lobby === 'pipeline' ? 528 : 470, m.userData.lobby, x.room.id));
         });
       });
       // nameplates: one per seated bot of the shown floor, on its desk
@@ -215,11 +263,14 @@
       scan();
       boards.forEach(function (b) {
         if (b.kind === 'memo') { var m = memoLines(o.layout ? o.layout() : null, o.since ? o.since() : []); repaint(b, JSON.stringify(m), function (c, w, h) { paintMemo(c, w, h, m); }); }
+        if (b.kind === 'pipeline') { var pl0 = pipelineLines(o.changes ? o.changes() : null); repaint(b, JSON.stringify(pl0), function (c, w, h) { paintPipeline(c, w, h, pl0); }); }
         if (b.kind === 'directory') {
           var rows = directoryRows(o.floors ? o.floors() : [], o.agents ? o.agents() : {}, o.states ? o.states() : {});
           repaint(b, JSON.stringify(rows), function (c, w, h) { paintDirectory(c, w, h, rows); });
         }
       });
+      var pc = propCounts(o.changes ? o.changes() : null);
+      props.forEach(function (m) { var k = m.userData.prop === 'tray' ? m.userData.kind : m.userData.prop; if (pc[k] != null) m.userData.setCount(pc[k]); });
       var sz = { body: cssNum('type-body-size', 13), caption: cssNum('type-caption-size', 11) };
       plates.forEach(function (p) {
         var pl = plateLines(p.bot, o.session ? o.session(p.bot) : null), sig = JSON.stringify(pl) + sz.body + '/' + sz.caption;
@@ -258,7 +309,7 @@
       var up = new T.Vector3(0, 1, 0).applyQuaternion(st.cam.quaternion);
       hint.position.copy(hintPoint).addScaledVector(up, (hpx / 2 + cssNum('space-2', 8)) * wpp);
     }
-    var VERB = { desk: 'Start an agent here', memo: 'Open the Reception', directory: 'Search the office', monitor: 'Start an agent here' };
+    var VERB = { desk: 'Start an agent here', memo: 'Open the Reception', directory: 'Search the office', pipeline: 'Open the pipeline', monitor: 'Start an agent here' };
     function keyOf(it) { return it.kind + ':' + it.roomId + (it.kind === 'desk' || it.kind === 'monitor' ? ':' + it.i : ''); }
     function hintOf(it) { var f = host.focused(); return f && f.key === keyOf(it) ? VERB[it.kind] : it.kind === 'desk' ? 'Look at the open desk' : 'Look closer'; }
     var target = {

@@ -1142,6 +1142,25 @@ Parts.globe=function(K,g,x,z,anim){mesh(cyl(.05,.05,1),K.m("#5b4630"),x,.5,z,g);
 Parts.clock=function(K,g,x,y,z,anim){var f=mesh(cyl(.75,.75,.08,40),K.m("#ffffff"),x,y,z,g);f.rotation.x=Math.PI/2;mesh(new T.TorusGeometry(.75,.06,10,40),K.m("#2a3440"),x,y,z+.03,g);
  var hh=new T.Group();hh.position.set(x,y,z+.07);g.add(hh);var p1=new T.Group(),p2=new T.Group();p1.add(mesh(box(.06,.42,.02),K.m("#1d252e"),0,.18,0));p2.add(mesh(box(.04,.6,.02),K.m("#1d252e"),0,.27,0));hh.add(p1);hh.add(p2);
  anim.push(function(){var d=new Date();p1.rotation.z=-((d.getHours()%12)+d.getMinutes()/60)/12*Math.PI*2;p2.rotation.z=-(d.getMinutes()/60)*Math.PI*2;});};
+/* paper props (#93): a folder, trays, a stamp, a cabinet and an archive box. Each prop is a group with userData.prop (its kind) and
+   userData.setCount(n), which shows n of its folders (a tray, the archive box) or pulls n drawers out (the cabinet). A page sets the
+   count from its data; the part holds no data. Colors are tokens: bubble paper, emphasis tab, scene-metal, scene-wood, scene-dark. */
+Parts.folder=function(K,g,x,y,z,ry){var f=new T.Group();f.position.set(x,y,z);f.rotation.y=ry||0;g.add(f);mesh(box(.44,.03,.32),K.t("bubble"),0,0,0,f);mesh(box(.16,.03,.06),K.t("emphasis"),-.12,0,-.19,f);return f;};
+Parts.tray=function(K,g,x,y,z,kind){var t=new T.Group();t.position.set(x,y,z);g.add(t);t.userData.prop="tray";t.userData.kind=kind;
+ var mt=K.t("scene-metal");mesh(box(.6,.04,.46),mt,0,.02,0,t);mesh(box(.6,.1,.03),mt,0,.07,-.22,t);mesh(box(.03,.1,.46),mt,-.29,.07,0,t);mesh(box(.03,.1,.46),mt,.29,.07,0,t);
+ if(kind==="ready")mesh(box(.6,.02,.03),K.t("emphasis"),0,.13,.22,t);
+ var fs=[];for(var i=0;i<5;i++)fs.push(Parts.folder(K,t,0,.07+i*.035,0,(i%2?.06:-.05)));
+ t.userData.setCount=function(n){fs.forEach(function(f,j){f.visible=j<n;});};t.userData.setCount(0);return t;};
+Parts.stamp=function(K,g,x,y,z){var s=new T.Group();s.position.set(x,y,z);g.add(s);s.userData.prop="stamp";
+ mesh(box(.22,.04,.16),K.t("scene-dark"),0,.02,0,s);mesh(cyl(.035,.035,.16),K.t("scene-wood"),0,.12,0,s);mesh(sph(.06,12,8),K.t("scene-wood"),0,.22,0,s);return s;};
+Parts.cabinet=function(K,g,x,z){var c=new T.Group();c.position.set(x,0,z);g.add(c);c.userData.prop="cabinet";
+ mesh(box(1,1.5,.6),K.t("scene-metal"),0,.75,0,c);var dr=[];
+ for(var i=0;i<3;i++){var d=new T.Group();d.position.set(0,.3+i*.46,.31);c.add(d);mesh(box(.9,.38,.04),K.t("scene-dark"),0,0,0,d);mesh(box(.3,.04,.05),K.t("emphasis"),0,.06,.04,d);dr.push(d);}
+ c.userData.setCount=function(n){dr.forEach(function(d,j){d.position.z=.31+(j<n?.14:0);});};c.userData.setCount(0);return c;};
+Parts.archiveBox=function(K,g,x,z){var a=new T.Group();a.position.set(x,0,z);g.add(a);a.userData.prop="archive";
+ mesh(box(.7,.4,.5),K.t("scene-wood"),0,.2,0,a);var lid=mesh(box(.76,.06,.56),K.t("scene-dark"),0,.43,0,a);var fs=[];
+ for(var i=0;i<3;i++)fs.push(Parts.folder(K,a,-.1+i*.1,.42,0,.1*i));
+ a.userData.setCount=function(n){lid.position.y=n>0?.55:.43;lid.rotation.x=n>0?-.18:0;fs.forEach(function(f,j){f.visible=j<n;});};a.userData.setCount(0);return a;};
 /* the reception desk of a lobby room (#92): a counter, a memo on it (userData.lobby "memo") and a directory board on the back wall
    (userData.lobby "directory"). The engine paints a plain face; a page repaints both. */
 Parts.reception=function(K,g,x,D,anim){var c=new T.Group();c.position.set(x,0,-.6);g.add(c);
@@ -1149,6 +1168,9 @@ Parts.reception=function(K,g,x,D,anim){var c=new T.Group();c.position.set(x,0,-.
  var face=function(title){return function(cx,w,hh){cx.fillStyle=K.tok.bubble||"#fff";cx.fillRect(0,0,w,hh);cx.fillStyle=K.tok.ink;cx.font="600 "+Math.round(hh/7)+"px "+K.f.sans;cx.fillText(title,Math.round(w/12),Math.round(hh/4));};};
  var memo=Parts.wallPanel(K,c,.4,1.13,.05,0,.9,.62,face("Memo"),true);memo.rotation.x=-Math.PI/2.6;memo.userData.lobby="memo";
  var dir=Parts.wallPanel(K,g,x,2.7,-D/2+.02,0,3.6,2.2,face("Directory"),true);dir.userData.lobby="directory";
+ var pb=Parts.wallPanel(K,g,x-4,2.7,-D/2+.02,0,3.2,2.2,face("Pipeline"),true);pb.userData.lobby="pipeline";
+ Parts.tray(K,c,-1.3,1.12,.05,"ready");Parts.stamp(K,c,1.5,1.12,.05);
+ Parts.cabinet(K,g,x-6.2,-D/2+.6);Parts.archiveBox(K,g,x+2.5,-D/2+.5);
  Parts.plant(K,g,x+2.4,-D/2+1,1.2);return c;};
 Parts.sign=function(K,g,title,sub,typeKey,x,y,z){var sl=K.look==="sublevel";if(sl){title=title.toUpperCase();sub=sub.toUpperCase();}var t=canvasTex(1024,256,function(c){if(sl&&"letterSpacing" in c)c.letterSpacing="6px";c.fillStyle=K.tok["type-"+typeKey]||K.tok.ink;c.fillRect(10,40,16,166);c.fillStyle=K.tok.ink;var fs=96;c.font="600 "+fs+"px "+K.f.sans;var tw=c.measureText(title).width;if(tw>950){fs=Math.max(48,Math.floor(fs*950/tw));c.font="600 "+fs+"px "+K.f.sans;}c.fillText(title,50,128);c.fillStyle=K.tok.muted;c.font="500 38px "+K.f.mono;c.fillText(sub,52,196);});
  var m=new T.Mesh(new T.PlaneGeometry(4.8,1.2),new T.MeshBasicMaterial({map:t,transparent:true}));m.position.set(x,y,z);g.add(m);return m;};

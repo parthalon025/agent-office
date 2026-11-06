@@ -78,9 +78,10 @@ test('nameplates on top of each other: the first shows, the one over it waits; a
 test('every lobby object has a Ctrl+K action: an open desk on each floor, the Reception, the tour, and the directory search', () => {
   const office = fs.readFileSync(new URL('../public/office.js', import.meta.url), 'utf8');
   const lobby = fs.readFileSync(new URL('../public/lobby.js', import.meta.url), 'utf8');
-  const verbs = /var VERB = \{ desk: '([^']+)', memo: '([^']+)', directory: '([^']+)', monitor: '([^']+)' \};/.exec(lobby);
+  const verbs = /var VERB = \{ desk: '([^']+)', memo: '([^']+)', directory: '([^']+)', pipeline: '([^']+)', monitor: '([^']+)' \};/.exec(lobby);
   assert.ok(verbs, 'the in-scene verbs');
-  assert.deepEqual(verbs.slice(1), ['Start an agent here', 'Open the Reception', 'Search the office', 'Start an agent here']);
+  assert.deepEqual(verbs.slice(1), ['Start an agent here', 'Open the Reception', 'Search the office', 'Open the pipeline', 'Start an agent here']);
+  assert.match(office, /part === 'pipeline'\) setDlg\(\{ name: 'flow' \}\)/, 'pipeline: the Changes dialog, also in Ctrl+K as page-flow');
   // an open desk on each floor moved into desk.js (#90): one list of the scene's actions, which test/desk.test.mjs checks
   assert.match(office, /OfficeDesk\.pure\.paletteActions\(dt,/, 'desk: Start an agent on <floor>');
   assert.match(fs.readFileSync(new URL('../public/desk.js', import.meta.url), 'utf8'), /'Start an agent on ' \+ \(e\.name/, 'desk: Start an agent on <floor>');

@@ -2359,6 +2359,8 @@
             host: host,
             layout: function () { var sn = latestSnap.current; return (sn && sn.layouts && sn.layouts[lobMount.repo]) || null; },
             since: function () { try { var sm = o.summary ? o.summary() : null; return ((sm && sm.top) || []).map(function (x) { return typeof x === 'string' ? x : String(x && x.text || ''); }); } catch (x) { return []; } },
+            // the building's changes (folders, tray, pipeline) for the pipeline board and the paper props (#93)
+            changes: function () { var sn = latestSnap.current; return sn ? window.OfficeBuilding.changes(sn, lobMount.repo) : null; },
             floors: function () { return lobMount.floors(); },
             states: function () { return lobMount.rollup().floors; },
             agents: function () { return lobMount.agentsByFloor(); },
@@ -2366,7 +2368,7 @@
             onDesk: function (roomId) { deskStart(roomId); },
             // the tour's monitor stop: an agent's monitor on the floor first (terminal.js look), else an open desk's
             monitor: function () { return !!(terminalRef.current && terminalRef.current.look && terminalRef.current.look()); },
-            onReception: function (part) { if (part === 'directory') openPalette(); else setDlg({ name: 'reception' }); }
+            onReception: function (part) { if (part === 'directory') openPalette(); else if (part === 'pipeline') setDlg({ name: 'flow' }); else setDlg({ name: 'reception' }); }
           });
           window.officeLobby = lobbyRef.current;   // the lobby (open desks, memo, directory, nameplates), for the console and tests
         }
