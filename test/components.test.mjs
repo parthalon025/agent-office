@@ -53,10 +53,12 @@ test('office.js: the scene height follows the window, and no CSS overrides the D
 });
 
 test('office.js: only Check again asks the server for a fresh provider round; opening a dialog reads the kept answer (#104)', () => {
-  const fx = office.match(/function useKinds\(on\) \{[\s\S]*?\n  \}\n/);
+  const fx = office.match(/function useKinds\(on\) \{[\s\S]*?\n  \}\r?\n/);
   assert.ok(fx, 'useKinds');
-  const asks = [...fx[0].matchAll(/'\/api\/providers[^']*'/g)].map((m) => m[0]);
-  assert.deepEqual(asks, ["'/api/providers?fresh=1'", "'/api/providers'"], 'one plain ask, one fresh ask');
+  const sh = office.match(/function fetchProviders\(fresh\) \{[\s\S]*?\n  \}\r?\n/);
+  assert.ok(sh, 'fetchProviders: the one shared ask (#101)');
+  assert.equal((fx[0].match(/fetchProviders\(/g) || []).length, 1, 'useKinds asks only through the shared fetch');
+  assert.equal((sh[0].match(/'\/api\/providers\?fresh=1' : '\/api\/providers'/g) || []).length, 1, 'one plain ask, one fresh ask');
   assert.match(fx[0], /var fresh = wantFresh\.current; wantFresh\.current = false;/, 'the flag is read once');
   assert.match(fx[0], /recheck: function \(\) \{ wantFresh\.current = true; setRound\(round \+ 1\); \}/, 'only recheck sets it');
   assert.equal((fx[0].match(/wantFresh\.current = true/g) || []).length, 1);

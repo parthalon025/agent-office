@@ -35,6 +35,8 @@
      pickFact(k)      -> the Agent kinds fact for a kind that needs a pick ('You pick the Foundry agent'), else null
      modelChoices(k, fallback) -> the Model options. A kind with a default model starts with Default; a local model
                          offers only its models. No kind, or a default-model kind before its answer: fallback.
+     modelSwitch(k, current, fallback) -> the dock switch options: the kind's models, no Default, plus the session's own unknown model
+     modelWord(k, id, fallback) -> the label of a model id in the kind's list, else the id; no id: Default model
      firstModel(k)    -> the model a kind starts on: the first of a kind that needs one, else '' (Default)
      noModelFor(k)    -> true when the kind needs a model and has none to pick (Open session waits)
      withKind(form, k, id) -> the form after a kind change: its first model, and only the options that kind takes
@@ -273,6 +275,25 @@
     if (!k.needsModel) return [{ value: '', label: 'Default' }].concat(opts);
     return opts.length ? opts : [{ value: '', label: (k.checking ? 'Looking for ' : 'No ') + modelNoun(k) + 's' }];
   }
+  // One list per kind: the kind's own models, or for Claude Code before its first answer the page's fallback list.
+  function modelList(k, fallback) {
+    var own = (k && k.models) || [];
+    if (own.length) return own.map(function (m) { return { value: m.id, label: m.label || m.id }; });
+    return !k || k.kind === 'claude-code' ? (fallback || []).filter(function (o) { return o.value; }) : [];
+  }
+  // The dock's model switch: the models of the session's own kind, no Default, and the session's own model when no list knows it.
+  function modelSwitch(k, current, fallback) {
+    var opts = modelList(k, fallback);
+    if (current && !opts.some(function (o) { return o.value === current; })) opts.unshift({ value: current, label: current });
+    return opts;
+  }
+  // The word for a model id: its label in the kind's list (the id may be longer, a dated name), else the id itself.
+  function modelWord(k, m, fallback) {
+    if (!m) return 'Default model';
+    var list = modelList(k, fallback);
+    var hit = list.filter(function (o) { return m.indexOf(o.value) === 0; })[0] || list.filter(function (o) { return m.toLowerCase().indexOf(String(o.label).toLowerCase()) >= 0; })[0];
+    return hit ? hit.label : m;
+  }
   function firstModel(k) { return k && k.needsModel && k.models && k.models.length ? k.models[0].id : ''; }
   function noModelFor(k) { return !!(k && k.needsModel && !(k.models || []).length); }
   function withKind(form, k, id) {
@@ -302,5 +323,5 @@
     return label + ' does not report cost, so the office shows it as unknown and no spend limit can stop it. Check the spend in its own account.';
   }
 
-  root.OfficeVocab = { limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform };
+  root.OfficeVocab = { limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, security: security, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, platform: platform };
 })(typeof globalThis !== 'undefined' ? globalThis : window);
