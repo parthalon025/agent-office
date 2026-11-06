@@ -257,16 +257,36 @@ var TYPE_LBL={team:"Team floor",lab:"Lab",studio:"Studio",hq:"War room",security
 var TYPE_TOK={lobby:"team"},TYPE_ICON={lobby:"building"};
 var ROLE_LBL={research:"Research",writer:"Writer",coder:"Coder",analyst:"Analyst",designer:"Designer",ops:"Ops",sales:"Sales",planner:"Planner",media:"Media"};
 AO.ThemeCtx=AO.ThemeCtx||R.createContext(null);
-function useTheme(p){var c=R.useContext(AO.ThemeCtx);return p&&p.theme||c||document.documentElement.getAttribute("data-theme")||AO.MODES[0].theme;}
+/* watchTheme(fn): fn runs after each data-theme change in the document and each change of the system scheme. One MutationObserver
+   and one media listener serve every caller; the function it returns stops the calls, and the last stop disconnects both. */
+var themeFns=[],themeMo=null,themeMq=null;
+function themeTick(){themeFns.slice().forEach(function(f){f();});}
+function watchTheme(fn){if(typeof MutationObserver==="undefined"||typeof document==="undefined")return function(){};
+ if(!themeFns.length){themeMo=new MutationObserver(themeTick);themeMo.observe(document.documentElement,{attributes:true,subtree:true,attributeFilter:["data-theme"]});
+  themeMq=window.matchMedia?window.matchMedia("(prefers-color-scheme: dark)"):null;if(themeMq&&themeMq.addEventListener)themeMq.addEventListener("change",themeTick);}
+ themeFns.push(fn);
+ return function(){var i=themeFns.indexOf(fn);if(i<0)return;themeFns.splice(i,1);if(themeFns.length)return;themeMo.disconnect();themeMo=null;if(themeMq&&themeMq.removeEventListener)themeMq.removeEventListener("change",themeTick);themeMq=null;};}
+/* useTheme(p, ref): the theme a component draws in. Without ref it is p.theme, else the theme of the OfficeScene around it, else
+   AO.themeOf(<html>). With ref, it is AO.themeOf(ref.current): the theme whose tokens the element shows. The first render guesses as
+   without ref; a layout effect reads the element and renders again before the paint when the guess was wrong, and it reads again after
+   each data-theme or system scheme change (watchTheme). So a part drawn in JS and a part drawn by CSS show one theme. A component that
+   takes p.theme sets data-theme on its own element, so its tokens follow p.theme too. */
+function useTheme(p,ref){var c=R.useContext(AO.ThemeCtx),g=p&&p.theme||c||AO.themeOf(null),st=R.useState(g),th=st[0],set=st[1];
+ R.useLayoutEffect(function(){if(ref&&ref.current){var t=AO.themeOf(ref.current);if(t!==th)set(t);}});
+ R.useEffect(function(){if(!ref)return;return watchTheme(function(){if(ref.current)set(AO.themeOf(ref.current));});},[!ref]);
+ return ref?th:g;}
 AO.useTheme=useTheme;
 function cx(){return Array.prototype.filter.call(arguments,Boolean).join(" ");}
 function Icon(p){var s=p.size||16,inner=(AO.ICONS||{})[p.name]||"";return h("svg",{className:cx("ao-icon",p.className),width:s,height:s,viewBox:"0 0 24 24",fill:"none",stroke:"currentColor",strokeWidth:1.75,strokeLinecap:"round",strokeLinejoin:"round",
  "aria-hidden":p.label?null:"true",role:p.label?"img":null,"aria-label":p.label||null,style:p.color?{color:p.color}:null,dangerouslySetInnerHTML:{__html:inner}});}
-/* Logo: the theme's MODES entry names its wordmark (AO.LOGO.wordmarks); the mark takes its corner from the logo-mark-radius token (bundle.css). */
-function Logo(p){var md=AO.modeOf(useTheme(p)),s=p.size||22;if(p.variant==="wordmark"||p.variant==="lockup"){var L=AO.LOGO.wordmarks[md.wordmark]||{},vb=(L.viewBox||"0 0 100 20").split(" ").map(Number),hgt=p.height||20,w=hgt*vb[2]/vb[3];
-  var wm=h("svg",{key:"w",width:w,height:hgt,viewBox:L.viewBox,role:"img","aria-label":"Agent Office"},h("path",{d:L.path,style:{fill:"var(--ink)"}}));
-  if(p.variant==="wordmark")return wm;return h("span",{className:"ao-lockup"},h(Logo,{size:hgt*2}),wm);}
- return h("span",{className:"ao-mark",style:{width:s,height:s},role:"img","aria-label":"Agent Office"},h("i",{style:{width:s*.4,height:s*.4}}));}
+/* Logo: the mark takes its corner from the logo-mark-radius token (bundle.css). The wordmark is the one that the MODES entry of the
+   theme the logo sits in names (AO.LOGO.wordmarks), read from the logo's own element (useTheme with a ref), so a mark and a wordmark
+   never show two themes. p.theme sets data-theme on the logo, so its tokens follow too. */
+function Logo(p){var ref=R.useRef(null),wd=p.variant==="wordmark"||p.variant==="lockup",th=useTheme(p,wd?ref:null),s=p.size||22,dt=p.theme||undefined;
+ if(wd){var L=AO.LOGO.wordmarks[AO.modeOf(th).wordmark]||{},vb=(L.viewBox||"0 0 100 20").split(" ").map(Number),hgt=p.height||20,w=hgt*vb[2]/vb[3],lock=p.variant==="lockup";
+  var wm=h("svg",{key:"w",ref:lock?null:ref,"data-theme":lock?undefined:dt,width:w,height:hgt,viewBox:L.viewBox,role:"img","aria-label":"Agent Office"},h("path",{d:L.path,style:{fill:"var(--ink)"}}));
+  if(!lock)return wm;return h("span",{ref:ref,className:"ao-lockup","data-theme":dt},h(Logo,{size:hgt*2}),wm);}
+ return h("span",{className:"ao-mark","data-theme":dt,style:{width:s,height:s},role:"img","aria-label":"Agent Office"},h("i",{style:{width:s*.4,height:s*.4}}));}
 /* BotAvatar: one portrait for every theme; the portrait-* tokens of the theme style it (bundle.css, .ao-pt-*). */
 function BotAvatar(p){var s=p.size||22,f=(AO.PORTRAITS||{})[p.shape||"blob"],svg=f?f(p.color||"#4f8cff"):"";
  return h("span",{className:"ao-avatar",style:{width:s,height:s}},h("span",{className:"ao-avatar-img",dangerouslySetInnerHTML:{__html:svg}}),p.status&&h("i",{className:"ao-dot ao-s-"+p.status}));}
@@ -313,10 +333,11 @@ function RoomList(p){var st=R.useState(false),pick=st[0],setPick=st[1],box=R.use
   p.onAddRoom&&h("div",{className:"ao-addrow"},pick?h("div",{className:"ao-typepick",role:"group","aria-label":"Room type"},Object.keys(TYPE_LBL).map(function(t){return h("button",{key:t,type:"button",onClick:function(){setPick(false);p.onAddRoom(t);}},h("span",{style:{color:"var(--type-"+t+")"}},h(Icon,{name:t,size:16})),TYPE_LBL[t]);}),h("button",{type:"button",className:"ao-muted",onClick:function(){setPick(false);}},"Cancel"))
    :h(AddButton,{onClick:function(){setPick(true);}},"Add room")));}
 /* OfficeTypeCard: the picture is drawn from the tokens of the theme the card sits in (AO.officePicture), in the dark and retro style
-   of its MODES entry. It reads the tokens in a layout effect, after the first render and before the browser paints. */
-function OfficeTypeCard(p){var t=p.type||"team",md=AO.modeOf(useTheme(p)),ref=R.useRef(null),ps=R.useState(""),pic=ps[0],setPic=ps[1];
- R.useLayoutEffect(function(){var el=ref.current;if(!el)return;var cs=getComputedStyle(el);setPic(AO.officePicture(t,function(n){return cs.getPropertyValue("--"+n);},{dark:!!md.dark,retro:!!md.retro}));},[t,md]);
- return h("div",{className:"ao-panel ao-typecard"},h("div",{ref:ref,className:"ao-typecard-img",dangerouslySetInnerHTML:{__html:pic}}),h("div",{className:"ao-typecard-b"},h(OfficeTypeBadge,{type:t}),h("div",{className:"ao-muted",style:{fontSize:12,marginTop:4}},p.note)));}
+   of its MODES entry. Both come from one element at one time: a layout effect reads the element's tokens and AO.themeOf(element),
+   after the first render and before the browser paints, and again when the theme changes (useTheme). p.theme sets data-theme on the card. */
+function OfficeTypeCard(p){var t=p.type||"team",ref=R.useRef(null),th=useTheme(p,ref),ps=R.useState(""),pic=ps[0],setPic=ps[1];
+ R.useLayoutEffect(function(){var el=ref.current;if(!el)return;var md=AO.modeOf(AO.themeOf(el)),cs=getComputedStyle(el);setPic(AO.officePicture(t,function(n){return cs.getPropertyValue("--"+n);},{dark:!!md.dark,retro:!!md.retro}));},[t,th]);
+ return h("div",{className:"ao-panel ao-typecard","data-theme":p.theme||undefined},h("div",{ref:ref,className:"ao-typecard-img",dangerouslySetInnerHTML:{__html:pic}}),h("div",{className:"ao-typecard-b"},h(OfficeTypeBadge,{type:t}),h("div",{className:"ao-muted",style:{fontSize:12,marginTop:4}},p.note)));}
 Object.assign(AO,{worstOf:worstOf,Icon:Icon,Logo:Logo,BotAvatar:BotAvatar,OfficeTypeBadge:OfficeTypeBadge,RoleBadge:RoleBadge,AddButton:AddButton,ViewToggle:ViewToggle,FloorList:FloorList,RoomList:RoomList,OfficeTypeCard:OfficeTypeCard});
 })();
 
@@ -713,6 +734,11 @@ function Skeleton(p){var n=p.lines||3,rows=[];for(var i=0;i<n;i++)rows.push(h("i
 AO.MODES=[{id:"day",theme:"light",label:"Day",icon:"day",dark:false,retro:false,wordmark:"sans"},{id:"night",theme:"dark",label:"Night",icon:"night",dark:true,retro:false,wordmark:"sans"},{id:"sublevel",theme:"sublevel",label:"Sublevel",icon:"terminal",dark:false,retro:true,wordmark:"wide"},{id:"fluent",theme:"fluent",label:"Fluent",icon:"fluent",dark:false,retro:false,wordmark:"sans"},{id:"fluent-dark",theme:"fluent-dark",label:"Fluent Dark",icon:"fluentdark",dark:true,retro:false,wordmark:"sans"}];
 /* modeOf(theme): the MODES entry of a data-theme value. A value that is no theme gets the first entry, as the engine shows the first look. */
 AO.modeOf=function(t){var M=AO.MODES;for(var i=0;i<M.length;i++)if(M[i].theme===t)return M[i];return M[0];};
+/* themeOf(el): the theme whose tokens el shows, by the rules of tokens.css. It is the nearest data-theme (on el or a parent) that is a
+   theme of MODES; a value that is no theme is passed over, as no block of tokens.css matches it. With none, it is the first dark theme
+   when <html> has no data-theme and the system scheme is dark (the system dark block), else the first theme (the :root block). With no
+   el, it starts at <html>. The engine and the drawn parts (useTheme) read the theme here, and nowhere else. */
+AO.themeOf=function(el){var M=AO.MODES,d=typeof document!=="undefined"?document.documentElement:null,n,i,t;for(n=el||d;n&&n.getAttribute;n=n.parentNode){t=n.getAttribute("data-theme");for(i=0;i<M.length;i++)if(M[i].theme===t)return t;}if(d&&d.getAttribute("data-theme")==null&&typeof window!=="undefined"&&window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)for(i=0;i<M.length;i++)if(M[i].dark)return M[i].theme;return M[0].theme;};
 function ModeToggle(p){var opts=p.options||AO.MODES.concat([{id:"tour",label:"Tour",icon:"tour"}]);
  return h("div",{className:"ao-panel ao-seg",role:"group","aria-label":p.label||"View mode"},opts.map(function(o){return h("button",{key:o.id,type:"button","aria-pressed":String(o.id===p.value||(p.active||[]).indexOf(o.id)>-1),title:o.icon?o.label:undefined,onClick:function(){p.onChange&&p.onChange(o.id);}},o.icon&&AO.Icon?h(AO.Icon,{name:o.icon,size:14}):null,o.icon?h("span",{className:"ao-seg-l"},o.label):o.label);}));}
 Object.assign(AO,{ModeToggle:ModeToggle,Button:Button,Tooltip:Tooltip,Toast:Toast,ToastStack:ToastStack,Dialog:Dialog,Tabs:Tabs,TextInput:TextInput,Select:Select,EmptyState:EmptyState,Skeleton:Skeleton});
@@ -1084,7 +1110,7 @@ var FALL={bg:"#e9edf1",accent:"#2f6fe4","on-accent":"#ffffff",emphasis:"#2f6fe4"
  "status-working":"#1f9a58","status-waiting":"#c27c17","status-error":"#d1403b","status-resting":"#8a939d","status-finished":"#3b74e0","status-working-on-bubble":"#1b854c","status-waiting-on-bubble":"#a46913","status-error-on-bubble":"#d1403b","status-resting-on-bubble":"#6e7780","status-finished-on-bubble":"#3771df",ink:"#18212b",muted:"#5f6b78",
  "type-team":"#3a7ca5","type-lab":"#0f8b8d","type-studio":"#c2477a","type-hq":"#a36a12","type-security":"#6650b8","floor-ops":"#4a6278","floor-sales":"#b5523b","floor-research":"#2f7f44","floor-content":"#7a52c7","floor-hq":"#8a5a12"};
 function readTokens(el){var cs=getComputedStyle(el||document.documentElement),o={};for(var k in FALL){var v=cs.getPropertyValue("--"+k).trim();o[k]=v||FALL[k];}return o;}
-function themeOf(el){var n=el&&el.closest?el.closest("[data-theme]"):null,t=(n||document.documentElement).getAttribute("data-theme");if(t)return t;var os=!!(window.matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches),M=AO.MODES;for(var i=0;i<M.length;i++)if(!!M[i].dark===os)return M[i].theme;return M[0].theme;}
+function themeOf(el){return AO.themeOf(el);}
 function readFonts(el){var cs=getComputedStyle(el||document.documentElement),g=function(n,f){var v=cs.getPropertyValue("--font-"+n).trim();return v||f;};return {sans:g("sans","'IBM Plex Sans',sans-serif"),mono:g("mono","'IBM Plex Mono',monospace"),term:g("term","'VT323',monospace")};}
 function Kit(el){this.el=el;this.f=readFonts(el);this.tok=readTokens(el);this.mats={};this.themed=[];this.tex={};this.dark=false;this.caps=false;this.term=false;this.look=AO.MODES[0].id;this.screens=[];}
 /* t: a themed material, a new one on every call (page code changes some after creation). K.themed lists [WeakRef(material), token], so a

@@ -2,7 +2,7 @@
 
 The Agent Office mark is a square with one centred dot (diameter = 40% of the size). Its corner comes from the theme: the `logo-mark-radius` token (25% of the size, a rounded square, in most themes; 50%, a circle, in Sublevel). The wordmark is "Agent Office", converted to paths. The lockup puts the mark and the wordmark side by side. The gap is 0.4 x the mark size. The wordmark cap height is 0.5 x the mark size and the cap band is centred on the mark.
 
-In the page, `Logo` draws the logo of the theme it sits in. Each theme names its wordmark in its `AgentOffice.MODES` entry (`wordmark`), and the mark takes `ink`, `bg` and `logo-mark-radius` from the theme's tokens. No theme has a logo file of its own.
+In the page, `Logo` draws the logo of the theme it sits in: the nearest `data-theme` on it or a parent (`AgentOffice.themeOf`). Each theme names its wordmark in its `AgentOffice.MODES` entry (`wordmark`), and the mark takes `ink`, `bg` and `logo-mark-radius` from the theme's tokens. No theme has a logo file of its own.
 
 | Wordmark (`AgentOffice.LOGO.wordmarks`) | Drawing | Themes |
 |---|---|---|

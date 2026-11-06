@@ -1066,21 +1066,6 @@ test('the scene reads flags, not look names: K.dark from AO.MODES, K.caps and K.
   assert.match(board, /paint\(bd\.canvas\.getContext\('2d'\), bd\.canvas\.width, bd\.canvas\.height, d, K\.tok, K\.f \|\| \{\}, !!K\.dark\);/);
 });
 
-test('OfficeTypeCard draws its picture from the tokens of the theme it sits in, in the dark and retro style of its AO.MODES entry', () => {
-  const h = (tag, props, ...kids) => ({ tag, props, kids });
-  const M = modes(), calls = [];
-  let state = '';
-  const R = { useRef: () => ({ current: {} }), useState: () => [state, (v) => { state = v; }], useLayoutEffect: (fn) => fn() };
-  const AO = { MODES: M, modeOf: (t) => M.find((m) => m.theme === t) || M[0], officePicture: (type, tok, style) => { calls.push([type, tok('scene-floor'), style]); return 'PIC'; } };
-  const card = new Function('AO', 'h', 'useTheme', 'OfficeTypeBadge', 'R', 'getComputedStyle', source('function OfficeTypeCard(p){') + 'return OfficeTypeCard;')(AO, h, (p) => p.theme, function () {}, R,
-    () => ({ getPropertyValue: (n) => 'v' + n }));
-  for (const m of M) {
-    card({ type: 'lab', theme: m.theme });
-    assert.deepEqual(calls.at(-1), ['lab', 'v--scene-floor', { dark: m.dark, retro: m.retro }], `${m.label}: tokens of the card, style of the entry`);
-  }
-  assert.equal(card({ type: 'lab', theme: M[0].theme }).kids[0].props.dangerouslySetInnerHTML.__html, 'PIC');
-});
-
 test('the modes fit a narrow box: under 520 px a segment with an icon shows the icon, the pressed one keeps its label (office HUD and City)', () => {
   const css = readFileSync(join(root, 'components', 'bundle.css'), 'utf8'), office = readFileSync(join(root, 'public', 'office.css'), 'utf8');
   assert.match(bundle, /title:o\.icon\?o\.label:undefined,onClick:[^\n]*o\.icon\?h\("span",\{className:"ao-seg-l"\},o\.label\):o\.label\)/, 'the label is a span, and the tooltip names the mode');
@@ -1193,11 +1178,11 @@ test('walk: no literal speed is left in the walk step or the bot animation, and 
 });
 
 // ---- #107: one theme change refreshes the Kit once; Stage.dispose always frees the renderer ----
-// The rig runs the real themeOf (the nearest data-theme, else <html>, else the system scheme) and the real AO.MODES maps. The stage
-// element sits inside its root, as in the office page (the root is .ao-office, the stage is a child of it).
+// The rig runs the real themeOf (AO.themeOf: the nearest data-theme that is a theme, else the system scheme, else the first theme)
+// and the real AO.MODES maps. The stage element sits inside its root, as in the office page (the root is .ao-office, the stage is a
+// child of it).
 function themeRig() {
-  const node = (parent = null) => ({ attrs: {}, parentNode: parent, getAttribute(k) { return this.attrs[k] ?? null; }, setAttribute(k, v) { this.attrs[k] = v; },
-    closest(sel) { const k = sel.slice(1, -1); for (let n = this; n; n = n.parentNode) if (n.attrs[k] != null) return n; return null; } });
+  const node = (parent = null) => ({ attrs: {}, parentNode: parent, getAttribute(k) { return this.attrs[k] ?? null; }, setAttribute(k, v) { this.attrs[k] = v; } });
   const html = Object.assign(node(), { className: '' });
   const doc = { documentElement: html };
   const win = { matchMedia: () => ({ matches: false }) };
@@ -1208,6 +1193,7 @@ function themeRig() {
   const FX = { bloom: {}, thr: {}, exp: {}, vig: {}, fog: Object.fromEntries(modes().map((m) => [m.id, 0])), rad: 1, knee: 1 };
   function Stage() {}
   new Function('AO', 'Stage', 'T', 'LOOKS', 'FX', 'document', 'window', 'matchMedia',
+    source('AO.themeOf=function', '};\n') +
     source('function themeOf(el)', '}\n') +
     source('var THEME_OF={},LOOK_OF={},DARK={};', '\n') +
     source('Stage.prototype.look=function', '};\n') +

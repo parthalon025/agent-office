@@ -100,6 +100,64 @@ const FIELD_NAMES = new Set([...Object.keys(AO.MODES[0]), ...LOOK_FIELDS]);
 // is a token. The one prop palette of the drawn parts.
 const BOT_PALETTE = new Set(Array.from(AO.BODY_COLORS).flatMap((c) => Object.values(AO.PORTRAITS).flatMap((p) => p(c, { ink: 'currentColor', gloss: 1, outline: 1, eyesSquare: 1 }).match(/#[0-9a-f]{6}/g) || [])));
 
+// A page for the drawn parts that read their theme in JS (Logo, OfficeTypeCard): plain nodes with data-theme, and the tokens that
+// tokens.css gives a node. That is the block of the nearest data-theme that is a theme; with none, the system dark block (the first
+// block with color-scheme dark) when <html> has no data-theme and the system scheme is dark, else the :root block (the first theme).
+const SYSTEM_DARK = SKINS.find((s, i) => scheme(blockOf(i)) === 'dark')?.id;
+const DISPATCHER = sb.React.__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.ReactCurrentDispatcher;
+const node = (theme, parentNode = null) => ({ attrs: theme == null ? {} : { 'data-theme': theme }, parentNode, getAttribute(k) { return this.attrs[k] ?? null; } });
+function cssTheme(el, html, dark) {
+  for (let n = el; n; n = n.parentNode) if (SKINS.some((s) => s.id === n.attrs['data-theme'])) return n.attrs['data-theme'];
+  return html.attrs['data-theme'] == null && dark && SYSTEM_DARK ? SYSTEM_DARK : SKINS[0].id;
+}
+// page(theme, dark): <html> with that data-theme (null: none) and that system scheme. mount(Comp, props, parent) renders one component
+// with stand-in hooks (as test/rich.test.mjs does), makes a node for each of its host elements under parent, sets the refs to them,
+// runs the layout effects, and renders again while an effect changes state. It gives the last tree.
+function page(theme, dark) {
+  const html = node(theme);
+  Object.assign(sb, { document: { documentElement: html }, matchMedia: (q) => ({ matches: dark && /prefers-color-scheme: dark/.test(q) }),
+    getComputedStyle: (el) => ({ getPropertyValue: (n) => valueOf(n.replace(/^--/, ''), cssTheme(el, html, dark)) }) });
+  const mount = (Comp, props, parent = html) => {
+    const slots = [];
+    let i = 0, dirty = false, effects = [];
+    const hooks = {
+      useState(init) { const k = i++; if (!(k in slots)) slots[k] = typeof init === 'function' ? init() : init; return [slots[k], (v) => { v = typeof v === 'function' ? v(slots[k]) : v; if (!Object.is(v, slots[k])) { slots[k] = v; dirty = true; } }]; },
+      useRef(v) { const k = i++; if (!(k in slots)) slots[k] = { current: v }; return slots[k]; },
+      useContext(ctx) { return ctx._currentValue; },
+      useLayoutEffect(fn, deps) { const k = i++, old = slots[k]; slots[k] = deps; if (!deps || !old || deps.some((d, j) => !Object.is(d, old[j]))) effects.push(fn); },
+      useEffect() { i++; },
+      useMemo(f) { i++; return f(); },
+      useCallback(f) { i++; return f; },
+    };
+    const attach = (n, parentNode) => {
+      if (Array.isArray(n)) { n.forEach((c) => attach(c, parentNode)); return; }
+      if (!n || typeof n !== 'object' || !n.$$typeof || typeof n.type !== 'string') return;
+      const el = node(n.props['data-theme'], parentNode);
+      if (n.ref && typeof n.ref === 'object') n.ref.current = el;
+      attach(n.props.children, el);
+    };
+    for (let pass = 0; pass < 5; pass++) {
+      i = 0; dirty = false; effects = [];
+      const prev = DISPATCHER.current;
+      DISPATCHER.current = hooks;
+      let tree;
+      try { tree = Comp(props); } finally { DISPATCHER.current = prev; }
+      attach(tree, parent);
+      effects.forEach((f) => f());
+      if (!dirty) return tree;
+    }
+    throw new Error(`${Comp.name} renders again and again`);
+  };
+  return { html, mount, box: (th, parent = html) => node(th, parent) };
+}
+const elements = (n, out = []) => {
+  if (Array.isArray(n)) { n.forEach((c) => elements(c, out)); return out; }
+  if (n && typeof n === 'object' && n.$$typeof) { out.push(n); elements(n.props.children, out); }
+  return out;
+};
+const cardPicture = (tree) => elements(tree).find((e) => e.props.className === 'ao-typecard-img')?.props.dangerouslySetInnerHTML.__html;
+const wordmarkPath = (tree) => elements(tree).find((e) => e.type === 'path')?.props.d;
+
 // ---- the parts that are not one skin's: the two lists agree, the hooks exist ----
 
 test('tokens.json and AgentOffice.MODES list the same skins in the same order; Tour is a mode, not a theme', () => {
@@ -129,6 +187,32 @@ test('the drawn parts read their skin values from tokens and MODES, and are not 
     const files = fs.readdirSync(new URL(dir, root));
     const own = files.filter((f) => re.test(f) && SKINS.concat(AO.MODES.map((m) => ({ id: m.id }))).some((s) => f.endsWith('-' + s.id + '.svg')));
     assert.deepEqual(own, [], `${dir}: no hand-made file of one skin`);
+  }
+});
+
+test('AO.themeOf gives the theme whose tokens an element shows, by the rules of tokens.css', () => {
+  for (const dark of [false, true]) {
+    const p = page(null, dark), want = dark && SYSTEM_DARK ? SYSTEM_DARK : SKINS[0].id;
+    assert.equal(AO.themeOf(null), want, `no data-theme, system ${dark ? 'dark' : 'light'}: <html>`);
+    assert.equal(AO.themeOf(p.box(null, p.box(null))), want, `no data-theme, system ${dark ? 'dark' : 'light'}: a nested element`);
+    assert.equal(AO.themeOf(p.box('no-such-theme')), want, 'a data-theme value that is no theme is passed over');
+    const q = page('no-such-theme', dark);
+    assert.equal(AO.themeOf(q.box(null)), SKINS[0].id, '<html> with a data-theme that is no theme: the :root block, not the system dark block');
+  }
+  for (const [i, s] of SKINS.entries()) {
+    const outer = SKINS[(i + 1) % SKINS.length].id, p = page(outer, true);
+    assert.equal(AO.themeOf(p.html), outer, `${s.id}: <html>`);
+    assert.equal(AO.themeOf(p.box(null, p.box('no-such-theme', p.box(s.id)))), s.id, `${s.id}: the nearest data-theme that is a theme`);
+  }
+});
+
+test('Logo and OfficeTypeCard on a page with no data-theme draw the theme of the system scheme', () => {
+  for (const dark of [false, true]) {
+    const p = page(null, dark), th = dark && SYSTEM_DARK ? SYSTEM_DARK : SKINS[0].id, M = AO.modeOf(th);
+    for (const type of Object.keys(AO.office.TYPES)) {
+      assert.equal(cardPicture(p.mount(AO.OfficeTypeCard, { type })), AO.officePicture(type, (n) => valueOf(n, th), { dark: M.dark, retro: M.retro }), `OfficeTypeCard ${type}, system ${dark ? 'dark' : 'light'}: the ${th} picture`);
+    }
+    for (const variant of ['wordmark', 'lockup']) assert.equal(wordmarkPath(p.mount(AO.Logo, { variant })), AO.LOGO.wordmarks[M.wordmark].path, `Logo ${variant}, system ${dark ? 'dark' : 'light'}: the ${th} wordmark`);
   }
 });
 
@@ -248,6 +332,17 @@ for (const [index, skin] of SKINS.entries()) {
         // the type's own color: type-<type>, or the type-* token the type names (tok in AO.office.TYPES: the lobby takes the team color)
         for (const n of [`type-${AO.office.TYPES[type].tok || type}`, 'scene-floor']) ok(svg.includes(`"${tok(n)}"`), `the ${type} picture does not use ${n} (${tok(n)})`);
       }
+      // OfficeTypeCard reads the tokens and the style from the element it sits in: in a box of the skin on a page in another theme
+      // (one with another style, if there is one), and with theme set on the card itself, it draws the picture of the skin
+      const outer = (SKINS.find((s) => s.id !== id && (AO.modeOf(s.id).dark !== M?.dark || AO.modeOf(s.id).retro !== M?.retro)) || SKINS[(index + 1) % SKINS.length]).id;
+      for (const dark of [false, true]) {
+        const p = page(outer, dark);
+        for (const type of Object.keys(AO.office.TYPES)) {
+          const want = AO.officePicture(type, (n) => valueOf(n, id), style);
+          ok(cardPicture(p.mount(AO.OfficeTypeCard, { type }, p.box(id))) === want, `OfficeTypeCard ${type} in a [data-theme="${id}"] box on a page in ${outer} does not draw the ${id} picture`);
+          ok(cardPicture(p.mount(AO.OfficeTypeCard, { type, theme: id })) === want, `OfficeTypeCard ${type} with theme "${id}" on a page in ${outer} does not draw the ${id} picture`);
+        }
+      }
     });
 
     part('9. portraits and logo', 'tokens.json skin, components/bundle.js AO.PORTRAITS, AO.LOGO', (ok) => {
@@ -259,6 +354,14 @@ for (const [index, skin] of SKINS.entries()) {
       }
       const r = parseFloat(valueOf('logo-mark-radius', id)) / 100;
       ok(AO.LOGO.mark('#000000', '#ffffff', r).includes(`rx="${Math.round(64 * r * 100) / 100}"`), 'AO.LOGO.mark does not take logo-mark-radius');
+      // The wordmark comes from the element the logo sits in, like the mark's corner (CSS): in a box of the skin on a page in another
+      // theme (one with another wordmark, if there is one), and with theme set on the logo itself, it is the skin's wordmark
+      const outer = (SKINS.find((s) => s.id !== id && AO.modeOf(s.id).wordmark !== M?.wordmark) || SKINS[(index + 1) % SKINS.length]).id, p = page(outer, false);
+      for (const variant of ['wordmark', 'lockup']) {
+        ok(wordmarkPath(p.mount(AO.Logo, { variant }, p.box(id))) === AO.LOGO.wordmarks[M?.wordmark]?.path, `Logo ${variant} in a [data-theme="${id}"] box on a page in ${outer} does not draw the "${M?.wordmark}" wordmark`);
+        ok(wordmarkPath(p.mount(AO.Logo, { variant, theme: id })) === AO.LOGO.wordmarks[M?.wordmark]?.path, `Logo ${variant} with theme "${id}" on a page in ${outer} does not draw the "${M?.wordmark}" wordmark`);
+      }
+      ok(p.mount(AO.Logo, { theme: id }).props['data-theme'] === id, 'Logo with theme does not set data-theme on its mark, so the mark would take the tokens of the page');
     });
 
     part('10. contrast pairs', 'tokens.json, components/ContrastCheck/preview.html', (ok) => {
