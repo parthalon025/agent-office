@@ -29,7 +29,7 @@ const SHAPES = {
   'skills.js': ['Skills', ['Dialog']],
   'merge.js': ['Merge', ['Flow', 'Row', 'use']],
   'screens.js': ['Screens', ['Desk', 'Note']],
-  'reception.js': ['Reception', ['Recap', 'Reception', 'TourCard', 'setTourSeen', 'tourSeen']],
+  'reception.js': ['Reception', ['Orientation', 'Recap', 'Reception', 'TourCard', 'orientationDue', 'setTourSeen', 'tourSeen']],
 };
 
 for (const [file, [name, keys]] of Object.entries(SHAPES)) {
@@ -72,4 +72,13 @@ test('needs.js: the Interface is OfficePage.Needs, and the paper flow and the pi
   for (const old of ['FlowDialog', 'NeedsDialog', 'PhoneView', 'PHONE_MAX', 'openPalette', 'DeskScreen', 'NoteScreen', 'SkillsDialog']) {
     assert.equal(Object.prototype.hasOwnProperty.call(O, old), false, old);
   }
+});
+
+test('Orientation opens by itself once: the server has not seen it closed and this browser has not either (#196)', () => {
+  const { O, store } = load('reception.js');
+  assert.equal(O.Reception.orientationDue(null), false);
+  assert.equal(O.Reception.orientationDue({ seen: true }), false);
+  assert.equal(O.Reception.orientationDue({ seen: false }), true);
+  store['ao-orientation'] = '1';
+  assert.equal(O.Reception.orientationDue({ seen: false }), false);
 });

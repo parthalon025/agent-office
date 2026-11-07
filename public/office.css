@@ -205,6 +205,15 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .reception-floor > .ao-field { flex: 1 1 200px; min-width: 0; }
 .reception-floor.is-hidden { opacity: var(--opacity-resting); }
 .reception-actions { display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.orient-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-1); }
+.orient-step { all: unset; box-sizing: border-box; display: flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-2); background: var(--chip); border: 1px solid var(--line); border-radius: var(--radius-md); color: var(--ink); cursor: pointer; min-height: 44px; }
+.orient-step.is-at { border-color: var(--accent); }
+.orient-step.is-skipped { opacity: var(--opacity-resting); }
+.orient-step:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.orient-state { color: var(--muted); }
+.orient .past-row, .orient .past-main { min-width: 0; }
+.orient .past-meta { overflow-wrap: anywhere; }
+.orient-body { display: flex; flex-direction: column; gap: var(--space-2); }
 /* the tour card sits at the top of the view, under the HUD top bar, clear of the look bar at the bottom */
 .tour-card {
   position: fixed; z-index: var(--z-sheet); top: 76px; left: 50%; translate: -50% 0; box-sizing: border-box;

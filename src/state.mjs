@@ -15,6 +15,7 @@ import { cleanPersonas, cleanTeams, cleanScreens } from './personas.mjs';
 import { cleanRecent } from './recent.mjs';
 import { cleanNotes, cleanPins } from './notes.mjs';
 import { cleanMerges, cleanStandups, cleanFocus } from './rituals.mjs';
+import { cleanOrientation } from './orientation.mjs';
 
 const isMap = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
 const list = (raw) => (Array.isArray(raw) ? raw : []);
@@ -44,6 +45,7 @@ export const SLICES = {
   merges: cleanMerges,
   standups: cleanStandups,
   focus: cleanFocus,
+  orientation: cleanOrientation,
   personas: cleanPersonas,
   teams: cleanTeams,
   screens: cleanScreens,

@@ -13,6 +13,7 @@ import { createCampus } from './campus.mjs';
 import { slimPayload, cleanIds as cleanPaperclipIds } from './payload.mjs';
 import { createHq } from './paperclip.mjs';
 import { recap as recapOf, away as awayOf } from './rituals.mjs';
+import { mark as markOrientation, view as orientationView } from './orientation.mjs';
 import { createTracker, clip } from './tracker.mjs';
 import { createAdmission } from './admission.mjs';
 import { createRegistry, providerEvents, traitsOf, DEFAULT_PROVIDER } from './providers/index.mjs';
@@ -1323,6 +1324,15 @@ export function createOffice(cfg) {
     }),
     R('POST', '/api/merge', 'page', ({ body }) => mergeChange(body)),
     R('POST', '/api/settings/focus', 'page', ({ body }) => { saved.set('focus', body.on === true); savePersisted(); broadcast(); return { focus: saved.get('focus') }; }),
+    // Orientation (#196): the steps with their saved progress. A step is marked { step, status: 'done' | 'skipped' | 'open' }; { seen: true } says the user closed it once.
+    R('GET', '/api/orientation', 'page', () => orientationView(saved.get('orientation'))),
+    R('POST', '/api/orientation/step', 'page', ({ body }) => {
+      const st = saved.get('orientation');
+      if (body.step !== undefined) markOrientation(st, String(body.step), body.status);
+      if (body.seen === true) st.seen = true;
+      savePersisted();
+      return orientationView(st);
+    }),
     R('POST', '/api/settings/spend', 'page', ({ body }) => { const r = saveSpendLimit(body); broadcast(); return r; }),
     // One Security room rule from the wall: { scope: 'office' | 'building', building, row, col, value, confirmed } (security.mjs setRule).
     R('POST', '/api/security/set', 'page', ({ body }) => saveRule(body)),
