@@ -12,7 +12,7 @@ import * as launch from './launch.mjs';
 import { createCampus } from './campus.mjs';
 import { slimPayload, cleanIds as cleanPaperclipIds } from './payload.mjs';
 import { createHq, companyDraft } from './paperclip.mjs';
-import { WRITE_KINDS, writeValueOf, setWriteCell, HIRE_ROLES } from './hq-model.mjs';
+import { WRITE_KINDS, writeValueOf, setWriteCell, HIRE_ROLES, SELF_APPROVAL_KINDS, NEVER_SELF_APPROVED, selfApprovalOn, setSelfApproval } from './hq-model.mjs';
 import { createRuntime, runtimePaths } from './paperclip-runtime.mjs';
 import { createMemory, createEmbedder } from './memory.mjs';
 import { createRuns } from './paperclip-runs.mjs';
@@ -362,6 +362,7 @@ export function createOffice(cfg) {
     sessions: () => [...sessions.values()], // the plan source links a Paperclip task to the session that runs it (#155)
     hooksFile: () => HOOKS_CMD_FILE.replace(/\\/g, '/'),
     grid: () => saved.get('hqGrid'),   // the HQ write grid (#198): every Paperclip write asks it first (hq.write)
+    selfApproval: () => saved.get('hqSelfApproval'),   // the approval kinds an employee may approve itself (#203)
     askFirst: (kind, text, extra) => askFirst(kind, text, extra),
     onChange: () => broadcast(),
     onFeed: (text, kind) => addFeed(PAPERCLIP, kind, text),
@@ -476,6 +477,21 @@ export function createOffice(cfg) {
     const g = saved.get('hqGrid');
     return Object.entries(WRITE_KINDS).map(([kind, w]) => ({ kind, label: w.label, options: w.options, def: w.def, value: writeValueOf(g, kind), set: Object.hasOwn(g, kind) }));
   }
+  // Self-approval (#203): per approval kind, on or off. Turning a kind on is looser (409 until confirmed: true); hire and budget kinds are listed
+  // as never (the page shows them as locked), and a change of them is 400. A change leaves a feed line.
+  function selfApprovalView() {
+    const g = saved.get('hqSelfApproval');
+    return { kinds: SELF_APPROVAL_KINDS.map((k) => ({ ...k, on: selfApprovalOn(g, k.type) })), never: NEVER_SELF_APPROVED };
+  }
+  function setHqSelfApproval(body) {
+    const r = setSelfApproval(saved.get('hqSelfApproval'), { type: body.type, value: body.value, confirmed: body.confirmed === true });
+    saved.set('hqSelfApproval', r.slice);
+    savePersisted();
+    addFeed(PAPERCLIP, 'tool', `Self-approval, ${SELF_APPROVAL_KINDS.find((k) => k.type === body.type).label}: ${r.to ? 'on' : 'off'}.`);
+    broadcast();
+    hq.selfApprove();
+    return { ok: true, selfApproval: selfApprovalView() };
+  }
   function setHqGrid(body) {
     const r = setWriteCell(saved.get('hqGrid'), { kind: body.kind, value: body.value ?? null, confirmed: body.confirmed === true });
     saved.set('hqGrid', r.grid);
@@ -501,7 +517,7 @@ export function createOffice(cfg) {
   // The org chart editor's write (#202) is one write of hq.write (#198): the kind `reporting`, so the HQ write grid decides it (Deny refuses with
   // 403, Confirm asks first and the editor's own Change button is that Confirm, Allow sends) and the writer checks a loop, a self report or a
   // stranger before anything is asked. The snapshot's hq tells the page whether to offer the editor: it is writable unless the grid says Deny.
-  const hqView = () => { const v = hq.view(); return v && { ...v, reportingWrite: writeValueOf(saved.get('hqGrid'), 'reporting') !== 'deny', goalWrite: writeValueOf(saved.get('hqGrid'), 'goal') !== 'deny' }; };
+  const hqView = () => { const v = hq.view(); return v && { ...v, reportingWrite: writeValueOf(saved.get('hqGrid'), 'reporting') !== 'deny', goalWrite: writeValueOf(saved.get('hqGrid'), 'goal') !== 'deny', employeeWrite: writeValueOf(saved.get('hqGrid'), 'pause') !== 'deny' }; };
   async function reportingLineHq(body) {
     const r = await hq.write({ kind: 'reporting', action: 'set', agent: String(body.agent || ''), manager: body.manager ? String(body.manager) : null }, { confirmed: body.confirmed === true });
     broadcast();
@@ -1386,7 +1402,8 @@ export function createOffice(cfg) {
     // The HQ write grid and the one writer (#198): the grid's cells, one change of a cell, and a write by kind (409 with the question until confirmed: true).
     R('POST', '/api/hq/hire', 'page', ({ body }) => hireHq(body)),
     R('GET', '/api/hq/hire-desk', 'page', () => ({ roles: HIRE_ROLES, write: writeValueOf(saved.get('hqGrid'), 'hire') !== 'deny' })),
-    R('GET', '/api/hq/grid', 'page', () => ({ grid: hqGridView() })),
+    R('GET', '/api/hq/grid', 'page', () => ({ grid: hqGridView(), selfApproval: selfApprovalView() })),
+    R('POST', '/api/hq/self-approval/set', 'page', ({ body }) => setHqSelfApproval(body)),
     R('POST', '/api/hq/grid/set', 'page', ({ body }) => setHqGrid(body)),
     R('POST', '/api/hq/write', 'page', ({ body }) => writeHq(body)),
     R('GET', '/api/hq/costs', 'page', async () => ({ costs: await hq.costs() })),
@@ -1398,6 +1415,10 @@ export function createOffice(cfg) {
     R('GET', '/api/hq/catalog', 'page', async () => ({ catalog: await hq.catalog() })),
     // Company admin (#213): the company's invites, join requests and members: names, roles and states (no invite token or link, no request IP).
     R('GET', '/api/hq/access', 'page', async () => ({ access: await hq.access() })),
+    // Company admin, the rest (#221): the instance settings and environments (names and states, no config or env value) and a company export
+    // (a read of Paperclip that changes nothing; the bundle goes to the page as a file, the office keeps no copy). Import is a write: kind company.
+    R('GET', '/api/hq/instance', 'page', async () => ({ instance: await hq.instance() })),
+    R('POST', '/api/hq/company/export', 'page', ({ body }) => hq.exportCompany(body)),
     // The Paperclip runtime (#193): install (409 without the Confirm), start, stop, and the board key's approval link. Never the key.
     R('GET', '/api/paperclip/runtime', 'page', () => ({ runtime: runtime.status() })),
     // The transcript of a run of the office adapter, for the desk screen (#211): the log the plugin reads, live or kept after the end.

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { WRITE_KINDS, cleanWriteGrid, writeValueOf, setWriteCell, planWrite } from '../src/hq-model.mjs';
 
 test('the grid has the ten write kinds of ADR 0010 and the first company (#199); Allow only for the user\'s own task edits and comments', () => {
-  assert.deepEqual(Object.keys(WRITE_KINDS), ['hire', 'pause', 'budget', 'approval', 'reporting', 'routine', 'access', 'secret', 'task', 'comment', 'company', 'goal']);
+  assert.deepEqual(Object.keys(WRITE_KINDS), ['hire', 'pause', 'budget', 'approval', 'reporting', 'routine', 'access', 'secret', 'task', 'comment', 'company', 'goal', 'instance']);
   for (const k of Object.keys(WRITE_KINDS)) assert.equal(writeValueOf({}, k), k === 'task' || k === 'comment' ? 'allow' : 'confirm', k);
   assert.deepEqual(WRITE_KINDS.secret.options, ['confirm', 'deny'], 'a secret never takes Allow');
   assert.deepEqual(WRITE_KINDS.task.options, ['confirm', 'allow', 'deny']);

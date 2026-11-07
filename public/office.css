@@ -92,7 +92,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .org-cable { align-self: stretch; flex: none; width: 3px; min-height: var(--space-5); border-radius: var(--radius-sm); background: var(--accent); }
 .org-cable.is-root { background: var(--line); }
 .org-who { flex: 1 1 10rem; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); }
-.org-who .past-meta { flex-basis: 100%; }
+.org-who .past-meta { }
 .org-row .ao-select { min-width: 0; max-width: 100%; }
 .goal-tree { display: grid; gap: var(--space-2); }
 .goal-form { padding-top: var(--space-2); }
@@ -116,6 +116,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .req-raw { color: var(--muted); overflow-wrap: anywhere; }
 .req-raw em { font-style: normal; text-transform: uppercase; letter-spacing: var(--type-eyebrow-tracking); font-size: var(--type-eyebrow-size); }
 .past-actions { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: var(--space-1); flex: none; }
+.hq-manage { display: flex; flex-direction: column; gap: var(--space-2); }
 
 /* page toasts hold every toast: results of page actions, requests and errors from the scene (the DS HUD stack is off, toasts: false) */
 /* office.js places the stack at every width (toasts.js place, #79): --toast-x (left edge), --toast-bottom and --toast-room
@@ -275,7 +276,7 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .city-sub { color: var(--muted); }
 /* Paperclip HQ (#76): its line (agents and budget) is long, so it takes a line of its own under the name */
 .city-row.is-hq .city-main { flex-wrap: wrap; }
-.city-row.is-hq .city-sub { flex-basis: 100%; }
+.city-row.is-hq .city-sub { }
 .city-name .ao-icon { margin-right: var(--space-1); vertical-align: -2px; }
 .city-wait { color: var(--ink); font: var(--type-caption-weight) var(--type-caption-size)/var(--type-caption-line) var(--font-sans); }
 .city-tag { position: absolute; z-index: var(--z-tag); left: 50%; top: var(--space-5); translate: -50% 0; padding: var(--space-1) var(--space-3); background: var(--panel); backdrop-filter: blur(var(--blur-panel)); border: 1px solid var(--line); border-radius: var(--radius-full); box-shadow: var(--shadow-panel); font: var(--type-body-weight) var(--type-body-size)/var(--type-body-line) var(--font-sans); animation: page-fade var(--duration-fast) var(--ease-out) both; }
