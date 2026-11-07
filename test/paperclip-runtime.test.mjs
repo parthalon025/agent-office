@@ -1055,3 +1055,8 @@ test('resume with a saved connect address connects again; a Paperclip that is go
     assert.equal((await b.runtime.resume(false, MINE)).state, 'connected');
   } finally { b.f.done(); }
 });
+
+test('childEnv: the office adapter plugin finds this office token file from the environment of Paperclip, by path only (#200)', () => {
+  assert.equal(childEnv({}, { data: '/d', config: '/d/c.json' }).AGENT_OFFICE_TOKEN_FILE, undefined, 'none unless the office gives one');
+  assert.equal(childEnv({ AGENT_OFFICE_TOKEN_FILE: 'C:/other/.office-token' }, { data: '/d', config: '/d/c.json', tokenFile: 'C:/office/.office-token' }).AGENT_OFFICE_TOKEN_FILE, 'C:/office/.office-token');
+});

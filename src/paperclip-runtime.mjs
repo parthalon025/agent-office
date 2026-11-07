@@ -98,7 +98,7 @@ export function buildConfig({ data, port = DEFAULT_PORT, dbPort = DEFAULT_DB_POR
 // Paperclip has DATABASE_URL or PAPERCLIP_* set for it). The office sets its own below.
 const DROP_ENV = /^(PAPERCLIP_|BETTER_AUTH_|OFFICE_)|^(DATABASE_URL|HOST|PORT|SERVE_UI)$/i;
 /** The environment of the Paperclip process: the office's, without what configures another Paperclip, plus this instance's own. */
-export function childEnv(base, { data, config, port = DEFAULT_PORT }) {
+export function childEnv(base, { data, config, port = DEFAULT_PORT, tokenFile = '' }) {
   const env = {};
   for (const [k, v] of Object.entries(base || {})) if (!DROP_ENV.test(k)) env[k] = v;
   return Object.assign(env, {
@@ -106,6 +106,8 @@ export function childEnv(base, { data, config, port = DEFAULT_PORT }) {
     PAPERCLIP_DEPLOYMENT_MODE: 'authenticated', PAPERCLIP_DEPLOYMENT_EXPOSURE: 'private', PAPERCLIP_BIND: 'loopback',
     HOST: '127.0.0.1', PORT: String(port), PAPERCLIP_NO_BROWSER: 'true', PAPERCLIP_OPEN_ON_LISTEN: 'false',
     PAPERCLIP_UI_DEV_MIDDLEWARE: 'false', DO_NOT_TRACK: '1',
+    // The office adapter plugin (#200) finds this office's agent token file here. The path only; the token stays in the file.
+    ...(tokenFile ? { AGENT_OFFICE_TOKEN_FILE: tokenFile } : {}),
   });
 }
 
@@ -172,7 +174,7 @@ export const runtimeError = (status, message) => Object.assign(new Error(message
 
 /**
  * createRuntime(deps): the runtime of one office. deps (all injectable):
- *   root, port (the office's port), env, paths? (override of runtimePaths), pin, serverPort, dbPort
+ *   root, port (the office's port), env, paths? (override of runtimePaths), pin, serverPort, dbPort, tokenFile? (this office's agent token file, for the office adapter plugin)
  *   fs, spawn(file, args, opts), exe(name), npmCli(), processStart(pid), killTree(pid), killSync(pid), fetch, writeSecret(file, text)
  *   now, random(n), setTimer(fn, ms), clearTimer(h), onChange(), onFeed(text, kind)
  * Methods: status(), install({ background }), update({ background }), start(), stop(), killNow(), resume(enabled), connectKey(), key() (the token, for the
@@ -469,7 +471,7 @@ export function createRuntime(deps = {}) {
       if (!fsx.existsSync(P.config)) fsx.writeFileSync(P.config, JSON.stringify(buildConfig({ data: P.data, port: serverPort, dbPort, now: d.now }), null, 2));
       ensureSecrets();
       tail = []; invite = ''; bootstrap = null; wantStop = false; misses = 0; startedAt = d.now().getTime();
-      const env = childEnv(d.env, { data: P.data, config: P.config, port: serverPort });
+      const env = childEnv(d.env, { data: P.data, config: P.config, port: serverPort, tokenFile: d.tokenFile || '' });
       let c;
       try { c = d.spawn(d.exe(process.execPath), [cliPath(), 'run', '-c', P.config, '-i', INSTANCE], { cwd: P.data, env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); }
       catch (e) { set('failed', `Paperclip did not start: ${e.message}`); throw runtimeError(500, reason); }
