@@ -40,6 +40,8 @@ const homeBefore = new Map([[realHome, listing(realHome)], [path.join(realHome, 
 // paperclip-runtime.mjs runtimePaths). A test must point LOCALAPPDATA at its own folder; a new entry there is a leak.
 const realLocal = process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'AgentOffice') : null;
 const localBefore = realLocal ? listing(realLocal) : new Set();
+// The owner's office runs on 4317, which no test may use, so these names are its own files: never a test's leak.
+const OWNER_FILES = new Set(['office-page-4317.json', 'paperclip', 'paperclip-board-key.json']);
 const roomsDir = realSync(path.join(tmp, 'ao-rooms-'));
 process.env.OFFICE_ROOMS_DIR = roomsDir;
 
@@ -48,10 +50,10 @@ process.on('exit', () => {
   try { fs.rmSync(roomsDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { /* reported below */ }
   const homeLeft = [];
   for (const [dir, before] of homeBefore) for (const n of listing(dir)) if (!before.has(n)) homeLeft.push(path.join(dir, n));
-  if (realLocal) for (const n of listing(realLocal)) if (!localBefore.has(n)) homeLeft.push(path.join(realLocal, n));
+  if (realLocal) for (const n of listing(realLocal)) if (!localBefore.has(n) && !OWNER_FILES.has(n)) homeLeft.push(path.join(realLocal, n));
   if (roomsLeft.size || homeLeft.length) {
     const lines = [...[...roomsLeft].map((n) => path.join(roomsDir, n)), ...homeLeft.map((n) => `${n} (real user data folder, not removed)`)];
-    fs.writeSync(2, `room leak: ${process.argv[1] || 'test'} left ${lines.length} room folder(s):
+    fs.writeSync(2, `leak outside temp: ${process.argv[1] || 'test'} left ${lines.length} room folder(s) or user data file(s):
 ${lines.map((d) => `  ${d}
 `).join('')}`);
     process.exitCode = 1;
