@@ -104,7 +104,7 @@
               h(A.Select, { id: 'org-' + r.id, ariaLabel: 'Manager of ' + r.name, options: r.options, value: waiting ? pend.manager : r.managerId, disabled: !o.write || busy === r.id,
                 onChange: function (v) { setPend(v === r.managerId ? null : { id: r.id, manager: v }); } }),
               waiting ? h('div', { className: 'past-actions' },
-                h(A.Button, { variant: 'primary', icon: 'approve', loading: busy === r.id, onClick: send }, 'Change reporting line'),
+                h(A.Button, { variant: 'primary', icon: 'approve', loading: busy === r.id, disabled: busy === r.id, onClick: send }, 'Change reporting line'),
                 h(A.Button, { variant: 'quiet', onClick: function () { setPend(null); } }, 'Cancel')) : null);
           })));
       }));
