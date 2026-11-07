@@ -18,7 +18,7 @@
 import path from 'node:path';
 import { runIds, cleanIds } from './payload.mjs';
 import { readArgs, CLAUDE_FLAGS_VERSION } from './providers/claude-code.mjs';
-import { floorsOf, lobbyOf, shapeProblems, planWrite, writeValueOf, WRITE_KINDS } from './hq-model.mjs';
+import { floorsOf, lobbyOf, costsOf, monthWindows, shapeProblems, planWrite, writeValueOf, WRITE_KINDS } from './hq-model.mjs';
 
 export const DEFAULT_URL = 'http://127.0.0.1:3100';
 
@@ -592,6 +592,44 @@ export function createHq(deps = {}) {
     if (!v || !d) return v;
     return { ...v, goals: known('goals') ? d.hqRead.goals : null, approvals: known('approvals') ? d.hqRead.approvals : null, activity: known('activity') ? activityOf(30) : null };
   }
+  /**
+   * The Costs view (#208): the last three UTC months per agent and per project, and the budgets overview, read when asked (the page opens
+   * the view; the watcher does not poll them). Null while not connected. A part Paperclip does not answer, or answers in a shape the
+   * office does not know, is null (unknown, never zero); `contract` names the shapes. Dollars. Reads only.
+   */
+  async function costs() {
+    const conn = c;
+    if (!conn || !d) return null;
+    const id = encodeURIComponent(conn.companyId), contract = [];
+    const dollars = (n) => (Number.isFinite(n) && n >= 0 ? Math.round(n) / 100 : null);
+    const rows = async (name, route, idKey, nameKey) => {
+      let json;
+      try { json = await call(conn, route); } catch { return null; }
+      const p = shapeProblems(name, json);
+      if (p.length) { contract.push(...p.filter((x) => !contract.includes(x))); return null; }
+      return list(json).filter((r) => r && r[idKey]).map((r) => ({ id: String(r[idKey]), name: text(r[nameKey], 60) || (d.agents.get(String(r[idKey])) ? text(d.agents.get(String(r[idKey])).name, 60) : '') || 'Unknown', cost: dollars(r.costCents) }));
+    };
+    const months = await Promise.all(monthWindows((deps.now || Date.now)()).map(async (w) => {
+      const q = `?from=${encodeURIComponent(w.from)}&to=${encodeURIComponent(w.to)}`;
+      const [agents, projects] = await Promise.all([rows('costsByAgent', `/api/companies/${id}/costs/by-agent${q}`, 'agentId', 'agentName'), rows('costsByProject', `/api/companies/${id}/costs/by-project${q}`, 'projectId', 'projectName')]);
+      return { key: w.key, agents, projects };
+    }));
+    let budgets = null;
+    try {
+      const json = await call(conn, `/api/companies/${id}/budgets/overview`), p = shapeProblems('budgets', json);
+      if (p.length) contract.push(...p);
+      else budgets = {
+        paused: Number.isFinite(json.pausedAgentCount) ? json.pausedAgentCount : null,
+        policies: json.policies.filter((x) => x && x.policyId && Number.isFinite(x.amount)).map((x) => {
+          const money = x.metric === 'billed_cents', n = (v) => (Number.isFinite(v) ? (money ? Math.round(v) / 100 : v) : null);
+          return { id: String(x.policyId), scope: text(x.scopeType, 20), name: text(x.scopeName, 60) || text(x.scopeType, 20), metric: text(x.metric, 30), limit: n(x.amount), used: n(x.observedAmount), percent: Number.isFinite(x.utilizationPercent) ? x.utilizationPercent : null, status: text(x.status, 20), paused: x.paused === true };
+        }),
+      };
+    } catch { /* an older Paperclip has no budgets route: unknown */ }
+    if (c !== conn) return null;
+    return { ...costsOf({ months, budgets }), contract };
+  }
+
   /** A Paperclip run's label for its office session (hook ids), or null when the agent is not one of the watched company. */
   function labelOf(ids) {
     const x = cleanIds(ids);
@@ -770,5 +808,5 @@ export function createHq(deps = {}) {
     return out;
   }
 
-  return { connect, disconnect, supervise, handoffGoal, handoffTasks, write, view, model, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
+  return { connect, disconnect, supervise, handoffGoal, handoffTasks, write, view, model, costs, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
 }

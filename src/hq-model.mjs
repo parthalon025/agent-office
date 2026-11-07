@@ -16,6 +16,10 @@ export const SHAPES = {
   activity: { list: true, fields: { id: 'string', actorType: 'string', action: 'string', createdAt: 'string' } },
   costs: { list: false, fields: { spendCents: 'number', budgetCents: 'number?' } },
   secrets: { list: true, fields: { id: 'string', name: 'string' } },
+  // The Costs view (#208): spend per agent and per project for a window (routes/costs.ts), and the budgets overview.
+  costsByAgent: { list: true, fields: { agentId: 'string', costCents: 'number' } },
+  costsByProject: { list: true, fields: { projectId: 'string', costCents: 'number' } },
+  budgets: { list: false, fields: { policies: 'array' } },
 };
 
 const typeOf = (v) => (v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v);
@@ -207,4 +211,40 @@ export function planWrite(b) {
   const make = row && typeof action === 'string' && Object.hasOwn(row, action) ? row[action] : null;
   if (!make) throw gridError(400, 'The office cannot make that write.');
   return { kind, action, ...make(b) };
+}
+
+// ---------- the Costs view (#208) ----------
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const byCost = (x, y) => (y.cost || 0) - (x.cost || 0) || String(x.name).localeCompare(String(y.name));
+/** The UTC months the Costs view reads, newest first: [{ key: '2026-11', from, to }] (to is the first instant of the next month). */
+export function monthWindows(now, n = 3) {
+  const d = new Date(now), out = [];
+  for (let i = 0; i < n; i++) {
+    const a = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - i, 1)), b = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - i + 1, 1));
+    out.push({ key: `${a.getUTCFullYear()}-${String(a.getUTCMonth() + 1).padStart(2, '0')}`, from: a.toISOString(), to: b.toISOString() });
+  }
+  return out;
+}
+/**
+ * The Costs view: spend per agent and per project for each month, and the budgets. Unknown stays unknown: a part the office could not
+ * read is null (never a zero that looks real), a row with no cost number has cost null and makes its month's total partial.
+ * in: { months: [{ key, agents: [{ id, name, cost: dollars|null }]|null, projects: [...]|null }],
+ *   budgets: { policies: [{ id, scope, name, metric, limit, used, percent, status, paused }], paused: number|null }|null }.
+ * out: { months: [{ key, label, total: dollars|null, partial, agents, projects }], budgets: [...]|null, pausedAgents }.
+ */
+export function costsOf(i) {
+  const side = (rows) => {
+    if (!rows) return { rows: null, total: null, partial: false };
+    const sorted = rows.slice().sort(byCost);
+    return { rows: sorted, total: sorted.reduce((t, r) => t + (r.cost || 0), 0), partial: sorted.some((r) => r.cost == null) };
+  };
+  const months = i.months.map((m) => {
+    const a = side(m.agents), p = side(m.projects);
+    // The agent cut is the company's spend; the project cut is a second cut of the same money, so it is the fallback for the total.
+    const t = a.rows ? a : p;
+    const [y, mo] = m.key.split('-');
+    return { key: m.key, label: `${MONTHS[+mo - 1] || m.key} ${y}`, total: t.total == null ? null : Math.round(t.total * 100) / 100, partial: t.partial, agents: a.rows, projects: p.rows };
+  });
+  const b = i.budgets;
+  return { months, budgets: b ? b.policies.slice().sort((x, y) => (y.percent ?? -1) - (x.percent ?? -1)) : null, pausedAgents: b ? b.paused : null };
 }

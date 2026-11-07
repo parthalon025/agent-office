@@ -138,6 +138,38 @@
     "payload": "object",
     "createdAt": "string"
    }
+  },
+  "costsByAgent": {
+   "list": true,
+   "fields": {
+    "agentId": "string",
+    "agentName": "string",
+    "agentStatus": "string",
+    "costCents": "number",
+    "inputTokens": "number",
+    "outputTokens": "number"
+   }
+  },
+  "costsByProject": {
+   "list": true,
+   "fields": {
+    "projectId": "string",
+    "projectName": "string",
+    "costCents": "number",
+    "inputTokens": "number",
+    "outputTokens": "number"
+   }
+  },
+  "budgets": {
+   "list": false,
+   "fields": {
+    "companyId": "string",
+    "policies": "array",
+    "activeIncidents": "array",
+    "pausedAgentCount": "number",
+    "pausedProjectCount": "number",
+    "pendingApprovalCount": "number"
+   }
   }
  }
 }

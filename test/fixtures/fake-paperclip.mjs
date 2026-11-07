@@ -53,6 +53,14 @@ const withHq = (d) => {
     activity: [{ id: 'l1', companyId, actorType: 'agent', actorId: ada.id, action: 'issue.updated', entityType: 'issue', entityId: d.issues[0].id, agentId: ada.id, runId: null, details: { note: 'do-not-show' }, createdAt: '2026-11-06T08:00:00.000Z' },
       { id: 'l2', companyId, actorType: 'user', actorId: 'board', action: 'agent.updated', entityType: 'agent', entityId: ada.id, agentId: null, runId: null, details: {}, createdAt: '2026-11-06T07:00:00.000Z' }],
     costs: { companyId, spendCents: 1240, budgetCents: 10000, utilizationPercent: 12.4 },
+    costMonths: {
+      '2026-11': { agents: [{ agentId: ada.id, agentName: 'Ada', agentStatus: 'idle', costCents: 830, inputTokens: 1000, outputTokens: 200 }, { agentId: grace.id, agentName: 'Grace', agentStatus: 'idle', costCents: 410, inputTokens: 500, outputTokens: 90 }],
+        projects: [{ projectId: 'pr1', projectName: 'Web', costCents: 1240, inputTokens: 1500, outputTokens: 290 }] },
+      '2026-10': { agents: [{ agentId: ada.id, agentName: 'Ada', agentStatus: 'idle', costCents: 2000, inputTokens: 0, outputTokens: 0 }], projects: [] },
+    },
+    budgets: { companyId, policies: [{ policyId: 'bp1', companyId, scopeType: 'company', scopeId: companyId, scopeName: 'Acme Robotics', metric: 'billed_cents', windowKind: 'calendar_month_utc', amount: 10000, observedAmount: 1240, utilizationPercent: 12.4, status: 'ok', isActive: true },
+      { policyId: 'bp2', companyId, scopeType: 'agent', scopeId: ada.id, scopeName: 'Ada', metric: 'billed_cents', windowKind: 'calendar_month_utc', amount: 5000, observedAmount: 4500, utilizationPercent: 90, status: 'warning', isActive: true }],
+      activeIncidents: [], pausedAgentCount: 0, pausedProjectCount: 0, pendingApprovalCount: 0 },
     secrets: [{ id: 's1', companyId, name: 'GITHUB_TOKEN', provider: 'local_encrypted', description: null, latestVersion: 1, value: 'do-not-show' }],
   };
 };
@@ -88,7 +96,7 @@ const DEMO0 = (hooksFile = null) => {
  */
 export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
   const st = { companies: structuredClone(seed.companies || []), agents: structuredClone(seed.agents || []), issues: structuredClone(seed.issues || []), routines: structuredClone(seed.routines || []), projects: structuredClone(seed.projects || []), liveRuns: structuredClone(seed.liveRuns || []),
-    goals: structuredClone(seed.goals || []), approvals: structuredClone(seed.approvals || []), activity: structuredClone(seed.activity || []), costs: structuredClone(seed.costs || null), secrets: structuredClone(seed.secrets || []) };
+    goals: structuredClone(seed.goals || []), approvals: structuredClone(seed.approvals || []), activity: structuredClone(seed.activity || []), costs: structuredClone(seed.costs || null), secrets: structuredClone(seed.secrets || []), costMonths: structuredClone(seed.costMonths || {}), budgets: structuredClone(seed.budgets || null) };
   const requests = [], sockets = new Set();
   const api = { afterPatch: null, failIssueAfter: null, created: 0, comments: 0 };   // set by a test: runs right after a PATCH is answered (a change made in Paperclip at the same time)
   let seq = 0;
@@ -174,6 +182,12 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/approvals$/))) { const want = u.searchParams.get('status'); return send(res, 200, st.approvals.filter((r) => r.companyId === x[1] && (!want || r.status === want))); }
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/activity$/))) return send(res, 200, st.activity.filter((r) => r.companyId === x[1]));
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/costs\/summary$/))) return st.costs ? send(res, 200, st.costs) : send(res, 404, { error: 'Not found' });
+      // the Costs view (#208): one month per `from` (seed.costMonths by YYYY-MM; a month not in it answers 404), and the budgets overview
+      if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/costs\/by-(agent|project)$/))) {
+        const month = (u.searchParams.get('from') || '').slice(0, 7), mo = st.costMonths[month];
+        return mo ? send(res, 200, mo[x[2] === 'agent' ? 'agents' : 'projects'] || []) : send(res, 404, { error: 'Not found' });
+      }
+      if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/budgets\/overview$/))) return st.budgets ? send(res, 200, st.budgets) : send(res, 404, { error: 'Not found' });
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/secrets$/))) return send(res, 200, st.secrets.filter((r) => r.companyId === x[1]));
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/live-runs$/))) return send(res, 200, st.liveRuns);
       // the agent as saved, with what buildAgentDetail adds (routes/agents.ts; the board reads the whole config)
