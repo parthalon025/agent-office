@@ -315,6 +315,25 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
         emit('activity.logged', { actorType: 'user', actorId: 'board', action: 'agent.hire_created', entityType: 'agent', entityId: a.id, agentId: null, runId: null, details: {} }, a.companyId);
         return send(res, 201, { agent: a, approval });
       }
+      // employee management (#203; routes/agents.ts: POST /agents/:id/pause | resume | terminate answer the agent row; routes/costs.ts: PATCH
+      // /companies/:id/budgets answers the company, PATCH /agents/:id/budgets the agent; body { budgetMonthlyCents }, updateBudgetSchema: int, >= 0).
+      // terminate keeps the agent row with status terminated (its tasks and history stay); only DELETE /agents/:id erases it, and the office never sends it.
+      if (req.method === 'POST' && (x = m(/^\/api\/agents\/([^/]+)\/(pause|resume|terminate)$/))) {
+        const a = st.agents.find((y) => y.id === x[1]);
+        if (!a) return send(res, 404, { error: 'Agent not found' });
+        a.status = { pause: 'paused', resume: 'idle', terminate: 'terminated' }[x[2]];
+        a.updatedAt = new Date().toISOString();
+        emit('activity.logged', { actorType: 'user', actorId: 'board', action: `agent.${{ pause: 'paused', resume: 'resumed', terminate: 'terminated' }[x[2]]}`, entityType: 'agent', entityId: a.id, agentId: null, runId: null, details: {} }, a.companyId);
+        return send(res, 200, a);
+      }
+      if (req.method === 'PATCH' && (x = m(/^\/api\/(agents|companies)\/([^/]+)\/budgets$/))) {
+        const rec = (x[1] === 'agents' ? st.agents : st.companies).find((y) => y.id === x[2]);
+        if (!rec) return send(res, 404, { error: x[1] === 'agents' ? 'Agent not found' : 'Company not found' });
+        if (!parsed || !(Number.isInteger(parsed.budgetMonthlyCents) && parsed.budgetMonthlyCents >= 0)) return send(res, 400, { error: 'Validation error' });
+        rec.budgetMonthlyCents = parsed.budgetMonthlyCents;
+        emit('activity.logged', { actorType: 'user', actorId: 'board', action: 'cost.budget_updated', entityType: x[1] === 'agents' ? 'agent' : 'company', entityId: rec.id, agentId: null, runId: null, details: {} }, rec.companyId || rec.id);
+        return send(res, 200, rec);
+      }
       if (req.method === 'PATCH' && (x = m(/^\/api\/agents\/([^/]+)$/))) {
         const a = st.agents.find((y) => y.id === x[1]);
         if (!a) return send(res, 404, { error: 'Agent not found' });
