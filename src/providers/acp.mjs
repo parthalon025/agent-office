@@ -172,6 +172,17 @@ export const AGENTS = {
     askTimeoutMs: null, features: [], pin: null,
     needs: ['Set OFFICE_ACP_PROGRAM to the name of an agent that speaks ACP on stdio, and OFFICE_ACP_ARGS to its arguments as a JSON list, then start the office again. Example: OFFICE_ACP_PROGRAM=myagent, OFFICE_ACP_ARGS=["serve","--stdio"].'],
   },
+  // OpenAI Codex (#217). Through codex-acp, the ACP bridge Paperclip's codex-local adapter starts for its ACP engine
+  // (packages/adapters/codex-local/src/server/acp.ts; MIT, credit in NOTICE.md); `codex-acp` takes no arguments there. It sends
+  // session/request_permission, which the office holds like any ACP request, but how many of Codex's own calls ask is not known:
+  // the bridge was not run against the office, and none is installed on the owner's PC. So it is ungated and "Unsupervised",
+  // off until the user turns it on on the Agents screen, in a room of its own (ADR 0001). It shares the CLI tools column.
+  codex: {
+    label: 'Codex', program: 'codex-acp', args: [],
+    gated: false, supervision: 'Unsupervised: some calls may ask the office, but Codex decides which',
+    askTimeoutMs: null, features: [], pin: null,
+    needs: ['Install the Codex ACP bridge so that codex-acp.exe is on the PATH, then sign in with codex login in a terminal.'],
+  },
 };
 
 const INIT_MS = 20_000;          // the handshake and the first session

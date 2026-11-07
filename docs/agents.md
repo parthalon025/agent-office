@@ -13,8 +13,27 @@ The numbered jobs (job 3, job 9) are the core jobs in [Using the office](using-t
 | OpenClaw | ACP agent behind your own Gateway | Unknown | Gated through the office plugin |
 | Copilot CLI | GitHub Copilot as an ACP agent | Unknown | Partly supervised |
 | Gemini CLI, OpenCode, Kimi CLI, ACP agent | ACP tools (see [ACP tools](#acp-tools-gemini-cli-opencode-kimi-cli-and-other-acp-agents)) | Unknown | Gemini: partly supervised. The others: unsupervised |
+| Codex | OpenAI Codex as an ACP agent, through the `codex-acp` bridge | Unknown | Unsupervised |
+| Cursor CLI, Grok CLI, Pi | Command-line tools that print JSON, one process per turn | Unknown | Unsupervised |
 | Azure AI Foundry, Copilot Studio | Agents in your Microsoft cloud account | Unknown unless you set prices | Partly supervised or unsupervised |
 | Cursor cloud agent, Hermes gateway | Remote tools: Cursor's cloud, or a Hermes gateway you run | Unknown | Unsupervised |
+
+## Codex, Cursor CLI, Grok CLI and Pi
+
+Four more kinds are built (#217). None is gated, so each is **Unsupervised**: its tools run without asking the office, it is **off until you turn it on** (Security room, Agents screen, column **CLI tools**), and it opens only in a worktree of its own. The four share the **CLI tools** column on the Security room walls. No cell there is enforced.
+
+| Kind | Program (on the PATH) | How the office talks to it | What the office sees |
+| --- | --- | --- | --- |
+| Codex | `codex-acp.exe` | ACP, through the `codex-acp` bridge (the ACP provider) | ACP updates. Requests that the bridge sends are held like any ACP request. How many of Codex's own calls ask is not known. |
+| Cursor CLI | `cursor-agent.exe` | `cursor-agent -p --output-format stream-json`, the prompt on stdin, one process per turn, `--resume` for the next turn | The replies and the tokens. No tool calls. |
+| Grok CLI | `grok.exe` | `grok --output-format streaming-json --single <prompt>`, one process per turn, `--resume` for the next turn | The replies and the tokens. No tool calls. |
+| Pi | `pi.exe` | `pi --mode json -p --session <file> <prompt>`, one process per turn, one session file in the temp folder | The replies, the tokens and each tool call. |
+
+- **Hooks and ACP.** None of Cursor CLI, Grok CLI and Pi gives the office a hook or an approval channel in the way the office uses them. The office passes no `--yolo`, `--force`, `--always-approve` or `--trust`, so what a tool refuses in a headless run stays refused.
+- **Cost.** The office counts tokens and shows the cost as unknown. There is no spend limit. The office asks once per session.
+- **Install.** The office starts a program by its absolute path, and only `.exe` or `.com`. An npm `.cmd` shim (for example `pi.cmd`) is named in **Agent kinds** as not usable.
+- **Not tested with a real tool.** The shapes come from Paperclip's adapters (see `NOTICE.md`) and a fake CLI (`test/fixtures/fake-cli.mjs`). None of the four tools is installed on the owner's PC. Each is marked untested until a real run.
+- **Reopen.** It starts a new session in the same folder and cannot resume.
 
 ## Local model agents
 

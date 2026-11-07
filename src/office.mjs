@@ -20,6 +20,7 @@ import { createRegistry, providerEvents, traitsOf, DEFAULT_PROVIDER } from './pr
 import { createLocal } from './providers/local.mjs';
 import { createExplainer } from './explain.mjs';
 import { createAcp, AGENTS as ACP_AGENTS } from './providers/acp.mjs';
+import { createCliTool, TOOLS as CLI_TOOLS } from './providers/cli-tools.mjs';
 import { createAgentFramework } from './providers/agent-framework.mjs';
 import { createFoundry } from './providers/foundry.mjs';
 import { createCopilotStudio } from './providers/copilot-studio.mjs';
@@ -327,6 +328,8 @@ export function createOffice(cfg) {
     // turned on, a no-cost Deny). One rule source. tokenFile: the OpenClaw plugin must read this office's token (#77).
     ...Object.keys(ACP_AGENTS).map((kind) => createAcp({ events, kind, tokenFile: TOKEN_FILE,
       blocked: () => openRefusal(saved.get('security'), providers.get(kind)) })),
+    // Headless CLI tools (providers/cli-tools.mjs): Cursor CLI, Grok CLI and Pi, one entry each in its TOOLS list.
+    ...Object.keys(CLI_TOOLS).map((kind) => createCliTool({ events, kind, blocked: () => openRefusal(saved.get('security'), providers.get(kind)) })),
     // The Microsoft cloud kinds are off until the owner sets them up in the environment (docs/agents.md). Nothing here calls the network
     // or signs in. Like the ungated ACP agents, the Agents screen of the Security room keeps them off until it turns them on.
     // Remote tools (#218, providers/remote-tools.mjs): Cursor cloud agents and a Hermes gateway, the same rule: off until turned on.
