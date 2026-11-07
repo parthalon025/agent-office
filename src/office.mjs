@@ -13,7 +13,8 @@ import { createCampus } from './campus.mjs';
 import { slimPayload, cleanIds as cleanPaperclipIds } from './payload.mjs';
 import { createHq, companyDraft } from './paperclip.mjs';
 import { WRITE_KINDS, writeValueOf, setWriteCell, HIRE_ROLES } from './hq-model.mjs';
-import { createRuntime } from './paperclip-runtime.mjs';
+import { createRuntime, runtimePaths } from './paperclip-runtime.mjs';
+import { createMemory, createEmbedder } from './memory.mjs';
 import { createRuns } from './paperclip-runs.mjs';
 import { recap as recapOf, away as awayOf } from './rituals.mjs';
 import { mark as markOrientation, view as orientationView } from './orientation.mjs';
@@ -1101,9 +1102,46 @@ export function createOffice(cfg) {
   manager.restore(saved.get('goals'));
   // The office adapter (#200, paperclip-runs.mjs): a run Paperclip hands to the office is an ordinary office session of the employee's agent kind
   // (provider seam, Security room, holds, Needs you). The plugin in Paperclip asks for the log and the result; a call that waits is in Needs you.
+  // Company memory (#205, memory.mjs): one SQLite file per company next to the Paperclip data (owner-only), keyword search always and
+  // semantic search when LM Studio or Ollama lists an embedding model. Off where node:sqlite is missing. A run's wake prompt gets a few
+  // matching memories (recall), and a run that ends well leaves its last words (remember).
+  const memory = createMemory({
+    dir: runtimePaths({ root: ROOT, env: process.env, port: PORT }).memory, sqlite: process.getBuiltinModule?.('node:sqlite')?.DatabaseSync, writeSecret,
+    embedder: process.env.OFFICE_EMBED === 'off' ? null : createEmbedder({ servers: [{ label: 'LM Studio', baseUrl: lmstudio.baseUrl }, { label: 'Ollama', baseUrl: ollama.baseUrl }] }),
+  });
+  const memoryCompany = () => {
+    const v = hq.view()?.company, c = saved.get('paperclip')?.company;
+    return v?.id ? { id: String(v.id), name: v.name || 'Paperclip' } : typeof c === 'string' && c ? { id: c, name: 'Paperclip' } : null;
+  };
+  async function memoryView(query) {
+    const status = await memory.status(), company = memoryCompany();
+    if (!status.available || !company) return { memory: status, company, items: [], total: 0 };
+    const q = String(query.get('q') || '').trim();
+    if (q) { const r = await memory.search(company.id, q, { limit: 50 }); return { memory: { ...status, search: r.semantic ? 'semantic' : status.search === 'semantic' ? 'keyword' : status.search }, company, items: r.items, total: r.items.length, query: q }; }
+    const b = await memory.browse(company.id, { limit: Number(query.get('limit')) || 50, offset: Number(query.get('offset')) || 0 });
+    return { memory: status, company, items: b.items, total: b.total };
+  }
+  async function rememberMemory(body) {
+    const company = memoryCompany();
+    if (!company) throw httpError(409, 'There is no company yet. Create your company first.');
+    const r = await memory.remember(company.id, { text: body.text, source: 'user' });
+    addFeed(PAPERCLIP, 'tool', `Company memory: ${r.existed ? 'already known' : 'remembered one fact'}.`);
+    return { ok: true, ...r };
+  }
+  async function forgetMemory(body) {
+    const company = memoryCompany();
+    if (!company) throw httpError(409, 'There is no company yet.');
+    if (!Number.isInteger(body.id)) throw httpError(400, 'Name the memory by its number.');
+    if (body.confirmed !== true) throw askFirst('memory', 'Forget this memory? The company loses it for good. Its employees no longer see it in their prompts.');
+    if (!(await memory.forget(company.id, body.id))) throw httpError(404, 'No such memory.');
+    addFeed(PAPERCLIP, 'tool', 'Company memory: forgot one fact.');
+    return { ok: true };
+  }
+  process.once('exit', () => memory.close());
   const paperclipRuns = createRuns({
     open: (o) => openSession(o), send: (uid, text) => sendMessage(uid, text, [], { answers: false }), session: (uid) => sessions.get(uid),
     close: (uid) => closeSession(uid), feed: (s, kind, text) => addFeed(s, kind, text), changed: () => broadcast(),
+    recall: (company, query) => memory.recall(company, query), remember: (company, m) => memory.remember(company, m),
   });
   // The office Manager as a Paperclip employee (#204): a task assigned to it becomes a goal, the steps are sub-issues, the result a comment.
   const managerEmployees = createManagerEmployees({ hq, manager, state: { get: (k) => saved.get(k), set: (k, v) => saved.set(k, v), save: () => savePersisted() }, feed: (t) => addFeed(PAPERCLIP, 'tool', t) });
@@ -1352,6 +1390,10 @@ export function createOffice(cfg) {
     R('POST', '/api/hq/grid/set', 'page', ({ body }) => setHqGrid(body)),
     R('POST', '/api/hq/write', 'page', ({ body }) => writeHq(body)),
     R('GET', '/api/hq/costs', 'page', async () => ({ costs: await hq.costs() })),
+    // Company memory (#205): browse and search (`?q=`), remember a fact as the user, forget one behind the ask-first Confirm (kind memory).
+    R('GET', '/api/memory', 'page', ({ query }) => memoryView(query)),
+    R('POST', '/api/memory/remember', 'page', ({ body }) => rememberMemory(body)),
+    R('POST', '/api/memory/forget', 'page', ({ body }) => forgetMemory(body)),
     // The Paperclip runtime (#193): install (409 without the Confirm), start, stop, and the board key's approval link. Never the key.
     R('GET', '/api/paperclip/runtime', 'page', () => ({ runtime: runtime.status() })),
     // The transcript of a run of the office adapter, for the desk screen (#211): the log the plugin reads, live or kept after the end.
@@ -1557,6 +1599,6 @@ export function createOffice(cfg) {
     /** The Paperclip the office runs: the adapter ends it at exit (killNow is synchronous) and tests drive it. */
     runtime,
     /** Ends what the office started that would hold a process open (the process helper). */
-    stop() { if (walker) { walker.kill(); walker = null; } },
+    stop() { if (walker) { walker.kill(); walker = null; } memory.close(); },
   };
 }

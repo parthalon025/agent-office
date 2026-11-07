@@ -128,7 +128,7 @@
 
   // ---------- Orientation (#196): the first-run walk through the office ----------
   // The steps, their words and the saved progress come from the server (src/orientation.mjs); this draws the controls of each step.
-  // Every step can be skipped and is reachable again from the Reception and Ctrl+K. The memory step is a placeholder.
+  // Every step can be skipped and is reachable again from the Reception and Ctrl+K. The memory step shows the Memory panel of the HQ (hq.js).
   function KindsStep() {
     var K = O.useKinds();   // the shared provider read (page-core.js): the kept answer, never a fresh round
     if (K.checking) return h(Busy, { on: true });
@@ -222,6 +222,7 @@
     if (id === 'kinds') return h(KindsStep);
     if (id === 'company') return h(CompanyStep, { onDone: p.onDone, toast: p.toast });
     if (id === 'hire') return h(HireStep, { onDone: p.onDone, toast: p.toast });
+    if (id === 'memory') return O.Hq && O.Hq.Memory ? h(O.Hq.Memory, { toast: p.toast, onUsed: p.onDone }) : null;
     if (id === 'security') return h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'security', onClick: function () { p.onSecurity(); } }, 'Open the Security room'));
     if (id === 'spend') return h(SpendStep, { info: p.info, onDone: p.onDone });
     if (id === 'startup') return h(StartupStep, { info: p.info, onDone: p.onDone });

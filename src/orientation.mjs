@@ -1,8 +1,8 @@
 // Orientation (#196, parent #191): the first-run walk through the whole office. Each step is skippable and reachable again from the
 // Reception and Ctrl+K. This module owns the steps, their words and the saved progress (the `orientation` slice of the state file:
 // `{ seen, steps: { <id>: 'done' | 'skipped' } }`); the page draws each step's own controls and keeps no copy of the list.
-// The company step (#199) installs or connects Paperclip and creates the company; the first hire (#201) is the HR desk. A `later` step is a
-// placeholder the page says so for: the memory step. Pure: no I/O, no clock.
+// The company step (#199) installs or connects Paperclip and creates the company; the first hire (#201) is the HR desk. The memory step
+// (#205) shows the company memory panel. A `later` step would be a placeholder the page says so for; none is left. Pure: no I/O, no clock.
 import { httpError } from './office-core.mjs';
 
 /** The steps in order. Words are Simplified Technical English: short sentences, buttons say the result. */
@@ -14,7 +14,7 @@ export const STEPS = [
   { id: 'remote', title: 'Remote access', text: 'Reach the office from your phone through Cloudflare Access. It is off until you set it up.' },
   { id: 'company', title: 'Company', text: 'Install Paperclip or connect the one you run. Then create your company. You make the first account and approve the board key in Paperclip. The office waits for you.' },
   { id: 'hire', title: 'First hire', text: 'Hire your first employee at the HR desk. Pick a role and set a monthly budget. You see what the office creates before it sends anything.' },
-  { id: 'memory', title: 'Company memory', text: 'Set up the memory your employees learn from.', later: true },
+  { id: 'memory', title: 'Company memory', text: 'Your employees keep what they learn in one memory for the company. It stays on this PC. Look at it, and add a first fact if you like.' },
   { id: 'tour', title: 'Tour', text: 'Walk around the office. The tour has four stops.' },
 ];
 const IDS = new Set(STEPS.map((s) => s.id));

@@ -8,7 +8,7 @@ import '../public/ask.js';
 
 const Ask = globalThis.OfficeAsk;
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const SERVER_KINDS = ['merge', 'fork', 'skill', 'goal', 'handoff', 'cost', 'runtime', 'write'];
+const SERVER_KINDS = ['merge', 'fork', 'skill', 'goal', 'handoff', 'cost', 'runtime', 'write', 'memory'];
 
 // What api() in page-core.js rejects with for an answer: the Error carries the status and the parsed body.
 function rejected(a) {

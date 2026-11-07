@@ -259,3 +259,41 @@ test('transcript(uid): the log of a run by its office session, kept after the ru
   assert.match(t.lines.at(-1).text, /The run finished/);
   assert.equal(runs.transcript('nope'), null);
 });
+
+// Company memory (#205): recall goes in front of the wake prompt, and a run that ended well leaves its last words.
+function memRig(extra) {
+  const sessions = new Map(), asked = [];
+  const runs = createRuns({
+    open: async () => { sessions.set('m1', { uid: 'm1', status: 'starting', replies: [], calls: [], pending: [], usage: {}, turns: 0, turnEnded: false, error: null }); return 'm1'; },
+    send: (uid, text) => { asked.push(text); Object.assign(sessions.get(uid), { status: 'working', turnEnded: false }); },
+    session: (uid) => sessions.get(uid), close: async () => {}, feed: () => {}, setTimer: () => ({}), clearTimer: () => {}, now: () => 1000, ...extra,
+  });
+  return { runs, sessions, asked };
+}
+test('company memory: the recalled block goes before the prompt when it fits, and a good run is remembered with its source', async () => {
+  const kept = [];
+  const { runs, sessions, asked } = memRig({
+    recall: async (company, query) => { assert.equal(company, 'co-1'); assert.match(query, /health route/); return 'Company memory. Notes.\n- The API runs on 4000. (Ada)'; },
+    remember: async (company, m) => { kept.push([company, m]); },
+  });
+  await runs.start(BODY);
+  assert.equal(asked[0], 'Company memory. Notes.\n- The API runs on 4000. (Ada)\n\nAdd a health route.');
+  const s = sessions.get('m1');
+  s.replies.push({ id: 1, text: 'Added GET /health.' });
+  end(s);
+  runs.tick();
+  await new Promise((x) => setImmediate(x));
+  assert.deepEqual(kept, [['co-1', { text: 'Added GET /health.', source: 'run', employee: 'Ada', employeeId: 'agent-1', task: 'task-9', run: 'run-1' }]]);
+});
+test('company memory: a block that would not fit the message limit is left out, and a failed run is not remembered', async () => {
+  const kept = [];
+  const { runs, sessions, asked } = memRig({ recall: async () => 'x'.repeat(500), remember: async (c, m) => { kept.push(m); } });
+  await runs.start({ ...BODY, prompt: 'p'.repeat(3800) });
+  assert.equal(asked[0].length, 3800, 'the prompt goes alone');
+  const s = sessions.get('m1');
+  s.replies.push({ id: 1, text: 'half done' });
+  Object.assign(s, { status: 'idle', turnEnded: true, error: { text: 'boom' } });
+  runs.tick();
+  await new Promise((x) => setImmediate(x));
+  assert.deepEqual(kept, []);
+});

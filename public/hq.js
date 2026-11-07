@@ -1,5 +1,5 @@
 /* Agent Office for Claude Code x0.2: the hq feature (#184, the page features of #168).
-   The Manager board, the Paperclip HQ and earned trust (#157, #76, #153). One Module: its Interface is window.OfficePage.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm } (the HR desk, #201).
+   The Manager board, the Paperclip HQ and earned trust (#157, #76, #153). One Module: its Interface is window.OfficePage.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel } (the HR desk, #201; company memory, #205).
    Plain functions over the page core (window.OfficePage); office.js calls the Interface and holds none of the parts. */
 (function () {
   'use strict';
@@ -201,6 +201,68 @@
           })]);
   }
 
+  // Company memory (#205, src/memory.mjs): what the employees of the company learned, each with where it came from. Browse, search,
+  // add a fact and forget one. Forget asks first: the server answers 409 (ask-first kind memory) and the row shows a painted Confirm.
+  // Keyword search always works; the note says when a local model makes it semantic. Used by the HQ dialog and the Orientation step.
+  function MemoryPanel(p) {
+    var st = useState({ data: undefined, err: '' }), s = st[0], setS = st[1];
+    var qs = useState(''), q = qs[0], setQ = qs[1];
+    var ts = useState(''), text = ts[0], setText = ts[1];
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var er = useState(''), err = er[0], setErr = er[1];
+    var cf = useState(0), confirm = cf[0], setConfirm = cf[1];   // the id whose Forget waits for the Confirm
+    function load(query) {
+      return client.get('memory', { q: query || '' }).then(function (j) { setS({ data: j, err: '' }); }, function (x) { setS({ data: null, err: x.message }); });
+    }
+    useEffect(function () { load(''); }, []);
+    function add() {
+      setBusy(true); setErr('');
+      client.memoryRemember({ text: text }).then(function (r) {
+        setBusy(false); setText(''); if (p.onUsed) p.onUsed();
+        if (p.toast) p.toast({ tone: 'success', title: 'Company memory', text: r.existed ? 'The company already knew this.' : 'Remembered.' });
+        return load(q);
+      }, function (x) { setBusy(false); setErr(x.message); });
+    }
+    function forget(id, confirmed) {
+      setBusy(true); setErr('');
+      client.memoryForget({ id: id, confirmed: confirmed === true ? true : undefined }).then(function () { setBusy(false); setConfirm(0); return load(q); }, function (x) {
+        setBusy(false);
+        if (window.OfficeAsk.asked(x, 'memory', confirmed === true)) { setConfirm(id); return; }
+        setConfirm(0); setErr(x.message);
+      });
+    }
+    var d = s.data;
+    if (s.err) return h('p', { className: 'ao-err', role: 'alert' }, 'The office could not read company memory. ' + s.err);
+    if (d === undefined) return h('p', { className: 'note', role: 'status' }, 'Reading company memory.');
+    var m = d.memory;
+    if (!m.available) return h(A.EmptyState, { icon: 'hq', compact: true, title: 'Company memory is off', text: m.reason });
+    if (!d.company) return h(A.EmptyState, { icon: 'hq', compact: true, title: 'No company yet', text: 'Company memory belongs to a company. Create your company first.' });
+    var how = m.search === 'semantic' ? 'Search finds meaning and words. A local model (' + m.model + ' on ' + m.server + ') makes it so.' : 'Search finds words. It needs no model.' + (m.note ? ' ' + m.note : ' Start Ollama or LM Studio with an embedding model to find meaning too.');
+    return h('div', { className: 'hq-floor' },
+      h('p', { className: 'note' }, 'What the employees of ' + d.company.name + ' learned. It stays on this PC (' + m.label + '). ' + how),
+      h('div', { className: 'inline-actions' },
+        h(A.TextInput, { id: 'mem-q', label: 'Search memory', value: q, onChange: setQ }),
+        h(A.Button, { variant: 'quiet', icon: 'search', onClick: function () { load(q); } }, 'Search'),
+        d.query ? h(A.Button, { variant: 'quiet', onClick: function () { setQ(''); load(''); } }, 'Show all') : null),
+      h('div', { className: 'inline-actions' },
+        h(A.TextInput, { id: 'mem-add', label: 'Remember a fact (one short sentence)', value: text, onChange: setText }),
+        h(A.Button, { variant: 'quiet', icon: 'add', disabled: !text.trim(), loading: busy && !confirm, onClick: add }, 'Remember')),
+      err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
+      d.items.length ? h('ul', { className: 'past', 'aria-label': 'Memories' }, d.items.map(function (x) {
+        var from = x.source === 'user' ? 'You' : x.employee || 'An employee';
+        return h('li', { key: x.id, className: 'past-row' },
+          h('div', { className: 'past-main' },
+            h('div', { className: 'past-title' }, h('b', null, x.text)),
+            h('div', { className: 'past-meta' }, [from, x.task ? 'task ' + x.task : '', x.run ? 'run ' + x.run : '', ago(x.at)].filter(Boolean).join(' · '))),
+          confirm === x.id
+            ? h('div', { className: 'inline-actions' },
+              h(A.Button, { variant: 'primary', icon: 'remove', loading: busy, onClick: function () { forget(x.id, true); } }, 'Forget it'),
+              h(A.Button, { variant: 'quiet', onClick: function () { setConfirm(0); } }, 'Keep it'))
+            : h(A.Button, { variant: 'quiet', icon: 'remove', onClick: function () { forget(x.id); } }, 'Forget'));
+      })) : h('p', { className: 'note' }, d.query ? 'Nothing in memory matches.' : 'Nothing is remembered yet. A run that ends well adds its last words. You can add a fact above.'),
+      !d.query && d.total > d.items.length ? h('p', { className: 'note' }, 'Showing the newest ' + d.items.length + ' of ' + d.total + '. Search to find the rest.') : null);
+  }
+
   // The HQ: what Paperclip says about its company. Read only: Paperclip runs its heartbeats, routines and budgets. Supervise
   // in office is on the Agents screen of a Security room, with its painted Confirm (no button here: one place for a write).
   function HqDialog(p) {
@@ -229,6 +291,8 @@
         q.contract && q.contract.length ? h('p', { className: 'ao-err', role: 'alert' }, 'Paperclip answered in a shape the office does not know, so the office does not show that part. ' + q.contract.join(' ')) : null,
         q.lobby ? h(Lobby, { q: q, mark: mark, toast: p.toast }) : null,
         h(Costs, null),
+        h('h3', { className: 'ext-h' }, 'Company memory'),
+        h(MemoryPanel, { toast: p.toast }),
         h('h3', { className: 'ext-h' }, 'Agents'),
         q.agents.length ? h('ul', { className: 'past' }, q.agents.map(function (a) {
           var st = H.status(a), sup = H.supervision(a);
@@ -366,5 +430,5 @@
         })) : h('p', { className: 'note' }, 'No agent has a history yet.')));
   }
 
-  O.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm };
+  O.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel };
 })();
