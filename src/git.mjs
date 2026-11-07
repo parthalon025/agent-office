@@ -461,6 +461,9 @@ export function roomNameOf(name) {
  *  back (`addAt`) when git fails. */
 function roomFolder(repo, branch, name = '') {
   fs.mkdirSync(WORKTREE_ROOT, { recursive: true });
+  // Git lists a room by its real path (8.3 short names, links and junctions resolved) and removeRoom matches rooms by that text,
+  // so a room is made under the real path of the rooms folder (a CI temp folder is an 8.3 short path).
+  const base = fs.realpathSync.native(WORKTREE_ROOT);
   const n = roomNameOf(name);
   const claim = (dir) => {
     try { fs.mkdirSync(dir); return true; }
@@ -468,13 +471,13 @@ function roomFolder(repo, branch, name = '') {
   };
   if (!n) {
     for (let i = 0; i < 5; i++) {
-      const dir = path.join(WORKTREE_ROOT, `${path.basename(repo)}-${slugOf(branch)}-${crypto.randomBytes(2).toString('hex')}`);
+      const dir = path.join(base, `${path.basename(repo)}-${slugOf(branch)}-${crypto.randomBytes(2).toString('hex')}`);
       if (claim(dir)) return dir;
     }
     throw new Error('The office could not find a free folder for the room. Try again.');
   }
   for (let i = 1; i < 100; i++) {
-    const dir = path.join(WORKTREE_ROOT, i === 1 ? n : `${n}-${i}`);
+    const dir = path.join(base, i === 1 ? n : `${n}-${i}`);
     if (claim(dir)) return dir;
   }
   throw new Error('Too many rooms with that name. Pick another name.');
