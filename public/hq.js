@@ -15,6 +15,25 @@
     var bz = useState(''), busy = bz[0], setBusy = bz[1];
     var ha = useState(null), ask = ha[0], setAsk = ha[1];   // { g, text, tasks }: the handoff waits for the painted Confirm (#159)
     var connected = !!(snap && snap.hq && snap.hq.company);
+    // Managers as Paperclip employees (#204): the Managers of the company, and the hire of one for a building (a write of the grid's Hires cell).
+    var ms = useState([]), managers = ms[0], setManagers = ms[1];
+    var hs = useState(null), hire = hs[0], setHire = hs[1];   // { building, text }: the hire waits for the painted Confirm
+    var bs = useState(''), pick = bs[0], setPick = bs[1];
+    useEffect(function () {
+      if (!connected) { setManagers([]); return; }
+      client.get('managers').then(function (r) { setManagers(r.managers || []); }, function () { setManagers([]); });
+    }, [connected, hire]);
+    function hireManager(building, confirmed) {
+      setBusy('hire');
+      client.managerHire({ building: building, confirmed: confirmed === true }).then(function () {
+        setBusy(''); setHire(null); p.toast({ tone: 'success', title: V.plan.hireManager.done });
+      }, function (x) {
+        setBusy('');
+        var q = window.OfficeAsk.asked(x, 'write', confirmed);
+        if (q) { setHire({ building: building, text: q.text }); return; }
+        setHire(null); p.toast({ tone: 'error', title: V.plan.hireManager.title, text: x.message });
+      });
+    }
     function act(route, body, key) {
       setBusy(key);
       client.send(route, body).then(function () { setBusy(''); }, function (x) { setBusy(''); p.toast({ tone: 'error', title: 'Manager', text: x.message }); });
@@ -32,6 +51,12 @@
       });
     }
     var buildingName = function (key) { var r = ((snap && snap.repos) || []).filter(function (x) { return x.key === key; })[0]; return r ? r.name : ''; };
+    if (hire) {
+      return h(A.Dialog, { open: true, title: V.plan.hireManager.title, onClose: function () { setHire(null); }, actions: [
+        h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setHire(null); } }, 'Not now'),
+        h(A.Button, { key: 'y', variant: 'primary', icon: 'hq', loading: busy === 'hire', onClick: function () { hireManager(hire.building, true); } }, V.plan.hireManager.button)] },
+        h('div', { className: 'form wide' }, h('p', { className: 'note' }, hire.text)));
+    }
     if (ask) {
       var rows = V.plan.handoffRows(ask.tasks, ask.g.handoff && ask.g.handoff.tasks), todo = rows.filter(function (r) { return !r.written; }).length;
       return h(A.Dialog, { open: true, title: 'Hand this goal to Paperclip', onClose: function () { setAsk(null); }, actions: [
@@ -48,11 +73,15 @@
     return h(A.Dialog, { open: true, title: 'Manager board', onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
       h('div', { className: 'form wide manager-board' },
         v.unreadable.map(function (t) { return h('p', { key: t, className: 'note manager-warn', role: 'status' }, t); }),
+        connected && ((snap && snap.repos) || []).length ? h('div', { className: 'inline-actions manager-hire' },
+          h(A.Select, { id: 'mgr-building', ariaLabel: V.plan.hireManager.building, options: [{ value: '', label: V.plan.hireManager.building }].concat(((snap && snap.repos) || []).map(function (r) { return { value: r.key, label: r.name }; })), value: pick, onChange: setPick }),
+          h(A.Button, { variant: 'quiet', icon: 'hq', disabled: !pick || busy === 'hire', onClick: function () { hireManager(pick, false); } }, V.plan.hireManager.button)) : null,
+        connected && managers.length ? h('p', { className: 'note' }, V.plan.hireManager.has + managers.map(function (m) { return m.name + ' (' + (buildingName(m.building) || 'Other folders') + ')'; }).join(', ')) : null,
         v.empty ? h(A.EmptyState, { icon: 'plan', compact: true, title: 'No plan yet', text: 'A goal and its steps show here. Paperclip tasks show here when a company is connected.' }) : null,
         v.groups.map(function (g) {
           var open = g.status === 'planning' || g.status === 'awaiting-approval' || g.status === 'running' || g.status === 'blocked';
           return h('section', { key: g.id, className: 'manager-goal' + (g.frozen ? ' is-frozen' : ''), 'aria-label': g.goal },
-            h('div', { className: 'past-title' }, h('b', null, g.goal), h(Tag, null, g.sourceWord), g.readOnly ? h(Tag, null, 'Read only') : null, g.building ? h(Tag, null, buildingName(g.building) || 'Other folders') : null,
+            h('div', { className: 'past-title' }, h('b', null, g.goal), h(Tag, null, g.sourceWord), g.readOnly ? h(Tag, null, 'Read only') : null, g.fromTask ? h(Tag, null, g.fromTask) : null, g.building ? h(Tag, null, buildingName(g.building) || 'Other folders') : null,
               g.stateWord ? h('span', { className: 'sess-state' }, g.stateWord) : null),
             g.note && !(g.handoff && g.handoff.failed) ? h('p', { className: 'note', role: g.frozen ? 'status' : undefined }, g.note) : null,
             g.handoff && g.handoff.failed && g.note ? h('p', { className: 'note' }, g.note.replace(/^Handoff failed: \d+ of \d+ tasks written, \d+ left\.\s*/, '')) : null,

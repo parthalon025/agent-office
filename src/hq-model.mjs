@@ -226,8 +226,16 @@ const PLANS = {
       if (description) body.description = description;
       if (b.status !== undefined && b.status !== null) { if (!ISSUE_STATUS.includes(b.status)) throw gridError(400, 'Unknown task status.'); body.status = b.status; }
       const targets = [];
+      // A sub-task (#204: a Manager reports each step as a sub-issue of the task it works on): the parent is read first and must be in the company.
+      if (b.parentId !== undefined && b.parentId !== null) { body.parentId = idOf(b.parentId, 'parent task'); targets.push({ type: 'issue', id: body.parentId }); }
       if (b.assigneeAgentId !== undefined && b.assigneeAgentId !== null) { body.assigneeAgentId = idOf(b.assigneeAgentId, 'agent'); targets.push({ type: 'agent', id: body.assigneeAgentId }); }
       return { method: 'POST', path: (co) => `/api/companies/${encodeURIComponent(co)}/issues`, body, targets, summary: `Create the task "${short(title)}"` };
+    },
+    // The status of a task (#204: the Manager moves a task and its sub-tasks as the steps run).
+    status(b) {
+      const issue = idOf(b.issue, 'task');
+      if (!ISSUE_STATUS.includes(b.status)) throw gridError(400, 'Unknown task status.');
+      return { method: 'PATCH', path: () => `/api/issues/${issue}`, body: { status: b.status }, targets: [{ type: 'issue', id: issue }], summary: `Set a task to ${b.status.replace('_', ' ')}` };
     },
     assign(b) {
       const issue = idOf(b.issue, 'task'), agent = idOf(b.agent, 'agent');
@@ -264,6 +272,15 @@ const PLANS = {
         return { problem: '', summary: manager ? `Make ${nameOf(agent)} report to ${nameOf(manager)}` : `Give ${nameOf(agent)} no manager` };
       };
       return { method: 'PATCH', path: () => `/api/agents/${agent}`, body: { reportsTo: manager }, targets, review, summary: 'Change a reporting line' };
+    },
+  },
+  // The office Manager as an employee (#204): one hire, the manager role on the office adapter, so every run of it goes through the office.
+  // Only this hire is planned; a general hire waits for its own ticket (#201). The building is the office's record, never sent.
+  hire: {
+    manager(b) {
+      const name = textOf(b.name === undefined || b.name === null || b.name === '' ? 'Manager' : b.name, 'Manager name', NAME_MAX, { required: true });
+      const body = { name, role: 'manager', title: 'Agent Office Manager', adapterType: 'agent_office', adapterConfig: { agentKind: 'claude-code', isolation: 'same', manager: true } };
+      return { method: 'POST', path: (co) => `/api/companies/${encodeURIComponent(co)}/agents`, body, targets: [], summary: `Hire the Manager "${short(name)}" (manager role, runs in the office)` };
     },
   },
   approval: Object.fromEntries([decision('approve', 'approve', 'Approve an approval'), decision('reject', 'reject', 'Reject an approval'), decision('revise', 'request-revision', 'Request a revision of an approval')]),

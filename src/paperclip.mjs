@@ -522,6 +522,16 @@ export function createHq(deps = {}) {
   }
   // What the watcher holds of Paperclip, for tests: the env of every part is key names only.
   const held = () => (d ? { agents: [...d.agents.values()], issues: d.issues, routines: d.routines, projects: d.projects } : null);
+  /**
+   * The open tasks of one employee for the office Manager (#204): { company, tasks: [{ id, identifier, title, description, status, parentId }] }, or null
+   * when Paperclip is not connected or the task list is unread or may be cut (never a list that looks whole). Open = backlog, todo, in progress.
+   */
+  function tasksOf(agentId) {
+    if (!c || !d || c.state !== 'on' || !c.companyId || d.unread.some((u) => /^issues/.test(u))) return null;
+    const tasks = d.issues.filter((i) => i && i.id && i.assigneeAgentId === agentId && ['backlog', 'todo', 'in_progress'].includes(i.status))
+      .map((i) => ({ id: String(i.id), identifier: text(i.identifier, 30), title: text(i.title, 200), description: typeof i.description === 'string' ? i.description.replace(/\r\n?/g, '\n').trim().slice(0, 2000) : '', status: String(i.status), parentId: i.parentId ? String(i.parentId) : '' }));
+    return { company: c.companyId, tasks };
+  }
   function disconnect() { const had = !!c; stop(); if (had) changed(); }
 
   const issueOf = (agentId) => {
@@ -860,9 +870,10 @@ export function createHq(deps = {}) {
     if (!first) refetchSoon(conn);
     const out = { ok: true };
     if (plan.kind === 'company') { out.id = String(made.id); out.name = plan.name; out.existed = false; }
+    if (plan.kind === 'hire') { if (!made.id) { feed(`Paperclip did not name the employee it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the employee it made.'); } out.id = String(made.id); }
     if (plan.kind === 'task' && plan.action === 'create') { out.id = String(made.id); if (typeof made.identifier === 'string') out.identifier = text(made.identifier, 30); }
     return out;
   }
 
-  return { connect, disconnect, supervise, handoffGoal, handoffTasks, write, view, model, costs, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
+  return { connect, disconnect, supervise, handoffGoal, handoffTasks, write, tasksOf, view, model, costs, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
 }

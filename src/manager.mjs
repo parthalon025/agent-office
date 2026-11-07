@@ -97,6 +97,12 @@ const MARK = { pending: '[ ]', working: '[~]', finished: '[x]', error: '[!]' };
 const WORD = { planning: 1, 'awaiting-approval': 1, running: 1, finished: 1, blocked: 1, stopped: 1, failed: 1, cancelled: 1, 'handed-off': 1, 'handoff-failed': 1 }; // the goal states; their words are OfficeVocab.plan.goalWord
 const GOAL_MAX = 2000; // a longer goal is refused (never planned from a cut text); the board shows 300
 const BOARD_GOAL = 300, BOARD_STEP = 240, BOARD_OWNER = 40; // 12 steps of 240 and a goal of 300 leave room for status, reason and spend
+/** The link of a goal to the Paperclip task it came from (#204): task and company ids, the sub-issue of each step, the status last sent for it, the last result sent. */
+const cleanLink = (r) => {
+  const o = r && typeof r === 'object' ? r : {}, str = (v, n = 80) => (typeof v === 'string' ? v.slice(0, n) : '');
+  const map = (m) => Object.fromEntries(Object.entries(m && typeof m === 'object' && !Array.isArray(m) ? m : {}).filter(([k, v]) => typeof v === 'string' && k.length < 80).slice(0, 40).map(([k, v]) => [k, v.slice(0, 80)]));
+  return { task: str(o.task), identifier: str(o.identifier, 30), title: str(o.title, 200), company: str(o.company), employee: str(o.employee), subs: map(o.subs), pushed: map(o.pushed), reported: str(o.reported, 40) };
+};
 const clip = (s, n) => { s = String(s ?? ''); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
 
 export function createManager(deps = {}) {
@@ -225,6 +231,7 @@ export function createManager(deps = {}) {
         id: 'g' + makeId(), building: String(building || ''), goal: text, status: 'planning', reason: '', steps: [],
         approveFirst: opts.approveFirst === true, spendLimit: limitOf(building, opts.spendLimit), messages: 0,
         baseline: new Map(), hops: new Map(), mail: [], lastBoard: '', waitingFor: '', pumping: false, createdAt: now(), updatedAt: now(),
+        ...(opts.paperclip ? { paperclip: cleanLink(opts.paperclip) } : {}),
       };
       const startTier = typeof deps.ready === 'function' ? ladderStart(deps.ready(g.building)) : '';
       g.paidAsked = startTier !== 'local'; // a goal that starts on a paid tier was asked when the user started it
@@ -385,6 +392,15 @@ export function createManager(deps = {}) {
 
     get(goalId) { return goals.get(goalId) || null; },
 
+    /** Record what was sent to the Paperclip task of a goal (#204): a patch of its link (subs, pushed, reported). A goal with no link takes none. */
+    link(goalId, patch) {
+      const g = goals.get(goalId);
+      if (!g || !g.paperclip) return false;
+      g.paperclip = cleanLink({ ...g.paperclip, ...patch, subs: { ...g.paperclip.subs, ...(patch.subs || {}) }, pushed: { ...g.paperclip.pushed, ...(patch.pushed || {}) } });
+      touch(g);
+      return true;
+    },
+
     /** The agents that hold a running step now (the server finishes a step when its agent's turn ends). */
     workingAgents() { const out = []; for (const g of goals.values()) for (const s of g.steps) if (s.status === 'working' && s.agentId) out.push(s.agentId); return out; },
 
@@ -392,7 +408,7 @@ export function createManager(deps = {}) {
     export() {
       return [...goals.values()].map((g) => ({
         id: g.id, building: g.building, goal: g.goal, status: g.status, reason: g.reason, approveFirst: g.approveFirst, spendLimit: g.spendLimit,
-        messages: g.messages, createdAt: g.createdAt, updatedAt: g.updatedAt, baseline: [...g.baseline], handoff: g.handoff || null,
+        messages: g.messages, createdAt: g.createdAt, updatedAt: g.updatedAt, baseline: [...g.baseline], handoff: g.handoff || null, ...(g.paperclip ? { paperclip: g.paperclip } : {}),
         steps: g.steps.map((s) => ({ id: s.id, text: s.text, role: s.role, room: s.room, bot: s.bot, status: s.status, owner: s.owner, result: s.result, attempts: s.attempts, tier: s.tier || '' })),
         paidAsked: g.paidAsked === true, holdPaid: g.holdPaid === true,
       }));
@@ -414,6 +430,7 @@ export function createManager(deps = {}) {
             owner: String(s.owner || ''), agentId: '', result: String(s.result || ''), attempts: Number.isInteger(s.attempts) ? s.attempts : 0, ...(LADDER.includes(s.tier) ? { tier: s.tier } : {}),
           })),
         };
+        if (r.paperclip) g.paperclip = cleanLink(r.paperclip);
         const h = r.handoff;
         if (h && typeof h === 'object' && h.tasks && typeof h.tasks === 'object') g.handoff = { company: String(h.company || ''), tasks: Object.fromEntries(Object.entries(h.tasks).filter(([k, v]) => typeof v === 'string' && g.steps.some((s) => s.id === k))) };
         if (g.status === 'planning') { g.status = 'failed'; g.reason = 'The office restarted before the plan was ready.'; }
@@ -434,7 +451,7 @@ export function createManager(deps = {}) {
     snapshot() {
       return [...goals.values()].map((g) => ({
         id: g.id, building: g.building, goal: g.goal, status: g.status, reason: g.reason, approveFirst: g.approveFirst,
-        handoff: g.handoff || null, spendLimit: g.spendLimit, spent: spent(g), messages: g.messages, mail: g.mail.map((m) => ({ ...m })), waitingFor: g.waitingFor, updatedAt: g.updatedAt,
+        handoff: g.handoff || null, paperclip: g.paperclip || null, spendLimit: g.spendLimit, spent: spent(g), messages: g.messages, mail: g.mail.map((m) => ({ ...m })), waitingFor: g.waitingFor, updatedAt: g.updatedAt,
         steps: g.steps.map((s) => ({ id: s.id, text: s.text, role: s.role, room: s.room, owner: s.owner, status: s.status, result: s.result, attempts: s.attempts, tier: s.tier || '' })),
       }));
     },
@@ -460,7 +477,7 @@ export function officeSource(manager) {
     kind: 'office',
     list(building) {
       return manager.snapshot().filter((g) => !building || g.building === building).map((g) => ({
-        id: g.id, building: g.building, goal: g.goal, status: g.status, reason: g.reason, handoff: g.handoff || null, mail: g.mail,
+        id: g.id, building: g.building, goal: g.goal, status: g.status, reason: g.reason, handoff: g.handoff || null, paperclip: g.paperclip || null, mail: g.mail,
         steps: g.steps.map((s) => ({ id: s.id, title: s.text, state: s.status, owner: s.owner, cost: null, model: s.tier || '' })),
       }));
     },
@@ -479,7 +496,7 @@ export function createPlanBoard({ sources = [], onChange = () => {} } = {}) {
         let mapped;
         try {
           mapped = src.list(building).map((p) => ({
-            id: p.id, building: p.building, goal: p.goal, status: p.status || '', reason: p.reason || '', frozen: p.frozen === true, handoff: p.handoff || null, mail: (p.mail || []).map((x) => ({ from: x.from, to: x.to, text: x.text, t: x.t })), source: src.kind, sourceWord: P.sourceWord(src.kind),
+            id: p.id, building: p.building, goal: p.goal, status: p.status || '', reason: p.reason || '', frozen: p.frozen === true, handoff: p.handoff || null, task: p.paperclip ? { id: p.paperclip.task, identifier: p.paperclip.identifier, title: p.paperclip.title } : null, mail: (p.mail || []).map((x) => ({ from: x.from, to: x.to, text: x.text, t: x.t })), source: src.kind, sourceWord: P.sourceWord(src.kind),
             steps: p.steps.map((s) => {
               const state = P.stepState(s.state);
               return { id: s.id, title: s.title, state, word: P.stepWord(state), owner: s.owner || '', cost: Number.isFinite(s.cost) ? s.cost : null,
