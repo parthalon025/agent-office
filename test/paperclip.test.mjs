@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { OFFICE_ADAPTER, checkUrl, supervisionOf, supervisePatch, argsWhy, configWhy, runCheck, runIds, cleanIds, createHq, roleLabel, DEFAULT_URL } from '../src/paperclip.mjs';
 import { startFakePaperclip, DEMO } from './fixtures/fake-paperclip.mjs';
 import { until } from './fixtures/office-server.mjs';
+import { officeKinds } from './fixtures/office-kinds.mjs';
 
 const HOOKS = 'C:/office/office-hooks.json';
 const SUPERVISED = { engine: 'cli', dangerouslySkipPermissions: false, extraArgs: ['--permission-mode', 'default', '--settings', HOOKS] };
@@ -784,10 +785,30 @@ test('a board key goes in the Authorization header of every read and of the live
   } finally { await none.close(); }
 });
 
-test('an employee on the office adapter is Supervised, whatever its agent kind; the adapter of another type is not (#200)', () => {
+// Review of the HQ build, finding 1 (ADR 0001): the office adapter runs each run as an office session of the employee's agent kind, so the
+// employee is as supervised as that kind: a gated kind is Supervised, an ungated kind shows its own label, a kind the office does not have is
+// unknown (fail closed). A model profile or an open issue that names another kind counts too: the worst one wins.
+test('an employee on the office adapter is as supervised as its agent kind, also through a model profile or an issue override (#200)', () => {
   assert.equal(OFFICE_ADAPTER, 'agent_office');
-  const s = supervisionOf({ id: 'a1', adapterType: OFFICE_ADAPTER, adapterConfig: { agentKind: 'codex' } }, HOOKS);
-  assert.deepEqual([s.state, s.label, s.can], ['supervised', '', false]);
-  assert.match(s.why, /office adapter/);
+  const office = (cfg, o = {}) => ({ id: 'a1', name: 'Ada', adapterType: OFFICE_ADAPTER, adapterConfig: cfg, ...o });
+  const sup = (a, opts = {}) => supervisionOf(a, HOOKS, { kindOf: officeKinds, ...opts });
+  const cc = sup(office({ agentKind: 'claude-code' }));
+  assert.deepEqual([cc.state, cc.label, cc.can], ['supervised', '', false]);
+  assert.match(cc.why, /office adapter as Claude Code sessions, so the Security room decides every call/);
+  assert.equal(sup(office({})).state, 'supervised', 'no agentKind is claude-code, as the plugin reads it');
+  const hermes = sup(office({ agentKind: 'hermes' }));
+  assert.deepEqual([hermes.state, hermes.label, hermes.can], ['partly', 'Partly supervised: file edits and risky commands ask', false]);
+  assert.match(hermes.why, /Hermes Agent sessions, an agent kind the office cannot hold every call of/);
+  const cursor = sup(office({ agentKind: 'cursor' }));
+  assert.deepEqual([cursor.state, cursor.label], ['unsupervised', 'Unsupervised']);
+  const codex = sup(office({ agentKind: 'codex' }));
+  assert.deepEqual([codex.state, codex.label], ['unknown', 'Unsupervised: agent kind not known'], 'a kind the office does not have is never Supervised');
+  assert.equal(supervisionOf(office({ agentKind: 'claude-code' }), HOOKS).state, 'unknown', 'no list of agent kinds: fail closed');
+  const prof = sup(office({ agentKind: 'claude-code' }, { runtimeConfig: { modelProfiles: { fast: { adapterConfig: { agentKind: 'hermes' } }, off: { enabled: false, adapterConfig: { agentKind: 'cursor' } } } } }));
+  assert.equal(prof.state, 'partly');
+  assert.match(prof.why, /^With the fast model profile: /);
+  const iss = sup(office({ agentKind: 'hermes' }), { issues: [{ id: 'i', identifier: 'ACM-7', assigneeAgentId: 'a1', assigneeAdapterOverrides: { adapterConfig: { agentKind: 'cursor' } } }, { id: 'j', assigneeAgentId: 'zz', assigneeAdapterOverrides: { adapterConfig: { agentKind: 'codex' } } }] });
+  assert.deepEqual([iss.state, iss.label], ['unsupervised', 'Unsupervised'], 'the worst layer wins; an issue of another agent does not count');
+  assert.match(iss.why, /^For ACM-7: /);
   assert.equal(supervisionOf({ id: 'a1', adapterType: 'codex_local', adapterConfig: { cwd: 'C:/x' } }, HOOKS).state, 'unsupervised');
 });

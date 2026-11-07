@@ -13,6 +13,7 @@ import { planWrite, HIRE_ROLES } from '../src/hq-model.mjs';
 import { startFakePaperclip, DEMO } from './fixtures/fake-paperclip.mjs';
 import { until } from './fixtures/office-server.mjs';
 import { startInProcess, removeTree } from './fixtures/office-inproc.mjs';
+import { officeKinds } from './fixtures/office-kinds.mjs';
 
 const D = DEMO(), CO = D.companies[0].id, GRACE = D.agents[0].id;
 const KEY = 'board-key-0123456789abcdef';
@@ -31,9 +32,18 @@ test('plan: the office adapter by default, the budget in cents, and the Confirm 
   assert.equal(p.method, 'POST');
   assert.equal(p.path(CO), `/api/companies/${CO}/agent-hires`);
   assert.deepEqual(p.body, { name: 'Mira', role: 'engineer', adapterType: 'agent_office', adapterConfig: { agentKind: 'claude-code', isolation: 'worktree', model: 'sonnet' }, budgetMonthlyCents: 2500, title: 'Backend', reportsTo: GRACE, desiredSkills: ['tdd', 'review'] });
-  const r = p.review([{ id: GRACE, name: 'Grace' }]);
-  assert.equal(r.summary, 'Hire Mira as Engineer, reporting to Grace, agent kind claude-code, model sonnet, $25.00 a month, skills tdd, review');
-  assert.equal(p.review([]).status, 404);
+  const r = p.review([{ id: GRACE, name: 'Grace' }], { kindOf: officeKinds });
+  assert.equal(r.summary, 'Hire Mira as Engineer, reporting to Grace, agent kind claude-code (Supervised), model sonnet, $25.00 a month, skills tdd, review');
+  assert.equal(p.review([], { kindOf: officeKinds }).status, 404);
+  // the agent kind with its supervision (ADR 0001): an ungated kind names its label; a kind the office does not have is refused
+  assert.match(planWrite({ ...base0, agentKind: 'hermes' }).review([{ id: GRACE, name: 'Grace' }], { kindOf: officeKinds }).summary, /agent kind hermes \(Partly supervised: file edits and risky commands ask\)/);
+  for (const ctx of [{ kindOf: officeKinds }, {}]) assert.equal(planWrite({ ...base0, agentKind: 'codex' }).review([{ id: GRACE, name: 'Grace' }], ctx).status, 400, 'no such agent kind in the office');
+  // the opt-in first task: the Confirm names it and the run it starts
+  const w = planWrite({ ...base0, welcome: true });
+  assert.equal(w.body.welcome, undefined, 'welcome is words of the Confirm, never sent to Paperclip');
+  assert.match(w.review([{ id: GRACE, name: 'Grace' }], { kindOf: officeKinds }).summary, /\. Then the first task "Welcome, Mira: post your first stand-up note", assigned to Mira: Paperclip wakes Mira on it, which starts a run of Mira$/);
+  assert.doesNotMatch(r.summary, /first task/, 'no first task unless asked for');
+  assert.throws(() => planWrite({ ...base0, welcome: 'yes' }), (e) => e.status === 400);
   assert.deepEqual(p.targets, [{ type: 'agent', id: GRACE }]);
   assert.ok(HIRE_ROLES.length >= 6);
 });
@@ -41,7 +51,7 @@ test('plan: the office adapter by default, the budget in cents, and the Confirm 
 async function rig(grid = {}) {
   const pc = await startFakePaperclip({ ...DEMO(), boardKey: KEY });
   const feed = [];
-  const hq = createHq({ refetchMs: 20, retryMs: [50, 50], hooksFile: () => 'C:/office/office-hooks.json', key: () => KEY, grid: () => grid, askFirst, onFeed: (t, k) => feed.push([k, t]) });
+  const hq = createHq({ refetchMs: 20, retryMs: [50, 50], hooksFile: () => 'C:/office/office-hooks.json', key: () => KEY, kinds: officeKinds, grid: () => grid, askFirst, onFeed: (t, k) => feed.push([k, t]) });
   await hq.connect({ url: pc.url });
   await until(() => hq.state() === 'on', 'the events socket');
   return { pc, hq, feed, writes: () => pc.requests.filter((r) => r.method !== 'GET' && r.method !== 'UPGRADE'), done: async () => { hq.disconnect(); await pc.close(); } };
@@ -53,7 +63,7 @@ test('writer: Confirm asks with the exact summary and sends nothing; the confirm
     const e = await r.hq.write(base0).then(() => null, (x) => x);
     assert.equal(e.status, 409);
     assert.equal(e.answer.body.confirm, 'write');
-    assert.equal(e.answer.body.write.summary, 'Hire Mira as Engineer, reporting to Grace, agent kind claude-code, model the default, $25.00 a month, skills none');
+    assert.equal(e.answer.body.write.summary, 'Hire Mira as Engineer, reporting to Grace, agent kind claude-code (Supervised), model the default, $25.00 a month, skills none');
     assert.equal(r.writes().length, 0);
     const made = await r.hq.write(base0, { confirmed: true });
     assert.deepEqual(Object.keys(made).sort(), ['id', 'name', 'ok', 'pendingApproval']);
@@ -92,14 +102,14 @@ test('plan: the office Manager (#204) is the same hire: Project manager role (Pa
   const p = planWrite({ ...m, budgetDollars: 10 });
   assert.equal(p.path(CO), `/api/companies/${CO}/agent-hires`);
   assert.deepEqual(p.body, { name: 'Mara', role: 'pm', adapterType: 'agent_office', adapterConfig: { agentKind: 'claude-code', isolation: 'same', manager: true }, budgetMonthlyCents: 1000, title: 'Agent Office Manager' });
-  assert.equal(p.review([]).summary, 'Hire Mara as the office Manager (Project manager role), reporting to no manager, agent kind claude-code, model the default, $10.00 a month, skills none');
+  assert.equal(p.review([], { kindOf: officeKinds }).summary, 'Hire Mara as the office Manager (Project manager role), reporting to no manager, agent kind claude-code (Supervised), model the default, $10.00 a month, skills none');
   assert.equal(planWrite(base0).body.adapterConfig.manager, undefined, 'an ordinary hire is not marked');
 });
 
 test('writer: a company that asks the board to approve new employees answers a pending approval; the office says so', async () => {
   const pcA = await startFakePaperclip({ ...DEMO(), boardKey: KEY, companies: DEMO().companies.map((c) => ({ ...c, requireBoardApprovalForNewAgents: true })) });
   const feed = [];
-  const hq = createHq({ refetchMs: 20, retryMs: [50, 50], hooksFile: () => 'C:/office/office-hooks.json', key: () => KEY, grid: () => ({ hire: 'allow' }), askFirst, onFeed: (t, k) => feed.push([k, t]) });
+  const hq = createHq({ refetchMs: 20, retryMs: [50, 50], hooksFile: () => 'C:/office/office-hooks.json', key: () => KEY, kinds: officeKinds, grid: () => ({ hire: 'allow' }), askFirst, onFeed: (t, k) => feed.push([k, t]) });
   try {
     await hq.connect({ url: pcA.url });
     await until(() => hq.state() === 'on', 'the events socket');
@@ -132,10 +142,12 @@ test('route: the hire desk lists the role cards; the route asks first, then hire
   const ask = await office.call('/api/hq/hire', body);
   assert.equal(ask.status, 409);
   assert.equal(ask.json.confirm, 'write');
+  // the Confirm names what the confirmed call creates: the employee, and the first task with the run Paperclip starts for it (#201, review)
+  assert.match(ask.json.write.summary, /^Hire Mira as Engineer, reporting to Grace, agent kind claude-code \(Supervised\), .*\. Then the first task "Welcome, Mira: post your first stand-up note", assigned to Mira: Paperclip wakes Mira on it, which starts a run of Mira$/);
   assert.equal(pc.requests.filter((x) => x.method === 'POST').length, before, 'nothing was sent');
   const ok = await office.call('/api/hq/hire', { ...body, confirmed: true });
   assert.equal(ok.status, 200);
-  assert.equal(ok.json.onboarding, 'sent');
+  assert.equal(ok.json.onboarding, 'sent', 'Tasks is Allow by default: the task goes through its own cell with no question');
   const posts = pc.requests.filter((x) => x.method === 'POST').slice(before);
   assert.equal(posts.length, 2);
   assert.match(posts[0].path, /agent-hires$/);
@@ -144,6 +156,60 @@ test('route: the hire desk lists the role cards; the route asks first, then hire
   assert.match(posts[1].body.description, /office_room_update/);
   const none = await office.call('/api/hq/hire', { ...body, budgetDollars: 0, confirmed: true });
   assert.equal(none.status, 400);
+});
+
+// Review of the HQ build, finding 2: the first task is opt-in, and it never rides on the hire's Confirm. Its own Tasks cell decides it.
+test('route: the first task is off by default; with Tasks on Confirm it asks on its own after the hire; with Tasks on Deny nothing is sent', async () => {
+  const posts = () => pc.requests.filter((x) => x.method === 'POST');
+  const set = (value, confirmed) => office.call('/api/hq/grid/set', { kind: 'task', value, ...(confirmed ? { confirmed: true } : {}) });
+  try {
+    // no welcome: one POST, the hire only, and the Confirm names no task
+    let n = posts().length;
+    const ask0 = await office.call('/api/hq/hire', { name: 'Noor', role: 'qa', budgetDollars: 10 });
+    assert.doesNotMatch(ask0.json.write.summary, /first task/);
+    const plain = await office.call('/api/hq/hire', { name: 'Noor', role: 'qa', budgetDollars: 10, confirmed: true });
+    assert.deepEqual([plain.status, plain.json.onboarding], [200, 'none']);
+    assert.deepEqual(posts().slice(n).map((x) => x.path.split('/').pop()), ['agent-hires']);
+    // Tasks on Confirm: the hire's Confirm sends the hire only; the task comes back with its own question
+    assert.equal((await set('confirm')).status, 200);
+    n = posts().length;
+    const hired = await office.call('/api/hq/hire', { name: 'Ola', role: 'qa', budgetDollars: 10, welcome: true, confirmed: true });
+    assert.deepEqual([hired.status, hired.json.onboarding], [200, 'ask']);
+    assert.deepEqual(posts().slice(n).map((x) => x.path.split('/').pop()), ['agent-hires'], 'the task did not ride on the hire\'s Confirm');
+    assert.match(hired.json.onboardingAsk, /^Create the task "Welcome, Ola: post your first stand-up note" in Acme Robotics\?/);
+    assert.deepEqual(Object.keys(hired.json.onboardingTask).sort(), ['action', 'assigneeAgentId', 'description', 'kind', 'title']);
+    assert.equal(hired.json.onboardingTask.assigneeAgentId, hired.json.id);
+    const sent = await office.call('/api/hq/write', { ...hired.json.onboardingTask, confirmed: true });
+    assert.equal(sent.status, 200);
+    assert.deepEqual(posts().slice(n).map((x) => x.path.split('/').pop()), ['agent-hires', 'issues'], 'the task\'s own Confirm sent it');
+    // Tasks on Deny: a hire with the first task is refused before anything is asked or sent
+    assert.equal((await set('deny')).status, 200);
+    n = posts().length;
+    const denied = await office.call('/api/hq/hire', { name: 'Pia', role: 'qa', budgetDollars: 10, welcome: true });
+    assert.equal(denied.status, 403);
+    assert.match(denied.json.error, /Tasks/);
+    assert.equal(denied.json.confirm, undefined, 'no Confirm is asked for a hire whose task cannot be sent');
+    assert.equal(posts().length, n);
+  } finally { await set(null, true); }
+});
+
+// Review of the HQ build, finding 1, through the real office: the agent kinds come from the providers, the hire's Confirm names the kind's
+// supervision, and an employee on the office adapter shows the supervision of its kind.
+test('route: the hire Confirm names the supervision of the agent kind, and the HQ shows the employee with it', async () => {
+  const kinds = office.snapshot().kinds;
+  const hermes = kinds.find((k) => k.kind === 'hermes');
+  assert.ok(hermes && hermes.gated === false && /^Partly supervised/.test(hermes.supervision), 'Hermes is an ungated kind of the office');
+  const ask = await office.call('/api/hq/hire', { name: 'Hana', role: 'researcher', budgetDollars: 10, agentKind: 'hermes' });
+  assert.equal(ask.status, 409);
+  assert.ok(ask.json.write.summary.includes(`agent kind hermes (${hermes.supervision})`), ask.json.write.summary);
+  const unknown = await office.call('/api/hq/hire', { name: 'Kit', role: 'researcher', budgetDollars: 10, agentKind: 'no-such-kind' });
+  assert.equal(unknown.status, 400);
+  const ok = await office.call('/api/hq/hire', { name: 'Hana', role: 'researcher', budgetDollars: 10, agentKind: 'hermes', confirmed: true });
+  assert.equal(ok.status, 200);
+  const hana = await until(() => (office.snapshot().hq.agents || []).find((a) => a.id === ok.json.id), 'Hana in the HQ view');
+  assert.deepEqual([hana.supervision.state, hana.supervision.label], ['partly', hermes.supervision], 'never Supervised: Hermes is ungated (ADR 0001)');
+  const cc = await until(() => (office.snapshot().hq.agents || []).find((a) => a.name === 'Mira'), 'Mira in the HQ view');
+  assert.equal(cc.supervision.state, 'supervised', 'a Claude Code employee on the office adapter is Supervised');
 });
 
 // ---- the office adapter (#222): the HR desk and the Manager hire say what to do while it is missing; the install is the writer's ----

@@ -187,6 +187,9 @@ const SAMPLES = [
   { kind: 'pause', action: 'pause', agent: 'a1' },
   { kind: 'budget', action: 'company', budgetDollars: 50 },
   { kind: 'budget', action: 'agent', agent: 'a1', budgetDollars: 5 },
+  // review of the HQ build, finding 4: the writes that were sent beside the writer (the handoff is a task create, above)
+  { kind: 'export', action: 'company', include: { company: true, agents: false, projects: true, issues: true, skills: true } },
+  { kind: 'supervise', action: 'set', agent: 'a1' },   // its body is built by the writer: checked below with supervisePatch
 ];
 
 // Routes whose validator the reader cannot see in the route line (a middleware chain, or the schema parsed in the handler). Read from routes/*.js of the release.
@@ -195,7 +198,32 @@ const VALIDATED_BY = {
   'PATCH /api/companies/:p': 'updateCompanySchema',
   'PATCH /api/issues/:p': 'updateIssueSchema',
   'PATCH /api/instance/settings/general': 'instanceGeneralSettingsSchema',
+  'POST /api/companies/:p/export': 'companyPortabilityExportSchema',   // routes/companies.js: companyPortabilityExportSchema.parse(req.body) in the handler
 };
+
+// Supervise in office: the writer builds the PATCH body from the agent as Paperclip has it (supervisePatch), so the sample above sends {}. The
+// keys of the real body are checked here against the validator of PATCH /api/agents/:id in the release.
+test('the Supervise in office body carries only keys of the release validator of PATCH /api/agents/:id', { skip }, async () => {
+  const { supervisePatch } = await import('../src/paperclip.mjs');
+  const { schemas } = releaseRoutes();
+  const schema = schemas.get('PATCH /api/agents/:p');
+  assert.equal(schema, 'updateAgentSchema');
+  const keys = schemaKeys(schema);
+  const body = supervisePatch({ adapterType: 'claude_local', adapterConfig: { extraArgs: ['--max-turns', '8'] } }, 'C:/office/office-hooks.json');
+  assert.deepEqual(Object.keys(body).filter((k) => !keys.has(k)), [], `${schema} has ${[...keys].join(', ')}`);
+});
+
+// CODING_STANDARDS "a second sender anywhere is a defect": in the HQ module every request with a method (every non-GET) goes through the writer,
+// whose send reads the method of the plan. A literal method anywhere else in paperclip.mjs is a second sender. (paperclip-runtime.mjs keeps the
+// board key approval of #193, made before any company or key exists, and is not the HQ.)
+test('paperclip.mjs sends no write beside the writer: every method it passes comes from a plan', () => {
+  const src = read(path.join(ROOT, 'src', 'paperclip.mjs'));
+  const methods = [...src.matchAll(/method:\s*([^,}\s]+)/g)].map((m) => m[1]);
+  assert.ok(methods.length >= 2, 'the reader found the writer\'s sends');
+  assert.deepEqual(methods.filter((m) => !/^plan\.method$/.test(m) && m !== "'POST'"), [], 'only the plan\'s method');
+  // the one literal POST is the preview a plan asks for first (plan.preflight: a company import), on the same line as its plan path
+  for (const line of src.split('\n').filter((l) => /method:\s*'POST'/.test(l))) assert.match(line, /plan\.preflight\.path/, line.trim());
+});
 
 test('the bodies the office sends carry only keys the release validators know', { skip }, () => {
   const { routes, schemas } = releaseRoutes();

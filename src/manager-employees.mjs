@@ -1,6 +1,6 @@
 // Office Managers as Paperclip employees (#204, spec #191, ADR 0010): the bridge between the Manager (manager.mjs, the rules of a goal) and the
 // HQ (paperclip.mjs, the one writer). A distinct job, so its own file: manager.mjs knows nothing of Paperclip and paperclip.mjs nothing of goals.
-// `createManagerEmployees({ hq, manager, state, feed, now })` gives `register`, `list` and `sync`.
+// `createManagerEmployees({ hq, manager, state, feed, now })` gives `register`, `list`, `sync`, `runGoal` and `goalState`.
 //   register({ building, name, budgetDollars, confirmed })
 //                                            hire the Manager as a Paperclip employee through the one hire plan (hq.write, kind hire, action
 //                                            create, officeManager: true: the Project manager role, since Paperclip has no 'manager' role, the
@@ -26,13 +26,19 @@
 // The quick office goal (POST /api/goal/start) does not pass through here, so it works with no Paperclip at all. One Manager board shows both
 // (the plan board, manager.mjs createPlanBoard). Nothing here holds the board key: it only calls hq.write and reads hq.tasksOf.
 // Saved as the slice `managers` (`cleanManagers`): { [employee id]: { building, name, company } }.
-// Not yet: the Manager does not run its own Paperclip runs through the office adapter (the plan comes from the task, the adapter is
-// registered for it).
+// One run of work (review of the HQ build): a Manager is hired on the office adapter, so Paperclip wakes it when it assigns it a task. That
+// run (paperclip-runs.mjs start) asks `runGoal` first: for a registered Manager it opens no session, links the run to the goal of its task
+// (made through the same `takeTask` as sync, so the task becomes one goal), logs the goal's progress (`goalState`) and ends with the goal's
+// result. A goal that waits for approval or a retry holds the run, as a call in Needs you holds a session run.
 // Tested in test/manager-employees.test.mjs and test/manager-employees-routes.test.mjs.
 
 const clip = (s, n) => { s = String(s ?? ''); return s.length > n ? `${s.slice(0, n - 1)}…` : s; };
 const STEP_TO_TASK = { pending: 'backlog', working: 'in_progress', finished: 'done', error: 'blocked' };
 const END = new Set(['finished', 'failed', 'stopped', 'cancelled', 'blocked', 'handed-off', 'handoff-failed']);
+// A Paperclip run of a Manager ends with these goal states. Not with blocked: a failed step waits for the user's Retry or Cancel on the Manager
+// board, and the run waits with it, like a session run waits for a call in Needs you.
+const RUN_END = new Set([...END].filter((s) => s !== 'blocked'));
+const OPEN = ['backlog', 'todo', 'in_progress'];   // the task states a Manager takes as a goal (hq.tasksOf lists the same)
 const RETRY_MS = 30000;   // after a refused write the same goal waits before it tries again
 
 /** The saved slice: only records with a plain id, a building and a company. */
@@ -130,24 +136,36 @@ export function createManagerEmployees({ hq, manager, state, feed = () => {}, no
     }
   }
 
+  /** The goal of a Paperclip task, or null. Read at each use: sync and a Manager run both take tasks, and neither keeps a list of its own. */
+  const goalOfTask = (taskId) => manager.snapshot().find((g) => g.paperclip && g.paperclip.task === taskId) || null;
+  /**
+   * The one place a task becomes a goal (once: a task with a goal, even a finished one, is never made again). The check and manager.submit run
+   * with no await between them, and submit keeps the goal before its first await, so sync and a Manager run that ask at once make one goal.
+   * Resolves the goal id, or null when the goal could not be made (fed).
+   */
+  async function takeTask(id, r, co, t) {
+    const have = goalOfTask(t.id);
+    if (have) return have.id;
+    let gid;
+    try {
+      gid = await manager.submit(r.building, goalTextOf(t), { approveFirst: true, paperclip: { task: t.id, identifier: t.identifier, title: t.title, company: co.id, employee: id } });
+    } catch (e) { feed(`The Manager could not take the task ${t.identifier || t.title}: ${clip(e.message, 160)}`); return null; }
+    feed(`The Manager of ${r.name} took the task ${t.identifier ? `${t.identifier} ` : ''}"${clip(t.title, 60)}" as the goal ${gid}.`);
+    if (t.status !== 'in_progress') await put(manager.get(gid), { kind: 'task', action: 'status', issue: t.id, status: 'in_progress' });
+    return gid;
+  }
+
   async function pass() {
     const co = hq.view()?.company;
     if (!co) return;
-    const known = new Set(manager.snapshot().filter((g) => g.paperclip).map((g) => g.paperclip.task));
-    // a task assigned to a Manager becomes a goal in its building (once: a task with a goal, even a finished one, is never made again)
+    // a task assigned to a Manager becomes a goal in its building
     for (const [id, r] of Object.entries(records())) {
       if (r.company !== co.id) continue;
       const got = hq.tasksOf(id);
       if (!got || got.company !== co.id) continue;
       for (const t of got.tasks) {
-        if (known.has(t.id) || t.parentId) continue;
-        known.add(t.id);
-        let gid;
-        try {
-          gid = await manager.submit(r.building, goalTextOf(t), { approveFirst: true, paperclip: { task: t.id, identifier: t.identifier, title: t.title, company: co.id, employee: id } });
-        } catch (e) { feed(`The Manager could not take the task ${t.identifier || t.title}: ${clip(e.message, 160)}`); continue; }
-        feed(`The Manager of ${r.name} took the task ${t.identifier ? `${t.identifier} ` : ''}"${clip(t.title, 60)}" as the goal ${gid}.`);
-        if (t.status !== 'in_progress') await put(manager.get(gid), { kind: 'task', action: 'status', issue: t.id, status: 'in_progress' });
+        if (t.parentId || goalOfTask(t.id)) continue;
+        await takeTask(id, r, co, t);
       }
     }
     for (const g of manager.snapshot()) {
@@ -166,5 +184,42 @@ export function createManagerEmployees({ hq, manager, state, feed = () => {}, no
     } finally { running = false; }
   }
 
-  return { register, list, sync };
+  /**
+   * A Paperclip run of an employee (the office adapter, paperclip-runs.mjs): one run of work, never two. When the employee is a registered
+   * Manager, the run is the goal of its task and opens no session of its own (the goal's steps are the sessions). Resolves:
+   *   null                 the employee is not a Manager of that company: the run is an ordinary office session.
+   *   { goal }             the goal of the task (made now, through takeTask, when sync has not made it yet).
+   *   { none, ok }         nothing to run as a goal (no task, a sub-task, a task that is not open, another company watched): the run ends
+   *                        at once with this reason; ok false when the office could not do what the run asks.
+   * A task the watcher has not read yet is read from Paperclip (hq.task); its errors (409, 404, 502) are the run's error.
+   */
+  async function runGoal({ employee, company, task }) {
+    const r = records()[employee];
+    if (!r || r.company !== company) return null;
+    const co = hq.view()?.company;
+    if (!co || co.id !== company) return { none: 'The office does not watch the company of this Manager now, so it cannot take its task as a goal. Connect the HQ to that company.', ok: false };
+    if (!task) return { none: 'The run names no task. The Manager works on the tasks assigned to it: each one becomes an office goal.', ok: true };
+    const have = goalOfTask(task);
+    if (have) return { goal: have.id };
+    const t = ((hq.tasksOf(employee) || {}).tasks || []).find((x) => x.id === task) || await hq.task(task);
+    if (t.assigneeAgentId && t.assigneeAgentId !== employee) return { none: 'The task is not assigned to this Manager.', ok: false };
+    if (t.parentId) return { none: 'The task is a sub-task. The Manager takes only the tasks it gets, not their sub-tasks.', ok: true };
+    if (!OPEN.includes(t.status)) return { none: `The task is ${t.status.replace('_', ' ')}, so there is nothing to do.`, ok: true };
+    const gid = await takeTask(employee, r, co, t);
+    if (!gid) return { none: 'The office could not make a goal of the task. The feed says why.', ok: false };
+    return { goal: gid };
+  }
+
+  /**
+   * A goal as a Manager run reports it: { id, status, reason, ended, ok, summary, steps: [{ id, text, status, result }] }, or null for a goal
+   * that is gone. ended: a RUN_END state; summary: the result the Manager writes on the task (resultText), once it ended.
+   */
+  function goalState(goalId) {
+    const g = manager.get(goalId);
+    if (!g) return null;
+    const ended = RUN_END.has(g.status);
+    return { id: g.id, status: g.status, reason: g.reason || '', ended, ok: g.status === 'finished', summary: ended ? resultText(g) : '', steps: g.steps.map((s) => ({ id: s.id, text: s.text, status: s.status, result: s.result || '' })) };
+  }
+
+  return { register, list, sync, runGoal, goalState };
 }

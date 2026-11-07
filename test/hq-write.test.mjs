@@ -9,6 +9,7 @@ import { askFirst } from '../src/office-core.mjs';
 import { createHq } from '../src/paperclip.mjs';
 import { startFakePaperclip, DEMO } from './fixtures/fake-paperclip.mjs';
 import { until } from './fixtures/office-server.mjs';
+import { officeKinds } from './fixtures/office-kinds.mjs';
 
 const fast = { refetchMs: 20, retryMs: [50, 50] };
 const D = DEMO();
@@ -382,7 +383,7 @@ test('company import: Paperclip refusing a non instance admin is an error, nothi
   } finally { await r.done(); }
 });
 
-test('company export is one POST, returns the bundle, and leaves a feed line (no write grid: it changes nothing)', async () => {
+test('company export is one POST of the writer (the export cell, never asked), returns the bundle, and leaves a feed line', async () => {
   const r = await rig({});
   try {
     const out = await r.hq.exportCompany({ include: { agents: false } });
@@ -394,6 +395,34 @@ test('company export is one POST, returns the bundle, and leaves a feed line (no
     const again = await r.hq.exportCompany({});
     assert.ok(again.files['agents/grace/AGENTS.md']);
   } finally { await r.done(); }
+});
+
+// Review of the HQ build, finding 4: Supervise in office, the goal handoff and the company export were sent beside the writer. Now each is a
+// write of it, so Deny in the grid stops it and nothing reaches Paperclip.
+test('Deny in the grid stops Supervise in office, the goal handoff and the company export: nothing is sent, the feed says so', async () => {
+  const r = await rig({ supervise: 'deny', task: 'deny', export: 'deny' });
+  try {
+    const ada = r.hq.view().agents.find((a) => a.name === 'Ada');
+    await assert.rejects(r.hq.supervise(ada.id), (e) => e.status === 403 && /Supervise in office/.test(e.message));
+    await assert.rejects(r.hq.handoffGoal({ id: 'g1', goal: 'Ship it', steps: [{ id: 'g1-1', text: 'Write the code' }] }), (e) => e.status === 403 && /Tasks/.test(e.message) && e.written && Object.keys(e.written).length === 0);
+    await assert.rejects(r.hq.exportCompany({}), (e) => e.status === 403 && /Company export/.test(e.message));
+    assert.deepEqual(r.writes(), [], 'no PATCH, no task POST, no export POST');
+    assert.equal(r.feed.filter(([, t]) => /^Refused by the HQ write grid/.test(t)).length, 3);
+  } finally { await r.done(); }
+  // Supervise on Confirm (the default): the route's painted Confirm is its Confirm, so it sends; the writer's own call without it asks first
+  const c = await rig({});
+  try {
+    const ada = c.hq.view().agents.find((a) => a.name === 'Ada');
+    const e = await c.hq.write({ kind: 'supervise', action: 'set', agent: ada.id }).then(() => null, (x) => x);
+    assert.equal(e.status, 409);
+    assert.equal(e.answer.body.confirm, 'write');
+    assert.match(e.answer.body.write.summary, /^Supervise Ada in the office/);
+    assert.deepEqual(c.writes(), [], 'asked, not sent');
+    const ok = await c.hq.supervise(ada.id);
+    assert.deepEqual([ok.ok, ok.supervision.state], [true, 'supervised']);
+    assert.deepEqual(c.writes().map((w) => [w[0], w[1]]), [['PATCH', `/api/agents/${ada.id}`]]);
+    assert.deepEqual(Object.keys(c.writes()[0][2]), ['adapterConfig'], 'the body the writer built from its read, nothing from the request');
+  } finally { await c.done(); }
 });
 
 test('instance settings, the default environment and an environment are one PATCH each', async () => {
@@ -452,7 +481,7 @@ const ADAPTER_DIR = path.resolve(fileURLToPath(new URL('../src/integrations/pape
 async function adapterRig(grid = {}, seed = { ...DEMO(), adapters: [{ type: 'claude_local', label: 'Claude Code', source: 'builtin', modelsCount: 3, loaded: true, disabled: false, capabilities: {} }] }, adapterDir = ADAPTER_DIR) {
   const pc = await startFakePaperclip({ ...seed, boardKey: KEY });
   const feed = [];
-  const hq = createHq({ ...fast, hooksFile: () => 'C:/office/office-hooks.json', key: () => KEY, grid: () => grid, askFirst, adapterDir, onFeed: (t, k) => feed.push([k, t]) });
+  const hq = createHq({ ...fast, hooksFile: () => 'C:/office/office-hooks.json', key: () => KEY, kinds: officeKinds, grid: () => grid, askFirst, adapterDir, onFeed: (t, k) => feed.push([k, t]) });
   await hq.connect({ url: pc.url });
   await until(() => hq.state() === 'on', 'the events socket');
   return { pc, hq, feed, writes: () => pc.requests.filter((r) => r.method !== 'GET' && r.method !== 'UPGRADE'), done: async () => { hq.disconnect(); await pc.close(); } };

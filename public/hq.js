@@ -851,21 +851,24 @@
   }
 
   // ---------- the HR desk (#201): hire an employee ----------
-  // Role cards, then name, manager, agent kind, model, monthly budget and skills. The Hire button asks the office once (ask-first 'write'):
-  // the answer is the exact words of what it creates, shown with a Confirm, and only the Confirm sends. A hire has a budget (the office
-  // refuses one without) and the office adapter, so the new employee is supervised: its runs go through the Security room. The onboarding
-  // task (a first stand-up note on the room board) goes with the same Confirm. One write path: the hqHire command, which ends in hq.write.
+  // Role cards, then name, manager, agent kind (each with its supervision: an employee on the office adapter runs as sessions of that kind, so it
+  // is as supervised as the kind, ADR 0001), model, monthly budget, skills and the first task (off by default). The Hire button asks the office
+  // once (ask-first 'write'): the answer is the exact words of what it creates (with the first task and the run it starts), shown with a Confirm,
+  // and only the Confirm sends. A hire has a budget (the office refuses one without). The first task is its own write of the Tasks cell: when
+  // that cell says Confirm, the answer of the hire carries the task and its question, and a second Confirm sends it (hqWrite). One write path:
+  // the hqHire and hqWrite commands, which end in hq.write.
   function HireForm(p) {
-    var snap = useSnapshot(), q = snap && snap.hq;
+    var snap = useSnapshot(), q = snap && snap.hq, HV = window.OfficeVocab.hq;
     var ds = useState(null), desk = ds[0], setDesk = ds[1];
     var rs = useState(''), role = rs[0], setRole = rs[1];
-    var f = useState({ name: '', manager: '', agentKind: 'claude-code', model: '', budget: '20', skills: '' }), v = f[0], setV = f[1];
+    var f = useState({ name: '', manager: '', agentKind: 'claude-code', model: '', budget: '20', skills: '', welcome: 'no' }), v = f[0], setV = f[1];
     var bz = useState(false), busy = bz[0], setBusy = bz[1];
     var er = useState(''), err = er[0], setErr = er[1];
     var qs = useState(''), ask = qs[0], setAsk = qs[1];
+    var ts = useState(null), taskAsk = ts[0], setTaskAsk = ts[1];   // { hired, task, text }: the first task waits for its own Confirm
     var actionsRef = React.useRef(null);
     // The Confirm sits under a long form in a scrolling dialog (a phone shows one screen of it): bring it into view when the question comes.
-    useEffect(function () { if (ask && actionsRef.current && actionsRef.current.scrollIntoView) actionsRef.current.scrollIntoView({ block: 'nearest' }); }, [ask]);
+    useEffect(function () { if ((ask || taskAsk) && actionsRef.current && actionsRef.current.scrollIntoView) actionsRef.current.scrollIntoView({ block: 'nearest' }); }, [ask, taskAsk]);
     var tk = useState(0), tick = tk[0], setTick = tk[1];   // read the desk again after the adapter is installed (#222)
     useEffect(function () { var live = true; client.get('hqHireDesk').then(function (j) { if (live) setDesk(j); }, function (x) { if (live) setErr(x.message); }); return function () { live = false; }; }, [tick]);
     if (!q || !q.company) return h('p', { className: 'note' }, 'Connect a company in Paperclip first. Then you can hire here.');
@@ -876,13 +879,18 @@
     function pick(r) { setRole(r.role); setAsk(''); if (!v.name.trim()) setV(Object.assign({}, v, { name: r.label })); }
     var dollars = Number(v.budget), budgetOk = v.budget.trim() !== '' && isFinite(dollars) && dollars > 0;
     var ready = !!role && !!v.name.trim() && budgetOk;
+    function hiredToast(r, task) {
+      var waits = r.pendingApproval ? window.OfficeVocab.plan.hireManager.pending + ' ' : '';
+      p.toast({ tone: 'success', title: v.name + ' is hired', text: waits + (task === 'sent' ? 'The first stand-up task is sent.' : task === 'failed' ? 'The first stand-up task was not sent. ' + (r.onboardingError || '') : task === 'skipped' ? 'The first stand-up task was not sent.' : '') });
+    }
     function send(confirmed) {
       setBusy(true); setErr('');
       client.hqHire({ name: v.name, role: role, manager: v.manager || undefined, agentKind: v.agentKind, model: v.model.trim() || undefined, budgetDollars: dollars,
-        skills: v.skills.split(',').map(function (x) { return x.trim(); }).filter(Boolean), welcome: true, confirmed: confirmed === true ? true : undefined }).then(function (r) {
+        skills: v.skills.split(',').map(function (x) { return x.trim(); }).filter(Boolean), welcome: v.welcome === 'yes', confirmed: confirmed === true ? true : undefined }).then(function (r) {
         setBusy(false); setAsk('');
-        var waits = r.pendingApproval ? window.OfficeVocab.plan.hireManager.pending + ' ' : '';
-        p.toast({ tone: 'success', title: v.name + ' is hired', text: waits + (r.onboarding === 'sent' ? 'The first stand-up task is sent.' : r.onboarding === 'failed' ? 'The first stand-up task was not sent. ' + r.onboardingError : '') });
+        // The Tasks cell says Confirm: the employee is hired, and the first task waits for its own Confirm.
+        if (r.onboarding === 'ask' && r.onboardingTask) { setTaskAsk({ hired: r, task: r.onboardingTask, text: r.onboardingAsk || '' }); return; }
+        hiredToast(r, r.onboarding);
         if (p.onDone) p.onDone(r);
       }, function (x) {
         setBusy(false);
@@ -891,8 +899,27 @@
         setErr(x.message);
       });
     }
+    function sendTask(go) {
+      var t = taskAsk;
+      if (!go) { setTaskAsk(null); hiredToast(t.hired, 'skipped'); if (p.onDone) p.onDone(t.hired); return; }
+      setBusy(true); setErr('');
+      client.send('hqWrite', Object.assign({}, t.task, { confirmed: true })).then(function () {
+        setBusy(false); setTaskAsk(null); hiredToast(t.hired, 'sent'); if (p.onDone) p.onDone(t.hired);
+      }, function (x) { setBusy(false); setErr(x.message); });
+    }
     var managers = [{ value: '', label: 'No manager' }].concat((q.agents || []).map(function (a) { return { value: a.id, label: a.name }; }));
-    var kinds = ((snap && snap.kinds) || []).map(function (k) { return { value: k.kind, label: k.label }; });
+    var kindList = (snap && snap.kinds) || [];
+    var kinds = kindList.map(HV.hire.kindOption);
+    var kind = kindList.filter(function (k) { return k.kind === v.agentKind; })[0] || null;
+    if (taskAsk) {
+      return h('div', { className: 'form wide' },
+        h('p', { className: 'note', role: 'status' }, v.name + ' is hired.'),
+        h('p', { className: 'note', role: 'alert' }, taskAsk.text),
+        err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
+        h('div', { className: 'inline-actions', ref: actionsRef },
+          h(A.Button, { variant: 'primary', icon: 'approve', loading: busy, onClick: function () { sendTask(true); } }, HV.hire.taskConfirm),
+          h(A.Button, { variant: 'quiet', disabled: busy, onClick: function () { sendTask(false); } }, HV.hire.taskSkip)));
+    }
     return h('div', { className: 'form wide' },
       h('div', { className: 'hire-roles', role: 'group', 'aria-label': 'Role' }, desk.roles.map(function (r) {
         return h('div', { key: r.role, className: 'hire-role' }, h(A.Button, { variant: role === r.role ? 'primary' : 'quiet', onClick: function () { pick(r); } }, r.label), h('span', { className: 'hq-note' }, r.text));
@@ -900,10 +927,12 @@
       h(A.TextInput, { id: 'hire-name', label: 'Name', value: v.name, onChange: function (t) { set('name', t); } }),
       h(A.Select, { id: 'hire-manager', label: 'Reports to', options: managers, value: v.manager, onChange: function (t) { set('manager', t); } }),
       kinds.length ? h(A.Select, { id: 'hire-kind', label: 'Agent kind', options: kinds, value: v.agentKind, onChange: function (t) { set('agentKind', t); } }) : null,
+      kind ? h('p', { className: 'note' }, HV.hire.kindNote(kind)) : null,
       h(A.TextInput, { id: 'hire-model', label: 'Model (optional)', value: v.model, onChange: function (t) { set('model', t); } }),
       h(A.TextInput, { id: 'hire-budget', label: 'Monthly budget in dollars', value: v.budget, onChange: function (t) { set('budget', t); } }),
       h(A.TextInput, { id: 'hire-skills', label: 'Skills (names, separated by commas)', value: v.skills, onChange: function (t) { set('skills', t); } }),
-      h('p', { className: 'note' }, 'The new employee runs through the office adapter, so the Security room decides every call. It gets a first task: post a stand-up note on its room board.'),
+      h(A.Select, { id: 'hire-welcome', label: 'First task', options: HV.hire.welcomeOptions, value: v.welcome, onChange: function (t) { set('welcome', t); } }),
+      v.welcome === 'yes' ? h('p', { className: 'note' }, HV.hire.welcomeNote) : null,
       !budgetOk ? h('p', { className: 'note', role: 'status' }, 'Set a monthly budget above zero. The office does not hire without one.') : null,
       ask ? h('p', { className: 'note', role: 'alert' }, ask) : null,
       err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
