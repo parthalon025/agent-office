@@ -78,6 +78,7 @@ test('contract: the office needs only what was recorded, and the fake Paperclip 
     const id = DEMO().companies[0].id;
     const route = { company: `/api/companies/${id}`, agents: `/api/companies/${id}/agents`, issues: `/api/companies/${id}/issues`, goals: `/api/companies/${id}/goals`, approvals: `/api/companies/${id}/approvals?status=pending`,
       activity: `/api/companies/${id}/activity`, costs: `/api/companies/${id}/costs/summary`, secrets: `/api/companies/${id}/secrets`,
+      skills: `/api/companies/${id}/skills`, plugins: '/api/plugins', adapters: '/api/adapters',
       costsByAgent: `/api/companies/${id}/costs/by-agent?from=2026-11-01T00:00:00.000Z&to=2026-12-01T00:00:00.000Z`, costsByProject: `/api/companies/${id}/costs/by-project?from=2026-11-01T00:00:00.000Z&to=2026-12-01T00:00:00.000Z`, budgets: `/api/companies/${id}/budgets/overview` };
     for (const [name, r] of Object.entries(route)) {
       const json = await (await fetch(pc.url + r)).json();

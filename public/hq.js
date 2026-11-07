@@ -172,6 +172,12 @@
           })]);
   }
 
+  // Skills, secrets and plugins (#212): company skills, secrets by name (never a value), Paperclip's plugins and adapters. Read only.
+  function Catalog() {
+    var cat = O.HqCatalog.use(), C = O.HqCatalog;
+    return h('div', { className: 'hq-floor' }, h(C.Skills, { cat: cat }), h(C.Secrets, { cat: cat }), h(C.Plugins, { cat: cat }), h(C.Adapters, { cat: cat }));
+  }
+
   // The HQ: what Paperclip says about its company. Read only: Paperclip runs its heartbeats, routines and budgets. Supervise
   // in office is on the Agents screen of a Security room, with its painted Confirm (no button here: one place for a write).
   function HqDialog(p) {
@@ -200,6 +206,7 @@
         q.contract && q.contract.length ? h('p', { className: 'ao-err', role: 'alert' }, 'Paperclip answered in a shape the office does not know, so the office does not show that part. ' + q.contract.join(' ')) : null,
         q.lobby ? h(Lobby, { q: q, mark: mark, toast: p.toast }) : null,
         h(Costs, null),
+        h(Catalog, null),
         h('h3', { className: 'ext-h' }, 'Agents'),
         q.agents.length ? h('ul', { className: 'past' }, q.agents.map(function (a) {
           var st = H.status(a), sup = H.supervision(a);

@@ -1320,6 +1320,8 @@ export function createOffice(cfg) {
     R('POST', '/api/hq/grid/set', 'page', ({ body }) => setHqGrid(body)),
     R('POST', '/api/hq/write', 'page', ({ body }) => writeHq(body)),
     R('GET', '/api/hq/costs', 'page', async () => ({ costs: await hq.costs() })),
+    // Company skills, secret names, plugins and adapters (#212): names and states only, never a secret value. Reads only.
+    R('GET', '/api/hq/catalog', 'page', async () => ({ catalog: await hq.catalog() })),
     // The Paperclip runtime (#193): install (409 without the Confirm), start, stop, and the board key's approval link. Never the key.
     R('GET', '/api/paperclip/runtime', 'page', () => ({ runtime: runtime.status() })),
     // The transcript of a run of the office adapter, for the desk screen (#211): the log the plugin reads, live or kept after the end.

@@ -61,6 +61,9 @@ const withHq = (d) => {
     budgets: { companyId, policies: [{ policyId: 'bp1', companyId, scopeType: 'company', scopeId: companyId, scopeName: 'Acme Robotics', metric: 'billed_cents', windowKind: 'calendar_month_utc', amount: 10000, observedAmount: 1240, utilizationPercent: 12.4, status: 'ok', isActive: true },
       { policyId: 'bp2', companyId, scopeType: 'agent', scopeId: ada.id, scopeName: 'Ada', metric: 'billed_cents', windowKind: 'calendar_month_utc', amount: 5000, observedAmount: 4500, utilizationPercent: 90, status: 'warning', isActive: true }],
       activeIncidents: [], pausedAgentCount: 0, pausedProjectCount: 0, pendingApprovalCount: 0 },
+    skills: [{ id: 'k1', companyId, key: 'acme/review', slug: 'review', name: 'Code review', description: 'How we review a change', sourceType: 'local_path', sourceLocator: 'C:/secret-path', sourceRef: null, trustLevel: 'markdown_only', fileInventory: [{ path: 'SKILL.md', kind: 'skill', content: 'do-not-show' }], categories: [] }],
+    plugins: [{ id: 'pl1', pluginKey: 'acme.linear', packageName: '@acme/plugin-linear', version: '1.2.0', apiVersion: 1, categories: [], manifestJson: { secretHint: 'do-not-show' }, status: 'ready', installOrder: 1, packagePath: null, lastError: null }],
+    adapters: [{ type: 'claude_local', label: 'Claude Code', source: 'builtin', modelsCount: 3, loaded: true, disabled: false, capabilities: {} }, { type: 'agent_office', label: 'Agent Office', source: 'external', modelsCount: 0, loaded: true, disabled: false, version: '0.1.0', packageName: 'agent-office-adapter', capabilities: {} }],
     secrets: [{ id: 's1', companyId, name: 'GITHUB_TOKEN', provider: 'local_encrypted', description: null, latestVersion: 1, value: 'do-not-show' }],
   };
 };
@@ -96,7 +99,7 @@ const DEMO0 = (hooksFile = null) => {
  */
 export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
   const st = { companies: structuredClone(seed.companies || []), agents: structuredClone(seed.agents || []), issues: structuredClone(seed.issues || []), routines: structuredClone(seed.routines || []), projects: structuredClone(seed.projects || []), liveRuns: structuredClone(seed.liveRuns || []),
-    goals: structuredClone(seed.goals || []), approvals: structuredClone(seed.approvals || []), activity: structuredClone(seed.activity || []), costs: structuredClone(seed.costs || null), secrets: structuredClone(seed.secrets || []), costMonths: structuredClone(seed.costMonths || {}), budgets: structuredClone(seed.budgets || null) };
+    goals: structuredClone(seed.goals || []), approvals: structuredClone(seed.approvals || []), activity: structuredClone(seed.activity || []), costs: structuredClone(seed.costs || null), secrets: structuredClone(seed.secrets || []), skills: structuredClone(seed.skills || []), plugins: structuredClone(seed.plugins || []), adapters: structuredClone(seed.adapters || []), costMonths: structuredClone(seed.costMonths || {}), budgets: structuredClone(seed.budgets || null) };
   const requests = [], sockets = new Set();
   const api = { afterPatch: null, failIssueAfter: null, created: 0, comments: 0 };   // set by a test: runs right after a PATCH is answered (a change made in Paperclip at the same time)
   let seq = 0;
@@ -195,6 +198,10 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
         return mo ? send(res, 200, mo[x[2] === 'agent' ? 'agents' : 'projects'] || []) : send(res, 404, { error: 'Not found' });
       }
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/budgets\/overview$/))) return st.budgets ? send(res, 200, st.budgets) : send(res, 404, { error: 'Not found' });
+      // skills, plugins and adapters (#212; Paperclip's answers carry skill files, a plugin manifest and adapter capabilities too)
+      if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/skills$/))) return seed.noSkills ? send(res, 404, { error: 'Not found' }) : send(res, 200, st.skills.filter((r) => r.companyId === x[1]));
+      if (req.method === 'GET' && m(/^\/api\/plugins$/)) return send(res, 200, st.plugins);
+      if (req.method === 'GET' && m(/^\/api\/adapters$/)) return send(res, 200, st.adapters);
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/secrets$/))) return send(res, 200, st.secrets.filter((r) => r.companyId === x[1]));
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/live-runs$/))) return send(res, 200, st.liveRuns);
       // the agent as saved, with what buildAgentDetail adds (routes/agents.ts; the board reads the whole config)
