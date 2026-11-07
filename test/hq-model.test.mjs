@@ -46,6 +46,8 @@ test('contract: the shapes the office reads are checked, and a change is a named
   assert.match(shapeProblems('goals', [{ id: 'g', status: 'active' }])[0], /goals: title is missing/);
   assert.match(shapeProblems('goals', { rows: [] })[0], /goals: expected a list/);
   assert.match(shapeProblems('costs', [])[0], /costs: expected an object/);
+  assert.deepEqual(shapeProblems('costs', { spendCents: 0, budgetCents: null }), [], 'no budget set is null, not a changed shape');
+  assert.match(shapeProblems('costs', { spendCents: null, budgetCents: 0 })[0], /spendCents is null, expected number/);
 });
 
 test('contract: the office needs only what was recorded, and the fake Paperclip still answers the recorded shapes', async () => {

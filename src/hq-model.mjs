@@ -5,7 +5,7 @@
 // ---------- the contract: the fields of each route the office reads ----------
 // list: the answer is an array (the first element is checked) or one object. An empty list says nothing about its shape. A field the
 // office reads is named with its type; a field Paperclip adds is no problem, a missing or retyped one is. Money is in cents in
-// Paperclip (the read turns it into dollars).
+// Paperclip (the read turns it into dollars). A type written `number?` may also be null (no budget set).
 export const SHAPES = {
   company: { list: false, fields: { id: 'string', name: 'string' } },
   agents: { list: true, fields: { id: 'string', name: 'string', role: 'string', status: 'string', adapterType: 'string' } },
@@ -13,7 +13,7 @@ export const SHAPES = {
   goals: { list: true, fields: { id: 'string', title: 'string', status: 'string' } },
   approvals: { list: true, fields: { id: 'string', type: 'string', status: 'string' } },
   activity: { list: true, fields: { id: 'string', actorType: 'string', action: 'string', createdAt: 'string' } },
-  costs: { list: false, fields: { spendCents: 'number', budgetCents: 'number' } },
+  costs: { list: false, fields: { spendCents: 'number', budgetCents: 'number?' } },
   secrets: { list: true, fields: { id: 'string', name: 'string' } },
 };
 
@@ -37,7 +37,7 @@ export function shapeProblems(name, json) {
   const out = [];
   for (const [f, t] of Object.entries(spec.fields)) {
     if (!(f in row)) out.push(`${name}: ${f} is missing.`);
-    else if (typeOf(row[f]) !== t) out.push(`${name}: ${f} is ${typeOf(row[f])}, expected ${t}.`);
+    else if (typeOf(row[f]) !== t.replace('?', '') && !(t.endsWith('?') && row[f] === null)) out.push(`${name}: ${f} is ${typeOf(row[f])}, expected ${t.replace('?', '')}.`);
   }
   return out;
 }
