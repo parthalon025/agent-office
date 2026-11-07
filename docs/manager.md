@@ -5,6 +5,7 @@ The Manager board shows one plan for each goal: the steps, who works on each ste
 ## The two plan sources
 
 - **Office.** The office Manager turns one goal into steps and hands each step to an agent that is free. Steps run one after the other. You approve the plan first. The Manager checks the spend limit before every step it starts, never after. A goal that can reach a paid agent gets the default spend limit (set in **Attach sessions**). A goal that only local agents can take has none, because they cost $0. Agent mail inside a goal has a hop cap and a message cap, so a reply chain stops.
+- **Paperclip goals.** When a company is connected, the board also shows its goals as a tree, above the plans. You can make a goal, change its title, description, status or owner, through the write grid (**Goals**, Confirm by default). See [Paperclip HQ](paperclip.md).
 - **Paperclip.** When a company is connected, the board lists its tasks as plans. This source is read only: no button on the board writes to Paperclip, except the handoff below. If Paperclip is not connected, its last plan shows as frozen and is never shown as current. See [Paperclip HQ](paperclip.md).
 
 ## Managers as Paperclip employees

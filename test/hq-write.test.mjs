@@ -143,3 +143,41 @@ test('the company is read again after a write, so the view shows it', async () =
     await until(() => r.hq.view().lobby.tasks.open === n + 1, 'the task in the Lobby');
   } finally { await r.done(); }
 });
+
+test('goals (#207): create and update are one request each, the parent and owner must be in the company, the view shows the new goal', async () => {
+  const r = await rig({ goal: 'allow' });
+  const G1 = D.goals[0].id;
+  try {
+    const made = await r.hq.write({ kind: 'goal', action: 'create', title: 'Cut build time', description: 'Under two minutes.', level: 'team', parent: G1, owner: ADA });
+    assert.match(made.id, /^g2000000/);
+    await r.hq.write({ kind: 'goal', action: 'update', goal: G1, status: 'achieved' });
+    await r.hq.write({ kind: 'goal', action: 'update', goal: G1, owner: null });
+    assert.deepEqual(r.writes(), [
+      ['POST', `/api/companies/${CO}/goals`, { title: 'Cut build time', description: 'Under two minutes.', level: 'team', parentId: G1, ownerAgentId: ADA }],
+      ['PATCH', `/api/goals/${G1}`, { status: 'achieved' }],
+      ['PATCH', `/api/goals/${G1}`, { ownerAgentId: null }],
+    ]);
+    await until(() => (r.hq.view().goals.rows.find((x) => x.id === made.id) || {}).parentId === G1, 'the new goal in the view');
+    assert.equal(r.hq.view().goals.rows.find((x) => x.id === made.id).owner, 'Ada');
+    await assert.rejects(r.hq.write({ kind: 'goal', action: 'update', goal: 'g9999999', status: 'active' }), (e) => e.status === 404);
+    await assert.rejects(r.hq.write({ kind: 'goal', action: 'create', title: 'X', parent: 'g9999999' }), (e) => e.status === 404);
+    assert.equal(r.writes().length, 3, 'a refused write sends nothing');
+  } finally { await r.done(); }
+});
+
+test('goals (#207): Confirm asks first and Deny refuses', async () => {
+  const r = await rig({ goal: 'confirm' });
+  try {
+    const e = await r.hq.write({ kind: 'goal', action: 'create', title: 'Ship it' }).then(() => null, (x) => x);
+    assert.equal(e.status, 409);
+    assert.deepEqual(e.answer.body.write, { kind: 'goal', action: 'create', summary: 'Create the goal "Ship it"' });
+    assert.equal(r.writes().length, 0);
+    await r.hq.write({ kind: 'goal', action: 'create', title: 'Ship it' }, { confirmed: true });
+    assert.equal(r.writes().length, 1);
+  } finally { await r.done(); }
+  const d = await rig({ goal: 'deny' });
+  try {
+    await assert.rejects(d.hq.write({ kind: 'goal', action: 'update', goal: D.goals[0].id, status: 'active' }, { confirmed: true }), (e) => e.status === 403);
+    assert.equal(d.writes().length, 0);
+  } finally { await d.done(); }
+});

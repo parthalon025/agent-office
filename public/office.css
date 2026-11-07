@@ -94,6 +94,12 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .org-who { flex: 1 1 10rem; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); }
 .org-who .past-meta { flex-basis: 100%; }
 .org-row .ao-select { min-width: 0; max-width: 100%; }
+.goal-tree { display: grid; gap: var(--space-2); }
+.goal-form { padding-top: var(--space-2); }
+.goal-row.goal-d1 { margin-inline-start: var(--space-4); }
+.goal-row.goal-d2 { margin-inline-start: calc(var(--space-4) * 2); }
+.goal-row.goal-d3 { margin-inline-start: calc(var(--space-4) * 3); }
+.goal-row.goal-d4, .goal-row.goal-d5, .goal-row.goal-d6 { margin-inline-start: calc(var(--space-4) * 4); }
 .manager-goal { display: flex; flex-direction: column; gap: var(--space-2); padding-bottom: var(--space-3); border-bottom: 1px solid var(--line); }
 .manager-goal.is-frozen { opacity: 0.85; }
 .manager-warn { color: var(--ink); }

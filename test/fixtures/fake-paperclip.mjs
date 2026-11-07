@@ -98,7 +98,7 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
   const st = { companies: structuredClone(seed.companies || []), agents: structuredClone(seed.agents || []), issues: structuredClone(seed.issues || []), routines: structuredClone(seed.routines || []), projects: structuredClone(seed.projects || []), liveRuns: structuredClone(seed.liveRuns || []),
     goals: structuredClone(seed.goals || []), approvals: structuredClone(seed.approvals || []), activity: structuredClone(seed.activity || []), costs: structuredClone(seed.costs || null), secrets: structuredClone(seed.secrets || []), costMonths: structuredClone(seed.costMonths || {}), budgets: structuredClone(seed.budgets || null) };
   const requests = [], sockets = new Set();
-  const api = { afterPatch: null, failIssueAfter: null, created: 0, comments: 0, hires: [] };   // set by a test: runs right after a PATCH is answered (a change made in Paperclip at the same time)
+  const api = { afterPatch: null, failIssueAfter: null, created: 0, comments: 0, hires: [], goalsMade: 0 };   // set by a test: runs right after a PATCH is answered (a change made in Paperclip at the same time)
   let seq = 0;
   const send = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
   function emit(type, payload, companyId = st.companies[0]?.id) {
@@ -178,6 +178,22 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
         if (!parsed || typeof parsed.body !== 'string' || !parsed.body) return send(res, 422, { error: 'Validation error' });
         const k = { id: `m2000000-0000-4000-8000-${String(++api.comments).padStart(12, '0')}`, companyId: i.companyId, issueId: i.id, body: parsed.body };
         return send(res, 201, k);
+      }
+      // goals (#207, routes/goals.ts): one goal, create in a company, update
+      if (req.method === 'GET' && (x = m(/^\/api\/goals\/([^/]+)$/))) { const g = st.goals.find((y) => y.id === x[1]); return g ? send(res, 200, g) : send(res, 404, { error: 'Goal not found' }); }
+      if (req.method === 'POST' && (x = m(/^\/api\/companies\/([^/]+)\/goals$/))) {
+        if (!parsed || typeof parsed.title !== 'string' || !parsed.title) return send(res, 422, { error: 'Validation error' });
+        const g = { id: `g2000000-0000-4000-8000-${String(++api.goalsMade).padStart(12, '0')}`, companyId: x[1], description: null, level: 'task', status: 'planned', parentId: null, ownerAgentId: null, ...parsed };
+        st.goals.push(g);
+        emit('activity.logged', { actorType: 'user', actorId: 'board', action: 'goal.created', entityType: 'goal', entityId: g.id, agentId: null, runId: null, details: {} }, x[1]);
+        return send(res, 201, g);
+      }
+      if (req.method === 'PATCH' && (x = m(/^\/api\/goals\/([^/]+)$/))) {
+        const g = st.goals.find((y) => y.id === x[1]);
+        if (!g) return send(res, 404, { error: 'Goal not found' });
+        Object.assign(g, parsed || {});
+        emit('activity.logged', { actorType: 'user', actorId: 'board', action: 'goal.updated', entityType: 'goal', entityId: g.id, agentId: null, runId: null, details: {} }, g.companyId);
+        return send(res, 200, g);
       }
       if (req.method === 'GET' && (x = m(/^\/api\/approvals\/([^/]+)$/))) { const a = st.approvals.find((y) => y.id === x[1]); return a ? send(res, 200, a) : send(res, 404, { error: 'Approval not found' }); }
       if (req.method === 'POST' && (x = m(/^\/api\/approvals\/([^/]+)\/(approve|reject|request-revision)$/))) {

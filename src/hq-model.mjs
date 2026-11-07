@@ -156,6 +156,7 @@ export const WRITE_KINDS = {
   task: { label: 'Tasks', options: RULES, def: 'allow' },
   comment: { label: 'Comments', options: RULES, def: 'allow' },
   company: { label: 'Company', options: RULES, def: 'confirm' },
+  goal: { label: 'Goals', options: RULES, def: 'confirm' },
 };
 const kindRow = (k) => (typeof k === 'string' && Object.hasOwn(WRITE_KINDS, k) ? WRITE_KINDS[k] : null);
 const gridError = (status, message) => Object.assign(new Error(message), { status });
@@ -196,11 +197,12 @@ export function setWriteCell(grid, change) {
 // planWrite(body) -> { kind, action, method, path(companyId), body, targets, summary }. body: { kind, action, ...fields }. The fields are
 // checked here (400), every id must be a plain id (it goes into a path), and a target is a thing the writer reads before it writes
 // (issue, approval, agent): it must belong to the connected company. Only the first writes are planned: task (create, assign), comment
-// (add), approval (approve, reject, revise), reporting (set, #202) and company (create, #199: scope 'none', it needs no connection). Another kind in the grid
+// (add), approval (approve, reject, revise), reporting (set, #202), goal (create, update, #207) and company (create, #199: scope 'none', it needs no connection). Another kind in the grid
 // has no plan yet, and is 400 (never sent).
 const OFFICE_ADAPTER_TYPE = 'agent_office';   // the word of OFFICE_ADAPTER in paperclip.mjs (which imports this module)
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const ISSUE_STATUS = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'];
+export const GOAL_STATUSES = ['planned', 'active', 'achieved', 'cancelled'], GOAL_LEVELS = ['company', 'team', 'agent', 'task'];
 const TITLE_MAX = 200, TEXT_MAX = 10000, NOTE_MAX = 2000, DESC_MAX = 4000, NAME_MAX = 80, COMPANY_DESC_MAX = 300;
 const short = (t, n = 80) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 function idOf(v, what) {
@@ -348,6 +350,33 @@ const PLANS = {
       return { method: 'POST', path: (co) => `/api/companies/${encodeURIComponent(co)}/agents`, body, targets: [], summary: `Hire the Manager "${short(name)}" (manager role, runs in the office)` };
     },
   },
+  // Goals (#207): a goal of the company (POST) or a change to one (PATCH). A parent goal and an owner are targets: both must belong to the
+  // connected company. A goal cannot be its own parent. An update must change something.
+  goal: {
+    create(b) {
+      const title = textOf(b.title, 'title', TITLE_MAX, { required: true }), description = textOf(b.description, 'description', DESC_MAX);
+      const body = { title }, targets = [];
+      if (description) body.description = description;
+      if (b.level !== undefined && b.level !== null && b.level !== '') { if (!GOAL_LEVELS.includes(b.level)) throw gridError(400, 'Unknown goal level.'); body.level = b.level; }
+      if (b.status !== undefined && b.status !== null && b.status !== '') { if (!GOAL_STATUSES.includes(b.status)) throw gridError(400, 'Unknown goal status.'); body.status = b.status; }
+      if (b.parent !== undefined && b.parent !== null && b.parent !== '') { body.parentId = idOf(b.parent, 'parent goal'); targets.push({ type: 'goal', id: body.parentId }); }
+      if (b.owner !== undefined && b.owner !== null && b.owner !== '') { body.ownerAgentId = idOf(b.owner, 'owner'); targets.push({ type: 'agent', id: body.ownerAgentId }); }
+      return { method: 'POST', path: (co) => `/api/companies/${encodeURIComponent(co)}/goals`, body, targets, summary: `Create the goal "${short(title)}"` };
+    },
+    update(b) {
+      const goal = idOf(b.goal, 'goal'), body = {}, targets = [{ type: 'goal', id: goal }];
+      if (b.title !== undefined) body.title = textOf(b.title, 'title', TITLE_MAX, { required: true });
+      if (b.description !== undefined) body.description = textOf(b.description, 'description', DESC_MAX);
+      if (b.status !== undefined) { if (!GOAL_STATUSES.includes(b.status)) throw gridError(400, 'Unknown goal status.'); body.status = b.status; }
+      if (b.owner !== undefined) {
+        if (b.owner === null || b.owner === '') body.ownerAgentId = null;
+        else { body.ownerAgentId = idOf(b.owner, 'owner'); targets.push({ type: 'agent', id: body.ownerAgentId }); }
+      }
+      if (!Object.keys(body).length) throw gridError(400, 'Give something to change.');
+      const what = body.status && Object.keys(body).length === 1 ? `Mark a goal ${body.status}` : 'Change a goal';
+      return { method: 'PATCH', path: () => `/api/goals/${goal}`, body, targets, summary: what };
+    },
+  },
   approval: Object.fromEntries([decision('approve', 'approve', 'Approve an approval'), decision('reject', 'reject', 'Reject an approval'), decision('revise', 'request-revision', 'Request a revision of an approval')]),
 };
 export function planWrite(b) {
@@ -356,6 +385,33 @@ export function planWrite(b) {
   const make = row && typeof action === 'string' && Object.hasOwn(row, action) ? row[action] : null;
   if (!make) throw gridError(400, 'The office cannot make that write.');
   return { kind, action, ...make(b) };
+}
+
+// ---------- goals (#207) ----------
+const GOAL_DEPTH = 6;
+/**
+ * The goals of the company as a tree for the executive floor: parents before their children, siblings in the order Paperclip gave, each row
+ * with its depth (capped), its owner's name and how many goals sit under it. A goal whose parent is not in the list is a root. Loop-safe and
+ * never drops a goal. goals: [{ id, title, status, level, description, parentId, ownerAgentId }]|null (null: unknown), agents: [{ id, name }].
+ * out: { total, rows: [{ id, title, status, level, description, parentId, ownerId, owner, depth, children }] }|null.
+ */
+export function goalsOf(goals, agents) {
+  if (!goals) return null;
+  const ids = new Set(goals.map((g) => g.id)), kids = new Map(), roots = [], who = new Map((agents || []).map((a) => [a.id, a.name]));
+  for (const g of goals) {
+    if (g.parentId && g.parentId !== g.id && ids.has(g.parentId)) { if (!kids.has(g.parentId)) kids.set(g.parentId, []); kids.get(g.parentId).push(g); } else roots.push(g);
+  }
+  const rows = [], seen = new Set();
+  const walk = (g, depth) => {
+    if (seen.has(g.id)) return;
+    seen.add(g.id);
+    rows.push({ id: g.id, title: g.title, status: g.status, level: g.level || '', description: g.description || '', parentId: g.parentId && ids.has(g.parentId) ? g.parentId : null,
+      ownerId: g.ownerAgentId || null, owner: g.ownerAgentId ? (who.get(g.ownerAgentId) || '') : '', depth: Math.min(depth, GOAL_DEPTH), children: (kids.get(g.id) || []).length });
+    for (const k of kids.get(g.id) || []) walk(k, depth + 1);
+  };
+  for (const g of roots) walk(g, 0);
+  for (const g of goals) walk(g, 0);   // a loop has no root: still shown
+  return { total: goals.length, rows };
 }
 
 // ---------- the Costs view (#208) ----------

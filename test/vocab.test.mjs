@@ -588,3 +588,25 @@ test('the org chart editor words (#202): top floor first, the line of each emplo
   assert.equal(V.hq.org({ ...q, reportingWrite: true }).write, true);
   assert.deepEqual(V.hq.org(null).floors, []);
 });
+
+test('the goals view words (#207): a row says level, status and owner, the options follow the goal, write follows the grid, unknown says so', () => {
+  const q = { goalWrite: true, agents: [{ id: 'a', name: 'Ada' }, { id: 'g', name: 'Grace' }],
+    goals: { total: 3, rows: [
+      { id: 'g1', title: 'Roadmap', status: 'active', level: 'company', description: 'All of it.', parentId: null, ownerId: 'g', owner: 'Grace', depth: 0, children: 1 },
+      { id: 'g2', title: 'Health route', status: 'planned', level: 'task', description: '', parentId: 'g1', ownerId: null, owner: '', depth: 1, children: 1 },
+      { id: 'g3', title: 'Probe', status: 'achieved', level: '', description: '', parentId: 'g2', ownerId: 'a', owner: 'Ada', depth: 2, children: 0 }] } };
+  const v = V.hq.goals(q);
+  assert.equal(v.write, true);
+  assert.deepEqual(v.rows.map((r) => [r.id, r.depth, r.status.word, r.line]),
+    [['g1', 0, 'Active', 'Company goal · Owner Grace · 1 goal under it'], ['g2', 1, 'Planned', 'Task goal · No owner · 1 goal under it'], ['g3', 2, 'Achieved', 'Owner Ada']]);
+  assert.deepEqual(v.statusOptions.map((o) => o.value), ['planned', 'active', 'achieved', 'cancelled']);
+  assert.deepEqual(v.ownerOptions.map((o) => o.label), ['No owner', 'Ada', 'Grace']);
+  assert.deepEqual(v.parentOptions(null).map((o) => o.label), ['No parent goal', 'Roadmap', 'Health route', 'Probe']);
+  assert.deepEqual(v.parentOptions('g2').map((o) => o.label), ['No parent goal', 'Roadmap', 'Health route', 'Probe'], 'the parent is only chosen when a goal is made');
+  assert.equal(V.hq.goals({ ...q, goalWrite: false }).write, false);
+  assert.match(V.hq.goals({ ...q, goalWrite: false }).note, /Read only/);
+  const none = V.hq.goals({ goalWrite: true, goals: { total: 0, rows: [] } });
+  assert.deepEqual([none.rows.length, none.unknown], [0, false]);
+  assert.equal(V.hq.goals({ goalWrite: true, goals: null }).unknown, true);
+  assert.equal(V.hq.goals(null).unknown, true);
+});
