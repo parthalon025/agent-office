@@ -1297,6 +1297,8 @@ export function createOffice(cfg) {
     R('GET', '/api/hq/costs', 'page', async () => ({ costs: await hq.costs() })),
     // The Paperclip runtime (#193): install (409 without the Confirm), start, stop, and the board key's approval link. Never the key.
     R('GET', '/api/paperclip/runtime', 'page', () => ({ runtime: runtime.status() })),
+    // The transcript of a run of the office adapter, for the desk screen (#211): the log the plugin reads, live or kept after the end.
+    R('GET', '/api/paperclip/transcript', 'page', ({ query }) => paperclipRuns.transcript(String(query.get('uid') || '')) || reply(404, { error: 'This session is not a Paperclip run.' })),
     R('POST', '/api/paperclip/runtime/install', 'page', ({ body }) => installRuntime(body)),
     R('POST', '/api/paperclip/runtime/update', 'page', ({ body }) => updateRuntime(body)),
     R('POST', '/api/paperclip/runtime/start', 'page', () => startRuntime()),

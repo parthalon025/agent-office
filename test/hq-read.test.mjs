@@ -105,3 +105,31 @@ test('the board key: sent as a bearer to Paperclip, never held in a view; withou
     hq.disconnect();
   } finally { await pc.close(); }
 });
+
+test('read model: projects are rooms with their workspaces, and an employee sits in the room of its open task (#211)', async () => {
+  const seed = DEMO(), cid = seed.companies[0].id;
+  seed.issues[0] = { ...seed.issues[0], projectId: 'proj-web', projectWorkspaceId: 'ws-main' };
+  seed.projects = [{ id: 'proj-web', companyId: cid, name: 'Web app', status: 'in_progress', env: null, workspaces: [{ id: 'ws-main', name: 'main', cwd: 'C:/work/acme', isPrimary: true, env: { SECRET: 'do-not-show' } }] },
+    { id: 'proj-idle', companyId: cid, name: 'Idle', status: 'planned', env: null }];
+  const pc = await startFakePaperclip(seed);
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS });
+  try {
+    await hq.connect({ url: pc.url });
+    await until(() => hq.state() === 'on', 'the events socket');
+    const v = hq.view();
+    assert.deepEqual(v.rooms, [
+      { id: 'proj-web', name: 'Web app', status: 'in_progress', workspaces: [{ id: 'ws-main', name: 'main', folder: 'C:/work/acme', primary: true }], employees: [{ id: 'a1000000-0000-4000-8000-000000000002', name: 'Ada', workspace: 'main' }] },
+      { id: 'proj-idle', name: 'Idle', status: 'planned', workspaces: [], employees: [] }]);
+    assert.doesNotMatch(JSON.stringify(v), /do-not-show/, 'a workspace env value never leaves the HQ module');
+  } finally { hq.disconnect(); await pc.close(); }
+});
+
+test('read model: a Paperclip with no projects route has no rooms, not an error (#211)', async () => {
+  const pc = await startFakePaperclip({ ...DEMO(), noProjects: true });
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS });
+  try {
+    await hq.connect({ url: pc.url });
+    await until(() => hq.state() === 'on', 'the events socket');
+    assert.deepEqual(hq.view().rooms, []);
+  } finally { hq.disconnect(); await pc.close(); }
+});

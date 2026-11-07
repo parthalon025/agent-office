@@ -243,3 +243,19 @@ test('start keeps the run context on the session for the desk', async () => {
   await r2.runs.start(BODY);
   assert.equal(r2.sessions.get('o1').paperclip.desk, undefined, 'no context: no desk block, nothing guessed');
 });
+
+test('transcript(uid): the log of a run by its office session, kept after the run ends; null for a session that is not a run', async () => {
+  const { runs, sessions } = rig();
+  await runs.start(BODY);
+  const s = sessions.get('o1');
+  s.replies.push({ id: 1, text: 'Working on it.' });
+  runs.tick();
+  let t = runs.transcript('o1');
+  assert.equal(t.key, 'run-1'); assert.equal(t.done, false);
+  assert.ok(t.lines.some((l) => l.text === 'Working on it.'));
+  end(s); runs.tick();
+  t = runs.transcript('o1');
+  assert.equal(t.done, true);
+  assert.match(t.lines.at(-1).text, /The run finished/);
+  assert.equal(runs.transcript('nope'), null);
+});

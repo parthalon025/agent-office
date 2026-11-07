@@ -28,7 +28,7 @@
     personaStarters: '/api/persona/starters', personas: '/api/personas', pr: '/api/pr', providers: '/api/providers', recap: '/api/recap',
     reopen: '/api/reopen', roomCreate: '/api/room/create', roomDelete: '/api/room/delete', scheduleDelete: '/api/schedule/delete',
     scheduleRun: '/api/schedule/run', scheduleSave: '/api/schedule/save', screenSet: '/api/screen/set', search: '/api/search',
-    securitySet: '/api/security/set', session: '/api/session', settingsFocus: '/api/settings/focus', settingsSpend: '/api/settings/spend',
+    securitySet: '/api/security/set', session: '/api/session', paperclipTranscript: '/api/paperclip/transcript', settingsFocus: '/api/settings/focus', settingsSpend: '/api/settings/spend',
     skillsDelete: '/api/skills/delete', skillsList: '/api/skills/list', skillsRead: '/api/skills/read', skillsSave: '/api/skills/save',
     startup: '/api/startup', teamDelete: '/api/team/delete', teamSave: '/api/team/save', teamStart: '/api/team/start',
     templateDelete: '/api/template/delete', templateSave: '/api/template/save', tree: '/api/tree', trustApply: '/api/trust/apply',

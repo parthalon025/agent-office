@@ -88,3 +88,33 @@ test('contract: the office needs only what was recorded, and the fake Paperclip 
     }
   } finally { await pc.close(); }
 });
+
+// ---------- projects and workspaces as rooms (#211) ----------
+import { roomsOf } from '../src/hq-model.mjs';
+
+test('rooms: a project is a room, its workspaces are listed, an employee sits in the room of its open task', () => {
+  const projects = [
+    { id: 'p1', name: 'Web app', status: 'in_progress', workspaces: [{ id: 'w1', name: 'main', cwd: 'C:\\work\\web', isPrimary: true }, { id: 'w2', name: 'docs', cwd: 'C:\\work\\docs' }] },
+    { id: 'p2', name: 'Empty', status: 'planned' },
+  ];
+  const agents = [{ id: 'a1', name: 'Ada' }, { id: 'a2', name: 'Bo' }, { id: 'a3', name: 'Cy' }];
+  const issues = [
+    { id: 'i1', status: 'in_progress', assigneeAgentId: 'a1', projectId: 'p1', projectWorkspaceId: 'w2' },
+    { id: 'i2', status: 'todo', assigneeAgentId: 'a1', projectId: 'p2' },
+    { id: 'i3', status: 'todo', assigneeAgentId: 'a2', projectId: 'p1' },
+    { id: 'i4', status: 'done', assigneeAgentId: 'a3', projectId: 'p1' },
+  ];
+  const r = roomsOf({ projects, agents, issues });
+  assert.deepEqual(r.map((x) => x.id), ['p1', 'p2']);
+  assert.deepEqual(r[0].workspaces, [{ id: 'w1', name: 'main', folder: 'C:\\work\\web', primary: true }, { id: 'w2', name: 'docs', folder: 'C:\\work\\docs', primary: false }]);
+  assert.deepEqual(r[0].employees, [{ id: 'a1', name: 'Ada', workspace: 'docs' }, { id: 'a2', name: 'Bo', workspace: 'main' }], 'in progress beats todo; no workspace on the task: the primary one');
+  assert.deepEqual(r[1].employees, [], 'an employee sits in one room: the room of its best open task');
+  assert.deepEqual(r[1].workspaces, []);
+});
+
+test('rooms: unreadable shapes give no room and never throw; the folder is never invented', () => {
+  assert.deepEqual(roomsOf({ projects: null, agents: [], issues: [] }), []);
+  const r = roomsOf({ projects: [null, { name: 'x' }, { id: 'p', name: 'P', workspaces: [{ id: 'w' }, 5] }], agents: [], issues: null });
+  assert.equal(r.length, 1);
+  assert.deepEqual(r[0].workspaces, [{ id: 'w', name: 'w', folder: null, primary: false }]);
+});

@@ -49,6 +49,8 @@
       h('ul', { className: 'stats-list', 'aria-label': 'Run context of ' + p.s.name }, rows.map(function (r) { return h('li', { key: r[0] }, h('span', null, r[0]), h('b', null, r[1])); })));
   }
   var DESK_TABS = [{ id: 'chat', label: 'Chat', icon: 'chat' }, { id: 'terminal', label: 'Terminal', icon: 'terminal' }, { id: 'timeline', label: 'Timeline', icon: 'trace' }];
+  // A session that is a run of the office adapter (#200) has a fourth tab: the transcript Paperclip reads (#211).
+  var RUN_TAB = { id: 'run', label: 'Run', icon: 'plan' };
   function DeskScreen(p) {
     var snap = useSnapshot(), kinds = useKinds();
     var s = snap ? snap.sessions.filter(function (x) { return x.uid === p.uid; })[0] : null;
@@ -71,7 +73,8 @@
         p.onRules ? act('security', 'Rules', 'Open the Security room: the rules behind this agent', p.onRules) : null,
         h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onBack }, 'Back')),
       s ? h(RunContext, { s: s }) : null,
-      h(A.Tabs, { label: 'Desk screen', tabs: DESK_TABS, value: tab, onChange: p.onTab, render: function (id) {
+      h(A.Tabs, { label: 'Desk screen', tabs: s && s.paperclipRun ? DESK_TABS.concat([RUN_TAB]) : DESK_TABS, value: tab === 'run' && !(s && s.paperclipRun) ? 'chat' : tab, onChange: p.onTab, render: function (id) {
+        if (id === 'run') return h(RunTab, { s: s });
         if (id === 'chat') return h(ChatTab, { office: p.office, bot: p.bot, name: p.name });
         return h(TermTab, { s: s, name: p.name, toast: p.toast, timeline: id === 'timeline' });
       } }));
@@ -100,6 +103,27 @@
         h('div', { className: 'inline-actions' },
           h(A.Button, { variant: 'quiet', disabled: busy, onClick: function () { send('Yes.'); } }, 'Answer yes'),
           h(A.Button, { variant: 'quiet', disabled: busy, onClick: function () { send('No.'); } }, 'Answer no'))));
+  }
+
+  // The transcript of a Paperclip run on the desk (#211): the log the office hands to Paperclip, read from the server (the snapshot does not
+  // carry it). It reads again when the session changes, and shows what the plugin shows: replies, calls, failures, requests that wait.
+  function RunTab(p) {
+    var s = p.s, st = useState(null), t = st[0], setT = st[1], er = useState(''), err = er[0], setErr = er[1];
+    var vw = React.useRef(null), sig = s ? [s.status, s.turns, (s.calls || []).length, (s.replies || []).length, (s.pending || []).length, s.endedAt].join() : '';
+    useEffect(function () {
+      if (!s) return undefined;
+      var gone = false;
+      client.get('paperclipTranscript', { uid: s.uid }).then(function (r) { if (!gone) { setT(r); setErr(''); } }, function (x) { if (!gone) setErr(x.message); });
+      return function () { gone = true; };
+    }, [s && s.uid, sig]);
+    useEffect(function () { var v = vw.current; if (v) v.scrollTop = v.scrollHeight; }, [t]);
+    var lines = (t && t.lines) || [];
+    return h('div', { className: 'pin-term' },
+      err ? h('p', { className: 'term-note', role: 'alert' }, err) : null,
+      h('div', { className: 'term-view', ref: vw, role: 'log', 'aria-live': 'off', 'aria-label': 'Run transcript', tabIndex: 0 },
+        lines.length ? lines.map(function (l, i) { return h('div', { key: i, className: 'term-line tone-' + (l.stream === 'stderr' ? 'err' : /^\[agent-office\]/.test(l.text) ? 'muted' : 'prompt') }, l.text || ' '); })
+          : h('div', { className: 'term-line tone-muted' }, t ? 'The run has no log yet.' : 'Loading the transcript.')),
+      h('p', { className: 'term-note' }, t && t.done ? 'This run ended. Paperclip has this log.' : 'Paperclip reads this log while the run goes on.'));
   }
 
   // ---------- one session as a full terminal (the Terminal and Timeline tabs of the desk screen) ----------

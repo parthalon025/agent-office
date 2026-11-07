@@ -76,6 +76,12 @@ test('a call of the run waits in Needs you until the user answers; then the run 
   assert.deepEqual((await fullOf(waiting.uid)).paperclip, { agent: 'agent-1', company: 'co-1', run: 'run-e2e-1', task: 'task-9', desk });
   assert.deepEqual(waiting.deskCtx, desk, 'the page gets the run context in its snapshot (#206)');
   assert.equal(fake.requests[0].messages.at(-1).content.includes('ACM-12 Say hello'), true, 'the task reached the agent in its prompt');
+  // The desk screen shows the run's transcript (#211): the session says it is a run, and the page route gives the log, live.
+  assert.equal(waiting.paperclipRun, true, 'the snapshot marks the session as a Paperclip run');
+  const live = (await rig.call('/api/paperclip/transcript?uid=' + encodeURIComponent(waiting.uid))).json;
+  assert.equal(live.done, false);
+  assert.match(live.lines.map((l) => l.text).join('\n'), /Waiting for your answer in Agent Office \(Needs you\): Bash echo from-paperclip/);
+  assert.equal((await rig.call('/api/paperclip/transcript?uid=nope')).status, 404, 'a session that is not a run has no transcript');
   await new Promise((r) => setTimeout(r, 300));
   assert.equal(settled, false, 'the run does not end while the call waits');
   assert.equal((await rig.call('/api/answer', { id: waiting.pending[0].id, allow: true })).status, 200);
@@ -91,6 +97,9 @@ test('a call of the run waits in Needs you until the user answers; then the run 
   assert.match(text, /Waiting for your answer in Agent Office \(Needs you\): Bash echo from-paperclip/);
   assert.match(text, /All done\./);
   assert.match(text, /\[agent-office\] The run finished\./);
+  const kept = (await rig.call('/api/paperclip/transcript?uid=' + encodeURIComponent(waiting.uid))).json;
+  assert.equal(kept.done, true, 'the transcript stays after the run ends');
+  assert.match(kept.lines.map((l) => l.text).join('\n'), /All done\./);
   // The session ended with its run and is a past session.
   const past = await until(async () => (await rig.call('/api/history', {})).json.sessions.find((h) => h.uid === waiting.uid), 'the past record');
   assert.equal(past.provider, 'ollama');
