@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { startOffice, settle, holdPort, closeHeld } from './fixtures/office-server.mjs';
+import { startOffice, settle, holdPort, close, closeHeld } from './fixtures/office-server.mjs';
 
 const within = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(() => r('HANG'), ms))]);
 const connects = (port) => new Promise((r) => {
@@ -65,4 +65,44 @@ test('stop: ends the whole process tree by pid and waits for it (#161)', { timeo
       for (let i = 0; i < 40 && (() => { try { process.kill(kid, 0); return true; } catch { return false; } })(); i++) await new Promise((r) => setTimeout(r, 100)); }
     fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
   }
+});
+
+test('stop: ends the child of an office that exited first (#161)', { timeout: 30000, skip: process.platform !== 'win32' }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-fx-'));
+  let kid = 0;
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  try {
+    const pidFile = path.join(dir, 'child.pid');
+    const script = path.join(import.meta.dirname, 'fixtures', 'tree-parent.mjs');
+    const o = startOffice(dir, { ...process.env, TREE_PID_FILE: pidFile, TREE_PARENT_EXITS: '1' }, { script, ms: 20000 });
+    await o.done;
+    kid = Number(fs.readFileSync(pidFile, 'utf8'));
+    await o.exited;
+    assert.equal(alive(kid), true, 'the orphan runs after its parent exited');
+    await o.stop();
+    for (let i = 0; i < 100 && alive(kid); i++) await new Promise((r) => setTimeout(r, 100));
+    assert.equal(alive(kid), false, 'stop() must end the child of a parent that exited first');
+  } finally {
+    if (kid) { try { process.kill(kid); } catch { /* gone */ }
+      for (let i = 0; i < 40 && alive(kid); i++) await new Promise((r) => setTimeout(r, 100)); }
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+  }
+});
+
+test('close: a held port closes at once while a client keeps a keep-alive connection (#190)', { timeout: 20000 }, async () => {
+  const probe = net.createServer();
+  await new Promise((r) => probe.listen(0, '127.0.0.1', r));
+  const port = probe.address().port;
+  await new Promise((r) => probe.close(r));
+  let client;
+  try {
+    const s = await holdPort(port);
+    client = net.connect(port, '127.0.0.1');
+    client.on('error', () => {});
+    await new Promise((r) => client.once('connect', r));
+    client.setKeepAlive(true);
+    await new Promise((r) => setTimeout(r, 100));
+    assert.notEqual(await within(close(s), 2000), 'HANG', 'close() must not wait for the client');
+    assert.equal(await connects(port), false);
+  } finally { client?.destroy(); await closeHeld(); }
 });

@@ -13,7 +13,29 @@ import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn, execFile } from 'node:child_process';
-import { killTree } from '../../src/launch.mjs';
+import { killTree, resolveExe, helperCwd } from '../../src/launch.mjs';
+
+// Windows keeps a process's ParentProcessId after the parent has exited, so the children of an office that ended first can
+// still be found by pid (#161). Every process of the process table that descends from `root` and started at or after
+// `since` (ms) and after its own parent (a reused pid never does). Never rejects; [] when the table cannot be read.
+const TABLE_SCRIPT = 'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId) $($_.ParentProcessId) $([datetimeoffset]$_.CreationDate | ForEach-Object { $_.ToUnixTimeMilliseconds() })" }';
+export function descendantsOf(rows, root, since) {
+  const born = new Map(rows.map((r) => [r.pid, r.at]));
+  const found = []; const queue = [root];
+  while (queue.length) {
+    const p = queue.shift();
+    for (const r of rows) if (r.ppid === p && r.pid !== root && !found.includes(r.pid) && r.at >= since && (!born.has(p) || r.at >= born.get(p))) { found.push(r.pid); queue.push(r.pid); }
+  }
+  return found;
+}
+const processTable = () => new Promise((resolve) => {
+  try {
+    execFile(resolveExe('powershell'), ['-NoProfile', '-NonInteractive', '-Command', TABLE_SCRIPT], { cwd: helperCwd(), windowsHide: true, timeout: 20000 }, (err, out) => {
+      if (err) return resolve([]);
+      resolve(String(out).split(/\r?\n/).map((l) => l.trim().split(/\s+/).map(Number)).filter((a) => a.length === 3 && a.every(Number.isFinite)).map(([pid, ppid, at]) => ({ pid, ppid, at })));
+    });
+  } catch { resolve([]); }
+});
 
 // The repository root, and the copy a test makes of the office layout: package.json, launch.ps1, src/ (every server module),
 // public/, and with `components` also tokens.css and components/ (what the static routes serve). The copy has the same layout
@@ -56,6 +78,7 @@ export async function until(fn, what, { ms = START_MS, log = () => '', step = 50
  * busy port has `busy: true`.  `script` is for a test that starts a stand-in instead of the server.
  */
 export function startOffice(dir, env, { ms = START_MS, script = path.join(dir, 'src', 'server.mjs'), execPath = process.execPath } = {}) {
+  const since = Date.now() - 1000;
   const child = spawn(execPath, [script], { cwd: dir, env: { OFFICE_EXPLAIN: 'off', ...env }, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let out = '';
   // A child that cannot start gives `error` and no `exit`: exited settles with null then, so no caller waits for ever.
@@ -83,8 +106,16 @@ export function startOffice(dir, env, { ms = START_MS, script = path.join(dir, '
      * Waits for taskkill and for the server to exit.
      */
     async stop() {
-      if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
-      if (process.platform === 'win32') await killTree(child.pid);
+      if (!child.pid) return;
+      const gone = child.exitCode !== null || child.signalCode !== null;
+      if (process.platform === 'win32') {
+        // Walk the tree first, then kill: when the server ended before stop(), taskkill /T has no parent left to walk,
+        // but each child still names it (#161). Children go by pid, newest first, so none restarts a sibling.
+        const kids = descendantsOf(await processTable(), child.pid, since);
+        if (!gone) await killTree(child.pid);
+        for (const pid of kids.reverse()) await killTree(pid);
+      }
+      if (gone) return;
       child.kill();
       await exited;
     },
@@ -118,14 +149,28 @@ export async function startOnFreePort(dir, env, { prepare, envFor, attempts = 6,
 
 // Ports a test holds. closeHeld() closes every one that is still open, so a failed or timed-out test never leaves a
 // listening socket that keeps the test process alive (#122). Closing twice is harmless.
+// server.close() waits for every accepted connection, so a client that keeps one open (keep-alive) would hang it (#190):
+// the accepted sockets are remembered and destroyed before close.
 const held = new Set();
+const accepted = new WeakMap();
+const track = (s) => {
+  if (accepted.has(s)) return s;
+  const sockets = new Set();
+  accepted.set(s, sockets);
+  s.on('connection', (c) => { sockets.add(c); c.once('close', () => sockets.delete(c)); });
+  return s;
+};
 export const holdPort = (port) => new Promise((resolve, reject) => {
-  const s = net.createServer();
+  const s = track(net.createServer());
   s.once('error', reject);
   s.listen(port, '127.0.0.1', () => { held.add(s); resolve(s); });
 });
-export const hold = (s) => { held.add(s); return s; };
-export const close = (s) => new Promise((r) => { if (!s.listening) return r(); s.close(() => r()); });
+export const hold = (s) => { held.add(track(s)); return s; };
+export const close = (s) => new Promise((r) => {
+  if (!s.listening) return r();
+  s.close(() => r());
+  for (const c of accepted.get(s) || []) c.destroy();
+});
 export const closeHeld = async () => { const all = [...held]; held.clear(); for (const s of all) await close(s); };
 
 /** listening: the office said it is open. Else its exit code (null: it never ran, or was killed at the limit `ms`). */
