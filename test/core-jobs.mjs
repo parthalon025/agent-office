@@ -78,7 +78,8 @@ export async function run({ shots = true } = {}) {
   if (!findBrowser()) throw new Error('No Chrome or Edge found. Set OFFICE_BROWSER to the browser program.');
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
   const { dir, repo } = seedRepo();
-  const env = { ...process.env, OFFICE_OPEN: '0' };
+  // The rooms of floors stand in the real home folder by default; the gate keeps them inside its own temp folder (removed with `dir`).
+  const env = { ...process.env, OFFICE_OPEN: '0', OFFICE_ROOMS_DIR: path.join(dir, 'rooms') };
   delete env.OFFICE_PORT;
   // Only a session the office ran is kept in Past sessions, so the past record is seeded in the history file of this port.
   const PAST = 'gate-past-session';
