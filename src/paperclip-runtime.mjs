@@ -26,6 +26,7 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 import * as launch from './launch.mjs';
+import { checkUrl } from './paperclip.mjs';
 
 /**
  * The release the office installs: an exact version of the `paperclipai` package and the SHA-512 of its tarball as the registry
@@ -156,7 +157,15 @@ export function withSecrets(text, random = (n) => crypto.randomBytes(n)) {
 }
 
 /** What the saved state keeps: whether the user asked for Paperclip to run with the office. */
-export function cleanRuntime(raw) { return raw && typeof raw === 'object' && !Array.isArray(raw) && raw.enabled === true ? { enabled: true } : undefined; }
+export function cleanRuntime(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  // Connect mode (#194): the address of the user's own Paperclip, on 127.0.0.1 only. The key is in its own owner-only file, never here.
+  if (typeof raw.connect === 'string') { const c = checkUrl(raw.connect); if (c.ok) return { connect: c.url }; }
+  return raw.enabled === true ? { enabled: true } : undefined;
+}
+
+// A board key as Paperclip makes it (pcp_board_ and hex). Checked before any request, so a paste of the wrong thing is said at once.
+const BOARD_KEY = /^pcp_board_[A-Za-z0-9_-]{16,200}$/;
 
 /** An answer for a route: the status and a message in plain words. */
 export const runtimeError = (status, message) => Object.assign(new Error(message), { status });
@@ -179,7 +188,9 @@ export function createRuntime(deps = {}) {
   const P = d.paths || runtimePaths({ root: d.root, env: d.env, port: d.port });
   const serverPort = Number(d.serverPort) || Number(d.env.OFFICE_PAPERCLIP_PORT) || DEFAULT_PORT;
   const dbPort = Number(d.dbPort) || Number(d.env.OFFICE_PAPERCLIP_DB_PORT) || DEFAULT_DB_PORT;
-  const url = `http://127.0.0.1:${serverPort}`;
+  const ownUrl = `http://127.0.0.1:${serverPort}`;
+  let url = ownUrl;       // the address in use: the office's own Paperclip, or in connect mode the user's (#194)
+  let mode = 'own';       // 'own' (the office installs and runs it) or 'connect' (the user's Paperclip: nothing installed, started, stopped or updated)
   const cliPath = (dir = P.install) => path.join(dir, 'node_modules', 'paperclipai', 'dist', 'index.js');
 
   let state = 'off', reason = '', child = null, pid = 0, tail = [], bootstrap = null, invite = '', wantStop = false, busy = false;
@@ -258,7 +269,9 @@ export function createRuntime(deps = {}) {
    * the install is done; with background: true it answers as soon as the install has started (the checks that can refuse come first),
    * and the state, the reason and the feed tell how it ends (a download of minutes is not held in a request).
    */
+  const connectedWhy = () => `The office is connected to your Paperclip at ${url}. Disconnect first.`;
   async function install({ background = false } = {}) {
+    if (mode === 'connect') throw runtimeError(409, connectedWhy());
     if (updating) throw runtimeError(409, 'Paperclip is being updated.');
     if (busy || state === 'installing') throw runtimeError(409, 'Paperclip is being installed already.');
     if (isInstalled()) { if (state === 'off' || state === 'failed') set('stopped'); return status(); }
@@ -306,6 +319,7 @@ export function createRuntime(deps = {}) {
    * tell how it ends.
    */
   async function update({ background = false } = {}) {
+    if (mode === 'connect') throw runtimeError(409, connectedWhy());
     if (updating) throw runtimeError(409, 'Paperclip is being updated already.');
     if (busy || state === 'installing') throw runtimeError(409, 'Paperclip is being installed. Update it when that is done.');
     isInstalled();
@@ -380,16 +394,16 @@ export function createRuntime(deps = {}) {
   }
 
   // ---------- health ----------
-  async function get(route, headers) {
-    const r = await d.fetch(url + route, { headers, signal: AbortSignal.timeout(4000), redirect: 'error' });
+  async function get(route, headers, base = url) {
+    const r = await d.fetch(base + route, { headers, signal: AbortSignal.timeout(4000), redirect: 'error' });
     let json = null;
     try { json = await r.json(); } catch { /* not json */ }
     return { status: r.status, json };
   }
   /** What answers on the port: nothing ('free'), a Paperclip ('paperclip', with its health), or another program ('other'). */
-  async function probe() {
+  async function probe(base = url) {
     try {
-      const r = await get('/api/health');
+      const r = await get('/api/health', undefined, base);
       const j = r.json;
       const mine = r.status === 200 || r.status === 503;
       if (mine && j && typeof j.status === 'string' && (typeof j.deploymentMode === 'string' || typeof j.version === 'string')) return { kind: 'paperclip', health: j, code: r.status };
@@ -434,6 +448,7 @@ export function createRuntime(deps = {}) {
   }
 
   async function start({ inUpdate = false } = {}) {
+    if (mode === 'connect') throw runtimeError(409, connectedWhy());
     if (updating && !inUpdate) throw runtimeError(409, 'Paperclip is being updated. Start it when that is done.');
     if (['starting', 'running'].includes(state)) return status();
     if (busy || state === 'installing') throw runtimeError(409, 'Paperclip is being installed. Start it when that is done.');
@@ -598,12 +613,66 @@ export function createRuntime(deps = {}) {
     if (challenge === c) keyTimer = d.setTimer(pollKey, KEY_POLL_MS);
   }
 
+  // ---------- connect mode (#194): the user's own Paperclip ----------
+  const noKey = () => ({ state: 'none', reason: '', expiresAt: null, approvalUrl: '' });
+  /**
+   * Connects to a Paperclip the user runs, by its address (127.0.0.1 only) and a board key. Nothing is installed, started, stopped or
+   * changed in it: the office only asks it who the key is. Every refusal says why (400 for what the user typed, 502 for what Paperclip
+   * answered). An empty key reuses the saved key of the same address; a Paperclip in local trusted mode needs none. The key is written
+   * only after Paperclip accepted it, to the same owner-only file as the office's own key, and never appears in an answer or a message.
+   */
+  async function connectExisting({ url: raw, key: given } = {}) {
+    const c = checkUrl(raw);
+    if (!c.ok) throw runtimeError(400, c.error);
+    if (updating) throw runtimeError(409, 'Paperclip is being updated. Connect when that is done.');
+    if (busy || state === 'installing') throw runtimeError(409, 'Paperclip is being installed. Connect when that is done.');
+    if (mode === 'own' && ['starting', 'running'].includes(state)) throw runtimeError(409, 'The office runs its own Paperclip. Stop Paperclip first, then connect to yours.');
+    const typed = typeof given === 'string' ? given.trim() : '';
+    if (typed && !BOARD_KEY.test(typed)) throw runtimeError(400, 'That is not a board key. A board key starts with pcp_board_. Create one in Paperclip (Instance settings, board keys).');
+    const seen = await probe(c.url);
+    if (seen.kind === 'free') throw runtimeError(502, `No Paperclip answers at ${c.url}. Check the address and that Paperclip runs.`);
+    if (seen.kind !== 'paperclip') throw runtimeError(502, `Something answers at ${c.url}, but it is not Paperclip.`);
+    const saved = read(P.key);
+    const token = typed || (keyOk(saved) && saved.apiBase === c.url ? saved.token : '');
+    const trusted = seen.health.deploymentMode === 'local_trusted';
+    if (!token && !trusted) throw runtimeError(400, `This Paperclip runs in login mode (${seen.health.deploymentMode || 'unknown mode'}), so it needs a board key. Create one in Paperclip and paste it here.`);
+    let next = noKey();
+    if (token) {
+      let me;
+      try { me = await get('/api/cli-auth/me', bearer(token), c.url); } catch { throw runtimeError(502, `No Paperclip answers at ${c.url} when the office checks the board key.`); }
+      if (me.status === 401 || me.status === 403) throw runtimeError(400, `Paperclip at ${c.url} does not accept this board key. It may be wrong, expired or revoked. Create a new one in Paperclip.`);
+      if (me.status !== 200 || !me.json || !me.json.userId) throw runtimeError(502, `Paperclip at ${c.url} answered ${me.status} when the office checked the board key.`);
+      let expiresAt = null;
+      try { const list = await get('/api/board-api-keys', bearer(token), c.url); const mine = Array.isArray(list.json) ? list.json.find((k) => k && k.id === me.json.keyId) : null; expiresAt = mine && mine.expiresAt || null; } catch { /* the expiry is optional */ }
+      if (typed) {
+        fsx.mkdirSync(path.dirname(P.key), { recursive: true });
+        d.writeSecret(P.key, JSON.stringify({ token, apiBase: c.url, userId: me.json.userId, keyId: me.json.keyId || null, expiresAt, createdAt: d.now().toISOString() }));
+      }
+      next = { state: 'ready', reason: '', expiresAt: expiresAt || (saved && saved.apiBase === c.url ? saved.expiresAt : null) || null, approvalUrl: '' };
+    }
+    stopKeyWatch(); unschedule();
+    mode = 'connect'; url = c.url; bootstrap = seen.health.bootstrapStatus === 'bootstrap_pending' ? 'pending' : 'ready'; invite = ''; key = next;
+    set('connected');
+    feed(`connected to your Paperclip at ${url}${token ? ' with a board key' : ' (local trusted mode, no key)'}. The office installs and changes nothing in it.`);
+    return status();
+  }
+
+  /** Leaves connect mode: forgets the address and the key file. Nothing is sent to the user's Paperclip, which runs on. */
+  async function disconnect() {
+    if (mode !== 'connect') return status();
+    const rec = read(P.key);
+    if (rec && rec.apiBase === url) { try { fsx.rmSync(P.key, { force: true }); } catch { /* the key file is gone or locked: the address check keeps it unused */ } }
+    mode = 'own'; url = ownUrl; key = noKey(); bootstrap = null; invite = '';
+    set('off'); feed('disconnected from your Paperclip. It runs on as before.', 'end');
+    return status();
+  }
+
   // ---------- what the page shows ----------
   // Installed but never started in this process: stopped, not off.
   const stateNow = () => (state === 'off' && installedNow() ? 'stopped' : state);
   function steps() {
     if (updating) return [];
-    if (stateNow() === 'off') return ['Install Paperclip. The office downloads one pinned release with npm into its own folder.'];
+    if (stateNow() === 'off') return ['Install Paperclip. The office downloads one pinned release with npm into its own folder. Or connect to a Paperclip you already run.'];
     if (stateNow() === 'stopped') return ['Start Paperclip.'];
     if (state !== 'running') return [];
     const out = [];
@@ -616,7 +685,7 @@ export function createRuntime(deps = {}) {
   function status() {
     return {
       state: updating ? 'updating' : stateNow(), reason: updating ? phase : reason, version: d.pin.version, installed: installedNow(), installedVersion: usable ? version : null,
-      updateAvailable: usable && !current, update: { error: updateError }, url, port: serverPort,
+      updateAvailable: mode === 'own' && usable && !current, update: { error: updateError }, url, port: Number(new URL(url).port), mode,
       bootstrap, inviteUrl: state === 'running' && bootstrap === 'pending' ? invite : '',
       key: { state: key.state, reason: key.reason, expiresAt: key.expiresAt, approvalUrl: key.state === 'waiting' ? key.approvalUrl : '' },
       steps: steps(),
@@ -624,12 +693,25 @@ export function createRuntime(deps = {}) {
   }
 
   /** At the office start: the runtime comes back when the user asked for it (and it is installed). */
-  async function resume(enabled) {
+  async function resume(enabled, connect) {
+    if (connect) {
+      // Connect mode (#194): the user's Paperclip again, with the saved key of that address. A Paperclip that is not up, or a key it no
+      // longer accepts, is failed with the reason; the user connects again from the panel.
+      try { return await connectExisting({ url: connect, key: '' }); } catch (e) {
+        const c = checkUrl(connect);
+        if (c.ok) { mode = 'connect'; url = c.url; key = noKey(); set('failed', e.message); feed(`Your Paperclip did not connect with the office: ${e.message}`, 'error'); }
+        return status();
+      }
+    }
     isInstalled();
     if (usable && state === 'off') set('stopped');
     if (!enabled || !usable) return status();
     try { return await start(); } catch (e) { feed(`Paperclip did not start with the office: ${e.message}`, 'error'); return status(); }
   }
 
-  return { status, install, update, start, stop, killNow, resume, connectKey, key: () => { const rec = read(P.key); return keyOk(rec) && rec.apiBase === url && key.state === 'ready' ? rec.token : null; }, paths: P, url };
+  return { status, install, update, start, stop, killNow, resume, connectKey, connectExisting, disconnect,
+    key: () => { const rec = read(P.key); return keyOk(rec) && rec.apiBase === url && key.state === 'ready' ? rec.token : null; },
+    /** The board key for a call to this address, or null: the key never goes to another address. */
+    keyFor(u) { return u === url ? this.key() : null; },
+    paths: P, get url() { return url; } };
 }

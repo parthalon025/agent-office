@@ -755,3 +755,31 @@ test('plan source: while it runs, the office sends only GET and the WebSocket', 
     for (const r of pc.requests) assert.ok(r.method === 'GET' || r.method === 'UPGRADE', `${r.method} ${r.path}`);
   } finally { board.close(); hq.disconnect(); await pc.close(); }
 });
+
+// ---------- #194: a Paperclip in login mode, read with the board key of the connect mode ----------
+test('a board key goes in the Authorization header of every read and of the live stream, to the address it is for, and a refused key is said', async () => {
+  const KEY = 'pcp_board_' + 'a'.repeat(40);
+  const pc = await startFakePaperclip({ ...DEMO(), boardKey: KEY });
+  const asked = [];
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS, token: (u) => { asked.push(u); return u === pc.url ? KEY : null; } });
+  try {
+    const r = await hq.connect({ url: pc.url, company: DEMO().companies[0].id });
+    assert.equal(r.ok, true);
+    await new Promise((res) => setTimeout(res, 150));
+    assert.equal(hq.view().state, 'on');
+    assert.ok(asked.every((u) => u === pc.url), 'the key is asked for only the address in use');
+    assert.ok(pc.requests.filter((q) => q.method === 'GET').length > 3);
+    assert.ok(!JSON.stringify(hq.view()).includes(KEY), 'the view never carries the key');
+    const ws = pc.requests.find((q) => q.method === 'UPGRADE');
+    assert.equal(ws && ws.authorization, `Bearer ${KEY}`, 'the live stream carries it too');
+  } finally { hq.disconnect(); }
+  const bad = createHq({ ...fast, hooksFile: () => HOOKS, token: () => 'pcp_board_' + 'b'.repeat(40) });
+  try {
+    await assert.rejects(bad.connect({ url: pc.url }), (e) => e.status === 502 && /does not accept the board key \(401\)/.test(e.message) && !e.message.includes('pcp_board_'));
+  } finally { await pc.close(); }
+  const none = await startFakePaperclip({ ...DEMO(), boardKey: KEY });
+  const hq0 = createHq({ ...fast, hooksFile: () => HOOKS });
+  try {
+    await assert.rejects(hq0.connect({ url: none.url }), (e) => e.status === 502 && /asks for sign-in \(403\)/.test(e.message) && /board key/.test(e.message));
+  } finally { await none.close(); }
+});

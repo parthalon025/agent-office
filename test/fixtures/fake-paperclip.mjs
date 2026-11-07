@@ -89,6 +89,15 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
       try { parsed = body ? JSON.parse(body) : null; } catch { return send(res, 400, { error: 'Bad JSON' }); }
       requests.push({ method: req.method, path: u.pathname, query: u.search, body: parsed });
       if (seed.auth) return send(res, 403, { error: 'Board access required' });
+      // boardKey: a Paperclip in login mode that knows one key (#194): no Authorization is 403, another key is 401, GET /api/cli-auth/me names the key's user
+      if (seed.boardKey) {
+        const a = req.headers.authorization;
+        if (u.pathname !== '/api/health') {
+          if (!a) return send(res, 403, { error: 'Board access required' });
+          if (a !== `Bearer ${seed.boardKey}`) return send(res, 401, { error: 'Board authentication required' });
+        }
+        if (u.pathname === '/api/cli-auth/me') return send(res, 200, { userId: 'u1', keyId: 'k1', source: 'board_key', isInstanceAdmin: true });
+      }
       const m = (re) => re.exec(u.pathname);
       let x;
       if (req.method === 'GET' && u.pathname === '/api/health') return send(res, 200, seed.health || { status: 'ok', version: '2026.1023.0' });
@@ -136,7 +145,8 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
     const u = new URL(req.url, 'http://127.0.0.1');
     const m = /^\/api\/companies\/([^/]+)\/events\/ws$/.exec(u.pathname);
     requests.push({ method: 'UPGRADE', path: u.pathname, query: u.search, body: null });
-    if (!m || seed.auth) { sock.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return; }
+    requests[requests.length - 1].authorization = req.headers.authorization || null;
+    if (!m || seed.auth || (seed.boardKey && req.headers.authorization !== `Bearer ${seed.boardKey}`)) { sock.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return; }
     const accept = crypto.createHash('sha1').update(String(req.headers['sec-websocket-key']) + GUID).digest('base64');
     sock.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
     sock.companyId = decodeURIComponent(m[1]);

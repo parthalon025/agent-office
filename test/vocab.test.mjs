@@ -403,6 +403,7 @@ test('the Paperclip runtime words (#193): a state is a DS status and a word, and
   assert.deepEqual(H.runtime({ state: 'off' }), { key: 'resting', word: 'Not installed' });
   assert.deepEqual(H.runtime({ state: 'starting' }), { key: 'working', word: 'Starting' });
   assert.deepEqual(H.runtime({ state: 'running' }), { key: 'working', word: 'Running' });
+  assert.deepEqual(H.runtime({ state: 'connected' }), { key: 'working', word: 'Connected to your Paperclip' });
   assert.deepEqual(H.runtime({ state: 'failed' }), { key: 'error', word: 'Failed' });
   assert.deepEqual(H.runtime({ state: 'external' }), { key: 'resting', word: 'Another Paperclip runs' });
   assert.deepEqual(H.runtime({ state: 'busy' }), { key: 'error', word: 'Port in use' });
