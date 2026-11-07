@@ -128,7 +128,7 @@ export function createCliTool(deps) {
 
   function runTurn(s, st, prompt) {
     st.busy = true;
-    st.interrupted = false;
+    if (st.interrupted) { finish(s, st, '', ''); return; }   // Stop came before the process started
     const back = emit(st, () => events.hook(s, { hook_event_name: 'UserPromptSubmit', prompt }));
     const text = noteOf(back) ? prompt + '\n\n' + noteOf(back) : prompt;
     let file;
@@ -159,7 +159,7 @@ export function createCliTool(deps) {
       if (turn.out.trim()) line(s, st, turn, turn.out);
       st.child = null;
       if (turn.text.trim()) emit(st, () => events.stream(s, { type: 'assistant', message: { id: 'm' + makeId(), content: [{ type: 'text', text: turn.text }] } }));
-      const why = turn.error || (err ? textOf(err) : '') || (code && !turn.ended ? (turn.err.trim().split(/\r?\n/).pop() || `${spec.label} stopped with exit code ${code}.`) : '');
+      const why = turn.error || (err ? textOf(err) : '') || (code !== 0 && !turn.ended ? (turn.err.trim().split(/\r?\n/).pop() || code == null ? `${spec.label} was stopped.` : `${spec.label} stopped with exit code ${code}.`) : '');
       finish(s, st, turn.text, st.interrupted ? '' : why);
     };
     child.on('error', (e) => exit(null, e));
@@ -196,7 +196,7 @@ export function createCliTool(deps) {
   function finish(s, st, last, failure) {
     st.busy = false;
     if (st.closed) return;
-    if (st.interrupted) events.stream(s, { type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Stopped' });
+    if (st.interrupted) { st.interrupted = false; events.stream(s, { type: 'result', subtype: 'error_during_execution', is_error: true, result: 'Stopped' }); }
     else if (failure) events.stream(s, { type: 'result', subtype: 'success', is_error: true, result: failure });
     else events.stream(s, { type: 'result', subtype: 'success', is_error: false, result: last });
     const next = st.queue.shift();
@@ -259,7 +259,7 @@ export function createCliTool(deps) {
       if (attachments.length) throw providerError(415, `${spec.label} takes text only.`);
       const prompt = String(text);
       if (st.busy) st.queue.push(prompt);
-      else setImmediate(() => runTurn(s, st, prompt));
+      else { st.busy = true; st.interrupted = false; setImmediate(() => runTurn(s, st, prompt)); }
     },
 
     answer() { /* the office holds nothing for this kind: it asks no questions */ },
