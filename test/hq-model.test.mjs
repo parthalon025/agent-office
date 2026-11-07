@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { floorsOf, cablesOf, reportingProblem, lobbyOf, costsOf, monthWindows, shapeProblems, shapeOf, SHAPES } from '../src/hq-model.mjs';
+import { goalsOf, floorsOf, cablesOf, reportingProblem, lobbyOf, costsOf, monthWindows, shapeProblems, shapeOf, SHAPES } from '../src/hq-model.mjs';
 import { startFakePaperclip, DEMO } from './fixtures/fake-paperclip.mjs';
 
 const RECORDED = JSON.parse(fs.readFileSync(fileURLToPath(new URL('./fixtures/paperclip-shapes.json', import.meta.url)), 'utf8'));
@@ -78,6 +78,7 @@ test('contract: the office needs only what was recorded, and the fake Paperclip 
     const id = DEMO().companies[0].id;
     const route = { company: `/api/companies/${id}`, agents: `/api/companies/${id}/agents`, issues: `/api/companies/${id}/issues`, goals: `/api/companies/${id}/goals`, approvals: `/api/companies/${id}/approvals?status=pending`,
       activity: `/api/companies/${id}/activity`, costs: `/api/companies/${id}/costs/summary`, secrets: `/api/companies/${id}/secrets`,
+      skills: `/api/companies/${id}/skills`, plugins: '/api/plugins', adapters: '/api/adapters',
       costsByAgent: `/api/companies/${id}/costs/by-agent?from=2026-11-01T00:00:00.000Z&to=2026-12-01T00:00:00.000Z`, costsByProject: `/api/companies/${id}/costs/by-project?from=2026-11-01T00:00:00.000Z&to=2026-12-01T00:00:00.000Z`, budgets: `/api/companies/${id}/budgets/overview` };
     for (const [name, r] of Object.entries(route)) {
       const json = await (await fetch(pc.url + r)).json();
@@ -132,4 +133,16 @@ test('a reporting line change: a root, a new manager and the refusals (unknown, 
   assert.match(reportingProblem(org, 'dev', 'ghost'), /manager is not in the company/);
   assert.match(reportingProblem(org, 'dev', 'dev'), /itself/);
   assert.match(reportingProblem(org, 'ceo', 'dev'), /loop/);
+});
+
+test('goals (#207): a tree, parents first, owner names, loop-safe, null is unknown', () => {
+  const g = (id, parentId, extra = {}) => ({ id, title: id.toUpperCase(), status: 'active', level: 'task', description: '', parentId, ownerAgentId: null, ...extra });
+  const out = goalsOf([g('b', 'a'), g('a', null, { ownerAgentId: 'x', level: 'company' }), g('c', 'b'), g('z', 'ghost')], [{ id: 'x', name: 'Grace' }]);
+  assert.equal(out.total, 4);
+  assert.deepEqual(out.rows.map((r) => [r.id, r.depth, r.children]), [['a', 0, 1], ['b', 1, 1], ['c', 2, 0], ['z', 0, 0]]);
+  assert.deepEqual([out.rows[0].owner, out.rows[0].level, out.rows[3].parentId], ['Grace', 'company', null], 'a parent that is not in the list makes a root');
+  const loop = goalsOf([g('p', 'q'), g('q', 'p'), g('s', 's')], []);
+  assert.deepEqual(loop.rows.map((r) => r.id).sort(), ['p', 'q', 's'], 'a loop and a self parent drop no goal');
+  assert.equal(goalsOf(null, []), null);
+  assert.deepEqual(goalsOf([], []), { total: 0, rows: [] });
 });

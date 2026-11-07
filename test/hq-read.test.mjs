@@ -88,6 +88,41 @@ test('costs (#208): a changed shape is not used, and a Paperclip without the bud
   } finally { hq.disconnect(); await pc.close(); }
 });
 
+test('catalog (#212): skills, secret names, plugins and adapters; no value, file or manifest; a missing or retyped route is unknown; only reads', async () => {
+  const pc = await startFakePaperclip(DEMO());
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS });
+  try {
+    assert.equal(await hq.catalog(), null, 'not connected: nothing');
+    await hq.connect({ url: pc.url });
+    await until(() => hq.state() === 'on', 'the events socket');
+    const c = await hq.catalog();
+    assert.deepEqual(c.skills, [{ id: 'k1', key: 'acme/review', name: 'Code review', description: 'How we review a change', source: 'local_path', trust: 'markdown_only' }]);
+    assert.deepEqual(c.secrets, [{ id: 's1', name: 'GITHUB_TOKEN', provider: 'local_encrypted' }]);
+    assert.deepEqual(c.plugins, [{ id: 'pl1', name: 'acme.linear', version: '1.2.0', status: 'ready', error: '' }]);
+    assert.deepEqual(c.adapters.map((a) => [a.type, a.source, a.version, a.disabled]), [['claude_local', 'builtin', '', false], ['agent_office', 'external', '0.1.0', false]]);
+    assert.deepEqual(c.contract, []);
+    assert.doesNotMatch(JSON.stringify(c), /do-not-show|secret-path/, 'a secret value, a skill file, a manifest and a source path never leave the HQ module');
+    assert.equal(pc.requests.filter((r) => r.method !== 'GET' && r.method !== 'UPGRADE').length, 0);
+    pc.state.plugins = [{ id: 'x', pluginKey: 7, status: 'ready' }];   // retyped
+    const bad = await hq.catalog();
+    assert.equal(bad.plugins, null, 'a retyped route is unknown, not an empty list');
+    assert.match(bad.contract[0], /plugins: pluginKey is number, expected string/);
+    assert.equal(bad.skills.length, 1, 'the other parts still read');
+  } finally { hq.disconnect(); await pc.close(); }
+});
+
+test('catalog (#212): a Paperclip without the skills route has unknown skills, not none', async () => {
+  const pc = await startFakePaperclip({ ...DEMO(), noSkills: true });
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS });
+  try {
+    await hq.connect({ url: pc.url });
+    await until(() => hq.state() === 'on', 'the events socket');
+    const c = await hq.catalog();
+    assert.equal(c.skills, null);
+    assert.equal(c.secrets.length, 1);
+  } finally { hq.disconnect(); await pc.close(); }
+});
+
 test('the board key: sent as a bearer to Paperclip, never held in a view; without it a login-mode Paperclip refuses', async () => {
   const KEY = 'board-key-0123456789abcdef';
   const pc = await startFakePaperclip({ ...DEMO(), key: KEY });

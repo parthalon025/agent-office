@@ -121,6 +121,14 @@
     notConnectedReason: function (why) { return 'Not connected.' + (why ? ' ' + why : '') + ' The steps are the last ones read.'; },
     // The state of an office goal (manager.mjs status). A Paperclip plan has none of its own: its steps carry the state.
     goalWord: function (status) { return status === 'not-connected' ? 'Not connected' : GOAL_WORD[status] || ''; },
+    // A goal that came from a Paperclip task a Manager employee took (#204), and the words of hiring a Manager there.
+    fromTask: function (t) { return t && (t.identifier || t.title) ? 'From the Paperclip task ' + [t.identifier, t.title].filter(Boolean).join(' ') : ''; },
+    // The Manager is hired like every employee (the one hire of #201): a monthly budget is required, and the Confirm names it.
+    hireManager: { title: 'Hire the Manager in Paperclip', button: 'Hire Manager', confirm: 'Confirm hire', building: 'Building', has: 'Manager in Paperclip: ', none: 'No Manager works in Paperclip for this building yet.', done: 'Manager hired in Paperclip',
+      name: 'Name (optional)', budget: 'Monthly budget in dollars', budgetStart: '20', needBudget: 'Set a monthly budget above zero. The office does not hire without one.',
+      pending: 'Paperclip waits for the board to approve the hire.',
+      intro: function (building) { return 'The Manager of ' + building + ' becomes a Paperclip employee with the Project manager role. It runs through the office adapter, so the Security room decides its calls. Like every hire, it has a monthly budget.'; },
+      budgetOk: function (v) { var t = String(v == null ? '' : v).trim(), n = Number(t); return t !== '' && isFinite(n) && n > 0; } },
     readOnlyNote: function (kind) { return kind === 'paperclip' ? 'Read only. Paperclip plans this work.' : ''; },
     unreadable: function (word) { return 'The ' + word + ' plan could not be read. It is not shown.'; },
     // One view of the snapshot's plans field (the Manager panel, the room wall, Ctrl+K). building: only that building's goals.
@@ -130,7 +138,7 @@
         var steps = p.steps || [], note = p.frozen ? p.reason : (p.source === 'paperclip' ? plan.readOnlyNote(p.source) : (p.reason || ''));
         var ho = p.handoff && typeof p.handoff === 'object' ? p.handoff : null, written = ho && ho.tasks ? Object.keys(ho.tasks).length : 0;
         var handoff = ho ? { company: String(ho.company || ''), tasks: ho.tasks || {}, written: written, left: Math.max(0, steps.length - written), failed: p.status === 'handoff-failed', done: p.status === 'handed-off' } : null;
-        return { id: p.id, building: p.building, source: p.source, sourceWord: p.sourceWord, goal: p.goal, readOnly: p.source === 'paperclip', frozen: !!p.frozen, status: p.status,
+        return { id: p.id, building: p.building, source: p.source, sourceWord: p.sourceWord, fromTask: plan.fromTask(p.task), goal: p.goal, readOnly: p.source === 'paperclip', frozen: !!p.frozen, status: p.status,
           handoff: handoff, handoffable: p.source === 'office' && HANDOFF_FROM.indexOf(p.status) >= 0 && steps.length > 0 && !steps.some(function (x) { return x.state === 'working'; }),
           stateWord: plan.goalWord(p.status), note: note, steps: steps, total: steps.length, done: steps.filter(function (x) { return x.state === 'finished'; }).length };
       });
@@ -286,18 +294,15 @@
       return { id: 'hq-' + x.kind + '-' + x.id, label: x.label + ' (' + k[0] + co + ')', hint: x.hint, icon: k[1], group: 'Paperclip', keywords: 'paperclip hq ' + k[0] + ' ' + x.label + (x.hint ? ' ' + x.hint : ''), ref: { kind: x.kind, id: x.id } };
     });
   }
-  // The HQ in the phone list (#215): each employee with its status, its task line and its supervision, and what needs the user (the
-  // approvals that wait in Paperclip, then each employee whose last run failed). Approvals are decided in Paperclip: a row says so, no button.
+  // The HQ in the phone list (#215): each employee with its status, its task line and its supervision, and what needs the user
+  // here (each employee whose last run failed). The approvals and tasks that wait for the user are in the one queue (#210, Needs you above).
   function hqPhone(q) {
     var l = q && q.lobby, ags = (q && q.agents) || [], ap = l && l.approvals;
     var employees = ags.map(function (a) {
       var st = hqStatus(a);
       return { id: a.id, name: a.name, title: a.title || a.role || '', mood: st, line: a.task ? (a.task.identifier ? a.task.identifier + ' ' : '') + a.task.title : 'No open task', supervision: hqSupervision(a) };
     });
-    var needs = ((ap && ap.items) || []).map(function (x) {
-      var kind = String(x.kind || 'request').replace(/_/g, ' ');
-      return { key: 'approval:' + x.id, text: x.by ? 'Approval from ' + x.by + ': ' + kind : 'Approval: ' + kind };
-    });
+    var needs = [];
     employees.forEach(function (e) { if (e.mood.key === 'error') needs.push({ key: 'error:' + e.id, text: e.name + ': ' + e.mood.word }); });
     return { employees: employees, needs: needs, approvalsUnknown: !!l && !ap };
   }
@@ -334,7 +339,60 @@
     });
     return { floors: floors, write: write, note: write ? 'Pick a manager to change a reporting line.' : 'Read only. The HQ write grid denies reporting line changes. Allow them in the write grid to edit.' };
   }
-  var hq = { searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg };
+  // The goals of the executive floor (#207): the goal tree as rows (depth, state word, one line of level, owner and children), the option lists of the
+  // forms, and whether the HQ write grid lets the page write (goalWrite: not Deny). A goal not read is unknown, never an empty list.
+  var GOAL_STATUS = [['planned', 'Planned', 'idle'], ['active', 'Active', 'working'], ['achieved', 'Achieved', 'finished'], ['cancelled', 'Cancelled', 'resting']];
+  var GOAL_LEVEL = { company: 'Company goal', team: 'Team goal', agent: 'Agent goal', task: 'Task goal' };
+  function hqGoals(q) {
+    var write = !!(q && q.goalWrite), g = q && q.goals, agents = (q && q.agents) || [];
+    var rows = ((g && g.rows) || []).map(function (r) {
+      var st = GOAL_STATUS.filter(function (x) { return x[0] === r.status; })[0];
+      var bits = [];
+      if (GOAL_LEVEL[r.level]) bits.push(GOAL_LEVEL[r.level]);
+      bits.push(r.owner ? 'Owner ' + r.owner : r.ownerId ? 'Owner not in the company' : 'No owner');
+      if (r.children) bits.push(r.children + (r.children === 1 ? ' goal' : ' goals') + ' under it');
+      return { id: r.id, title: r.title, depth: r.depth, description: r.description || '', level: r.level, status: { key: st ? st[2] : 'idle', word: st ? st[1] : (r.status || 'Unknown'), value: r.status }, ownerId: r.ownerId || '', parentId: r.parentId || '',
+        line: bits.join(' · ') };
+    });
+    return {
+      unknown: !g, write: write, rows: rows,
+      note: write ? 'Goals are Paperclip\'s. A change here goes to Paperclip after you confirm it.' : 'Read only. The HQ write grid denies goal changes. Allow them in the write grid to edit.',
+      statusOptions: GOAL_STATUS.map(function (x) { return { value: x[0], label: x[1] }; }),
+      levelOptions: [{ value: '', label: 'No level' }].concat(Object.keys(GOAL_LEVEL).map(function (k) { return { value: k, label: GOAL_LEVEL[k].replace(' goal', '') }; })),
+      ownerOptions: [{ value: '', label: 'No owner' }].concat(agents.map(function (a) { return { value: a.id, label: a.name }; })),
+      parentOptions: function () { return [{ value: '', label: 'No parent goal' }].concat(rows.map(function (r) { return { value: r.id, label: r.title }; })); },
+    };
+  }
+  // Routines (#209). routineFacts: the line under a routine. routineForm: the edit form of a routine (null: a new one). routineCalls: the
+  // hqWrite bodies a saved form needs, only for what changed (update for title, text, employee or state; schedule for the cron line).
+  var routineStates = [{ value: 'active', label: 'Active' }, { value: 'paused', label: 'Paused' }, { value: 'archived', label: 'Archived' }];
+  function routineFacts(r) {
+    return [r.agent ? 'For ' + r.agent : 'No employee', r.cron ? 'Cron ' + r.cron : 'No schedule', r.next ? 'Next ' + new Date(r.next).toLocaleString() : 'No next run'].join(' · ');
+  }
+  function routineForm(r) {
+    var t = r && r.trigger;
+    return { id: r ? r.id : null, title: r ? r.title : '', description: '', agent: r ? r.agentId || '' : '', status: r && r.status ? r.status : 'active', cron: t ? t.cron : '', timezone: t ? t.timezone : '', trigger: t ? t.id : '' };
+  }
+  function routineCalls(f, r) {
+    var title = String(f.title || '').trim(), desc = String(f.description || '').trim();
+    if (!f.id) {
+      var c = { kind: 'routine', action: 'create', title: title };
+      if (desc) c.description = desc;
+      if (f.agent) c.agent = f.agent;
+      return [c];
+    }
+    var u = { kind: 'routine', action: 'update', routine: f.id }, calls = [];
+    if (r && title !== r.title) u.title = title;
+    if (desc) u.description = desc;
+    if (r && (f.agent || '') !== (r.agentId || '')) u.agent = f.agent || null;
+    if (r && f.status !== r.status) u.status = f.status;
+    if (Object.keys(u).length > 3) calls.push(u);
+    var cron = String(f.cron || '').trim();
+    if (f.trigger && r && r.trigger && cron && cron !== r.trigger.cron) calls.push({ kind: 'routine', action: 'schedule', routine: f.id, trigger: f.trigger, cron: cron });
+    return calls;
+  }
+  function routineDone(c) { return c.action === 'create' ? 'Routine created' : c.action === 'schedule' ? 'Schedule changed' : 'Routine changed'; }
+  var hq = { goals: hqGoals, routineStates: routineStates, routineFacts: routineFacts, routineForm: routineForm, routineCalls: routineCalls, routineDone: routineDone, searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg };
 
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
   // priced: sessions with a cost figure. unknown: sessions whose agent reports no cost (costUnknown), shown as "unknown".

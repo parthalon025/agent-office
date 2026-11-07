@@ -137,6 +137,21 @@ test('the Costs view (#208): GET /api/hq/costs gives months and budgets to the p
   assert.equal(pc.requests.filter((q) => q.method !== 'GET' && q.method !== 'UPGRADE').length, 0);
 });
 
+test('the catalog (#212): GET /api/hq/catalog gives skills, secret names, plugins and adapters to the page only; no secret value or file reaches any page response', async () => {
+  const r = await call('/api/hq/catalog', null, pageToken, 'GET');
+  assert.equal(r.status, 200);
+  const c = r.json.catalog;
+  assert.deepEqual(c.skills.map((x) => [x.name, x.key]), [['Code review', 'acme/review']]);
+  assert.deepEqual(c.secrets, [{ id: 's1', name: 'GITHUB_TOKEN', provider: 'local_encrypted' }]);
+  assert.deepEqual(c.plugins.map((x) => [x.name, x.status]), [['acme.linear', 'ready']]);
+  assert.deepEqual(c.adapters.map((x) => [x.type, x.source]), [['claude_local', 'builtin'], ['agent_office', 'external']]);
+  assert.equal((await call('/api/hq/catalog', null, agentToken, 'GET')).status, 401, 'the agent token never opens an HQ route');
+  // every page route that carries Paperclip data, and the snapshot: none holds a secret value, a skill file, a manifest or a path
+  const bodies = [r.json, (await call('/api/hq/lobby', null, pageToken, 'GET')).json, (await call('/api/hq/costs', null, pageToken, 'GET')).json, (await call('/api/paperclip', null, pageToken, 'GET')).json, await snapshot()];
+  assert.doesNotMatch(JSON.stringify(bodies), new RegExp(`do-not-show|secret-path|${pageToken}|${agentToken}`));
+  assert.equal(pc.requests.filter((q) => q.method !== 'GET' && q.method !== 'UPGRADE').length, 0, 'the catalog only reads');
+});
+
 test('the page never calls Paperclip: no Paperclip route in any page script', () => {
   for (const f of fs.readdirSync(path.join(SRC, 'public')).filter((x) => x.endsWith('.js'))) {
     const code = fs.readFileSync(path.join(SRC, 'public', f), 'utf8');
@@ -156,6 +171,8 @@ test('org chart editor (#202): the snapshot carries the cables; the reporting li
   const s = await snapshot();
   assert.ok(Array.isArray(s.hq.cables) && s.hq.cables.length === 2, 'cables in the snapshot');
   assert.equal(s.hq.reportingWrite, true, 'the grid does not deny reporting lines by default: the editor is writable');
+  assert.equal(s.hq.goalWrite, true, 'goal writes are not denied by the grid by default (Confirm): the goal forms show');
+  assert.deepEqual(s.hq.goals.rows.map((r) => [r.title, r.depth, r.owner]), [['Ship the Q1 roadmap', 0, 'Grace'], ['Health route', 1, 'Ada']], 'the executive floor goals are a tree with owner names');
   const [grace, ada, linus] = DEMO().agents;
   const patches = () => pc.requests.filter((q) => q.method === 'PATCH').length;
   const before = patches();

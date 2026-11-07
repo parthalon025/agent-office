@@ -16,6 +16,8 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+// AGENT_ROLES of packages/shared/src/constants.ts (0.3.1): the role of an agent is this enum. There is no 'manager'.
+const AGENT_ROLES = ['ceo', 'cto', 'cmo', 'cfo', 'security', 'engineer', 'designer', 'pm', 'qa', 'devops', 'researcher', 'general'];
 
 // One text frame from the server (not masked), RFC 6455 5.2.
 function frame(text, opcode = 0x1) {
@@ -61,6 +63,14 @@ const withHq = (d) => {
     budgets: { companyId, policies: [{ policyId: 'bp1', companyId, scopeType: 'company', scopeId: companyId, scopeName: 'Acme Robotics', metric: 'billed_cents', windowKind: 'calendar_month_utc', amount: 10000, observedAmount: 1240, utilizationPercent: 12.4, status: 'ok', isActive: true },
       { policyId: 'bp2', companyId, scopeType: 'agent', scopeId: ada.id, scopeName: 'Ada', metric: 'billed_cents', windowKind: 'calendar_month_utc', amount: 5000, observedAmount: 4500, utilizationPercent: 90, status: 'warning', isActive: true }],
       activeIncidents: [], pausedAgentCount: 0, pausedProjectCount: 0, pendingApprovalCount: 0 },
+    skills: [{ id: 'k1', companyId, key: 'acme/review', slug: 'review', name: 'Code review', description: 'How we review a change', sourceType: 'local_path', sourceLocator: 'C:/secret-path', sourceRef: null, trustLevel: 'markdown_only', fileInventory: [{ path: 'SKILL.md', kind: 'skill', content: 'do-not-show' }], categories: [] }],
+    plugins: [{ id: 'pl1', pluginKey: 'acme.linear', packageName: '@acme/plugin-linear', version: '1.2.0', apiVersion: 1, categories: [], manifestJson: { secretHint: 'do-not-show' }, status: 'ready', installOrder: 1, packagePath: null, lastError: null }],
+    adapters: [{ type: 'claude_local', label: 'Claude Code', source: 'builtin', modelsCount: 3, loaded: true, disabled: false, capabilities: {} }, { type: 'agent_office', label: 'Agent Office', source: 'external', modelsCount: 0, loaded: true, disabled: false, version: '0.1.0', packageName: 'agent-office-adapter', capabilities: {} }],
+    // company admin (#213): shapes of routes/access.ts (an invite has a tokenHash in the table; the list never carries the token)
+    invites: [{ id: 'v1000000-0000-4000-8000-000000000001', companyId, inviteType: 'company_join', allowedJoinTypes: 'human', humanRole: 'operator', inviteMessage: null, state: 'active', expiresAt: '2026-11-13T10:00:00.000Z', createdAt: '2026-11-06T10:00:00.000Z', tokenHash: 'do-not-show' }],
+    joinRequests: [{ id: 'j1000000-0000-4000-8000-000000000001', companyId, inviteId: 'v1000000-0000-4000-8000-000000000001', requestType: 'human', status: 'pending_approval', requestIp: '203.0.113.9', requestingUserId: 'u9', requestEmailSnapshot: 'sam@example.com', agentName: null, createdAt: '2026-11-06T11:00:00.000Z' }],
+    members: [{ id: 'm1000000-0000-4000-8000-000000000001', companyId, principalType: 'user', principalId: 'u1', status: 'active', membershipRole: 'owner', user: { id: 'u1', name: 'Justin', email: 'j@example.com' }, grants: [] },
+      { id: 'm1000000-0000-4000-8000-000000000002', companyId, principalType: 'user', principalId: 'u2', status: 'active', membershipRole: 'viewer', user: { id: 'u2', name: 'Pat', email: 'pat@example.com' }, grants: [] }],
     secrets: [{ id: 's1', companyId, name: 'GITHUB_TOKEN', provider: 'local_encrypted', description: null, latestVersion: 1, value: 'do-not-show' }],
   };
 };
@@ -96,9 +106,10 @@ const DEMO0 = (hooksFile = null) => {
  */
 export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
   const st = { companies: structuredClone(seed.companies || []), agents: structuredClone(seed.agents || []), issues: structuredClone(seed.issues || []), routines: structuredClone(seed.routines || []), projects: structuredClone(seed.projects || []), liveRuns: structuredClone(seed.liveRuns || []),
-    goals: structuredClone(seed.goals || []), approvals: structuredClone(seed.approvals || []), activity: structuredClone(seed.activity || []), costs: structuredClone(seed.costs || null), secrets: structuredClone(seed.secrets || []), costMonths: structuredClone(seed.costMonths || {}), budgets: structuredClone(seed.budgets || null) };
+    goals: structuredClone(seed.goals || []), approvals: structuredClone(seed.approvals || []), activity: structuredClone(seed.activity || []), costs: structuredClone(seed.costs || null), secrets: structuredClone(seed.secrets || []), skills: structuredClone(seed.skills || []), plugins: structuredClone(seed.plugins || []), adapters: structuredClone(seed.adapters || []), costMonths: structuredClone(seed.costMonths || {}), budgets: structuredClone(seed.budgets || null),
+    invites: structuredClone(seed.invites || []), joinRequests: structuredClone(seed.joinRequests || []), members: structuredClone(seed.members || []) };
   const requests = [], sockets = new Set();
-  const api = { afterPatch: null, failIssueAfter: null, created: 0, comments: 0 };   // set by a test: runs right after a PATCH is answered (a change made in Paperclip at the same time)
+  const api = { afterPatch: null, failIssueAfter: null, created: 0, comments: 0, hires: [], goalsMade: 0 };   // set by a test: runs right after a PATCH is answered (a change made in Paperclip at the same time)
   let seq = 0;
   const send = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
   function emit(type, payload, companyId = st.companies[0]?.id) {
@@ -172,6 +183,22 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
         const k = { id: `m2000000-0000-4000-8000-${String(++api.comments).padStart(12, '0')}`, companyId: i.companyId, issueId: i.id, body: parsed.body };
         return send(res, 201, k);
       }
+      // goals (#207, routes/goals.ts): one goal, create in a company, update
+      if (req.method === 'GET' && (x = m(/^\/api\/goals\/([^/]+)$/))) { const g = st.goals.find((y) => y.id === x[1]); return g ? send(res, 200, g) : send(res, 404, { error: 'Goal not found' }); }
+      if (req.method === 'POST' && (x = m(/^\/api\/companies\/([^/]+)\/goals$/))) {
+        if (!parsed || typeof parsed.title !== 'string' || !parsed.title) return send(res, 422, { error: 'Validation error' });
+        const g = { id: `g2000000-0000-4000-8000-${String(++api.goalsMade).padStart(12, '0')}`, companyId: x[1], description: null, level: 'task', status: 'planned', parentId: null, ownerAgentId: null, ...parsed };
+        st.goals.push(g);
+        emit('activity.logged', { actorType: 'user', actorId: 'board', action: 'goal.created', entityType: 'goal', entityId: g.id, agentId: null, runId: null, details: {} }, x[1]);
+        return send(res, 201, g);
+      }
+      if (req.method === 'PATCH' && (x = m(/^\/api\/goals\/([^/]+)$/))) {
+        const g = st.goals.find((y) => y.id === x[1]);
+        if (!g) return send(res, 404, { error: 'Goal not found' });
+        Object.assign(g, parsed || {});
+        emit('activity.logged', { actorType: 'user', actorId: 'board', action: 'goal.updated', entityType: 'goal', entityId: g.id, agentId: null, runId: null, details: {} }, g.companyId);
+        return send(res, 200, g);
+      }
       if (req.method === 'GET' && (x = m(/^\/api\/approvals\/([^/]+)$/))) { const a = st.approvals.find((y) => y.id === x[1]); return a ? send(res, 200, a) : send(res, 404, { error: 'Approval not found' }); }
       if (req.method === 'POST' && (x = m(/^\/api\/approvals\/([^/]+)\/(approve|reject|request-revision)$/))) {
         const a = st.approvals.find((y) => y.id === x[1]);
@@ -183,6 +210,31 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
         return send(res, 200, a);
       }
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/routines$/))) return send(res, 200, st.routines.filter((r) => r.companyId === x[1]));
+      // the routine writes (#209; routes/routines.ts): create, edit, one trigger's schedule, run now
+      if (req.method === 'POST' && (x = m(/^\/api\/companies\/([^/]+)\/routines$/))) {
+        if (!parsed || typeof parsed.title !== 'string' || !parsed.title) return send(res, 422, { error: 'Validation error' });
+        const r = { id: `r2000000-0000-4000-8000-${String(st.routines.length + 1).padStart(12, '0')}`, companyId: x[1], status: 'active', env: null, assigneeAgentId: null, lastTriggeredAt: null, triggers: [], ...parsed };
+        st.routines.push(r);
+        return send(res, 201, r);
+      }
+      if (req.method === 'PATCH' && (x = m(/^\/api\/routines\/([^/]+)$/))) {
+        const r = st.routines.find((y) => y.id === x[1]);
+        if (!r) return send(res, 404, { error: 'Routine not found' });
+        Object.assign(r, parsed || {});
+        return send(res, 200, r);
+      }
+      if (req.method === 'PATCH' && (x = m(/^\/api\/routine-triggers\/([^/]+)$/))) {
+        const t = st.routines.flatMap((y) => y.triggers).find((y) => y.id === x[1]);
+        if (!t) return send(res, 404, { error: 'Trigger not found' });
+        Object.assign(t, parsed || {});
+        return send(res, 200, t);
+      }
+      if (req.method === 'POST' && (x = m(/^\/api\/routines\/([^/]+)\/run$/))) {
+        const r = st.routines.find((y) => y.id === x[1]);
+        if (!r) return send(res, 404, { error: 'Routine not found' });
+        r.lastTriggeredAt = new Date().toISOString();
+        return send(res, 202, { id: `rr-${++api.comments}`, routineId: r.id, status: 'queued' });
+      }
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/projects$/))) return seed.noProjects ? send(res, 404, { error: 'Not found' }) : send(res, 200, st.projects.filter((r) => r.companyId === x[1]));
       // the HQ read model (#197): goals, pending approvals (the payload is in the answer, as in Paperclip), activity, the cost summary, secret names
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/goals$/))) return seed.noGoals ? send(res, 404, { error: 'Not found' }) : send(res, 200, st.goals.filter((r) => r.companyId === x[1]));
@@ -195,10 +247,74 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
         return mo ? send(res, 200, mo[x[2] === 'agent' ? 'agents' : 'projects'] || []) : send(res, 404, { error: 'Not found' });
       }
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/budgets\/overview$/))) return st.budgets ? send(res, 200, st.budgets) : send(res, 404, { error: 'Not found' });
+      // skills, plugins and adapters (#212; Paperclip's answers carry skill files, a plugin manifest and adapter capabilities too)
+      if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/skills$/))) return seed.noSkills ? send(res, 404, { error: 'Not found' }) : send(res, 200, st.skills.filter((r) => r.companyId === x[1]));
+      if (req.method === 'GET' && m(/^\/api\/plugins$/)) return send(res, 200, st.plugins);
+      if (req.method === 'GET' && m(/^\/api\/adapters$/)) return send(res, 200, st.adapters);
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/secrets$/))) return send(res, 200, st.secrets.filter((r) => r.companyId === x[1]));
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/live-runs$/))) return send(res, 200, st.liveRuns);
+      // company admin (#213): settings, invites, join requests and members (routes/companies.ts, routes/access.ts)
+      if (req.method === 'PATCH' && (x = m(/^\/api\/companies\/([^/]+)$/))) {
+        const co = st.companies.find((y) => y.id === x[1]);
+        if (!co) return send(res, 404, { error: 'Company not found' });
+        Object.assign(co, parsed || {});
+        emit('activity.logged', { actorType: 'user', actorId: 'board', action: 'company.updated', entityType: 'company', entityId: co.id, agentId: null, runId: null, details: {} }, co.id);
+        return send(res, 200, co);
+      }
+      if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/invites$/))) return send(res, 200, { invites: st.invites.filter((r) => r.companyId === x[1]), nextOffset: null });
+      if (req.method === 'POST' && (x = m(/^\/api\/companies\/([^/]+)\/invites$/))) {
+        if (!parsed || !['human', 'agent', 'both'].includes(parsed.allowedJoinTypes)) return send(res, 422, { error: 'Validation error' });
+        const v = { id: `v2000000-0000-4000-8000-${String(st.invites.length + 1).padStart(12, '0')}`, companyId: x[1], inviteType: 'company_join', allowedJoinTypes: parsed.allowedJoinTypes, humanRole: parsed.humanRole || null, inviteMessage: parsed.agentMessage || null, state: 'active', expiresAt: '2026-11-13T10:00:00.000Z', createdAt: new Date().toISOString() };
+        st.invites.push(v);
+        return send(res, 201, { ...v, token: 'pcp_invite_do-not-show', inviteUrl: 'http://127.0.0.1/invite/pcp_invite_do-not-show' });
+      }
+      if (req.method === 'POST' && (x = m(/^\/api\/invites\/([^/]+)\/revoke$/))) {
+        const v = st.invites.find((y) => y.id === x[1]);
+        if (!v) return send(res, 404, { error: 'Invite not found' });
+        v.state = 'revoked';
+        return send(res, 200, v);
+      }
+      if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/join-requests$/))) return send(res, 200, st.joinRequests.filter((r) => r.companyId === x[1]));
+      if (req.method === 'POST' && (x = m(/^\/api\/companies\/([^/]+)\/join-requests\/([^/]+)\/(approve|reject)$/))) {
+        const j = st.joinRequests.find((y) => y.id === x[2] && y.companyId === x[1]);
+        if (!j) return send(res, 404, { error: 'Join request not found' });
+        if (j.status !== 'pending_approval') return send(res, 409, { error: 'Join request is not pending' });
+        j.status = x[3] === 'approve' ? 'approved' : 'rejected';
+        return send(res, 200, j);
+      }
+      if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/members$/))) return send(res, 200, { members: st.members.filter((r) => r.companyId === x[1]), access: { currentUserRole: 'owner' } });
+      if (req.method === 'PATCH' && (x = m(/^\/api\/companies\/([^/]+)\/members\/([^/]+)$/))) {
+        const mm = st.members.find((y) => y.id === x[2] && y.companyId === x[1]);
+        if (!mm) return send(res, 404, { error: 'Member not found' });
+        if (parsed && parsed.membershipRole) mm.membershipRole = parsed.membershipRole;
+        if (parsed && parsed.status) mm.status = parsed.status;
+        return send(res, 200, mm);
+      }
       // the agent as saved, with what buildAgentDetail adds (routes/agents.ts; the board reads the whole config)
       if (req.method === 'GET' && (x = m(/^\/api\/agents\/([^/]+)$/))) { const a = st.agents.find((y) => y.id === x[1]); return a ? send(res, 200, { ...a, chainOfCommand: [], access: {} }) : send(res, 404, { error: 'Agent not found' }); }
+      // hire an employee (#201, #204; routes/agents.ts handleAgentHire, createAgentHireSchema 0.3.1: name, role from AGENT_ROLES (a Zod enum:
+      // another word is 400), title, adapterType, adapterConfig, reportsTo, budgetMonthlyCents (int, nonnegative), desiredSkills). Answers 201
+      // { agent, approval }: approval is a pending hire_agent approval, and the agent pending_approval, when the company sets
+      // requireBoardApprovalForNewAgents, else null. api.hires lists what was sent.
+      if (req.method === 'POST' && (x = m(/^\/api\/companies\/([^/]+)\/agent-hires$/))) {
+        if (!parsed || typeof parsed.name !== 'string' || !parsed.name || typeof parsed.adapterType !== 'string') return send(res, 400, { error: 'Validation error' });
+        if (parsed.role !== undefined && !AGENT_ROLES.includes(parsed.role)) return send(res, 400, { error: 'Validation error', details: [{ path: ['role'], message: 'Invalid enum value' }] });
+        if (parsed.budgetMonthlyCents !== undefined && !(Number.isInteger(parsed.budgetMonthlyCents) && parsed.budgetMonthlyCents >= 0)) return send(res, 400, { error: 'Validation error' });
+        if (parsed.reportsTo && !st.agents.some((y) => y.id === parsed.reportsTo)) return send(res, 422, { error: 'Manager not found' });
+        const co = st.companies.find((y) => y.id === x[1]);
+        if (!co) return send(res, 404, { error: 'Company not found' });
+        const pending = co.requireBoardApprovalForNewAgents === true;
+        const n = st.agents.length + 1;
+        const a = { id: `a4000000-0000-4000-8000-${String(n).padStart(12, '0')}`, companyId: x[1], title: null, reportsTo: null, budgetMonthlyCents: 0, spentMonthlyCents: 0, adapterConfig: {}, runtimeConfig: {}, role: 'general', ...parsed, status: pending ? 'pending_approval' : 'idle', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+        st.agents.push(a); api.hires.push(parsed);
+        let approval = null;
+        if (pending) {
+          approval = { id: `p4000000-0000-4000-8000-${String(n).padStart(12, '0')}`, companyId: x[1], type: 'hire_agent', status: 'pending', requestedByAgentId: null, requestedByUserId: 'board', payload: { name: a.name, role: a.role, agentId: a.id }, decisionNote: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+          st.approvals.push(approval);
+        }
+        emit('activity.logged', { actorType: 'user', actorId: 'board', action: 'agent.hire_created', entityType: 'agent', entityId: a.id, agentId: null, runId: null, details: {} }, a.companyId);
+        return send(res, 201, { agent: a, approval });
+      }
       if (req.method === 'PATCH' && (x = m(/^\/api\/agents\/([^/]+)$/))) {
         const a = st.agents.find((y) => y.id === x[1]);
         if (!a) return send(res, 404, { error: 'Agent not found' });

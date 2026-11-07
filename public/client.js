@@ -19,7 +19,7 @@
     dismiss: '/api/dismiss', export: '/api/export', ext: '/api/ext', extList: '/api/ext/list',
     floorCleanup: '/api/floor/cleanup', floorCreate: '/api/floor/create', floorDelete: '/api/floor/delete', floorStale: '/api/floor/stale',
     fork: '/api/fork', goalApprove: '/api/goal/approve', goalCancel: '/api/goal/cancel', goalHandoff: '/api/goal/handoff',
-    goalRetry: '/api/goal/retry', hqReportingLine: '/api/hq/reporting-line', history: '/api/history', historyForget: '/api/history/forget', info: '/api/info',
+    goalRetry: '/api/goal/retry', managerHire: '/api/manager/hire', managers: '/api/managers', hqReportingLine: '/api/hq/reporting-line', hqWrite: '/api/hq/write', history: '/api/history', historyForget: '/api/history/forget', info: '/api/info',
     interrupt: '/api/interrupt', layout: '/api/layout', merge: '/api/merge', message: '/api/message', notesSave: '/api/notes/save',
     open: '/api/open', orientation: '/api/orientation', orientationStep: '/api/orientation/step', paperclipConnect: '/api/paperclip/connect', paperclipCompany: '/api/paperclip/company', paperclipDisconnect: '/api/paperclip/disconnect',
     paperclipSupervise: '/api/paperclip/supervise', personaDelete: '/api/persona/delete', personaSave: '/api/persona/save',
@@ -33,7 +33,8 @@
     startup: '/api/startup', teamDelete: '/api/team/delete', teamSave: '/api/team/save', teamStart: '/api/team/start',
     templateDelete: '/api/template/delete', templateSave: '/api/template/save', tree: '/api/tree', trustApply: '/api/trust/apply',
     trustDismiss: '/api/trust/dismiss', trustWithdraw: '/api/trust/withdraw', worktreeRemove: '/api/worktree/remove',
-    hqCosts: '/api/hq/costs',
+    hqCosts: '/api/hq/costs', hqHire: '/api/hq/hire', hqHireDesk: '/api/hq/hire-desk', hqCatalog: '/api/hq/catalog', hqAccess: '/api/hq/access',
+    memory: '/api/memory', memoryRemember: '/api/memory/remember', memoryForget: '/api/memory/forget',
     events: '/events', launch: '/launch', signin: '/remote/signin'
   });
   var ACCESS = { auth: 1, launch: 1, signin: 1 };   // how the page gets ready: they never wait for it

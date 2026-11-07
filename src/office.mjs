@@ -12,8 +12,9 @@ import * as launch from './launch.mjs';
 import { createCampus } from './campus.mjs';
 import { slimPayload, cleanIds as cleanPaperclipIds } from './payload.mjs';
 import { createHq, companyDraft } from './paperclip.mjs';
-import { WRITE_KINDS, writeValueOf, setWriteCell } from './hq-model.mjs';
-import { createRuntime } from './paperclip-runtime.mjs';
+import { WRITE_KINDS, writeValueOf, setWriteCell, HIRE_ROLES } from './hq-model.mjs';
+import { createRuntime, runtimePaths } from './paperclip-runtime.mjs';
+import { createMemory, createEmbedder } from './memory.mjs';
 import { createRuns } from './paperclip-runs.mjs';
 import { recap as recapOf, away as awayOf } from './rituals.mjs';
 import { mark as markOrientation, view as orientationView } from './orientation.mjs';
@@ -34,6 +35,7 @@ import { createState } from './state.mjs';
 import { addRecent, recentChoices } from './recent.mjs';
 import { cleanRecord, layoutView, catalogView, functionOf } from './archetypes.mjs';
 import { createManager, createPlanBoard, officeSource } from './manager.mjs';
+import { createManagerEmployees } from './manager-employees.mjs';
 import { setPersona, removePersona, personaOf, personaPrompt, addStarters, addStarterTeams, setTeam, removeTeam, teamOf, exportCustom, importCustom, setScreen } from './personas.mjs';
 import { createHolds } from './holds.mjs';
 import { createNotes, scanNote } from './notes.mjs';
@@ -499,11 +501,31 @@ export function createOffice(cfg) {
   // The org chart editor's write (#202) is one write of hq.write (#198): the kind `reporting`, so the HQ write grid decides it (Deny refuses with
   // 403, Confirm asks first and the editor's own Change button is that Confirm, Allow sends) and the writer checks a loop, a self report or a
   // stranger before anything is asked. The snapshot's hq tells the page whether to offer the editor: it is writable unless the grid says Deny.
-  const hqView = () => { const v = hq.view(); return v && { ...v, reportingWrite: writeValueOf(saved.get('hqGrid'), 'reporting') !== 'deny' }; };
+  const hqView = () => { const v = hq.view(); return v && { ...v, reportingWrite: writeValueOf(saved.get('hqGrid'), 'reporting') !== 'deny', goalWrite: writeValueOf(saved.get('hqGrid'), 'goal') !== 'deny' }; };
   async function reportingLineHq(body) {
     const r = await hq.write({ kind: 'reporting', action: 'set', agent: String(body.agent || ''), manager: body.manager ? String(body.manager) : null }, { confirmed: body.confirmed === true });
     broadcast();
     return r;
+  }
+
+  // The HR desk (#201): a hire is one write of hq.write (kind `hire`), so the write grid decides it (Deny refuses, Confirm asks first with the
+  // exact summary, Allow sends). With `welcome` the new employee gets its onboarding task, a second write of the same writer (kind `task`,
+  // assigned to the new id): a first stand-up note. The task rides on the hire's Confirm. A failed task never undoes the hire: the answer says so.
+  const HIRE_FIELDS = ['name', 'role', 'title', 'manager', 'agentKind', 'model', 'isolation', 'budgetDollars', 'skills'];
+  const ONBOARDING = 'Introduce yourself. Read the room notes, then add one line to the notes board with office_room_update: who you are, what you will do first and what you need. That is your first stand-up note.';
+  async function hireHq(body) {
+    const confirmed = body.confirmed === true, plan = { kind: 'hire', action: 'create' };
+    for (const k of HIRE_FIELDS) if (body[k] !== undefined) plan[k] = body[k];
+    const r = await hq.write(plan, { confirmed });
+    const out = { ...r, onboarding: 'none' };
+    if (body.welcome === true) {
+      try {
+        await hq.write({ kind: 'task', action: 'create', title: `Welcome, ${String(r.name).slice(0, 60)}: post your first stand-up note`, description: ONBOARDING, assigneeAgentId: r.id }, { confirmed });
+        out.onboarding = 'sent';
+      } catch (e) { out.onboarding = 'failed'; out.onboardingError = e.message; }
+    }
+    broadcast();
+    return out;
   }
 
   // ---------- buildings: repositories and their worktrees (campus.mjs) ----------
@@ -1080,10 +1102,55 @@ export function createOffice(cfg) {
   manager.restore(saved.get('goals'));
   // The office adapter (#200, paperclip-runs.mjs): a run Paperclip hands to the office is an ordinary office session of the employee's agent kind
   // (provider seam, Security room, holds, Needs you). The plugin in Paperclip asks for the log and the result; a call that waits is in Needs you.
+  // Company memory (#205, memory.mjs): one SQLite file per company next to the Paperclip data (owner-only), keyword search always and
+  // semantic search when LM Studio or Ollama lists an embedding model. Off where node:sqlite is missing. A run's wake prompt gets a few
+  // matching memories (recall), and a run that ends well leaves its last words (remember).
+  const memory = createMemory({
+    dir: runtimePaths({ root: ROOT, env: process.env, port: PORT }).memory, sqlite: process.getBuiltinModule?.('node:sqlite')?.DatabaseSync, writeSecret,
+    embedder: process.env.OFFICE_EMBED === 'off' ? null : createEmbedder({ servers: [{ label: 'LM Studio', baseUrl: lmstudio.baseUrl }, { label: 'Ollama', baseUrl: ollama.baseUrl }] }),
+  });
+  const memoryCompany = () => {
+    const v = hq.view()?.company, c = saved.get('paperclip')?.company;
+    return v?.id ? { id: String(v.id), name: v.name || 'Paperclip' } : typeof c === 'string' && c ? { id: c, name: 'Paperclip' } : null;
+  };
+  async function memoryView(query) {
+    const status = await memory.status(), company = memoryCompany();
+    if (!status.available || !company) return { memory: status, company, items: [], total: 0 };
+    const q = String(query.get('q') || '').trim();
+    if (q) { const r = await memory.search(company.id, q, { limit: 50 }); return { memory: { ...status, search: r.semantic ? 'semantic' : status.search === 'semantic' ? 'keyword' : status.search }, company, items: r.items, total: r.items.length, query: q }; }
+    const b = await memory.browse(company.id, { limit: Number(query.get('limit')) || 50, offset: Number(query.get('offset')) || 0 });
+    return { memory: status, company, items: b.items, total: b.total };
+  }
+  async function rememberMemory(body) {
+    const company = memoryCompany();
+    if (!company) throw httpError(409, 'There is no company yet. Create your company first.');
+    const r = await memory.remember(company.id, { text: body.text, source: 'user' });
+    addFeed(PAPERCLIP, 'tool', `Company memory: ${r.existed ? 'already known' : 'remembered one fact'}.`);
+    return { ok: true, ...r };
+  }
+  async function forgetMemory(body) {
+    const company = memoryCompany();
+    if (!company) throw httpError(409, 'There is no company yet.');
+    if (!Number.isInteger(body.id)) throw httpError(400, 'Name the memory by its number.');
+    if (body.confirmed !== true) throw askFirst('memory', 'Forget this memory? The company loses it for good. Its employees no longer see it in their prompts.');
+    if (!(await memory.forget(company.id, body.id))) throw httpError(404, 'No such memory.');
+    addFeed(PAPERCLIP, 'tool', 'Company memory: forgot one fact.');
+    return { ok: true };
+  }
+  process.once('exit', () => memory.close());
   const paperclipRuns = createRuns({
     open: (o) => openSession(o), send: (uid, text) => sendMessage(uid, text, [], { answers: false }), session: (uid) => sessions.get(uid),
     close: (uid) => closeSession(uid), feed: (s, kind, text) => addFeed(s, kind, text), changed: () => broadcast(),
+    recall: (company, query) => memory.recall(company, query), remember: (company, m) => memory.remember(company, m),
   });
+  // The office Manager as a Paperclip employee (#204): a task assigned to it becomes a goal, the steps are sub-issues, the result a comment.
+  const managerEmployees = createManagerEmployees({ hq, manager, state: { get: (k) => saved.get(k), set: (k, v) => saved.set(k, v), save: () => savePersisted() }, feed: (t) => addFeed(PAPERCLIP, 'tool', t) });
+  let managerSyncQueued = false;
+  function managerSync() {
+    if (managerSyncQueued) return;
+    managerSyncQueued = true;
+    setImmediate(() => { managerSyncQueued = false; managerEmployees.sync().catch((e) => console.warn(`Manager employees: ${e.message}`)); });
+  }
   const planBoard = createPlanBoard({ sources: [officeSource(manager), hq.planSource] });
   // Called after every state change: a step ends with the turn of its agent, and a freed agent may take a waiting step.
   let goalTickQueued = false, freeSig = '';
@@ -1260,6 +1327,7 @@ export function createOffice(cfg) {
   readPlan();
   function broadcast() {
     goalTick();    // a step ends with its agent's turn (#156)
+    managerSync(); // a task for a Manager employee, and the report of its goal (#204)
     paperclipRuns.tick(); // so does a Paperclip run (#200)
     noteRooms();   // every state change: a room gets its floor and its name even while no page is connected (#92)
     if (!pending) pending = setTimeout(flush, BROADCAST_MS);
@@ -1316,10 +1384,20 @@ export function createOffice(cfg) {
     // The HQ read model behind the Lobby (#197): the snapshot's HQ part plus goals, pending approvals and activity. Names and counts only: no key, secret value or payload.
     R('GET', '/api/hq/lobby', 'page', () => ({ hq: hq.model() })),
     // The HQ write grid and the one writer (#198): the grid's cells, one change of a cell, and a write by kind (409 with the question until confirmed: true).
+    R('POST', '/api/hq/hire', 'page', ({ body }) => hireHq(body)),
+    R('GET', '/api/hq/hire-desk', 'page', () => ({ roles: HIRE_ROLES, write: writeValueOf(saved.get('hqGrid'), 'hire') !== 'deny' })),
     R('GET', '/api/hq/grid', 'page', () => ({ grid: hqGridView() })),
     R('POST', '/api/hq/grid/set', 'page', ({ body }) => setHqGrid(body)),
     R('POST', '/api/hq/write', 'page', ({ body }) => writeHq(body)),
     R('GET', '/api/hq/costs', 'page', async () => ({ costs: await hq.costs() })),
+    // Company memory (#205): browse and search (`?q=`), remember a fact as the user, forget one behind the ask-first Confirm (kind memory).
+    R('GET', '/api/memory', 'page', ({ query }) => memoryView(query)),
+    R('POST', '/api/memory/remember', 'page', ({ body }) => rememberMemory(body)),
+    R('POST', '/api/memory/forget', 'page', ({ body }) => forgetMemory(body)),
+    // Company skills, secret names, plugins and adapters (#212): names and states only, never a secret value. Reads only.
+    R('GET', '/api/hq/catalog', 'page', async () => ({ catalog: await hq.catalog() })),
+    // Company admin (#213): the company's invites, join requests and members: names, roles and states (no invite token or link, no request IP).
+    R('GET', '/api/hq/access', 'page', async () => ({ access: await hq.access() })),
     // The Paperclip runtime (#193): install (409 without the Confirm), start, stop, and the board key's approval link. Never the key.
     R('GET', '/api/paperclip/runtime', 'page', () => ({ runtime: runtime.status() })),
     // The transcript of a run of the office adapter, for the desk screen (#211): the log the plugin reads, live or kept after the end.
@@ -1488,6 +1566,10 @@ export function createOffice(cfg) {
     // Manager goals (#156): start { building, goal, approveFirst?, spendLimit?, confirmed? }, approve, cancel and retry { id, step }.
     R('POST', '/api/goal/start', 'page', ({ body }) => startGoal(body)),
     R('POST', '/api/goal/approve', 'page', async ({ body }) => { if (!await manager.approve(String(body.id))) throw httpError(409, 'That goal does not wait for approval.'); return { ok: true }; }),
+    // Managers as Paperclip employees (#204): the Managers of the connected company, and the hire of one { building, name?, budgetDollars,
+    // confirmed? } (the one hire plan, hq.write kind hire with officeManager: the grid's Hires cell; no budget is 400, as for every hire).
+    R('GET', '/api/managers', 'page', () => ({ managers: managerEmployees.list() })),
+    R('POST', '/api/manager/hire', 'page', ({ body }) => managerEmployees.register({ building: String(body.building || ''), name: body.name === undefined ? undefined : String(body.name), budgetDollars: body.budgetDollars, confirmed: body.confirmed === true })),
     R('POST', '/api/goal/handoff', 'page', ({ body }) => handoffGoalHq(body)),
     R('POST', '/api/goal/cancel', 'page', ({ body }) => { if (!manager.cancel(String(body.id))) throw httpError(409, 'That goal is done or stopped.'); return { ok: true }; }),
     R('POST', '/api/goal/retry', 'page', async ({ body }) => { const r = await manager.retry(String(body.id), String(body.step)); if (!r.ok) throw httpError(409, r.reason); return { ok: true }; }),
@@ -1522,6 +1604,6 @@ export function createOffice(cfg) {
     /** The Paperclip the office runs: the adapter ends it at exit (killNow is synchronous) and tests drive it. */
     runtime,
     /** Ends what the office started that would hold a process open (the process helper). */
-    stop() { if (walker) { walker.kill(); walker = null; } },
+    stop() { if (walker) { walker.kill(); walker = null; } memory.close(); },
   };
 }

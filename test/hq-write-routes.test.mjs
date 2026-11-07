@@ -49,11 +49,11 @@ test('not connected: a write is 409 and nothing is sent', async () => {
   assert.equal(pc.requests.length, 0);
 });
 
-test('the grid: ten kinds, the defaults, and no cell saved until the user sets one', async () => {
+test('the grid: twelve kinds, the defaults, and no cell saved until the user sets one', async () => {
   const r = await get('/api/hq/grid');
   assert.equal(r.status, 200);
   assert.deepEqual(r.json.grid.map((x) => [x.kind, x.value, x.set]), [['hire', 'confirm', false], ['pause', 'confirm', false], ['budget', 'confirm', false], ['approval', 'confirm', false], ['reporting', 'confirm', false],
-    ['routine', 'confirm', false], ['access', 'confirm', false], ['secret', 'confirm', false], ['task', 'allow', false], ['comment', 'allow', false], ['company', 'confirm', false]]);
+    ['routine', 'confirm', false], ['access', 'confirm', false], ['secret', 'confirm', false], ['task', 'allow', false], ['comment', 'allow', false], ['company', 'confirm', false], ['goal', 'confirm', false]]);
   assert.deepEqual(r.json.grid.find((x) => x.kind === 'secret').options, ['confirm', 'deny']);
   assert.deepEqual(state().hqGrid || {}, {});
 });
@@ -89,6 +89,20 @@ test('a task create answers with its id; a bad write is 400', async () => {
   assert.equal(writes().length, n);
 });
 
+test('routines (#209): Run sends one request only after the Confirm; the view lists the routine with its schedule', async () => {
+  const view = (await get('/api/paperclip')).json.hq.routines[0];
+  assert.equal(view.id, D.routines[0].id);
+  assert.equal(view.trigger.cron, '0 9 * * 1');
+  const body = { kind: 'routine', action: 'run', routine: D.routines[0].id };
+  const n = writes().length;
+  const q = await call('/api/hq/write', body);
+  assert.equal(q.status, 409);
+  assert.equal(q.json.write.summary, 'Run a routine now');
+  assert.equal(writes().length, n, 'the question sent nothing');
+  assert.equal((await call('/api/hq/write', { ...body, confirmed: true })).status, 200);
+  assert.deepEqual(writes().at(-1), ['POST', `/api/routines/${D.routines[0].id}/run`, {}]);
+});
+
 test('changing a cell: stricter at once, looser only with the painted Confirm, a secret never Allow; only set cells are saved', async () => {
   const deny = await call('/api/hq/grid/set', { kind: 'comment', value: 'deny' });
   assert.deepEqual([deny.status, deny.json.from, deny.json.to], [200, 'allow', 'deny']);
@@ -118,4 +132,21 @@ test('only the page token reaches the grid and the writer; the agent token does 
     assert.ok(r.status === 401 || r.status === 403, `${route}: ${r.status}`);
   }
   assert.equal((await call('/api/hq/grid', null, agentToken, 'GET')).status === 200, false);
+});
+
+test('company admin (#213): the access read and an access write are page routes only, and the agent token reaches neither', async () => {
+  const INVITE = D.invites[0].id;
+  const read = await get('/api/hq/access');
+  assert.equal(read.status, 200);
+  assert.deepEqual(read.json.access.invites.map((x) => x.id), [INVITE]);
+  assert.doesNotMatch(JSON.stringify(read.json), /do-not-show|tokenHash/);
+  const n = writes().length;
+  const q = await call('/api/hq/write', { kind: 'access', action: 'revoke', invite: INVITE });
+  assert.equal(q.status, 409);
+  assert.equal(q.json.confirm, 'write');
+  assert.equal(writes().length, n, 'the question sent nothing');
+  const yes = await call('/api/hq/write', { kind: 'access', action: 'revoke', invite: INVITE, confirmed: true });
+  assert.deepEqual([yes.status, yes.json], [200, { ok: true }]);
+  assert.deepEqual(writes().at(-1), ['POST', `/api/invites/${INVITE}/revoke`, {}]);
+  for (const r of [await call('/api/hq/write', { kind: 'access', action: 'invite', allowedJoinTypes: 'both', confirmed: true }, agentToken), await call('/api/hq/access', null, agentToken, 'GET')]) assert.ok(r.status === 401 || r.status === 403);
 });

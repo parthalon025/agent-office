@@ -20,6 +20,14 @@ export const SHAPES = {
   costsByAgent: { list: true, fields: { agentId: 'string', costCents: 'number' } },
   costsByProject: { list: true, fields: { projectId: 'string', costCents: 'number' } },
   budgets: { list: false, fields: { policies: 'array' } },
+  // Skills, plugins and adapters (#212): company skills (routes/company-skills.ts), installed plugins (routes/plugins.ts) and the adapter list (routes/adapters.ts).
+  skills: { list: true, fields: { id: 'string', key: 'string', name: 'string' } },
+  plugins: { list: true, fields: { id: 'string', pluginKey: 'string', status: 'string' } },
+  adapters: { list: true, fields: { type: 'string', label: 'string', source: 'string' } },
+  // Company admin (#213): the invites, join requests and members of a company (routes/access.ts). Invites and members come in an object.
+  invites: { list: false, fields: { invites: 'array' } },
+  joinRequests: { list: true, fields: { id: 'string', status: 'string', requestType: 'string' } },
+  members: { list: false, fields: { members: 'array' } },
 };
 
 const typeOf = (v) => (v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v);
@@ -138,6 +146,30 @@ export function lobbyOf(i) {
 }
 
 
+// ---------- the inbox (#210) ----------
+/**
+ * What Paperclip holds for the user, as items of the one queue (Needs you): each pending approval, then each open task assigned to a
+ * person (my issues: `assigneeUserId`; the office has one user, so any person assignee is the board). Each: { id, kind: 'approval' | 'issue',
+ * text, by, at }. Names and statuses only: never a payload. null: neither list was read (unknown, not an empty inbox). Oldest first, capped.
+ * in: { agents: [agent views], issues: [Paperclip issues]|null, approvals: [{ id, type, requestedByAgentId, at }]|null }.
+ */
+export const INBOX_CAP = 20;
+export function inboxOf(i) {
+  if (!i.approvals && !i.issues) return null;
+  const nameOf = (id) => (i.agents.find((a) => a.id === id) || {}).name || '';
+  const out = [];
+  for (const p of i.approvals || []) {
+    const by = nameOf(p.requestedByAgentId), kind = String(p.type || 'request').replace(/_/g, ' ');
+    out.push({ id: `approval:${p.id}`, kind: 'approval', text: by ? `Approval from ${by}: ${kind}` : `Approval: ${kind}`, by, at: p.at || 0 });
+  }
+  for (const x of i.issues || []) {
+    if (!x || !x.id || !x.assigneeUserId || x.status === 'done' || x.status === 'cancelled') continue;
+    const name = [x.identifier, x.title].filter(Boolean).join(' ');
+    out.push({ id: `issue:${x.id}`, kind: 'issue', text: `Task for you${x.status === 'blocked' ? ' (blocked)' : ''}: ${name || 'untitled'}`, by: '', at: Date.parse(x.updatedAt || x.createdAt || '') || 0 });
+  }
+  return out.sort((a, b) => a.at - b.at).slice(0, INBOX_CAP);
+}
+
 // ---------- the write grid (#198, ADR 0010) ----------
 // Each write kind is Confirm, Allow or Deny. Defaults: Confirm for the consequential kinds, Allow for the user's own task edits and
 // comments. A secret never takes Allow. The saved slice holds only the cells the user set (a value equal to the default counts: the user
@@ -156,6 +188,7 @@ export const WRITE_KINDS = {
   task: { label: 'Tasks', options: RULES, def: 'allow' },
   comment: { label: 'Comments', options: RULES, def: 'allow' },
   company: { label: 'Company', options: RULES, def: 'confirm' },
+  goal: { label: 'Goals', options: RULES, def: 'confirm' },
 };
 const kindRow = (k) => (typeof k === 'string' && Object.hasOwn(WRITE_KINDS, k) ? WRITE_KINDS[k] : null);
 const gridError = (status, message) => Object.assign(new Error(message), { status });
@@ -196,10 +229,17 @@ export function setWriteCell(grid, change) {
 // planWrite(body) -> { kind, action, method, path(companyId), body, targets, summary }. body: { kind, action, ...fields }. The fields are
 // checked here (400), every id must be a plain id (it goes into a path), and a target is a thing the writer reads before it writes
 // (issue, approval, agent): it must belong to the connected company. Only the first writes are planned: task (create, assign), comment
-// (add), approval (approve, reject, revise), reporting (set, #202) and company (create, #199: scope 'none', it needs no connection). Another kind in the grid
+// (add), approval (approve, reject, revise), routine (create, update, schedule, run, #209), reporting (set, #202), goal (create, update, #207),
+// hire (create, #201), company (create, #199: scope 'none', it needs no connection; update, #213) and access (invite, revoke, approveJoin,
+// rejectJoin, member, #213). Another kind in the grid
 // has no plan yet, and is 400 (never sent).
+const OFFICE_ADAPTER_TYPE = 'agent_office';   // the word of OFFICE_ADAPTER in paperclip.mjs (which imports this module)
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const ISSUE_STATUS = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'];
+export const GOAL_STATUSES = ['planned', 'active', 'achieved', 'cancelled'], GOAL_LEVELS = ['company', 'team', 'agent', 'task'];
+const ROUTINE_STATUS = ['active', 'paused', 'archived'];
+const CRON_RE = /^[0-9*/,\-A-Za-z ]+$/, TZ_RE = /^[A-Za-z][A-Za-z0-9_+\-/]{0,63}$/;
+const JOIN_TYPES = ['human', 'agent', 'both'], HUMAN_ROLES = ['owner', 'admin', 'operator', 'viewer'], MEMBER_STATUS = ['pending', 'active', 'suspended'];
 const TITLE_MAX = 200, TEXT_MAX = 10000, NOTE_MAX = 2000, DESC_MAX = 4000, NAME_MAX = 80, COMPANY_DESC_MAX = 300;
 const short = (t, n = 80) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 function idOf(v, what) {
@@ -218,6 +258,37 @@ const decision = (action, route, summary) => [action, (b) => {
   const approval = idOf(b.approval, 'approval'), note = textOf(b.note, 'note', NOTE_MAX);
   return { method: 'POST', path: () => `/api/approvals/${approval}/${route}`, body: note ? { decisionNote: note } : {}, targets: [{ type: 'approval', id: approval }], summary };
 }];
+// The HR desk (#201): the role cards. role is Paperclip's role word (AGENT_ROLES of the pinned release); text is what the card says. A hire
+// always names a role from this list, so the writer never sends a role Paperclip does not know.
+export const HIRE_ROLES = [
+  { role: 'engineer', label: 'Engineer', text: 'Writes and changes code.' },
+  { role: 'qa', label: 'Quality', text: 'Tests changes and reports faults.' },
+  { role: 'designer', label: 'Designer', text: 'Shapes screens and flows.' },
+  { role: 'pm', label: 'Project manager', text: 'Plans work and keeps it moving.' },
+  { role: 'researcher', label: 'Researcher', text: 'Reads sources and writes findings.' },
+  { role: 'devops', label: 'Operations', text: 'Runs builds, releases and servers.' },
+  { role: 'security', label: 'Security', text: 'Reviews risk and access.' },
+  { role: 'general', label: 'General', text: 'Takes any task.' },
+];
+const HIRE_ROLE_IDS = new Set(HIRE_ROLES.map((r) => r.role));
+// The office Manager (#204) is a hire like any other (one plan, ADR 0010: a hire is supervised and budgeted). Paperclip's role is an enum
+// (AGENT_ROLES, validated by createAgentHireSchema) with no 'manager', so the Manager takes the Project manager role; the office marks it
+// with adapterConfig.manager and knows its Managers from its own `managers` slice, never from the role.
+export const MANAGER_ROLE = 'pm', MANAGER_TITLE = 'Agent Office Manager';
+const HIRE_KIND_RE = /^[a-z][a-z0-9-]{0,39}$/, HIRE_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,99}$/, SKILL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$/;
+export const HIRE_BUDGET_MAX = 100000;   // dollars a month: a typing slip (an extra zero) is refused, not sent
+export const HIRE_ISOLATIONS = ['worktree', 'same'];
+function skillsOf(v) {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v)) throw gridError(400, 'Skills are a list of names.');
+  const out = [];
+  for (const k of v) {
+    if (typeof k !== 'string' || !SKILL_RE.test(k)) throw gridError(400, 'A skill name is not valid.');
+    if (!out.includes(k)) out.push(k);
+  }
+  if (out.length > 20) throw gridError(400, 'Give at most 20 skills.');
+  return out;
+}
 const PLANS = {
   task: {
     create(b) {
@@ -226,8 +297,16 @@ const PLANS = {
       if (description) body.description = description;
       if (b.status !== undefined && b.status !== null) { if (!ISSUE_STATUS.includes(b.status)) throw gridError(400, 'Unknown task status.'); body.status = b.status; }
       const targets = [];
+      // A sub-task (#204: a Manager reports each step as a sub-issue of the task it works on): the parent is read first and must be in the company.
+      if (b.parentId !== undefined && b.parentId !== null) { body.parentId = idOf(b.parentId, 'parent task'); targets.push({ type: 'issue', id: body.parentId }); }
       if (b.assigneeAgentId !== undefined && b.assigneeAgentId !== null) { body.assigneeAgentId = idOf(b.assigneeAgentId, 'agent'); targets.push({ type: 'agent', id: body.assigneeAgentId }); }
       return { method: 'POST', path: (co) => `/api/companies/${encodeURIComponent(co)}/issues`, body, targets, summary: `Create the task "${short(title)}"` };
+    },
+    // The status of a task (#204: the Manager moves a task and its sub-tasks as the steps run).
+    status(b) {
+      const issue = idOf(b.issue, 'task');
+      if (!ISSUE_STATUS.includes(b.status)) throw gridError(400, 'Unknown task status.');
+      return { method: 'PATCH', path: () => `/api/issues/${issue}`, body: { status: b.status }, targets: [{ type: 'issue', id: issue }], summary: `Set a task to ${b.status.replace('_', ' ')}` };
     },
     assign(b) {
       const issue = idOf(b.issue, 'task'), agent = idOf(b.agent, 'agent');
@@ -240,6 +319,48 @@ const PLANS = {
       return { method: 'POST', path: () => `/api/issues/${issue}/comments`, body: { body: text }, targets: [{ type: 'issue', id: issue }], summary: 'Comment on a task' };
     },
   },
+  // A hire (#201): POST /agent-hires with the office adapter (its runs go through the Security room, so a new employee is supervised), a
+  // monthly budget in whole cents (a hire without a budget is refused: 400) and nothing else the office has not named. The Confirm shows
+  // exactly what it creates: role, manager, agent kind, model, budget and skills. The manager is checked as a target. officeManager: true
+  // is the office Manager of a building (#204): the same hire, marked adapterConfig.manager, with the Project manager role by default.
+  // Paperclip answers { agent, approval } (the writer reads the agent).
+  hire: {
+    create(b) {
+      const name = textOf(b.name, 'name', NAME_MAX, { required: true });
+      if (b.officeManager !== undefined && typeof b.officeManager !== 'boolean') throw gridError(400, 'officeManager is true or false.');
+      const office = b.officeManager === true, role = office && (b.role === undefined || b.role === null || b.role === '') ? MANAGER_ROLE : b.role;
+      if (typeof role !== 'string' || !HIRE_ROLE_IDS.has(role)) throw gridError(400, 'Pick a role.');
+      const title = textOf(b.title, 'title', NAME_MAX) || (office ? MANAGER_TITLE : '');
+      const manager = b.manager === undefined || b.manager === null || b.manager === '' ? null : idOf(b.manager, 'manager');
+      const kind = b.agentKind === undefined || b.agentKind === null || b.agentKind === '' ? 'claude-code' : b.agentKind;
+      if (typeof kind !== 'string' || !HIRE_KIND_RE.test(kind)) throw gridError(400, 'Give the agent kind.');
+      const model = b.model === undefined || b.model === null || b.model === '' ? '' : b.model;
+      if (model && (typeof model !== 'string' || !HIRE_MODEL_RE.test(model))) throw gridError(400, 'The model name is not valid.');
+      const isolation = b.isolation === undefined || b.isolation === null || b.isolation === '' ? 'worktree' : b.isolation;
+      if (!HIRE_ISOLATIONS.includes(isolation)) throw gridError(400, 'Isolation is worktree or same.');
+      const dollars = b.budgetDollars;
+      if (typeof dollars !== 'number' || !Number.isFinite(dollars) || dollars <= 0) throw gridError(400, 'Set a monthly budget for the new employee. The office does not hire without one.');
+      if (dollars > HIRE_BUDGET_MAX) throw gridError(400, `The monthly budget is too high (at most $${HIRE_BUDGET_MAX}).`);
+      const cents = Math.round(dollars * 100);
+      if (cents < 1) throw gridError(400, 'Set a monthly budget of at least one cent.');
+      const skills = skillsOf(b.skills);
+      const adapterConfig = { agentKind: kind, isolation };
+      if (model) adapterConfig.model = model;
+      if (office) adapterConfig.manager = true;
+      const body = { name, role, adapterType: OFFICE_ADAPTER_TYPE, adapterConfig, budgetMonthlyCents: cents };
+      if (title) body.title = title;
+      if (manager) body.reportsTo = manager;
+      if (skills.length) body.desiredSkills = skills;
+      const cardLabel = HIRE_ROLES.find((r) => r.role === role).label, roleLabel = office ? `the office Manager (${cardLabel} role)` : cardLabel;
+      const line = (mgr) => `Hire ${short(name, 60)} as ${roleLabel}, reporting to ${mgr}, agent kind ${kind}, model ${model || 'the default'}, $${(cents / 100).toFixed(2)} a month, skills ${skills.length ? skills.join(', ') : 'none'}`;
+      const review = (org) => {
+        const m = manager ? org.find((x) => x.id === manager) : null;
+        if (manager && !m) return { problem: 'Paperclip has no such manager in this company.', status: 404 };
+        return { problem: '', summary: line(m ? short(String(m.name || 'a manager'), 60) : 'no manager') };
+      };
+      return { method: 'POST', path: (co) => `/api/companies/${encodeURIComponent(co)}/agent-hires`, body, targets: manager ? [{ type: 'agent', id: manager }] : [], review, summary: line(manager ? 'a manager' : 'no manager') };
+    },
+  },
   // The first company (#199): the one write that has no company to belong to. It names the Paperclip it goes to (url, a loopback address the
   // writer checks) and needs no connection: scope 'none'. The writer reads the company list first and reuses a company of the same name.
   company: {
@@ -247,6 +368,56 @@ const PLANS = {
       const name = textOf(b.name, 'company name', NAME_MAX, { required: true }), description = textOf(b.description, 'description', COMPANY_DESC_MAX);
       if (typeof b.url !== 'string' || !b.url) throw gridError(400, 'Give the Paperclip address.');
       return { method: 'POST', path: () => '/api/companies', body: { name, description }, targets: [], scope: 'none', url: b.url, name, summary: `Create the company "${short(name)}"` };
+    },
+    // Company settings (#213): name, description and whether a new employee needs the board's approval. One PATCH of the connected company.
+    update(b) {
+      const body = {};
+      if (b.name !== undefined) body.name = textOf(b.name, 'company name', NAME_MAX, { required: true });
+      if (b.description !== undefined) body.description = textOf(b.description, 'description', COMPANY_DESC_MAX);
+      if (b.requireBoardApprovalForNewAgents !== undefined) {
+        if (typeof b.requireBoardApprovalForNewAgents !== 'boolean') throw gridError(400, 'Hire approval must be on or off.');
+        body.requireBoardApprovalForNewAgents = b.requireBoardApprovalForNewAgents;
+      }
+      if (!Object.keys(body).length) throw gridError(400, 'Give a setting to change.');
+      const what = [body.name !== undefined && 'name', body.description !== undefined && 'description', body.requireBoardApprovalForNewAgents !== undefined && 'hire approval'].filter(Boolean).join(', ');
+      return { method: 'PATCH', path: (co) => `/api/companies/${encodeURIComponent(co)}`, body, targets: [], summary: `Change the company settings (${what})` };
+    },
+  },
+  // Invites and access (#213, owner only: the page group is the owner's, and the grid's Access cell decides). Each names its invite, join
+  // request or member as a target; the writer reads the company's lists and refuses what is not in them. The answer carries an id, never
+  // the invite token or link: a link that lets people in stays in Paperclip.
+  access: {
+    invite(b) {
+      const join = b.allowedJoinTypes === undefined || b.allowedJoinTypes === null ? 'both' : b.allowedJoinTypes;
+      if (!JOIN_TYPES.includes(join)) throw gridError(400, 'Choose who may join: people, agents or both.');
+      const body = { allowedJoinTypes: join };
+      if (b.humanRole !== undefined && b.humanRole !== null && b.humanRole !== '') {
+        if (!HUMAN_ROLES.includes(b.humanRole) || b.humanRole === 'owner') throw gridError(400, 'Choose a role: admin, operator or viewer.');
+        body.humanRole = b.humanRole;
+      }
+      const message = textOf(b.agentMessage, 'message', 1000);
+      if (message) body.agentMessage = message;
+      const who = { human: 'people', agent: 'agents', both: 'people and agents' }[join];
+      return { method: 'POST', path: (co) => `/api/companies/${encodeURIComponent(co)}/invites`, body, targets: [], summary: `Create an invite for ${who}${body.humanRole ? ` as ${body.humanRole}` : ''}` };
+    },
+    revoke(b) {
+      const invite = idOf(b.invite, 'invite');
+      return { method: 'POST', path: () => `/api/invites/${invite}/revoke`, body: {}, targets: [{ type: 'invite', id: invite }], summary: 'Revoke an invite' };
+    },
+    approveJoin(b) {
+      const join = idOf(b.join, 'join request');
+      return { method: 'POST', path: (co) => `/api/companies/${encodeURIComponent(co)}/join-requests/${join}/approve`, body: {}, targets: [{ type: 'join', id: join }], summary: 'Approve a join request' };
+    },
+    rejectJoin(b) {
+      const join = idOf(b.join, 'join request');
+      return { method: 'POST', path: (co) => `/api/companies/${encodeURIComponent(co)}/join-requests/${join}/reject`, body: {}, targets: [{ type: 'join', id: join }], summary: 'Reject a join request' };
+    },
+    member(b) {
+      const member = idOf(b.member, 'member'), body = {};
+      if (b.role !== undefined && b.role !== null) { if (!HUMAN_ROLES.includes(b.role)) throw gridError(400, 'Choose a role: owner, admin, operator or viewer.'); body.membershipRole = b.role; }
+      if (b.status !== undefined && b.status !== null) { if (!MEMBER_STATUS.includes(b.status)) throw gridError(400, 'Choose a status: pending, active or suspended.'); body.status = b.status; }
+      if (!Object.keys(body).length) throw gridError(400, 'Give a role or a status.');
+      return { method: 'PATCH', path: (co) => `/api/companies/${encodeURIComponent(co)}/members/${member}`, body, targets: [{ type: 'member', id: member }], summary: `Change the access of a member${body.membershipRole ? ` to ${body.membershipRole}` : ''}${body.status ? ` (${body.status})` : ''}` };
     },
   },
   // A reporting line (#202): PATCH { reportsTo } of one agent (manager null: no manager). review(org) reads the org chart the writer holds:
@@ -266,6 +437,66 @@ const PLANS = {
       return { method: 'PATCH', path: () => `/api/agents/${agent}`, body: { reportsTo: manager }, targets, review, summary: 'Change a reporting line' };
     },
   },
+  // Goals (#207): a goal of the company (POST) or a change to one (PATCH). A parent goal and an owner are targets: both must belong to the
+  // connected company. A goal cannot be its own parent. An update must change something.
+  goal: {
+    create(b) {
+      const title = textOf(b.title, 'title', TITLE_MAX, { required: true }), description = textOf(b.description, 'description', DESC_MAX);
+      const body = { title }, targets = [];
+      if (description) body.description = description;
+      if (b.level !== undefined && b.level !== null && b.level !== '') { if (!GOAL_LEVELS.includes(b.level)) throw gridError(400, 'Unknown goal level.'); body.level = b.level; }
+      if (b.status !== undefined && b.status !== null && b.status !== '') { if (!GOAL_STATUSES.includes(b.status)) throw gridError(400, 'Unknown goal status.'); body.status = b.status; }
+      if (b.parent !== undefined && b.parent !== null && b.parent !== '') { body.parentId = idOf(b.parent, 'parent goal'); targets.push({ type: 'goal', id: body.parentId }); }
+      if (b.owner !== undefined && b.owner !== null && b.owner !== '') { body.ownerAgentId = idOf(b.owner, 'owner'); targets.push({ type: 'agent', id: body.ownerAgentId }); }
+      return { method: 'POST', path: (co) => `/api/companies/${encodeURIComponent(co)}/goals`, body, targets, summary: `Create the goal "${short(title)}"` };
+    },
+    update(b) {
+      const goal = idOf(b.goal, 'goal'), body = {}, targets = [{ type: 'goal', id: goal }];
+      if (b.title !== undefined) body.title = textOf(b.title, 'title', TITLE_MAX, { required: true });
+      if (b.description !== undefined) body.description = textOf(b.description, 'description', DESC_MAX);
+      if (b.status !== undefined) { if (!GOAL_STATUSES.includes(b.status)) throw gridError(400, 'Unknown goal status.'); body.status = b.status; }
+      if (b.owner !== undefined) {
+        if (b.owner === null || b.owner === '') body.ownerAgentId = null;
+        else { body.ownerAgentId = idOf(b.owner, 'owner'); targets.push({ type: 'agent', id: body.ownerAgentId }); }
+      }
+      if (!Object.keys(body).length) throw gridError(400, 'Give something to change.');
+      const what = body.status && Object.keys(body).length === 1 ? `Mark a goal ${body.status}` : 'Change a goal';
+      return { method: 'PATCH', path: () => `/api/goals/${goal}`, body, targets, summary: what };
+    },
+  },
+  // Routines (#209): create, edit (title, description, employee, status), change the schedule of one trigger (a cron line) and run now. The
+  // routine and trigger must be in the connected company (the writer checks them against what it holds). Run is one POST with no body.
+  routine: {
+    create(b) {
+      const title = textOf(b.title, 'title', TITLE_MAX, { required: true }), description = textOf(b.description, 'description', DESC_MAX);
+      const body = { title }, targets = [];
+      if (description) body.description = description;
+      if (b.agent !== undefined && b.agent !== null && b.agent !== '') { body.assigneeAgentId = idOf(b.agent, 'employee'); targets.push({ type: 'agent', id: body.assigneeAgentId }); }
+      if (b.status !== undefined && b.status !== null) { if (!ROUTINE_STATUS.includes(b.status) || b.status === 'archived') throw gridError(400, 'Unknown routine status.'); body.status = b.status; }
+      if (b.project !== undefined && b.project !== null && b.project !== '') body.projectId = idOf(b.project, 'project');
+      return { method: 'POST', path: (co) => `/api/companies/${encodeURIComponent(co)}/routines`, body, targets, summary: `Create the routine "${short(title)}"` };
+    },
+    update(b) {
+      const routine = idOf(b.routine, 'routine'), body = {}, targets = [{ type: 'routine', id: routine }];
+      if (b.title !== undefined) body.title = textOf(b.title, 'title', TITLE_MAX, { required: true });
+      if (b.description !== undefined) body.description = textOf(b.description, 'description', DESC_MAX);
+      if (b.agent !== undefined) { if (b.agent === null || b.agent === '') body.assigneeAgentId = null; else { body.assigneeAgentId = idOf(b.agent, 'employee'); targets.push({ type: 'agent', id: body.assigneeAgentId }); } }
+      if (b.status !== undefined) { if (!ROUTINE_STATUS.includes(b.status)) throw gridError(400, 'Unknown routine status.'); body.status = b.status; }
+      if (!Object.keys(body).length) throw gridError(400, 'Give a change for the routine.');
+      return { method: 'PATCH', path: () => `/api/routines/${routine}`, body, targets, summary: 'Change a routine' };
+    },
+    schedule(b) {
+      const routine = idOf(b.routine, 'routine'), trigger = idOf(b.trigger, 'schedule'), cron = textOf(b.cron, 'schedule', 100, { required: true });
+      if (!CRON_RE.test(cron) || cron.split(/\s+/).length !== 5) throw gridError(400, 'Give the schedule as five cron fields, for example 0 9 * * 1.');
+      const body = { cronExpression: cron.split(/\s+/).join(' ') };
+      if (b.timezone !== undefined && b.timezone !== null && b.timezone !== '') { if (typeof b.timezone !== 'string' || !TZ_RE.test(b.timezone)) throw gridError(400, 'Give a time zone such as UTC or Europe/Berlin.'); body.timezone = b.timezone; }
+      return { method: 'PATCH', path: () => `/api/routine-triggers/${trigger}`, body, targets: [{ type: 'trigger', id: trigger, routine }], summary: 'Change the schedule of a routine' };
+    },
+    run(b) {
+      const routine = idOf(b.routine, 'routine');
+      return { method: 'POST', path: () => `/api/routines/${routine}/run`, body: {}, targets: [{ type: 'routine', id: routine }], summary: 'Run a routine now' };
+    },
+  },
   approval: Object.fromEntries([decision('approve', 'approve', 'Approve an approval'), decision('reject', 'reject', 'Reject an approval'), decision('revise', 'request-revision', 'Request a revision of an approval')]),
 };
 export function planWrite(b) {
@@ -274,6 +505,52 @@ export function planWrite(b) {
   const make = row && typeof action === 'string' && Object.hasOwn(row, action) ? row[action] : null;
   if (!make) throw gridError(400, 'The office cannot make that write.');
   return { kind, action, ...make(b) };
+}
+
+// ---------- goals (#207) ----------
+const GOAL_DEPTH = 6;
+/**
+ * The goals of the company as a tree for the executive floor: parents before their children, siblings in the order Paperclip gave, each row
+ * with its depth (capped), its owner's name and how many goals sit under it. A goal whose parent is not in the list is a root. Loop-safe and
+ * never drops a goal. goals: [{ id, title, status, level, description, parentId, ownerAgentId }]|null (null: unknown), agents: [{ id, name }].
+ * out: { total, rows: [{ id, title, status, level, description, parentId, ownerId, owner, depth, children }] }|null.
+ */
+export function goalsOf(goals, agents) {
+  if (!goals) return null;
+  const ids = new Set(goals.map((g) => g.id)), kids = new Map(), roots = [], who = new Map((agents || []).map((a) => [a.id, a.name]));
+  for (const g of goals) {
+    if (g.parentId && g.parentId !== g.id && ids.has(g.parentId)) { if (!kids.has(g.parentId)) kids.set(g.parentId, []); kids.get(g.parentId).push(g); } else roots.push(g);
+  }
+  const rows = [], seen = new Set();
+  const walk = (g, depth) => {
+    if (seen.has(g.id)) return;
+    seen.add(g.id);
+    rows.push({ id: g.id, title: g.title, status: g.status, level: g.level || '', description: g.description || '', parentId: g.parentId && ids.has(g.parentId) ? g.parentId : null,
+      ownerId: g.ownerAgentId || null, owner: g.ownerAgentId ? (who.get(g.ownerAgentId) || '') : '', depth: Math.min(depth, GOAL_DEPTH), children: (kids.get(g.id) || []).length });
+    for (const k of kids.get(g.id) || []) walk(k, depth + 1);
+  };
+  for (const g of roots) walk(g, 0);
+  for (const g of goals) walk(g, 0);   // a loop has no root: still shown
+  return { total: goals.length, rows };
+}
+
+// ---------- skills, secrets, plugins and adapters (#212) ----------
+/**
+ * The catalog: what Paperclip has installed for the company, as names and states only. A secret is its name and provider, never a value
+ * (the value, if Paperclip sends one, is dropped here); a skill is its name, description and where it came from, never its files.
+ * A part the office could not read is null (unknown, never an empty list that looks real).
+ * in: { skills, secrets, plugins, adapters } (each the answer of its route, or null). out: the same four keys, shaped.
+ */
+export function catalogOf(i) {
+  const rows = (v) => (Array.isArray(v) ? v.filter((r) => r && typeof r === 'object') : null);
+  const t = (v, n) => (typeof v === 'string' ? short(v.trim(), n) : '');
+  const skills = rows(i.skills), secrets = rows(i.secrets), plugins = rows(i.plugins), adapters = rows(i.adapters);
+  return {
+    skills: skills && skills.filter((r) => r.id).slice(0, 200).map((r) => ({ id: String(r.id), key: t(r.key, 100), name: t(r.name, 80) || t(r.key, 80), description: t(r.description, 200), source: t(r.sourceType, 30), trust: t(r.trustLevel, 30) })),
+    secrets: secrets && secrets.filter((r) => r.id && r.name).slice(0, 200).map((r) => ({ id: String(r.id), name: t(r.name, 60), provider: t(r.provider, 40) })),
+    plugins: plugins && plugins.filter((r) => r.id).slice(0, 100).map((r) => ({ id: String(r.id), name: t(r.pluginKey, 100) || t(r.packageName, 100), version: t(r.version, 30), status: t(r.status, 30), error: t(r.lastError, 200) })),
+    adapters: adapters && adapters.filter((r) => r.type).slice(0, 100).map((r) => ({ type: t(r.type, 60), label: t(r.label, 60) || t(r.type, 60), source: t(r.source, 20), version: t(r.version, 30), loaded: r.loaded !== false, disabled: r.disabled === true })),
+  };
 }
 
 // ---------- the Costs view (#208) ----------

@@ -170,6 +170,71 @@
     "pausedProjectCount": "number",
     "pendingApprovalCount": "number"
    }
+  },
+  "skills": {
+   "list": true,
+   "fields": {
+    "id": "string",
+    "companyId": "string",
+    "key": "string",
+    "slug": "string",
+    "name": "string",
+    "description": "string",
+    "sourceType": "string",
+    "sourceLocator": "string",
+    "sourceRef": "null",
+    "trustLevel": "string",
+    "fileInventory": "array",
+    "categories": "array"
+   }
+  },
+  "plugins": {
+   "list": true,
+   "fields": {
+    "id": "string",
+    "pluginKey": "string",
+    "packageName": "string",
+    "version": "string",
+    "apiVersion": "number",
+    "categories": "array",
+    "manifestJson": "object",
+    "status": "string",
+    "installOrder": "number",
+    "packagePath": "null",
+    "lastError": "null"
+   }
+  },
+  "adapters": {
+   "list": true,
+   "fields": {
+    "type": "string",
+    "label": "string",
+    "source": "string",
+    "modelsCount": "number",
+    "loaded": "boolean",
+    "disabled": "boolean",
+    "capabilities": "object"
+   }
+  },
+  "invites": {
+   "list": false,
+   "fields": {
+    "invites": "array"
+   }
+  },
+  "joinRequests": {
+   "list": true,
+   "fields": {
+    "id": "string",
+    "status": "string",
+    "requestType": "string"
+   }
+  },
+  "members": {
+   "list": false,
+   "fields": {
+    "members": "array"
+   }
   }
  }
 }

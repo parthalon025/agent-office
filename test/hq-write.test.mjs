@@ -143,3 +143,171 @@ test('the company is read again after a write, so the view shows it', async () =
     await until(() => r.hq.view().lobby.tasks.open === n + 1, 'the task in the Lobby');
   } finally { await r.done(); }
 });
+
+test('goals (#207): create and update are one request each, the parent and owner must be in the company, the view shows the new goal', async () => {
+  const r = await rig({ goal: 'allow' });
+  const G1 = D.goals[0].id;
+  try {
+    const made = await r.hq.write({ kind: 'goal', action: 'create', title: 'Cut build time', description: 'Under two minutes.', level: 'team', parent: G1, owner: ADA });
+    assert.match(made.id, /^g2000000/);
+    await r.hq.write({ kind: 'goal', action: 'update', goal: G1, status: 'achieved' });
+    await r.hq.write({ kind: 'goal', action: 'update', goal: G1, owner: null });
+    assert.deepEqual(r.writes(), [
+      ['POST', `/api/companies/${CO}/goals`, { title: 'Cut build time', description: 'Under two minutes.', level: 'team', parentId: G1, ownerAgentId: ADA }],
+      ['PATCH', `/api/goals/${G1}`, { status: 'achieved' }],
+      ['PATCH', `/api/goals/${G1}`, { ownerAgentId: null }],
+    ]);
+    await until(() => (r.hq.view().goals.rows.find((x) => x.id === made.id) || {}).parentId === G1, 'the new goal in the view');
+    assert.equal(r.hq.view().goals.rows.find((x) => x.id === made.id).owner, 'Ada');
+    await assert.rejects(r.hq.write({ kind: 'goal', action: 'update', goal: 'g9999999', status: 'active' }), (e) => e.status === 404);
+    await assert.rejects(r.hq.write({ kind: 'goal', action: 'create', title: 'X', parent: 'g9999999' }), (e) => e.status === 404);
+    assert.equal(r.writes().length, 3, 'a refused write sends nothing');
+  } finally { await r.done(); }
+});
+
+test('goals (#207): Confirm asks first and Deny refuses', async () => {
+  const r = await rig({ goal: 'confirm' });
+  try {
+    const e = await r.hq.write({ kind: 'goal', action: 'create', title: 'Ship it' }).then(() => null, (x) => x);
+    assert.equal(e.status, 409);
+    assert.deepEqual(e.answer.body.write, { kind: 'goal', action: 'create', summary: 'Create the goal "Ship it"' });
+    assert.equal(r.writes().length, 0);
+    await r.hq.write({ kind: 'goal', action: 'create', title: 'Ship it' }, { confirmed: true });
+    assert.equal(r.writes().length, 1);
+  } finally { await r.done(); }
+  const d = await rig({ goal: 'deny' });
+  try {
+    await assert.rejects(d.hq.write({ kind: 'goal', action: 'update', goal: D.goals[0].id, status: 'active' }, { confirmed: true }), (e) => e.status === 403);
+    assert.equal(d.writes().length, 0);
+  } finally { await d.done(); }
+});
+
+// ---------- routines (#209) ----------
+const ROUTINE = D.routines[0].id, TRIGGER = D.routines[0].triggers[0].id;
+
+test('routines: create, edit, schedule and run are one request each, nothing else', async () => {
+  const r = await rig({ routine: 'allow' });
+  try {
+    const made = await r.hq.write({ kind: 'routine', action: 'create', title: 'Daily check', description: 'Look at the build.', agent: ADA });
+    assert.match(made.id, /^r2000000/);
+    await r.hq.write({ kind: 'routine', action: 'update', routine: ROUTINE, title: 'Weekly report', status: 'paused' });
+    await r.hq.write({ kind: 'routine', action: 'schedule', routine: ROUTINE, trigger: TRIGGER, cron: '0 8 * * 1-5', timezone: 'UTC' });
+    await r.hq.write({ kind: 'routine', action: 'run', routine: ROUTINE });
+    assert.deepEqual(r.writes(), [
+      ['POST', `/api/companies/${CO}/routines`, { title: 'Daily check', description: 'Look at the build.', assigneeAgentId: ADA }],
+      ['PATCH', `/api/routines/${ROUTINE}`, { title: 'Weekly report', status: 'paused' }],
+      ['PATCH', `/api/routine-triggers/${TRIGGER}`, { cronExpression: '0 8 * * 1-5', timezone: 'UTC' }],
+      ['POST', `/api/routines/${ROUTINE}/run`, {}],
+    ]);
+  } finally { await r.done(); }
+});
+
+test('routines: Run waits for the Confirm by default, Deny sends nothing, and a stranger routine is 404', async () => {
+  const r = await rig({});
+  try {
+    await assert.rejects(r.hq.write({ kind: 'routine', action: 'run', routine: ROUTINE }), (e) => e.status === 409 && e.answer.body.confirm === 'write');
+    assert.deepEqual(r.writes(), [], 'no request before the Confirm');
+    await r.hq.write({ kind: 'routine', action: 'run', routine: ROUTINE }, { confirmed: true });
+    assert.equal(r.writes().length, 1);
+    await assert.rejects(r.hq.write({ kind: 'routine', action: 'run', routine: 'r9999999-0000-4000-8000-000000000000' }, { confirmed: true }), (e) => e.status === 404);
+    await assert.rejects(r.hq.write({ kind: 'routine', action: 'schedule', routine: ROUTINE, trigger: 'nope', cron: '0 8 * * *' }, { confirmed: true }), (e) => e.status === 404);
+    assert.equal(r.writes().length, 1, 'refused writes send nothing');
+  } finally { await r.done(); }
+  const d = await rig({ routine: 'deny' });
+  try {
+    await assert.rejects(d.hq.write({ kind: 'routine', action: 'run', routine: ROUTINE }, { confirmed: true }), (e) => e.status === 403);
+    assert.deepEqual(d.writes(), []);
+  } finally { await d.done(); }
+});
+
+test('routines: bad fields are 400 before anything is asked', async () => {
+  const r = await rig({ routine: 'allow' });
+  try {
+    for (const b of [{ action: 'create' }, { action: 'create', title: 'x', status: 'weird' }, { action: 'update', routine: ROUTINE }, { action: 'schedule', routine: ROUTINE, trigger: TRIGGER, cron: 'drop table' }, { action: 'run', routine: '../x' }]) {
+      await assert.rejects(r.hq.write({ kind: 'routine', ...b }), (e) => e.status === 400, JSON.stringify(b));
+    }
+    assert.deepEqual(r.writes(), []);
+  } finally { await r.done(); }
+});
+
+test('routines: the view carries what the page edits (agent id, schedule trigger)', async () => {
+  const r = await rig({});
+  try {
+    const v = r.hq.view().routines[0];
+    assert.equal(v.id, ROUTINE);
+    assert.equal(v.agentId, D.routines[0].assigneeAgentId);
+    assert.deepEqual(v.trigger, { id: TRIGGER, cron: '0 9 * * 1', timezone: 'UTC', enabled: true });
+  } finally { await r.done(); }
+});
+
+// ---------- company admin (#213): settings, invites and access ----------
+const INVITE = D.invites[0].id, JOIN = D.joinRequests[0].id, PAT = D.members[1].id;
+
+test('company settings and every access write are one request each', async () => {
+  const r = await rig({ company: 'allow', access: 'allow' });
+  try {
+    await r.hq.write({ kind: 'company', action: 'update', name: 'Acme Labs', requireBoardApprovalForNewAgents: true });
+    const made = await r.hq.write({ kind: 'access', action: 'invite', allowedJoinTypes: 'human', humanRole: 'viewer', agentMessage: 'Welcome.' });
+    await r.hq.write({ kind: 'access', action: 'revoke', invite: INVITE });
+    await r.hq.write({ kind: 'access', action: 'approveJoin', join: JOIN });
+    await r.hq.write({ kind: 'access', action: 'member', member: PAT, role: 'operator' });
+    assert.deepEqual(Object.keys(made).sort(), ['id', 'ok']);
+    assert.deepEqual(r.writes(), [
+      ['PATCH', `/api/companies/${CO}`, { name: 'Acme Labs', requireBoardApprovalForNewAgents: true }],
+      ['POST', `/api/companies/${CO}/invites`, { allowedJoinTypes: 'human', humanRole: 'viewer', agentMessage: 'Welcome.' }],
+      ['POST', `/api/invites/${INVITE}/revoke`, {}],
+      ['POST', `/api/companies/${CO}/join-requests/${JOIN}/approve`, {}],
+      ['PATCH', `/api/companies/${CO}/members/${PAT}`, { membershipRole: 'operator' }],
+    ]);
+    assert.doesNotMatch(JSON.stringify(made) + JSON.stringify(r.feed), /do-not-show|pcp_invite/, 'the invite token and link reach no result or feed line');
+  } finally { await r.done(); }
+});
+
+test('access writes wait for the Confirm by default, and Deny refuses them', async () => {
+  const r = await rig({});
+  try {
+    const e = await r.hq.write({ kind: 'access', action: 'rejectJoin', join: JOIN }).then(() => null, (x) => x);
+    assert.equal(e.status, 409);
+    assert.equal(e.answer.body.write.summary, 'Reject a join request');
+    const u = await r.hq.write({ kind: 'company', action: 'update', description: 'Robots.' }).then(() => null, (x) => x);
+    assert.equal(u.status, 409);
+    assert.equal(r.writes().length, 0);
+    await r.hq.write({ kind: 'access', action: 'rejectJoin', join: JOIN }, { confirmed: true });
+    assert.deepEqual(r.writes(), [['POST', `/api/companies/${CO}/join-requests/${JOIN}/reject`, {}]]);
+  } finally { await r.done(); }
+  const d = await rig({ access: 'deny' });
+  try {
+    await assert.rejects(d.hq.write({ kind: 'access', action: 'invite', allowedJoinTypes: 'both' }, { confirmed: true }), (e) => e.status === 403 && /Invites and access/.test(e.message));
+    assert.equal(d.writes().length, 0);
+  } finally { await d.done(); }
+});
+
+test('an invite, join request or member that is not in the company, or already decided, is refused before the write; bad bodies are 400', async () => {
+  const r = await rig({ access: 'allow' });
+  try {
+    await assert.rejects(r.hq.write({ kind: 'access', action: 'revoke', invite: 'v0000000-0000-4000-8000-000000000404' }), (e) => e.status === 404);
+    await assert.rejects(r.hq.write({ kind: 'access', action: 'member', member: 'm0000000-0000-4000-8000-000000000404', role: 'admin' }), (e) => e.status === 404);
+    await r.hq.write({ kind: 'access', action: 'approveJoin', join: JOIN });
+    await assert.rejects(r.hq.write({ kind: 'access', action: 'rejectJoin', join: JOIN }), (e) => e.status === 409);
+    await r.hq.write({ kind: 'access', action: 'revoke', invite: INVITE });
+    await assert.rejects(r.hq.write({ kind: 'access', action: 'revoke', invite: INVITE }), (e) => e.status === 409);
+    for (const b of [{ allowedJoinTypes: 'everyone' }, { humanRole: 'owner' }, { humanRole: 'root' }]) await assert.rejects(r.hq.write({ kind: 'access', action: 'invite', ...b }), (e) => e.status === 400, JSON.stringify(b));
+    await assert.rejects(r.hq.write({ kind: 'access', action: 'member', member: PAT }), (e) => e.status === 400);
+    await assert.rejects(r.hq.write({ kind: 'access', action: 'member', member: PAT, status: 'banned' }), (e) => e.status === 400);
+    await assert.rejects(r.hq.write({ kind: 'company', action: 'update' }), (e) => e.status === 400);
+    await assert.rejects(r.hq.write({ kind: 'company', action: 'update', requireBoardApprovalForNewAgents: 'yes' }), (e) => e.status === 400);
+    assert.equal(r.writes().length, 2, 'only the approval and the revoke were sent');
+  } finally { await r.done(); }
+});
+
+test('access() lists names, roles and states, never a token, a link or an address', async () => {
+  const r = await rig({});
+  try {
+    const a = await r.hq.access();
+    assert.deepEqual(a.invites.map((x) => [x.id, x.state, x.joins, x.role]), [[INVITE, 'active', 'human', 'operator']]);
+    assert.deepEqual(a.joins.map((x) => [x.id, x.status, x.type, x.name]), [[JOIN, 'pending_approval', 'human', 'sam@example.com']]);
+    assert.deepEqual(a.members.map((x) => [x.name, x.role, x.status]), [['Justin', 'owner', 'active'], ['Pat', 'viewer', 'active']]);
+    assert.equal(a.error, null);
+    assert.doesNotMatch(JSON.stringify(a), /do-not-show|203\.0\.113|tokenHash/);
+  } finally { await r.done(); }
+});
