@@ -63,14 +63,14 @@ export function cloudConfig(env, prefix, readFile = (p) => fs.readFileSync(p, 'u
  * to another host), with no user name, password or fragment. allowLoopback is for tests with a fake server: the server never sets it.
  * Returns { url } or { problem } (a sentence for the user).
  */
-export function checkEndpoint(raw, { suffixes, allowLoopback = false }) {
+export function checkEndpoint(raw, { suffixes, allowLoopback = false, vendor = 'Microsoft', anyHost = false }) {
   let url;
   try { url = new URL(raw); } catch { return { problem: 'The endpoint is not a valid address.' }; }
   const loop = LOOPBACK.has(url.hostname);
   if (url.protocol !== 'https:' && !(allowLoopback && loop && url.protocol === 'http:')) return { problem: 'The endpoint must start with https://.' };
   if (url.username || url.password || url.hash) return { problem: 'The endpoint must not hold a user name, a password or a # part.' };
   const host = url.hostname.toLowerCase();
-  if (!(allowLoopback && loop) && !suffixes.some((x) => host.endsWith(x))) return { problem: `The endpoint host must end with ${suffixes.join(' or ')}. The office sends your token only to a Microsoft host.` };
+  if (!anyHost && !(allowLoopback && loop) && !suffixes.some((x) => host.endsWith(x))) return { problem: `The endpoint host must end with ${suffixes.join(' or ')}. The office sends your token only to a ${vendor} host.` };
   return { url };
 }
 
@@ -78,15 +78,16 @@ export function checkEndpoint(raw, { suffixes, allowLoopback = false }) {
  * Is a cloud kind set up? Reads the endpoint and the token now (the token file may have changed). Returns { ok: true, url, token }
  * or { ok: false, needs } where needs are the steps for the user, in plain words, only for what is missing or wrong.
  * @param {object} config cloudConfig() of the kind.
- * @param {object} o { prefix, hosts (allowed host suffixes), allowLoopback, endpointHelp (what the endpoint looks like),
+ * @param {object} o { prefix, hosts (allowed host suffixes), vendor (the host word in the message, default Microsoft), anyHost (the
+ *   user's own server: any https host, or http on loopback with allowLoopback; the token still goes only to the endpoint they set), allowLoopback, endpointHelp (what the endpoint looks like),
  *   tokenHelp (what the token is for), validate(url) -> problem text or '' (a check of the path), readme (the section of docs/agents.md) }
  */
-export function cloudSetup(config, { prefix, hosts, allowLoopback = false, endpointHelp, tokenHelp, validate = () => '', readme }) {
+export function cloudSetup(config, { prefix, hosts, allowLoopback = false, vendor, anyHost = false, endpointHelp, tokenHelp, validate = () => '', readme }) {
   const needs = [];
   let url = null;
   if (!config.endpoint) needs.push(`Set ${prefix}_ENDPOINT to ${endpointHelp}.`);
   else {
-    const c = checkEndpoint(config.endpoint, { suffixes: hosts, allowLoopback });
+    const c = checkEndpoint(config.endpoint, { suffixes: hosts, allowLoopback, vendor, anyHost });
     const problem = c.problem || validate(c.url);
     if (problem) needs.push(`${prefix}_ENDPOINT cannot be used. ${problem}`);
     else url = c.url;

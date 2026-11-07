@@ -23,6 +23,7 @@ import { createAcp, AGENTS as ACP_AGENTS } from './providers/acp.mjs';
 import { createAgentFramework } from './providers/agent-framework.mjs';
 import { createFoundry } from './providers/foundry.mjs';
 import { createCopilotStudio } from './providers/copilot-studio.mjs';
+import { createCursorCloud, createHermesGateway } from './providers/remote-tools.mjs';
 import { createClaudeCode, claudeVersion, MODEL_RE, MODES } from './providers/claude-code.mjs';
 import { placeOfSession, adoptLegacy, normPath } from './place.mjs';
 import { createState } from './state.mjs';
@@ -328,7 +329,9 @@ export function createOffice(cfg) {
       blocked: () => openRefusal(saved.get('security'), providers.get(kind)) })),
     // The Microsoft cloud kinds are off until the owner sets them up in the environment (docs/agents.md). Nothing here calls the network
     // or signs in. Like the ungated ACP agents, the Agents screen of the Security room keeps them off until it turns them on.
-    ...[['foundry', createFoundry, CLOUD.foundry], ['copilot-studio', createCopilotStudio, CLOUD.studio]].map(([kind, create, config]) => create({ events, config,
+    // Remote tools (#218, providers/remote-tools.mjs): Cursor cloud agents and a Hermes gateway, the same rule: off until turned on.
+    ...[['foundry', createFoundry, CLOUD.foundry], ['copilot-studio', createCopilotStudio, CLOUD.studio],
+      ['cursor-cloud', createCursorCloud, CLOUD.cursor], ['hermes-gateway', createHermesGateway, CLOUD.gateway]].map(([kind, create, config]) => create({ events, config, env: process.env,
       blocked: () => openRefusal(saved.get('security'), providers.get(kind)) }))]);
   const providerOf = (s) => providers.of(s);
   ENFORCE = enforcement(providers.list());

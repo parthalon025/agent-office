@@ -14,6 +14,7 @@ The numbered jobs (job 3, job 9) are the core jobs in [Using the office](using-t
 | Copilot CLI | GitHub Copilot as an ACP agent | Unknown | Partly supervised |
 | Gemini CLI, OpenCode, Kimi CLI, ACP agent | ACP tools (see [ACP tools](#acp-tools-gemini-cli-opencode-kimi-cli-and-other-acp-agents)) | Unknown | Gemini: partly supervised. The others: unsupervised |
 | Azure AI Foundry, Copilot Studio | Agents in your Microsoft cloud account | Unknown unless you set prices | Partly supervised or unsupervised |
+| Cursor cloud agent, Hermes gateway | Remote tools: Cursor's cloud, or a Hermes gateway you run | Unknown | Unsupervised |
 
 ## Local model agents
 
@@ -117,6 +118,28 @@ When the hour ends, save a new token in the same file. The office reads the file
 - **Cost and the spend limit.** Foundry reports tokens, not dollars, and Copilot Studio reports neither. So the office counts only the prices you set: `OFFICE_FOUNDRY_PRICE_IN` and `OFFICE_FOUNDRY_PRICE_OUT` (dollars for 1 million tokens, set both) or `OFFICE_COPILOTSTUDIO_PRICE_MESSAGE` (dollars you count for each message you send). **With no prices, the kind does not report cost**, like an ACP agent: the office asks "This agent does not report cost. Run it?" before it runs (the **Run without cost reports** cell of the Agents screen decides as for the other agents), shows the cost as "unknown", never $0.00, and no spend limit can stop it. Check the spend in your Azure account. With the prices set, a new session gets the default spend limit, the cost shows in dollars, and the Spend screen counts it under **Cloud agent**. When the limit is reached, the next message does not go out. Foundry reports the tokens of a run only when the run ends, so a run that works is not cut in the middle. The office checks the limit again before it sends an approval back to a run. When you stop a run, or it fails, the office cancels it and then reads it again, and counts its tokens if Foundry reports them. Those tokens count against the next message.
 - **Threads.** Foundry keeps one thread for each session in your project. The office does not delete it. Delete old threads in the portal. Stop turn cancels the run.
 - **Not available.** No terminal window, no permission mode, no model switch, no Extensions, no office tools (inbox, ask, room), no skills or fork, text only (no attachments). Reopen starts a new session in the same worktree and cannot resume. Export and Search work as for every kind.
+
+## Cursor cloud agents and the Hermes gateway
+
+Two remote tools join the office as agent kinds (#218). Their tools run somewhere else: Cursor runs its agent in Cursor's cloud, and a Hermes gateway runs its tools on its own host. **The office cannot hold their calls.** Neither service offers a hook that sends a tool call to a client before it runs, so both are **Unsupervised**: you see what the agent says, but the office does not approve its steps. The rules are the same as for the Microsoft cloud kinds: the kinds are **off until you turn on Cloud agent** on the Agents screen of the Security room, they make no call before that, and they open only in a room of their own (a new worktree). Cursor and the gateway report no dollars, so the office shows their cost as unknown and no spend limit can stop them. It asks once per session before it runs one. Check the spend in your Cursor account or your gateway's model account. The office never signs in: you make the key.
+
+The request shapes are learned from the cursor-cloud and hermes-gateway adapters of [Paperclip](https://github.com/paperclipai/paperclip) (MIT licence) and the vendors' public notes. They are tested against fake services. A run against a real account has not been done yet.
+
+**Set up Cursor cloud agent.**
+
+1. In the Cursor dashboard, make an API key. Save it in a file that only you can read.
+2. Set `OFFICE_CURSORCLOUD_TOKEN_FILE` to that file. Set `OFFICE_CURSORCLOUD_REPOSITORY` to the GitHub repository the agent works on, for example `https://github.com/owner/name`. The agent works on GitHub, not in the office folder. Set `OFFICE_CURSORCLOUD_REF` for a branch other than the default (optional). `OFFICE_CURSORCLOUD_ENDPOINT` is optional and must be a `.cursor.com` host.
+3. Start the office again. In the Security room, Agents screen, turn on **Cloud agent**. Open **Agent kinds**, then **Check again**: it shows **Ready** and the repository.
+
+The office launches one agent per session with no pull request (`autoCreatePr: false`), polls its status and conversation, shows its replies, and sends your next message as a follow-up to the same agent. Stop tells Cursor to stop the agent.
+
+**Set up Hermes gateway.**
+
+1. Run the Hermes gateway API server with an API key of 16 characters or more.
+2. Save the key in a file only you can read. Set `OFFICE_HERMESGATEWAY_TOKEN_FILE` to it and `OFFICE_HERMESGATEWAY_ENDPOINT` to the base address, for example `http://127.0.0.1:8642/v1`. The address must be `https`, or `http` on this PC. The office sends the key only to that address. `OFFICE_HERMESGATEWAY_MODEL` names the model the gateway shows (default `hermes-agent`).
+3. Start the office again, turn on **Cloud agent**, and check.
+
+The office streams a chat completion and sends the conversation with each message. A gateway on this PC can change your files and run commands, and the office cannot see or stop it. For a Hermes on this PC that asks before it edits, use the **Hermes Agent** kind instead.
 
 ## Copilot CLI
 

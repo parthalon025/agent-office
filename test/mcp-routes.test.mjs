@@ -182,7 +182,7 @@ test('the local providers are registered, and an unknown agent kind is refused',
   assert.match(noModel.json.error, /Pick a model/);
   const info = await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
   const kinds = info.providers.map((p) => p.kind);
-  assert.deepEqual(kinds.sort(), ['acp', 'agent-framework', 'claude-code', 'copilot', 'copilot-studio', 'dsh', 'foundry', 'gemini', 'hermes', 'kimi', 'lmstudio', 'ollama', 'openclaw', 'opencode']);
+  assert.deepEqual(kinds.sort(), ['acp', 'agent-framework', 'claude-code', 'copilot', 'copilot-studio', 'cursor-cloud', 'dsh', 'foundry', 'gemini', 'hermes', 'hermes-gateway', 'kimi', 'lmstudio', 'ollama', 'openclaw', 'opencode']);
   const dsh = info.providers.find((p) => p.kind === 'dsh');
   assert.deepEqual([dsh.ready, dsh.cost, dsh.gated, dsh.paid], [false, 'unknown', true, true]);
   // Not on the PATH, or only an npm install (dsh.cmd), which the office cannot start without a shell: not ready either way.
@@ -209,7 +209,7 @@ test('the local providers are registered, and an unknown agent kind is refused',
   assert.equal(lm.ready, false);
   assert.match(lm.needs[0], /LM Studio local server/);
   // The cloud kinds (#24) are off until configured: Not configured with the steps, and no session opens.
-  for (const [kind, name] of [['foundry', 'OFFICE_FOUNDRY_ENDPOINT'], ['copilot-studio', 'OFFICE_COPILOTSTUDIO_ENDPOINT']]) {
+  for (const [kind, name] of [['foundry', 'OFFICE_FOUNDRY_ENDPOINT'], ['copilot-studio', 'OFFICE_COPILOTSTUDIO_ENDPOINT'], ['cursor-cloud', 'OFFICE_CURSORCLOUD_REPOSITORY'], ['hermes-gateway', 'OFFICE_HERMESGATEWAY_ENDPOINT']]) {
     const cloud = info.providers.find((p) => p.kind === kind);
     assert.deepEqual([cloud.ready, cloud.configured, cloud.cloud, cloud.paid], [false, false, true, true], kind);
     // Spec #67: its tools run in the cloud without the office (ungated, with its label), and with no prices set its cost is unknown.

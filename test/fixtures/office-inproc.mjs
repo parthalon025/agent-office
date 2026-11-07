@@ -33,7 +33,7 @@ export async function startInProcess({ dir, port = 4391, env = {}, state = null 
   const office = createOffice({
     root: REPO_ROOT, port, files, agentToken: auth.newAgentToken(), pageToken: auth.newPageToken(),
     launchCodes: auth.createLaunchCodes(), remote: auth.remoteConfig(process.env, { port, branch: false }), remotePageToken: auth.newPageToken(),
-    writeSecret: () => {}, cloud: { foundry: cloudConfig(process.env, 'OFFICE_FOUNDRY'), studio: cloudConfig(process.env, 'OFFICE_COPILOTSTUDIO') },
+    writeSecret: () => {}, cloud: { foundry: cloudConfig(process.env, 'OFFICE_FOUNDRY'), studio: cloudConfig(process.env, 'OFFICE_COPILOTSTUDIO'), cursor: cloudConfig(process.env, 'OFFICE_CURSORCLOUD'), gateway: cloudConfig(process.env, 'OFFICE_HERMESGATEWAY') },
     warmWalker: false,
   });
   const call = async (route, body, { signal, headers } = {}) => {

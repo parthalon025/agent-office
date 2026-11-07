@@ -20,8 +20,9 @@
     { id: 'openclaw', label: 'OpenClaw' }, { id: 'copilot', label: 'Copilot' }, { id: 'acp', label: 'ACP tools' }, { id: 'local', label: 'Local model', free: true }, { id: 'agent-framework', label: 'Agent Framework', free: true }, { id: 'cloud', label: 'Cloud agent' }];
   // The tables are looked up by names that come from requests and saved files, so they have no prototype: '__proto__' or
   // 'constructor' is no row, agent kind or word. Rule maps (rules.office, rules.buildings) are read by own keys only (own).
-  // The two Microsoft cloud kinds (#24) share one column, like the two local servers: the same rules hold for both.
-  var SEC_KIND = bare({ 'claude-code': 'claude-code', ollama: 'local', lmstudio: 'local', hermes: 'hermes', dsh: 'dsh', openclaw: 'openclaw', 'agent-framework': 'agent-framework', copilot: 'copilot', gemini: 'acp', opencode: 'acp', kimi: 'acp', acp: 'acp', foundry: 'cloud', 'copilot-studio': 'cloud' });
+  // The Microsoft cloud kinds (#24) and the remote tools (#218: Cursor cloud, Hermes gateway) share one column, like the two local servers: no
+  // call of any of them comes to the office (ungated, Unsupervised), so the same rules hold for all.
+  var SEC_KIND = bare({ 'claude-code': 'claude-code', ollama: 'local', lmstudio: 'local', hermes: 'hermes', dsh: 'dsh', openclaw: 'openclaw', 'agent-framework': 'agent-framework', copilot: 'copilot', gemini: 'acp', opencode: 'acp', kimi: 'acp', acp: 'acp', foundry: 'cloud', 'copilot-studio': 'cloud', 'cursor-cloud': 'cloud', 'hermes-gateway': 'cloud' });
   // not: the kinds a row has no cell for. A cloud agent runs in the owner's cloud account and cannot reach the files on this
   // machine, so the file rows have no cell for it (no rule there could mean anything).
   var NO_FILES = { not: ['cloud'], na: { cloud: 'No files' } };
