@@ -138,6 +138,30 @@ export function lobbyOf(i) {
 }
 
 
+// ---------- the inbox (#210) ----------
+/**
+ * What Paperclip holds for the user, as items of the one queue (Needs you): each pending approval, then each open task assigned to a
+ * person (my issues: `assigneeUserId`; the office has one user, so any person assignee is the board). Each: { id, kind: 'approval' | 'issue',
+ * text, by, at }. Names and statuses only: never a payload. null: neither list was read (unknown, not an empty inbox). Oldest first, capped.
+ * in: { agents: [agent views], issues: [Paperclip issues]|null, approvals: [{ id, type, requestedByAgentId, at }]|null }.
+ */
+export const INBOX_CAP = 20;
+export function inboxOf(i) {
+  if (!i.approvals && !i.issues) return null;
+  const nameOf = (id) => (i.agents.find((a) => a.id === id) || {}).name || '';
+  const out = [];
+  for (const p of i.approvals || []) {
+    const by = nameOf(p.requestedByAgentId), kind = String(p.type || 'request').replace(/_/g, ' ');
+    out.push({ id: `approval:${p.id}`, kind: 'approval', text: by ? `Approval from ${by}: ${kind}` : `Approval: ${kind}`, by, at: p.at || 0 });
+  }
+  for (const x of i.issues || []) {
+    if (!x || !x.id || !x.assigneeUserId || x.status === 'done' || x.status === 'cancelled') continue;
+    const name = [x.identifier, x.title].filter(Boolean).join(' ');
+    out.push({ id: `issue:${x.id}`, kind: 'issue', text: `Task for you${x.status === 'blocked' ? ' (blocked)' : ''}: ${name || 'untitled'}`, by: '', at: Date.parse(x.updatedAt || x.createdAt || '') || 0 });
+  }
+  return out.sort((a, b) => a.at - b.at).slice(0, INBOX_CAP);
+}
+
 // ---------- the write grid (#198, ADR 0010) ----------
 // Each write kind is Confirm, Allow or Deny. Defaults: Confirm for the consequential kinds, Allow for the user's own task edits and
 // comments. A secret never takes Allow. The saved slice holds only the cells the user set (a value equal to the default counts: the user

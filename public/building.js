@@ -231,6 +231,16 @@
     });
   }
 
+  // What Paperclip holds for the user (#210): its pending approvals and the tasks assigned to a person (snap.hq.inbox, hq-model.mjs inboxOf).
+  // Not a session's request: it has no desk, so it opens in the Needs you list, and the answer is given in Paperclip (HQ dialog).
+  function hqRequests(snap) {
+    var q = snap && snap.hq;
+    if (!q || !q.company || !q.inbox) return [];
+    return q.inbox.map(function (x) {
+      return { id: 'hq:' + x.id, kind: 'paperclip', item: x.kind, text: x.text, uid: null, bot: 'Paperclip', building: '', buildingName: q.company.name, roomName: x.kind === 'approval' ? 'Approval' : 'Task', t: x.at || 0 };
+    });
+  }
+
   // Every open request and question of every building, oldest first. This is the Needs you list.
   // The rule for one session's items is OfficeVocab.requests (one owner); this adds who and where, and the
   // preview of a request. kind is 'permission' or 'question'; a question has no risk, so a bulk action never answers one.
@@ -243,7 +253,7 @@
         out.push(Object.assign({}, r, base, { preview: pend ? (pend.preview || pend.detail || '') : '' }));
       });
     });
-    return out.concat(mergeRequests(snap, now), planRequests(snap)).sort(function (a, b) { return a.t - b.t; });
+    return out.concat(mergeRequests(snap, now), planRequests(snap), hqRequests(snap)).sort(function (a, b) { return a.t - b.t; });
   }
   // The one queue (#146): everything that waits on the user, across buildings, oldest first. Every surface that shows a
   // request count or opens a request reads this, so the counts agree and no request is out of reach. reach(item) says how

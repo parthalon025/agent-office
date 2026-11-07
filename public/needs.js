@@ -61,6 +61,9 @@
           var r = g.items[0];
           if (r.kind === 'plan') return h('li', { key: r.id, className: 'past-row' }, h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h(A.Icon, { name: 'plan', size: 16 }), h('b', null, r.text), h(Tag, null, r.buildingName))),
             h('div', { className: 'past-actions' }, h(A.Button, { variant: 'emphasis', icon: 'plan', onClick: function () { p.onManager(); } }, 'Open Manager board')));
+          if (r.kind === 'paperclip') return h('li', { key: r.id, className: 'past-row' }, h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h(A.Icon, { name: 'hq', size: 16 }), h('b', null, r.text), h(Tag, null, r.buildingName)),
+            h('div', { className: 'past-meta mono' }, 'Paperclip ' + r.roomName.toLowerCase() + (r.t ? ' · ' + ago(r.t) : '') + '. Decide it in Paperclip.')),
+            h('div', { className: 'past-actions' }, h(A.Button, { variant: 'emphasis', icon: 'hq', onClick: function () { p.onHq(); } }, 'Open Paperclip HQ')));
           if (r.kind === 'merge') return h(O.Merge.Row, { key: r.id, r: r, busy: M.busy, onMerge: function (x) { M.start(x); } });
           var q = r.kind === 'question';
           return h('li', { key: r.id, className: 'past-row' },
@@ -76,7 +79,7 @@
   }
   function NeedsDialog(p) {
     return h(A.Dialog, { open: true, title: 'Needs you', onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
-      h('div', { className: 'form wide' }, h(QueueList, { toast: p.toast, onManager: p.onManager, onGo: p.onGo })));
+      h('div', { className: 'form wide' }, h(QueueList, { toast: p.toast, onManager: p.onManager, onHq: p.onHq, onGo: p.onGo })));
   }
 
   // the DS palette listens for Ctrl+K on the document, so a button sends the same key
@@ -100,7 +103,7 @@
         h(A.Button, { variant: 'quiet', icon: 'search', 'aria-label': 'Open the command palette', onClick: openPalette }, 'Commands')),
       h('section', { className: 'phone-sec', 'aria-label': 'Needs you' },
         h('h2', { className: 'phone-h' }, 'Needs you', ph.queue.count ? h(Tag, null, String(ph.queue.count)) : null),
-        h(QueueList, { toast: p.toast, onManager: p.onManager, onGo: p.onGo })),
+        h(QueueList, { toast: p.toast, onManager: p.onManager, onHq: p.onHq, onGo: p.onGo })),
       // The HQ building (#197): the company of the connected Paperclip, its Lobby in one line, and the way to the dashboard.
       hqPh ? h('section', { className: 'phone-sec', 'aria-label': 'Paperclip HQ' },
         h('h2', { className: 'phone-h' }, 'Paperclip HQ'),
@@ -110,7 +113,6 @@
           hqPh.needs.length || hqPh.approvalsUnknown ? h('ul', { className: 'phone-hq-needs', 'aria-label': 'Needs you in Paperclip' },
             hqPh.needs.map(function (n) { return h('li', { key: n.key }, n.text); }),
             hqPh.approvalsUnknown ? h('li', { key: 'unknown' }, 'The office could not read the approvals.') : null) : null,
-          hqPh.needs.some(function (n) { return n.key.indexOf('approval:') === 0; }) ? h('p', { className: 'look-facts' }, 'Decide approvals in Paperclip.') : null,
           hqPh.employees.length ? h('ul', { className: 'look-agents', 'aria-label': 'Employees' }, hqPh.employees.map(function (e) {
             return h('li', { key: e.id, className: 'phone-emp' },
               h('span', { className: 'phone-row' }, h('b', null, e.name), h(PhoneMood, { glance: { mood: e.mood, text: e.mood.word } })),

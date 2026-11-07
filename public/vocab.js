@@ -286,18 +286,15 @@
       return { id: 'hq-' + x.kind + '-' + x.id, label: x.label + ' (' + k[0] + co + ')', hint: x.hint, icon: k[1], group: 'Paperclip', keywords: 'paperclip hq ' + k[0] + ' ' + x.label + (x.hint ? ' ' + x.hint : ''), ref: { kind: x.kind, id: x.id } };
     });
   }
-  // The HQ in the phone list (#215): each employee with its status, its task line and its supervision, and what needs the user (the
-  // approvals that wait in Paperclip, then each employee whose last run failed). Approvals are decided in Paperclip: a row says so, no button.
+  // The HQ in the phone list (#215): each employee with its status, its task line and its supervision, and what needs the user
+  // here (each employee whose last run failed). The approvals and tasks that wait for the user are in the one queue (#210, Needs you above).
   function hqPhone(q) {
     var l = q && q.lobby, ags = (q && q.agents) || [], ap = l && l.approvals;
     var employees = ags.map(function (a) {
       var st = hqStatus(a);
       return { id: a.id, name: a.name, title: a.title || a.role || '', mood: st, line: a.task ? (a.task.identifier ? a.task.identifier + ' ' : '') + a.task.title : 'No open task', supervision: hqSupervision(a) };
     });
-    var needs = ((ap && ap.items) || []).map(function (x) {
-      var kind = String(x.kind || 'request').replace(/_/g, ' ');
-      return { key: 'approval:' + x.id, text: x.by ? 'Approval from ' + x.by + ': ' + kind : 'Approval: ' + kind };
-    });
+    var needs = [];
     employees.forEach(function (e) { if (e.mood.key === 'error') needs.push({ key: 'error:' + e.id, text: e.name + ': ' + e.mood.word }); });
     return { employees: employees, needs: needs, approvalsUnknown: !!l && !ap };
   }
