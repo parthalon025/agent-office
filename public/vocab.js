@@ -261,6 +261,14 @@
   }
   // The Lobby of the HQ building (#197, paperclip.mjs view().lobby): the Glance line (the city card, the building sign) and the dashboard
   // cards. null in the data is unknown, said so: the office never shows a zero it did not read.
+  // The office adapter line of the HQ (#222): the state the server read (installed, off, missing, unknown) as one line and the Install action's words.
+  function hqAdapter(a) {
+    var st = a && a.state, why = a && a.why ? a.why : '';
+    if (st === 'installed') return { line: 'Office adapter: installed', ok: true, install: false, why: '' };
+    if (st === 'off') return { line: 'Office adapter: switched off in Paperclip', ok: false, install: false, why: why };
+    if (st === 'missing') return { line: 'Office adapter: not installed', ok: false, install: true, why: why };
+    return { line: 'Office adapter: unknown', ok: false, install: false, why: why || 'The office has not read the adapter list of Paperclip yet.' };
+  }
   function hqPlural(n, one) { return n + ' ' + (n === 1 ? one : one + 's'); }
   function hqGlance(q) {
     var l = q && q.lobby;
@@ -392,7 +400,7 @@
     return calls;
   }
   function routineDone(c) { return c.action === 'create' ? 'Routine created' : c.action === 'schedule' ? 'Schedule changed' : 'Routine changed'; }
-  var hq = { goals: hqGoals, routineStates: routineStates, routineFacts: routineFacts, routineForm: routineForm, routineCalls: routineCalls, routineDone: routineDone, searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg };
+  var hq = { adapter: hqAdapter, goals: hqGoals, routineStates: routineStates, routineFacts: routineFacts, routineForm: routineForm, routineCalls: routineCalls, routineDone: routineDone, searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg };
 
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
   // priced: sessions with a cost figure. unknown: sessions whose agent reports no cost (costUnknown), shown as "unknown".

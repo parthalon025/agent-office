@@ -444,3 +444,96 @@ test('instance() lists environments by name and state and the settings, never a 
     assert.doesNotMatch(JSON.stringify(i), /do-not-show|privateKey|build\.example/);
   } finally { await r.done(); }
 });
+
+// ---------- the office adapter install (#222): POST /api/adapters/install, idempotent, through the grid ----------
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const ADAPTER_DIR = path.resolve(fileURLToPath(new URL('../src/integrations/paperclip-adapter', import.meta.url)));
+async function adapterRig(grid = {}, seed = { ...DEMO(), adapters: [{ type: 'claude_local', label: 'Claude Code', source: 'builtin', modelsCount: 3, loaded: true, disabled: false, capabilities: {} }] }, adapterDir = ADAPTER_DIR) {
+  const pc = await startFakePaperclip({ ...seed, boardKey: KEY });
+  const feed = [];
+  const hq = createHq({ ...fast, hooksFile: () => 'C:/office/office-hooks.json', key: () => KEY, grid: () => grid, askFirst, adapterDir, onFeed: (t, k) => feed.push([k, t]) });
+  await hq.connect({ url: pc.url });
+  await until(() => hq.state() === 'on', 'the events socket');
+  return { pc, hq, feed, writes: () => pc.requests.filter((r) => r.method !== 'GET' && r.method !== 'UPGRADE'), done: async () => { hq.disconnect(); await pc.close(); } };
+}
+const INSTALL = { kind: 'adapter', action: 'install' };
+
+test('adapter: Confirm asks first and sends nothing; the confirmed call sends one POST with the office folder, and the adapter is then installed', async () => {
+  const r = await adapterRig();
+  try {
+    assert.equal((await r.hq.adapter()).state, 'missing');
+    const e = await r.hq.write(INSTALL).then(() => null, (x) => x);
+    assert.equal(e.status, 409);
+    assert.equal(e.answer.body.confirm, 'write');
+    assert.equal(e.answer.body.write.summary, 'Install the office adapter in Paperclip');
+    assert.equal(r.writes().length, 0, 'nothing was sent before the Confirm');
+    const made = await r.hq.write({ ...INSTALL, packageName: 'C:/evil', localPath: 'C:/evil' }, { confirmed: true });
+    assert.deepEqual(made, { ok: true, type: 'agent_office', existed: false, requiresRestart: false });
+    assert.deepEqual(r.writes().map((x) => [x.method, x.path, x.body]), [['POST', '/api/adapters/install', { isLocalPath: true, packageName: ADAPTER_DIR }]], 'the folder is the office folder, never the caller folder');
+    assert.equal((await r.hq.adapter()).state, 'installed');
+    assert.ok(!JSON.stringify([r.feed, made]).includes(KEY), 'the board key reaches no feed line or answer');
+  } finally { await r.done(); }
+});
+
+test('adapter: a second install sends nothing (idempotent), also when it was switched off in Paperclip', async () => {
+  const r = await adapterRig({ adapter: 'allow' });
+  try {
+    await r.hq.write(INSTALL);
+    assert.equal(r.writes().length, 1);
+    const again = await r.hq.write(INSTALL);
+    assert.deepEqual(again, { ok: true, type: 'agent_office', existed: true, off: false });
+    assert.equal(r.writes().length, 1, 'no second request');
+    r.pc.state.adapters.find((x) => x.type === 'agent_office').disabled = true;
+    const off = await r.hq.write(INSTALL);
+    assert.equal(off.off, true);
+    assert.equal(r.writes().length, 1);
+    assert.equal((await r.hq.adapter()).state, 'off');
+  } finally { await r.done(); }
+});
+
+test('adapter: Deny refuses with 403 and sends nothing; a Paperclip refusal (not an instance admin) is named, with no key in it', async () => {
+  const d = await adapterRig({ adapter: 'deny' });
+  try {
+    const e = await d.hq.write(INSTALL, { confirmed: true }).then(() => null, (x) => x);
+    assert.equal(e.status, 403);
+    assert.match(e.message, /Office adapter/);
+    assert.equal(d.writes().length, 0);
+  } finally { await d.done(); }
+  const n = await adapterRig({ adapter: 'allow' }, { ...DEMO(), adapters: [], notAdmin: true });
+  try {
+    const e = await n.hq.write(INSTALL).then(() => null, (x) => x);
+    assert.ok(e && e.status >= 400, 'refused');
+    assert.match(e.message, /needs an instance admin/);
+    assert.ok(!(e.message + JSON.stringify(n.feed)).includes(KEY));
+    assert.ok(n.feed.some(([, t]) => /Paperclip refused the write: Install the office adapter/.test(t)));
+  } finally { await n.done(); }
+});
+
+test('adapter: an adapter folder that is missing is a 500 before anything is sent', async () => {
+  const r = await adapterRig({ adapter: 'allow' }, undefined, path.join(ADAPTER_DIR, 'nowhere'));
+  try {
+    const e = await r.hq.write(INSTALL).then(() => null, (x) => x);
+    assert.equal(e.status, 500);
+    assert.equal(r.writes().length, 0);
+  } finally { await r.done(); }
+});
+
+test('hire: refused with the reason while the adapter is missing or off, before any Confirm; allowed once it is installed', async () => {
+  const r = await adapterRig({ hire: 'allow', adapter: 'allow' });
+  const hire = { kind: 'hire', action: 'create', name: 'Mira', role: 'engineer', manager: D.agents[0].id, budgetDollars: 25 };
+  try {
+    const e = await r.hq.write(hire).then(() => null, (x) => x);
+    assert.equal(e.status, 409);
+    assert.match(e.message, /does not have the office adapter yet\. Install it at the HQ first/);
+    assert.equal(r.writes().length, 0, 'no hire request');
+    assert.ok(r.feed.some(([, t]) => /^Hire not sent/.test(t)));
+    await r.hq.write(INSTALL);
+    r.pc.state.adapters.find((x) => x.type === 'agent_office').disabled = true;
+    const off = await r.hq.write(hire).then(() => null, (x) => x);
+    assert.match(off.message, /switched off/);
+    r.pc.state.adapters.find((x) => x.type === 'agent_office').disabled = false;
+    const made = await r.hq.write(hire);
+    assert.match(made.id, /^a4000000/);
+  } finally { await r.done(); }
+});

@@ -13,6 +13,9 @@
 // company on 127.0.0.1 and prints its address; Ctrl+C stops it. With --hooks, Ada is already supervised with that file.
 import http from 'node:http';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { loadAdapter } from './fake-paperclip-host.mjs';
 import { fileURLToPath } from 'node:url';
 
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
@@ -106,7 +109,7 @@ const DEMO0 = (hooksFile = null) => {
 };
 
 /**
- * Starts the fake on 127.0.0.1. seed: { companies, agents, issues, routines, projects, noProjects, liveRuns, goals, approvals, activity, costs, secrets, noGoals, health, auth, key }. key: a board key; every route but /api/health answers 401 without `authorization: Bearer <key>`. auth: true answers
+ * Starts the fake on 127.0.0.1. seed: { notAdmin (the board key is no instance admin), companies, agents, issues, routines, projects, noProjects, liveRuns, goals, approvals, activity, costs, secrets, noGoals, health, auth, key }. key: a board key; every route but /api/health answers 401 without `authorization: Bearer <key>`. auth: true answers
  * 403 to every route (a Paperclip in authenticated mode). port: 0 for a free one.
  */
 export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
@@ -115,7 +118,7 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
     invites: structuredClone(seed.invites || []), joinRequests: structuredClone(seed.joinRequests || []), members: structuredClone(seed.members || []),
     environments: structuredClone(seed.environments || []), instance: structuredClone(seed.instance || { id: 'is100000-0000-4000-8000-000000000001', defaultEnvironmentId: null, general: { censorUsernameInLogs: false, feedbackDataSharingPreference: 'prompt' }, experimental: {}, createdAt: '2026-11-01T09:00:00.000Z', updatedAt: '2026-11-01T09:00:00.000Z' }) };
   const requests = [], sockets = new Set();
-  const api = { imports: [], exports: 0, afterPatch: null, failIssueAfter: null, created: 0, comments: 0, hires: [], goalsMade: 0 };   // set by a test: runs right after a PATCH is answered (a change made in Paperclip at the same time)
+  const api = { imports: [], exports: 0, afterPatch: null, failIssueAfter: null, created: 0, comments: 0, hires: [], goalsMade: 0, adapterInstalls: [] };   // set by a test: runs right after a PATCH is answered (a change made in Paperclip at the same time)
   let seq = 0;
   const send = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
   function emit(type, payload, companyId = st.companies[0]?.id) {
@@ -325,6 +328,25 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/skills$/))) return seed.noSkills ? send(res, 404, { error: 'Not found' }) : send(res, 200, st.skills.filter((r) => r.companyId === x[1]));
       if (req.method === 'GET' && m(/^\/api\/plugins$/)) return send(res, 200, st.plugins);
       if (req.method === 'GET' && m(/^\/api\/adapters$/)) return send(res, 200, st.adapters);
+      // install an external adapter (routes/adapters.ts POST /adapters/install, AdapterInstallRequest { packageName, isLocalPath?, version? }): instance admin
+      // only; a local path is loaded at once (plugin-loader.ts loadExternalAdapterPackage: package.json exports["."], import, createServerAdapter()), the
+      // adapter is registered and answers 201 { type, packageName, version, installedAt, requiresRestart }; requiresRestart is true for a reinstall of a type that
+      // an external record already holds. A load error is 500 { error: 'Failed to install adapter: ...' }.
+      if (req.method === 'POST' && u.pathname === '/api/adapters/install') {
+        if (seed.notAdmin) return send(res, 403, { error: 'Instance admin access required' });
+        if (!parsed || typeof parsed.packageName !== 'string' || !parsed.packageName) return send(res, 400, { error: 'packageName is required and must be a string.' });
+        api.adapterInstalls.push(parsed);
+        const dir = path.resolve(parsed.packageName);
+        return Promise.resolve().then(async () => {
+          if (parsed.isLocalPath !== true) throw new Error('npm install is not done by this stand-in');
+          const mod = await loadAdapter(dir);
+          let version; try { version = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).version; } catch { /* none */ }
+          const type = mod.adapter.type, had = st.adapters.find((r) => r.type === type);
+          const row = { type, label: type, source: 'external', modelsCount: 0, loaded: true, disabled: false, capabilities: {}, version, packageName: parsed.packageName, isLocalPath: true };
+          if (had) Object.assign(had, row); else st.adapters.push(row);
+          return send(res, 201, { type, packageName: parsed.packageName, version, installedAt: new Date().toISOString(), requiresRestart: !!(had && had.source === 'external') });
+        }).catch((e) => send(res, 500, { error: `Failed to install adapter: ${e.message}` }));
+      }
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/secrets$/))) return send(res, 200, st.secrets.filter((r) => r.companyId === x[1]));
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/live-runs$/))) return send(res, 200, st.liveRuns);
       // company admin (#213): settings, invites, join requests and members (routes/companies.ts, routes/access.ts)
@@ -377,6 +399,7 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
         if (parsed.reportsTo && !st.agents.some((y) => y.id === parsed.reportsTo)) return send(res, 422, { error: 'Manager not found' });
         const co = st.companies.find((y) => y.id === x[1]);
         if (!co) return send(res, 404, { error: 'Company not found' });
+        if (!st.adapters.some((y) => y.type === parsed.adapterType)) return send(res, 422, { error: `Unknown adapter type: ${parsed.adapterType}` });   // routes/agents.ts assertKnownAdapterType
         const pending = co.requireBoardApprovalForNewAgents === true;
         const n = st.agents.length + 1;
         const a = { id: `a4000000-0000-4000-8000-${String(n).padStart(12, '0')}`, companyId: x[1], title: null, reportsTo: null, budgetMonthlyCents: 0, spentMonthlyCents: 0, adapterConfig: {}, runtimeConfig: {}, role: 'general', ...parsed, status: pending ? 'pending_approval' : 'idle', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };

@@ -15,10 +15,11 @@
 //
 // Pure apart from createHq, whose network, clock and timers are injected (tests: test/paperclip.test.mjs with the fake server
 // test/fixtures/fake-paperclip.mjs; through the server: test/paperclip-routes.test.mjs).
+import fs from 'node:fs';
 import path from 'node:path';
 import { runIds, cleanIds } from './payload.mjs';
 import { readArgs, CLAUDE_FLAGS_VERSION } from './providers/claude-code.mjs';
-import { floorsOf, cablesOf, goalsOf, lobbyOf, inboxOf, costsOf, catalogOf, roomsOf, monthWindows, searchOf, shapeProblems, planWrite, writeValueOf, WRITE_KINDS, NEVER_SELF_APPROVED, selfApprovalOn, EXPORT_INCLUDES } from './hq-model.mjs';
+import { floorsOf, cablesOf, goalsOf, lobbyOf, inboxOf, costsOf, catalogOf, roomsOf, monthWindows, searchOf, shapeProblems, planWrite, writeValueOf, WRITE_KINDS, officeAdapterOf, OFFICE_ADAPTER_TYPE, NEVER_SELF_APPROVED, selfApprovalOn, EXPORT_INCLUDES } from './hq-model.mjs';
 import { archetypeOf, GENERAL } from './archetypes.mjs';
 
 export const DEFAULT_URL = 'http://127.0.0.1:3100';
@@ -349,13 +350,14 @@ export function createHq(deps = {}) {
 
   // The board key (the connect mode #194, the Paperclip the office runs #197): asked per call for the address it is used at (deps.key), so it goes only to the Paperclip it was made for (redirects are refused) and is held nowhere.
   const keyOf = (url) => { try { return deps.key?.(url) || null; } catch { return null; } };
-  async function call(conn, route, { timeoutMs, ...init } = {}) {
+  async function call(conn, route, { timeoutMs, forbidden, ...init } = {}) {
     let res;
     const key = keyOf(conn.url);
     try {
       res = await doFetch(conn.url + route, { ...init, redirect: 'error', signal: AbortSignal.timeout(timeoutMs || (init.method ? 15000 : 8000)), headers: { accept: 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}), ...(init.body ? { 'content-type': 'application/json' } : {}) } });
     } catch (e) { throw httpError(502, `No Paperclip answers at ${conn.url} (${e.cause?.code || e.name || 'no answer'}).`); }
     const body = await res.text();
+    if (res.status === 403 && forbidden) throw Object.assign(httpError(502, `Paperclip at ${conn.url} refused this (403). ${forbidden}`), { upstream: 403 });
     if (res.status === 401 || res.status === 403) {
       throw httpError(502, key
         ? `Paperclip at ${conn.url} does not accept the board key (${res.status}). It may be expired or revoked. Connect to Paperclip again with a new key.`
@@ -924,6 +926,18 @@ export function createHq(deps = {}) {
     feed(`Exported the company ${name} from Paperclip as a file (${Object.keys(json.files).length} files). The office keeps no copy.`);
     return { rootPath: json.rootPath, manifest: json.manifest, files: json.files, warnings: Array.isArray(json.warnings) ? json.warnings.map((w) => text(w, 200)).slice(0, 50) : [] };
   }
+  /**
+   * Whether Paperclip has the office adapter (#222), read from GET /api/adapters when asked (the HQ, the HR desk and the hire writer): { state, why }
+   * (hq-model.mjs officeAdapterOf). A list that cannot be read, or has another shape, is 'unknown' with the reason. Reads only.
+   */
+  async function adapterState(conn = c) {
+    if (!conn || !d) return { state: 'unknown', why: 'Paperclip is not connected.' };
+    let json;
+    try { json = await call(conn, '/api/adapters'); } catch (e) { return { state: 'unknown', why: `The office cannot read the adapter list of Paperclip. ${e.message}` }; }
+    const p = shapeProblems('adapters', json);
+    if (p.length) return { state: 'unknown', why: `Paperclip answered in a shape the office does not know (${p[0]}) Update the office or the pinned Paperclip.` };
+    return officeAdapterOf(list(json));
+  }
   const askWrite = deps.askFirst || ((kind, message, extra) => Object.assign(httpError(409, message), { confirm: kind, ...extra }));
   const OPEN_APPROVAL = new Set(['pending', 'revision_requested']);
   async function check(conn, t) {
@@ -987,6 +1001,20 @@ export function createHq(deps = {}) {
     }
     for (const t of plan.targets) await check(conn, t);
     if (!first && c !== conn) throw httpError(409, 'Paperclip is not connected.');
+    // Hiring needs the office adapter (#222): every hire runs through it, and Paperclip refuses a hire for an adapter type it does not have. Both
+    // hire paths (the HR desk and the Manager) end here, so one check says what to do, before any Confirm is asked.
+    if (plan.kind === 'hire') {
+      const a = await adapterState(conn);
+      if (a.state !== 'installed') { feed(`Hire not sent: ${a.why}`, 'wait'); throw httpError(409, a.why); }
+    }
+    if (plan.kind === 'adapter') {
+      // Idempotent: an adapter that is there is left alone. Nothing is asked and nothing is sent.
+      const a = await adapterState(conn);
+      if (a.state === 'unknown') throw httpError(502, a.why);
+      if (a.state !== 'missing') { feed('The office adapter was already in Paperclip. Nothing was sent.'); return { ok: true, type: OFFICE_ADAPTER_TYPE, existed: true, off: a.state === 'off' }; }
+      if (!deps.adapterDir || !fs.existsSync(path.join(deps.adapterDir, 'package.json'))) throw httpError(500, 'The office cannot find its adapter folder.');
+      plan.body = { ...plan.body, packageName: deps.adapterDir };
+    }
     if (first && plan.kind === 'company') {
       // A retry never doubles the company: a name that exists is reused, with no write and no question.
       const have = list(await call(conn, '/api/companies')).find((x) => x && x.id && text(x.name, 80) === plan.name);
@@ -1013,7 +1041,7 @@ export function createHq(deps = {}) {
     }
     let made, hireApproval = null;
     try {
-      try { made = obj(await call(conn, plan.path(conn.companyId), { method: plan.method, body: JSON.stringify(plan.body), timeoutMs: plan.timeoutMs })); }
+      try { made = obj(await call(conn, plan.path(conn.companyId), { method: plan.method, body: JSON.stringify(plan.body), timeoutMs: plan.timeoutMs, forbidden: plan.forbidden })); }
       catch (e) { feed(`Paperclip refused the write: ${plan.summary}. ${e.message}`, 'wait'); throw e; }
       // A hire answers { agent, approval } (routes/agents.ts handleAgentHire, 0.3.1): approval is the board's pending hire_agent approval
       // when the company asks the board to approve new employees, else null. The employee is the agent.
@@ -1044,12 +1072,17 @@ export function createHq(deps = {}) {
       const bad = shapeProblems('importResult', made), co = obj(made.company);
       if (bad.length || typeof co.id !== 'string' || !co.id) { feed(`Paperclip did not name the company it imported: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the company it imported.'); }
     }
+    if (plan.kind === 'adapter') {
+      const bad = shapeProblems('adapterInstall', made);
+      if (bad.length || made.type !== OFFICE_ADAPTER_TYPE) { feed(`Paperclip did not confirm the office adapter: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not confirm that it loaded the office adapter.'); }
+    }
     if (plan.kind === 'hire' && !(typeof made.id === 'string' && made.id)) { feed(`Paperclip did not name the employee it hired: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the employee it hired.'); }
     const waitsForBoard = plan.kind === 'hire' && (made.status === 'pending_approval' || !!(hireApproval && hireApproval.id));
     feed(`Wrote to ${name}: ${plan.summary}.${waitsForBoard ? ' Paperclip waits for the board to approve the hire.' : ''}`);
     if (!first) refetchSoon(conn);
     const out = { ok: true };
     if (plan.kind === 'company' && plan.action === 'create') { out.id = String(made.id); out.name = plan.name; out.existed = false; }
+    if (plan.kind === 'adapter') { out.type = OFFICE_ADAPTER_TYPE; out.existed = false; out.requiresRestart = made.requiresRestart === true; }
     if (plan.kind === 'hire') { out.id = String(made.id); out.name = plan.body.name; out.pendingApproval = waitsForBoard; }
     if (plan.kind === 'company' && plan.action === 'import') { out.id = String(made.company.id); out.name = text(made.company.name, 80) || plan.name; }
     if (plan.kind === 'goal' && plan.action === 'create') out.id = String(made.id);
@@ -1059,5 +1092,5 @@ export function createHq(deps = {}) {
     return out;
   }
 
-  return { connect, disconnect, supervise, handoffGoal, handoffTasks, write, selfApprove: () => { if (c) selfApprove(c); }, tasksOf, access, instance, exportCompany, view, model, costs, catalog, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
+  return { connect, disconnect, supervise, handoffGoal, handoffTasks, write, adapter: adapterState, selfApprove: () => { if (c) selfApprove(c); }, tasksOf, access, instance, exportCompany, view, model, costs, catalog, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
 }

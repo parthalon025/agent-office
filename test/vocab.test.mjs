@@ -624,3 +624,14 @@ test('routines (#209): the form, the calls it needs (only what changed) and the 
   assert.deepEqual(V.hq.routineCalls({ ...f, agent: '' }, r), [{ kind: 'routine', action: 'update', routine: 'r1', agent: null }]);
   assert.deepEqual(V.hq.routineCalls({ ...V.hq.routineForm(null), title: ' New ', agent: 'a2' }, null), [{ kind: 'routine', action: 'create', title: 'New', agent: 'a2' }]);
 });
+
+test('the office adapter line of the HQ (#222): installed, off, missing and unknown, each with its words; only a missing adapter offers Install', () => {
+  const A = V.hq.adapter;
+  assert.deepEqual(A({ state: 'installed', why: '' }), { line: 'Office adapter: installed', ok: true, install: false, why: '' });
+  assert.deepEqual([A({ state: 'missing', why: 'Install it.' }).line, A({ state: 'missing', why: 'Install it.' }).install], ['Office adapter: not installed', true]);
+  assert.equal(A({ state: 'off', why: 'On.' }).install, false);
+  assert.equal(A({ state: 'off', why: 'On.' }).line, 'Office adapter: switched off in Paperclip');
+  const u = A(null);
+  assert.deepEqual([u.line, u.install, u.ok], ['Office adapter: unknown', false, false]);
+  assert.ok(u.why.length > 0, 'unknown says why');
+});

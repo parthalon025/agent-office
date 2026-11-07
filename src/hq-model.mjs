@@ -24,6 +24,8 @@ export const SHAPES = {
   skills: { list: true, fields: { id: 'string', key: 'string', name: 'string' } },
   plugins: { list: true, fields: { id: 'string', pluginKey: 'string', status: 'string' } },
   adapters: { list: true, fields: { type: 'string', label: 'string', source: 'string' } },
+  // The answer of POST /api/adapters/install (routes/adapters.ts, 201): the adapter the install loaded. version is left out when the package has none.
+  adapterInstall: { list: false, fields: { type: 'string', packageName: 'string', installedAt: 'string', requiresRestart: 'boolean' } },
   // Company admin (#213): the invites, join requests and members of a company (routes/access.ts). Invites and members come in an object.
   invites: { list: false, fields: { invites: 'array' } },
   joinRequests: { list: true, fields: { id: 'string', status: 'string', requestType: 'string' } },
@@ -197,6 +199,7 @@ export const WRITE_KINDS = {
   company: { label: 'Company', options: RULES, def: 'confirm' },
   goal: { label: 'Goals', options: RULES, def: 'confirm' },
   instance: { label: 'Instance and environments', options: RULES, def: 'confirm' },
+  adapter: { label: 'Office adapter', options: RULES, def: 'confirm' },
 };
 const kindRow = (k) => (typeof k === 'string' && Object.hasOwn(WRITE_KINDS, k) ? WRITE_KINDS[k] : null);
 const gridError = (status, message) => Object.assign(new Error(message), { status });
@@ -271,7 +274,7 @@ export function setSelfApproval(slice, change) {
 // hire (create, #201), company (create, #199: scope 'none', it needs no connection; update, #213) and access (invite, revoke, approveJoin,
 // rejectJoin, member, #213). Another kind in the grid
 // has no plan yet, and is 400 (never sent).
-const OFFICE_ADAPTER_TYPE = 'agent_office';   // the word of OFFICE_ADAPTER in paperclip.mjs (which imports this module)
+export const OFFICE_ADAPTER_TYPE = 'agent_office';   // the word of OFFICE_ADAPTER in paperclip.mjs (which imports this module)
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const ISSUE_STATUS = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'];
 export const GOAL_STATUSES = ['planned', 'active', 'achieved', 'cancelled'], GOAL_LEVELS = ['company', 'team', 'agent', 'task'];
@@ -657,6 +660,13 @@ const PLANS = {
     },
   },
   approval: Object.fromEntries([decision('approve', 'approve', 'Approve an approval'), decision('reject', 'reject', 'Reject an approval'), decision('revise', 'request-revision', 'Request a revision of an approval')]),
+  // The office adapter (#222): the one install of the plugin the office ships (src/integrations/paperclip-adapter) into the Paperclip it is
+  // connected to: POST /api/adapters/install { packageName: <folder>, isLocalPath: true } (routes/adapters.ts: instance admin only, the folder
+  // must be readable by the Paperclip process, it loads at once). The folder is never a field of the request: the writer fills it from the
+  // office's own folder (deps.adapterDir), so no page can make Paperclip load other code.
+  adapter: {
+    install: () => ({ method: 'POST', path: () => '/api/adapters/install', body: { isLocalPath: true }, targets: [], ownFolder: true, forbidden: 'Installing an adapter needs an instance admin. The board key of the office may not be one, or this Paperclip manages its adapters itself.', summary: 'Install the office adapter in Paperclip' }),
+  },
 };
 export function planWrite(b) {
   const kind = b && b.kind, action = b && b.action;
@@ -664,6 +674,19 @@ export function planWrite(b) {
   const make = row && typeof action === 'string' && Object.hasOwn(row, action) ? row[action] : null;
   if (!make) throw gridError(400, 'The office cannot make that write.');
   return { kind, action, ...make(b) };
+}
+
+/**
+ * Whether Paperclip has the office adapter (#222), from the adapter list it answers (rows: the shaped rows, or null when the list was not
+ * read). { state: 'installed' | 'off' | 'missing' | 'unknown', why }. Only 'installed' lets a hire go: Paperclip refuses a hire for an
+ * adapter type it does not have (routes/agents.ts assertKnownAdapterType) and a disabled adapter takes no run. Pure.
+ */
+export function officeAdapterOf(rows) {
+  if (!Array.isArray(rows)) return { state: 'unknown', why: 'The office cannot read the adapter list of Paperclip.' };
+  const r = rows.find((x) => x && x.type === OFFICE_ADAPTER_TYPE);
+  if (!r) return { state: 'missing', why: 'Paperclip does not have the office adapter yet. Install it at the HQ first. Then hire.' };
+  if (r.disabled) return { state: 'off', why: 'Paperclip has the office adapter switched off. Switch it on in Paperclip. Then hire.' };
+  return { state: 'installed', why: '' };
 }
 
 // ---------- goals (#207) ----------
