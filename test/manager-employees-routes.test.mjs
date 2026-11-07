@@ -1,5 +1,5 @@
-// Office Managers as Paperclip employees through the real office in process (#204): GET /api/managers, POST /api/manager/hire (the write grid's
-// Hires cell: Confirm by default, the ask-first question, then one POST), the Manager saved in the state, and a task assigned to it becoming a goal
+// Office Managers as Paperclip employees through the real office in process (#204): GET /api/managers, POST /api/manager/hire (the one hire
+// plan of #201 with a monthly budget; the write grid's Hires cell: Confirm by default, the ask-first question, then one POST of agent-hires), the Manager saved in the state, and a task assigned to it becoming a goal
 // on the plan board that the snapshot carries. Paperclip is the fake. No Claude Code runs and nothing is paid for.
 // Run: node --test test/manager-employees-routes.test.mjs
 import test, { before, after } from 'node:test';
@@ -29,7 +29,7 @@ test('both routes are page routes', () => {
 });
 
 test('not connected: a hire is 409 and sends nothing; the list is empty', async () => {
-  const r = await rig.call('/api/manager/hire', { building: BUILDING });
+  const r = await rig.call('/api/manager/hire', { building: BUILDING, budgetDollars: 20 });
   assert.equal(r.status, 409);
   assert.match(r.json.error, /not connected/);
   assert.deepEqual((await rig.call('/api/managers')).json, { managers: [] });
@@ -39,16 +39,21 @@ test('not connected: a hire is 409 and sends nothing; the list is empty', async 
 test('connected: the hire asks first, then sends one POST; the task assigned to the Manager is a goal on the board', async () => {
   assert.equal((await rig.call('/api/paperclip/connect', { url: pc.url })).status, 200);
   await until(async () => (await rig.call('/api/paperclip')).json.hq?.state === 'on', 'the live events');
-  const q = await rig.call('/api/manager/hire', { building: BUILDING, name: 'Mara' });
+  const none = await rig.call('/api/manager/hire', { building: BUILDING, name: 'Mara' });
+  assert.equal(none.status, 400, 'no budget, no hire');
+  assert.match(none.json.error, /budget/);
+  const q = await rig.call('/api/manager/hire', { building: BUILDING, name: 'Mara', budgetDollars: 20 });
   assert.equal(q.status, 409);
+  assert.match(q.json.write.summary, /office Manager \(Project manager role\).*\$20\.00 a month/);
   assert.equal(q.json.confirm, 'write');
   assert.equal(posts().length, 0);
-  const ok = await rig.call('/api/manager/hire', { building: BUILDING, name: 'Mara', confirmed: true });
+  const ok = await rig.call('/api/manager/hire', { building: BUILDING, name: 'Mara', budgetDollars: 20, confirmed: true });
   assert.equal(ok.status, 200);
   assert.match(ok.json.id, /^a4000000/);
-  assert.deepEqual(posts().map((x) => x.path), [`/api/companies/${CO}/agents`]);
+  assert.deepEqual(posts().map((x) => x.path), [`/api/companies/${CO}/agent-hires`]);
+  assert.equal(posts()[0].body.role, 'pm');
   assert.deepEqual((await rig.call('/api/managers')).json.managers, [{ id: ok.json.id, name: 'Mara', building: BUILDING }]);
-  assert.equal((await rig.call('/api/manager/hire', { building: BUILDING, confirmed: true })).status, 409, 'one Manager for each building');
+  assert.equal((await rig.call('/api/manager/hire', { building: BUILDING, budgetDollars: 20, confirmed: true })).status, 409, 'one Manager for each building');
 
   pc.state.issues.push({ id: 'i3000000-0000-4000-8000-000000000001', companyId: CO, identifier: 'ACM-30', title: 'Fix the login bug', description: 'Find it\nFix it', status: 'todo', assigneeAgentId: ok.json.id, assigneeAdapterOverrides: null });
   pc.emit('activity.logged', { actorType: 'user', actorId: 'board', action: 'issue.created', entityType: 'issue', entityId: 'i3000000-0000-4000-8000-000000000001', agentId: null, runId: null, details: {} });

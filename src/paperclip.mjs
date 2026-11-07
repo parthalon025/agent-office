@@ -922,10 +922,13 @@ export function createHq(deps = {}) {
       if (conn.busy.has(busyId)) throw httpError(409, 'The office is already changing this employee.');
       conn.busy.add(busyId); changed();
     }
-    let made;
+    let made, hireApproval = null;
     try {
       try { made = obj(await call(conn, plan.path(conn.companyId), { method: plan.method, body: JSON.stringify(plan.body) })); }
       catch (e) { feed(`Paperclip refused the write: ${plan.summary}. ${e.message}`, 'wait'); throw e; }
+      // A hire answers { agent, approval } (routes/agents.ts handleAgentHire, 0.3.1): approval is the board's pending hire_agent approval
+      // when the company asks the board to approve new employees, else null. The employee is the agent.
+      if (plan.kind === 'hire') { hireApproval = made.approval && typeof made.approval === 'object' ? made.approval : null; made = obj(made.agent); }
       if (plan.kind === 'hire' && c === conn && d && typeof made.id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(made.id)) {
         // the new employee is known at once, so the onboarding task can name it before the next read of the company (#201). A failed read is
         // not an error of the hire: the read of the company that follows has the same data.
@@ -949,11 +952,12 @@ export function createHq(deps = {}) {
     if (plan.kind === 'access' && plan.action === 'invite' && !made.id) { feed(`Paperclip did not name the invite it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the invite it made.'); }
     if (plan.kind === 'company' && plan.action === 'create' && !made.id) { feed(`Paperclip did not name the company it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the company it made.'); }
     if (plan.kind === 'hire' && !(typeof made.id === 'string' && made.id)) { feed(`Paperclip did not name the employee it hired: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the employee it hired.'); }
-    feed(`Wrote to ${name}: ${plan.summary}.`);
+    const waitsForBoard = plan.kind === 'hire' && (made.status === 'pending_approval' || !!(hireApproval && hireApproval.id));
+    feed(`Wrote to ${name}: ${plan.summary}.${waitsForBoard ? ' Paperclip waits for the board to approve the hire.' : ''}`);
     if (!first) refetchSoon(conn);
     const out = { ok: true };
     if (plan.kind === 'company' && plan.action === 'create') { out.id = String(made.id); out.name = plan.name; out.existed = false; }
-    if (plan.kind === 'hire') { out.id = String(made.id); out.name = plan.body.name; }
+    if (plan.kind === 'hire') { out.id = String(made.id); out.name = plan.body.name; out.pendingApproval = waitsForBoard; }
     if (plan.kind === 'goal' && plan.action === 'create') out.id = String(made.id);
     if (plan.kind === 'routine' && plan.action === 'create') out.id = String(made.id);
     if (plan.kind === 'access' && plan.action === 'invite') out.id = String(made.id);

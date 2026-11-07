@@ -1566,9 +1566,10 @@ export function createOffice(cfg) {
     // Manager goals (#156): start { building, goal, approveFirst?, spendLimit?, confirmed? }, approve, cancel and retry { id, step }.
     R('POST', '/api/goal/start', 'page', ({ body }) => startGoal(body)),
     R('POST', '/api/goal/approve', 'page', async ({ body }) => { if (!await manager.approve(String(body.id))) throw httpError(409, 'That goal does not wait for approval.'); return { ok: true }; }),
-    // Managers as Paperclip employees (#204): the Managers of the connected company, and the hire of one (hq.write kind hire: the grid's Hires cell).
+    // Managers as Paperclip employees (#204): the Managers of the connected company, and the hire of one { building, name?, budgetDollars,
+    // confirmed? } (the one hire plan, hq.write kind hire with officeManager: the grid's Hires cell; no budget is 400, as for every hire).
     R('GET', '/api/managers', 'page', () => ({ managers: managerEmployees.list() })),
-    R('POST', '/api/manager/hire', 'page', ({ body }) => managerEmployees.register({ building: String(body.building || ''), name: body.name === undefined ? undefined : String(body.name), confirmed: body.confirmed === true })),
+    R('POST', '/api/manager/hire', 'page', ({ body }) => managerEmployees.register({ building: String(body.building || ''), name: body.name === undefined ? undefined : String(body.name), budgetDollars: body.budgetDollars, confirmed: body.confirmed === true })),
     R('POST', '/api/goal/handoff', 'page', ({ body }) => handoffGoalHq(body)),
     R('POST', '/api/goal/cancel', 'page', ({ body }) => { if (!manager.cancel(String(body.id))) throw httpError(409, 'That goal is done or stopped.'); return { ok: true }; }),
     R('POST', '/api/goal/retry', 'page', async ({ body }) => { const r = await manager.retry(String(body.id), String(body.step)); if (!r.ok) throw httpError(409, r.reason); return { ok: true }; }),

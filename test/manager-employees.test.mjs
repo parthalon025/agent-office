@@ -38,12 +38,13 @@ const assign = async (r, id, fields = {}) => {
   await until(() => r.hq.tasksOf(id)?.tasks.length === 1, 'the task in the read model');
 };
 
-test('the hire plan: the manager role on the office adapter, and no other hire is planned', () => {
-  const p = planWrite({ kind: 'hire', action: 'manager', name: 'Mara' });
+test('the hire plan: the Manager is the one hire (#201) with officeManager, the Project manager role (no manager role in Paperclip) and a budget', () => {
+  const p = planWrite({ kind: 'hire', action: 'create', officeManager: true, name: 'Mara', isolation: 'same', budgetDollars: 20 });
   assert.equal(p.method, 'POST');
-  assert.equal(p.path(CO), `/api/companies/${CO}/agents`);
-  assert.deepEqual(p.body, { name: 'Mara', role: 'manager', title: 'Agent Office Manager', adapterType: 'agent_office', adapterConfig: { agentKind: 'claude-code', isolation: 'same', manager: true } });
-  assert.equal(planWrite({ kind: 'hire', action: 'manager' }).body.name, 'Manager');
+  assert.equal(p.path(CO), `/api/companies/${CO}/agent-hires`);
+  assert.deepEqual(p.body, { name: 'Mara', role: 'pm', title: 'Agent Office Manager', adapterType: 'agent_office', adapterConfig: { agentKind: 'claude-code', isolation: 'same', manager: true }, budgetMonthlyCents: 2000 });
+  assert.throws(() => planWrite({ kind: 'hire', action: 'manager', name: 'X' }), (e) => e.status === 400, 'the second hire plan is gone');
+  assert.throws(() => planWrite({ kind: 'hire', action: 'create', officeManager: true, name: 'X' }), (e) => e.status === 400, 'no budget, no hire');
   assert.throws(() => planWrite({ kind: 'hire', action: 'engineer', name: 'X' }), (e) => e.status === 400);
   assert.deepEqual(planWrite({ kind: 'task', action: 'create', title: 'Step', parentId: 'i1' }).targets, [{ type: 'issue', id: 'i1' }]);
   assert.deepEqual(planWrite({ kind: 'task', action: 'status', issue: 'i1', status: 'done' }).body, { status: 'done' });
@@ -53,23 +54,28 @@ test('the hire plan: the manager role on the office adapter, and no other hire i
 test('hiring: Confirm by default asks first and sends nothing; the Confirm sends one POST and keeps the Manager', async () => {
   const r = await rig({ grid: {} });
   try {
-    await assert.rejects(r.me.register({ building: BUILDING, name: 'Mara' }), (e) => e.status === 409 && e.answer.body.confirm === 'write' && /Hire the Manager "Mara"/.test(e.message));
+    await assert.rejects(r.me.register({ building: BUILDING, name: 'Mara' }), (e) => e.status === 400 && /budget/.test(e.message), 'a Manager hire needs a budget like every hire');
+    await assert.rejects(r.me.register({ building: BUILDING, name: 'Mara', budgetDollars: 20 }), (e) => e.status === 409 && e.answer.body.confirm === 'write' && /Hire Mara as the office Manager \(Project manager role\).*\$20\.00 a month/.test(e.message));
     assert.deepEqual(r.writes(), []);
-    const out = await r.me.register({ building: BUILDING, name: 'Mara', confirmed: true });
+    const out = await r.me.register({ building: BUILDING, name: 'Mara', budgetDollars: 20, confirmed: true });
     assert.equal(out.ok, true);
-    assert.deepEqual(r.writes().map((w) => [w[0], w[1]]), [['POST', `/api/companies/${CO}/agents`]]);
-    assert.equal(r.writes()[0][2].role, 'manager');
+    assert.equal(out.pendingApproval, false);
+    assert.match(out.id, /^a4000000/, 'the id of the agent in the { agent, approval } answer');
+    assert.deepEqual(r.writes().map((w) => [w[0], w[1]]), [['POST', `/api/companies/${CO}/agent-hires`]]);
+    assert.equal(r.writes()[0][2].role, 'pm');
+    assert.equal(r.writes()[0][2].budgetMonthlyCents, 2000);
+    assert.equal(r.writes()[0][2].adapterConfig.manager, true);
     assert.deepEqual(r.store.managers, { [out.id]: { building: BUILDING, name: 'Mara', company: CO } });
     assert.deepEqual(r.me.list(), [{ id: out.id, name: 'Mara', building: BUILDING }]);
-    await assert.rejects(r.me.register({ building: BUILDING, confirmed: true }), (e) => e.status === 409 && /already has a Manager/.test(e.message));
-    await assert.rejects(r.me.register({ building: '', confirmed: true }), (e) => e.status === 400);
+    await assert.rejects(r.me.register({ building: BUILDING, budgetDollars: 20, confirmed: true }), (e) => e.status === 409 && /already has a Manager/.test(e.message));
+    await assert.rejects(r.me.register({ building: '', budgetDollars: 20, confirmed: true }), (e) => e.status === 400);
   } finally { await r.done(); }
 });
 
 test('Deny on Hires refuses the hire and records nothing', async () => {
   const r = await rig({ grid: { hire: 'deny' } });
   try {
-    await assert.rejects(r.me.register({ building: BUILDING, name: 'Mara', confirmed: true }), (e) => e.status === 403);
+    await assert.rejects(r.me.register({ building: BUILDING, name: 'Mara', budgetDollars: 20, confirmed: true }), (e) => e.status === 403);
     assert.deepEqual(r.writes(), []);
     assert.equal(r.store.managers, undefined);
   } finally { await r.done(); }
@@ -78,7 +84,7 @@ test('Deny on Hires refuses the hire and records nothing', async () => {
 test('a task assigned to the Manager becomes a goal; the steps are sub-issues; the result is a comment on the task and it is done', async () => {
   const r = await rig();
   try {
-    const { id } = await r.me.register({ building: BUILDING, name: 'Mara' });
+    const { id } = await r.me.register({ building: BUILDING, name: 'Mara', budgetDollars: 20 });
     await assign(r, id);
     await r.me.sync();
     const [g] = r.manager.snapshot();
@@ -128,7 +134,7 @@ const manager = (r) => r.manager.get(r.manager.snapshot()[0].id);
 test('a failed step is blocked in Paperclip and the result is reported without done', async () => {
   const r = await rig();
   try {
-    const { id } = await r.me.register({ building: BUILDING });
+    const { id } = await r.me.register({ building: BUILDING, budgetDollars: 20 });
     await assign(r, id, { description: 'Only step' });
     await r.me.sync();
     const g = manager(r);
@@ -148,7 +154,7 @@ test('a failed step is blocked in Paperclip and the result is reported without d
 test('the write grid still rules: Tasks on Confirm leaves the report undone, says so once, and waits before it tries again', async () => {
   const r = await rig({ grid: { hire: 'allow', task: 'confirm', comment: 'confirm' } });
   try {
-    const { id } = await r.me.register({ building: BUILDING });
+    const { id } = await r.me.register({ building: BUILDING, budgetDollars: 20 });
     await assign(r, id);
     const before = r.writes().length;
     await r.me.sync();
@@ -163,7 +169,7 @@ test('the write grid still rules: Tasks on Confirm leaves the report undone, say
 test('a task of another employee, a sub-task and a task under another company are not taken', async () => {
   const r = await rig();
   try {
-    const { id } = await r.me.register({ building: BUILDING });
+    const { id } = await r.me.register({ building: BUILDING, budgetDollars: 20 });
     r.pc.state.issues.push({ id: 'i3000000-0000-4000-8000-000000000002', companyId: CO, identifier: 'ACM-31', title: 'Not mine', status: 'todo', assigneeAgentId: D.agents[1].id });
     r.pc.state.issues.push({ id: 'i3000000-0000-4000-8000-000000000003', companyId: CO, identifier: 'ACM-32', title: 'A sub-task', status: 'todo', assigneeAgentId: id, parentId: 'i1' });
     r.pc.state.issues.push({ id: 'i3000000-0000-4000-8000-000000000004', companyId: CO, identifier: 'ACM-33', title: 'Done already', status: 'done', assigneeAgentId: id });
@@ -191,7 +197,7 @@ test('the office-only goal works with no Paperclip, and one board shows both', a
 test('one Manager board: a goal made from a task names the task; the link is saved and restored', async () => {
   const r = await rig();
   try {
-    const { id } = await r.me.register({ building: BUILDING });
+    const { id } = await r.me.register({ building: BUILDING, budgetDollars: 20 });
     await assign(r, id);
     await r.me.sync();
     const board = createPlanBoard({ sources: [officeSource(r.manager), r.hq.planSource] });

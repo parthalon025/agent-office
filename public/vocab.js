@@ -123,7 +123,12 @@
     goalWord: function (status) { return status === 'not-connected' ? 'Not connected' : GOAL_WORD[status] || ''; },
     // A goal that came from a Paperclip task a Manager employee took (#204), and the words of hiring a Manager there.
     fromTask: function (t) { return t && (t.identifier || t.title) ? 'From the Paperclip task ' + [t.identifier, t.title].filter(Boolean).join(' ') : ''; },
-    hireManager: { title: 'Hire the Manager in Paperclip', button: 'Hire Manager', building: 'Building', has: 'Manager in Paperclip: ', none: 'No Manager works in Paperclip for this building yet.', done: 'Manager hired in Paperclip' },
+    // The Manager is hired like every employee (the one hire of #201): a monthly budget is required, and the Confirm names it.
+    hireManager: { title: 'Hire the Manager in Paperclip', button: 'Hire Manager', confirm: 'Confirm hire', building: 'Building', has: 'Manager in Paperclip: ', none: 'No Manager works in Paperclip for this building yet.', done: 'Manager hired in Paperclip',
+      name: 'Name (optional)', budget: 'Monthly budget in dollars', budgetStart: '20', needBudget: 'Set a monthly budget above zero. The office does not hire without one.',
+      pending: 'Paperclip waits for the board to approve the hire.',
+      intro: function (building) { return 'The Manager of ' + building + ' becomes a Paperclip employee with the Project manager role. It runs through the office adapter, so the Security room decides its calls. Like every hire, it has a monthly budget.'; },
+      budgetOk: function (v) { var t = String(v == null ? '' : v).trim(), n = Number(t); return t !== '' && isFinite(n) && n > 0; } },
     readOnlyNote: function (kind) { return kind === 'paperclip' ? 'Read only. Paperclip plans this work.' : ''; },
     unreadable: function (word) { return 'The ' + word + ' plan could not be read. It is not shown.'; },
     // One view of the snapshot's plans field (the Manager panel, the room wall, Ctrl+K). building: only that building's goals.

@@ -16,6 +16,8 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+// AGENT_ROLES of packages/shared/src/constants.ts (0.3.1): the role of an agent is this enum. There is no 'manager'.
+const AGENT_ROLES = ['ceo', 'cto', 'cmo', 'cfo', 'security', 'engineer', 'designer', 'pm', 'qa', 'devops', 'researcher', 'general'];
 
 // One text frame from the server (not masked), RFC 6455 5.2.
 function frame(text, opcode = 0x1) {
@@ -152,13 +154,6 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/issues$/))) {
         const want = (u.searchParams.get('status') || '').split(',').map((s) => s.trim()).filter(Boolean);
         return send(res, 200, st.issues.filter((i) => i.companyId === x[1] && (seed.allIssues || !want.length || want.includes(i.status))));
-      }
-      // hire an agent (routes/agents.ts, #204: the office Manager as an employee; Paperclip answers the agent it made).
-      if (req.method === 'POST' && (x = m(/^\/api\/companies\/([^/]+)\/agents$/))) {
-        if (!parsed || typeof parsed.name !== 'string' || !parsed.name || typeof parsed.role !== 'string') return send(res, 422, { error: 'Validation error' });
-        const a = { id: `a4000000-0000-4000-8000-${String(st.agents.length + 1).padStart(12, '0')}`, companyId: x[1], urlKey: parsed.name.toLowerCase(), title: null, icon: null, status: 'idle', reportsTo: null, capabilities: null, runtimeConfig: { heartbeat: { enabled: false } }, budgetMonthlyCents: 0, spentMonthlyCents: 0, pauseReason: null, pausedAt: null, permissions: { canCreateAgents: false }, lastHeartbeatAt: null, metadata: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), ...parsed };
-        st.agents.push(a);
-        return send(res, 201, a);
       }
       // create a task (routes/issues.ts, createIssueSchema 0.3.1: title, description, status; no metadata, no idempotency key).
       // api.failIssueAfter = n answers 500 to every create once n tasks were made (a failure in the middle of a handoff).
@@ -297,16 +292,28 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
       }
       // the agent as saved, with what buildAgentDetail adds (routes/agents.ts; the board reads the whole config)
       if (req.method === 'GET' && (x = m(/^\/api\/agents\/([^/]+)$/))) { const a = st.agents.find((y) => y.id === x[1]); return a ? send(res, 200, { ...a, chainOfCommand: [], access: {} }) : send(res, 404, { error: 'Agent not found' }); }
-      // hire an employee (#201, routes/agents.ts agent-hires, createAgentHireSchema 0.3.1: name, role, adapterType, adapterConfig, reportsTo,
-      // budgetMonthlyCents, desiredSkills). Answers the agent row, as Paperclip does. api.hires lists what was sent.
+      // hire an employee (#201, #204; routes/agents.ts handleAgentHire, createAgentHireSchema 0.3.1: name, role from AGENT_ROLES (a Zod enum:
+      // another word is 400), title, adapterType, adapterConfig, reportsTo, budgetMonthlyCents (int, nonnegative), desiredSkills). Answers 201
+      // { agent, approval }: approval is a pending hire_agent approval, and the agent pending_approval, when the company sets
+      // requireBoardApprovalForNewAgents, else null. api.hires lists what was sent.
       if (req.method === 'POST' && (x = m(/^\/api\/companies\/([^/]+)\/agent-hires$/))) {
-        if (!parsed || typeof parsed.name !== 'string' || !parsed.name || typeof parsed.adapterType !== 'string') return send(res, 422, { error: 'Validation error' });
+        if (!parsed || typeof parsed.name !== 'string' || !parsed.name || typeof parsed.adapterType !== 'string') return send(res, 400, { error: 'Validation error' });
+        if (parsed.role !== undefined && !AGENT_ROLES.includes(parsed.role)) return send(res, 400, { error: 'Validation error', details: [{ path: ['role'], message: 'Invalid enum value' }] });
+        if (parsed.budgetMonthlyCents !== undefined && !(Number.isInteger(parsed.budgetMonthlyCents) && parsed.budgetMonthlyCents >= 0)) return send(res, 400, { error: 'Validation error' });
         if (parsed.reportsTo && !st.agents.some((y) => y.id === parsed.reportsTo)) return send(res, 422, { error: 'Manager not found' });
+        const co = st.companies.find((y) => y.id === x[1]);
+        if (!co) return send(res, 404, { error: 'Company not found' });
+        const pending = co.requireBoardApprovalForNewAgents === true;
         const n = st.agents.length + 1;
-        const a = { id: `a4000000-0000-4000-8000-${String(n).padStart(12, '0')}`, companyId: x[1], status: 'idle', title: null, reportsTo: null, budgetMonthlyCents: 0, spentMonthlyCents: 0, adapterConfig: {}, runtimeConfig: {}, ...parsed, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+        const a = { id: `a4000000-0000-4000-8000-${String(n).padStart(12, '0')}`, companyId: x[1], title: null, reportsTo: null, budgetMonthlyCents: 0, spentMonthlyCents: 0, adapterConfig: {}, runtimeConfig: {}, role: 'general', ...parsed, status: pending ? 'pending_approval' : 'idle', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
         st.agents.push(a); api.hires.push(parsed);
-        emit('activity.logged', { actorType: 'user', actorId: 'board', action: 'agent.hired', entityType: 'agent', entityId: a.id, agentId: null, runId: null, details: {} }, a.companyId);
-        return send(res, 201, a);
+        let approval = null;
+        if (pending) {
+          approval = { id: `p4000000-0000-4000-8000-${String(n).padStart(12, '0')}`, companyId: x[1], type: 'hire_agent', status: 'pending', requestedByAgentId: null, requestedByUserId: 'board', payload: { name: a.name, role: a.role, agentId: a.id }, decisionNote: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+          st.approvals.push(approval);
+        }
+        emit('activity.logged', { actorType: 'user', actorId: 'board', action: 'agent.hire_created', entityType: 'agent', entityId: a.id, agentId: null, runId: null, details: {} }, a.companyId);
+        return send(res, 201, { agent: a, approval });
       }
       if (req.method === 'PATCH' && (x = m(/^\/api\/agents\/([^/]+)$/))) {
         const a = st.agents.find((y) => y.id === x[1]);

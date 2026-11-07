@@ -271,6 +271,10 @@ export const HIRE_ROLES = [
   { role: 'general', label: 'General', text: 'Takes any task.' },
 ];
 const HIRE_ROLE_IDS = new Set(HIRE_ROLES.map((r) => r.role));
+// The office Manager (#204) is a hire like any other (one plan, ADR 0010: a hire is supervised and budgeted). Paperclip's role is an enum
+// (AGENT_ROLES, validated by createAgentHireSchema) with no 'manager', so the Manager takes the Project manager role; the office marks it
+// with adapterConfig.manager and knows its Managers from its own `managers` slice, never from the role.
+export const MANAGER_ROLE = 'pm', MANAGER_TITLE = 'Agent Office Manager';
 const HIRE_KIND_RE = /^[a-z][a-z0-9-]{0,39}$/, HIRE_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,99}$/, SKILL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$/;
 export const HIRE_BUDGET_MAX = 100000;   // dollars a month: a typing slip (an extra zero) is refused, not sent
 export const HIRE_ISOLATIONS = ['worktree', 'same'];
@@ -317,12 +321,16 @@ const PLANS = {
   },
   // A hire (#201): POST /agent-hires with the office adapter (its runs go through the Security room, so a new employee is supervised), a
   // monthly budget in whole cents (a hire without a budget is refused: 400) and nothing else the office has not named. The Confirm shows
-  // exactly what it creates: role, manager, agent kind, model, budget and skills. The manager is checked as a target.
+  // exactly what it creates: role, manager, agent kind, model, budget and skills. The manager is checked as a target. officeManager: true
+  // is the office Manager of a building (#204): the same hire, marked adapterConfig.manager, with the Project manager role by default.
+  // Paperclip answers { agent, approval } (the writer reads the agent).
   hire: {
     create(b) {
       const name = textOf(b.name, 'name', NAME_MAX, { required: true });
-      if (typeof b.role !== 'string' || !HIRE_ROLE_IDS.has(b.role)) throw gridError(400, 'Pick a role.');
-      const title = textOf(b.title, 'title', NAME_MAX);
+      if (b.officeManager !== undefined && typeof b.officeManager !== 'boolean') throw gridError(400, 'officeManager is true or false.');
+      const office = b.officeManager === true, role = office && (b.role === undefined || b.role === null || b.role === '') ? MANAGER_ROLE : b.role;
+      if (typeof role !== 'string' || !HIRE_ROLE_IDS.has(role)) throw gridError(400, 'Pick a role.');
+      const title = textOf(b.title, 'title', NAME_MAX) || (office ? MANAGER_TITLE : '');
       const manager = b.manager === undefined || b.manager === null || b.manager === '' ? null : idOf(b.manager, 'manager');
       const kind = b.agentKind === undefined || b.agentKind === null || b.agentKind === '' ? 'claude-code' : b.agentKind;
       if (typeof kind !== 'string' || !HIRE_KIND_RE.test(kind)) throw gridError(400, 'Give the agent kind.');
@@ -338,11 +346,12 @@ const PLANS = {
       const skills = skillsOf(b.skills);
       const adapterConfig = { agentKind: kind, isolation };
       if (model) adapterConfig.model = model;
-      const body = { name, role: b.role, adapterType: OFFICE_ADAPTER_TYPE, adapterConfig, budgetMonthlyCents: cents };
+      if (office) adapterConfig.manager = true;
+      const body = { name, role, adapterType: OFFICE_ADAPTER_TYPE, adapterConfig, budgetMonthlyCents: cents };
       if (title) body.title = title;
       if (manager) body.reportsTo = manager;
       if (skills.length) body.desiredSkills = skills;
-      const roleLabel = HIRE_ROLES.find((r) => r.role === b.role).label;
+      const cardLabel = HIRE_ROLES.find((r) => r.role === role).label, roleLabel = office ? `the office Manager (${cardLabel} role)` : cardLabel;
       const line = (mgr) => `Hire ${short(name, 60)} as ${roleLabel}, reporting to ${mgr}, agent kind ${kind}, model ${model || 'the default'}, $${(cents / 100).toFixed(2)} a month, skills ${skills.length ? skills.join(', ') : 'none'}`;
       const review = (org) => {
         const m = manager ? org.find((x) => x.id === manager) : null;
@@ -426,15 +435,6 @@ const PLANS = {
         return { problem: '', summary: manager ? `Make ${nameOf(agent)} report to ${nameOf(manager)}` : `Give ${nameOf(agent)} no manager` };
       };
       return { method: 'PATCH', path: () => `/api/agents/${agent}`, body: { reportsTo: manager }, targets, review, summary: 'Change a reporting line' };
-    },
-  },
-  // The office Manager as an employee (#204): one hire, the manager role on the office adapter, so every run of it goes through the office.
-  // Only this hire is planned; a general hire waits for its own ticket (#201). The building is the office's record, never sent.
-  hire: {
-    manager(b) {
-      const name = textOf(b.name === undefined || b.name === null || b.name === '' ? 'Manager' : b.name, 'Manager name', NAME_MAX, { required: true });
-      const body = { name, role: 'manager', title: 'Agent Office Manager', adapterType: 'agent_office', adapterConfig: { agentKind: 'claude-code', isolation: 'same', manager: true } };
-      return { method: 'POST', path: (co) => `/api/companies/${encodeURIComponent(co)}/agents`, body, targets: [], summary: `Hire the Manager "${short(name)}" (manager role, runs in the office)` };
     },
   },
   // Goals (#207): a goal of the company (POST) or a change to one (PATCH). A parent goal and an owner are targets: both must belong to the

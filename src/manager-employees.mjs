@@ -1,7 +1,10 @@
 // Office Managers as Paperclip employees (#204, spec #191, ADR 0010): the bridge between the Manager (manager.mjs, the rules of a goal) and the
 // HQ (paperclip.mjs, the one writer). A distinct job, so its own file: manager.mjs knows nothing of Paperclip and paperclip.mjs nothing of goals.
-//   register({ building, name, confirmed })  hire the Manager as a Paperclip employee with the manager role (hq.write, kind hire, the write
-//                                            grid's Hires cell: Confirm by default), and keep it as the Manager of that building.
+//   register({ building, name, budgetDollars, confirmed })
+//                                            hire the Manager as a Paperclip employee through the one hire plan (hq.write, kind hire, action
+//                                            create, officeManager: true: the Project manager role, since Paperclip has no 'manager' role, the
+//                                            office adapter and a monthly budget like every hire; the write grid's Hires cell decides, Confirm by
+//                                            default), and keep it as the Manager of that building.
 //   sync()                                   a task assigned to a registered Manager becomes an office goal in its building; each step of the
 //                                            goal is a sub-issue of that task; a step's state moves its sub-issue; the result is a comment on
 //                                            the task, and a finished goal sets the task to done. Every write is hq.write (the one writer), so
@@ -46,20 +49,24 @@ export function createManagerEmployees({ hq, manager, state, feed = () => {}, no
   const wait = new Map();   // goal id -> time before which it does not try its writes again
   let running = false, again = false;
 
-  /** Hire the Manager of a building as a Paperclip employee. Resolves { ok, id, building }; the writer's errors (403, 409 ask-first, 502) pass through. */
-  async function register({ building, name, confirmed = false } = {}) {
+  /**
+   * Hire the Manager of a building as a Paperclip employee. Resolves { ok, id, building, pendingApproval }; the writer's errors (400 for no
+   * budget, 403, 409 ask-first, 502) pass through.
+   */
+  async function register({ building, name, budgetDollars, confirmed = false } = {}) {
     const b = typeof building === 'string' ? building : '';
     if (!b) { const e = new Error('Say which building this Manager works in.'); e.status = 400; throw e; }
     const company = hq.view()?.company;
     if (!company) { const e = new Error('Paperclip is not connected, so there is no company to hire the Manager into.'); e.status = 409; throw e; }
     const have = Object.entries(records()).find(([, r]) => r.building === b && r.company === company.id);
     if (have) { const e = new Error('This building already has a Manager in Paperclip.'); e.status = 409; throw e; }
-    const made = await hq.write({ kind: 'hire', action: 'manager', name }, { confirmed });
+    const who = typeof name === 'string' && name.trim() ? name.trim() : 'Manager';
+    const made = await hq.write({ kind: 'hire', action: 'create', officeManager: true, name: who, agentKind: 'claude-code', isolation: 'same', budgetDollars }, { confirmed });
     const next = records();
-    next[made.id] = { building: b, name: clip(name || 'Manager', 80), company: company.id };
+    next[made.id] = { building: b, name: clip(who, 80), company: company.id };
     state.set('managers', next); state.save();
-    feed(`The Manager of this building now works in ${company.name} as an employee.`);
-    return { ok: true, id: made.id, building: b };
+    feed(`The Manager of this building now works in ${company.name} as an employee.${made.pendingApproval ? ' Paperclip waits for the board to approve the hire.' : ''}`);
+    return { ok: true, id: made.id, building: b, pendingApproval: made.pendingApproval === true };
   }
 
   /** The Managers of the connected company, for the page: [{ id, name, building }]. */

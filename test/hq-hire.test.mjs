@@ -56,8 +56,9 @@ test('writer: Confirm asks with the exact summary and sends nothing; the confirm
     assert.equal(e.answer.body.write.summary, 'Hire Mira as Engineer, reporting to Grace, agent kind claude-code, model the default, $25.00 a month, skills none');
     assert.equal(r.writes().length, 0);
     const made = await r.hq.write(base0, { confirmed: true });
-    assert.deepEqual(Object.keys(made).sort(), ['id', 'name', 'ok']);
-    assert.match(made.id, /^a4000000/);
+    assert.deepEqual(Object.keys(made).sort(), ['id', 'name', 'ok', 'pendingApproval']);
+    assert.match(made.id, /^a4000000/, 'the id of the agent in Paperclip\'s { agent, approval } answer');
+    assert.equal(made.pendingApproval, false);
     assert.equal(r.writes().length, 1);
     assert.equal(r.writes()[0].body.adapterType, 'agent_office');
     assert.ok(r.feed.some(([, t]) => /Wrote to Acme Robotics: Hire Mira/.test(t)));
@@ -81,6 +82,32 @@ test('writer: Deny refuses, a missing budget never reaches Paperclip, a stranger
     await r.hq.write(base0);   // Allow sends with no question
     assert.equal(r.writes().length, 1);
   } finally { await r.done(); }
+});
+
+test('plan: the office Manager (#204) is the same hire: Project manager role (Paperclip has no manager role), marked, budgeted', () => {
+  assert.throws(() => planWrite({ ...base0, role: 'manager' }), (e) => e.status === 400, 'manager is not a Paperclip role');
+  const m = { kind: 'hire', action: 'create', officeManager: true, name: 'Mara', isolation: 'same' };
+  assert.throws(() => planWrite(m), (e) => e.status === 400 && /budget/.test(e.message), 'a Manager hire needs a budget too');
+  assert.throws(() => planWrite({ ...m, budgetDollars: 10, officeManager: 'yes' }), (e) => e.status === 400);
+  const p = planWrite({ ...m, budgetDollars: 10 });
+  assert.equal(p.path(CO), `/api/companies/${CO}/agent-hires`);
+  assert.deepEqual(p.body, { name: 'Mara', role: 'pm', adapterType: 'agent_office', adapterConfig: { agentKind: 'claude-code', isolation: 'same', manager: true }, budgetMonthlyCents: 1000, title: 'Agent Office Manager' });
+  assert.equal(p.review([]).summary, 'Hire Mara as the office Manager (Project manager role), reporting to no manager, agent kind claude-code, model the default, $10.00 a month, skills none');
+  assert.equal(planWrite(base0).body.adapterConfig.manager, undefined, 'an ordinary hire is not marked');
+});
+
+test('writer: a company that asks the board to approve new employees answers a pending approval; the office says so', async () => {
+  const pcA = await startFakePaperclip({ ...DEMO(), boardKey: KEY, companies: DEMO().companies.map((c) => ({ ...c, requireBoardApprovalForNewAgents: true })) });
+  const feed = [];
+  const hq = createHq({ refetchMs: 20, retryMs: [50, 50], hooksFile: () => 'C:/office/office-hooks.json', key: () => KEY, grid: () => ({ hire: 'allow' }), askFirst, onFeed: (t, k) => feed.push([k, t]) });
+  try {
+    await hq.connect({ url: pcA.url });
+    await until(() => hq.state() === 'on', 'the events socket');
+    const made = await hq.write(base0);
+    assert.match(made.id, /^a4000000/);
+    assert.equal(made.pendingApproval, true);
+    assert.ok(feed.some(([, t]) => /waits for the board to approve the hire/.test(t)), 'the feed says the hire waits');
+  } finally { hq.disconnect(); await pcA.close(); }
 });
 
 // ---- the route: hire, then the onboarding task through the same writer ----

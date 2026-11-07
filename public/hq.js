@@ -15,23 +15,24 @@
     var bz = useState(''), busy = bz[0], setBusy = bz[1];
     var ha = useState(null), ask = ha[0], setAsk = ha[1];   // { g, text, tasks }: the handoff waits for the painted Confirm (#159)
     var connected = !!(snap && snap.hq && snap.hq.company);
-    // Managers as Paperclip employees (#204): the Managers of the company, and the hire of one for a building (a write of the grid's Hires cell).
+    // Managers as Paperclip employees (#204): the Managers of the company, and the hire of one for a building. It is the one hire of the HR
+    // desk (#201, a write of the grid's Hires cell), so it asks for a monthly budget like every hire: the dialog takes a name and the budget,
+    // the first call gets the server's question (ask-first 'write', the exact words of what it creates), and only the painted Confirm sends.
     var ms = useState([]), managers = ms[0], setManagers = ms[1];
-    var hs = useState(null), hire = hs[0], setHire = hs[1];   // { building, text }: the hire waits for the painted Confirm
+    var hs = useState(null), hire = hs[0], setHire = hs[1];   // { building, name, budget, ask, err }: the Hire Manager dialog
     var bs = useState(''), pick = bs[0], setPick = bs[1];
     useEffect(function () {
       if (!connected) { setManagers([]); return; }
       client.get('managers').then(function (r) { setManagers(r.managers || []); }, function () { setManagers([]); });
-    }, [connected, hire]);
-    function hireManager(building, confirmed) {
+    }, [connected, !hire]);   // read again when the Hire Manager dialog closes, not on each key in it
+    function hireManager(f, confirmed) {
       setBusy('hire');
-      client.managerHire({ building: building, confirmed: confirmed === true }).then(function () {
-        setBusy(''); setHire(null); p.toast({ tone: 'success', title: V.plan.hireManager.done });
+      client.managerHire({ building: f.building, name: f.name.trim() || undefined, budgetDollars: Number(f.budget), confirmed: confirmed === true ? true : undefined }).then(function (r) {
+        setBusy(''); setHire(null); p.toast({ tone: 'success', title: V.plan.hireManager.done, text: r && r.pendingApproval ? V.plan.hireManager.pending : '' });
       }, function (x) {
         setBusy('');
-        var q = window.OfficeAsk.asked(x, 'write', confirmed);
-        if (q) { setHire({ building: building, text: q.text }); return; }
-        setHire(null); p.toast({ tone: 'error', title: V.plan.hireManager.title, text: x.message });
+        var q = window.OfficeAsk.asked(x, 'write', confirmed === true);
+        setHire(function (cur) { return cur ? Object.assign({}, cur, q ? { ask: q.text, err: '' } : { ask: '', err: x.message }) : cur; });
       });
     }
     function act(route, body, key) {
@@ -52,10 +53,20 @@
     }
     var buildingName = function (key) { var r = ((snap && snap.repos) || []).filter(function (x) { return x.key === key; })[0]; return r ? r.name : ''; };
     if (hire) {
-      return h(A.Dialog, { open: true, title: V.plan.hireManager.title, onClose: function () { setHire(null); }, actions: [
+      var hm = V.plan.hireManager, budgetOk = hm.budgetOk(hire.budget);
+      var setField = function (k, x) { var o = { ask: '', err: '' }; o[k] = x; setHire(Object.assign({}, hire, o)); };
+      return h(A.Dialog, { open: true, title: hm.title, onClose: function () { setHire(null); }, actions: [
         h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setHire(null); } }, 'Not now'),
-        h(A.Button, { key: 'y', variant: 'primary', icon: 'hq', loading: busy === 'hire', onClick: function () { hireManager(hire.building, true); } }, V.plan.hireManager.button)] },
-        h('div', { className: 'form wide' }, h('p', { className: 'note' }, hire.text)));
+        hire.ask
+          ? h(A.Button, { key: 'y', variant: 'primary', icon: 'approve', loading: busy === 'hire', onClick: function () { hireManager(hire, true); } }, hm.confirm)
+          : h(A.Button, { key: 'y', variant: 'primary', icon: 'hq', disabled: !budgetOk, loading: busy === 'hire', onClick: function () { hireManager(hire, false); } }, hm.button)] },
+        h('div', { className: 'form wide' },
+          h('p', { className: 'note' }, hm.intro(buildingName(hire.building) || 'Other folders')),
+          h(A.TextInput, { id: 'mgr-name', label: hm.name, value: hire.name, onChange: function (t) { setField('name', t); } }),
+          h(A.TextInput, { id: 'mgr-budget', label: hm.budget, value: hire.budget, onChange: function (t) { setField('budget', t); } }),
+          !budgetOk ? h('p', { className: 'note', role: 'status' }, hm.needBudget) : null,
+          hire.ask ? h('p', { className: 'note', role: 'alert' }, hire.ask) : null,
+          hire.err ? h('p', { className: 'ao-err', role: 'alert' }, hire.err) : null));
     }
     if (ask) {
       var rows = V.plan.handoffRows(ask.tasks, ask.g.handoff && ask.g.handoff.tasks), todo = rows.filter(function (r) { return !r.written; }).length;
@@ -75,7 +86,7 @@
         v.unreadable.map(function (t) { return h('p', { key: t, className: 'note manager-warn', role: 'status' }, t); }),
         connected && ((snap && snap.repos) || []).length ? h('div', { className: 'inline-actions manager-hire' },
           h(A.Select, { id: 'mgr-building', ariaLabel: V.plan.hireManager.building, options: [{ value: '', label: V.plan.hireManager.building }].concat(((snap && snap.repos) || []).map(function (r) { return { value: r.key, label: r.name }; })), value: pick, onChange: setPick }),
-          h(A.Button, { variant: 'quiet', icon: 'hq', disabled: !pick || busy === 'hire', onClick: function () { hireManager(pick, false); } }, V.plan.hireManager.button)) : null,
+          h(A.Button, { variant: 'quiet', icon: 'hq', disabled: !pick || busy === 'hire', onClick: function () { setHire({ building: pick, name: '', budget: V.plan.hireManager.budgetStart, ask: '', err: '' }); } }, V.plan.hireManager.button)) : null,
         connected && managers.length ? h('p', { className: 'note' }, V.plan.hireManager.has + managers.map(function (m) { return m.name + ' (' + (buildingName(m.building) || 'Other folders') + ')'; }).join(', ')) : null,
         connected && snap.hq.goals ? h('section', { className: 'manager-goal', 'aria-label': 'Paperclip goals' }, h('div', { className: 'past-title' }, h('b', null, 'Paperclip goals'), h(Tag, null, 'Paperclip')), h(Goals, { q: snap.hq, toast: p.toast })) : null,
         v.empty ? h(A.EmptyState, { icon: 'plan', compact: true, title: 'No plan yet', text: 'A goal and its steps show here. Paperclip tasks show here when a company is connected.' }) : null,
@@ -588,7 +599,8 @@
       client.hqHire({ name: v.name, role: role, manager: v.manager || undefined, agentKind: v.agentKind, model: v.model.trim() || undefined, budgetDollars: dollars,
         skills: v.skills.split(',').map(function (x) { return x.trim(); }).filter(Boolean), welcome: true, confirmed: confirmed === true ? true : undefined }).then(function (r) {
         setBusy(false); setAsk('');
-        p.toast({ tone: 'success', title: v.name + ' is hired', text: r.onboarding === 'sent' ? 'The first stand-up task is sent.' : r.onboarding === 'failed' ? 'The first stand-up task was not sent. ' + r.onboardingError : '' });
+        var waits = r.pendingApproval ? window.OfficeVocab.plan.hireManager.pending + ' ' : '';
+        p.toast({ tone: 'success', title: v.name + ' is hired', text: waits + (r.onboarding === 'sent' ? 'The first stand-up task is sent.' : r.onboarding === 'failed' ? 'The first stand-up task was not sent. ' + r.onboardingError : '') });
         if (p.onDone) p.onDone(r);
       }, function (x) {
         setBusy(false);
