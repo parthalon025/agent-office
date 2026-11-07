@@ -133,3 +133,20 @@ test('only the page token reaches the grid and the writer; the agent token does 
   }
   assert.equal((await call('/api/hq/grid', null, agentToken, 'GET')).status === 200, false);
 });
+
+test('company admin (#213): the access read and an access write are page routes only, and the agent token reaches neither', async () => {
+  const INVITE = D.invites[0].id;
+  const read = await get('/api/hq/access');
+  assert.equal(read.status, 200);
+  assert.deepEqual(read.json.access.invites.map((x) => x.id), [INVITE]);
+  assert.doesNotMatch(JSON.stringify(read.json), /do-not-show|tokenHash/);
+  const n = writes().length;
+  const q = await call('/api/hq/write', { kind: 'access', action: 'revoke', invite: INVITE });
+  assert.equal(q.status, 409);
+  assert.equal(q.json.confirm, 'write');
+  assert.equal(writes().length, n, 'the question sent nothing');
+  const yes = await call('/api/hq/write', { kind: 'access', action: 'revoke', invite: INVITE, confirmed: true });
+  assert.deepEqual([yes.status, yes.json], [200, { ok: true }]);
+  assert.deepEqual(writes().at(-1), ['POST', `/api/invites/${INVITE}/revoke`, {}]);
+  for (const r of [await call('/api/hq/write', { kind: 'access', action: 'invite', allowedJoinTypes: 'both', confirmed: true }, agentToken), await call('/api/hq/access', null, agentToken, 'GET')]) assert.ok(r.status === 401 || r.status === 403);
+});

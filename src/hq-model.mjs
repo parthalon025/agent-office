@@ -24,6 +24,10 @@ export const SHAPES = {
   skills: { list: true, fields: { id: 'string', key: 'string', name: 'string' } },
   plugins: { list: true, fields: { id: 'string', pluginKey: 'string', status: 'string' } },
   adapters: { list: true, fields: { type: 'string', label: 'string', source: 'string' } },
+  // Company admin (#213): the invites, join requests and members of a company (routes/access.ts). Invites and members come in an object.
+  invites: { list: false, fields: { invites: 'array' } },
+  joinRequests: { list: true, fields: { id: 'string', status: 'string', requestType: 'string' } },
+  members: { list: false, fields: { members: 'array' } },
 };
 
 const typeOf = (v) => (v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v);
@@ -225,8 +229,9 @@ export function setWriteCell(grid, change) {
 // planWrite(body) -> { kind, action, method, path(companyId), body, targets, summary }. body: { kind, action, ...fields }. The fields are
 // checked here (400), every id must be a plain id (it goes into a path), and a target is a thing the writer reads before it writes
 // (issue, approval, agent): it must belong to the connected company. Only the first writes are planned: task (create, assign), comment
-// (add), approval (approve, reject, revise), routine (create, update, schedule, run, #209), reporting (set, #202), goal (create, update, #207)
-// and company (create, #199: scope 'none', it needs no connection). Another kind in the grid
+// (add), approval (approve, reject, revise), routine (create, update, schedule, run, #209), reporting (set, #202), goal (create, update, #207),
+// hire (create, #201), company (create, #199: scope 'none', it needs no connection; update, #213) and access (invite, revoke, approveJoin,
+// rejectJoin, member, #213). Another kind in the grid
 // has no plan yet, and is 400 (never sent).
 const OFFICE_ADAPTER_TYPE = 'agent_office';   // the word of OFFICE_ADAPTER in paperclip.mjs (which imports this module)
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
@@ -234,6 +239,7 @@ const ISSUE_STATUS = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 
 export const GOAL_STATUSES = ['planned', 'active', 'achieved', 'cancelled'], GOAL_LEVELS = ['company', 'team', 'agent', 'task'];
 const ROUTINE_STATUS = ['active', 'paused', 'archived'];
 const CRON_RE = /^[0-9*/,\-A-Za-z ]+$/, TZ_RE = /^[A-Za-z][A-Za-z0-9_+\-/]{0,63}$/;
+const JOIN_TYPES = ['human', 'agent', 'both'], HUMAN_ROLES = ['owner', 'admin', 'operator', 'viewer'], MEMBER_STATUS = ['pending', 'active', 'suspended'];
 const TITLE_MAX = 200, TEXT_MAX = 10000, NOTE_MAX = 2000, DESC_MAX = 4000, NAME_MAX = 80, COMPANY_DESC_MAX = 300;
 const short = (t, n = 80) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 function idOf(v, what) {
@@ -353,6 +359,56 @@ const PLANS = {
       const name = textOf(b.name, 'company name', NAME_MAX, { required: true }), description = textOf(b.description, 'description', COMPANY_DESC_MAX);
       if (typeof b.url !== 'string' || !b.url) throw gridError(400, 'Give the Paperclip address.');
       return { method: 'POST', path: () => '/api/companies', body: { name, description }, targets: [], scope: 'none', url: b.url, name, summary: `Create the company "${short(name)}"` };
+    },
+    // Company settings (#213): name, description and whether a new employee needs the board's approval. One PATCH of the connected company.
+    update(b) {
+      const body = {};
+      if (b.name !== undefined) body.name = textOf(b.name, 'company name', NAME_MAX, { required: true });
+      if (b.description !== undefined) body.description = textOf(b.description, 'description', COMPANY_DESC_MAX);
+      if (b.requireBoardApprovalForNewAgents !== undefined) {
+        if (typeof b.requireBoardApprovalForNewAgents !== 'boolean') throw gridError(400, 'Hire approval must be on or off.');
+        body.requireBoardApprovalForNewAgents = b.requireBoardApprovalForNewAgents;
+      }
+      if (!Object.keys(body).length) throw gridError(400, 'Give a setting to change.');
+      const what = [body.name !== undefined && 'name', body.description !== undefined && 'description', body.requireBoardApprovalForNewAgents !== undefined && 'hire approval'].filter(Boolean).join(', ');
+      return { method: 'PATCH', path: (co) => `/api/companies/${encodeURIComponent(co)}`, body, targets: [], summary: `Change the company settings (${what})` };
+    },
+  },
+  // Invites and access (#213, owner only: the page group is the owner's, and the grid's Access cell decides). Each names its invite, join
+  // request or member as a target; the writer reads the company's lists and refuses what is not in them. The answer carries an id, never
+  // the invite token or link: a link that lets people in stays in Paperclip.
+  access: {
+    invite(b) {
+      const join = b.allowedJoinTypes === undefined || b.allowedJoinTypes === null ? 'both' : b.allowedJoinTypes;
+      if (!JOIN_TYPES.includes(join)) throw gridError(400, 'Choose who may join: people, agents or both.');
+      const body = { allowedJoinTypes: join };
+      if (b.humanRole !== undefined && b.humanRole !== null && b.humanRole !== '') {
+        if (!HUMAN_ROLES.includes(b.humanRole) || b.humanRole === 'owner') throw gridError(400, 'Choose a role: admin, operator or viewer.');
+        body.humanRole = b.humanRole;
+      }
+      const message = textOf(b.agentMessage, 'message', 1000);
+      if (message) body.agentMessage = message;
+      const who = { human: 'people', agent: 'agents', both: 'people and agents' }[join];
+      return { method: 'POST', path: (co) => `/api/companies/${encodeURIComponent(co)}/invites`, body, targets: [], summary: `Create an invite for ${who}${body.humanRole ? ` as ${body.humanRole}` : ''}` };
+    },
+    revoke(b) {
+      const invite = idOf(b.invite, 'invite');
+      return { method: 'POST', path: () => `/api/invites/${invite}/revoke`, body: {}, targets: [{ type: 'invite', id: invite }], summary: 'Revoke an invite' };
+    },
+    approveJoin(b) {
+      const join = idOf(b.join, 'join request');
+      return { method: 'POST', path: (co) => `/api/companies/${encodeURIComponent(co)}/join-requests/${join}/approve`, body: {}, targets: [{ type: 'join', id: join }], summary: 'Approve a join request' };
+    },
+    rejectJoin(b) {
+      const join = idOf(b.join, 'join request');
+      return { method: 'POST', path: (co) => `/api/companies/${encodeURIComponent(co)}/join-requests/${join}/reject`, body: {}, targets: [{ type: 'join', id: join }], summary: 'Reject a join request' };
+    },
+    member(b) {
+      const member = idOf(b.member, 'member'), body = {};
+      if (b.role !== undefined && b.role !== null) { if (!HUMAN_ROLES.includes(b.role)) throw gridError(400, 'Choose a role: owner, admin, operator or viewer.'); body.membershipRole = b.role; }
+      if (b.status !== undefined && b.status !== null) { if (!MEMBER_STATUS.includes(b.status)) throw gridError(400, 'Choose a status: pending, active or suspended.'); body.status = b.status; }
+      if (!Object.keys(body).length) throw gridError(400, 'Give a role or a status.');
+      return { method: 'PATCH', path: (co) => `/api/companies/${encodeURIComponent(co)}/members/${member}`, body, targets: [{ type: 'member', id: member }], summary: `Change the access of a member${body.membershipRole ? ` to ${body.membershipRole}` : ''}${body.status ? ` (${body.status})` : ''}` };
     },
   },
   // A reporting line (#202): PATCH { reportsTo } of one agent (manager null: no manager). review(org) reads the org chart the writer holds:

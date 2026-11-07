@@ -33,7 +33,7 @@
     startup: '/api/startup', teamDelete: '/api/team/delete', teamSave: '/api/team/save', teamStart: '/api/team/start',
     templateDelete: '/api/template/delete', templateSave: '/api/template/save', tree: '/api/tree', trustApply: '/api/trust/apply',
     trustDismiss: '/api/trust/dismiss', trustWithdraw: '/api/trust/withdraw', worktreeRemove: '/api/worktree/remove',
-    hqCosts: '/api/hq/costs', hqHire: '/api/hq/hire', hqHireDesk: '/api/hq/hire-desk', hqCatalog: '/api/hq/catalog',
+    hqCosts: '/api/hq/costs', hqHire: '/api/hq/hire', hqHireDesk: '/api/hq/hire-desk', hqCatalog: '/api/hq/catalog', hqAccess: '/api/hq/access',
     memory: '/api/memory', memoryRemember: '/api/memory/remember', memoryForget: '/api/memory/forget',
     events: '/events', launch: '/launch', signin: '/remote/signin'
   });

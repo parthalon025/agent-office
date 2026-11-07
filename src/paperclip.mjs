@@ -822,6 +822,36 @@ export function createHq(deps = {}) {
   // happen. Every write, and every refusal, leaves a feed line. The result carries ids only, never a body from Paperclip.
   // The two earlier writes (supervise and handoffGoal, ADR 0005 and 0007) predate it and keep their own Confirm.
   // The first company (#199) is the one write with no company yet: it names the loopback address it goes to and needs no connection.
+  /**
+   * Company admin (#213): the invites, join requests and members of the connected company, read when asked (the HQ opens Access), for
+   * GET /api/hq/access and for the writer's checks. Names, roles and states only: never an invite token or link, an address or a key.
+   * A part Paperclip does not answer, or answers in a shape the office does not know, is null (unknown); `problem` names the first
+   * contract failure. Reads only.
+   */
+  async function accessRead(conn = c) {
+    if (!conn || !d) return { invites: [], joins: [], members: [], problem: 'Paperclip is not connected.' };
+    const id = encodeURIComponent(conn.companyId);
+    const get = async (name, route) => {
+      let json;
+      try { json = await call(conn, route); } catch (e) { return { err: e.message }; }
+      const p = shapeProblems(name, json);
+      return p.length ? { err: `Paperclip answered in a shape the office does not know (${p[0]}) Update the office or the pinned Paperclip.` } : { json };
+    };
+    const [inv, jr, mem] = await Promise.all([get('invites', `/api/companies/${id}/invites?limit=100`), get('joinRequests', `/api/companies/${id}/join-requests`), get('members', `/api/companies/${id}/members`)]);
+    const id_ = (x) => x && typeof x.id === 'string' && x.id;
+    const invites = inv.json ? inv.json.invites.filter(id_).map((x) => ({ id: String(x.id), state: text(x.state, 20) || 'unknown', joins: text(x.allowedJoinTypes, 10), role: text(x.humanRole, 20) || null, message: text(x.inviteMessage, 200) || null, expiresAt: text(x.expiresAt, 40) || null })) : null;
+    const joins = jr.json ? list(jr.json).filter(id_).map((x) => ({ id: String(x.id), status: text(x.status, 30), type: text(x.requestType, 10), name: text(x.agentName, 80) || text(x.requestEmailSnapshot, 120) || (x.requesterUser && text(x.requesterUser.name, 80)) || 'Unknown', createdAt: text(x.createdAt, 40) || null })) : null;
+    const members = mem.json ? mem.json.members.filter(id_).map((x) => ({ id: String(x.id), name: text(x.user && x.user.name, 80) || text(x.user && x.user.email, 120) || 'Unknown', role: text(x.membershipRole, 20) || null, status: text(x.status, 20) })) : null;
+    return { invites: invites || [], joins: joins || [], members: members || [], known: { invites: !!invites, joins: !!joins, members: !!members }, problem: [inv, jr, mem].map((x) => x.err).find(Boolean) || '' };
+  }
+  async function access() {
+    const conn = c;
+    if (!conn || !d) return null;
+    const a = await accessRead(conn);
+    if (c !== conn) return null;
+    const { problem, known, ...rest } = a;
+    return { ...rest, known, error: problem || null };
+  }
   const askWrite = deps.askFirst || ((kind, message, extra) => Object.assign(httpError(409, message), { confirm: kind, ...extra }));
   const OPEN_APPROVAL = new Set(['pending', 'revision_requested']);
   async function check(conn, t) {
@@ -834,6 +864,15 @@ export function createHq(deps = {}) {
       const r = d.routines.find((x) => x && x.id === (t.type === 'routine' ? t.id : t.routine) && x.status !== 'archived');
       if (!r || (r.companyId && r.companyId !== conn.companyId)) throw httpError(404, 'Paperclip has no such routine in this company.');
       if (t.type === 'trigger' && !list(r.triggers).some((x) => x && x.id === t.id)) throw httpError(404, 'Paperclip has no such schedule on this routine.');
+      return;
+    }
+    if (t.type === 'invite' || t.type === 'join' || t.type === 'member') {
+      const a = await accessRead(conn), what = { invite: 'invite', join: 'join request', member: 'member' }[t.type];
+      if (a.problem) throw httpError(502, a.problem);
+      const row = a[{ invite: 'invites', join: 'joins', member: 'members' }[t.type]].find((x) => x.id === t.id);
+      if (!row) throw httpError(404, `Paperclip has no such ${what} in this company.`);
+      if (t.type === 'invite' && row.state !== 'active') throw httpError(409, 'This invite is not active.');
+      if (t.type === 'join' && row.status !== 'pending_approval') throw httpError(409, 'This join request is not waiting for a decision.');
       return;
     }
     const issue = t.type === 'issue', goal = t.type === 'goal', noun = issue ? 'task' : goal ? 'goal' : 'approval', route = `/api/${issue ? 'issues' : goal ? 'goals' : 'approvals'}/${t.id}`;
@@ -907,18 +946,20 @@ export function createHq(deps = {}) {
     if (plan.kind === 'task' && plan.action === 'create' && !made.id) { feed(`Paperclip did not name the task it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the task it made.'); }
     if (plan.kind === 'goal' && plan.action === 'create' && !made.id) { feed(`Paperclip did not name the goal it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the goal it made.'); }
     if (plan.kind === 'routine' && plan.action === 'create' && !made.id) { feed(`Paperclip did not name the routine it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the routine it made.'); }
-    if (plan.kind === 'company' && !made.id) { feed(`Paperclip did not name the company it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the company it made.'); }
+    if (plan.kind === 'access' && plan.action === 'invite' && !made.id) { feed(`Paperclip did not name the invite it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the invite it made.'); }
+    if (plan.kind === 'company' && plan.action === 'create' && !made.id) { feed(`Paperclip did not name the company it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the company it made.'); }
     if (plan.kind === 'hire' && !(typeof made.id === 'string' && made.id)) { feed(`Paperclip did not name the employee it hired: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the employee it hired.'); }
     feed(`Wrote to ${name}: ${plan.summary}.`);
     if (!first) refetchSoon(conn);
     const out = { ok: true };
-    if (plan.kind === 'company') { out.id = String(made.id); out.name = plan.name; out.existed = false; }
+    if (plan.kind === 'company' && plan.action === 'create') { out.id = String(made.id); out.name = plan.name; out.existed = false; }
     if (plan.kind === 'hire') { out.id = String(made.id); out.name = plan.body.name; }
     if (plan.kind === 'goal' && plan.action === 'create') out.id = String(made.id);
     if (plan.kind === 'routine' && plan.action === 'create') out.id = String(made.id);
+    if (plan.kind === 'access' && plan.action === 'invite') out.id = String(made.id);
     if (plan.kind === 'task' && plan.action === 'create') { out.id = String(made.id); if (typeof made.identifier === 'string') out.identifier = text(made.identifier, 30); }
     return out;
   }
 
-  return { connect, disconnect, supervise, handoffGoal, handoffTasks, write, tasksOf, view, model, costs, catalog, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
+  return { connect, disconnect, supervise, handoffGoal, handoffTasks, write, tasksOf, access, view, model, costs, catalog, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
 }
