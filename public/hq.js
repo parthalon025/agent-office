@@ -106,6 +106,43 @@
         : h('p', { className: 'note' }, 'No activity yet.'));
   }
 
+  // Costs (#208), the Finance floor: spend per agent and per project for the last three months, and the budgets. Read from
+  // the hqCosts command when the HQ opens. Unknown says Unknown, never $0.00: a month or a cut Paperclip did not answer is null.
+  function Costs() {
+    var st = useState({ costs: undefined, err: '' }), s = st[0], setS = st[1];
+    useEffect(function () {
+      var live = true;
+      client.get('hqCosts').then(function (j) { if (live) setS({ costs: j.costs || null, err: '' }); }, function (x) { if (live) setS({ costs: null, err: x.message }); });
+      return function () { live = false; };
+    }, []);
+    var F = window.OfficeFormat, c = s.costs;
+    function cut(rows) {
+      if (!rows) return h('p', { className: 'note' }, 'Unknown: Paperclip did not answer.');
+      if (!rows.length) return h('p', { className: 'note' }, 'No spend.');
+      return h('ul', { className: 'stats-list' }, rows.map(function (r) { return h('li', { key: r.id }, h('span', null, r.name), h('b', null, r.cost == null ? 'Unknown' : F.money(r.cost))); }));
+    }
+    function amount(b, v) { return v == null ? 'Unknown' : b.metric === 'billed_cents' ? F.money(v) : F.tokens(v) + ' tokens'; }
+    return h('div', { className: 'hq-floor' },
+      h('h3', { className: 'ext-h' }, 'Costs'),
+      s.err ? h('p', { className: 'ao-err', role: 'alert' }, 'The office could not read the costs. ' + s.err)
+        : c === undefined ? h('p', { className: 'note', role: 'status' }, 'Reading the costs.')
+        : !c ? h('p', { className: 'note' }, 'The office is not connected to Paperclip.')
+        : [
+          c.contract && c.contract.length ? h('p', { key: 'k', className: 'ao-err', role: 'alert' }, 'Paperclip answered in a shape the office does not know, so the office does not show that part. ' + c.contract.join(' ')) : null,
+          h('h4', { key: 'bh', className: 'ext-h' }, 'Budgets'),
+          c.budgets === null ? h('p', { key: 'b', className: 'note' }, 'Unknown: Paperclip did not answer.')
+            : c.budgets.length ? h('ul', { key: 'b', className: 'stats-list' }, c.budgets.map(function (b) {
+              return h('li', { key: b.id }, h('span', null, b.name + ' (' + b.scope + ')'), h('b', null, amount(b, b.used) + ' of ' + amount(b, b.limit) + (b.percent != null ? ', ' + Math.round(b.percent) + '%' : '') + (b.paused ? ', paused' : '')));
+            })) : h('p', { key: 'b', className: 'note' }, 'No budget is set.'),
+          c.pausedAgents ? h('p', { key: 'p', className: 'note' }, plural(c.pausedAgents, 'agent', 'agents') + ' paused by a budget.') : null,
+          c.months.map(function (m) {
+            return h('div', { key: m.key, className: 'hq-floor' },
+              h('h4', { className: 'ext-h' }, m.label + ': ' + (m.total == null ? 'Unknown' : F.money(m.total) + (m.partial ? ' or more' : ''))),
+              h('p', { className: 'note' }, h('b', null, 'By agent')), cut(m.agents),
+              h('p', { className: 'note' }, h('b', null, 'By project')), cut(m.projects));
+          })]);
+  }
+
   // The HQ: what Paperclip says about its company. Read only: Paperclip runs its heartbeats, routines and budgets. Supervise
   // in office is on the Agents screen of a Security room, with its painted Confirm (no button here: one place for a write).
   function HqDialog(p) {
@@ -123,6 +160,7 @@
         h('p', { className: 'note' }, 'Budget for its runs: ' + H.budget(q.budget) + '. Paperclip keeps this budget. The office sets no second limit on Paperclip runs.'),
         q.contract && q.contract.length ? h('p', { className: 'ao-err', role: 'alert' }, 'Paperclip answered in a shape the office does not know, so the office does not show that part. ' + q.contract.join(' ')) : null,
         q.lobby ? h(Lobby, { q: q }) : null,
+        h(Costs, null),
         h('h3', { className: 'ext-h' }, 'Agents'),
         q.agents.length ? h('ul', { className: 'past' }, q.agents.map(function (a) {
           var st = H.status(a), sup = H.supervision(a);

@@ -44,6 +44,9 @@ When the office watches a company, the company is the HQ building in the city. I
 
 Open **Paperclip HQ** for the Lobby: employees, open tasks, approvals, goals and spend as cards, the approvals and goals that wait, the org chart and the live activity. When the office could not read a part, the card says Unknown, not zero. On a phone, the HQ is a card above the buildings.
 
+
+**Costs** (Finance) is in the same dialog: spend per agent and per project for this month and the two before it, and the budgets (what each has used of its limit, and any employee a budget paused). It reads Paperclip when you open the HQ and only reads. Unknown stays unknown: a month or a cut that Paperclip did not answer says Unknown, never $0.00, and a month with a row of no known cost says "or more".
+
 The office reads Paperclip through its own server. The page never calls Paperclip, and the board key never leaves the office: it goes to Paperclip as a bearer token and is in no answer to the page. Secret names show, secret values and approval payloads do not. If an update of Paperclip changes the shape of an answer the office reads, the office does not use that part, says so in the HQ and in the feed, and shows Unknown for it.
 
 ## Writes from the office

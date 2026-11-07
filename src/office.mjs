@@ -1294,6 +1294,7 @@ export function createOffice(cfg) {
     R('GET', '/api/hq/grid', 'page', () => ({ grid: hqGridView() })),
     R('POST', '/api/hq/grid/set', 'page', ({ body }) => setHqGrid(body)),
     R('POST', '/api/hq/write', 'page', ({ body }) => writeHq(body)),
+    R('GET', '/api/hq/costs', 'page', async () => ({ costs: await hq.costs() })),
     // The Paperclip runtime (#193): install (409 without the Confirm), start, stop, and the board key's approval link. Never the key.
     R('GET', '/api/paperclip/runtime', 'page', () => ({ runtime: runtime.status() })),
     R('POST', '/api/paperclip/runtime/install', 'page', ({ body }) => installRuntime(body)),

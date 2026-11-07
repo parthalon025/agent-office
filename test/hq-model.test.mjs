@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { floorsOf, lobbyOf, shapeProblems, shapeOf, SHAPES } from '../src/hq-model.mjs';
+import { floorsOf, lobbyOf, costsOf, monthWindows, shapeProblems, shapeOf, SHAPES } from '../src/hq-model.mjs';
 import { startFakePaperclip, DEMO } from './fixtures/fake-paperclip.mjs';
 
 const RECORDED = JSON.parse(fs.readFileSync(fileURLToPath(new URL('./fixtures/paperclip-shapes.json', import.meta.url)), 'utf8'));
@@ -50,6 +50,26 @@ test('contract: the shapes the office reads are checked, and a change is a named
   assert.match(shapeProblems('costs', { spendCents: null, budgetCents: 0 })[0], /spendCents is null, expected number/);
 });
 
+test('costs (#208): per month, agents and projects sorted by cost; unknown stays unknown', () => {
+  assert.deepEqual(monthWindows(Date.UTC(2026, 0, 15)).map((m) => m.key), ['2026-01', '2025-12', '2025-11'], 'the window crosses the year');
+  assert.equal(monthWindows(Date.UTC(2026, 10, 6))[0].to, '2026-12-01T00:00:00.000Z');
+  const c = costsOf({
+    months: [
+      { key: '2026-11', agents: [{ id: 'a', name: 'Ada', cost: 2 }, { id: 'g', name: 'Grace', cost: 4.5 }], projects: [{ id: 'p', name: 'Web', cost: 6.5 }] },
+      { key: '2026-10', agents: [{ id: 'a', name: 'Ada', cost: null }, { id: 'g', name: 'Grace', cost: 1 }], projects: null },
+      { key: '2026-09', agents: null, projects: null },
+    ],
+    budgets: { paused: 1, policies: [{ id: 'b1', scope: 'agent', name: 'Ada', metric: 'billed_cents', limit: 50, used: 8, percent: 16, status: 'ok', paused: false }, { id: 'b2', scope: 'company', name: 'Acme', metric: 'billed_cents', limit: 100, used: 90, percent: 90, status: 'warning', paused: false }] },
+  });
+  assert.deepEqual(c.months.map((m) => [m.label, m.total, m.partial]), [['November 2026', 6.5, false], ['October 2026', 1, true], ['September 2026', null, false]]);
+  assert.deepEqual(c.months[0].agents.map((a) => a.name), ['Grace', 'Ada']);
+  assert.equal(c.months[1].projects, null);
+  assert.equal(c.months[2].agents, null, 'an unread month is null, not zero');
+  assert.deepEqual(c.budgets.map((b) => b.id), ['b2', 'b1']);
+  assert.equal(c.pausedAgents, 1);
+  assert.equal(costsOf({ months: [], budgets: null }).budgets, null);
+});
+
 test('contract: the office needs only what was recorded, and the fake Paperclip still answers the recorded shapes', async () => {
   assert.equal(RECORDED.pinned, '2026.1106.0', 'the recording belongs to the pinned release; a new pin needs a new recording');
   for (const [name, spec] of Object.entries(SHAPES)) for (const f of Object.keys(spec.fields)) assert.ok(RECORDED.routes[name]?.fields?.[f], `${name}.${f} is read but was never recorded`);
@@ -57,7 +77,8 @@ test('contract: the office needs only what was recorded, and the fake Paperclip 
   try {
     const id = DEMO().companies[0].id;
     const route = { company: `/api/companies/${id}`, agents: `/api/companies/${id}/agents`, issues: `/api/companies/${id}/issues`, goals: `/api/companies/${id}/goals`, approvals: `/api/companies/${id}/approvals?status=pending`,
-      activity: `/api/companies/${id}/activity`, costs: `/api/companies/${id}/costs/summary`, secrets: `/api/companies/${id}/secrets` };
+      activity: `/api/companies/${id}/activity`, costs: `/api/companies/${id}/costs/summary`, secrets: `/api/companies/${id}/secrets`,
+      costsByAgent: `/api/companies/${id}/costs/by-agent?from=2026-11-01T00:00:00.000Z&to=2026-12-01T00:00:00.000Z`, costsByProject: `/api/companies/${id}/costs/by-project?from=2026-11-01T00:00:00.000Z&to=2026-12-01T00:00:00.000Z`, budgets: `/api/companies/${id}/budgets/overview` };
     for (const [name, r] of Object.entries(route)) {
       const json = await (await fetch(pc.url + r)).json();
       assert.deepEqual(shapeProblems(name, json), [], name);

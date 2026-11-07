@@ -126,6 +126,17 @@ test('the HQ building (#197): floors from the org chart and the Lobby in the sna
   assert.equal(pc.requests.filter((q) => q.method !== 'GET' && q.method !== 'UPGRADE').length, 0, 'reading the HQ sent no write');
 });
 
+test('the Costs view (#208): GET /api/hq/costs gives months and budgets to the page, never to the agent token, and reads only', async () => {
+  const r = await call('/api/hq/costs', null, pageToken, 'GET');
+  assert.equal(r.status, 200);
+  assert.equal(r.json.costs.months.length, 3);
+  assert.ok(r.json.costs.months.every((m) => /^\d{4}-\d{2}$/.test(m.key)));
+  assert.ok(Array.isArray(r.json.costs.budgets), 'the budgets of the company');
+  assert.equal((await call('/api/hq/costs', null, agentToken, 'GET')).status, 401);
+  assert.doesNotMatch(JSON.stringify(r.json), new RegExp(`do-not-show|${pageToken}|${agentToken}`));
+  assert.equal(pc.requests.filter((q) => q.method !== 'GET' && q.method !== 'UPGRADE').length, 0);
+});
+
 test('the page never calls Paperclip: no Paperclip route in any page script', () => {
   for (const f of fs.readdirSync(path.join(SRC, 'public')).filter((x) => x.endsWith('.js'))) {
     const code = fs.readFileSync(path.join(SRC, 'public', f), 'utf8');

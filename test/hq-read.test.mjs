@@ -56,6 +56,38 @@ test('read model: a route Paperclip lacks is unknown, not zero; a changed shape 
   } finally { hq.disconnect(); await pc.close(); }
 });
 
+test('costs (#208): three months per agent and project, the budgets; a month Paperclip lacks is unknown; only reads', async () => {
+  const pc = await startFakePaperclip(DEMO());
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS, now: () => Date.UTC(2026, 10, 6) });
+  try {
+    assert.equal(await hq.costs(), null, 'not connected: nothing');
+    await hq.connect({ url: pc.url });
+    await until(() => hq.state() === 'on', 'the events socket');
+    const c = await hq.costs();
+    assert.deepEqual(c.months.map((m) => [m.key, m.total, m.partial]), [['2026-11', 12.4, false], ['2026-10', 20, false], ['2026-09', null, false]]);
+    assert.deepEqual(c.months[0].agents.map((a) => [a.name, a.cost]), [['Ada', 8.3], ['Grace', 4.1]]);
+    assert.deepEqual(c.months[0].projects, [{ id: 'pr1', name: 'Web', cost: 12.4 }]);
+    assert.equal(c.months[2].agents, null, 'a month that cannot be read is unknown, not $0.00');
+    assert.deepEqual(c.budgets.map((b) => [b.name, b.limit, b.used, b.percent, b.status]), [['Ada', 50, 45, 90, 'warning'], ['Acme Robotics', 100, 12.4, 12.4, 'ok']]);
+    assert.doesNotMatch(JSON.stringify(c), /do-not-show/);
+    assert.equal(pc.requests.filter((r) => r.method !== 'GET' && r.method !== 'UPGRADE').length, 0, 'the Costs view only reads');
+  } finally { hq.disconnect(); await pc.close(); }
+});
+
+test('costs (#208): a changed shape is not used, and a Paperclip without the budgets route has no budgets, not none set', async () => {
+  const pc = await startFakePaperclip({ ...DEMO(), budgets: null });
+  pc.state.costMonths['2026-10'].agents = [{ agentId: 'x', agentName: 'X', costCents: 'a lot' }];
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS, now: () => Date.UTC(2026, 10, 6) });
+  try {
+    await hq.connect({ url: pc.url });
+    await until(() => hq.state() === 'on', 'the events socket');
+    const c = await hq.costs();
+    assert.equal(c.budgets, null);
+    assert.equal(c.months[1].agents, null, 'a retyped cost is not read');
+    assert.match(c.contract[0], /costsByAgent: costCents is string, expected number/);
+  } finally { hq.disconnect(); await pc.close(); }
+});
+
 test('the board key: sent as a bearer to Paperclip, never held in a view; without it a login-mode Paperclip refuses', async () => {
   const KEY = 'board-key-0123456789abcdef';
   const pc = await startFakePaperclip({ ...DEMO(), key: KEY });
