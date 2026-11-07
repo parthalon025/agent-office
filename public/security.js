@@ -266,7 +266,9 @@
     { fs: 21, lh: 29, y0: 168, sub: 132, subS: 24, rowH: 104, cy: 16, ch: 52, ng: 26, bk: 22, hint: 24, hintY: 34, gap: 36 },
     { fs: 18, lh: 23, y0: 128, sub: 110, subS: 22, rowH: 96, cy: 8, ch: 44, ng: 20, bk: 19, hint: 22, hintY: 30, gap: 30 },
     { fs: 18, lh: 23, y0: 128, sub: 110, subS: 22, rowH: 86, cy: 6, ch: 42, ng: 19, bk: 18, hint: 22, hintY: 30, gap: 24 },
-    { fs: 16, lh: 20, y0: 128, sub: 110, subS: 22, rowH: 86, cy: 6, ch: 42, ng: 19, bk: 18, hint: 20, hintY: 28, gap: 22 }
+    { fs: 16, lh: 20, y0: 128, sub: 110, subS: 22, rowH: 86, cy: 6, ch: 42, ng: 19, bk: 18, hint: 20, hintY: 28, gap: 22 },
+    // ten agent kinds (#217): the reasons take more lines again, so the rows are shorter and the gaps tighter; the type stays at 16 px
+    { fs: 16, lh: 20, y0: 124, sub: 106, subS: 22, rowH: 78, cy: 4, ch: 40, ng: 17, bk: 16, hint: 20, hintY: 26, gap: 18 }
   ];
   function rowHOf(L, rows) { return rows > 2 ? L.rowH : 120; }
 
@@ -286,10 +288,10 @@
   function heads(p, cols, gx, colW, s, yOne, yTwo) {
     var max = colW - 8;
     var two = cols.some(function (c) { return c.label.length * charW(s, 600) > max; }), size = two ? s - 2 : s;
-    // nine kinds (#22, #23, #216): the longest word of a head must fit too, so the type goes down to 16 px, never cut
-    if (two) cols.forEach(function (c) { c.label.split(' ').forEach(function (w) { while (size > 16 && w.length * charW(size, 600) > max) size--; }); });
+    // ten kinds (#22, #23, #216, #217): the longest word of a head must fit too, so the type goes down to 16 px, never cut
+    if (two) cols.forEach(function (c) { c.label.split(' ').forEach(function (w) { while (size > 16 && w.length * Math.max(charW(size, 600), size * 0.62) > max) size--; }); });
     cols.forEach(function (c, i) {
-      var lines = two ? wrap(c.label, size, max, 600).slice(0, 2) : [c.label];
+      var words = c.label.split(' '), lines = two ? (words.length === 2 ? words : wrap(c.label, size, max, 600).slice(0, 2)) : [c.label]; // ten kinds (#217): a two-word head takes one word a line, so "ACP tools" never rests on the estimate
       lines.forEach(function (l, k) {
         text(p, gx + i * colW + colW / 2, (two ? yTwo : yOne) - (lines.length - 1 - k) * (size + 2), size, 'muted', l, { wt: 600, align: 'center', maxW: max });
       });
@@ -298,16 +300,17 @@
 
   // The rows of a rules or Agents screen as a grid: one column per agent kind.
   function grid(p, view, data, L) {
-    // nine kinds (#22, #24, #216): the label column is 220 px and the grid runs to 24 px from the edge, so a column is 109 px and
-    // "Framework" and "Not enforced" fit it; a row label that does not fit at 28 px takes a smaller size (fit).
-    var sc = screenOf(view.screen), W = view.w, x0 = 48, labelW = 220, gx = x0 + labelW, cols = S().columns;
+    // ten kinds (#22, #24, #216, #217): the label column is 134 px from 32 px and the grid runs to 24 px from the edge, so a column
+    // is 109 px and "Framework" and "Not enforced" fit it; a row label wraps to at most three lines at 22 px (18 px when it needs more).
+    var sc = screenOf(view.screen), W = view.w, x0 = 32, labelW = 134, gx = x0 + labelW, cols = S().columns;
     var colW = Math.floor((W - 24 - gx) / cols.length), y0 = L.y0, rowH = rowHOf(L, sc.rows.length);
     heads(p, cols, gx, colW, 24, y0 + 30, y0 + 42);
     var y = y0 + 52;
     sc.rows.forEach(function (row) {
       var r = S().rows[row];
-      fill(p, x0, y, W - 96, 2, 'line');
-      text(p, x0, y + rowH / 2 + 10, fit(r.label, 28, labelW - 16, 400), 'ink', r.label, { maxW: labelW - 16 });
+      fill(p, x0, y, W - 24 - x0, 2, 'line');
+      var ls = wrap(r.label, 22, labelW - 12, 400), ls2 = ls.length > 3 ? wrap(r.label, 18, labelW - 12, 400) : ls, lsz = ls.length > 3 ? 18 : 22, llh = lsz + 3;
+      ls2.forEach(function (l, k) { text(p, x0, y + rowH / 2 + lsz * 0.36 - (ls2.length - 1) * llh / 2 + k * llh, lsz, 'ink', l, { maxW: labelW - 12 }); });
       cols.forEach(function (c, i) {
         var cx = gx + i * colW, cw = colW - 16, ch = L.ch, cy = y + L.cy;
         if (!S().applies(row, c.id)) { text(p, cx + colW / 2, cy + ch / 2 + 9, fit(S().na(row, c.id), 22, colW - 8, 400), 'muted', S().na(row, c.id), { align: 'center', maxW: colW - 8 }); return; }
@@ -466,12 +469,15 @@
       // takes 24 px.
       var gx = 48, colW = Math.floor((W - 48 - gx) / cols.length), gy = y + 66;
       heads(p, cols, gx, colW, 22, gy + 30, gy + 30);
-      // One size for the row, up to 28 px, so that the longest word fits its column by the plan's estimate (nine kinds: 123 px).
-      var longest = Math.max.apply(null, cols.map(function (c) { return costWord(c).length; }));
-      var cs = Math.max(16, Math.min(28, Math.floor((colW - 8) / (longest * 0.62))));
+      // One size for the row, up to 28 px, so that the longest word fits its column by the plan's estimate (ten kinds: 110 px).
+      // Ten kinds (#217): a word of two parts that does not fit one line at 16 px ("Not reported") takes two lines.
+      var maxW = colW - 8, split = cols.map(function (c) { var w = costWord(c); return w.indexOf(' ') > 0 && w.length * 0.62 * 16 > maxW ? w.split(' ') : [w]; });
+      var longest = Math.max.apply(null, split.map(function (ls) { return Math.max.apply(null, ls.map(function (l) { return l.length; })); }));
+      var cs = Math.max(16, Math.min(28, Math.floor(maxW / (longest * 0.62))));
       cols.forEach(function (c, i) {
-        var w = costWord(c);
-        text(p, gx + i * colW + colW / 2, gy + 68, cs, 'ink', w, { wt: 600, align: 'center', maxW: colW - 8, mono: c.id === 'claude-code' });
+        var ls = split[i];
+        if (ls.length === 1) { text(p, gx + i * colW + colW / 2, gy + 68, cs, 'ink', ls[0], { wt: 600, align: 'center', maxW: maxW, mono: c.id === 'claude-code' }); return; }
+        ls.forEach(function (l, k) { text(p, gx + i * colW + colW / 2, gy + 58 + k * (cs + 2), cs, 'ink', l, { wt: 600, align: 'center', maxW: maxW }); });
       });
       y = gy + 92;
     }

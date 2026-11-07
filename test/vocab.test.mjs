@@ -138,7 +138,7 @@ test('always allow is offered for low and medium risk, never for high risk or a 
 const S = V.security;
 const RULES = (office = {}, buildings = {}) => ({ office, buildings });
 
-test('security: six screens on three walls, each with its rows; nine agent kinds as columns', () => {
+test('security: six screens on three walls, each with its rows; ten agent kinds as columns', () => {
   assert.deepEqual(S.screens.map((x) => x.title), ['Files', 'Commands', 'Network', 'Secrets', 'Agents', 'Spend']);
   assert.deepEqual(S.screens.find((x) => x.id === 'files').rows, ['read-inside', 'edit-inside', 'files-outside']);
   assert.deepEqual(S.screens.find((x) => x.id === 'secrets').rows, ['settings', 'secrets']);
