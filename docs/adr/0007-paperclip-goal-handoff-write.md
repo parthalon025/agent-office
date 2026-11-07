@@ -1,6 +1,6 @@
 # 0007: The goal handoff is Paperclip's second and last allowed write
 
-Status: accepted, 2026-11-06. From #158 (spec #130, Manager board; plan sources #155). Amends [ADR 0005](0005-paperclip-watched-not-driven.md), which stays accepted. Related: #76.
+Status: superseded by ADR 0010 (2026-11-06)
 
 ## Context
 

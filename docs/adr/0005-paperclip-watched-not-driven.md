@@ -1,6 +1,6 @@
 # 0005: Paperclip is watched, not driven, and Supervise in office is its one write
 
-Status: accepted, 2026-11-05. From #76 (spec #67: Q18 revised, Q20 b, Q31, Q32, Q33) and the spike in #75.
+Status: superseded by ADR 0010 (2026-11-06)
 
 ## Context
 

@@ -32,3 +32,6 @@ The vocabulary of the office layout (#88). Plain company terms only.
 | Employee | A Paperclip agent of an HQ. An office session is an agent; an employee is the Paperclip record it runs as |
 | Hire | Creating an employee from the office, behind a Confirm, supervised and with a budget |
 | Company memory | The shared, searchable memory of one company: what its employees learned, each item with where it came from |
+| Orientation | The first-run walk through the whole office, step by step and skippable: agent kinds, Security room, spend limit, company setup, company memory, Start with Windows, remote access, the tour |
+| Write grid | The HQ setting of what the office may write to Paperclip, per write kind: Confirm, Allow or Deny |
+| Self-approval | An employee approving its own work, only for the approval kinds the user allows in the write grid |
