@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import {
-  PINNED, INSTANCE, runtimePaths, buildConfig, childEnv, npmCli, installArgs, cleanRuntime, createRuntime, withSecrets,
+  PINNED, VERIFIED, INSTANCE, runtimePaths, buildConfig, childEnv, npmCli, installArgs, cleanRuntime, createRuntime, withSecrets,
 } from '../src/paperclip-runtime.mjs';
 
 const URL_ = 'http://127.0.0.1:3100';
@@ -64,33 +64,36 @@ function clock() {
   };
 }
 // The package that npm would put in the install folder: the file layout and the lock entry of paperclipai.
-function plantPackage(install, { version = PINNED.version, integrity = PINNED.integrity } = {}) {
+function plantPackage(install, { version = PINNED.version, integrity = PINNED.integrity, marker = false } = {}) {
+  fs.mkdirSync(install, { recursive: true });
+  if (marker) fs.writeFileSync(path.join(install, VERIFIED), JSON.stringify({ version, integrity }));
   const pkg = path.join(install, 'node_modules', 'paperclipai');
   fs.mkdirSync(path.join(pkg, 'dist'), { recursive: true });
   fs.writeFileSync(path.join(pkg, 'package.json'), JSON.stringify({ name: 'paperclipai', version }));
   fs.writeFileSync(path.join(pkg, 'dist', 'index.js'), '// fake\n');
   fs.writeFileSync(path.join(install, 'package-lock.json'), JSON.stringify({ packages: { 'node_modules/paperclipai': { version, integrity } } }));
 }
-function rig({ plant = false, port = 4392, env = {} } = {}) {
+function rig({ plant = false, pin, port = 4392, env = {} } = {}) {
   const f = folder();
   const root = path.join(f.dir, 'office'), local = path.join(f.dir, 'local');
   fs.mkdirSync(root, { recursive: true });
   const paths = runtimePaths({ root, env: { LOCALAPPDATA: local }, port });
-  if (plant) plantPackage(paths.install);
+  if (plant) plantPackage(paths.install, plant === true ? {} : plant);
   const pc = fakePaperclip(), clk = clock();
-  const r = { f, root, local, paths, pc, clk, spawned: [], killed: [], killedSync: [], feeds: [], changes: 0, secrets: [], children: [], npmExit: 0, npmPlant: true, npmOut: '', npmIntegrity: '' };
+  const r = { f, root, local, paths, pc, clk, spawned: [], killed: [], killedSync: [], feeds: [], changes: 0, secrets: [], children: [], npmExit: 0, npmPlant: true, npmOut: '', npmIntegrity: '', npmVersion: '' };
   r.runtime = createRuntime({
-    root, port, env: { LOCALAPPDATA: local, PATH: '/bin', ...env }, fetch: (u, i) => pc.fetch(u, i), setTimer: clk.setTimer, clearTimer: clk.clearTimer,
+    root, port, ...(pin ? { pin } : {}), env: { LOCALAPPDATA: local, PATH: '/bin', ...env }, fetch: (u, i) => pc.fetch(u, i), setTimer: clk.setTimer, clearTimer: clk.clearTimer,
     exe: (n) => `/abs/${path.basename(n)}`, npmCli: () => '/abs/npm-cli.js', processStart: async (p) => `start-${p}`,
-    killTree: async (p) => { r.killed.push(p); const c = r.children.find((x) => x.pid === p); if (c && c.exitCode === null) c.end(1); },
+    killTree: async (p) => { r.killed.push(p); const c = r.children.find((x) => x.pid === p); if (c && !c.isNpm) pc.up = false; if (c && c.exitCode === null) c.end(1); },
     killSync: (p) => r.killedSync.push(p), writeSecret: (file, text) => { r.secrets.push(file); fs.writeFileSync(file, text); },
     onChange: () => { r.changes++; }, onFeed: (text, kind) => r.feeds.push([kind, text]), now: () => new Date(Date.parse('2026-11-06T12:00:00Z') + clk.elapsed()),
     spawn: (file, args, opts) => {
       r.spawned.push({ file, args, opts });
       const c = fakeChild(4242 + r.spawned.length);
+      c.isNpm = args[0] === '/abs/npm-cli.js';
       r.children.push(c);
       if (args[0] === '/abs/npm-cli.js') {
-        setImmediate(() => { if (r.npmPlant) plantPackage(paths.install, r.npmIntegrity ? { integrity: r.npmIntegrity } : {}); if (r.npmOut) c.stderr.emit('data', r.npmOut); c.end(r.npmExit); });
+        setImmediate(() => { if (r.npmPlant) plantPackage(opts.cwd, { ...(r.npmIntegrity ? { integrity: r.npmIntegrity } : {}), ...(r.npmVersion ? { version: r.npmVersion } : {}) }); if (r.npmOut) c.stderr.emit('data', r.npmOut); c.end(r.npmExit); });
       }
       return c;
     },
@@ -741,4 +744,150 @@ test('a port that accepts a connection and never answers counts as held, not as 
     assert.equal(r.runtime.status().state, 'busy');
     assert.equal(r.spawned.length, 0);
   } finally { r.f.done(); }
+});
+
+// ---------- update (#195) ----------
+const OLD = { version: '2026.1001.0', integrity: 'sha512-' + 'B'.repeat(86) + '==' };
+const oldInstall = { ...OLD, marker: true };
+const lastNpm = (r) => r.spawned.filter((x) => x.args[0] === '/abs/npm-cli.js').at(-1);
+const runs = (r) => r.spawned.filter((x) => x.args[0] !== '/abs/npm-cli.js');
+const verOf = (dir) => JSON.parse(fs.readFileSync(path.join(dir, 'node_modules', 'paperclipai', 'package.json'), 'utf8')).version;
+
+test('an older verified install is installed but not current: it starts, install refuses, update is offered', async () => {
+  const r = rig({ plant: oldInstall });
+  try {
+    const s = r.runtime.status();
+    assert.equal(s.installed, true);
+    assert.equal(s.installedVersion, OLD.version);
+    assert.equal(s.updateAvailable, true);
+    assert.equal(s.state, 'stopped');
+    await assert.rejects(() => r.runtime.install(), /Update/);
+    assert.equal(r.spawned.length, 0);
+    await r.runtime.start();
+    assert.equal(runs(r).length, 1, 'the old release runs');
+  } finally { r.f.done(); }
+});
+
+test('an older install with no marker is not trusted and shows no update', async () => {
+  const r = rig({ plant: { ...OLD } });
+  try {
+    assert.equal(r.runtime.status().installed, false);
+    assert.equal(r.runtime.status().updateAvailable, false);
+    await assert.rejects(() => r.runtime.update(), /not installed|Install/);
+  } finally { r.f.done(); }
+});
+
+test('a verified current install writes the marker and offers no update', async () => {
+  const r = rig({ plant: true });
+  try {
+    const s = r.runtime.status();
+    assert.equal(s.updateAvailable, false);
+    assert.equal(s.installedVersion, PINNED.version);
+    assert.ok(fs.existsSync(path.join(r.paths.install, VERIFIED)));
+    await assert.rejects(() => r.runtime.update(), /already/);
+  } finally { r.f.done(); }
+});
+
+test('update of a stopped Paperclip installs the pin in a staging folder, checks it, swaps it in and starts nothing', async () => {
+  const r = rig({ plant: oldInstall });
+  try {
+    const s = await r.runtime.update();
+    const npm = lastNpm(r);
+    assert.equal(npm.opts.cwd, r.paths.next, 'the running release is not touched while npm works');
+    assert.ok(npm.args.includes(`paperclipai@${PINNED.version}`));
+    assert.equal(verOf(r.paths.install), PINNED.version);
+    assert.ok(!fs.existsSync(r.paths.next) && !fs.existsSync(r.paths.prev), 'no staging or backup folder is left');
+    assert.equal(s.state, 'stopped');
+    assert.equal(s.updateAvailable, false);
+    assert.equal(s.installedVersion, PINNED.version);
+    assert.equal(runs(r).length, 0);
+    assert.ok(r.feeds.some(([, t]) => /updated paperclipai/.test(t)));
+  } finally { r.f.done(); }
+});
+
+test('update of a running Paperclip downloads while the old one runs, then stops it, swaps and starts the new one', async () => {
+  const r = rig({ plant: oldInstall });
+  try {
+    await r.runtime.start(); r.pc.up = true; await r.clk.advance(2000);
+    assert.equal(r.runtime.status().state, 'running');
+    const first = await r.runtime.update({ background: true });
+    assert.equal(first.state, 'updating');
+    assert.equal(r.killed.length, 0, 'the old one still runs during the download');
+    await settle();
+    assert.equal(r.killed.length, 1, 'then it is stopped');
+    r.pc.up = true;
+    await settle(); await r.clk.advance(2000); await settle();
+    const s = r.runtime.status();
+    assert.equal(s.state, 'running');
+    assert.equal(s.installedVersion, PINNED.version);
+    assert.equal(runs(r).length, 2);
+    assert.equal(runs(r)[1].args[0], path.join(r.paths.install, 'node_modules', 'paperclipai', 'dist', 'index.js'));
+    assert.ok(!fs.existsSync(r.paths.prev));
+  } finally { r.f.done(); }
+});
+
+test('a failed download keeps the old version running and says why', async () => {
+  const r = rig({ plant: oldInstall });
+  r.npmPlant = false; r.npmExit = 1; r.npmOut = 'npm error code ENOTFOUND\n';
+  try {
+    await r.runtime.start(); r.pc.up = true; await r.clk.advance(2000);
+    await assert.rejects(() => r.runtime.update(), /npm stopped with code 1.*ENOTFOUND/s);
+    const s = r.runtime.status();
+    assert.equal(s.state, 'running', 'the old Paperclip was never stopped');
+    assert.equal(r.killed.length, 0);
+    assert.equal(s.installedVersion, OLD.version);
+    assert.equal(s.updateAvailable, true);
+    assert.match(s.update.error, /ENOTFOUND/);
+    assert.ok(!fs.existsSync(r.paths.next));
+    assert.ok(r.feeds.some(([k, t]) => k === 'error' && /update failed/.test(t)));
+  } finally { r.f.done(); }
+});
+
+test('a download that does not match the pinned SHA-512 is dropped and the old version stays', async () => {
+  const r = rig({ plant: oldInstall });
+  r.npmIntegrity = 'sha512-' + 'A'.repeat(86) + '==';
+  try {
+    await assert.rejects(() => r.runtime.update(), /does not match the SHA-512/);
+    assert.equal(verOf(r.paths.install), OLD.version);
+    assert.ok(!fs.existsSync(r.paths.next));
+    assert.equal(r.runtime.status().state, 'stopped');
+  } finally { r.f.done(); }
+});
+
+test('a new release that does not start is rolled back: the old folder comes back and runs again', async () => {
+  const r = rig({ plant: oldInstall });
+  try {
+    await r.runtime.start(); r.pc.up = true; await r.clk.advance(2000);
+    const first = await r.runtime.update({ background: true });
+    assert.equal(first.state, 'updating');
+    await settle();
+    // the new release starts but never answers: the start wait ends it
+    await settle(); await r.clk.advance(200000); await settle();
+    r.pc.up = true;
+    await settle(); await r.clk.advance(2000); await settle();
+    const s = r.runtime.status();
+    assert.equal(verOf(r.paths.install), OLD.version, 'the old release is back');
+    assert.equal(s.state, 'running');
+    assert.equal(s.installedVersion, OLD.version);
+    assert.equal(s.updateAvailable, true);
+    assert.match(s.update.error, /rolled back/i);
+    assert.ok(!fs.existsSync(r.paths.prev) && !fs.existsSync(r.paths.next));
+    assert.ok(r.feeds.some(([k, t]) => k === 'error' && /update failed/.test(t)));
+  } finally { r.f.done(); }
+});
+
+test('update refuses while a Paperclip of the user answers on the port, and while an update runs', async () => {
+  const r = rig({ plant: oldInstall });
+  try {
+    r.pc.up = true;
+    await assert.rejects(() => r.runtime.update(), /already runs/i);
+    assert.equal(r.spawned.length, 0);
+  } finally { r.f.done(); }
+  const q = rig({ plant: oldInstall });
+  try {
+    await q.runtime.update({ background: true });
+    await assert.rejects(() => q.runtime.update({ background: true }), /being updated/);
+    await assert.rejects(() => q.runtime.start(), /being updated/);
+    await settle();
+  } finally { q.f.done(); }
 });

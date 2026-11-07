@@ -19,7 +19,7 @@ function standIn() {
   const x = { calls: [], st: { state: 'off', reason: '', version: '2026.1106.0', installed: false, url: 'http://127.0.0.1:3100', port: 3100, bootstrap: null, inviteUrl: '', key: { state: 'none', reason: '', expiresAt: null, approvalUrl: '' }, steps: ['Install Paperclip.'] }, fail: null };
   const act = (name, next) => async () => { x.calls.push(name); if (x.fail) throw x.fail; Object.assign(x.st, next); return x.st; };
   Object.assign(x, {
-    status: () => x.st, install: act('install', { state: 'stopped', installed: true }), start: act('start', { state: 'running' }), stop: act('stop', { state: 'stopped' }),
+    status: () => x.st, install: act('install', { state: 'stopped', installed: true }), update: async (o) => { x.calls.push('update:' + (o && o.background)); if (x.fail) throw x.fail; Object.assign(x.st, { state: 'updating' }); return x.st; }, start: act('start', { state: 'running' }), stop: act('stop', { state: 'stopped' }),
     connectKey: act('key', { key: { state: 'waiting', reason: '', expiresAt: null, approvalUrl: 'http://127.0.0.1:3100/cli-auth/x' } }),
     resume: async (enabled) => { x.calls.push('resume:' + enabled); return x.st; }, killNow() { x.calls.push('killNow'); }, key: () => secretKey,
   });
@@ -39,7 +39,7 @@ after(async () => {
 });
 
 test('the runtime routes are page routes: the agent token does not open them', () => {
-  for (const [m, r] of [['GET', '/api/paperclip/runtime'], ['POST', '/api/paperclip/runtime/install'], ['POST', '/api/paperclip/runtime/start'], ['POST', '/api/paperclip/runtime/stop'], ['POST', '/api/paperclip/runtime/key']]) {
+  for (const [m, r] of [['GET', '/api/paperclip/runtime'], ['POST', '/api/paperclip/runtime/install'], ['POST', '/api/paperclip/runtime/update'], ['POST', '/api/paperclip/runtime/start'], ['POST', '/api/paperclip/runtime/stop'], ['POST', '/api/paperclip/runtime/key']]) {
     assert.equal(rig.office.core.groupOf(m, r), 'page', r);
   }
 });
@@ -63,6 +63,27 @@ test('install asks first: 409 with the ask-first body and no install; with confi
   assert.equal(done.json.runtime.installed, true);
   assert.deepEqual(rt.calls, ['install']);
   assert.equal(rig.snapshot().paperclipRuntime.installed, true, 'the snapshot follows');
+});
+
+test('update asks first: 409 with the ask-first body and no update; with confirmed: true it starts the update in the background', async () => {
+  rt.st.installedVersion = '2026.1001.0'; rt.st.updateAvailable = true;
+  rt.calls.length = 0;
+  const ask = await page('/api/paperclip/runtime/update', {});
+  assert.equal(ask.status, 409);
+  assert.equal(ask.json.confirm, 'runtime');
+  assert.match(ask.json.error, /Update Paperclip from 2026\.1001\.0 to 2026\.1106\.0/);
+  assert.match(ask.json.error, /puts the old one back/);
+  assert.deepEqual(rt.calls, [], 'nothing runs without the Confirm');
+  const done = await page('/api/paperclip/runtime/update', { confirmed: true });
+  assert.equal(done.status, 200);
+  assert.equal(done.json.runtime.state, 'updating');
+  assert.deepEqual(rt.calls, ['update:true']);
+  rt.st.state = 'stopped'; rt.st.updateAvailable = false;
+  rt.calls.length = 0;
+  rt.fail = runtimeError(409, 'Paperclip 2026.1106.0 is installed already.');
+  const again = await page('/api/paperclip/runtime/update', { confirmed: true });
+  assert.equal(again.status, 409);
+  rt.fail = null;
 });
 
 test('start keeps the wish in state.json; stop removes it', async () => {

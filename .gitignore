@@ -14,5 +14,7 @@ history.json
 .scratch/
 # The Paperclip release the office installs with npm (src/paperclip-runtime.mjs): not part of the repository.
 /.paperclip-runtime/
+/.paperclip-runtime-next/
+/.paperclip-runtime-prev/
 # Screenshots of a visual check: never commit them.
 /.screens/

@@ -236,7 +236,7 @@
     return 'Lost ' + hq.url + ': ' + (hq.error || 'no answer') + ' The office tries again.';
   }
   // The Paperclip the office runs itself (#193, paperclip-runtime.mjs status): its state as a DS status and a word, and the board key's line.
-  var RUNTIME = { off: ['resting', 'Not installed'], installing: ['working', 'Installing'], stopped: ['resting', 'Stopped'], starting: ['working', 'Starting'],
+  var RUNTIME = { off: ['resting', 'Not installed'], installing: ['working', 'Installing'], updating: ['working', 'Updating'], stopped: ['resting', 'Stopped'], starting: ['working', 'Starting'],
     running: ['working', 'Running'], failed: ['error', 'Failed'], external: ['resting', 'Another Paperclip runs'], busy: ['error', 'Port in use'] };
   function runtimeState(rt) {
     if (!rt) return null;

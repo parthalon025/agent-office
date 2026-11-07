@@ -398,6 +398,15 @@ export function createOffice(cfg) {
     broadcast();
     return { runtime: st };
   }
+  // Update Paperclip (#195): installs the pinned release over the older one the office verified, behind a Confirm. The old release keeps
+  // running while the new one downloads, and a release that does not start is rolled back (paperclip-runtime.mjs update).
+  async function updateRuntime(body) {
+    const st0 = runtime.status();
+    if (body.confirmed !== true) throw askFirst('runtime', `Update Paperclip from ${st0.installedVersion || 'the installed release'} to ${st0.version}? The office downloads the new release with npm into a staging folder (a few minutes) and checks it against the SHA-512 it pins. npm runs none of its install scripts. If Paperclip runs, it stops for a moment and starts again on the new release. If the new release does not start, the office puts the old one back. Paperclip's data and the board key stay. The new release may change the format of its data, so the office keeps hourly backups of it.`);
+    const st = await runtime.update({ background: true });
+    broadcast();
+    return { runtime: st };
+  }
   async function startRuntime() {
     const st = await runtime.start();
     saved.set('paperclipRuntime', { enabled: true }); savePersisted();
@@ -1233,6 +1242,7 @@ export function createOffice(cfg) {
     // The Paperclip runtime (#193): install (409 without the Confirm), start, stop, and the board key's approval link. Never the key.
     R('GET', '/api/paperclip/runtime', 'page', () => ({ runtime: runtime.status() })),
     R('POST', '/api/paperclip/runtime/install', 'page', ({ body }) => installRuntime(body)),
+    R('POST', '/api/paperclip/runtime/update', 'page', ({ body }) => updateRuntime(body)),
     R('POST', '/api/paperclip/runtime/start', 'page', () => startRuntime()),
     R('POST', '/api/paperclip/runtime/stop', 'page', () => stopRuntime()),
     R('POST', '/api/paperclip/runtime/key', 'page', async () => { const st = await runtime.connectKey(); broadcast(); return { runtime: st }; }),
