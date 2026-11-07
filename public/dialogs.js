@@ -281,6 +281,7 @@
     var b = useState(''), busy = b[0], setBusy = b[1];
     var e = useState(''), err = e[0], setErr = e[1];
     var q = useState(''), ask = q[0], setAsk = q[1];
+    var w = useState('paperclipRuntimeInstall'), askFor = w[0], setAskFor = w[1];
     if (!rt) return null;
     var st = V.runtime(rt), s = rt.state;
     function call(name, body, done) {
@@ -288,7 +289,7 @@
       client[name](body || {}).then(function () { setBusy(''); setAsk(''); if (done) done(); }, function (x) {
         setBusy('');
         var a = window.OfficeAsk.asked(x, 'runtime', body && body.confirmed === true);
-        if (a) { setAsk(a.text); return; }
+        if (a) { setAskFor(name); setAsk(a.text); return; }
         setErr(x.message);
       });
     }
@@ -303,17 +304,22 @@
       h('p', { className: 'note' }, 'Run Paperclip from the office. The office installs release ' + rt.version + ' with npm into its own folder, starts it in login mode on this computer only (127.0.0.1) and stops it with the office. Its data stays in your local app data folder. A Paperclip that you run yourself is never changed.'),
       h('p', { className: 'note', role: 'status' }, h('span', { className: 'sess-state' }, h(A.StatusDot, { status: st.key }), st.word), rt.reason ? ' ' + rt.reason : ''),
       s === 'running' ? h('p', { className: 'note' }, V.runtimeKey(rt)) : null,
+      rt.updateAvailable && s !== 'updating' ? h('p', { className: 'note' }, 'Paperclip ' + rt.installedVersion + ' is installed. Release ' + rt.version + ' is ready to install.') : null,
+      rt.update && rt.update.error && s !== 'updating' ? h('p', { className: 'ao-err', role: 'alert' }, rt.update.error) : null,
       rt.steps && rt.steps.length && !ask ? h('ul', { className: 'kind-steps' }, rt.steps.map(function (t, i) { return h('li', { key: i }, t); })) : null,
       inviteLink || keyLink || openLink ? h('p', { className: 'note' }, inviteLink || keyLink || openLink) : null,
       ask ? h('div', { className: 'copy-row' }, h('p', { className: 'note', role: 'alert' }, ask),
         h('div', { className: 'btn-row' },
-          h(A.Button, { variant: 'primary', icon: 'approve', loading: busy === 'paperclipRuntimeInstall', onClick: function () { call('paperclipRuntimeInstall', { confirmed: true }, function () { toast('Installing Paperclip', 'It takes a few minutes. This panel says when it is done.'); }); } }, 'Install Paperclip'),
-          h(A.Button, { variant: 'quiet', onClick: function () { setAsk(''); } }, 'Do not install'))) : null,
+          askFor === 'paperclipRuntimeUpdate'
+            ? h(A.Button, { variant: 'primary', icon: 'approve', loading: busy === askFor, onClick: function () { call(askFor, { confirmed: true }, function () { toast('Updating Paperclip', 'It takes a few minutes. This panel says when it is done.'); }); } }, 'Update Paperclip')
+            : h(A.Button, { variant: 'primary', icon: 'approve', loading: busy === askFor, onClick: function () { call(askFor, { confirmed: true }, function () { toast('Installing Paperclip', 'It takes a few minutes. This panel says when it is done.'); }); } }, 'Install Paperclip'),
+          h(A.Button, { variant: 'quiet', onClick: function () { setAsk(''); } }, askFor === 'paperclipRuntimeUpdate' ? 'Do not update' : 'Do not install'))) : null,
       err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
       h('div', { className: 'btn-row' },
         (s === 'off' || (s === 'failed' && !rt.installed)) && !ask ? h(A.Button, { variant: 'quiet', icon: 'add', disabled: !!busy, loading: busy === 'paperclipRuntimeInstall', onClick: function () { call('paperclipRuntimeInstall', {}); } }, 'Install Paperclip') : null,
         s === 'stopped' || (s === 'failed' && rt.installed) ? h(A.Button, { variant: 'quiet', icon: 'resume', disabled: !!busy, loading: busy === 'paperclipRuntimeStart', onClick: function () { call('paperclipRuntimeStart', {}, function () { toast('Paperclip is starting', 'The first start takes a minute or two.'); }); } }, 'Start Paperclip') : null,
         s === 'running' && rt.bootstrap !== 'pending' && needsKey ? h(A.Button, { variant: 'quiet', icon: 'tool', disabled: !!busy, loading: busy === 'paperclipRuntimeKey', onClick: function () { call('paperclipRuntimeKey', {}); } }, 'Connect board key') : null,
+        rt.updateAvailable && (s === 'stopped' || s === 'running' || s === 'failed') && !ask ? h(A.Button, { variant: 'quiet', icon: 'add', disabled: !!busy, loading: busy === 'paperclipRuntimeUpdate', onClick: function () { call('paperclipRuntimeUpdate', {}); } }, 'Update Paperclip') : null,
         s === 'running' || s === 'starting' ? h(A.Button, { variant: 'quiet', icon: 'close', disabled: !!busy, loading: busy === 'paperclipRuntimeStop', onClick: function () { call('paperclipRuntimeStop', {}, function () { toast('Paperclip stopped', 'It starts again only when you start it.'); }); } }, 'Stop Paperclip') : null));
   }
 

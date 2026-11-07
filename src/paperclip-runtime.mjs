@@ -30,7 +30,8 @@ import * as launch from './launch.mjs';
 /**
  * The release the office installs: an exact version of the `paperclipai` package and the SHA-512 of its tarball as the registry
  * publishes it (`npm view paperclipai@2026.1106.0 dist.integrity`, read 2026-11-06). The install is checked against it. A new
- * release is a change here, with its own test run; "Update Paperclip" at the HQ (a later ticket) asks for a Confirm first.
+ * release is a change here, with its own test run. The office never moves the pin by itself: "Update Paperclip" (#195) installs the
+ * pin in a staging folder behind a Confirm, and a release already installed and verified keeps running until then.
  */
 export const PINNED = Object.freeze({
   version: '2026.1106.0',
@@ -40,6 +41,7 @@ export const DEFAULT_PORT = 3100;       // Paperclip's own default
 export const DEFAULT_DB_PORT = 54339;   // not 54329, the default of a Paperclip the user may run too
 export const INSTANCE = 'agent-office'; // not `default`: another instance than the user's own, so no service of theirs is touched
 export const INSTALL_DIR_NAME = '.paperclip-runtime';
+export const VERIFIED = 'office-verified.json'; // in the install folder: what the office checked there ({ version, integrity }), so an older release stays usable after the pin moves
 
 const START_WAIT_MS = 180000;   // a first start makes the database
 const POLL_MS = 15000;
@@ -61,6 +63,8 @@ export function runtimePaths({ root, env = process.env, port = 4317, home = os.h
   const data = path.join(base, `paperclip${tag}`);
   return {
     install: path.join(root, INSTALL_DIR_NAME),
+    next: path.join(root, `${INSTALL_DIR_NAME}-next`), // the staging folder of an update
+    prev: path.join(root, `${INSTALL_DIR_NAME}-prev`), // the release an update replaced, kept until the new one answers
     data,
     config: path.join(data, 'instances', INSTANCE, 'config.json'),
     pid: path.join(data, 'office-runtime.json'),
@@ -162,7 +166,7 @@ export const runtimeError = (status, message) => Object.assign(new Error(message
  *   root, port (the office's port), env, paths? (override of runtimePaths), pin, serverPort, dbPort
  *   fs, spawn(file, args, opts), exe(name), npmCli(), processStart(pid), killTree(pid), killSync(pid), fetch, writeSecret(file, text)
  *   now, random(n), setTimer(fn, ms), clearTimer(h), onChange(), onFeed(text, kind)
- * Methods: status(), install({ background }), start(), stop(), killNow(), resume(enabled), connectKey(), key() (the token, for the
+ * Methods: status(), install({ background }), update({ background }), start(), stop(), killNow(), resume(enabled), connectKey(), key() (the token, for the
  * HQ's own calls: never in a route answer).
  */
 export function createRuntime(deps = {}) {
@@ -176,16 +180,21 @@ export function createRuntime(deps = {}) {
   const serverPort = Number(d.serverPort) || Number(d.env.OFFICE_PAPERCLIP_PORT) || DEFAULT_PORT;
   const dbPort = Number(d.dbPort) || Number(d.env.OFFICE_PAPERCLIP_DB_PORT) || DEFAULT_DB_PORT;
   const url = `http://127.0.0.1:${serverPort}`;
-  const cliPath = () => path.join(P.install, 'node_modules', 'paperclipai', 'dist', 'index.js');
+  const cliPath = (dir = P.install) => path.join(dir, 'node_modules', 'paperclipai', 'dist', 'index.js');
 
   let state = 'off', reason = '', child = null, pid = 0, tail = [], bootstrap = null, invite = '', wantStop = false, busy = false;
   let timer = null, misses = 0, startedAt = 0;
+  let updating = false, phase = '', updateError = '', waiters = [];
   let key = { state: 'none', reason: '', expiresAt: null, approvalUrl: '' };
   let challenge = null, keyTimer = null;
 
+  const SETTLED = ['running', 'failed', 'stopped', 'external', 'busy'];
   const change = () => { try { d.onChange(); } catch { /* the page catches up at the next one */ } };
   const feed = (text, kind = 'start') => { try { d.onFeed(text, kind); } catch { /* feed only */ } };
-  const set = (s, r = '') => { state = s; reason = r; change(); };
+  const set = (s, r = '') => {
+    state = s; reason = r; change();
+    if (SETTLED.includes(s)) { const w = waiters; waiters = []; for (const f of w) f(); }
+  };
   const read = (file) => { try { return JSON.parse(fsx.readFileSync(file, 'utf8')); } catch { return null; } };
 
   // ---------- install ----------
@@ -193,20 +202,41 @@ export function createRuntime(deps = {}) {
     const j = read(path.join(P.install, 'node_modules', 'paperclipai', 'package.json'));
     return j && typeof j.version === 'string' ? j.version : null;
   }
-  // Checked fresh before an install or a start; status() (each snapshot) reads what the last check found, not the lock file again.
-  let installedOk = null;
-  const isInstalled = () => (installedOk = verifyInstall() === '');
-  const installedNow = () => (installedOk === null ? isInstalled() : installedOk);
+  // Checked fresh before an install, an update or a start; status() (each snapshot) reads what the last check found, not the lock file again.
+  // `current`: the install is the pinned release. `usable`: it is the pinned release, or an older one the office verified itself when
+  // it installed it (the marker file), so a release stays usable after the pin moves and an update is offered, never forced.
+  let current = null, usable = false, version = null;
+  function refresh() {
+    version = installedVersion();
+    current = verifyInstall() === '';
+    if (current) { markVerified(P.install); usable = true; } else usable = markerOk();
+    return current;
+  }
+  const isInstalled = () => refresh();
+  const installedNow = () => { if (current === null) refresh(); return usable; };
 
-  /** Checks the install against the pinned release: the version and the tarball's SHA-512 from npm's own lock file. */
-  function verifyInstall() {
-    const v = installedVersion();
-    if (v !== d.pin.version) return `npm installed ${v || 'no paperclipai'}, not ${d.pin.version}.`;
+  /** Checks an install against a pin: the version and the tarball's SHA-512 from npm's own lock file. */
+  function verifyInstall(dir = P.install, pin = d.pin) {
+    const v = read(path.join(dir, 'node_modules', 'paperclipai', 'package.json'))?.version;
+    if (v !== pin.version) return `npm installed ${v || 'no paperclipai'}, not ${pin.version}.`;
+    const lock = read(path.join(dir, 'package-lock.json'));
+    const entry = lock && lock.packages && lock.packages['node_modules/paperclipai'];
+    if (!entry || entry.integrity !== pin.integrity) return `The package that npm installed does not match the SHA-512 that the office pins for paperclipai ${pin.version}.`;
+    if (!fsx.existsSync(cliPath(dir))) return 'The package has no dist/index.js.';
+    return '';
+  }
+  function markVerified(dir) {
+    const m = read(path.join(dir, VERIFIED));
+    if (m && m.version === d.pin.version && m.integrity === d.pin.integrity) return;
+    try { fsx.writeFileSync(path.join(dir, VERIFIED), JSON.stringify({ version: d.pin.version, integrity: d.pin.integrity })); } catch { /* the install still runs: only an older release would need it */ }
+  }
+  /** An install the office verified at install time: the files still say the same version and SHA-512 as the marker. */
+  function markerOk() {
+    const m = read(path.join(P.install, VERIFIED));
+    if (!m || typeof m.version !== 'string' || typeof m.integrity !== 'string') return false;
     const lock = read(path.join(P.install, 'package-lock.json'));
     const entry = lock && lock.packages && lock.packages['node_modules/paperclipai'];
-    if (!entry || entry.integrity !== d.pin.integrity) return `The package that npm installed does not match the SHA-512 that the office pins for paperclipai ${d.pin.version}.`;
-    if (!fsx.existsSync(cliPath())) return 'The package has no dist/index.js.';
-    return '';
+    return installedVersion() === m.version && !!entry && entry.integrity === m.integrity && fsx.existsSync(cliPath());
   }
 
   const run = (file, args, opts, { limitMs } = {}) => new Promise((resolve) => {
@@ -229,8 +259,10 @@ export function createRuntime(deps = {}) {
    * and the state, the reason and the feed tell how it ends (a download of minutes is not held in a request).
    */
   async function install({ background = false } = {}) {
+    if (updating) throw runtimeError(409, 'Paperclip is being updated.');
     if (busy || state === 'installing') throw runtimeError(409, 'Paperclip is being installed already.');
     if (isInstalled()) { if (state === 'off' || state === 'failed') set('stopped'); return status(); }
+    if (usable) throw runtimeError(409, `Paperclip ${version} is installed. Use Update Paperclip to move to ${d.pin.version}.`);
     const seen = await probe();
     if (seen.kind === 'paperclip') { set('external', `A Paperclip already runs at ${url}. The office does not install another one. Connect to it instead.`); throw runtimeError(409, reason); }
     if (seen.kind === 'other') { set('busy', `Something else uses port ${serverPort}, so Paperclip could not start there.`); throw runtimeError(409, reason); }
@@ -253,6 +285,94 @@ export function createRuntime(deps = {}) {
         set('failed', `The install failed. ${e.message}`); feed(`install failed: ${e.message}`, 'error');
         throw runtimeError(500, reason);
       } finally { busy = false; }
+    })();
+    if (!background) return work;
+    work.catch(() => { /* the state and the feed carry it */ });
+    return status();
+  }
+
+  // ---------- update (#195) ----------
+  const rmDir = (dir) => { fsx.rmSync(dir, { recursive: true, force: true }); };
+  const settled = () => SETTLED.includes(state);
+  const untilSettled = () => (settled() ? Promise.resolve() : new Promise((resolve) => waiters.push(resolve)));
+  const live = () => !!pid && ['starting', 'running'].includes(state);
+
+  /**
+   * Installs the pinned release over an older one that the office verified. One at a time; the caller asks the user first (the route
+   * answers 409 until confirmed). The new release is downloaded and checked in a staging folder while the old one runs, so a download
+   * that fails changes nothing. Then, if Paperclip runs, it is stopped, the folders are swapped (the old one is kept as the backup),
+   * and the new release starts. If that start fails, the old folder comes back and runs again. The data folder and the board key are
+   * never touched. With background: true it answers once the checks that can refuse have passed; the state, the reason and the feed
+   * tell how it ends.
+   */
+  async function update({ background = false } = {}) {
+    if (updating) throw runtimeError(409, 'Paperclip is being updated already.');
+    if (busy || state === 'installing') throw runtimeError(409, 'Paperclip is being installed. Update it when that is done.');
+    isInstalled();
+    if (!usable) throw runtimeError(409, 'Paperclip is not installed yet. Install it first.');
+    if (current) throw runtimeError(409, `Paperclip ${d.pin.version} is installed already.`);
+    if (!live()) {
+      const seen = await probe();
+      if (seen.kind === 'paperclip') throw runtimeError(409, `A Paperclip already runs at ${url} that this office did not start. The office does not update it.`);
+      if (seen.kind === 'other') throw runtimeError(409, `Something else uses port ${serverPort}, so the office does not touch Paperclip now.`);
+    }
+    let cli;
+    try { cli = d.npmCli(); } catch (e) { throw runtimeError(409, e.message); }
+    const from = version;
+    updating = true; updateError = ''; phase = `Downloading paperclipai ${d.pin.version} with npm. ${live() ? `Paperclip ${from} keeps running meanwhile.` : 'This takes a few minutes.'}`; change();
+    feed(`updating paperclipai ${from} to ${d.pin.version} in ${P.next}`);
+    const fail = (why) => {
+      updateError = why; feed(`update failed: ${why}`, 'error');
+      return runtimeError(500, `The update failed. ${why}`);
+    };
+    const work = (async () => {
+      try {
+        // 1. download and check in the staging folder: the running release is not touched
+        try {
+          rmDir(P.next); fsx.mkdirSync(P.next, { recursive: true });
+          fsx.writeFileSync(path.join(P.next, 'package.json'), JSON.stringify({ name: 'agent-office-paperclip', private: true, description: 'The Paperclip release that Agent Office installs. Not part of the repository.' }, null, 2));
+          const r = await run(d.exe(process.execPath), installArgs(cli, d.pin), { cwd: P.next, env: d.env }, { limitMs: INSTALL_MS });
+          const why = r.error ? r.error : r.over ? 'npm did not finish in 15 minutes.' : r.code !== 0 ? `npm stopped with code ${r.code}: ${oneLine(r.lines, 4)}` : verifyInstall(P.next, d.pin);
+          if (why) throw new Error(why);
+          fsx.writeFileSync(path.join(P.next, VERIFIED), JSON.stringify({ version: d.pin.version, integrity: d.pin.integrity }));
+        } catch (e) {
+          try { rmDir(P.next); } catch { /* a leftover staging folder is removed at the next update */ }
+          throw fail(`${e.message} Paperclip ${from} stays.`);
+        }
+        // 2. swap, with Paperclip stopped
+        const wasLive = live();
+        phase = wasLive ? `Stopping Paperclip ${from} to switch to ${d.pin.version}.` : `Switching to ${d.pin.version}.`; change();
+        if (wasLive) await stop();
+        try {
+          rmDir(P.prev);
+          fsx.renameSync(P.install, P.prev);
+          try { fsx.renameSync(P.next, P.install); } catch (e) { fsx.renameSync(P.prev, P.install); throw e; }
+        } catch (e) {
+          isInstalled();
+          if (wasLive) { try { await start({ inUpdate: true }); } catch { /* the state carries it */ } }
+          throw fail(`The folders could not be switched: ${e.message} Paperclip ${from} stays.`);
+        }
+        isInstalled();
+        // 3. the new release must answer; if it does not, the old one comes back
+        if (wasLive) {
+          phase = `Starting Paperclip ${d.pin.version}.`; change();
+          let why = '';
+          try { await start({ inUpdate: true }); await untilSettled(); if (state !== 'running') why = reason || `Paperclip is ${state}.`; } catch (e) { why = e.message; }
+          if (why) {
+            await killAny();
+            try {
+              rmDir(P.install); fsx.renameSync(P.prev, P.install);
+            } catch (e) { isInstalled(); throw fail(`Paperclip ${d.pin.version} did not start (${why}) and the old release could not be put back: ${e.message} Its copy is in ${P.prev}.`); }
+            isInstalled(); wantStop = false;
+            let again = '';
+            try { await start({ inUpdate: true }); } catch (e) { again = ` The old release did not start again: ${e.message}`; }
+            throw fail(`Paperclip ${d.pin.version} did not start (${why}). The office rolled back to ${from}.${again}`);
+          }
+        }
+        try { rmDir(P.prev); } catch { /* a leftover backup is removed at the next update */ }
+        updating = false; phase = ''; updateError = ''; feed(`updated paperclipai ${from} to ${d.pin.version} (checked against its pinned SHA-512)`);
+        return status();
+      } finally { updating = false; phase = ''; change(); }
     })();
     if (!background) return work;
     work.catch(() => { /* the state and the feed carry it */ });
@@ -313,10 +433,12 @@ export function createRuntime(deps = {}) {
     if (!fsx.existsSync(keyFile)) { fsx.mkdirSync(path.dirname(keyFile), { recursive: true }); d.writeSecret(keyFile, d.random(32).toString('base64')); }
   }
 
-  async function start() {
+  async function start({ inUpdate = false } = {}) {
+    if (updating && !inUpdate) throw runtimeError(409, 'Paperclip is being updated. Start it when that is done.');
     if (['starting', 'running'].includes(state)) return status();
     if (busy || state === 'installing') throw runtimeError(409, 'Paperclip is being installed. Start it when that is done.');
-    if (!isInstalled()) throw runtimeError(409, 'Paperclip is not installed yet. Install it first.');
+    isInstalled();
+    if (!usable) throw runtimeError(409, 'Paperclip is not installed yet. Install it first.');
     busy = true;
     try {
       const adopted = await adopt();
@@ -350,7 +472,7 @@ export function createRuntime(deps = {}) {
       c.once('exit', (code) => { if (child === c) onGone(code); });
       void savePid();
       set('starting', 'Paperclip is starting. The first start makes its database and takes a minute or two.');
-      feed(`Paperclip ${d.pin.version} starting at ${url} (login mode, this computer only)`);
+      feed(`Paperclip ${version || d.pin.version} starting at ${url} (login mode, this computer only)`);
       schedule(START_POLL_MS);
       return status();
     } finally { busy = false; }
@@ -480,6 +602,7 @@ export function createRuntime(deps = {}) {
   // Installed but never started in this process: stopped, not off.
   const stateNow = () => (state === 'off' && installedNow() ? 'stopped' : state);
   function steps() {
+    if (updating) return [];
     if (stateNow() === 'off') return ['Install Paperclip. The office downloads one pinned release with npm into its own folder.'];
     if (stateNow() === 'stopped') return ['Start Paperclip.'];
     if (state !== 'running') return [];
@@ -492,7 +615,8 @@ export function createRuntime(deps = {}) {
   }
   function status() {
     return {
-      state: stateNow(), reason, version: d.pin.version, installed: installedNow(), url, port: serverPort,
+      state: updating ? 'updating' : stateNow(), reason: updating ? phase : reason, version: d.pin.version, installed: installedNow(), installedVersion: usable ? version : null,
+      updateAvailable: usable && !current, update: { error: updateError }, url, port: serverPort,
       bootstrap, inviteUrl: state === 'running' && bootstrap === 'pending' ? invite : '',
       key: { state: key.state, reason: key.reason, expiresAt: key.expiresAt, approvalUrl: key.state === 'waiting' ? key.approvalUrl : '' },
       steps: steps(),
@@ -501,10 +625,11 @@ export function createRuntime(deps = {}) {
 
   /** At the office start: the runtime comes back when the user asked for it (and it is installed). */
   async function resume(enabled) {
-    if (isInstalled() && state === 'off') set('stopped');
-    if (!enabled || !isInstalled()) return status();
+    isInstalled();
+    if (usable && state === 'off') set('stopped');
+    if (!enabled || !usable) return status();
     try { return await start(); } catch (e) { feed(`Paperclip did not start with the office: ${e.message}`, 'error'); return status(); }
   }
 
-  return { status, install, start, stop, killNow, resume, connectKey, key: () => { const rec = read(P.key); return keyOk(rec) && rec.apiBase === url && key.state === 'ready' ? rec.token : null; }, paths: P, url };
+  return { status, install, update, start, stop, killNow, resume, connectKey, key: () => { const rec = read(P.key); return keyOk(rec) && rec.apiBase === url && key.state === 'ready' ? rec.token : null; }, paths: P, url };
 }
