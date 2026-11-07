@@ -381,6 +381,7 @@
     if (terminal) return 'Starts ' + label + ' in a new terminal window with the office hooks attached.';
     if (k && k.team) return 'Runs a team of ' + label + ' agents on a model on this machine, inside the office. The team comes from agent-team.json in the folder, '
       + 'or it is a lead, a coder and a reviewer. A member shows as a helper bot while it has the work. Each tool call comes to you for approval, until you set a rule in the Security room. It costs nothing.';
+    if (k && k.cloud && k.host) return 'Runs ' + label + ' on ' + k.host + '. You talk to it in the chat. Its tools run there with no approval here: you see what it says, but the office cannot hold its calls. Each message can cost money. It cannot read the folder: the folder only sets its desk. The office never signs in for you.';
     if (k && k.cloud) return 'Runs ' + label + ' in your Microsoft cloud account. You talk to it in the chat. Its tools run in the cloud with no approval here: you see them, but the office does not hold them. Only a request the service sends for approval comes to you. Each message can cost money. It cannot read the folder: the folder only sets its desk. The office never signs in for you.';
     if (k && !k.paid) return 'Runs a model from ' + label + ' on this machine, inside the office. It reads and changes files in the folder and runs commands. Risky steps come to you for approval. It costs nothing.';
     return 'Runs ' + label + ' inside the office. You talk to it in the chat and approve its steps here. It has no terminal window.';
@@ -393,6 +394,7 @@
   function costNote(k) {
     if (!(k && k.paid !== false && k.cost === 'unknown')) return '';
     var label = k.label || 'This agent';
+    if (k.cloud && k.host) return label + ' reports no cost, so the office shows it as unknown and no spend limit can stop it. Check the spend on ' + k.host + '.';
     if (k.cloud) return label + ' reports no dollars, and no prices are set, so the office shows its cost as unknown and no spend limit can stop it. Set the prices to count it (see docs/configuration.md), or check the spend in your Azure account.';
     return label + ' does not report cost, so the office shows it as unknown and no spend limit can stop it. Check the spend in its own account.';
   }

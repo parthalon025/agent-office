@@ -169,6 +169,7 @@ export function checkProvider(p) {
   if (p.needsModel !== undefined && typeof p.needsModel !== 'boolean') missing.push('needsModel (optional, but then true or false)');
   if (p.team !== undefined && typeof p.team !== 'boolean') missing.push('team (optional, but then true or false)');
   if (p.cloud !== undefined && typeof p.cloud !== 'boolean') missing.push('cloud (optional, but then true or false)');
+  if (p.host !== undefined && !(typeof p.host === 'string' && p.host)) missing.push('host (optional, but then words: where its tools run)');
   if (p.modelLabel !== undefined && !(typeof p.modelLabel === 'string' && p.modelLabel)) missing.push('modelLabel (optional, but then a word)');
   if (p.openWindow !== undefined && typeof p.openWindow !== 'function') missing.push('openWindow() (optional, but then a function)');
   if (p.control !== undefined && typeof p.control !== 'function') missing.push('control() (optional, but then a function)');
@@ -232,14 +233,14 @@ function settled(p, ms, fallback) {
  * change, connectors; the dock offers them only then), gated and supervision (ADR 0001: an ungated kind opens only in a
  * room of its own, with its label), cost ('unknown': the office asks before it runs and shows no dollars),
  * team (a team of agents: members show as helper bots) }, and only when the provider says so: cloud (it runs in the
- * owner's cloud account), modelLabel (the pick is not called Model).
+ * owner's cloud account), host (a remote tool that is not Azure: where its tools run, in words), modelLabel (the pick is not called Model).
  */
 export function describe(p) {
   const tr = traitsOf(p);
   return { kind: p.kind, label: p.label, paid: tr.paid, terminal: typeof p.openWindow === 'function', modes: Array.isArray(p.modes) ? [...p.modes] : [],
     needsModel: p.needsModel === true, control: typeof p.control === 'function', gated: tr.gated, supervision: tr.supervision, cost: tr.cost,
     team: p.team === true,
-    ...(p.cloud === true ? { cloud: true } : {}), ...(p.modelLabel ? { modelLabel: p.modelLabel } : {}) };
+    ...(p.cloud === true ? { cloud: true } : {}), ...(p.host ? { host: p.host } : {}), ...(p.modelLabel ? { modelLabel: p.modelLabel } : {}) };
 }
 
 /**
