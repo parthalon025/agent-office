@@ -71,6 +71,7 @@ export function createCursorCloud(deps) {
     const c = setup();
     if (!c.ok) throw new Error(c.needs[0]);
     ctx.stream({ type: 'stream_event', event: { type: 'message_start' } });
+    const followup = !!st.agent;
     if (!st.agent) {
       const r = await jsonOf(await call(c, ctx.signal, 'POST', '/v0/agents', {
         prompt: { text: ctx.prompt },
@@ -83,13 +84,19 @@ export function createCursorCloud(deps) {
       await call(c, ctx.signal, 'POST', `/v0/agents/${enc(st.agent)}/followup`, { prompt: { text: ctx.prompt } });
     }
     const t0 = Date.now();
+    st.said = false; // per turn: the summary below is the fallback only when this turn's conversation said nothing
+    // After a follow-up the first status can still be FINISHED from the run before. Accept FINISHED only after the agent was seen
+    // running again, or after a short grace (three polls) with no sign of work.
+    let active = !followup;
+    const grace = t0 + pollMs * 3;
     let info = {};
     for (;;) {
       if (ctx.stopped()) return { last: st.last || '' };
       info = await jsonOf(await call(c, ctx.signal, 'GET', `/v0/agents/${enc(st.agent)}`));
       await said(ctx, st, c);
       const status = String(info.status || '').toUpperCase();
-      if (DONE.has(status)) break;
+      if (!DONE.has(status) && !FAILED.has(status) && !GONE.has(status)) active = true;
+      if (DONE.has(status) && (active || Date.now() >= grace)) break;
       if (FAILED.has(status)) throw new Error(`Cursor stopped with an error${info.summary ? ': ' + clip(info.summary, 200) : '.'}`);
       if (GONE.has(status)) { st.agent = null; throw new Error('The Cursor agent expired or was stopped. The next message starts a new agent.'); }
       if (Date.now() - t0 > CURSOR_MAX_MS) throw new Error('Cursor did not finish in 2 hours. Stop the session and check the agent in Cursor.');

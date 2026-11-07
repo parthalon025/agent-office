@@ -123,6 +123,25 @@ test('Cursor: a message launches an agent on the repository, polls until it fini
   assert.match(fetch.calls.find((c) => /followup$/.test(c.path)).body.prompt.text, /now a test/);
 });
 
+test('Cursor: after a follow-up a stale FINISHED from the last run does not end the turn before the agent works again', async () => {
+  const seq = ['FINISHED', 'RUNNING', 'FINISHED'], polls = [];
+  let phase = 'first'; let i = 0;
+  const fetch = async (url, init = {}) => {
+    const u = new URL(url), m = init.method || 'GET';
+    if (m === 'POST' && u.pathname === '/v0/agents') return json({ id: 'bc_1', status: 'CREATING' });
+    if (m === 'POST') { phase = 'follow'; return json({}); }
+    if (u.pathname === '/v0/agents/bc_1') { const st = phase === 'first' ? 'FINISHED' : seq[Math.min(i++, 2)]; polls.push(st); return json({ id: 'bc_1', status: st, summary: 'done' }); }
+    return json({ messages: phase === 'first' ? [{ id: 'a', type: 'assistant_message', text: 'one' }] : [{ id: 'a', type: 'assistant_message', text: 'one' }, { id: 'b', type: 'assistant_message', text: 'two' }] });
+  };
+  const o = office(cursor(fetch, { pollMs: 20 }), 'cursor-cloud');
+  const s = o.session();
+  o.say(s, 'first');
+  await until(() => idle(s) && s.replies.length === 1, 'first reply');
+  o.say(s, 'second');
+  await until(() => s.replies.some((r) => r.text === 'two') && idle(s), 'the new answer and the end');
+  assert.deepEqual(polls.slice(-3), ['FINISHED', 'RUNNING', 'FINISHED'], 'the turn waited for the agent to run again');
+});
+
 test('Cursor: an agent that ends in ERROR or EXPIRED ends the turn as an error in words', async () => {
   for (const [st, re] of [['ERROR', /Cursor stopped with an error/], ['EXPIRED', /expired/]]) {
     const o = office(cursor(fakeCursor({ status: st })), 'cursor-cloud');
