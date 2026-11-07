@@ -1,6 +1,7 @@
 // The HQ read model, the pure part (#197, spec #191): the org chart as the floors of the HQ building, the Lobby dashboard, and the
 // contract of the Paperclip API shapes the office reads. paperclip.mjs holds the connection and reads; this module only shapes what it
-// read. No I/O, no clock. Tested in test/hq-model.test.mjs against test/fixtures/paperclip-shapes.json (the recorded shapes).
+// read. The write side is here too (#198): the write grid (Confirm, Allow, Deny per write kind: kinds, defaults, saved slice, the looser-change
+// rule) and planWrite (the exact request of a write, checked before anything is asked or sent); `write` in paperclip.mjs sends it. No I/O, no clock. Tested in test/hq-model.test.mjs against test/fixtures/paperclip-shapes.json (the recorded shapes).
 
 // ---------- the contract: the fields of each route the office reads ----------
 // list: the answer is an array (the first element is checked) or one object. An empty list says nothing about its shape. A field the
@@ -95,4 +96,115 @@ export function lobbyOf(i) {
     secrets: i.secrets ? { count: i.secrets.length, names: i.secrets.slice(0, 20) } : null,
     unread: i.unread || [],
   };
+}
+
+
+// ---------- the write grid (#198, ADR 0010) ----------
+// Each write kind is Confirm, Allow or Deny. Defaults: Confirm for the consequential kinds, Allow for the user's own task edits and
+// comments. A secret never takes Allow. The saved slice holds only the cells the user set (a value equal to the default counts: the user
+// set it). The table is looked up by names from requests and saved files, so every lookup is by own key.
+const RULES = ['confirm', 'allow', 'deny'];
+const STRICT = { deny: 0, confirm: 1, allow: 2 };
+export const WRITE_KINDS = {
+  hire: { label: 'Hires', options: RULES, def: 'confirm' },
+  pause: { label: 'Pause and retire', options: RULES, def: 'confirm' },
+  budget: { label: 'Budgets', options: RULES, def: 'confirm' },
+  approval: { label: 'Approvals', options: RULES, def: 'confirm' },
+  reporting: { label: 'Reporting lines', options: RULES, def: 'confirm' },
+  routine: { label: 'Routines', options: RULES, def: 'confirm' },
+  access: { label: 'Invites and access', options: RULES, def: 'confirm' },
+  secret: { label: 'Secrets', options: ['confirm', 'deny'], def: 'confirm' },
+  task: { label: 'Tasks', options: RULES, def: 'allow' },
+  comment: { label: 'Comments', options: RULES, def: 'allow' },
+};
+const kindRow = (k) => (typeof k === 'string' && Object.hasOwn(WRITE_KINDS, k) ? WRITE_KINDS[k] : null);
+const gridError = (status, message) => Object.assign(new Error(message), { status });
+
+/** The saved write grid: only cells the grid has, with values the kind offers. */
+export function cleanWriteGrid(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const [k, v] of Object.entries(raw)) { const row = kindRow(k); if (row && row.options.includes(v)) out[k] = v; }
+  return out;
+}
+/** The value of a cell: what the user set, else the default. An unknown kind is Deny (fail closed). */
+export function writeValueOf(grid, kind) {
+  const row = kindRow(kind);
+  if (!row) return 'deny';
+  const v = grid && typeof grid === 'object' && Object.hasOwn(grid, kind) ? grid[kind] : undefined;
+  return row.options.includes(v) ? v : row.def;
+}
+/**
+ * One change from the HQ. change: { kind, value, confirmed }. value null is Use default. A looser value (Deny to Confirm, Confirm to Allow)
+ * needs confirmed: true, the painted Confirm; a stricter one applies at once. Returns { grid, from, to } with a new grid; the old one is
+ * not changed. A secret never takes Allow, confirmed or not (400).
+ */
+export function setWriteCell(grid, change) {
+  const { kind } = change || {};
+  const row = kindRow(kind);
+  if (!row) throw gridError(400, 'Unknown write kind.');
+  const value = change.value === undefined ? null : change.value;
+  if (value !== null && !row.options.includes(value)) throw gridError(400, `${row.label} cannot be set to ${String(value)}.`);
+  const from = writeValueOf(grid, kind), to = value === null ? row.def : value;
+  if (STRICT[to] > STRICT[from] && change.confirmed !== true) throw gridError(409, 'Confirm the looser rule first.');
+  const next = { ...cleanWriteGrid(grid) };
+  if (value === null) delete next[kind]; else next[kind] = value;
+  return { grid: next, from, to };
+}
+
+// ---------- the plan of a write ----------
+// planWrite(body) -> { kind, action, method, path(companyId), body, targets, summary }. body: { kind, action, ...fields }. The fields are
+// checked here (400), every id must be a plain id (it goes into a path), and a target is a thing the writer reads before it writes
+// (issue, approval, agent): it must belong to the connected company. Only the first writes are planned: task (create, assign), comment
+// (add) and approval (approve, reject, revise). Another kind in the grid has no plan yet, and is 400 (never sent).
+const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+const ISSUE_STATUS = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'];
+const TITLE_MAX = 200, TEXT_MAX = 10000, NOTE_MAX = 2000, DESC_MAX = 4000;
+const short = (t, n = 80) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
+function idOf(v, what) {
+  if (typeof v !== 'string' || !ID_RE.test(v)) throw gridError(400, `Give the ${what}.`);
+  return v;
+}
+function textOf(v, what, max, { required = false } = {}) {
+  if (v === undefined || v === null) { if (required) throw gridError(400, `Give the ${what}.`); return ''; }
+  if (typeof v !== 'string') throw gridError(400, `The ${what} must be text.`);
+  const t = v.trim();
+  if (required && !t) throw gridError(400, `Give the ${what}.`);
+  if (t.length > max) throw gridError(400, `The ${what} is too long (at most ${max} characters).`);
+  return t;
+}
+const decision = (action, route, summary) => [action, (b) => {
+  const approval = idOf(b.approval, 'approval'), note = textOf(b.note, 'note', NOTE_MAX);
+  return { method: 'POST', path: () => `/api/approvals/${approval}/${route}`, body: note ? { decisionNote: note } : {}, targets: [{ type: 'approval', id: approval }], summary };
+}];
+const PLANS = {
+  task: {
+    create(b) {
+      const title = textOf(b.title, 'title', TITLE_MAX, { required: true }), description = textOf(b.description, 'description', DESC_MAX);
+      const body = { title };
+      if (description) body.description = description;
+      if (b.status !== undefined && b.status !== null) { if (!ISSUE_STATUS.includes(b.status)) throw gridError(400, 'Unknown task status.'); body.status = b.status; }
+      const targets = [];
+      if (b.assigneeAgentId !== undefined && b.assigneeAgentId !== null) { body.assigneeAgentId = idOf(b.assigneeAgentId, 'agent'); targets.push({ type: 'agent', id: body.assigneeAgentId }); }
+      return { method: 'POST', path: (co) => `/api/companies/${encodeURIComponent(co)}/issues`, body, targets, summary: `Create the task "${short(title)}"` };
+    },
+    assign(b) {
+      const issue = idOf(b.issue, 'task'), agent = idOf(b.agent, 'agent');
+      return { method: 'PATCH', path: () => `/api/issues/${issue}`, body: { assigneeAgentId: agent }, targets: [{ type: 'issue', id: issue }, { type: 'agent', id: agent }], summary: 'Assign a task' };
+    },
+  },
+  comment: {
+    add(b) {
+      const issue = idOf(b.issue, 'task'), text = textOf(b.text, 'comment', TEXT_MAX, { required: true });
+      return { method: 'POST', path: () => `/api/issues/${issue}/comments`, body: { body: text }, targets: [{ type: 'issue', id: issue }], summary: 'Comment on a task' };
+    },
+  },
+  approval: Object.fromEntries([decision('approve', 'approve', 'Approve an approval'), decision('reject', 'reject', 'Reject an approval'), decision('revise', 'request-revision', 'Request a revision of an approval')]),
+};
+export function planWrite(b) {
+  const kind = b && b.kind, action = b && b.action;
+  const row = typeof kind === 'string' && Object.hasOwn(PLANS, kind) ? PLANS[kind] : null;
+  const make = row && typeof action === 'string' && Object.hasOwn(row, action) ? row[action] : null;
+  if (!make) throw gridError(400, 'The office cannot make that write.');
+  return { kind, action, ...make(b) };
 }

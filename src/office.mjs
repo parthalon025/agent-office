@@ -12,6 +12,7 @@ import * as launch from './launch.mjs';
 import { createCampus } from './campus.mjs';
 import { slimPayload, cleanIds as cleanPaperclipIds } from './payload.mjs';
 import { createHq } from './paperclip.mjs';
+import { WRITE_KINDS, writeValueOf, setWriteCell } from './hq-model.mjs';
 import { createRuntime } from './paperclip-runtime.mjs';
 import { createRuns } from './paperclip-runs.mjs';
 import { recap as recapOf, away as awayOf } from './rituals.mjs';
@@ -347,8 +348,9 @@ export function createOffice(cfg) {
 
   // ---------- Paperclip as an optional HQ (#76, paperclip.mjs) ----------
   // Off until the user connects it (Attach sessions); the connection is kept in state.json (url and company, no secret) and
-  // made again at start. The office reads Paperclip and never drives it: no heartbeat, no task, no routine. The one write is
-  // Supervise in office (one PATCH of one agent's adapter config, after the Security room's painted Confirm; ADR 0005). Its
+  // made again at start. The office sends no heartbeat and runs no routine. Its writes: Supervise in office (one PATCH of one
+  // agent's adapter config, after the Security room's painted Confirm; ADR 0005), the goal handoff (ADR 0007) and, since ADR 0010, every
+  // write of the HQ writer (hq.write, after the write grid, #198). Its
   // Claude Code runs then come in through the command hooks file of this office, like terminal sessions, with the run's ids.
   // Paperclip owns the budgets of its runs: the office shows them and sets no second limit (a hook session has no spend limit).
   const PAPERCLIP = { uid: 'paperclip', name: 'Paperclip' };
@@ -357,6 +359,8 @@ export function createOffice(cfg) {
     key: (url) => runtime.keyFor(url),
     sessions: () => [...sessions.values()], // the plan source links a Paperclip task to the session that runs it (#155)
     hooksFile: () => HOOKS_CMD_FILE.replace(/\\/g, '/'),
+    grid: () => saved.get('hqGrid'),   // the HQ write grid (#198): every Paperclip write asks it first (hq.write)
+    askFirst: (kind, text, extra) => askFirst(kind, text, extra),
     onChange: () => broadcast(),
     onFeed: (text, kind) => addFeed(PAPERCLIP, kind, text),
     // A run ended. One whose held call timed out (the office denied it) and that Paperclip marks succeeded is named, so the
@@ -447,6 +451,27 @@ export function createOffice(cfg) {
     broadcast();
     if (!r.ok) throw httpError(r.status, r.reason);
     return { ok: true, plans: planBoard.snapshot().plans.filter((p) => p.id === g.id) };
+  }
+  // The HQ write grid (#198, ADR 0010): Confirm, Allow or Deny per write kind, saved as persisted.hqGrid (the cells the user set). A looser change
+  // is 409 without confirmed: true (the painted Confirm), a secret never takes Allow (400). Every change leaves a feed line.
+  const GRID_WORD = { confirm: 'Confirm', allow: 'Allow', deny: 'Deny' };
+  function hqGridView() {
+    const g = saved.get('hqGrid');
+    return Object.entries(WRITE_KINDS).map(([kind, w]) => ({ kind, label: w.label, options: w.options, def: w.def, value: writeValueOf(g, kind), set: Object.hasOwn(g, kind) }));
+  }
+  function setHqGrid(body) {
+    const r = setWriteCell(saved.get('hqGrid'), { kind: body.kind, value: body.value ?? null, confirmed: body.confirmed === true });
+    saved.set('hqGrid', r.grid);
+    savePersisted();
+    addFeed(PAPERCLIP, 'tool', `Write grid, ${WRITE_KINDS[body.kind].label}: ${GRID_WORD[r.to]} (was ${GRID_WORD[r.from]}).`);
+    broadcast();
+    return { ok: true, from: r.from, to: r.to, grid: hqGridView() };
+  }
+  // One Paperclip write (#198): hq.write asks the grid, then the Confirm (ask-first), then sends. The answer has ids only.
+  async function writeHq(body) {
+    const r = await hq.write(body, { confirmed: body.confirmed === true });
+    broadcast();
+    return r;
   }
   // Supervise in office (#76): one PATCH, only with the Confirm the Security room's Agents screen paints.
   async function superviseHq(body) {
@@ -1265,6 +1290,10 @@ export function createOffice(cfg) {
     R('GET', '/api/paperclip', 'page', () => ({ hq: hq.view() })),
     // The HQ read model behind the Lobby (#197): the snapshot's HQ part plus goals, pending approvals and activity. Names and counts only: no key, secret value or payload.
     R('GET', '/api/hq/lobby', 'page', () => ({ hq: hq.model() })),
+    // The HQ write grid and the one writer (#198): the grid's cells, one change of a cell, and a write by kind (409 with the question until confirmed: true).
+    R('GET', '/api/hq/grid', 'page', () => ({ grid: hqGridView() })),
+    R('POST', '/api/hq/grid/set', 'page', ({ body }) => setHqGrid(body)),
+    R('POST', '/api/hq/write', 'page', ({ body }) => writeHq(body)),
     // The Paperclip runtime (#193): install (409 without the Confirm), start, stop, and the board key's approval link. Never the key.
     R('GET', '/api/paperclip/runtime', 'page', () => ({ runtime: runtime.status() })),
     R('POST', '/api/paperclip/runtime/install', 'page', ({ body }) => installRuntime(body)),

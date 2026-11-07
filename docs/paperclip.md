@@ -46,6 +46,16 @@ Open **Paperclip HQ** for the Lobby: employees, open tasks, approvals, goals and
 
 The office reads Paperclip through its own server. The page never calls Paperclip, and the board key never leaves the office: it goes to Paperclip as a bearer token and is in no answer to the page. Secret names show, secret values and approval payloads do not. If an update of Paperclip changes the shape of an answer the office reads, the office does not use that part, says so in the HQ and in the feed, and shows Unknown for it.
 
+## Writes from the office
+
+Every write to Paperclip goes through one writer, and the **write grid** decides each kind of write: **Confirm**, **Allow** or **Deny**. The kinds are hires, pause and retire, budgets, approvals, reporting lines, routines, invites and access, secrets, tasks and comments. By default every kind is Confirm, except tasks and comments: your own task edits and comments save at once. Secrets offer Confirm and Deny only, never Allow. A change to a looser cell (Deny to Confirm, Confirm to Allow) needs a second, painted Confirm. A stricter change applies at once. The grid is saved in the office state, and only the cells you set.
+
+- **Allow** sends the write. **Deny** refuses it and sends nothing, even with a Confirm. **Confirm** asks first: the office answers with the question ("Approve an approval in <company>?") and sends nothing until the same call comes again with the confirmation.
+- Before it asks or sends, the office reads the task, approval or employee the write names. It must be in the connected company, and an approval must still wait for a decision. A write that cannot happen is refused, not asked.
+- Every write leaves a feed line ("Wrote to <company>: ..."), and so does a refusal by the grid or by Paperclip.
+- The first writes are: create a task (with an optional first assignee), assign a task, comment on a task, and approve, reject or request a revision of an approval (with a note). The other kinds are in the grid, and each gets its writes with its own page.
+- Routes (page token only): `GET /api/hq/grid`, `POST /api/hq/grid/set` and `POST /api/hq/write`. The answer of a write carries ids only, never a body from Paperclip, and the board key is in no answer.
+
 ## The office adapter
 
 The office ships an adapter plugin for Paperclip, `agent_office` (folder `src/integrations/paperclip-adapter`). When Paperclip wakes an employee on this adapter, the plugin hands the run to the office. The office runs it as a normal office session with the employee's agent kind, so the Security room decides every call, a call that asks you waits in Needs you, and the employee has a bot and a room. The office sends the result, token usage, cost and a log of the run back to Paperclip. An employee on the office adapter shows as **Supervised** at the HQ, whatever its agent kind.
@@ -57,4 +67,4 @@ The office ships an adapter plugin for Paperclip, `agent_office` (folder `src/in
 - **The run waits for you.** A call in Needs you holds the run. The plugin asks the office for news every 25 seconds, so a run can wait for hours. If the office stops, the run fails ("Agent Office lost the run").
 - **Not done yet.** The office does not install the plugin for you, a new wake starts a fresh session (no resume), and an employee is not hired on this adapter by default yet. The plugin is tested with a stand-in Paperclip host, not with a real Paperclip.
 
-Related: [ADR 0005](adr/0005-paperclip-watched-not-driven.md) (the office watches Paperclip and does not drive it), [ADR 0007](adr/0007-paperclip-goal-handoff-write.md) (the goal handoff is the second and last write) and the [Manager board](manager.md).
+Related: [ADR 0005](adr/0005-paperclip-watched-not-driven.md) (the office watches Paperclip and does not drive it), [ADR 0007](adr/0007-paperclip-goal-handoff-write.md) (the goal handoff was the second write; ADR 0010 opened the write grid, see Writes from the office) and the [Manager board](manager.md).

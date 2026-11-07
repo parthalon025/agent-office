@@ -1,4 +1,4 @@
-// A fake Paperclip server for the HQ tests (#76): the REST routes the office reads, the one PATCH it may send, and the live
+// A fake Paperclip server for the HQ tests (#76): the REST routes the office reads, the writes it may send (the agent PATCH, tasks, comments, approval decisions), and the live
 // events WebSocket (/api/companies/{id}/events/ws), and GET /api/agents/:id (Supervise reads the agent again before its PATCH).
 // Not a recording: the routes, the agent, issue and routine fields and the
 // event shapes follow the Paperclip source (0.3.1: server/src/routes/{agents,issues,routines,companies,health}.ts,
@@ -90,7 +90,7 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
   const st = { companies: structuredClone(seed.companies || []), agents: structuredClone(seed.agents || []), issues: structuredClone(seed.issues || []), routines: structuredClone(seed.routines || []), projects: structuredClone(seed.projects || []), liveRuns: structuredClone(seed.liveRuns || []),
     goals: structuredClone(seed.goals || []), approvals: structuredClone(seed.approvals || []), activity: structuredClone(seed.activity || []), costs: structuredClone(seed.costs || null), secrets: structuredClone(seed.secrets || []) };
   const requests = [], sockets = new Set();
-  const api = { afterPatch: null, failIssueAfter: null, created: 0 };   // set by a test: runs right after a PATCH is answered (a change made in Paperclip at the same time)
+  const api = { afterPatch: null, failIssueAfter: null, created: 0, comments: 0 };   // set by a test: runs right after a PATCH is answered (a change made in Paperclip at the same time)
   let seq = 0;
   const send = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
   function emit(type, payload, companyId = st.companies[0]?.id) {
@@ -139,6 +139,33 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
         const i = { id: `i2000000-0000-4000-8000-${String(n).padStart(12, '0')}`, companyId: x[1], identifier: `ACM-${100 + n}`, assigneeAgentId: null, assigneeAdapterOverrides: null, ...parsed };
         st.issues.push(i);
         return send(res, 201, i);
+      }
+      // the writes of the HQ writer (#198): one task, its assignee and comments, and the approval decisions (routes/issues.ts, routes/approvals.ts).
+      // Paperclip answers the company of the thing too: GET /api/issues/:id and GET /api/approvals/:id are read before a write.
+      if (req.method === 'GET' && (x = m(/^\/api\/issues\/([^/]+)$/))) { const i = st.issues.find((y) => y.id === x[1]); return i ? send(res, 200, i) : send(res, 404, { error: 'Issue not found' }); }
+      if (req.method === 'PATCH' && (x = m(/^\/api\/issues\/([^/]+)$/))) {
+        const i = st.issues.find((y) => y.id === x[1]);
+        if (!i) return send(res, 404, { error: 'Issue not found' });
+        Object.assign(i, parsed || {});
+        emit('activity.logged', { actorType: 'user', actorId: 'board', action: 'issue.updated', entityType: 'issue', entityId: i.id, agentId: null, runId: null, details: {} }, i.companyId);
+        return send(res, 200, i);
+      }
+      if (req.method === 'POST' && (x = m(/^\/api\/issues\/([^/]+)\/comments$/))) {
+        const i = st.issues.find((y) => y.id === x[1]);
+        if (!i) return send(res, 404, { error: 'Issue not found' });
+        if (!parsed || typeof parsed.body !== 'string' || !parsed.body) return send(res, 422, { error: 'Validation error' });
+        const k = { id: `m2000000-0000-4000-8000-${String(++api.comments).padStart(12, '0')}`, companyId: i.companyId, issueId: i.id, body: parsed.body };
+        return send(res, 201, k);
+      }
+      if (req.method === 'GET' && (x = m(/^\/api\/approvals\/([^/]+)$/))) { const a = st.approvals.find((y) => y.id === x[1]); return a ? send(res, 200, a) : send(res, 404, { error: 'Approval not found' }); }
+      if (req.method === 'POST' && (x = m(/^\/api\/approvals\/([^/]+)\/(approve|reject|request-revision)$/))) {
+        const a = st.approvals.find((y) => y.id === x[1]);
+        if (!a) return send(res, 404, { error: 'Approval not found' });
+        if (a.status !== 'pending' && a.status !== 'revision_requested') return send(res, 422, { error: 'Approval already resolved' });
+        a.status = { approve: 'approved', reject: 'rejected', 'request-revision': 'revision_requested' }[x[2]];
+        a.decisionNote = parsed && parsed.decisionNote ? parsed.decisionNote : null;
+        emit('activity.logged', { actorType: 'user', actorId: 'board', action: `approval.${a.status}`, entityType: 'approval', entityId: a.id, agentId: null, runId: null, details: {} }, a.companyId);
+        return send(res, 200, a);
       }
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/routines$/))) return send(res, 200, st.routines.filter((r) => r.companyId === x[1]));
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/projects$/))) return seed.noProjects ? send(res, 404, { error: 'Not found' }) : send(res, 200, st.projects.filter((r) => r.companyId === x[1]));
