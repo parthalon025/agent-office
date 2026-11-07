@@ -5,8 +5,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { WRITE_KINDS, cleanWriteGrid, writeValueOf, setWriteCell, planWrite } from '../src/hq-model.mjs';
 
-test('the grid has the ten write kinds of ADR 0010; Allow only for the user\'s own task edits and comments', () => {
-  assert.deepEqual(Object.keys(WRITE_KINDS), ['hire', 'pause', 'budget', 'approval', 'reporting', 'routine', 'access', 'secret', 'task', 'comment']);
+test('the grid has the ten write kinds of ADR 0010 and the first company (#199); Allow only for the user\'s own task edits and comments', () => {
+  assert.deepEqual(Object.keys(WRITE_KINDS), ['hire', 'pause', 'budget', 'approval', 'reporting', 'routine', 'access', 'secret', 'task', 'comment', 'company']);
   for (const k of Object.keys(WRITE_KINDS)) assert.equal(writeValueOf({}, k), k === 'task' || k === 'comment' ? 'allow' : 'confirm', k);
   assert.deepEqual(WRITE_KINDS.secret.options, ['confirm', 'deny'], 'a secret never takes Allow');
   assert.deepEqual(WRITE_KINDS.task.options, ['confirm', 'allow', 'deny']);
@@ -61,6 +61,12 @@ test('planWrite: the exact request of each first write', () => {
     ['approval', 'POST', `/api/approvals/${AP}/reject`, { decisionNote: 'No.' }, [{ type: 'approval', id: AP }]]);
   assert.deepEqual(plan({ kind: 'approval', action: 'revise', approval: AP, note: 'Add a budget.' }),
     ['approval', 'POST', `/api/approvals/${AP}/request-revision`, { decisionNote: 'Add a budget.' }, [{ type: 'approval', id: AP }]]);
+  const co = planWrite({ kind: 'company', action: 'create', url: 'http://127.0.0.1:3100', name: ' Acme ', description: 'Made here.' });
+  assert.deepEqual([co.kind, co.method, co.path('ignored'), co.body, co.targets, co.scope, co.url], ['company', 'POST', '/api/companies', { name: 'Acme', description: 'Made here.' }, [], 'none', 'http://127.0.0.1:3100']);
+  assert.equal(co.summary, 'Create the company "Acme"');
+  assert.throws(() => planWrite({ kind: 'company', action: 'create', url: 'http://127.0.0.1:3100', name: '  ' }), (e) => e.status === 400);
+  assert.throws(() => planWrite({ kind: 'company', action: 'create', name: 'Acme' }), (e) => e.status === 400, 'the address is required');
+  assert.throws(() => planWrite({ kind: 'company', action: 'create', url: 'http://127.0.0.1:3100', name: 'x'.repeat(81) }), (e) => e.status === 400);
 });
 
 test('planWrite: a bad write is 400 before anything is asked, and an id never changes the path', () => {

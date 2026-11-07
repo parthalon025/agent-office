@@ -892,7 +892,7 @@
         onOpenAgent: function (uid) { var x = window.officeAdapter.sessionByUid(uid); if (x) { setPhoneList(false); goTo(x); } } }) : null,
       win.w <= PHONE_MAX && !phoneList ? h('div', { className: 'phone-back' }, h(A.Button, { variant: 'emphasis', icon: 'chevron-right', onClick: function () { blurScene(); setBoard(null); setPhoneList(true); } }, 'Back to the list')) : null,
       !ambient && touring && cur2.view === 'office' ? h(TourCard, { onStep: tourStep, onDone: endTour }) : null,
-      d === 'orientation' ? h(OrientationDialog, { info: info.port ? info : null, onSecurity: function () { var sec = securityRef.current; if (!sec || !sec.open('files')) toast({ tone: 'info', title: 'Permissions', text: 'This building shows no Security room yet.' }); }, onTour: startTour, onClose: function () { setOrient(true); close(); } }) : null,
+      d === 'orientation' ? h(OrientationDialog, { info: info.port ? info : null, toast: toast, onSecurity: function () { var sec = securityRef.current; if (!sec || !sec.open('files')) toast({ tone: 'info', title: 'Permissions', text: 'This building shows no Security room yet.' }); }, onTour: startTour, onClose: function () { setOrient(true); close(); } }) : null,
       d === 'reception' ? h(ReceptionDialog, { repo: shown, actions: officeActions, onTour: startTour, onClose: close }) : null,
       d === 'open' ? h(OpenDialog, { shownPath: shownPath, kind: dlg.kind, role: dlg.role, roleName: dlg.roleName, folder: dlg.folder, spendLimit: info.spendLimit, recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
       d === 'personas' ? h(PersonasDialog, { toast: toast, folder: shownPath || (info.recent || [])[0] || '', onClose: close }) : null,

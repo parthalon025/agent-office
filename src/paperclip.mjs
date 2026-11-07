@@ -19,6 +19,7 @@ import path from 'node:path';
 import { runIds, cleanIds } from './payload.mjs';
 import { readArgs, CLAUDE_FLAGS_VERSION } from './providers/claude-code.mjs';
 import { floorsOf, lobbyOf, costsOf, roomsOf, monthWindows, searchOf, shapeProblems, planWrite, writeValueOf, WRITE_KINDS } from './hq-model.mjs';
+import { archetypeOf, GENERAL } from './archetypes.mjs';
 
 export const DEFAULT_URL = 'http://127.0.0.1:3100';
 
@@ -308,6 +309,18 @@ const cents = (n) => (Number.isFinite(+n) && +n >= 0 ? Math.round(+n) / 100 : 0)
 const ms = (t) => { const v = t ? Date.parse(t) : NaN; return Number.isFinite(v) ? v : null; };
 const text = (v, n = 120) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
 const httpError = (status, message) => Object.assign(new Error(message), { status });
+
+/**
+ * The company the orientation step makes (#199): { name, archetype, description }. The name is 1 to 80 characters (a 400 otherwise); the
+ * building kind is an archetype id of archetypes.mjs, else General. The description says only where the company came from.
+ */
+export function companyDraft({ name, archetype } = {}) {
+  const n = typeof name === 'string' ? name.replace(/\s+/g, ' ').trim() : '';
+  if (!n) throw httpError(400, 'Name the company.');
+  if (n.length > 80) throw httpError(400, 'The company name is at most 80 characters.');
+  const a = archetypeOf(archetype) || archetypeOf(GENERAL);
+  return { name: n, archetype: a.id, description: `Made by Agent Office from the ${a.name} building kind.` };
+}
 // Run states that end a run (heartbeat.ts). A run that ends refreshes the budgets (Paperclip records its cost).
 const ISSUE_LIST_LIMIT = 500;
 const ENDED = new Set(['succeeded', 'failed', 'cancelled', 'timed_out', 'error']);
@@ -771,6 +784,7 @@ export function createHq(deps = {}) {
   // belong to the connected company (and an approval must wait for a decision), so a Confirm is never asked for a write that cannot
   // happen. Every write, and every refusal, leaves a feed line. The result carries ids only, never a body from Paperclip.
   // The two earlier writes (supervise and handoffGoal, ADR 0005 and 0007) predate it and keep their own Confirm.
+  // The first company (#199) is the one write with no company yet: it names the loopback address it goes to and needs no connection.
   const askWrite = deps.askFirst || ((kind, message, extra) => Object.assign(httpError(409, message), { confirm: kind, ...extra }));
   const OPEN_APPROVAL = new Set(['pending', 'revision_requested']);
   async function check(conn, t) {
@@ -791,13 +805,27 @@ export function createHq(deps = {}) {
    * not in this company, 502 Paperclip failed or answered in another shape.
    */
   async function write(body, { confirmed = false } = {}) {
-    const conn = c;
-    if (!conn || !d || conn.state === 'choose' || !conn.companyId) throw httpError(409, 'Paperclip is not connected.');
-    const plan = planWrite(body), label = WRITE_KINDS[plan.kind].label, name = text(d.company.name, 80) || 'Paperclip';
-    const cell = writeValueOf(deps.grid ? deps.grid() : {}, plan.kind);
+    if (!(body && body.kind === 'company') && (!c || !d || c.state === 'choose' || !c.companyId)) throw httpError(409, 'Paperclip is not connected.');
+    const plan = planWrite(body), label = WRITE_KINDS[plan.kind].label, cell = writeValueOf(deps.grid ? deps.grid() : {}, plan.kind);
+    // The first company has no connection and no company to belong to (#199): it goes to the address it names, which must be loopback.
+    const first = plan.scope === 'none';
+    let conn = c, name;
+    if (first) {
+      const u = checkUrl(plan.url);
+      if (!u.ok) throw httpError(400, u.error);
+      conn = { url: u.url }; name = `Paperclip at ${u.url}`;
+    } else {
+      if (!conn || !d || conn.state === 'choose' || !conn.companyId) throw httpError(409, 'Paperclip is not connected.');
+      name = text(d.company.name, 80) || 'Paperclip';
+    }
     if (cell === 'deny') { feed(`Refused by the HQ write grid: ${label}. Nothing was sent.`, 'wait'); throw httpError(403, `Denied by the HQ write grid: ${label}.`); }
     for (const t of plan.targets) await check(conn, t);
-    if (c !== conn) throw httpError(409, 'Paperclip is not connected.');
+    if (!first && c !== conn) throw httpError(409, 'Paperclip is not connected.');
+    if (first && plan.kind === 'company') {
+      // A retry never doubles the company: a name that exists is reused, with no write and no question.
+      const have = list(await call(conn, '/api/companies')).find((x) => x && x.id && text(x.name, 80) === plan.name);
+      if (have) { feed(`The company "${plan.name}" was already in Paperclip. Nothing was sent.`); return { ok: true, id: String(have.id), name: plan.name, existed: true }; }
+    }
     if (cell === 'confirm' && confirmed !== true) {
       throw askWrite('write', `${plan.summary} in ${name}? The office sends this one change to Paperclip and nothing else.`, { write: { kind: plan.kind, action: plan.action, summary: plan.summary } });
     }
@@ -805,9 +833,11 @@ export function createHq(deps = {}) {
     try { made = obj(await call(conn, plan.path(conn.companyId), { method: plan.method, body: JSON.stringify(plan.body) })); }
     catch (e) { feed(`Paperclip refused the write: ${plan.summary}. ${e.message}`, 'wait'); throw e; }
     if (plan.kind === 'task' && plan.action === 'create' && !made.id) { feed(`Paperclip did not name the task it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the task it made.'); }
+    if (plan.kind === 'company' && !made.id) { feed(`Paperclip did not name the company it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the company it made.'); }
     feed(`Wrote to ${name}: ${plan.summary}.`);
-    refetchSoon(conn);
+    if (!first) refetchSoon(conn);
     const out = { ok: true };
+    if (plan.kind === 'company') { out.id = String(made.id); out.name = plan.name; out.existed = false; }
     if (plan.kind === 'task' && plan.action === 'create') { out.id = String(made.id); if (typeof made.identifier === 'string') out.identifier = text(made.identifier, 30); }
     return out;
   }

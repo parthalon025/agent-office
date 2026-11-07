@@ -1,8 +1,8 @@
 // Orientation (#196, parent #191): the first-run walk through the whole office. Each step is skippable and reachable again from the
 // Reception and Ctrl+K. This module owns the steps, their words and the saved progress (the `orientation` slice of the state file:
 // `{ seen, steps: { <id>: 'done' | 'skipped' } }`); the page draws each step's own controls and keeps no copy of the list.
-// `later` steps are placeholders: the company step (the Paperclip install and the first hire) and the memory step land with their
-// own tickets, and the page says so. Pure: no I/O, no clock.
+// The company step (#199) installs or connects Paperclip and creates the company; the first hire lands with its own ticket. A `later` step is a
+// placeholder the page says so for: the memory step. Pure: no I/O, no clock.
 import { httpError } from './office-core.mjs';
 
 /** The steps in order. Words are Simplified Technical English: short sentences, buttons say the result. */
@@ -12,7 +12,7 @@ export const STEPS = [
   { id: 'spend', title: 'Spend limit', text: 'Set the most one paid session may spend. The office stops the session at this limit.' },
   { id: 'startup', title: 'Start with Windows', text: 'Start the office when you sign in. It is off until you turn it on.' },
   { id: 'remote', title: 'Remote access', text: 'Reach the office from your phone through Cloudflare Access. It is off until you set it up.' },
-  { id: 'company', title: 'Company', text: 'Install or connect Paperclip, create your company and hire your first employee.', later: true },
+  { id: 'company', title: 'Company', text: 'Install Paperclip or connect the one you run. Then create your company. You make the first account and approve the board key in Paperclip. The office waits for you.' },
   { id: 'memory', title: 'Company memory', text: 'Set up the memory your employees learn from.', later: true },
   { id: 'tour', title: 'Tour', text: 'Walk around the office. The tour has four stops.' },
 ];

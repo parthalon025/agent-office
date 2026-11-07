@@ -11,7 +11,7 @@ import * as git from './git.mjs';
 import * as launch from './launch.mjs';
 import { createCampus } from './campus.mjs';
 import { slimPayload, cleanIds as cleanPaperclipIds } from './payload.mjs';
-import { createHq } from './paperclip.mjs';
+import { createHq, companyDraft } from './paperclip.mjs';
 import { WRITE_KINDS, writeValueOf, setWriteCell } from './hq-model.mjs';
 import { createRuntime } from './paperclip-runtime.mjs';
 import { createRuns } from './paperclip-runs.mjs';
@@ -439,6 +439,21 @@ export function createOffice(cfg) {
     if (saved.get('paperclipRuntime')?.connect) { saved.set('paperclipRuntime', undefined); savePersisted(); }
     broadcast();
     return { runtime: st };
+  }
+  // The company (#199, orientation): the first company of the Paperclip the office runs or the user connected, from a building kind. It waits
+  // for the two steps only the user can do (the first account, the board key approval), then sends one write through hq.write (#198: the
+  // write grid's Company cell, then the Confirm; a name that exists is reused) and connects the HQ to it. A company the HQ already
+  // watches is not made again.
+  async function createCompanyHq(body) {
+    const rt = runtime.status();
+    if (hq.view()?.company) throw httpError(409, 'The office already watches a Paperclip company.');
+    if (!['running', 'connected'].includes(rt.state)) throw httpError(409, rt.state === 'off' || rt.state === 'stopped' ? 'Paperclip is not running. Install or start it first, or connect to your own.' : `Paperclip is not ready (${rt.state}). Wait for it, then try again.`);
+    if (rt.bootstrap === 'pending') throw httpError(409, 'Paperclip has no first account yet. Open the first-account link, create the admin account in Paperclip, then come back.');
+    if (rt.mode !== 'connect' && rt.key.state !== 'ready') throw httpError(409, 'The office has no board key yet. Connect the board key and approve it in Paperclip, then come back.');
+    const draft = companyDraft({ name: body.name, archetype: body.archetype });
+    const made = await hq.write({ kind: 'company', action: 'create', url: rt.url, name: draft.name, description: draft.description }, { confirmed: body.confirmed === true });
+    const r = await connectHq({ url: rt.url, company: made.id });
+    return { ok: true, company: { id: made.id, name: made.name }, existed: made.existed, hq: r.hq };
   }
   // Goal handoff (ADR 0007, #159): the second and last write to Paperclip. Without confirmed: true the answer is 409 with the exact tasks the Confirm shows.
   async function handoffGoalHq(body) {
@@ -1456,6 +1471,7 @@ export function createOffice(cfg) {
     // Paperclip HQ (#76): { url, company? } (127.0.0.1 only: 400 for any other address, before any request), and
     // Supervise in office { agent, confirmed: true } (409 without the Confirm), the one write to Paperclip.
     R('POST', '/api/paperclip/connect', 'page', ({ body }) => connectHq(body)),
+    R('POST', '/api/paperclip/company', 'page', ({ body }) => createCompanyHq(body)),
     R('POST', '/api/paperclip/disconnect', 'page', () => disconnectHq()),
     R('POST', '/api/paperclip/supervise', 'page', ({ body }) => superviseHq(body)),
     // Manager goals (#156): start { building, goal, approveFirst?, spendLimit?, confirmed? }, approve, cancel and retry { id, step }.

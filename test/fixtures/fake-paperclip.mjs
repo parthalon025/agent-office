@@ -127,6 +127,13 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
       const m = (re) => re.exec(u.pathname);
       let x;
       if (req.method === 'GET' && u.pathname === '/api/health') return send(res, 200, seed.health || { status: 'ok', version: '2026.1023.0' });
+      // create a company (routes/companies.ts: name, description).
+      if (req.method === 'POST' && u.pathname === '/api/companies') {
+        if (!parsed || typeof parsed.name !== 'string' || !parsed.name) return send(res, 422, { error: 'Validation error' });
+        const co = { id: `c3000000-0000-4000-8000-${String(st.companies.length + 1).padStart(12, '0')}`, status: 'active', budgetMonthlyCents: 0, spentMonthlyCents: 0, ...parsed };
+        st.companies.push(co);
+        return send(res, 201, co);
+      }
       if (req.method === 'GET' && u.pathname === '/api/companies') return send(res, 200, st.companies);
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)$/))) { const c = st.companies.find((y) => y.id === x[1]); return c ? send(res, 200, c) : send(res, 404, { error: 'Company not found' }); }
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/agents$/))) {

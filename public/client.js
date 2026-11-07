@@ -21,7 +21,7 @@
     fork: '/api/fork', goalApprove: '/api/goal/approve', goalCancel: '/api/goal/cancel', goalHandoff: '/api/goal/handoff',
     goalRetry: '/api/goal/retry', history: '/api/history', historyForget: '/api/history/forget', info: '/api/info',
     interrupt: '/api/interrupt', layout: '/api/layout', merge: '/api/merge', message: '/api/message', notesSave: '/api/notes/save',
-    open: '/api/open', orientation: '/api/orientation', orientationStep: '/api/orientation/step', paperclipConnect: '/api/paperclip/connect', paperclipDisconnect: '/api/paperclip/disconnect',
+    open: '/api/open', orientation: '/api/orientation', orientationStep: '/api/orientation/step', paperclipConnect: '/api/paperclip/connect', paperclipCompany: '/api/paperclip/company', paperclipDisconnect: '/api/paperclip/disconnect',
     paperclipSupervise: '/api/paperclip/supervise', personaDelete: '/api/persona/delete', personaSave: '/api/persona/save',
     paperclipRuntimeInstall: '/api/paperclip/runtime/install', paperclipRuntimeUpdate: '/api/paperclip/runtime/update', paperclipRuntimeStart: '/api/paperclip/runtime/start', paperclipRuntimeStop: '/api/paperclip/runtime/stop',
     paperclipRuntimeKey: '/api/paperclip/runtime/key', paperclipRuntimeConnect: '/api/paperclip/runtime/connect', paperclipRuntimeDisconnect: '/api/paperclip/runtime/disconnect', personaDelete: '/api/persona/delete', personaSave: '/api/persona/save',
