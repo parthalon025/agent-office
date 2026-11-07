@@ -18,7 +18,7 @@
 import path from 'node:path';
 import { runIds, cleanIds } from './payload.mjs';
 import { readArgs, CLAUDE_FLAGS_VERSION } from './providers/claude-code.mjs';
-import { floorsOf, cablesOf, goalsOf, lobbyOf, costsOf, roomsOf, monthWindows, searchOf, shapeProblems, planWrite, writeValueOf, WRITE_KINDS } from './hq-model.mjs';
+import { floorsOf, cablesOf, goalsOf, lobbyOf, inboxOf, costsOf, roomsOf, monthWindows, searchOf, shapeProblems, planWrite, writeValueOf, WRITE_KINDS } from './hq-model.mjs';
 import { archetypeOf, GENERAL } from './archetypes.mjs';
 
 export const DEFAULT_URL = 'http://127.0.0.1:3100';
@@ -595,7 +595,7 @@ export function createHq(deps = {}) {
   function view() {
     if (!c) return null;
     const base = { state: c.state, url: c.url, error: c.error, companies: c.state === 'choose' ? c.companies : null };
-    if (!d) return { ...base, company: null, budget: null, agents: [], routines: [], floors: [], cables: [], rooms: [], goals: null, lobby: null, search: [], contract: [] };
+    if (!d) return { ...base, company: null, budget: null, agents: [], routines: [], floors: [], cables: [], inbox: null, rooms: [], goals: null, lobby: null, search: [], contract: [] };
     const agents = [...d.agents.values()].filter((a) => a.status !== 'terminated').map(agentView), hr = d.hqRead;
     const lobby = lobbyOf({
       agents, issues: known('issues') ? d.issues : null, approvals: known('approvals') ? hr.approvals : null, goals: known('goals') ? hr.goals : null, activity: known('activity') ? activityOf(8) : null,
@@ -611,6 +611,7 @@ export function createHq(deps = {}) {
       rooms: known('projects') ? roomsOf({ projects: d.projects, agents, issues: known('issues') ? d.issues : null }) : [],
       cables: cablesOf(agents),
       goals: known('goals') ? goalsOf(hr.goals, agents) : null,
+      inbox: inboxOf({ agents, issues: known('issues') ? d.issues : null, approvals: known('approvals') ? hr.approvals : null }),
       lobby, contract: d.contract,
       routines,
       // what Ctrl+K searches (#214): names and statuses only; an unread route gives no entries

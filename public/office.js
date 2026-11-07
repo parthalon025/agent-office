@@ -933,7 +933,7 @@
       d === 'manager' ? h(ManagerDialog, { toast: toast, onClose: close, onGo: function (x) { goTo(x); }, onHq: function () { setDlg({ name: 'hq' }); } }) : null,
       d === 'hire' ? h(O.Hq.Hire, { toast: toast, onClose: close }) : null,
       d === 'hq' ? h(HqDialog, { snap: snap, focus: dlg.focus, toast: toast, onAttach: function () { show('hooks'); }, onClose: close }) : null,
-      d === 'needs' ? h(NeedsDialog, { toast: toast, onClose: close, onManager: function () { setDlg({ name: 'manager' }); }, onGo: function (r) { var s = snap && snap.sessions.filter(function (x) { return x.uid === r.uid; })[0]; if (s) goTo(s); else close(); } }) : null,
+      d === 'needs' ? h(NeedsDialog, { toast: toast, onClose: close, onManager: function () { setDlg({ name: 'manager' }); }, onHq: function () { setDlg({ name: 'hq' }); }, onGo: function (r) { var s = snap && snap.sessions.filter(function (x) { return x.uid === r.uid; })[0]; if (s) goTo(s); else close(); } }) : null,
       // The one Notifier (the scene has notifier: false). The tab title counts every request of every building, in the
       // city too. Browser alerts for the requests and errors of every building; the DS alert toggle decides, and they
       // show only while the page is hidden. A click goes to the session.

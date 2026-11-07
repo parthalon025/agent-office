@@ -552,8 +552,9 @@ test('the HQ in the phone list (#215): employees with their status, and what nee
   const p = H.phone(q);
   assert.deepEqual(p.employees.map((e) => [e.id, e.mood.key, e.line]), [['a1', 'working', 'ACM-1 Add a route'], ['a2', 'error', 'No open task'], ['a3', 'resting', 'No open task']]);
   assert.equal(p.employees[2].supervision, 'Unsupervised: runs skip the office');
-  assert.deepEqual(p.needs.map((n) => n.text), ['Approval from Ada: hire agent', 'Approval: budget', 'Bo: Last run failed']);
-  assert.deepEqual(p.needs.map((n) => n.key), ['approval:p1', 'approval:p2', 'error:a2']);
+  // approvals and tasks for the user are in the one queue (#210), so the HQ block lists only the failed runs
+  assert.deepEqual(p.needs.map((n) => n.text), ['Bo: Last run failed']);
+  assert.deepEqual(p.needs.map((n) => n.key), ['error:a2']);
   // unknown approvals are said, not counted as none
   assert.equal(H.phone({ agents: [], lobby: { approvals: null } }).approvalsUnknown, true);
   assert.deepEqual(H.phone({ agents: [], lobby: null }), { employees: [], needs: [], approvalsUnknown: false });

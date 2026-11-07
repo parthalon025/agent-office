@@ -83,7 +83,7 @@ function rig(over = {}) {
     const layouts = {};
     for (const key of new Set([...repos.map((x) => x.key), ...sessions.filter((s) => s.place).map((s) => s.place.buildingKey)])) layouts[key] = layoutView(recOf(key));
     return {
-      sessions, figures, notes: {}, pins: {}, plan: r.plan || null, plans: r.plans, now: r.t, kinds: over.kinds || [], repos, layouts, rooms, rituals: r.rituals,
+      sessions, figures, notes: {}, pins: {}, plan: r.plan || null, plans: r.plans, now: r.t, kinds: over.kinds || [], repos, layouts, rooms, rituals: r.rituals, hq: r.hq || null,
     };
   };
   // as over SSE. wire: the server's way (wire.js): the lean snapshot, whole once, then patches; r.reconnect() starts again.
@@ -774,6 +774,24 @@ test('requests: a goal that waits for approval and a failed office step are in N
   assert.deepEqual(list.map((x) => [x.kind, x.id, x.text, x.building]), [['plan', 'plan:g1', 'Approve the plan: Ship it', KEY_A], ['plan', 'plan:g2:b', 'Step failed: Step b', KEY_A]]);
   assert.deepEqual(r.store.alerts().map((x) => x.kind), ['request', 'request']);
   r.plans = { plans: [], unreadable: [] }; r.push();
+  assert.deepEqual(r.store.requests(), []);
+});
+
+// The Paperclip inbox (#210): a pending approval or a task for the user is in Needs you, in the one queue, with the company named.
+test('requests: Paperclip inbox items join the queue; they open in the list, not at a desk', async () => {
+  const r = rig();
+  r.hq = { company: { name: 'Acme' }, inbox: [{ id: 'approval:p1', kind: 'approval', text: 'Approval from Grace: hire agent', by: 'Grace', at: 5 }, { id: 'issue:i1', kind: 'issue', text: 'Task for you: ACM-1 Plan', by: '', at: 9 }] };
+  r.push();
+  const list = r.store.requests();
+  assert.deepEqual(list.map((x) => [x.kind, x.id, x.text, x.buildingName, x.uid]), [
+    ['paperclip', 'hq:approval:p1', 'Approval from Grace: hire agent', 'Acme', null], ['paperclip', 'hq:issue:i1', 'Task for you: ACM-1 Plan', 'Acme', null]]);
+  const q = r.store.queue();
+  assert.equal(q.count, 2);
+  assert.deepEqual(q.reach(q.oldest), { via: 'list' });
+  assert.deepEqual(r.store.alerts().map((x) => x.kind), ['request', 'request']);
+  r.hq = { company: { name: 'Acme' }, inbox: null }; r.push();
+  assert.deepEqual(r.store.requests(), [], 'an unread inbox adds nothing');
+  r.hq = null; r.push();
   assert.deepEqual(r.store.requests(), []);
 });
 
