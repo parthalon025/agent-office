@@ -79,9 +79,9 @@ test('nameplates on top of each other: the first shows, the one over it waits; a
 test('every lobby object has a Ctrl+K action: an open desk on each floor, the Reception, the tour, and the directory search', () => {
   const office = fs.readFileSync(new URL('../public/office.js', import.meta.url), 'utf8');
   const lobby = fs.readFileSync(new URL('../public/lobby.js', import.meta.url), 'utf8');
-  const verbs = /var VERB = \{ desk: '([^']+)', memo: '([^']+)', directory: '([^']+)', pipeline: '([^']+)', monitor: '([^']+)' \};/.exec(lobby);
+  const verbs = /var VERB = \{ desk: '([^']+)', memo: '([^']+)', directory: '([^']+)', pipeline: '([^']+)', monitor: '([^']+)', clock: '([^']+)' \};/.exec(lobby);
   assert.ok(verbs, 'the in-scene verbs');
-  assert.deepEqual(verbs.slice(1), ['Start an agent here', 'Open the Reception', 'Search the office', 'Open the pipeline', 'Start an agent here']);
+  assert.deepEqual(verbs.slice(1), ['Start an agent here', 'Open the Reception', 'Search the office', 'Open the pipeline', 'Start an agent here', 'Open the weekly recap']);
   assert.match(office, /part === 'pipeline'\) setDlg\(\{ name: 'flow' \}\)/, 'pipeline: the Changes dialog, also in Ctrl+K as page-flow');
   // an open desk on each floor moved into desk.js (#90): one list of the scene's actions, which test/desk.test.mjs checks
   assert.match(office, /OfficeDesk\.pure\.paletteActions\(dt,/, 'desk: Start an agent on <floor>');
@@ -89,6 +89,10 @@ test('every lobby object has a Ctrl+K action: an open desk on each floor, the Re
   assert.match(office, /\['reception', 'Reception: floors and the kind of building', 'building'/, 'memo: the Reception');
   assert.match(office, /\['tour', 'Replay the lobby tour', 'chevron-right'/);
   assert.match(office, /onReception: function \(part\) \{ if \(part === 'directory'\) openPalette\(\);/, 'the directory opens the search, which is Ctrl+K itself');
+  assert.match(office, /label: 'Look at the office clock'/, 'the clock: look, from Ctrl+K');
+  assert.match(office, /onClock: function \(\) \{ setDlg\(\{ name: 'recap' \}\); \}/, 'the second click opens the weekly recap');
+  assert.match(lobby, /g\.userData\.setHands\(clk\.hour, clk\.minute\)/, 'the hands come from rituals.clock');
+  assert.match(lobby, /o\.clock \? o\.clock\(\)/, 'the page reads the snapshot clock');
   // the dock's per-agent actions moved into Ctrl+K
   for (const id of ["'page-s-always-'", "'page-s-model-'", "'page-s-mode-'", "'page-s-stop-'", "'page-s-term-'", "'page-s-chg-'"]) assert.ok(office.includes(id) || (id === "'page-s-chg-'" && fs.readFileSync(new URL('../public/changes.js', import.meta.url), 'utf8').includes(id)), id);
 });
@@ -130,6 +134,57 @@ function lobbyRig({ desks = 1 } = {}) {
   const land = () => { for (let i = 0; i < 3; i++) anim.forEach((f) => f(1, i)); };   // 1 s frames: any flight lands
   return { office, host, stage, screens, land };
 }
+
+test('clockOf keeps a quiet week when the snapshot has no clock', () => {
+  assert.deepEqual(L.clockOf(null), { hour: 0, minute: 0, line: 'Quiet week.' });
+  assert.deepEqual(L.clockOf({ hour: 3, minute: 14, line: '3 merges. The office asked you 14 times.' }), { hour: 3, minute: 14, line: '3 merges. The office asked you 14 times.' });
+  assert.equal(L.clockOf({ hour: 40, minute: -2, line: '' }).hour, 12);
+});
+
+test('the wall clock takes its hands from rituals.clock, and the second click opens the recap', () => {
+  const calls = [];
+  const r = lobbyRig();
+  const fg = r.stage.scene.children[0];
+  const rg = fg.children.find((c) => c.isGroup);
+  const clock = node({
+    userData: { prop: 'clock', setHands(h, m) { calls.push([h, m]); } },
+    add(child) { child.parent = this; this.children.push(child); },
+  });
+  clock.parent = rg;
+  rg.children.push(clock);
+  const prevDoc = globalThis.document, prevT = globalThis.THREE;
+  globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => ({ clearRect() {}, fillRect() {}, fillText() {}, measureText: () => ({ width: 10 }) }) }) };
+  globalThis.THREE = Object.assign({}, prevT, {
+    PlaneGeometry: class { constructor(w, h) { this.type = 'PlaneGeometry'; this.parameters = { width: w, height: h }; } },
+    MeshBasicMaterial: class { constructor(o) { Object.assign(this, o); } dispose() {} },
+    Mesh: class {
+      constructor(g, m) {
+        this.geometry = g; this.material = m; this.position = { z: 0 }; this.userData = {}; this.parent = null; this.visible = true; this.renderOrder = 0; this.name = '';
+        this.matrixWorld = { elements: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, -6, 3.2, -4, 1] };
+        this.updateWorldMatrix = () => {};
+      }
+    },
+    CanvasTexture: class { constructor(cv) { this.image = cv; } dispose() {} },
+    sRGBEncoding: 3001,
+  });
+  const opened = [];
+  const lob = globalThis.OfficeLobby.attach(r.office, {
+    host: r.host,
+    clock: () => ({ hour: 3, minute: 14, line: '3 merges. The office asked you 14 times.' }),
+    onClock: () => opened.push('recap'),
+  });
+  try {
+    assert.deepEqual(calls[0], [3, 14], 'setHands from rituals.clock');
+    assert.ok(calls.every((c) => c[0] === 3 && c[1] === 14));
+    assert.equal(lob.clock(false), true, 'the camera flies to the clock');
+    r.land();
+    r.host.open();
+    assert.deepEqual(opened, ['recap']);
+  } finally {
+    lob.dispose(); r.host.dispose();
+    globalThis.document = prevDoc; globalThis.THREE = prevT;
+  }
+});
 
 test('tour: the monitor stop flies to the monitor of an open desk, and the second step starts an agent at that desk', () => {
   const r = lobbyRig(), started = [];

@@ -33,6 +33,16 @@ test('the props hold what the folders say: ready tray, inbox, outbox, cabinet, a
   assert.deepEqual(L.propCounts({ unknown: true, tray: [], folders: [f('inbox')] }), { ready: 0, inbox: 0, outbox: 0, cabinet: 0, archive: 0 }, 'unknown shows empty props');
 });
 
+test('the wall clock takes its hands from the page and does not read the time of day', () => {
+  const start = bundle.indexOf('Parts.clock=function');
+  const body = bundle.slice(start, bundle.indexOf('/* paper props', start));
+  assert.ok(start >= 0 && body.length > 40);
+  assert.match(body, /userData\.prop="clock"/);
+  assert.match(body, /userData\.setHands=/);
+  assert.doesNotMatch(body, /new Date\(/);
+  assert.doesNotMatch(bundle, /Parts\.clock\(K,rg,[^;\n]*anim\)/);
+});
+
 test('the DS has the paper props as parts, each with a count the page sets', () => {
   for (const p of ['tray', 'folder', 'stamp', 'cabinet', 'archiveBox']) assert.match(bundle, new RegExp('Parts\\.' + p + '='), p);
   assert.match(bundle, /userData\.lobby="pipeline"/, 'the Reception has the pipeline board');

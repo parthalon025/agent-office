@@ -93,7 +93,7 @@
       layouts: state.layouts || {},
       rooms: state.rooms || {},
       changes: state.changes || {},   // paper flow (#93): building key -> { ok, at, error, mergedToday, prs, ready } from gh
-      rituals: state.rituals || { focus: false, merges: [] },   // Focus mode and the recent merges (#151)
+      rituals: state.rituals || { focus: false, merges: [] },   // Focus mode, the recent merges and the office clock (#151)
       catalog: state.catalog || null
     };
   }

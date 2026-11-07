@@ -29,6 +29,7 @@ All of the above (personas, teams, wall screens and room layouts) can be exporte
 ## Rituals and Focus mode
 
 - **Weekly recap.** The recap dialog shows the last seven days: what merged, what it cost and the attention measure (approvals for each merge, minutes from done to merged, interruptions for each hour).
+- **Office clock.** The wall clock in the first room of a floor shows that same week. The hour hand counts merges and the minute hand counts how many times the office asked you. A quiet week leaves the clock stopped. Look at the clock, then click it again, to open the weekly recap.
 - **While you were away.** A list of what happened since you last closed the recap.
 - **Stand-up.** An agent of a given name that starts for the first time on a day can begin with a short stand-up line in its prompt: one note in the room notes board with Yesterday, Today and Blocked. It is only text in a prompt.
 - **The merged moment.** A short moment on screen when a change you confirmed merges.

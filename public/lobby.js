@@ -12,6 +12,8 @@
    - The pipeline board on the Reception's back wall draws the eight stages of the building's changes (#93, o.changes). Two clicks: look,
      then open the pipeline dialog (o.onReception('pipeline')). The DS paper props (ready tray, cabinet, archive box) get their count
      from the same data (propCounts, userData.setCount); the page never builds them.
+   - The wall clock (DS Parts.clock, the first room of a floor) shows the week the snapshot already carries (o.clock, rituals.clock).
+     The page calls setHands and paints the line on a plane in front of the face. Two clicks: look, then open the weekly recap (o.onClock).
    - A nameplate stands at each bot's desk: name, model lane (Haiku, Sonnet, Opus, Fable) and cost. It faces the camera and keeps
      the DS body and caption sizes on screen at every zoom (plateBox; #92 review: a plate on the desk was 2 px text at the floor's zoom).
    The plate is a sprite drawn at those sizes and scaled each frame to that many CSS pixels. A plate whose screen box overlaps
@@ -19,7 +21,7 @@
    The lobby tour flies to its monitor stop at an agent's monitor (terminal.js look(), passed as o.monitor), else at an open
    desk's DS screen (K.screens).
    Pure part (window.OfficeLobby.pure; tested in test/lobby.test.mjs): tourSteps, tourDue, plateLines, plateBox, declutter,
-   directoryRows, memoLines, FACES and dotOf (the painted colors: paper faces and on-bubble state dots, test/contrast.test.mjs).
+   directoryRows, memoLines, clockOf, FACES and dotOf (the painted colors: paper faces and on-bubble state dots, test/contrast.test.mjs).
    The tour's flights run on the real scene host with a plain scene graph in that test too.
    It reads the stage only through the host (rooms, shown floor, pick targets, frames) and office.inspect().bots, like terminal.js.
    It never moves a bot. Colors come from DS tokens (K.tok). */
@@ -92,6 +94,16 @@
   }
   // What each paper prop holds (the DS parts of the Reception): the ready tray, the inbox and outbox trays, the cabinet and the archive
   // box, by the place of each folder (building.js folderAt). A building whose changes are unknown shows empty props.
+  // The week the wall clock shows. c: snapshot rituals.clock, or null (a quiet week). The server owns the counts and the line.
+  function clockOf(c) {
+    if (!c || typeof c !== 'object') return { hour: 0, minute: 0, line: 'Quiet week.' };
+    var hour = Number(c.hour), minute = Number(c.minute);
+    return {
+      hour: isFinite(hour) ? Math.max(0, Math.min(12, hour)) : 0,
+      minute: isFinite(minute) ? Math.max(0, Math.min(60, minute)) : 0,
+      line: typeof c.line === 'string' && c.line ? c.line : 'Quiet week.'
+    };
+  }
   function propCounts(c) {
     var n = { ready: 0, inbox: 0, outbox: 0, cabinet: 0, archive: 0 };
     if (!c || c.unknown) return n;
@@ -107,10 +119,11 @@
     memo: { face: 'bubble', ink: 'scene-dark', band: 'status-waiting-on-bubble' },
     directory: { face: 'bubble', ink: 'scene-dark', wingAlpha: 0.7, dot: '-on-bubble' },
     plate: { face: 'scene-dark', ink: 'bubble', detailAlpha: 0.85 },
-    pipeline: { face: 'bubble', ink: 'scene-dark', mutedAlpha: 0.7, barAlpha: 0.85 }
+    pipeline: { face: 'bubble', ink: 'scene-dark', mutedAlpha: 0.7, barAlpha: 0.85 },
+    clock: { face: 'bubble', ink: 'scene-dark' }
   };
   function dotOf(tok, state) { var t = state && tok['status-' + state + FACES.directory.dot]; return t || tok[FACES.directory.ink]; }
-  var pure = { tourSteps: tourSteps, tourDue: tourDue, plateLines: plateLines, plateBox: plateBox, declutter: declutter, directoryRows: directoryRows, memoLines: memoLines, pipelineLines: pipelineLines, propCounts: propCounts, FACES: FACES, dotOf: dotOf };
+  var pure = { tourSteps: tourSteps, tourDue: tourDue, plateLines: plateLines, plateBox: plateBox, declutter: declutter, directoryRows: directoryRows, memoLines: memoLines, pipelineLines: pipelineLines, propCounts: propCounts, clockOf: clockOf, FACES: FACES, dotOf: dotOf };
 
   // ---------- browser ----------
   function cssNum(name, fallback) { try { var v = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--' + name)); return isFinite(v) && v > 0 ? v : fallback; } catch (x) { return fallback; } }
@@ -122,7 +135,7 @@
     var none = { refresh: function () {}, tour: function () { return false; }, dispose: function () {}, items: function () { return []; }, idle: function () { return false; }, desk: function () { return false; } };
     if (!T || !st || !host) return none;
     var K = st.K, dead = false, lastTok = K.tok;
-    var desks = [], boards = [], plates = [], props = [];   // { mesh, ... } of the shown floor; a desk also has its monitor (screen) when it has one
+    var desks = [], boards = [], plates = [], props = [], clocks = [], faces = [];   // { mesh, ... } of the shown floor; a desk also has its monitor (screen) when it has one
     var paintedSig = {};
 
 
@@ -179,6 +192,14 @@
       });
       if (p.foot) { c.globalAlpha = F0.mutedAlpha; c.font = Kit.font(K, 26, 500); c.fillText(Kit.clip(c, p.foot, w - 64), 32, h - 56); c.globalAlpha = 1; }
     }
+    // The line on the clock: a paper band at the bottom of a clear plane, so the hands stay visible above it.
+    function paintClock(c, w, h, line) {
+      var F0 = FACES.clock, band = Math.round(h * 0.22);
+      c.clearRect(0, 0, w, h);
+      c.fillStyle = K.tok[F0.face]; c.fillRect(0, h - band, w, band);
+      c.fillStyle = K.tok[F0.ink]; c.textBaseline = 'middle';
+      c.font = Kit.font(K, 36, 600); c.fillText(Kit.clip(c, line, w - 48), 24, h - band / 2);
+    }
     function paintPlate(c, w, h, p, box, sz) {
       var tok = K.tok, F0 = FACES.plate, k = PLATE_K, pad = PLATE_PAD * k;
       c.fillStyle = tok[F0.face]; c.fillRect(0, 0, w, h);
@@ -209,11 +230,20 @@
       var fg = host.shownFloor();
       desks = desks.filter(function (d) { return host.inScene(d.mesh); });
       props = props.filter(function (m) { return host.inScene(m); });
+      clocks = clocks.filter(function (g) { return host.inScene(g); });
+      faces = faces.filter(function (f) {
+        if (host.inScene(f.group)) return true;
+        if (f.mesh.parent && f.mesh.parent.remove) f.mesh.parent.remove(f.mesh);
+        if (f.tex.dispose) f.tex.dispose();
+        if (f.mesh.material && f.mesh.material.dispose) f.mesh.material.dispose();
+        return false;
+      });
       boards = boards.filter(function (b) { if (host.inScene(b.mesh)) return true; b.tex.dispose(); return false; });
       host.rooms().forEach(function (x) {
         x.rg.traverse(function (m) {
           if (m.userData.spareHit && !desks.some(function (d) { return d.mesh === m; })) desks.push({ kind: 'desk', mesh: m, roomId: m.userData.spareDesk.room, i: m.userData.spareDesk.i, screen: screenOf(m.parent) });
-          if (m.userData.setCount && m.userData.prop && props.indexOf(m) < 0) props.push(m);
+          if (m.userData.setCount && m.userData.prop && m.userData.prop !== 'clock' && props.indexOf(m) < 0) props.push(m);
+          if (m.userData.prop === 'clock' && m.userData.setHands && clocks.indexOf(m) < 0) { clocks.push(m); ensureFace(m, x.room.id); }
           if (m.userData.lobby && !m.userData.lobbyItem) boards.push(adopt(m, 768, m.userData.lobby === 'memo' ? 520 : m.userData.lobby === 'pipeline' ? 528 : 470, m.userData.lobby, x.room.id));
         });
       });
@@ -237,6 +267,17 @@
         g.add(m);
         plates.push({ bot: b.name, mesh: m, tex: t.tex, canvas: t.canvas, box: null, id: 'plate:' + b.name + ':' + m.uuid });
       });
+    }
+    // A clear plane in front of the clock face: the look target, with the week's line on a band at the bottom.
+    function ensureFace(g, roomId) {
+      if (g.userData.officeFace && host.inScene(g.userData.officeFace)) return;
+      if (!T.PlaneGeometry || !T.Mesh || !T.MeshBasicMaterial) return;
+      var tex = Kit.newTex(640, 640), mesh = new T.Mesh(new T.PlaneGeometry(1.6, 1.6), new T.MeshBasicMaterial({ map: tex.tex, transparent: true, depthWrite: false }));
+      mesh.position.z = 0.12; mesh.renderOrder = 3; mesh.name = 'office-clock';
+      mesh.userData.clockItem = { kind: 'clock', mesh: mesh, roomId: roomId, group: g };
+      if (g.add) g.add(mesh);
+      g.userData.officeFace = mesh;
+      faces.push({ kind: 'clock', mesh: mesh, roomId: roomId, group: g, tex: tex.tex, canvas: tex.canvas, id: 'clock:' + roomId + ':' + faces.length });
     }
     // The monitor of an open desk: the first DS desk screen (K.screens, Parts.screen) inside the desk's group.
     function screenOf(dg) {
@@ -263,6 +304,9 @@
       });
       var pc = propCounts(o.changes ? o.changes() : null);
       props.forEach(function (m) { var k = m.userData.prop === 'tray' ? m.userData.kind : m.userData.prop; if (pc[k] != null) m.userData.setCount(pc[k]); });
+      var clk = clockOf(o.clock ? o.clock() : null);
+      clocks.forEach(function (g) { g.userData.setHands(clk.hour, clk.minute); });
+      faces.forEach(function (f) { repaint(f, clk.line, function (c, w, h) { paintClock(c, w, h, clk.line); }); });
       var sz = { body: cssNum('type-body-size', 13), caption: cssNum('type-caption-size', 11) };
       plates.forEach(function (p) {
         var pl = plateLines(p.bot, o.session ? o.session(p.bot) : null), sig = JSON.stringify(pl) + sz.body + '/' + sz.caption;
@@ -301,14 +345,14 @@
       var up = new T.Vector3(0, 1, 0).applyQuaternion(st.cam.quaternion);
       hint.position.copy(hintPoint).addScaledVector(up, (hpx / 2 + cssNum('space-2', 8)) * wpp);
     }
-    var VERB = { desk: 'Start an agent here', memo: 'Open the Reception', directory: 'Search the office', pipeline: 'Open the pipeline', monitor: 'Start an agent here' };
+    var VERB = { desk: 'Start an agent here', memo: 'Open the Reception', directory: 'Search the office', pipeline: 'Open the pipeline', monitor: 'Start an agent here', clock: 'Open the weekly recap' };
     function keyOf(it) { return it.kind + ':' + it.roomId + (it.kind === 'desk' || it.kind === 'monitor' ? ':' + it.i : ''); }
-    function hintOf(it) { var f = host.focused(); return f && f.key === keyOf(it) ? VERB[it.kind] : it.kind === 'desk' ? 'Look at the open desk' : 'Look closer'; }
+    function hintOf(it) { var f = host.focused(); return f && f.key === keyOf(it) ? VERB[it.kind] : it.kind === 'desk' ? 'Look at the open desk' : it.kind === 'clock' ? 'Look at the office clock' : 'Look closer'; }
     var target = {
       name: 'lobby',
       active: function () { return !dead; },
-      meshes: function () { return desks.map(function (d) { return d.mesh; }).concat(boards.map(function (b) { return b.mesh; })); },
-      itemOf: function (mesh) { return mesh.userData.lobbyItem || desks.filter(function (d) { return d.mesh === mesh; })[0] || null; },
+      meshes: function () { return desks.map(function (d) { return d.mesh; }).concat(boards.map(function (b) { return b.mesh; }), faces.map(function (f) { return f.mesh; })); },
+      itemOf: function (mesh) { return mesh.userData.lobbyItem || mesh.userData.clockItem || desks.filter(function (d) { return d.mesh === mesh; })[0] || null; },
       hover: function (it, hit) { setHint(it ? hintOf(it) : '', hit && hit.point); },
       // a desk is framed from its padded box; fill keeps the desk and its chair in view, with room for the hint
       // a monitor (the tour's stop) fills the free view like a terminal (the host's fill), cut clear of the chair in front
@@ -318,10 +362,11 @@
       },
       open: function (it) {
         if (it.kind === 'desk' || it.kind === 'monitor') { if (o.onDesk) o.onDesk(it.roomId, it.i); }
+        else if (it.kind === 'clock') { if (o.onClock) o.onClock(); }
         else if (o.onReception) o.onReception(it.kind);
       },
       find: function (key) {
-        var it = desks.concat(boards, desks.map(monitorOf).filter(Boolean)).filter(function (x) { return keyOf(x) === key && host.inScene(x.mesh); })[0];
+        var it = desks.concat(boards, faces, desks.map(monitorOf).filter(Boolean)).filter(function (x) { return keyOf(x) === key && host.inScene(x.mesh); })[0];
         return it ? { item: it, mesh: it.mesh } : null;
       },
       anchors: function () { return []; }
@@ -378,9 +423,10 @@
       if (dead) return;
       dead = true; free();
       plates.forEach(dropPlate);
+      faces.forEach(function (f) { if (f.mesh.parent && f.mesh.parent.remove) f.mesh.parent.remove(f.mesh); if (f.tex.dispose) f.tex.dispose(); if (f.mesh.material && f.mesh.material.dispose) f.mesh.material.dispose(); if (f.group && f.group.userData) delete f.group.userData.officeFace; });
       boards.forEach(function (b) { delete b.mesh.userData.lobbyItem; });
       if (hint) { if (hint.parent) hint.parent.remove(hint); if (hint.material.map) hint.material.map.dispose(); hint.material.dispose(); hint = null; }
-      desks = []; boards = []; plates = [];
+      desks = []; boards = []; plates = []; clocks = []; faces = [];
     }
     return {
       refresh: refresh, tour: tour, dispose: dispose,
@@ -388,7 +434,13 @@
       idle: function () { return !dead && !st.intro; },
       // the lobby items of the shown floor, for tests and the console
       items: function () { return desks.map(function (d) { return { kind: 'desk', roomId: d.roomId, i: d.i, shown: host.shown(d.mesh) }; })
-        .concat(boards.map(function (b) { return { kind: b.kind, roomId: b.roomId, shown: host.shown(b.mesh) }; }), plates.map(function (p) { return { kind: 'plate', bot: p.bot, shown: host.shown(p.mesh) }; })); },
+        .concat(boards.map(function (b) { return { kind: b.kind, roomId: b.roomId, shown: host.shown(b.mesh) }; }), plates.map(function (p) { return { kind: 'plate', bot: p.bot, shown: host.shown(p.mesh) }; }), faces.map(function (f) { return { kind: 'clock', roomId: f.roomId, shown: host.shown(f.mesh) }; })); },
+      // the keyboard path (Ctrl+K): look at the office clock on the floor in view. True when the camera flies.
+      clock: function (andOpen) {
+        try { scan(); } catch (x) { /* the lists are still good */ }
+        var fg = host.shownFloor(), it = faces.filter(function (f) { return host.onShownFloor(f.mesh, fg); })[0];
+        return !!it && host.show(target, it, !!andOpen);
+      },
       // the keyboard path (Ctrl+K): look at an open desk of a room, and with andOpen start the agent at once
       desk: function (roomId, andOpen) {
         try { scan(); } catch (x) { /* ok */ }

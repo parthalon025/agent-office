@@ -1,9 +1,10 @@
-// Rituals and the attention measure (#151): stand-up note, merged moment, weekly recap, while-you-were-away, Focus mode.
-// The rules are pure: the shared ones in public/vocab.js (OfficeVocab.rituals), the measure in rituals.mjs. No server, no clock.
+// Rituals and the attention measure (#151): stand-up note, merged moment, weekly recap, while-you-were-away, Focus mode,
+// and the office clock (the week as two hands). The rules are pure: the shared ones in public/vocab.js (OfficeVocab.rituals),
+// the measure in rituals.mjs. No server. The caller passes now.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import '../src/vocab.mjs';
-import { metrics, recap, away, mergeRecord } from '../src/rituals.mjs';
+import { metrics, recap, away, mergeRecord, officeClock } from '../src/rituals.mjs';
 
 const R = globalThis.OfficeVocab.rituals;
 const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR;
@@ -99,6 +100,31 @@ test('while you were away: the feed since a time, short, oldest first, with no r
   assert.deepEqual(a.map((x) => x.text), ['Ada started', 'Ada ran npm test']);
   assert.equal(away({ feed: lines, since: NOW - 10 * DAY, now: NOW, max: 2 }).length, 2);
   assert.deepEqual(away({ feed: lines, since: 0, now: NOW, max: 0 }), []);
+});
+
+test('the office clock: a quiet week stops the hands, a few merges move them, and a full face holds', () => {
+  const quiet = officeClock({ feed: [], merges: [], now: NOW });
+  assert.deepEqual(quiet, { hour: 0, minute: 0, merges: 0, answers: 0, line: 'Quiet week.' });
+  const week = officeClock({ feed, merges, now: NOW });
+  assert.equal(week.merges, 1, 'the merge from last week is outside the window');
+  assert.equal(week.answers, 4, 'two approvals, one decline and one yes; a read and an old approval do not count');
+  assert.deepEqual([week.hour, week.minute], [1, 4]);
+  assert.equal(week.line, '1 merge. The office asked you 4 times.');
+  const many = { feed: [], merges: [] };
+  for (let i = 0; i < 13; i++) many.merges.push({ at: NOW - i * MIN });
+  for (let i = 0; i < 61; i++) many.feed.push({ t: NOW - i * MIN, kind: 'tool', text: 'approved from the office' });
+  const full = officeClock({ ...many, now: NOW });
+  assert.equal(full.merges, 13);
+  assert.equal(full.answers, 61);
+  assert.deepEqual([full.hour, full.minute], [12, 60], 'twelve merges and sixty answers fill the face and the hands stay there');
+  assert.equal(full.line, '13 merges. The office asked you 61 times.');
+  const three = officeClock({
+    feed: Array.from({ length: 14 }, (_, i) => ({ t: NOW - i * MIN, kind: 'prompt', text: 'answered in the office: yes' })),
+    merges: [1, 2, 3].map((n) => ({ at: NOW - n * MIN })),
+    now: NOW,
+  });
+  assert.deepEqual([three.hour, three.minute], [3, 14]);
+  assert.equal(three.line, '3 merges. The office asked you 14 times.');
 });
 
 test('a merge record keeps only what the recap and the moment read', () => {
