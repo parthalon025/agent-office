@@ -147,6 +147,15 @@
   // in office is on the Agents screen of a Security room, with its painted Confirm (no button here: one place for a write).
   function HqDialog(p) {
     var q = p.snap && p.snap.hq, H = window.OfficeVocab.hq;
+    // Ctrl+K search (#214): p.focus = { kind, id } names what the user picked. The card says what was found, and the row of an employee,
+    // floor or routine is marked and scrolled into view. A task, goal or approval has no row here, so the card is its place.
+    var focus = p.focus, found = focus ? ((q && q.search) || []).filter(function (x) { return x.kind === focus.kind && x.id === focus.id; })[0] : null;
+    var mark = function (kind, id) { return focus && focus.kind === kind && focus.id === id; };
+    useEffect(function () {
+      if (!focus) return;
+      var el = document.getElementById('hq-' + focus.kind + '-' + focus.id);
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+    }, [focus && focus.kind, focus && focus.id]);
     var close = [h(A.Button, { key: 'a', variant: 'quiet', onClick: p.onAttach }, 'Connection'), h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')];
     // The runtime panel (install, start, stop, board key) lives here since #197; it is the first step while no company is connected.
     var runtime = O.PaperclipRuntime ? h(O.PaperclipRuntime, { runtime: p.snap && p.snap.paperclipRuntime, toast: p.toast }) : null;
@@ -154,15 +163,6 @@
       h('div', { className: 'form wide' },
         h(A.EmptyState, { icon: 'hq', compact: true, title: 'Paperclip is not connected', text: q ? H.state(q) : 'Install and start Paperclip below, or connect to yours. Then connect it in Attach sessions.' }),
         runtime));
-    // Ctrl+K search (#214): p.focus = { kind, id } names what the user picked. The card says what was found, and the row of an employee,
-    // floor or routine is marked and scrolled into view. A task, goal or approval has no row here, so the card is its place.
-    var focus = p.focus, found = focus ? (q.search || []).filter(function (x) { return x.kind === focus.kind && x.id === focus.id; })[0] : null;
-    var mark = function (kind, id) { return focus && focus.kind === kind && focus.id === id; };
-    useEffect(function () {
-      if (!focus) return;
-      var el = document.getElementById('hq-' + focus.kind + '-' + focus.id);
-      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
-    }, [focus && focus.kind, focus && focus.id]);
     return h(A.Dialog, { open: true, title: q.company.name + ': Paperclip HQ', onClose: p.onClose, actions: close },
       h('div', { className: 'form wide' },
         h('p', { className: 'note', role: 'status' }, H.state(q)),
