@@ -93,6 +93,7 @@
   function PhoneView(p) {
     var snap = useSnapshot();
     var ph = snap ? window.officeAdapter.phone(snap) : { queue: { count: 0 }, buildings: [] };
+    var hqPh = snap && snap.hq && snap.hq.company ? window.OfficeVocab.hq.phone(snap.hq) : null;
     return h('div', { className: 'phone', role: 'region', 'aria-label': 'Agents' },
       h('div', { className: 'phone-head' },
         h('h1', { className: 'phone-title' }, 'Agent Office'),
@@ -101,11 +102,21 @@
         h('h2', { className: 'phone-h' }, 'Needs you', ph.queue.count ? h(Tag, null, String(ph.queue.count)) : null),
         h(QueueList, { toast: p.toast, onManager: p.onManager, onGo: p.onGo })),
       // The HQ building (#197): the company of the connected Paperclip, its Lobby in one line, and the way to the dashboard.
-      snap && snap.hq && snap.hq.company ? h('section', { className: 'phone-sec', 'aria-label': 'Paperclip HQ' },
+      hqPh ? h('section', { className: 'phone-sec', 'aria-label': 'Paperclip HQ' },
         h('h2', { className: 'phone-h' }, 'Paperclip HQ'),
         h('div', { className: 'phone-bld' },
           h('div', { className: 'phone-row phone-bld-head' }, h('b', null, snap.hq.company.name)),
           h('p', { className: 'look-facts mono' }, window.OfficeVocab.hq.glance(snap.hq) || window.OfficeVocab.hq.state(snap.hq)),
+          hqPh.needs.length || hqPh.approvalsUnknown ? h('ul', { className: 'phone-hq-needs', 'aria-label': 'Needs you in Paperclip' },
+            hqPh.needs.map(function (n) { return h('li', { key: n.key }, n.text); }),
+            hqPh.approvalsUnknown ? h('li', { key: 'unknown' }, 'The office could not read the approvals.') : null) : null,
+          hqPh.needs.some(function (n) { return n.key.indexOf('approval:') === 0; }) ? h('p', { className: 'look-facts' }, 'Decide approvals in Paperclip.') : null,
+          hqPh.employees.length ? h('ul', { className: 'look-agents', 'aria-label': 'Employees' }, hqPh.employees.map(function (e) {
+            return h('li', { key: e.id, className: 'phone-emp' },
+              h('span', { className: 'phone-row' }, h('b', null, e.name), h(PhoneMood, { glance: { mood: e.mood, text: e.mood.word } })),
+              h('span', null, [e.title, clip(e.line, 60)].filter(Boolean).join(' · ')),
+              h('span', { className: 'look-facts' }, e.supervision));
+          })) : h('p', { className: 'look-facts' }, 'No employees yet.'),
           p.onHq ? h(A.Button, { variant: 'quiet', icon: 'hq', onClick: p.onHq }, 'Open Paperclip HQ') : null)) : null,
       h('section', { className: 'phone-sec', 'aria-label': 'Buildings' },
         h('h2', { className: 'phone-h' }, 'Buildings'),

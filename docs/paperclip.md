@@ -42,7 +42,7 @@ If you already run Paperclip, connect to it instead of installing one. In **Pape
 
 When the office watches a company, the company is the HQ building in the city. Its floors follow the org chart: Records at the bottom, then the Lobby, then one floor for each reporting rank, with the top role (the CEO) on the top floor. Each employee has a pip on its floor. The city card shows one line: employees, open tasks, approvals that wait, and spend.
 
-Open **Paperclip HQ** for the Lobby: employees, open tasks, approvals, goals and spend as cards, the approvals and goals that wait, the org chart and the live activity. When the office could not read a part, the card says Unknown, not zero. On a phone, the HQ is a card above the buildings.
+Open **Paperclip HQ** for the Lobby: employees, open tasks, approvals, goals and spend as cards, the approvals and goals that wait, the org chart and the live activity. When the office could not read a part, the card says Unknown, not zero. On a phone, the HQ is a card above the buildings. It lists each employee with its status, its task and how it is supervised, and what needs you: the approvals that wait and each employee whose last run failed. The approvals are decided in Paperclip, so the card has no Approve button.
 
 
 **Costs** (Finance) is in the same dialog: spend per agent and per project for this month and the two before it, and the budgets (what each has used of its limit, and any employee a budget paused). It reads Paperclip when you open the HQ and only reads. Unknown stays unknown: a month or a cut that Paperclip did not answer says Unknown, never $0.00, and a month with a row of no known cost says "or more".
