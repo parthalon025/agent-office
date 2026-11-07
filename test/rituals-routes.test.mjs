@@ -48,6 +48,23 @@ after(async () => {
 
 const open = (name) => call('/api/open', { cwd: repo, name, provider: 'ollama', model: 'fake-model', where: 'office', isolation: 'same', prompt: `Work as ${name}` });
 
+test('the snapshot clock is the week the office already keeps', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-clock-'));
+  const merges = [{ key: 'r#1', repo: 'r', number: 1, title: 'Ship', head: 'agent/x', at: Date.now() - 1000 }];
+  const local = await startInProcess({ dir, state: { merges } });
+  try {
+    const c = local.snapshot().rituals.clock;
+    assert.equal(c.merges, 1);
+    assert.equal(c.answers, 0);
+    assert.deepEqual([c.hour, c.minute], [1, 0]);
+    assert.equal(c.line, '1 merge. The office asked you 0 times.');
+    assert.equal(local.snapshot().rituals.focus, false);
+  } finally {
+    local.stop();
+    await removeTree(dir);
+  }
+});
+
 test('the recap route reads the merges the office kept, and the away list', { skip: SKIP }, async () => {
   const r = await get('/api/recap?since=0');
   assert.equal(r.status, 200);

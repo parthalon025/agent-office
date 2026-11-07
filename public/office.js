@@ -723,7 +723,10 @@
             onDesk: function (roomId) { deskStart(roomId); },
             // the tour's monitor stop: an agent's monitor on the floor first (terminal.js look), else an open desk's
             monitor: function () { return !!(terminalRef.current && terminalRef.current.look && terminalRef.current.look()); },
-            onReception: function (part) { if (part === 'directory') openPalette(); else if (part === 'pipeline') setDlg({ name: 'flow' }); else setDlg({ name: 'reception' }); }
+            onReception: function (part) { if (part === 'directory') openPalette(); else if (part === 'pipeline') setDlg({ name: 'flow' }); else setDlg({ name: 'reception' }); },
+            // the week the wall clock shows (rituals.clock), and the second click, which opens the weekly recap
+            clock: function () { var sn = latestSnap.current; return sn && sn.rituals ? sn.rituals.clock : null; },
+            onClock: function () { setDlg({ name: 'recap' }); }
           });
           window.officeLobby = lobbyRef.current;   // the lobby (open desks, memo, directory, nameplates), for the console and tests
         }
@@ -899,7 +902,11 @@
 
     // Room tools and sessions are built when the palette draws, so the rooms of the floor on screen are current.
     function liveActions() {
-      var out = [], b = boardRef.current, sn = latestSnap.current, sec = securityRef.current;
+      var out = [], b = boardRef.current, sn = latestSnap.current, sec = securityRef.current, lob = lobbyRef.current;
+      if (lob && lob.clock && mount && cur2.view === 'office' && mount.repo === shown) {
+        out.push({ id: 'page-clock', label: 'Look at the office clock', icon: 'schedule', group: 'Office', keywords: 'clock week merges recap office time hands',
+          run: function () { if (!lob.clock(false)) toast({ tone: 'info', title: 'Office clock', text: 'This floor has no clock in view.' }); } });
+      }
       // Permissions: fly to the Security room of the building on screen (its floor first), at its Files screen
       if (sec && mount && cur2.view === 'office' && mount.repo === shown && mount.securityRoom()) {
         out.push({ id: 'page-permissions', label: 'Permissions', icon: 'security', group: 'Office', keywords: 'security room rules ask allow deny agents spend limit',

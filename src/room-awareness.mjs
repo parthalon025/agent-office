@@ -104,7 +104,7 @@ export function createRoomAwareness({ board, roomPlace, inRoom, floorName, addFe
     return [
       'What is in the room',
       'The room is a lab room in a 3D building. Fixed parts (the office draws them the same in every lab room):',
-      '- A floor and a back wall. The first room of a floor has a solid left wall with a wide window, and a wall clock on the back wall. Other rooms have a glass wall on the left. On the ground floor the Security room comes first, so every lab room there has a glass wall on the left.',
+      '- A floor and a back wall. The first room of a floor has a solid left wall with a wide window, and a wall clock on the back wall. The clock shows the work of this week for the whole office, not the time of day. The hour hand counts merges, and 12 fills the face. The minute hand counts how many times the office asked the user, and 60 fills the face. A quiet week leaves both hands at 12. The line on the clock says the real counts. Other rooms have a glass wall on the left. On the ground floor the Security room comes first, so every lab room there has a glass wall on the left.',
       `- A room sign on the back wall with the room name (${pl.room}), the room type and the office version.`,
       '- Server racks along the back wall, with a metal shelf on top. A cable tray runs above the racks and carries data packets from the desks to the racks.',
       '- A work table with a small monitor and an amber block.',
@@ -116,7 +116,7 @@ export function createRoomAwareness({ board, roomPlace, inRoom, floorName, addFe
       'The window of the first room is a picture: by day a blue sky with clouds over a low skyline, at night a dark sky with a moon over a skyline with lit windows, in Sublevel a lit corridor, in Fluent a pale sky with soft clouds over a light skyline, in Fluent Dark a dusk sky with a crescent moon over a dark skyline with a few lit windows. It does not show the street.',
       'The ground floor of every building also has the Security room, left of the lab rooms. No agent works in it. Its six wall screens (Files, Commands, Network, Secrets, Agents, Spend) are where the user sets the permission rules: Ask, Allow or Deny for each kind of tool call and agent kind. The office applies them before it asks the user.',
       'In the building view (outside the floors) the office draws a road with lane marks along the front and the right side of the building, sidewalks with trees, two street lights that glow at night (in Night and Fluent Dark), and a flock of birds that circles over the tower.',
-      'You can change only the notes board and the blackboard pin (office_room_update). You cannot move furniture, desks, boards, the door or bots. The office places them.',
+      'You can change only the notes board and the blackboard pin (office_room_update). You cannot move furniture, the clock, desks, boards, the door or bots. The office places them.',
     ];
   }
   

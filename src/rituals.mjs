@@ -8,8 +8,10 @@
 // links it to the session that made it). `metrics` gives approvals per merge, minutes from done to merged and interruptions per hour,
 // from the feed lines the office writes (`approved`, `declined`, `answered ...`), the merge records and the history. A ratio with
 // nothing to divide by is null, never 0. `recap` is the week: shipped work, cost, the metrics, and each agent's best moment (its latest
-// merge, matched by head branch). `away` is the feed since a time, newest 12. The saved slices are `cleanMerges`, `cleanStandups`
-// (agent name -> the day of its last stand-up) and `cleanFocus` (Focus mode is on only when saved as true).
+// merge, matched by head branch). `away` is the feed since a time, newest 12. `officeClock` is the same week as two hands: merges on
+// the hour hand (12 fills the face) and the times the office asked on the minute hand (60 fills the face). A quiet week is "Quiet week."
+// The saved slices are `cleanMerges`, `cleanStandups` (agent name -> the day of its last stand-up) and `cleanFocus` (Focus mode is on
+// only when saved as true).
 // Tested in test/rituals.test.mjs, test/rituals-routes.test.mjs and test/building.test.mjs.
 
 const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR;
@@ -65,6 +67,22 @@ export function recap({ feed, merges = [], history = [], now, days = WEEK_DAYS }
     best.push({ name, text: `Merged #${m.number}${m.title ? ' ' + m.title : ''}.` });
   }
   return { days, shipped, cost, metrics: metrics({ feed, merges, history, now, windowMs: days * DAY }), best };
+}
+
+const nWords = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+/** The week as clock hands. The hour hand counts merges (12 fills the face and stays there). The minute hand counts the times
+ *  the user answered (approved, declined, answered), and 60 fills the face and stays there. Both at rest: "Quiet week."
+ *  The line says the real counts. Same window as the recap. The caller passes `now`. */
+export function officeClock({ feed = [], merges = [], now, days = WEEK_DAYS } = {}) {
+  const t = Number(now), span = Number(days) > 0 ? Number(days) : WEEK_DAYS, from = t - span * DAY;
+  const inWindow = (at) => Number.isFinite(at) && at >= from && at <= t;
+  const mergeCount = (Array.isArray(merges) ? merges : []).filter((m) => m && inWindow(m.at)).length;
+  const answers = (Array.isArray(feed) ? feed : []).filter((f) => f && inWindow(f.t) && isAnswer(f)).length;
+  const line = mergeCount === 0 && answers === 0
+    ? 'Quiet week.'
+    : `${nWords(mergeCount, 'merge', 'merges')}. The office asked you ${nWords(answers, 'time', 'times')}.`;
+  return { hour: Math.min(mergeCount, 12), minute: Math.min(answers, 60), merges: mergeCount, answers, line };
 }
 
 /** While you were away: the feed since `since`, oldest first, a repeated line once, the newest `max` of them. */

@@ -33,7 +33,7 @@ import { WRITE_KINDS, writeValueOf, setWriteCell, HIRE_ROLES, SELF_APPROVAL_KIND
 import { createRuntime, runtimePaths } from './paperclip-runtime.mjs';
 import { createMemory, createEmbedder } from './memory.mjs';
 import { createRuns } from './paperclip-runs.mjs';
-import { recap as recapOf, away as awayOf } from './rituals.mjs';
+import { recap as recapOf, away as awayOf, officeClock } from './rituals.mjs';
 import { mark as markOrientation, view as orientationView } from './orientation.mjs';
 import { createTracker, clip } from './tracker.mjs';
 import { createAdmission } from './admission.mjs';
@@ -1370,7 +1370,8 @@ export function createOffice(cfg) {
     // Function floors (#92): each building's floors (archetypes.mjs layoutView), each room's floors and name, and the catalog
     layouts: layoutsView(), rooms: roomsView(), catalog: CATALOG,
     changes: changesView(),   // paper flow (#93): building key -> { ok, at, error, mergedToday, prs, ready } from gh
-    rituals: { focus: saved.get('focus'), merges: saved.get('merges').slice(0, 20) }, // Focus mode and the recent merges (the merged moment, #151)
+    // Focus mode, the recent merges (the merged moment, #151) and the week as clock hands (officeClock: one campus time).
+    rituals: { focus: saved.get('focus'), merges: saved.get('merges').slice(0, 20), clock: officeClock({ feed, merges: saved.get('merges'), now: Date.now() }) },
   }));
   // A page gets the whole snapshot when it connects, then one patch per broadcast with only what changed (wire.js).
   // State changes within BROADCAST_MS go out as one patch, so a burst of hooks sends at most 10 messages a second.
