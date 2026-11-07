@@ -24,7 +24,7 @@
     open: '/api/open', orientation: '/api/orientation', orientationStep: '/api/orientation/step', paperclipConnect: '/api/paperclip/connect', paperclipDisconnect: '/api/paperclip/disconnect',
     paperclipSupervise: '/api/paperclip/supervise', personaDelete: '/api/persona/delete', personaSave: '/api/persona/save',
     paperclipRuntimeInstall: '/api/paperclip/runtime/install', paperclipRuntimeUpdate: '/api/paperclip/runtime/update', paperclipRuntimeStart: '/api/paperclip/runtime/start', paperclipRuntimeStop: '/api/paperclip/runtime/stop',
-    paperclipRuntimeKey: '/api/paperclip/runtime/key', personaDelete: '/api/persona/delete', personaSave: '/api/persona/save',
+    paperclipRuntimeKey: '/api/paperclip/runtime/key', paperclipRuntimeConnect: '/api/paperclip/runtime/connect', paperclipRuntimeDisconnect: '/api/paperclip/runtime/disconnect', personaDelete: '/api/persona/delete', personaSave: '/api/persona/save',
     personaStarters: '/api/persona/starters', personas: '/api/personas', pr: '/api/pr', providers: '/api/providers', recap: '/api/recap',
     reopen: '/api/reopen', roomCreate: '/api/room/create', roomDelete: '/api/room/delete', scheduleDelete: '/api/schedule/delete',
     scheduleRun: '/api/schedule/run', scheduleSave: '/api/schedule/save', screenSet: '/api/screen/set', search: '/api/search',

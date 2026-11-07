@@ -21,7 +21,9 @@ function standIn() {
   Object.assign(x, {
     status: () => x.st, install: act('install', { state: 'stopped', installed: true }), update: async (o) => { x.calls.push('update:' + (o && o.background)); if (x.fail) throw x.fail; Object.assign(x.st, { state: 'updating' }); return x.st; }, start: act('start', { state: 'running' }), stop: act('stop', { state: 'stopped' }),
     connectKey: act('key', { key: { state: 'waiting', reason: '', expiresAt: null, approvalUrl: 'http://127.0.0.1:3100/cli-auth/x' } }),
-    resume: async (enabled) => { x.calls.push('resume:' + enabled); return x.st; }, killNow() { x.calls.push('killNow'); }, key: () => secretKey,
+    connectExisting: async (b) => { x.calls.push('connect:' + b.url + ':' + (b.key ? 'key' : 'nokey')); if (x.fail) throw x.fail; Object.assign(x.st, { state: 'connected', url: b.url }); return x.st; },
+    disconnect: async () => { x.calls.push('disconnect'); Object.assign(x.st, { state: 'stopped', url: 'http://127.0.0.1:3100' }); return x.st; },
+    resume: async (enabled, connect) => { x.calls.push('resume:' + enabled + (connect ? ':' + connect : '')); return x.st; }, killNow() { x.calls.push('killNow'); }, key: () => secretKey,
   });
   return x;
 }
@@ -121,4 +123,39 @@ test('the office hands its runtime to the adapter, and resume gives it the saved
   rig.office.resume();
   await new Promise((r) => setImmediate(r));
   assert.ok(rt.calls.includes('resume:false'), 'no wish saved after stop: it stays off');
+});
+
+// ---------- connect mode (#194) ----------
+test('the connect routes are page routes', () => {
+  for (const r of ['/api/paperclip/runtime/connect', '/api/paperclip/runtime/disconnect']) assert.equal(rig.office.core.groupOf('POST', r), 'page', r);
+});
+
+test('connect hands the address and the key to the runtime, keeps only the address in state.json, and no answer, snapshot or state carries the key', async () => {
+  const state = () => fs.readFileSync(officeFiles(base, PORT).state, 'utf8');
+  rt.calls.length = 0;
+  const KEY = 'pcp_board_' + '9'.repeat(40);
+  const r = await page('/api/paperclip/runtime/connect', { url: 'http://127.0.0.1:3555', key: KEY });
+  assert.equal(r.status, 200);
+  assert.equal(r.json.runtime.state, 'connected');
+  assert.deepEqual(rt.calls, ['connect:http://127.0.0.1:3555:key']);
+  assert.deepEqual(JSON.parse(state()).paperclipRuntime, { connect: 'http://127.0.0.1:3555' });
+  assert.equal(rig.snapshot().paperclipRuntime.state, 'connected');
+  assert.ok(!JSON.stringify([r.json, rig.snapshot(), state()]).includes(KEY));
+});
+
+test('stop does not forget the connect address; disconnect does', async () => {
+  const state = () => JSON.parse(fs.readFileSync(officeFiles(base, PORT).state, 'utf8'));
+  await page('/api/paperclip/runtime/stop');
+  assert.deepEqual(state().paperclipRuntime, { connect: 'http://127.0.0.1:3555' });
+  assert.equal((await page('/api/paperclip/runtime/disconnect')).status, 200);
+  assert.equal(state().paperclipRuntime, undefined);
+});
+
+test('a refusal of the runtime (a wrong key, a wrong address) is the route\'s status and words, and nothing is saved', async () => {
+  rt.fail = runtimeError(400, 'Paperclip at http://127.0.0.1:3555 does not accept this board key.');
+  const r = await page('/api/paperclip/runtime/connect', { url: 'http://127.0.0.1:3555', key: 'pcp_board_' + '1'.repeat(40) });
+  rt.fail = null;
+  assert.equal(r.status, 400);
+  assert.match(r.json.error, /does not accept this board key/);
+  assert.equal(JSON.parse(fs.readFileSync(officeFiles(base, PORT).state, 'utf8')).paperclipRuntime, undefined);
 });

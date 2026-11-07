@@ -326,13 +326,20 @@ export function createHq(deps = {}) {
   let c = null;   // the connection: { url, companyId, state, error, ws, tries, timer, refetch, busy, companies }
   let d = null;   // what Paperclip said: { company, agents: Map, issues, routines, runs: Map agentId -> run, last: Map agentId -> lastRun }
 
+  // The board key of the connect mode (#194): asked per address, so it goes only to the Paperclip it was made for (redirects are refused).
+  const keyOf = (url) => { try { return deps.token?.(url) || null; } catch { return null; } };
   async function call(conn, route, init = {}) {
     let res;
+    const key = keyOf(conn.url);
     try {
-      res = await doFetch(conn.url + route, { ...init, redirect: 'error', signal: AbortSignal.timeout(init.method ? 15000 : 8000), headers: { accept: 'application/json', ...(init.body ? { 'content-type': 'application/json' } : {}) } });
+      res = await doFetch(conn.url + route, { ...init, redirect: 'error', signal: AbortSignal.timeout(init.method ? 15000 : 8000), headers: { accept: 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}), ...(init.body ? { 'content-type': 'application/json' } : {}) } });
     } catch (e) { throw httpError(502, `No Paperclip answers at ${conn.url} (${e.cause?.code || e.name || 'no answer'}).`); }
     const body = await res.text();
-    if (res.status === 401 || res.status === 403) throw httpError(502, `Paperclip at ${conn.url} asks for sign-in (${res.status}). The office reads a Paperclip that runs in local_trusted mode (paperclipai run --bind loopback).`);
+    if (res.status === 401 || res.status === 403) {
+      throw httpError(502, key
+        ? `Paperclip at ${conn.url} does not accept the board key (${res.status}). It may be expired or revoked. Connect to Paperclip again with a new key.`
+        : `Paperclip at ${conn.url} asks for sign-in (${res.status}). The office reads a Paperclip that runs in local_trusted mode (paperclipai run --bind loopback), or one that you connect with a board key (Attach sessions, Paperclip runtime).`);
+    }
     if (!res.ok) throw httpError(502, `Paperclip answered ${res.status} for ${route.split('?')[0]}${body ? `: ${text(body, 160)}` : '.'}`);
     try { return body ? JSON.parse(body) : null; } catch { throw httpError(502, `Paperclip at ${conn.url} did not answer JSON for ${route.split('?')[0]}.`); }
   }
@@ -408,7 +415,8 @@ export function createHq(deps = {}) {
   function openSocket(conn) {
     if (!Ws) { lose(conn, 'This Node has no WebSocket, so the office cannot follow Paperclip live.'); return; }
     let ws;
-    try { ws = new Ws(`${conn.url.replace(/^http/, 'ws')}/api/companies/${encodeURIComponent(conn.companyId)}/events/ws`); } catch (e) { lose(conn, e.message); return; }
+    const key = keyOf(conn.url);
+    try { ws = new Ws(`${conn.url.replace(/^http/, 'ws')}/api/companies/${encodeURIComponent(conn.companyId)}/events/ws`, key ? { headers: { authorization: `Bearer ${key}` } } : undefined); } catch (e) { lose(conn, e.message); return; }
     conn.ws = ws;
     ws.onopen = () => { if (c !== conn) { try { ws.close(); } catch { /* gone */ } return; } conn.state = 'on'; conn.error = ''; conn.tries = 0; changed(); refetchSoon(conn); };
     ws.onmessage = (m) => { if (c !== conn) return; let ev; try { ev = JSON.parse(String(m.data)); } catch { return; } onEvent(conn, ev); };

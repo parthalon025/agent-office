@@ -891,3 +891,167 @@ test('update refuses while a Paperclip of the user answers on the port, and whil
     await settle();
   } finally { q.f.done(); }
 });
+
+// ---------- connect mode (#194): the user's own Paperclip, by address and board key ----------
+const MINE = 'http://127.0.0.1:3555';
+const GOOD = 'pcp_board_' + 'f'.repeat(40);
+async function connected(r, over = {}) {
+  r.pc.up = true; r.pc.bootstrapStatus = 'ready'; r.pc.keyValid = true;
+  return r.runtime.connectExisting({ url: MINE, key: GOOD, ...over });
+}
+
+test('cleanRuntime keeps a connect address that is on 127.0.0.1, and nothing else', () => {
+  assert.deepEqual(cleanRuntime({ connect: MINE }), { connect: MINE });
+  assert.deepEqual(cleanRuntime({ connect: MINE, enabled: true }), { connect: MINE });
+  assert.equal(cleanRuntime({ connect: 'http://example.com:3100' }), undefined);
+  assert.equal(cleanRuntime({ connect: 5 }), undefined);
+});
+
+test('connect: skips the install, checks the key against Paperclip, keeps it owner-only and says connected', async () => {
+  const r = rig();   // nothing installed
+  try {
+    const s = await connected(r);
+    assert.equal(s.state, 'connected');
+    assert.equal(s.url, MINE);
+    assert.equal(s.port, 3555);
+    assert.equal(s.installed, false, 'the office installed nothing');
+    assert.equal(s.key.state, 'ready');
+    assert.equal(s.key.expiresAt, '2026-12-06T00:00:00.000Z');
+    assert.equal(r.spawned.length, 0, 'no npm and no Paperclip process');
+    assert.deepEqual(r.secrets, [r.paths.key], 'through writeSecret');
+    const rec = JSON.parse(fs.readFileSync(r.paths.key, 'utf8'));
+    assert.equal(rec.apiBase, MINE);
+    assert.equal(rec.token, GOOD);
+    assert.ok(!JSON.stringify(s).includes(GOOD), 'the status never carries the key');
+    assert.equal(r.runtime.keyFor(MINE), GOOD, 'the HQ can ask for it, for this address only');
+    assert.equal(r.runtime.keyFor('http://127.0.0.1:3100'), null);
+    assert.ok(r.pc.requests.every((q) => q.route !== '/api/cli-auth/challenges'), 'no approval was started on the user\'s Paperclip');
+    assert.ok(r.feeds.some(([, t]) => /connected to your Paperclip/i.test(t)));
+  } finally { r.f.done(); }
+});
+
+test('connect: a wrong address says why, before or after a request, and keeps nothing', async () => {
+  const r = rig();
+  try {
+    for (const [url, re] of [['http://example.com:3100', /127\.0\.0\.1/], ['https://127.0.0.1:3100', /http/], ['', /address/i]]) {
+      await assert.rejects(r.runtime.connectExisting({ url, key: GOOD }), (e) => e.status === 400 && re.test(e.message), url);
+    }
+    assert.equal(r.pc.requests.length, 0, 'no request left the office');
+    await assert.rejects(r.runtime.connectExisting({ url: MINE, key: GOOD }), (e) => e.status === 502 && /No Paperclip answers at http:\/\/127\.0\.0\.1:3555/.test(e.message));
+    r.pc.up = true; r.pc.other = true;
+    await assert.rejects(r.runtime.connectExisting({ url: MINE, key: GOOD }), (e) => e.status === 502 && /not Paperclip/i.test(e.message));
+    assert.equal(r.secrets.length, 0);
+    assert.equal(fs.existsSync(r.paths.key), false);
+    assert.notEqual(r.runtime.status().state, 'connected');
+  } finally { r.f.done(); }
+});
+
+test('connect: a key that Paperclip refuses, an empty key in login mode, and a key of the wrong shape say why and write nothing', async () => {
+  const r = rig();
+  try {
+    r.pc.up = true; r.pc.bootstrapStatus = 'ready'; r.pc.keyValid = false;
+    await assert.rejects(r.runtime.connectExisting({ url: MINE, key: GOOD }), (e) => e.status === 400 && /does not accept this board key/i.test(e.message) && !e.message.includes(GOOD));
+    await assert.rejects(r.runtime.connectExisting({ url: MINE, key: 'nope' }), (e) => e.status === 400 && /board key/i.test(e.message) && !e.message.includes('nope'));
+    await assert.rejects(r.runtime.connectExisting({ url: MINE, key: '' }), (e) => e.status === 400 && /login mode.*board key/i.test(e.message));
+    assert.equal(r.secrets.length, 0);
+    assert.equal(fs.existsSync(r.paths.key), false);
+    assert.notEqual(r.runtime.status().state, 'connected');
+  } finally { r.f.done(); }
+});
+
+test('connect: a Paperclip in local trusted mode needs no key, and the office keeps none', async () => {
+  const r = rig();
+  try {
+    r.pc.up = true; r.pc.mode = 'local_trusted'; r.pc.bootstrapStatus = 'ready';
+    const s = await r.runtime.connectExisting({ url: MINE, key: '' });
+    assert.equal(s.state, 'connected');
+    assert.equal(s.key.state, 'none');
+    assert.equal(r.runtime.keyFor(MINE), null);
+    assert.equal(r.secrets.length, 0);
+  } finally { r.f.done(); }
+});
+
+test('connect: install and start refuse while connected; connect refuses while the office\'s own Paperclip runs', async () => {
+  const r = rig({ plant: true });
+  try {
+    await connected(r);
+    await assert.rejects(r.runtime.install(), (e) => e.status === 409 && /connected to your Paperclip/i.test(e.message));
+    await assert.rejects(r.runtime.start(), (e) => e.status === 409 && /Disconnect/i.test(e.message));
+    assert.equal(r.spawned.length, 0);
+  } finally { r.f.done(); }
+  const own = rig({ plant: true });
+  try {
+    await running(own);
+    own.pc.keyValid = true;
+    await assert.rejects(own.runtime.connectExisting({ url: MINE, key: GOOD }), (e) => e.status === 409 && /Stop Paperclip/i.test(e.message));
+  } finally { own.f.done(); }
+});
+
+test('connect: install, start and update all refuse while connected; no update is offered and nothing is run or changed (#194 with #195)', async () => {
+  const r = rig({ plant: oldInstall });   // an older verified release is on disk
+  try {
+    assert.equal(r.runtime.status().updateAvailable, true, 'own mode offers the update');
+    const s = await connected(r);
+    assert.equal(s.state, 'connected');
+    assert.equal(s.updateAvailable, false, 'a connected Paperclip is never offered an update');
+    await assert.rejects(() => r.runtime.install(), (e) => e.status === 409 && /connected to your Paperclip/i.test(e.message));
+    await assert.rejects(() => r.runtime.start(), (e) => e.status === 409 && /Disconnect/i.test(e.message));
+    await assert.rejects(() => r.runtime.update(), (e) => e.status === 409 && /connected to your Paperclip/i.test(e.message));
+    await assert.rejects(() => r.runtime.update({ background: true }), (e) => e.status === 409);
+    assert.equal(r.spawned.length, 0, 'no npm and no Paperclip process');
+    assert.equal(verOf(r.paths.install), OLD.version, 'the installed release is untouched');
+    assert.equal(fs.existsSync(r.paths.next), false, 'no staging folder');
+    assert.equal(fs.existsSync(r.paths.prev), false, 'no backup folder');
+  } finally { r.f.done(); }
+});
+
+test('disconnect forgets the key file and the address, writes nothing to the user\'s Paperclip, and the office can install again', async () => {
+  const r = rig({ plant: true });
+  try {
+    await connected(r);
+    r.pc.requests.length = 0;
+    const s = await r.runtime.disconnect();
+    assert.equal(s.state, 'stopped');
+    assert.equal(s.url, 'http://127.0.0.1:3100', 'back to the office\'s own address');
+    assert.equal(fs.existsSync(r.paths.key), false);
+    assert.equal(r.runtime.keyFor(MINE), null);
+    assert.equal(r.pc.requests.filter((q) => q.method !== 'GET').length, 0);
+    assert.equal(r.killed.length, 0, 'the user\'s Paperclip has no pid here');
+  } finally { r.f.done(); }
+});
+
+test('connect with no key reuses the saved key of the same address, and not one of another address', async () => {
+  const r = rig();
+  try {
+    r.pc.up = true; r.pc.bootstrapStatus = 'ready'; r.pc.keyValid = true;
+    fs.mkdirSync(path.dirname(r.paths.key), { recursive: true });
+    fs.writeFileSync(r.paths.key, JSON.stringify({ token: GOOD, apiBase: MINE, userId: 'u1', keyId: 'k1', expiresAt: null }));
+    assert.equal((await r.runtime.connectExisting({ url: MINE, key: '' })).state, 'connected');
+    await r.runtime.disconnect();
+    fs.mkdirSync(path.dirname(r.paths.key), { recursive: true });
+    fs.writeFileSync(r.paths.key, JSON.stringify({ token: GOOD, apiBase: 'http://127.0.0.1:3777', userId: 'u1', keyId: 'k1', expiresAt: null }));
+    await assert.rejects(r.runtime.connectExisting({ url: MINE, key: '' }), (e) => e.status === 400);
+  } finally { r.f.done(); }
+});
+
+test('resume with a saved connect address connects again; a Paperclip that is gone is failed with the reason and can retry', async () => {
+  const a = rig();
+  try {
+    fs.mkdirSync(path.dirname(a.paths.key), { recursive: true });
+    fs.writeFileSync(a.paths.key, JSON.stringify({ token: GOOD, apiBase: MINE, userId: 'u1', keyId: 'k1', expiresAt: null }));
+    a.pc.up = false;
+    const s = await a.runtime.resume(false, MINE);
+    assert.equal(s.state, 'failed');
+    assert.match(s.reason, /No Paperclip answers at http:\/\/127\.0\.0\.1:3555/);
+    assert.equal(a.spawned.length, 0);
+    a.pc.up = true; a.pc.bootstrapStatus = 'ready'; a.pc.keyValid = true;
+    assert.equal((await a.runtime.connectExisting({ url: MINE, key: '' })).state, 'connected', 'retry with the saved key');
+  } finally { a.f.done(); }
+  const b = rig();
+  try {
+    fs.mkdirSync(path.dirname(b.paths.key), { recursive: true });
+    fs.writeFileSync(b.paths.key, JSON.stringify({ token: GOOD, apiBase: MINE, userId: 'u1', keyId: 'k1', expiresAt: null }));
+    b.pc.up = true; b.pc.bootstrapStatus = 'ready'; b.pc.keyValid = true;
+    assert.equal((await b.runtime.resume(false, MINE)).state, 'connected');
+  } finally { b.f.done(); }
+});

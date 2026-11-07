@@ -354,6 +354,7 @@ export function createOffice(cfg) {
   const hq = createHq({
     sessions: () => [...sessions.values()], // the plan source links a Paperclip task to the session that runs it (#155)
     hooksFile: () => HOOKS_CMD_FILE.replace(/\\/g, '/'),
+    token: (u) => (runtime.keyFor ? runtime.keyFor(u) : null), // the board key (#194), for the address it was made for only
     onChange: () => broadcast(),
     onFeed: (text, kind) => addFeed(PAPERCLIP, kind, text),
     // A run ended. One whose held call timed out (the office denied it) and that Paperclip marks succeeded is named, so the
@@ -415,7 +416,21 @@ export function createOffice(cfg) {
   }
   async function stopRuntime() {
     const st = await runtime.stop();
-    if (saved.get('paperclipRuntime')) { saved.set('paperclipRuntime', undefined); savePersisted(); }
+    if (saved.get('paperclipRuntime')?.enabled) { saved.set('paperclipRuntime', undefined); savePersisted(); }
+    broadcast();
+    return { runtime: st };
+  }
+  // Connect mode (#194): the user's own Paperclip, by address and board key. Nothing is installed or started; the address is kept so it
+  // connects again at the next start, the key only in its owner-only file. The key is never in an answer, a feed line or state.json.
+  async function connectRuntime(body) {
+    const st = await runtime.connectExisting({ url: body.url, key: body.key });
+    saved.set('paperclipRuntime', { connect: st.url }); savePersisted();
+    broadcast();
+    return { runtime: st };
+  }
+  async function disconnectRuntime() {
+    const st = await runtime.disconnect();
+    if (saved.get('paperclipRuntime')?.connect) { saved.set('paperclipRuntime', undefined); savePersisted(); }
     broadcast();
     return { runtime: st };
   }
@@ -1245,6 +1260,9 @@ export function createOffice(cfg) {
     R('POST', '/api/paperclip/runtime/update', 'page', ({ body }) => updateRuntime(body)),
     R('POST', '/api/paperclip/runtime/start', 'page', () => startRuntime()),
     R('POST', '/api/paperclip/runtime/stop', 'page', () => stopRuntime()),
+    // Connect mode (#194): { url, key? } for a Paperclip the user runs (400 for a wrong address or key, 502 when it does not answer), and leave it.
+    R('POST', '/api/paperclip/runtime/connect', 'page', ({ body }) => connectRuntime(body)),
+    R('POST', '/api/paperclip/runtime/disconnect', 'page', () => disconnectRuntime()),
     R('POST', '/api/paperclip/runtime/key', 'page', async () => { const st = await runtime.connectKey(); broadcast(); return { runtime: st }; }),
     R('GET', '/api/info', 'page', () => ({
       port: PORT, hooksFile: activeHooksFile(), recent: saved.get('recent'), home: os.homedir(),
@@ -1424,7 +1442,7 @@ export function createOffice(cfg) {
       void refreshEnforce();
       // Paperclip HQ (#76): the connection the user made before, again (a Paperclip that is not up yet is tried again later).
       // The Paperclip runtime the user started before comes back with the office.
-      runtime.resume(!!(saved.get('paperclipRuntime') && saved.get('paperclipRuntime').enabled)).then(() => broadcast(), (e) => console.warn(`Paperclip runtime: ${e.message}`));
+      runtime.resume(!!(saved.get('paperclipRuntime') && saved.get('paperclipRuntime').enabled), saved.get('paperclipRuntime')?.connect).then(() => broadcast(), (e) => console.warn(`Paperclip runtime: ${e.message}`));
       if (saved.get('paperclip') && saved.get('paperclip').url) hq.connect({ url: saved.get('paperclip').url, company: saved.get('paperclip').company || null, keep: true }).catch((e) => console.warn(`Paperclip: ${e.message}`));
     },
     hooks: { mode: () => hooksMode, file: activeHooksFile, version: CLAUDE_VERSION },

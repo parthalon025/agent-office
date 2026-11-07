@@ -237,7 +237,7 @@
   }
   // The Paperclip the office runs itself (#193, paperclip-runtime.mjs status): its state as a DS status and a word, and the board key's line.
   var RUNTIME = { off: ['resting', 'Not installed'], installing: ['working', 'Installing'], updating: ['working', 'Updating'], stopped: ['resting', 'Stopped'], starting: ['working', 'Starting'],
-    running: ['working', 'Running'], failed: ['error', 'Failed'], external: ['resting', 'Another Paperclip runs'], busy: ['error', 'Port in use'] };
+    running: ['working', 'Running'], failed: ['error', 'Failed'], external: ['resting', 'Another Paperclip runs'], busy: ['error', 'Port in use'], connected: ['working', 'Connected to your Paperclip'] };
   function runtimeState(rt) {
     if (!rt) return null;
     var x = Object.prototype.hasOwnProperty.call(RUNTIME, rt.state) ? RUNTIME[rt.state] : ['resting', String(rt.state)];

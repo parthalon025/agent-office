@@ -298,12 +298,13 @@
     var keyLink = rt.key && rt.key.approvalUrl ? link(rt.key.approvalUrl, 'Open the approval link') : null;
     var inviteLink = rt.inviteUrl ? link(rt.inviteUrl, 'Open the first-account link') : null;
     var openLink = s === 'running' && !inviteLink && !keyLink ? link(rt.url + '/', 'Open Paperclip') : null;
+    var own = rt.mode !== 'connect';
     var needsKey = rt.key && (rt.key.state === 'none' || rt.key.state === 'refused' || rt.key.state === 'expired');
     return h(React.Fragment, null,
       h('h3', { className: 'ext-h' }, 'Paperclip runtime'),
-      h('p', { className: 'note' }, 'Run Paperclip from the office. The office installs release ' + rt.version + ' with npm into its own folder, starts it in login mode on this computer only (127.0.0.1) and stops it with the office. Its data stays in your local app data folder. A Paperclip that you run yourself is never changed.'),
+      h('p', { className: 'note' }, 'Run Paperclip from the office. The office installs release ' + rt.version + ' with npm into its own folder, starts it in login mode on this computer only (127.0.0.1) and stops it with the office. Its data stays in your local app data folder. A Paperclip that you run yourself is never changed: connect to it below instead of installing.'),
       h('p', { className: 'note', role: 'status' }, h('span', { className: 'sess-state' }, h(A.StatusDot, { status: st.key }), st.word), rt.reason ? ' ' + rt.reason : ''),
-      s === 'running' ? h('p', { className: 'note' }, V.runtimeKey(rt)) : null,
+      (s === 'running' || s === 'connected') ? h('p', { className: 'note' }, V.runtimeKey(rt)) : null,
       rt.updateAvailable && s !== 'updating' ? h('p', { className: 'note' }, 'Paperclip ' + rt.installedVersion + ' is installed. Release ' + rt.version + ' is ready to install.') : null,
       rt.update && rt.update.error && s !== 'updating' ? h('p', { className: 'ao-err', role: 'alert' }, rt.update.error) : null,
       rt.steps && rt.steps.length && !ask ? h('ul', { className: 'kind-steps' }, rt.steps.map(function (t, i) { return h('li', { key: i }, t); })) : null,
@@ -316,11 +317,29 @@
           h(A.Button, { variant: 'quiet', onClick: function () { setAsk(''); } }, askFor === 'paperclipRuntimeUpdate' ? 'Do not update' : 'Do not install'))) : null,
       err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
       h('div', { className: 'btn-row' },
-        (s === 'off' || (s === 'failed' && !rt.installed)) && !ask ? h(A.Button, { variant: 'quiet', icon: 'add', disabled: !!busy, loading: busy === 'paperclipRuntimeInstall', onClick: function () { call('paperclipRuntimeInstall', {}); } }, 'Install Paperclip') : null,
-        s === 'stopped' || (s === 'failed' && rt.installed) ? h(A.Button, { variant: 'quiet', icon: 'resume', disabled: !!busy, loading: busy === 'paperclipRuntimeStart', onClick: function () { call('paperclipRuntimeStart', {}, function () { toast('Paperclip is starting', 'The first start takes a minute or two.'); }); } }, 'Start Paperclip') : null,
+        own && (s === 'off' || (s === 'failed' && !rt.installed)) && !ask ? h(A.Button, { variant: 'quiet', icon: 'add', disabled: !!busy, loading: busy === 'paperclipRuntimeInstall', onClick: function () { call('paperclipRuntimeInstall', {}); } }, 'Install Paperclip') : null,
+        own && (s === 'stopped' || (s === 'failed' && rt.installed)) ? h(A.Button, { variant: 'quiet', icon: 'resume', disabled: !!busy, loading: busy === 'paperclipRuntimeStart', onClick: function () { call('paperclipRuntimeStart', {}, function () { toast('Paperclip is starting', 'The first start takes a minute or two.'); }); } }, 'Start Paperclip') : null,
         s === 'running' && rt.bootstrap !== 'pending' && needsKey ? h(A.Button, { variant: 'quiet', icon: 'tool', disabled: !!busy, loading: busy === 'paperclipRuntimeKey', onClick: function () { call('paperclipRuntimeKey', {}); } }, 'Connect board key') : null,
         rt.updateAvailable && (s === 'stopped' || s === 'running' || s === 'failed') && !ask ? h(A.Button, { variant: 'quiet', icon: 'add', disabled: !!busy, loading: busy === 'paperclipRuntimeUpdate', onClick: function () { call('paperclipRuntimeUpdate', {}); } }, 'Update Paperclip') : null,
-        s === 'running' || s === 'starting' ? h(A.Button, { variant: 'quiet', icon: 'close', disabled: !!busy, loading: busy === 'paperclipRuntimeStop', onClick: function () { call('paperclipRuntimeStop', {}, function () { toast('Paperclip stopped', 'It starts again only when you start it.'); }); } }, 'Stop Paperclip') : null));
+        s === 'running' || s === 'starting' ? h(A.Button, { variant: 'quiet', icon: 'close', disabled: !!busy, loading: busy === 'paperclipRuntimeStop', onClick: function () { call('paperclipRuntimeStop', {}, function () { toast('Paperclip stopped', 'It starts again only when you start it.'); }); } }, 'Stop Paperclip') : null),
+      own && (s === 'starting' || s === 'running' || s === 'installing') ? null : h(PaperclipOwn, { runtime: rt, call: call, toast: toast, busy: busy }));
+  }
+
+  // ---------- connect to a Paperclip you already run (#194): its address and a board key; nothing is installed ----------
+  // The key goes to the office server and on to Paperclip, and is saved in an owner-only file. This panel never shows it again and never keeps it.
+  function PaperclipOwn(p) {
+    var rt = p.runtime, on = rt.state === 'connected';
+    var u = useState(rt.mode === 'connect' ? rt.url : 'http://127.0.0.1:3100'), url = u[0], setUrl = u[1];
+    var k = useState(''), key = k[0], setKey = k[1];
+    return h(React.Fragment, null,
+      h('h3', { className: 'ext-h' }, 'Connect to your Paperclip'),
+      h('p', { className: 'note' }, on ? 'The office uses your Paperclip at ' + rt.url + '. It installs, starts and stops nothing. Disconnect forgets the address and the board key. Your Paperclip runs on.'
+        : 'Already run Paperclip? Type its address (127.0.0.1 only) and a board key from its settings. A Paperclip in login mode needs the key. The office checks it with Paperclip before it saves it, in a file only you can read.'),
+      on ? h('div', { className: 'btn-row' }, h(A.Button, { variant: 'quiet', icon: 'close', disabled: !!p.busy, loading: p.busy === 'paperclipRuntimeDisconnect', onClick: function () { p.call('paperclipRuntimeDisconnect', {}, function () { p.toast('Disconnected from your Paperclip', 'It runs on as before.'); }); } }, 'Disconnect Paperclip'))
+        : h('div', { className: 'copy-row' },
+          h(A.TextInput, { id: 'h-pcr-url', label: 'Your Paperclip address', value: url, onChange: setUrl, hint: 'Only an address on 127.0.0.1, for example http://127.0.0.1:3100.' }),
+          h(A.TextInput, { id: 'h-pcr-key', label: 'Board key', type: 'password', value: key, onChange: setKey, placeholder: 'pcp_board_...', hint: 'Leave it empty to use the key saved for this address, or when Paperclip runs in local trusted mode.' }),
+          h(A.Button, { variant: 'quiet', icon: 'approve', disabled: !!p.busy, loading: p.busy === 'paperclipRuntimeConnect', onClick: function () { p.call('paperclipRuntimeConnect', { url: url, key: key }, function () { setKey(''); p.toast('Connected to your Paperclip', 'The office installed nothing.'); }); } }, 'Connect to Paperclip')));
   }
 
   // ---------- Paperclip HQ (#76): connect, and what the office reads from it ----------
