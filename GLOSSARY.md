@@ -35,3 +35,4 @@ The vocabulary of the office layout (#88). Plain company terms only.
 | Orientation | The first-run walk through the whole office, step by step and skippable: agent kinds, Security room, spend limit, company setup, company memory, Start with Windows, remote access, the tour |
 | Write grid | The HQ setting of what the office may write to Paperclip, per write kind: Confirm, Allow or Deny |
 | Self-approval | An employee approving its own work, only for the approval kinds the user allows in the write grid |
+| Office adapter | The Paperclip adapter that hands an employee run to the office, which runs it with the employee agent kind under supervision |
