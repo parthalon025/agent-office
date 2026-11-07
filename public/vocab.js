@@ -121,6 +121,9 @@
     notConnectedReason: function (why) { return 'Not connected.' + (why ? ' ' + why : '') + ' The steps are the last ones read.'; },
     // The state of an office goal (manager.mjs status). A Paperclip plan has none of its own: its steps carry the state.
     goalWord: function (status) { return status === 'not-connected' ? 'Not connected' : GOAL_WORD[status] || ''; },
+    // A goal that came from a Paperclip task a Manager employee took (#204), and the words of hiring a Manager there.
+    fromTask: function (t) { return t && (t.identifier || t.title) ? 'From the Paperclip task ' + [t.identifier, t.title].filter(Boolean).join(' ') : ''; },
+    hireManager: { title: 'Hire the Manager in Paperclip', button: 'Hire Manager', building: 'Building', has: 'Manager in Paperclip: ', none: 'No Manager works in Paperclip for this building yet.', done: 'Manager hired in Paperclip' },
     readOnlyNote: function (kind) { return kind === 'paperclip' ? 'Read only. Paperclip plans this work.' : ''; },
     unreadable: function (word) { return 'The ' + word + ' plan could not be read. It is not shown.'; },
     // One view of the snapshot's plans field (the Manager panel, the room wall, Ctrl+K). building: only that building's goals.
@@ -130,7 +133,7 @@
         var steps = p.steps || [], note = p.frozen ? p.reason : (p.source === 'paperclip' ? plan.readOnlyNote(p.source) : (p.reason || ''));
         var ho = p.handoff && typeof p.handoff === 'object' ? p.handoff : null, written = ho && ho.tasks ? Object.keys(ho.tasks).length : 0;
         var handoff = ho ? { company: String(ho.company || ''), tasks: ho.tasks || {}, written: written, left: Math.max(0, steps.length - written), failed: p.status === 'handoff-failed', done: p.status === 'handed-off' } : null;
-        return { id: p.id, building: p.building, source: p.source, sourceWord: p.sourceWord, goal: p.goal, readOnly: p.source === 'paperclip', frozen: !!p.frozen, status: p.status,
+        return { id: p.id, building: p.building, source: p.source, sourceWord: p.sourceWord, fromTask: plan.fromTask(p.task), goal: p.goal, readOnly: p.source === 'paperclip', frozen: !!p.frozen, status: p.status,
           handoff: handoff, handoffable: p.source === 'office' && HANDOFF_FROM.indexOf(p.status) >= 0 && steps.length > 0 && !steps.some(function (x) { return x.state === 'working'; }),
           stateWord: plan.goalWord(p.status), note: note, steps: steps, total: steps.length, done: steps.filter(function (x) { return x.state === 'finished'; }).length };
       });

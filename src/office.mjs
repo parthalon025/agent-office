@@ -34,6 +34,7 @@ import { createState } from './state.mjs';
 import { addRecent, recentChoices } from './recent.mjs';
 import { cleanRecord, layoutView, catalogView, functionOf } from './archetypes.mjs';
 import { createManager, createPlanBoard, officeSource } from './manager.mjs';
+import { createManagerEmployees } from './manager-employees.mjs';
 import { setPersona, removePersona, personaOf, personaPrompt, addStarters, addStarterTeams, setTeam, removeTeam, teamOf, exportCustom, importCustom, setScreen } from './personas.mjs';
 import { createHolds } from './holds.mjs';
 import { createNotes, scanNote } from './notes.mjs';
@@ -1104,6 +1105,14 @@ export function createOffice(cfg) {
     open: (o) => openSession(o), send: (uid, text) => sendMessage(uid, text, [], { answers: false }), session: (uid) => sessions.get(uid),
     close: (uid) => closeSession(uid), feed: (s, kind, text) => addFeed(s, kind, text), changed: () => broadcast(),
   });
+  // The office Manager as a Paperclip employee (#204): a task assigned to it becomes a goal, the steps are sub-issues, the result a comment.
+  const managerEmployees = createManagerEmployees({ hq, manager, state: { get: (k) => saved.get(k), set: (k, v) => saved.set(k, v), save: () => savePersisted() }, feed: (t) => addFeed(PAPERCLIP, 'tool', t) });
+  let managerSyncQueued = false;
+  function managerSync() {
+    if (managerSyncQueued) return;
+    managerSyncQueued = true;
+    setImmediate(() => { managerSyncQueued = false; managerEmployees.sync().catch((e) => console.warn(`Manager employees: ${e.message}`)); });
+  }
   const planBoard = createPlanBoard({ sources: [officeSource(manager), hq.planSource] });
   // Called after every state change: a step ends with the turn of its agent, and a freed agent may take a waiting step.
   let goalTickQueued = false, freeSig = '';
@@ -1280,6 +1289,7 @@ export function createOffice(cfg) {
   readPlan();
   function broadcast() {
     goalTick();    // a step ends with its agent's turn (#156)
+    managerSync(); // a task for a Manager employee, and the report of its goal (#204)
     paperclipRuns.tick(); // so does a Paperclip run (#200)
     noteRooms();   // every state change: a room gets its floor and its name even while no page is connected (#92)
     if (!pending) pending = setTimeout(flush, BROADCAST_MS);
@@ -1510,6 +1520,9 @@ export function createOffice(cfg) {
     // Manager goals (#156): start { building, goal, approveFirst?, spendLimit?, confirmed? }, approve, cancel and retry { id, step }.
     R('POST', '/api/goal/start', 'page', ({ body }) => startGoal(body)),
     R('POST', '/api/goal/approve', 'page', async ({ body }) => { if (!await manager.approve(String(body.id))) throw httpError(409, 'That goal does not wait for approval.'); return { ok: true }; }),
+    // Managers as Paperclip employees (#204): the Managers of the connected company, and the hire of one (hq.write kind hire: the grid's Hires cell).
+    R('GET', '/api/managers', 'page', () => ({ managers: managerEmployees.list() })),
+    R('POST', '/api/manager/hire', 'page', ({ body }) => managerEmployees.register({ building: String(body.building || ''), name: body.name === undefined ? undefined : String(body.name), confirmed: body.confirmed === true })),
     R('POST', '/api/goal/handoff', 'page', ({ body }) => handoffGoalHq(body)),
     R('POST', '/api/goal/cancel', 'page', ({ body }) => { if (!manager.cancel(String(body.id))) throw httpError(409, 'That goal is done or stopped.'); return { ok: true }; }),
     R('POST', '/api/goal/retry', 'page', async ({ body }) => { const r = await manager.retry(String(body.id), String(body.step)); if (!r.ok) throw httpError(409, r.reason); return { ok: true }; }),

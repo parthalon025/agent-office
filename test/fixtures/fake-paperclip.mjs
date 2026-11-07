@@ -144,6 +144,13 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
         const want = (u.searchParams.get('status') || '').split(',').map((s) => s.trim()).filter(Boolean);
         return send(res, 200, st.issues.filter((i) => i.companyId === x[1] && (seed.allIssues || !want.length || want.includes(i.status))));
       }
+      // hire an agent (routes/agents.ts, #204: the office Manager as an employee; Paperclip answers the agent it made).
+      if (req.method === 'POST' && (x = m(/^\/api\/companies\/([^/]+)\/agents$/))) {
+        if (!parsed || typeof parsed.name !== 'string' || !parsed.name || typeof parsed.role !== 'string') return send(res, 422, { error: 'Validation error' });
+        const a = { id: `a4000000-0000-4000-8000-${String(st.agents.length + 1).padStart(12, '0')}`, companyId: x[1], urlKey: parsed.name.toLowerCase(), title: null, icon: null, status: 'idle', reportsTo: null, capabilities: null, runtimeConfig: { heartbeat: { enabled: false } }, budgetMonthlyCents: 0, spentMonthlyCents: 0, pauseReason: null, pausedAt: null, permissions: { canCreateAgents: false }, lastHeartbeatAt: null, metadata: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), ...parsed };
+        st.agents.push(a);
+        return send(res, 201, a);
+      }
       // create a task (routes/issues.ts, createIssueSchema 0.3.1: title, description, status; no metadata, no idempotency key).
       // api.failIssueAfter = n answers 500 to every create once n tasks were made (a failure in the middle of a handoff).
       if (req.method === 'POST' && (x = m(/^\/api\/companies\/([^/]+)\/issues$/))) {
