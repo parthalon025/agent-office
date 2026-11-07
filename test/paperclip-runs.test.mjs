@@ -3,6 +3,9 @@
 // Run: node --test test/paperclip-runs.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { createRuns, cleanRun, resultOf, WAIT_MS, MAX_RUNS } from '../src/paperclip-runs.mjs';
 import { askFirst } from '../src/office-core.mjs';
 
@@ -31,7 +34,7 @@ function rig(over = {}) {
   };
   const runs = createRuns(deps);
   const fire = (ms) => { for (const t of timers.filter((x) => !x.off && x.ms === ms)) { t.off = true; t.fn(); } };
-  return { runs, sessions, calls, timers, fire };
+  return { runs, sessions, calls, timers, fire, deps };
 }
 const end = (s, patch = {}) => Object.assign(s, { status: 'idle', turnEnded: true, turns: 1 }, patch);
 
@@ -296,4 +299,84 @@ test('company memory: a block that would not fit the message limit is left out, 
   runs.tick();
   await new Promise((x) => setImmediate(x));
   assert.deepEqual(kept, []);
+});
+
+// ---------- review of the HQ build, finding 5: one folder whatever its spelling, also through a junction ----------
+test('the desk compares the saved folder by the real path: a junction to the run folder is the same folder', { skip: process.platform !== 'win32' ? 'junctions are Windows only' : false }, async () => {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'ao-runs-dir-'));
+  try {
+    const real = path.join(base, 'work'), link = path.join(base, 'link');
+    fs.mkdirSync(real);
+    fs.symlinkSync(real, link, 'junction');
+    const r = rig();
+    await r.runs.start({ ...BODY, cwd: real, context: { wake_reason: 'issue_assigned', prior: { session_id: 's0', task_id: 'task-9', cwd: link } } });
+    assert.match(r.sessions.get('o1').paperclip.desk.fresh, /does not resume/, 'the saved folder is the run folder through a junction: not another folder');
+    const r2 = rig();
+    await r2.runs.start({ ...BODY, cwd: real, context: { wake_reason: 'issue_assigned', prior: { session_id: 's0', task_id: 'task-9', cwd: base } } });
+    assert.match(r2.sessions.get('o1').paperclip.desk.fresh, /another folder/);
+  } finally { fs.rmSync(base, { recursive: true, force: true }); }
+});
+
+// ---------- review of the HQ build, finding 3: a Manager's run is the goal of its task, never a second session ----------
+// The goals stand-in plays manager-employees.mjs runGoal and goalState; the test moves the goal by hand.
+function goalRig(take) {
+  const r = rig();
+  const goal = { id: 'g1', status: 'awaiting-approval', reason: '', ended: false, ok: false, summary: '', steps: [{ id: 'g1-1', text: 'Find the bug', status: 'pending', result: '' }, { id: 'g1-2', text: 'Fix it', status: 'pending', result: '' }] };
+  const asked = [], cancelled = [];
+  const runs = createRuns({ ...r.deps, goals: { take: async (x) => { asked.push(x); return take(x); }, read: (id) => (id === 'g1' ? goal : null), cancel: (id) => { cancelled.push(id); goal.status = 'cancelled'; } } });
+  return { ...r, runs, goal, asked, cancelled };
+}
+const logOf = async (runs, key = 'run-1') => (await runs.wait({ key, cursor: 0 })).log.map((l) => l.text);
+
+test('a Manager run opens no session: it is the goal of its task, logs the goal as it moves, and ends with the goal result', async () => {
+  const g = goalRig((x) => (x.employee === 'agent-1' ? { goal: 'g1' } : null));
+  assert.deepEqual(await g.runs.start(BODY), { key: 'run-1', resumed: false });
+  assert.deepEqual(g.asked, [{ employee: 'agent-1', company: 'co-1', task: 'task-9', run: 'run-1' }]);
+  assert.deepEqual([g.calls.open, g.calls.send], [[], []], 'no session, no prompt: the goal is the one run of work');
+  let lines = await logOf(g.runs);
+  assert.match(lines[0], /Ada is an office Manager: the office runs this task as its goal g1, and opens no session/);
+  assert.ok(lines.some((t) => /waits for your approval in Agent Office/.test(t)));
+  assert.ok(lines.some((t) => /The plan has 2 steps:\n1\. Find the bug\n2\. Fix it/.test(t)));
+  g.goal.status = 'running'; g.goal.steps[0].status = 'working';
+  g.runs.tick();
+  Object.assign(g.goal.steps[0], { status: 'finished', result: 'In auth.js' }); g.goal.steps[1].status = 'error'; Object.assign(g.goal, { status: 'blocked', reason: 'Step failed: Fix it' });
+  g.runs.tick();
+  assert.equal((await g.runs.wait({ key: 'run-1', cursor: 0 })).done, false, 'a blocked goal waits for Retry, and the run with it');
+  lines = await logOf(g.runs);
+  assert.ok(lines.includes('[agent-office] Step 1 working: Find the bug'));
+  assert.ok(lines.includes('[agent-office] Step 1 finished: Find the bug (In auth.js)'));
+  assert.ok(lines.some((t) => /Step 2 error: Fix it/.test(t)));
+  assert.ok(lines.some((t) => /The goal is blocked\. Retry the step or cancel the goal/.test(t)));
+  Object.assign(g.goal, { status: 'finished', ended: true, ok: true, summary: 'The Manager finished this task.\n[x] Find the bug\n[x] Fix it' });
+  g.runs.tick();
+  const done = await g.runs.wait({ key: 'run-1', cursor: 0 });
+  assert.equal(done.done, true);
+  assert.deepEqual([done.result.ok, done.result.uid, done.result.cost, done.result.costUnknown], [true, null, null, true]);
+  assert.match(done.result.summary, /^The Manager finished this task\./);
+  assert.equal(g.runs.transcript('o1'), null);
+  assert.deepEqual(g.calls.open, [], 'still no session');
+});
+
+test('a Manager run: Paperclip cancel cancels the goal; nothing to do as a goal ends at once; another employee is a session as before', async () => {
+  const g = goalRig(() => ({ goal: 'g1' }));
+  await g.runs.start(BODY);
+  assert.deepEqual(await g.runs.cancel({ key: 'run-1' }), { ok: true, done: true });
+  assert.deepEqual(g.cancelled, ['g1']);
+  const r = await g.runs.wait({ key: 'run-1', cursor: 0 });
+  assert.deepEqual([r.done, r.result.ok], [true, false]);
+  assert.match(r.result.error, /cancelled the goal/);
+  const none = goalRig(() => ({ none: 'The run names no task.', ok: true }));
+  await none.runs.start({ ...BODY, task_id: undefined });
+  const n = await none.runs.wait({ key: 'run-1', cursor: 0 });
+  assert.deepEqual([n.done, n.result.ok, n.result.summary, none.calls.open.length], [true, true, 'The run names no task.', 0]);
+  const other = goalRig(() => null);
+  await other.runs.start(BODY);
+  assert.equal(other.calls.open.length, 1, 'not a Manager: an ordinary session run');
+  const gone = goalRig(() => ({ goal: 'g-gone' }));
+  await gone.runs.start(BODY);
+  const x = await gone.runs.wait({ key: 'run-1', cursor: 0 });
+  assert.deepEqual([x.done, x.result.ok], [true, false]);
+  const failed = goalRig(async () => { throw Object.assign(new Error('Paperclip has no such task in this company.'), { status: 404 }); });
+  await assert.rejects(failed.runs.start(BODY), (e) => e.status === 404, 'a task the office cannot read is the start error');
+  assert.equal(failed.calls.open.length, 0);
 });

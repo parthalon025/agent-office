@@ -37,9 +37,11 @@
 // moves. test/hq-read.test.mjs runs the watcher against the fake.
 //
 // The write side (#198, ADR 0010).
-// - The write grid. WRITE_KINDS has one row per kind, fourteen: hire, pause, budget, approval, reporting, routine, access, secret,
-//   task, comment, company (#199), goal (#207), instance (#221) and adapter (#222). Each is Confirm, Allow or Deny. The default is
-//   Confirm, except Allow for task and comment. secret offers Confirm and Deny only. cleanWriteGrid cleans the saved slice `hqGrid`,
+// - The write grid. WRITE_KINDS has one row per kind, sixteen: hire, pause, budget, approval, reporting, routine, access, secret,
+//   task, comment, company (#199), goal (#207), instance (#221), adapter (#222), supervise and export (review of the HQ build: the writes
+//   that were sent beside the writer). Each is Confirm, Allow or Deny. The default is Confirm, except Allow for task, comment and export.
+//   secret and supervise offer Confirm and Deny only (supervise keeps its painted Confirm on the Agents screen); export offers Allow and
+//   Deny only (it changes nothing, so it is never asked). cleanWriteGrid cleans the saved slice `hqGrid`,
 //   which holds only the cells the user set. writeValueOf gives a cell (an unknown kind is Deny). setWriteCell changes one: a looser
 //   change, Deny to Confirm or Confirm to Allow, is 409 until `confirmed: true` (the painted Confirm); a secret never takes Allow
 //   (400). Tested in test/hq-write-grid.test.mjs.
@@ -81,17 +83,20 @@
 //   on is 409 until `confirmed: true`, a never kind is 400. After each read, selfApprove (paperclip.mjs) approves once each pending
 //   approval an employee of the company asked for, of a kind that is on, through `write`, so a Deny in the Approvals cell still wins.
 //   Routes (page group): GET /api/hq/grid also carries `selfApproval`, and POST /api/hq/self-approval/set { type, value, confirmed }.
-// - The hire (#201, PLANS.hire.create, HIRE_ROLES): POST /agent-hires with adapterType 'agent_office' (so the employee is Supervised),
+// - The hire (#201, PLANS.hire.create, HIRE_ROLES): POST /agent-hires with adapterType 'agent_office' (its runs are office sessions of its
+//   agent kind, so the employee is as supervised as that kind, ADR 0001: paperclip.mjs supervisionOf),
 //   adapterConfig { agentKind, isolation, model? }, budgetMonthlyCents from `budgetDollars` (a missing, zero or non-number budget is 400
-//   before anything is asked; at most HIRE_BUDGET_MAX), the role from the role cards only, and skills as names. Its `review` names the
-//   manager in the Confirm summary (role, manager, kind, model, budget, skills). Paperclip answers 201 { agent, approval }
+//   before anything is asked; at most HIRE_BUDGET_MAX), the role from the role cards only, and skills as names. Its `review(org, { kindOf })`
+//   names the manager and the agent kind's supervision in the Confirm summary (role, manager, kind and supervision, model, budget, skills,
+//   and with `welcome` the first task and the run it starts), and refuses a kind the office does not have (400). Paperclip answers 201 { agent, approval }
 //   (routes/agents.ts handleAgentHire): the writer takes the agent's id, and `pendingApproval` (in the result and a feed line) is true
 //   when the company sets requireBoardApprovalForNewAgents, so the agent is pending_approval and a hire_agent approval waits. Paperclip
 //   refuses an adapterType it has not installed (assertKnownAdapterType), so the agent_office adapter must be installed first. The
 //   office Manager (#204) is this same plan with `officeManager: true` (marked adapterConfig.manager, the Project manager role by
 //   default); there is no second hire plan. The writer reads the new agent back at once so the onboarding task can name it.
-//   POST /api/hq/hire (office.mjs hireHq: the hire, then with `welcome` one `task create` assigned to the new id, with the hire's
-//   Confirm; a failed task never undoes the hire, onboarding: 'failed') and GET /api/hq/hire-desk (role cards; `write` is false when
+//   POST /api/hq/hire (office.mjs hireHq: the hire, then with `welcome`, opt-in, one `task create` assigned to the new id, onboardingTask,
+//   through its own Tasks cell, never the hire's Confirm: Deny refuses the hire before anything is sent, Confirm answers onboarding 'ask'
+//   with the task for its own Confirm, Allow sends; a failed task never undoes the hire, onboarding: 'failed') and GET /api/hq/hire-desk (role cards; `write` is false when
 //   the grid says Deny). The page is `HireForm` and `HireDialog` in public/hq.js (Ctrl+K Hire an employee, the Orientation step
 //   `hire`); tested in test/hq-hire.test.mjs. The core-jobs gate has a `hire` job (5 steps).
 // - The office adapter (#222, kind `adapter`, Confirm by default; PLANS.adapter.install; tested in test/hq-write.test.mjs,
@@ -107,9 +112,13 @@
 //   write }) and `adapter` on GET /api/hq/hire-desk feed `AdapterInstall` in public/hq.js (the HQ dialog, the company step of
 //   Orientation after the company exists, the HR desk and the Hire Manager dialog in place of the form while it is missing;
 //   OfficeVocab.hq.adapter has the words; its Confirm scrolls into view).
-// - Company admin, the rest (#221): GET /api/hq/instance (page group: the instance settings and the environments by name and state)
-//   and POST /api/hq/company/export (page group: the bundle of the connected company, a read) are the two reads. The import is
+// - Company admin, the rest (#221): GET /api/hq/instance (page group: the instance settings and the environments by name and state) is a
+//   read. POST /api/hq/company/export (page group: the bundle of the connected company) is a write of the `export` kind (PLANS.export.company):
+//   it changes nothing in Paperclip, so it is never asked, but it is a POST, so it goes through the writer and Deny stops it. The import is
 //   POST /api/hq/write with kind 'company', action 'import', bundle: { rootPath, files, manifest? } and name?.
+// - Supervise in office (PLANS.supervise.set, kind `supervise`): the PATCH of a claude_local agent's adapter config. Its body is filled by the
+//   writer (fill: 'supervise', paperclip.mjs superviseSend) from a read of the agent and the office's hooks file, never from the request.
+// - The goal handoff (ADR 0007) sends `task create` writes (the Tasks cell).
 
 // ---------- the contract: the fields of each route the office reads ----------
 // list: the answer is an array (the first element is checked) or one object. An empty list says nothing about its shape. A field the
@@ -308,6 +317,11 @@ export const WRITE_KINDS = {
   goal: { label: 'Goals', options: RULES, def: 'confirm' },
   instance: { label: 'Instance and environments', options: RULES, def: 'confirm' },
   adapter: { label: 'Office adapter', options: RULES, def: 'confirm' },
+  // Supervise in office (ADR 0005, then 0010): its painted Confirm on the Agents screen of the Security room is always asked, so the cell offers
+  // no Allow; Deny stops it.
+  supervise: { label: 'Supervise in office', options: ['confirm', 'deny'], def: 'confirm' },
+  // A company export changes nothing in Paperclip and is never asked (the page saves the bundle as a file); Deny stops it. No Confirm option.
+  export: { label: 'Company export', options: ['allow', 'deny'], def: 'allow' },
 };
 const kindRow = (k) => (typeof k === 'string' && Object.hasOwn(WRITE_KINDS, k) ? WRITE_KINDS[k] : null);
 const gridError = (status, message) => Object.assign(new Error(message), { status });
@@ -378,7 +392,9 @@ export function setSelfApproval(slice, change) {
 // planWrite(body) -> { kind, action, method, path(companyId), body, targets, summary }. body: { kind, action, ...fields }. The fields are
 // checked here (400), every id must be a plain id (it goes into a path), and a target is a thing the writer reads before it writes
 // (issue, approval, agent): it must belong to the connected company. Every kind of the grid has a plan except `secret` (see the header): task, comment, pause, budget,
-// approval, routine, reporting, goal, hire, company, access, instance and adapter. A kind or action with no plan is 400 (never sent).
+// approval, routine, reporting, goal, hire, company, access, instance, adapter, supervise and export. A kind or action with no plan is 400
+// (never sent). Extra fields a writer reads: review(org, ctx), preflight, fill ('supervise': the writer builds the body), bundle (the answer
+// is returned, a company export), ownFolder, forbidden, timeoutMs, scope.
 export const OFFICE_ADAPTER_TYPE = 'agent_office';   // the word of OFFICE_ADAPTER in paperclip.mjs (which imports this module)
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 export const ISSUE_STATUS = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'];
@@ -423,6 +439,15 @@ const HIRE_ROLE_IDS = new Set(HIRE_ROLES.map((r) => r.role));
 // (AGENT_ROLES, validated by createAgentHireSchema) with no 'manager', so the Manager takes the Project manager role; the office marks it
 // with adapterConfig.manager and knows its Managers from its own `managers` slice, never from the role.
 export const MANAGER_ROLE = 'pm', MANAGER_TITLE = 'Agent Office Manager';
+// The onboarding task of a hire (#201): a first stand-up note on the room board. Opt-in on the HR desk (off by default). Paperclip wakes the
+// assignee of a new task (routes/issues.js POST /companies/:companyId/issues, queueIssueAssignmentWakeup with reason issue_assigned), so the
+// task starts a run of the new employee: the hire's Confirm says so, and the task is its own write of the Tasks cell (office.mjs hireHq).
+export const ONBOARDING_TEXT = 'Introduce yourself. Read the room notes, then add one line to the notes board with office_room_update: who you are, what you will do first and what you need. That is your first stand-up note.';
+/** The onboarding task of a new employee as a `task create` write: { kind, action, title, description, assigneeAgentId? }. */
+export function onboardingTask(name, agentId) {
+  const t = { kind: 'task', action: 'create', title: `Welcome, ${String(name || 'new employee').slice(0, 60)}: post your first stand-up note`, description: ONBOARDING_TEXT };
+  return agentId ? { ...t, assigneeAgentId: agentId } : t;
+}
 const HIRE_KIND_RE = /^[a-z][a-z0-9-]{0,39}$/, HIRE_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,99}$/, SKILL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$/;
 export const HIRE_BUDGET_MAX = 100000;   // dollars a month: a typing slip (an extra zero) is refused, not sent
 export const HIRE_ISOLATIONS = ['worktree', 'same'];
@@ -489,15 +514,19 @@ const PLANS = {
       return { method: 'POST', path: () => `/api/issues/${issue}/comments`, body: { body: text }, targets: [{ type: 'issue', id: issue }], summary: 'Comment on a task' };
     },
   },
-  // A hire (#201): POST /agent-hires with the office adapter (its runs go through the Security room, so a new employee is supervised), a
-  // monthly budget in whole cents (a hire without a budget is refused: 400) and nothing else the office has not named. The Confirm shows
-  // exactly what it creates: role, manager, agent kind, model, budget and skills. The manager is checked as a target. officeManager: true
-  // is the office Manager of a building (#204): the same hire, marked adapterConfig.manager, with the Project manager role by default.
-  // Paperclip answers { agent, approval } (the writer reads the agent).
+  // A hire (#201): POST /agent-hires with the office adapter (its runs are office sessions of its agent kind, so the Security room holds what
+  // that kind lets it hold), a monthly budget in whole cents (a hire without a budget is refused: 400) and nothing else the office has not
+  // named. The Confirm shows exactly what it creates: role, manager, agent kind with its supervision (review's ctx.kindOf, the office's agent
+  // kinds: a kind the office does not have is 400), model, budget and skills, and with `welcome` the onboarding task and the run it starts
+  // (the task itself is a second write, of the Tasks cell). The manager is checked as a target. officeManager: true is the office Manager of
+  // a building (#204): the same hire, marked adapterConfig.manager, with the Project manager role by default. Paperclip answers
+  // { agent, approval } (the writer reads the agent).
   hire: {
     create(b) {
       const name = textOf(b.name, 'name', NAME_MAX, { required: true });
       if (b.officeManager !== undefined && typeof b.officeManager !== 'boolean') throw gridError(400, 'officeManager is true or false.');
+      if (b.welcome !== undefined && typeof b.welcome !== 'boolean') throw gridError(400, 'welcome is true or false.');
+      const welcome = b.welcome === true;
       const office = b.officeManager === true, role = office && (b.role === undefined || b.role === null || b.role === '') ? MANAGER_ROLE : b.role;
       if (typeof role !== 'string' || !HIRE_ROLE_IDS.has(role)) throw gridError(400, 'Pick a role.');
       const title = textOf(b.title, 'title', NAME_MAX) || (office ? MANAGER_TITLE : '');
@@ -522,11 +551,16 @@ const PLANS = {
       if (manager) body.reportsTo = manager;
       if (skills.length) body.desiredSkills = skills;
       const cardLabel = HIRE_ROLES.find((r) => r.role === role).label, roleLabel = office ? `the office Manager (${cardLabel} role)` : cardLabel;
-      const line = (mgr) => `Hire ${short(name, 60)} as ${roleLabel}, reporting to ${mgr}, agent kind ${kind}, model ${model || 'the default'}, $${(cents / 100).toFixed(2)} a month, skills ${skills.length ? skills.join(', ') : 'none'}`;
-      const review = (org) => {
+      const who = short(name, 60);
+      const then = welcome ? `. Then the first task "${short(onboardingTask(name).title, 90)}", assigned to ${who}: Paperclip wakes ${who} on it, which starts a run of ${who}` : '';
+      const line = (mgr, sup) => `Hire ${who} as ${roleLabel}, reporting to ${mgr}, agent kind ${kind}${sup ? ` (${sup})` : ''}, model ${model || 'the default'}, $${(cents / 100).toFixed(2)} a month, skills ${skills.length ? skills.join(', ') : 'none'}${then}`;
+      // ctx.kindOf(kind) -> { word } (the supervision words of the kind, OfficeVocab.hq.kindSupervision) or null for a kind the office does not have
+      const review = (org, ctx = {}) => {
         const m = manager ? org.find((x) => x.id === manager) : null;
         if (manager && !m) return { problem: 'Paperclip has no such manager in this company.', status: 404 };
-        return { problem: '', summary: line(m ? short(String(m.name || 'a manager'), 60) : 'no manager') };
+        const k = typeof ctx.kindOf === 'function' ? ctx.kindOf(kind) : null;
+        if (!k) return { problem: `This office has no agent kind ${kind}, so the new employee could never run. Pick one of the office's agent kinds.`, status: 400 };
+        return { problem: '', summary: line(m ? short(String(m.name || 'a manager'), 60) : 'no manager', k.word) };
       };
       return { method: 'POST', path: (co) => `/api/companies/${encodeURIComponent(co)}/agent-hires`, body, targets: manager ? [{ type: 'agent', id: manager }] : [], review, summary: line(manager ? 'a manager' : 'no manager') };
     },
@@ -771,6 +805,34 @@ const PLANS = {
   // office's own folder (deps.adapterDir), so no page can make Paperclip load other code.
   adapter: {
     install: () => ({ method: 'POST', path: () => '/api/adapters/install', body: { isLocalPath: true }, targets: [], ownFolder: true, forbidden: 'Installing an adapter needs an instance admin. The board key of the office may not be one, or this Paperclip manages its adapters itself.', summary: 'Install the office adapter in Paperclip' }),
+  },
+  // Supervise in office (#76, ADR 0005, folded into the writer by review): one PATCH /api/agents/:id { adapterConfig } of a claude_local agent. The
+  // body is never a field of the request: the writer reads the agent again just before it and builds the change from that read and the office's
+  // own hooks file (paperclip.mjs supervisePatch; `fill: 'supervise'`), so no page can write other arguments into an agent. The painted Confirm
+  // of the Agents screen is its Confirm (the route refuses a call without it); the cell offers Confirm and Deny.
+  supervise: {
+    set(b) {
+      const agent = idOf(b.agent, 'employee');
+      const review = (org) => {
+        const a = org.find((x) => x.id === agent);
+        if (!a) return { problem: 'Paperclip has no such agent in this company.', status: 404 };
+        return { problem: '', summary: `Supervise ${short(String(a.name || 'an employee'), 60)} in the office (its Claude Code runs with the office hooks and asks here)` };
+      };
+      return { method: 'PATCH', path: () => `/api/agents/${agent}`, body: {}, targets: [{ type: 'agent', id: agent }], review, fill: 'supervise', summary: 'Supervise an employee in the office' };
+    },
+  },
+  // Company export (#221): POST /api/companies/:id/export (routes/companies.js, companyPortabilityExportSchema: include). It changes nothing in
+  // Paperclip, and Paperclip leaves secret values out; the answer is the bundle, the one write whose result is a body (the page saves it as a file
+  // and the office keeps no copy). It is never asked (the cell offers Allow and Deny), and Deny stops it.
+  export: {
+    company(b) {
+      const include = {};
+      if (b.include !== undefined && b.include !== null) {
+        if (typeof b.include !== 'object' || Array.isArray(b.include)) throw gridError(400, 'Choose what to export.');
+        for (const k of EXPORT_INCLUDES) if (b.include[k] !== undefined) { if (typeof b.include[k] !== 'boolean') throw gridError(400, 'Choose what to export.'); include[k] = b.include[k]; }
+      }
+      return { method: 'POST', path: (co) => `/api/companies/${encodeURIComponent(co)}/export`, body: Object.keys(include).length ? { include } : {}, targets: [], timeoutMs: 120000, bundle: true, summary: 'Export the company as a file' };
+    },
   },
 };
 export function planWrite(b) {

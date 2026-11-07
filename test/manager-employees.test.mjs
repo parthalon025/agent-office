@@ -13,13 +13,14 @@ import { createManagerEmployees, cleanManagers, goalTextOf } from '../src/manage
 import { planWrite } from '../src/hq-model.mjs';
 import { startFakePaperclip, DEMO } from './fixtures/fake-paperclip.mjs';
 import { until } from './fixtures/office-server.mjs';
+import { officeKinds } from './fixtures/office-kinds.mjs';
 
 const D = DEMO(), CO = D.companies[0].id, KEY = 'board-key-0123456789abcdef', BUILDING = 'b1';
 
 async function rig({ grid = { hire: 'allow' }, seed = DEMO(), agents } = {}) {
   const pc = await startFakePaperclip({ ...seed, boardKey: KEY });
   const feed = [], store = {};
-  const hq = createHq({ refetchMs: 20, retryMs: [50, 50], hooksFile: () => 'C:/office/office-hooks.json', key: () => KEY, grid: () => grid, askFirst, onFeed: (t) => feed.push(t) });
+  const hq = createHq({ refetchMs: 20, retryMs: [50, 50], hooksFile: () => 'C:/office/office-hooks.json', key: () => KEY, kinds: officeKinds, grid: () => grid, askFirst, onFeed: (t) => feed.push(t) });
   await hq.connect({ url: pc.url });
   await until(() => hq.state() === 'on', 'the events socket');
   let n = 0;

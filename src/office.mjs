@@ -29,7 +29,7 @@ import * as launch from './launch.mjs';
 import { createCampus } from './campus.mjs';
 import { slimPayload, cleanIds as cleanPaperclipIds } from './payload.mjs';
 import { createHq, companyDraft } from './paperclip.mjs';
-import { WRITE_KINDS, writeValueOf, setWriteCell, HIRE_ROLES, SELF_APPROVAL_KINDS, NEVER_SELF_APPROVED, selfApprovalOn, setSelfApproval } from './hq-model.mjs';
+import { WRITE_KINDS, writeValueOf, setWriteCell, HIRE_ROLES, SELF_APPROVAL_KINDS, NEVER_SELF_APPROVED, selfApprovalOn, setSelfApproval, onboardingTask } from './hq-model.mjs';
 import { createRuntime, runtimePaths } from './paperclip-runtime.mjs';
 import { createMemory, createEmbedder } from './memory.mjs';
 import { createRuns } from './paperclip-runs.mjs';
@@ -365,17 +365,21 @@ export function createOffice(cfg) {
 
   const basename = (p) => (p ? p.replace(/[\\/]+$/, '').split(/[\\/]/).pop() : '');
 
-  // ---------- Paperclip as an optional HQ (#76, paperclip.mjs) ----------
+  // ---------- Paperclip as the HQ (#76, ADR 0010, paperclip.mjs) ----------
   // Off until the user connects it (Attach sessions); the connection is kept in state.json (url and company, no secret) and
-  // made again at start. The office sends no heartbeat and runs no routine. Its writes: Supervise in office (one PATCH of one
-  // agent's adapter config, after the Security room's painted Confirm; ADR 0005), the goal handoff (ADR 0007) and, since ADR 0010, every
-  // write of the HQ writer (hq.write, after the write grid, #198). Its
-  // Claude Code runs then come in through the command hooks file of this office, like terminal sessions, with the run's ids.
-  // Paperclip owns the budgets of its runs: the office shows them and sets no second limit (a hook session has no spend limit).
+  // made again at start. The office sends no heartbeat. Every write to Paperclip goes through the one writer, hq.write, after the HQ
+  // write grid (#198, ADR 0010): Supervise in office (its own painted Confirm on the Agents screen, then the grid's Supervise cell), the goal
+  // handoff (its own Confirm, then the Tasks cell), the hire and its opt-in onboarding task, the company export, and every other kind.
+  // A claude_local employee's Claude Code runs come in through the command hooks file of this office, like terminal sessions, with the
+  // run's ids; an employee on the office adapter runs as an office session (paperclip-runs.mjs). Paperclip owns the budgets of its runs:
+  // the office shows them and sets no second limit (a hook session has no spend limit).
   const PAPERCLIP = { uid: 'paperclip', name: 'Paperclip' };
   const hq = createHq({
     // The board key (#193 the Paperclip the office runs, #194 one it connects to), for the address it was made for only: the HQ sends it as a bearer and holds it nowhere (#197).
     key: (url) => runtime.keyFor(url),
+    // The office's agent kinds (providers/index.mjs describe): an office adapter employee is as supervised as its kind (ADR 0001), and the
+    // hire's Confirm names that supervision (OfficeVocab.hq.kindSupervision). A kind the office does not have is null.
+    kinds: (k) => { const x = KINDS.find((d) => d.kind === k); return x ? { kind: x.kind, label: x.label, gated: x.gated, supervision: x.supervision, word: V.hq.kindSupervision(x) } : null; },
     sessions: () => [...sessions.values()], // the plan source links a Paperclip task to the session that runs it (#155)
     hooksFile: () => HOOKS_CMD_FILE.replace(/\\/g, '/'),
     adapterDir: path.join(ROOT, 'src', 'integrations', 'paperclip-adapter'),   // the office adapter plugin (#222): the one folder the adapter install names
@@ -402,7 +406,7 @@ export function createOffice(cfg) {
       const v = hq.view();
       saved.set('paperclip', { url: v.url, company: v.company ? v.company.id : null });
       savePersisted();
-      addFeed(PAPERCLIP, 'start', `connected: ${v.company ? v.company.name : 'Paperclip'} at ${v.url}. The office watches it and never sends heartbeats or tasks.`);
+      addFeed(PAPERCLIP, 'start', `connected: ${v.company ? v.company.name : 'Paperclip'} at ${v.url}. The office sends no heartbeat, and it writes to Paperclip only as the HQ write grid says.`);
     }
     broadcast();
     return { ...r, hq: hq.view() };
@@ -476,12 +480,15 @@ export function createOffice(cfg) {
     const r = await connectHq({ url: rt.url, company: made.id });
     return { ok: true, company: { id: made.id, name: made.name }, existed: made.existed, hq: r.hq };
   }
-  // Goal handoff (ADR 0007, #159): the second and last write to Paperclip. Without confirmed: true the answer is 409 with the exact tasks the Confirm shows.
+  // Goal handoff (ADR 0007, #159; since ADR 0010 each task is a `task create` write of hq.write, so the Tasks cell can Deny it). Without
+  // confirmed: true the answer is 409 with the exact tasks the Confirm shows; that Confirm is the Confirm of the task writes.
   async function handoffGoalHq(body) {
     const company = hq.view()?.company;
     if (!company) throw httpError(409, 'Paperclip is not connected, so there is no company to hand this goal to.');
     const g = manager.get(String(body.id || ''));
     if (!g) throw httpError(404, 'No such goal.');
+    // A handoff the grid would refuse is not asked (the writer refuses each task again if the cell changes meanwhile).
+    if (writeValueOf(saved.get('hqGrid'), 'task') === 'deny') { addFeed(PAPERCLIP, 'wait', `Refused by the HQ write grid: ${WRITE_KINDS.task.label}. Nothing was sent.`); throw httpError(403, `Denied by the HQ write grid: ${WRITE_KINDS.task.label}. A handoff creates tasks.`); }
     if (body.confirmed !== true) throw askFirst('handoff', `Create ${g.steps.length} tasks in ${company.name || 'Paperclip'}? The office writes these tasks and nothing else. It never assigns, changes or deletes a task.`, { tasks: hq.handoffTasks(g).map((t) => ({ step: t.step, title: t.title, description: t.description })) });
     const r = await manager.handoff(g.id, (goal, written) => hq.handoffGoal(goal, written));
     broadcast();
@@ -543,20 +550,30 @@ export function createOffice(cfg) {
   }
 
   // The HR desk (#201): a hire is one write of hq.write (kind `hire`), so the write grid decides it (Deny refuses, Confirm asks first with the
-  // exact summary, Allow sends). With `welcome` the new employee gets its onboarding task, a second write of the same writer (kind `task`,
-  // assigned to the new id): a first stand-up note. The task rides on the hire's Confirm. A failed task never undoes the hire: the answer says so.
+  // exact summary, Allow sends). `welcome` (opt-in, off by default) adds the onboarding task (hq-model.mjs onboardingTask): the hire's summary
+  // names it and the run it starts (Paperclip wakes the assignee of a new task), and the task is a second write of the same writer (kind `task`,
+  // assigned to the new id) through its own Tasks cell. It never rides on the hire's Confirm: Deny refuses the whole hire before anything is asked
+  // or sent; Confirm answers onboarding 'ask' with the task and its question, and the page sends that task again through /api/hq/write with its
+  // own Confirm; Allow sends it. A failed task never undoes the hire: the answer says so.
   const HIRE_FIELDS = ['name', 'role', 'title', 'manager', 'agentKind', 'model', 'isolation', 'budgetDollars', 'skills'];
-  const ONBOARDING = 'Introduce yourself. Read the room notes, then add one line to the notes board with office_room_update: who you are, what you will do first and what you need. That is your first stand-up note.';
   async function hireHq(body) {
-    const confirmed = body.confirmed === true, plan = { kind: 'hire', action: 'create' };
+    const confirmed = body.confirmed === true, welcome = body.welcome === true, plan = { kind: 'hire', action: 'create', welcome };
     for (const k of HIRE_FIELDS) if (body[k] !== undefined) plan[k] = body[k];
+    if (welcome && writeValueOf(saved.get('hqGrid'), 'task') === 'deny') {
+      addFeed(PAPERCLIP, 'wait', `Refused by the HQ write grid: ${WRITE_KINDS.task.label}. Nothing was sent.`);
+      throw httpError(403, `Denied by the HQ write grid: ${WRITE_KINDS.task.label}. Hire without the first task, or change the Tasks cell.`);
+    }
     const r = await hq.write(plan, { confirmed });
     const out = { ...r, onboarding: 'none' };
-    if (body.welcome === true) {
+    if (welcome) {
+      const task = onboardingTask(r.name, r.id);
       try {
-        await hq.write({ kind: 'task', action: 'create', title: `Welcome, ${String(r.name).slice(0, 60)}: post your first stand-up note`, description: ONBOARDING, assigneeAgentId: r.id }, { confirmed });
+        await hq.write(task, { confirmed: false });
         out.onboarding = 'sent';
-      } catch (e) { out.onboarding = 'failed'; out.onboardingError = e.message; }
+      } catch (e) {
+        if (e.answer && e.answer.body && e.answer.body.confirm === 'write') { out.onboarding = 'ask'; out.onboardingTask = task; out.onboardingAsk = e.message; }
+        else { out.onboarding = 'failed'; out.onboardingError = e.message; }
+      }
     }
     broadcast();
     return out;
@@ -1172,13 +1189,15 @@ export function createOffice(cfg) {
     return { ok: true };
   }
   process.once('exit', () => memory.close());
+  // The office Manager as a Paperclip employee (#204): a task assigned to it becomes a goal, the steps are sub-issues, the result a comment.
+  const managerEmployees = createManagerEmployees({ hq, manager, state: { get: (k) => saved.get(k), set: (k, v) => saved.set(k, v), save: () => savePersisted() }, feed: (t) => addFeed(PAPERCLIP, 'tool', t) });
   const paperclipRuns = createRuns({
     open: (o) => openSession(o), send: (uid, text) => sendMessage(uid, text, [], { answers: false }), session: (uid) => sessions.get(uid),
     close: (uid) => closeSession(uid), feed: (s, kind, text) => addFeed(s, kind, text), changed: () => broadcast(),
     recall: (company, query) => memory.recall(company, query), remember: (company, m) => memory.remember(company, m),
+    // A Manager's run is the goal of its task, not a session beside it (one run of work).
+    goals: { take: (x) => managerEmployees.runGoal(x), read: (id) => managerEmployees.goalState(id), cancel: (id) => manager.cancel(id) },
   });
-  // The office Manager as a Paperclip employee (#204): a task assigned to it becomes a goal, the steps are sub-issues, the result a comment.
-  const managerEmployees = createManagerEmployees({ hq, manager, state: { get: (k) => saved.get(k), set: (k, v) => saved.set(k, v), save: () => savePersisted() }, feed: (t) => addFeed(PAPERCLIP, 'tool', t) });
   let managerSyncQueued = false;
   function managerSync() {
     if (managerSyncQueued) return;

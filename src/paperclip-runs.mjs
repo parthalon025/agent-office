@@ -29,6 +29,13 @@
 // Result. `resultOf` carries cost only when the agent reported one (null, never 0, for an agent without cost reports), usage only when
 // it splits into input and output, the last reply as summary, and the session uid.
 //
+// A Manager run (#204, review of the HQ build: one run of work, not two). Before it opens a session, start asks `deps.goals.take`
+// (manager-employees.mjs runGoal). For a registered office Manager the run opens no session: it is the goal of its task (made now when the
+// Manager sync has not made it yet, through the same take, so the task is one goal). `tick` logs the goal's state and each step that moves,
+// and the run ends with the goal (finished, failed, stopped, cancelled, handed off) and its result as the summary (no cost: the steps' sessions
+// keep theirs). A goal that waits for approval or for a retry holds the run. Paperclip's cancel cancels the goal. A run with nothing to do as a
+// goal (no task, a sub-task, a closed task) ends at once with the reason.
+//
 // Context (#206). The start body may carry `context`: `wake_reason`, `prior` (the session Paperclip saved: `session_id`, `cwd`,
 // `task_id`, `instructions`), `instructions` (`file`, `key`) and `skills`. `cleanContext` checks it. `deskOf` gives the session
 // `paperclip.desk`: the wake reason, `resumed` (always false) and `fresh`, the reason: no saved session, another task, another folder,
@@ -40,6 +47,8 @@
 // Tested in test/paperclip-runs.test.mjs (broker, injected session) and test/paperclip-adapter-routes.test.mjs (the whole way: stand-in
 // host, plugin, HTTP, real office in process, local model, Windows only).
 import { httpError } from './office-core.mjs';
+import path from 'node:path';
+import { fileKey } from './risk.mjs';
 
 export const WAIT_MS = 25_000;          // how long one wait holds for news (a plain HTTP poll, so a run of hours needs no long request)
 export const MAX_RUNS = 16;             // live runs at once
@@ -70,7 +79,18 @@ export function cleanContext(c) {
   return wake || out.prior || instructions || skills.length ? out : null;
 }
 
-const sameDir = (a, b) => String(a).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() === String(b).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+// One folder whatever its spelling (case, slash style, a trailing slash, an 8.3 short name, a junction): risk.mjs fileKey, the office's path
+// identity. Two folders with no key (a path that is not text) are not the same.
+// A Windows path (drive letter) is a Windows folder whatever the office runs on: off Windows, fileKey keeps case and backslashes,
+// so it is compared by the Windows rule there.
+const WIN = /^[A-Za-z]:[\\/]/;
+const winKey = (p) => path.win32.normalize(p).replace(/\\+$/, '').toLowerCase();
+const sameDir = (a, b) => {
+  try {
+    if (process.platform !== 'win32' && WIN.test(String(a)) && WIN.test(String(b))) return winKey(a) === winKey(b);
+    return fileKey('', a) === fileKey('', b);
+  } catch { return false; }
+};
 /**
  * What the employee desk shows of a run's context (#206), or null with none. The office opens a new session on every wake and cannot
  * resume one (ADR 0010), so `resumed` is false; `fresh` says why it is not a continuation, from the run's own facts: no saved session,
@@ -128,7 +148,9 @@ export function resultOf(s, { ok, why = '' }) {
 
 /**
  * createRuns(deps) -> { start, wait, cancel, tick, transcript, live }.
- * deps: open(opts) -> uid (an office session, opened as the Open dialog opens one: refusals and the cost question are thrown),
+ * deps: goals (optional, the office Managers, manager-employees.mjs): { take({ employee, company, task, run }) -> promise of null (not a
+ *   Manager: a session run) | { goal } | { none, ok }, read(goalId) -> goalState or null, cancel(goalId) },
+ *   open(opts) -> uid (an office session, opened as the Open dialog opens one: refusals and the cost question are thrown),
  *   send(uid, text), session(uid) -> the tracker's session or undefined, close(uid) -> promise, feed(s, kind, text), changed(),
  *   setTimer(fn, ms), clearTimer(h), now(), recall(company, query) -> promise of a prompt block ('' for none; company memory, #205: it never
  *   throws), remember(company, { text, source, employee, employeeId, task, run }) -> promise (what a finished run learned; a refusal is ignored).
@@ -151,10 +173,11 @@ export function createRuns(deps) {
     return { done: r.done, cursor: r.base + r.log.length, log: r.log.slice(start), ...(r.done ? { result: r.result } : {}) };
   };
 
-  function finish(r, s, ok, why) {
+  // made: a result built by the caller (a Manager run: the goal's result, no session).
+  function finish(r, s, ok, why, made = null) {
     if (r.done) return;
     r.done = true;
-    r.result = s ? resultOf(s, { ok, why }) : { ok: false, error: clip(why, 500), uid: r.uid, provider: null, model: null, sessionId: null, summary: null, turns: 0, cost: null, costUnknown: true, usage: null };
+    r.result = made || (s ? resultOf(s, { ok, why }) : { ok: false, error: clip(why, 500), uid: r.uid, provider: null, model: null, sessionId: null, summary: null, turns: 0, cost: null, costUnknown: true, usage: null });
     r.doneAt = now();
     // Company memory (#205): what a run that ended well said last is kept, with where it came from. The scan refuses what it must (ignored).
     if (ok && r.result.summary && r.agent?.company && deps.remember) {
@@ -192,6 +215,7 @@ export function createRuns(deps) {
   function pass() {
     for (const r of runs.values()) {
       if (r.done) continue;
+      if (r.goal) { goalPass(r); continue; }
       const s = deps.session(r.uid);
       if (!s) { finish(r, null, false, 'The session left the office before the run ended.'); continue; }
       collect(r, s);
@@ -200,12 +224,67 @@ export function createRuns(deps) {
     }
   }
 
+  // ---------- a Manager run: the goal of its task, no session (manager-employees.mjs runGoal) ----------
+  // The result of a run that opened no session: the goal's result as the summary. No cost: the goal's steps are office sessions whose cost the
+  // office keeps (the Manager board), and the run reports none rather than a total that could leave an agent out.
+  const goalResult = (ok, text) => ({ ok, error: ok ? null : clip(text || 'The goal did not finish.', 500), uid: null, provider: null, model: null, sessionId: null, summary: text ? clip(text, 2000) : null, turns: 0, cost: null, costUnknown: true, usage: null });
+  const GOAL_LINE = {
+    planning: 'The office makes the plan of the goal.',
+    'awaiting-approval': 'The plan waits for your approval in Agent Office (Manager board).',
+    running: 'The goal runs. Each step is an office session, and the Security room decides its calls.',
+    blocked: 'The goal is blocked. Retry the step or cancel the goal in Agent Office (Manager board).',
+  };
+  /** The goal's news since the last look goes to the log: its state, and each step that moved. */
+  function collectGoal(r, g) {
+    if (g.status !== r.seen.goal) {
+      r.seen.goal = g.status;
+      push(r, g.status === 'blocked' ? 'stderr' : 'stdout', `[agent-office] ${GOAL_LINE[g.status] || `The goal is ${g.status}.`}${g.reason && g.status !== 'running' ? ` ${clip(g.reason, 300)}` : ''}`);
+    }
+    g.steps.forEach((st, k) => {
+      if (r.seen.steps.get(st.id) === st.status) return;
+      r.seen.steps.set(st.id, st.status);
+      if (st.status === 'pending' && !r.seen.listed) return;   // the plan is listed once, below
+      push(r, st.status === 'error' ? 'stderr' : 'stdout', `[agent-office] Step ${k + 1} ${st.status}: ${clip(st.text, 300)}${st.result ? ` (${clip(st.result, 300)})` : ''}`);
+    });
+    if (!r.seen.listed && g.steps.length) {
+      r.seen.listed = true;
+      push(r, 'stdout', `[agent-office] The plan has ${g.steps.length} step${g.steps.length === 1 ? '' : 's'}:\n${g.steps.map((st, k) => `${k + 1}. ${clip(st.text, 300)}`).join('\n')}`);
+    }
+  }
+  function goalPass(r) {
+    const g = deps.goals.read(r.goal);
+    if (!g) { finish(r, null, false, '', goalResult(false, 'The goal of this task left the office before it ended.')); return; }
+    collectGoal(r, g);
+    if (g.ended) finish(r, null, g.ok, '', goalResult(g.ok, g.summary));
+  }
+  /** A run of a registered Manager (deps.goals.take answered): no session, the run is the goal of its task. */
+  function startGoal(x, taken) {
+    const r = { key: x.runId, uid: null, goal: taken.goal || null, log: [], base: 0, done: false, result: null, doneAt: 0, waiters: new Set(), timer: null, agent: x.agent, task: x.task, seen: { goal: '', steps: new Map(), listed: false } };
+    runs.set(r.key, r);
+    if (!r.goal) {
+      push(r, 'stdout', `[agent-office] ${x.agent.name} is an office Manager. ${taken.none}`);
+      finish(r, null, taken.ok !== false, '', goalResult(taken.ok !== false, taken.none));
+      return { key: r.key, resumed: false };
+    }
+    push(r, 'stdout', `[agent-office] ${x.agent.name} is an office Manager: the office runs this task as its goal ${r.goal}, and opens no session for the run itself. Each step of the goal is an office session.`);
+    goalPass(r);
+    deps.changed?.();
+    return { key: r.key, resumed: false };
+  }
+
   async function start(body) {
     const x = cleanRun(body);
     const live = runs.get(x.runId);
     if (live && !live.done) return { key: live.key, resumed: true };
     if (live) { clearTimer(live.timer); runs.delete(live.key); } // an ended run under the same id: this start is a new run
     if ([...runs.values()].filter((r) => !r.done).length >= MAX_RUNS) throw httpError(429, `The office runs ${MAX_RUNS} Paperclip runs at once. Try again when one ends.`);
+    // A registered office Manager (#204): its run is the goal of its task, never a second run of the same work (review of the HQ build).
+    const taken = deps.goals ? await deps.goals.take({ employee: x.agent.id, company: x.agent.company, task: x.task, run: x.runId }) : null;
+    if (taken) {
+      const again = runs.get(x.runId);   // the take awaited: a start of the same run that came in meanwhile is this run
+      if (again && !again.done) return { key: again.key, resumed: true };
+      return startGoal(x, taken);
+    }
     let uid;
     try {
       uid = await deps.open({ cwd: x.cwd, name: x.agent.name, provider: x.kind, model: x.model, where: 'office', isolation: x.isolation });
@@ -258,6 +337,12 @@ export function createRuns(deps) {
     const r = runs.get(typeof body?.key === 'string' ? body.key : '');
     if (!r) throw httpError(404, 'No such run.');
     if (r.done) return { ok: true, done: true };
+    if (r.goal) {
+      // The run is the goal: Paperclip's cancel stops it (its working step is interrupted), as a session run's cancel closes the session.
+      deps.goals.cancel(r.goal);
+      finish(r, null, false, '', goalResult(false, 'Paperclip cancelled the run, so the office cancelled the goal of the task.'));
+      return { ok: true, done: true };
+    }
     const s = deps.session(r.uid);
     finish(r, s, false, 'Paperclip cancelled the run.');
     return { ok: true, done: true };

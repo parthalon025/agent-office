@@ -6,10 +6,28 @@ import assert from 'node:assert/strict';
 import { WRITE_KINDS, cleanWriteGrid, writeValueOf, setWriteCell, planWrite } from '../src/hq-model.mjs';
 
 test('the grid has the ten write kinds of ADR 0010 and the first company (#199); Allow only for the user\'s own task edits and comments', () => {
-  assert.deepEqual(Object.keys(WRITE_KINDS), ['hire', 'pause', 'budget', 'approval', 'reporting', 'routine', 'access', 'secret', 'task', 'comment', 'company', 'goal', 'instance', 'adapter']);
-  for (const k of Object.keys(WRITE_KINDS)) assert.equal(writeValueOf({}, k), k === 'task' || k === 'comment' ? 'allow' : 'confirm', k);
+  assert.deepEqual(Object.keys(WRITE_KINDS), ['hire', 'pause', 'budget', 'approval', 'reporting', 'routine', 'access', 'secret', 'task', 'comment', 'company', 'goal', 'instance', 'adapter', 'supervise', 'export']);
+  for (const k of Object.keys(WRITE_KINDS)) assert.equal(writeValueOf({}, k), k === 'task' || k === 'comment' || k === 'export' ? 'allow' : 'confirm', k);
   assert.deepEqual(WRITE_KINDS.secret.options, ['confirm', 'deny'], 'a secret never takes Allow');
   assert.deepEqual(WRITE_KINDS.task.options, ['confirm', 'allow', 'deny']);
+});
+
+// Review of the HQ build, finding 4: Supervise in office and the company export are writes of the grid. Supervise keeps its painted Confirm on
+// the Agents screen, so its cell has no Allow; an export changes nothing and is never asked, so its cell has no Confirm. Deny stops both.
+test('the Supervise cell is Confirm or Deny, the export cell Allow or Deny', () => {
+  assert.deepEqual(WRITE_KINDS.supervise.options, ['confirm', 'deny']);
+  assert.deepEqual(WRITE_KINDS.export.options, ['allow', 'deny']);
+  assert.throws(() => setWriteCell({}, { kind: 'supervise', value: 'allow', confirmed: true }), (e) => e.status === 400);
+  assert.throws(() => setWriteCell({}, { kind: 'export', value: 'confirm' }), (e) => e.status === 400);
+  assert.equal(setWriteCell({}, { kind: 'supervise', value: 'deny' }).to, 'deny', 'stricter at once');
+  assert.throws(() => setWriteCell({ export: 'deny' }, { kind: 'export', value: 'allow' }), (e) => e.status === 409, 'looser needs the painted Confirm');
+  const s = planWrite({ kind: 'supervise', action: 'set', agent: 'a1', extraArgs: ['--bare'], adapterConfig: { engine: 'acp' } });
+  assert.deepEqual([s.method, s.path('c1'), s.body, s.fill], ['PATCH', '/api/agents/a1', {}, 'supervise'], 'the body never comes from the request: the writer builds it');
+  assert.throws(() => planWrite({ kind: 'supervise', action: 'set', agent: '../x' }), (e) => e.status === 400);
+  const x = planWrite({ kind: 'export', action: 'company', include: { agents: false, bogus: true } });
+  assert.deepEqual([x.method, x.path('c1'), x.body], ['POST', '/api/companies/c1/export', { include: { agents: false } }]);
+  assert.deepEqual(planWrite({ kind: 'export', action: 'company' }).body, {});
+  for (const include of ['all', [], { agents: 'no' }]) assert.throws(() => planWrite({ kind: 'export', action: 'company', include }), (e) => e.status === 400);
 });
 
 test('cleanWriteGrid keeps only cells the grid has, with values the kind offers', () => {

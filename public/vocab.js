@@ -67,7 +67,8 @@
                          rules: { office: { 'row|col': value }, buildings: { buildingKey: { 'row|col': value } } }.
      hq               -> Paperclip HQ words (#76): status(agent) { key, word } (never waiting: a Paperclip approval is not an
                          office request), budget(b) ("$8.30 of $50.00 this month"), every(seconds) (a heartbeat), supervision(agent)
-                         ("Supervised in office" or the label), state(snap.hq) (the connection as a line), desk(s) (#206: the rows of a Paperclip run's context, [] for another session).
+                         ("Supervised in office" or the label), state(snap.hq) (the connection as a line), desk(s) (#206: the rows of a Paperclip run's context, [] for another session),
+                         kindSupervision(kind) ("Supervised" for a gated office agent kind, else its label: the hire's Confirm and the HR desk), hire (the HR desk words).
      layers           -> the four layers of detail (ADR 0006): glance (is all fine), look (what is it doing, how is it going), inspect (exactly
                          what happened), deep (proof and rules). order, opens(layer) (the next layer, '' at deep), surfaces (each surface's
                          layer and the layer it opens), surface(id), mood(state) ({ key, word } of a worst state: calm, busy, needs you, failed),
@@ -253,6 +254,23 @@
   }
   // The supervision words of an agent: "Supervised in office", else the label (ADR 0001).
   function hqSupervision(a) { var x = a && a.supervision; return !x ? '' : x.state === 'supervised' ? 'Supervised in office' : x.label; }
+  // The supervision of an office agent kind (snap.kinds, providers/index.mjs describe), as the HR desk and the hire's Confirm say it: an employee
+  // on the office adapter runs as sessions of that kind, so it is "Supervised" for a gated kind, else the kind's own label (ADR 0001). The server
+  // reads it too (office.mjs, the hire summary). '' for no kind.
+  function hqKindSupervision(k) { return !k ? '' : k.gated !== false ? 'Supervised' : (k.supervision || 'Unsupervised'); }
+  // The HR desk (#201): each agent kind with its supervision, the line under the pick, and the opt-in first task (off by default).
+  var hqHire = {
+    kindOption: function (k) { return { value: k.kind, label: k.label + ' (' + hqKindSupervision(k) + ')' }; },
+    kindNote: function (k) {
+      if (!k) return '';
+      if (k.gated !== false) return 'The new employee runs through the office adapter as ' + k.label + ' sessions, so the Security room decides every call.';
+      return 'The new employee runs through the office adapter as ' + k.label + ' sessions. ' + hqKindSupervision(k) + ': the office cannot hold every call of this kind. It stays off until you turn it on in the Security room (Agents screen), and it runs only in a room of its own.';
+    },
+    welcomeOptions: [{ value: 'no', label: 'No first task' }, { value: 'yes', label: 'Send a first task: a stand-up note' }],
+    welcomeNote: 'The first task starts a run of the new employee: Paperclip wakes it on the task. The Tasks cell of the write grid decides the task on its own.',
+    taskConfirm: 'Send first task',
+    taskSkip: 'Do not send',
+  };
   // The HQ connection as a line: what the office does now.
   function hqState(hq) {
     if (!hq) return 'Not connected';
@@ -418,7 +436,7 @@
     return calls;
   }
   function routineDone(c) { return c.action === 'create' ? 'Routine created' : c.action === 'schedule' ? 'Schedule changed' : 'Routine changed'; }
-  var hq = { adapter: hqAdapter, goals: hqGoals, routineStates: routineStates, routineFacts: routineFacts, routineForm: routineForm, routineCalls: routineCalls, routineDone: routineDone, searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg };
+  var hq = { kindSupervision: hqKindSupervision, hire: hqHire, adapter: hqAdapter, goals: hqGoals, routineStates: routineStates, routineFacts: routineFacts, routineForm: routineForm, routineCalls: routineCalls, routineDone: routineDone, searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg };
 
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
   // priced: sessions with a cost figure. unknown: sessions whose agent reports no cost (costUnknown), shown as "unknown".

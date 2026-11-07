@@ -49,11 +49,12 @@ test('not connected: a write is 409 and nothing is sent', async () => {
   assert.equal(pc.requests.length, 0);
 });
 
-test('the grid: fourteen kinds, the defaults, and no cell saved until the user sets one', async () => {
+test('the grid: sixteen kinds, the defaults, and no cell saved until the user sets one', async () => {
   const r = await get('/api/hq/grid');
   assert.equal(r.status, 200);
   assert.deepEqual(r.json.grid.map((x) => [x.kind, x.value, x.set]), [['hire', 'confirm', false], ['pause', 'confirm', false], ['budget', 'confirm', false], ['approval', 'confirm', false], ['reporting', 'confirm', false],
-    ['routine', 'confirm', false], ['access', 'confirm', false], ['secret', 'confirm', false], ['task', 'allow', false], ['comment', 'allow', false], ['company', 'confirm', false], ['goal', 'confirm', false], ['instance', 'confirm', false], ['adapter', 'confirm', false]]);
+    ['routine', 'confirm', false], ['access', 'confirm', false], ['secret', 'confirm', false], ['task', 'allow', false], ['comment', 'allow', false], ['company', 'confirm', false], ['goal', 'confirm', false], ['instance', 'confirm', false], ['adapter', 'confirm', false],
+    ['supervise', 'confirm', false], ['export', 'allow', false]]);
   assert.deepEqual(r.json.grid.find((x) => x.kind === 'secret').options, ['confirm', 'deny']);
   assert.deepEqual(state().hqGrid || {}, {});
 });
