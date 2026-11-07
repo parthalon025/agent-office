@@ -109,6 +109,30 @@ test('connect: the HQ in the snapshot with its company, budget, agents and routi
   assert.deepEqual(state().paperclip, { url: pc.url, company: COMPANY.id }, 'state.json keeps the address and company, no secret');
 });
 
+test('the HQ building (#197): floors from the org chart and the Lobby in the snapshot, the fuller model on GET /api/hq/lobby, no key or secret in any answer', async () => {
+  const s = (await snapshot()).hq;
+  assert.deepEqual(s.floors.map((f) => f.key), ['records', 'lobby', 'rank-2', 'rank-1', 'rank-0']);
+  assert.equal(s.floors.at(-1).employees[0].name, 'Grace');
+  assert.deepEqual([s.lobby.employees.total, s.lobby.tasks.open, s.lobby.approvals.pending, s.lobby.goals.total, s.lobby.secrets.names], [3, 2, 1, 2, ['GITHUB_TOKEN']]);
+  const r = await call('/api/hq/lobby', null, pageToken, 'GET');
+  assert.equal(r.status, 200);
+  assert.equal(r.json.hq.goals.length, 2);
+  assert.equal(r.json.hq.approvals[0].type, 'hire_agent');
+  assert.equal(r.json.hq.activity.length, 2);
+  const agent = await call('/api/hq/lobby', null, agentToken, 'GET');
+  assert.equal(agent.status, 401, 'the agent token never opens an HQ route');
+  const all = JSON.stringify(r.json) + JSON.stringify(s);
+  assert.doesNotMatch(all, new RegExp(`do-not-show|${pageToken}|${agentToken}`), 'a secret value, an approval payload, activity details and the tokens never leave the office');
+  assert.equal(pc.requests.filter((q) => q.method !== 'GET' && q.method !== 'UPGRADE').length, 0, 'reading the HQ sent no write');
+});
+
+test('the page never calls Paperclip: no Paperclip route in any page script', () => {
+  for (const f of fs.readdirSync(path.join(SRC, 'public')).filter((x) => x.endsWith('.js'))) {
+    const code = fs.readFileSync(path.join(SRC, 'public', f), 'utf8');
+    assert.doesNotMatch(code, /\/api\/companies\/|\/api\/cli-auth|\/api\/board-api-keys/, `${f} names a Paperclip route`);
+  }
+});
+
 test('the snapshot plans field carries the Paperclip plan beside the office goals, read only (#157)', async () => {
   const s = await snapshot();
   const p = s.plans.plans.find((x) => x.source === 'paperclip');

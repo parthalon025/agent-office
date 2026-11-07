@@ -1,0 +1,118 @@
+{
+ "pinned": "2026.1106.0",
+ "note": "The shapes of the Paperclip routes the HQ reads (src/hq-model.mjs SHAPES): field names and types of the first element, from the Paperclip source (routes/*.ts, packages/shared) as the fake answers them. Not a live recording: record again against a real pinned Paperclip when the pin changes.",
+ "routes": {
+  "company": {
+   "list": false,
+   "fields": {
+    "id": "string",
+    "name": "string",
+    "status": "string",
+    "budgetMonthlyCents": "number",
+    "spentMonthlyCents": "number"
+   }
+  },
+  "agents": {
+   "list": true,
+   "fields": {
+    "companyId": "string",
+    "urlKey": "string",
+    "title": "null",
+    "icon": "null",
+    "status": "string",
+    "reportsTo": "null",
+    "capabilities": "null",
+    "adapterType": "string",
+    "runtimeConfig": "object",
+    "budgetMonthlyCents": "number",
+    "spentMonthlyCents": "number",
+    "pauseReason": "null",
+    "pausedAt": "null",
+    "permissions": "object",
+    "lastHeartbeatAt": "string",
+    "metadata": "null",
+    "createdAt": "string",
+    "updatedAt": "string",
+    "id": "string",
+    "name": "string",
+    "role": "string",
+    "adapterConfig": "object"
+   }
+  },
+  "issues": {
+   "list": true,
+   "fields": {
+    "id": "string",
+    "companyId": "string",
+    "identifier": "string",
+    "title": "string",
+    "status": "string",
+    "assigneeAgentId": "string",
+    "assigneeAdapterOverrides": "null"
+   }
+  },
+  "goals": {
+   "list": true,
+   "fields": {
+    "id": "string",
+    "companyId": "string",
+    "title": "string",
+    "description": "null",
+    "level": "string",
+    "status": "string",
+    "parentId": "null",
+    "ownerAgentId": "string"
+   }
+  },
+  "approvals": {
+   "list": true,
+   "fields": {
+    "id": "string",
+    "companyId": "string",
+    "type": "string",
+    "status": "string",
+    "requestedByAgentId": "string",
+    "requestedByUserId": "null",
+    "payload": "object",
+    "createdAt": "string"
+   }
+  },
+  "activity": {
+   "list": true,
+   "fields": {
+    "id": "string",
+    "companyId": "string",
+    "actorType": "string",
+    "actorId": "string",
+    "action": "string",
+    "entityType": "string",
+    "entityId": "string",
+    "agentId": "string",
+    "runId": "null",
+    "details": "object",
+    "createdAt": "string"
+   }
+  },
+  "costs": {
+   "list": false,
+   "fields": {
+    "companyId": "string",
+    "spendCents": "number",
+    "budgetCents": "number",
+    "utilizationPercent": "number"
+   }
+  },
+  "secrets": {
+   "list": true,
+   "fields": {
+    "id": "string",
+    "companyId": "string",
+    "name": "string",
+    "provider": "string",
+    "description": "null",
+    "latestVersion": "number",
+    "value": "string"
+   }
+  }
+ }
+}

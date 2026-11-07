@@ -100,6 +100,13 @@
       h('section', { className: 'phone-sec', 'aria-label': 'Needs you' },
         h('h2', { className: 'phone-h' }, 'Needs you', ph.queue.count ? h(Tag, null, String(ph.queue.count)) : null),
         h(QueueList, { toast: p.toast, onManager: p.onManager, onGo: p.onGo })),
+      // The HQ building (#197): the company of the connected Paperclip, its Lobby in one line, and the way to the dashboard.
+      snap && snap.hq && snap.hq.company ? h('section', { className: 'phone-sec', 'aria-label': 'Paperclip HQ' },
+        h('h2', { className: 'phone-h' }, 'Paperclip HQ'),
+        h('div', { className: 'phone-bld' },
+          h('div', { className: 'phone-row phone-bld-head' }, h('b', null, snap.hq.company.name)),
+          h('p', { className: 'look-facts mono' }, window.OfficeVocab.hq.glance(snap.hq) || window.OfficeVocab.hq.state(snap.hq)),
+          p.onHq ? h(A.Button, { variant: 'quiet', icon: 'hq', onClick: p.onHq }, 'Open Paperclip HQ') : null)) : null,
       h('section', { className: 'phone-sec', 'aria-label': 'Buildings' },
         h('h2', { className: 'phone-h' }, 'Buildings'),
         !ph.buildings.length ? h(A.EmptyState, { icon: 'building', compact: true, title: 'No buildings yet', text: 'Open a session in a repository to see it here.' }) : null,

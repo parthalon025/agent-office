@@ -41,7 +41,23 @@ function onClientData(sock, buf) {
   }
 }
 
-export const DEMO = (hooksFile = null) => {
+// The HQ read model's data (#197): who reports to whom, goals, pending approvals, activity, cost summary and secret names. Shapes as
+// recorded in test/fixtures/paperclip-shapes.json (from the Paperclip source: routes/{goals,approvals,activity,costs,secrets}.ts).
+const withHq = (d) => {
+  const [grace, ada, linus] = d.agents, companyId = d.companies[0].id;
+  ada.reportsTo = grace.id; linus.reportsTo = ada.id;
+  return { ...d,
+    goals: [{ id: 'g1000000-0000-4000-8000-000000000001', companyId, title: 'Ship the Q1 roadmap', description: null, level: 'company', status: 'active', parentId: null, ownerAgentId: grace.id },
+      { id: 'g1000000-0000-4000-8000-000000000002', companyId, title: 'Health route', description: null, level: 'task', status: 'planned', parentId: 'g1000000-0000-4000-8000-000000000001', ownerAgentId: ada.id }],
+    approvals: [{ id: 'p1000000-0000-4000-8000-000000000001', companyId, type: 'hire_agent', status: 'pending', requestedByAgentId: grace.id, requestedByUserId: null, payload: { name: 'Margaret', secretHint: 'do-not-show' }, createdAt: '2026-11-05T10:00:00.000Z' }],
+    activity: [{ id: 'l1', companyId, actorType: 'agent', actorId: ada.id, action: 'issue.updated', entityType: 'issue', entityId: d.issues[0].id, agentId: ada.id, runId: null, details: { note: 'do-not-show' }, createdAt: '2026-11-06T08:00:00.000Z' },
+      { id: 'l2', companyId, actorType: 'user', actorId: 'board', action: 'agent.updated', entityType: 'agent', entityId: ada.id, agentId: null, runId: null, details: {}, createdAt: '2026-11-06T07:00:00.000Z' }],
+    costs: { companyId, spendCents: 1240, budgetCents: 10000, utilizationPercent: 12.4 },
+    secrets: [{ id: 's1', companyId, name: 'GITHUB_TOKEN', provider: 'local_encrypted', description: null, latestVersion: 1, value: 'do-not-show' }],
+  };
+};
+export const DEMO = (hooksFile = null) => withHq(DEMO0(hooksFile));
+const DEMO0 = (hooksFile = null) => {
   const companyId = 'c0ffee00-0000-4000-8000-000000000001';
   const agent = (o) => ({ companyId, urlKey: o.name.toLowerCase(), title: null, icon: null, status: 'idle', reportsTo: null, capabilities: null, adapterType: 'claude_local', runtimeConfig: { heartbeat: { enabled: false } }, budgetMonthlyCents: 0, spentMonthlyCents: 0, pauseReason: null, pausedAt: null, permissions: { canCreateAgents: false }, lastHeartbeatAt: null, metadata: null, createdAt: '2026-11-01T09:00:00.000Z', updatedAt: '2026-11-01T09:00:00.000Z', ...o });
   return {
@@ -67,11 +83,12 @@ export const DEMO = (hooksFile = null) => {
 };
 
 /**
- * Starts the fake on 127.0.0.1. seed: { companies, agents, issues, routines, projects, noProjects, liveRuns, health, auth }. auth: true answers
+ * Starts the fake on 127.0.0.1. seed: { companies, agents, issues, routines, projects, noProjects, liveRuns, goals, approvals, activity, costs, secrets, noGoals, health, auth, key }. key: a board key; every route but /api/health answers 401 without `authorization: Bearer <key>`. auth: true answers
  * 403 to every route (a Paperclip in authenticated mode). port: 0 for a free one.
  */
 export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
-  const st = { companies: structuredClone(seed.companies || []), agents: structuredClone(seed.agents || []), issues: structuredClone(seed.issues || []), routines: structuredClone(seed.routines || []), projects: structuredClone(seed.projects || []), liveRuns: structuredClone(seed.liveRuns || []) };
+  const st = { companies: structuredClone(seed.companies || []), agents: structuredClone(seed.agents || []), issues: structuredClone(seed.issues || []), routines: structuredClone(seed.routines || []), projects: structuredClone(seed.projects || []), liveRuns: structuredClone(seed.liveRuns || []),
+    goals: structuredClone(seed.goals || []), approvals: structuredClone(seed.approvals || []), activity: structuredClone(seed.activity || []), costs: structuredClone(seed.costs || null), secrets: structuredClone(seed.secrets || []) };
   const requests = [], sockets = new Set();
   const api = { afterPatch: null, failIssueAfter: null, created: 0 };   // set by a test: runs right after a PATCH is answered (a change made in Paperclip at the same time)
   let seq = 0;
@@ -98,6 +115,7 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
         }
         if (u.pathname === '/api/cli-auth/me') return send(res, 200, { userId: 'u1', keyId: 'k1', source: 'board_key', isInstanceAdmin: true });
       }
+      if (seed.key && u.pathname !== '/api/health' && req.headers.authorization !== `Bearer ${seed.key}`) return send(res, 401, { error: 'Board access required' });
       const m = (re) => re.exec(u.pathname);
       let x;
       if (req.method === 'GET' && u.pathname === '/api/health') return send(res, 200, seed.health || { status: 'ok', version: '2026.1023.0' });
@@ -124,6 +142,12 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
       }
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/routines$/))) return send(res, 200, st.routines.filter((r) => r.companyId === x[1]));
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/projects$/))) return seed.noProjects ? send(res, 404, { error: 'Not found' }) : send(res, 200, st.projects.filter((r) => r.companyId === x[1]));
+      // the HQ read model (#197): goals, pending approvals (the payload is in the answer, as in Paperclip), activity, the cost summary, secret names
+      if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/goals$/))) return seed.noGoals ? send(res, 404, { error: 'Not found' }) : send(res, 200, st.goals.filter((r) => r.companyId === x[1]));
+      if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/approvals$/))) { const want = u.searchParams.get('status'); return send(res, 200, st.approvals.filter((r) => r.companyId === x[1] && (!want || r.status === want))); }
+      if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/activity$/))) return send(res, 200, st.activity.filter((r) => r.companyId === x[1]));
+      if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/costs\/summary$/))) return st.costs ? send(res, 200, st.costs) : send(res, 404, { error: 'Not found' });
+      if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/secrets$/))) return send(res, 200, st.secrets.filter((r) => r.companyId === x[1]));
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/live-runs$/))) return send(res, 200, st.liveRuns);
       // the agent as saved, with what buildAgentDetail adds (routes/agents.ts; the board reads the whole config)
       if (req.method === 'GET' && (x = m(/^\/api\/agents\/([^/]+)$/))) { const a = st.agents.find((y) => y.id === x[1]); return a ? send(res, 200, { ...a, chainOfCommand: [], access: {} }) : send(res, 404, { error: 'Agent not found' }); }
@@ -146,7 +170,7 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
     const m = /^\/api\/companies\/([^/]+)\/events\/ws$/.exec(u.pathname);
     requests.push({ method: 'UPGRADE', path: u.pathname, query: u.search, body: null });
     requests[requests.length - 1].authorization = req.headers.authorization || null;
-    if (!m || seed.auth || (seed.boardKey && req.headers.authorization !== `Bearer ${seed.boardKey}`)) { sock.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return; }
+    if (!m || seed.auth || (seed.boardKey && req.headers.authorization !== `Bearer ${seed.boardKey}`) || (seed.key && req.headers.authorization !== `Bearer ${seed.key}`)) { sock.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n'); return; }
     const accept = crypto.createHash('sha1').update(String(req.headers['sec-websocket-key']) + GUID).digest('base64');
     sock.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
     sock.companyId = decodeURIComponent(m[1]);

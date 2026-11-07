@@ -269,7 +269,10 @@
           h('div', { className: 'btn-row' },
             h(A.Button, { variant: 'quiet', onClick: function () { setTokenShown(!tokenShown); } }, tokenShown ? 'Hide token' : 'Show token'),
             h(A.Button, { variant: 'quiet', icon: 'copy', onClick: function () { copy(token, 'The agent token', 'Click Show token, then select the token and copy it by hand.'); } }, 'Copy token'))) : null,
-        h(PaperclipRuntime, { runtime: p.snap && p.snap.paperclipRuntime, toast: p.toast }),
+        // The Paperclip runtime (install, start, stop, board key) lives in the HQ now (#197): one place for the company.
+        h('h3', { className: 'ext-h' }, 'Paperclip runtime'),
+        h('p', { className: 'note' }, 'The office installs and runs Paperclip from the HQ. ' + (p.snap && p.snap.paperclipRuntime ? window.OfficeVocab.hq.runtime(p.snap.paperclipRuntime).word + '.' : '')),
+        p.onHq ? h(A.Button, { variant: 'quiet', icon: 'hq', onClick: p.onHq }, 'Open Paperclip HQ') : null,
         h(PaperclipConnect, { hq: p.snap && p.snap.hq, toast: p.toast })));
   }
 
@@ -642,7 +645,7 @@
           h(A.AddButton, { label: 'Add an agent', onClick: function () { setErr(''); setAdd({ name: '', provider: DEFAULT_KIND, model: '', prompt: '' }); } }))));
   }
 
-  Object.assign(O, { FloorsDialog: FloorsDialog, HooksDialog: HooksDialog, KindsDialog: KindsDialog,
+  Object.assign(O, { PaperclipRuntime: PaperclipRuntime, FloorsDialog: FloorsDialog, HooksDialog: HooksDialog, KindsDialog: KindsDialog,
       OpenDialog: OpenDialog, PastDialog: PastDialog, RoomDialog: RoomDialog,
       SessionsDialog: SessionsDialog });
 })();

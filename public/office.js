@@ -40,11 +40,14 @@
   function hqBuilding(snap) {
     var q = snap && snap.hq, H = window.OfficeVocab.hq;
     if (!q || !q.company) return null;
-    var bots = q.agents.map(function (a) { var st = H.status(a); return { uid: 'hq:' + a.id, name: a.name, status: st.key, word: st.word, floor: 'HQ' }; });
+    // The floors follow the org chart (#197, hq-model.mjs floorsOf): Records, Lobby, then one per rank, the top role on top. A server that sends none gets one HQ floor.
+    var floors = q.floors && q.floors.length ? q.floors : [{ name: 'HQ', key: 'hq', employees: [] }], at = {};
+    floors.forEach(function (f) { (f.employees || []).forEach(function (e) { at[e.id] = f.name; }); });
+    var bots = q.agents.map(function (a) { var st = H.status(a); return { uid: 'hq:' + a.id, name: a.name, status: st.key, word: st.word, floor: at[a.id] || floors[0].name }; });
     var money = q.budget ? (q.budget.limit > 0 ? F.money(q.budget.spent) + ' of ' + F.money(q.budget.limit) : F.money(q.budget.spent)) : '';
     return { key: HQ_KEY, hq: true, name: q.company.name, sub: 'HQ · ' + plural(q.agents.length, 'agent', 'agents') + (money ? ' · ' + money : ''),
-      line: (q.state === 'on' ? 'Paperclip HQ' : 'Paperclip HQ, not live') + ' · ' + plural(q.agents.length, 'agent', 'agents') + (q.budget ? ' · ' + H.budget(q.budget) : ''),
-      sessions: 0, waiting: 0, live: q.state === 'on', floors: [{ name: 'HQ', key: 'hq' }], bots: bots };
+      line: (q.state === 'on' ? 'Paperclip HQ' : 'Paperclip HQ, not live') + ' · ' + (H.glance(q) || plural(q.agents.length, 'agent', 'agents') + (q.budget ? ' · ' + H.budget(q.budget) : '')),
+      sessions: 0, waiting: 0, live: q.state === 'on', floors: floors.map(function (f) { return { name: f.name, key: f.key }; }), bots: bots };
   }
   // The themes come from the DS (AgentOffice.MODES); the page keeps no copy of the list and names no theme. With no theme set,
   // the first theme whose dark flag matches the system scheme (the DS engine reads the system scheme the same way).
@@ -824,7 +827,7 @@
     var planWaits = snap ? window.OfficeVocab.plan.waits(snap.plans) : [], planAll = snap ? window.OfficeVocab.plan.board(snap.plans) : { groups: [], unreadable: [] };
     if (planAll.groups.length || planAll.unreadable.length) actions.push({ id: 'page-manager', label: planWaits.length ? 'Manager board (' + planWaits.length + ' waits for you)' : 'Manager board', icon: 'plan', group: 'Office', keywords: 'manager plan goal steps paperclip office tasks approve', run: function () { setDlg({ name: 'manager' }); } });
     planWaits.forEach(function (w, i) { actions.push({ id: 'page-plan-' + i, label: w.text, icon: 'waiting', group: 'Office', keywords: 'manager plan goal approve retry step', run: function () { setDlg({ name: 'manager' }); } }); });
-    if (snap && snap.hq) actions.push({ id: 'page-hq', label: 'Paperclip HQ', icon: 'hq', group: 'Office', keywords: 'paperclip company agents budget heartbeats routines supervise', run: function () { setDlg({ name: 'hq' }); } });
+    actions.push({ id: 'page-hq', label: 'Paperclip HQ', icon: 'hq', group: 'Office', keywords: 'paperclip hq company lobby org chart floors agents budget heartbeats routines supervise runtime install', run: function () { setDlg({ name: 'hq' }); } });
     list.forEach(function (b) { if (b.key !== shown) actions.push({ id: 'page-b-' + b.key, label: 'Go to ' + b.name, icon: 'building', group: 'Buildings', keywords: 'building repository ' + b.name, run: function () { pick(b.key); } }); });
     // The Reception lists the office's own actions (the dock had them before #92), so a touch screen reaches them with no keyboard.
     var officeActions = actions.filter(function (a) { return ['page-orientation', 'page-open', 'page-needs', 'page-flow', 'page-sessions', 'page-past', 'page-schedules', 'page-hooks', 'page-kinds', 'page-floors', 'page-city', 'page-compact'].indexOf(a.id) >= 0; })
@@ -883,7 +886,7 @@
 
     return h(React.Fragment, null,
       h('div', { className: 'view' + (fading ? ' is-fading' : '') }, scene),
-      phoneOn ? h(PhoneView, { toast: toast, onManager: function () { setDlg({ name: 'manager' }); }, onGo: function (r) { var x = snap && snap.sessions.filter(function (y) { return y.uid === r.uid; })[0]; if (x) { setPhoneList(false); goTo(x); } },
+      phoneOn ? h(PhoneView, { toast: toast, onHq: function () { setDlg({ name: 'hq' }); }, onManager: function () { setDlg({ name: 'manager' }); }, onGo: function (r) { var x = snap && snap.sessions.filter(function (y) { return y.uid === r.uid; })[0]; if (x) { setPhoneList(false); goTo(x); } },
         onOpenAgent: function (uid) { var x = window.officeAdapter.sessionByUid(uid); if (x) { setPhoneList(false); goTo(x); } } }) : null,
       win.w <= PHONE_MAX && !phoneList ? h('div', { className: 'phone-back' }, h(A.Button, { variant: 'emphasis', icon: 'chevron-right', onClick: function () { blurScene(); setBoard(null); setPhoneList(true); } }, 'Back to the list')) : null,
       !ambient && touring && cur2.view === 'office' ? h(TourCard, { onStep: tourStep, onDone: endTour }) : null,
@@ -898,7 +901,7 @@
       d === 'past' ? h(PastDialog, { onClose: close, onChanges: changes, toast: toast }) : null,
       d === 'schedules' ? h(SchedulesDialog, { recent: info.recent, spendLimit: info.spendLimit, onInfo: setInfo, toast: toast, onClose: close }) : null,
       d === 'changes' ? h(Changes.Dialog, { uid: dlg.uid, name: dlg.label, ended: dlg.ended, toast: toast, onClose: close }) : null,
-      d === 'hooks' ? h(HooksDialog, { info: info, snap: snap, onSaved: refresh, toast: toast, onClose: close }) : null,
+      d === 'hooks' ? h(HooksDialog, { info: info, snap: snap, onSaved: refresh, toast: toast, onHq: function () { setDlg({ name: 'hq' }); }, onClose: close }) : null,
       d === 'floors' ? h(FloorsDialog, { repo: shown, toast: toast, onClose: close }) : null,
       d === 'room' && mount ? h(RoomDialog, { mount: mount, roomId: dlg.roomId, toast: toast, onClose: close }) : null,
       d === 'ext' ? h(ExtensionsDialog, { uid: dlg.uid, name: dlg.label, toast: toast, onClose: close }) : null,
@@ -925,7 +928,7 @@
         onBack: blurScene, onOpen: function () { if (hostRef.current) hostRef.current.open(); } }) : null,
       d === 'sessions' ? h(SessionsDialog, { onClose: close, onGo: goTo }) : null,
       d === 'manager' ? h(ManagerDialog, { toast: toast, onClose: close, onGo: function (x) { goTo(x); }, onHq: function () { setDlg({ name: 'hq' }); } }) : null,
-      d === 'hq' ? h(HqDialog, { snap: snap, onAttach: function () { show('hooks'); }, onClose: close }) : null,
+      d === 'hq' ? h(HqDialog, { snap: snap, toast: toast, onAttach: function () { show('hooks'); }, onClose: close }) : null,
       d === 'needs' ? h(NeedsDialog, { toast: toast, onClose: close, onManager: function () { setDlg({ name: 'manager' }); }, onGo: function (r) { var s = snap && snap.sessions.filter(function (x) { return x.uid === r.uid; })[0]; if (s) goTo(s); else close(); } }) : null,
       // The one Notifier (the scene has notifier: false). The tab title counts every request of every building, in the
       // city too. Browser alerts for the requests and errors of every building; the DS alert toggle decides, and they

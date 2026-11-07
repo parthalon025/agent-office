@@ -17,6 +17,7 @@
 import path from 'node:path';
 import { runIds, cleanIds } from './payload.mjs';
 import { readArgs, CLAUDE_FLAGS_VERSION } from './providers/claude-code.mjs';
+import { floorsOf, lobbyOf, shapeProblems } from './hq-model.mjs';
 
 export const DEFAULT_URL = 'http://127.0.0.1:3100';
 
@@ -308,7 +309,8 @@ const ENDED = new Set(['succeeded', 'failed', 'cancelled', 'timed_out', 'error']
 /**
  * createHq(deps) -> the Paperclip watcher. deps: { hooksFile() (the office's command hooks file, the path Supervise writes),
  * onChange(), onFeed(text, kind), onRun({ agentId, runId, status }) (a run ended), fetch, WebSocket, setTimer, clearTimer,
- * refetchMs, retryMs }. connect, disconnect, supervise, view (the snapshot part), labelOf (a session's label). Only the
+ * refetchMs, retryMs, key(url) (the board key for that address, or null: sent only as a bearer to that address, never held in a view) }.
+ * connect, disconnect, supervise, view (the snapshot part, with the HQ floors and Lobby, #197), model (the fuller read model), labelOf (a session's label). Only the
  * labels need the company match: a held call of any Paperclip run waits the long hold (server.mjs holdRequest).
  */
 export function createHq(deps = {}) {
@@ -326,8 +328,8 @@ export function createHq(deps = {}) {
   let c = null;   // the connection: { url, companyId, state, error, ws, tries, timer, refetch, busy, companies }
   let d = null;   // what Paperclip said: { company, agents: Map, issues, routines, runs: Map agentId -> run, last: Map agentId -> lastRun }
 
-  // The board key of the connect mode (#194): asked per address, so it goes only to the Paperclip it was made for (redirects are refused).
-  const keyOf = (url) => { try { return deps.token?.(url) || null; } catch { return null; } };
+  // The board key (the connect mode #194, the Paperclip the office runs #197): asked per call for the address it is used at (deps.token or deps.key), so it goes only to the Paperclip it was made for (redirects are refused) and is held nowhere.
+  const keyOf = (url) => { try { return deps.token?.(url) || deps.key?.(url) || null; } catch { return null; } };
   async function call(conn, route, init = {}) {
     let res;
     const key = keyOf(conn.url);
@@ -350,13 +352,33 @@ export function createHq(deps = {}) {
     const id = encodeURIComponent(conn.companyId);
     const unread = [];
     const opt = (name, route, fallback = []) => call(conn, route).catch(() => { unread.push(name); return fallback; });
-    const [company, agents, issues, routines, projects, live] = await Promise.all([
-      call(conn, `/api/companies/${id}`),
-      call(conn, `/api/companies/${id}/agents`),
-      opt('issues', `/api/companies/${id}/issues?status=backlog,todo,in_progress,in_review,blocked`),
+    // The contract (hq-model.mjs SHAPES): an answer in a shape the office does not know is not used. A part is then unknown; company and
+    // agents are the ground of everything, so a changed shape there stops the read, loudly.
+    const contract = [];
+    const shaped = async (name, route, fallback) => {
+      let json;
+      try { json = await call(conn, route); } catch { unread.push(name); return fallback; }
+      const p = shapeProblems(name, json);
+      if (p.length) { contract.push(...p); unread.push(name); return fallback; }
+      return json;
+    };
+    const must = async (name, route) => {
+      const json = await call(conn, route), p = shapeProblems(name, json);
+      if (p.length) throw httpError(502, `Paperclip answered in a shape the office does not know (${p[0]}) Update the office or the pinned Paperclip.`);
+      return json;
+    };
+    const [company, agents, issues, routines, projects, live, goals, approvals, activity, costs, secrets] = await Promise.all([
+      must('company', `/api/companies/${id}`),
+      must('agents', `/api/companies/${id}/agents`),
+      shaped('issues', `/api/companies/${id}/issues?status=backlog,todo,in_progress,in_review,blocked`, []),
       opt('routines', `/api/companies/${id}/routines`),
       opt('projects', `/api/companies/${id}/projects`),
       call(conn, `/api/companies/${id}/live-runs`).catch(() => []),
+      shaped('goals', `/api/companies/${id}/goals`, null),
+      shaped('approvals', `/api/companies/${id}/approvals?status=pending`, null),
+      shaped('activity', `/api/companies/${id}/activity`, null),
+      shaped('costs', `/api/companies/${id}/costs/summary`, null),
+      shaped('secrets', `/api/companies/${id}/secrets`, null),
     ]);
     if (c !== conn) return;
     // What the office cannot tell fails closed (review 76, round 4). Paperclip lists at most 500 issues by default, so a list
@@ -367,7 +389,8 @@ export function createHq(deps = {}) {
     const runs = d && d.company && d.company.id === conn.companyId ? d.runs : new Map();
     for (const r of list(live)) if (r && r.agentId && r.id) runs.set(r.agentId, { id: r.id, status: r.status || 'running' });
     // env values are dropped here: only the key names are kept (scrubAgent, scrubIssue, envOnly)
-    d = { company: obj(company), agents: new Map(list(agents).filter((a) => a && a.id).map((a) => [a.id, scrubAgent(a)])), issues: list(issues).map(scrubIssue), routines: list(routines).map(envOnly), projects: list(projects).map(envOnly), unread, runs, last: d && d.last ? d.last : new Map() };
+    for (const p of contract) if (!conn.told.has(p)) { conn.told.add(p); feed(`Paperclip answered in a shape the office does not know, so the office does not use that part. ${p}`, 'wait'); }
+    d = { company: obj(company), agents: new Map(list(agents).filter((a) => a && a.id).map((a) => [a.id, scrubAgent(a)])), issues: list(issues).map(scrubIssue), routines: list(routines).map(envOnly), projects: list(projects).map(envOnly), unread, contract, hqRead: readHq({ goals, approvals, activity, costs, secrets }), runs, last: d && d.last ? d.last : new Map() };
     changed();
   }
   function refetchSoon(conn) {
@@ -454,7 +477,7 @@ export function createHq(deps = {}) {
     const u = checkUrl(url);
     if (!u.ok) throw httpError(400, u.error);
     stop();
-    const conn = c = { url: u.url, companyId: company ? String(company) : null, state: 'connecting', error: '', ws: null, tries: 0, timer: null, refetch: null, busy: new Set(), companies: null };
+    const conn = c = { url: u.url, companyId: company ? String(company) : null, state: 'connecting', error: '', ws: null, tries: 0, timer: null, refetch: null, busy: new Set(), companies: null, told: new Set() };
     changed();
     try {
       const health = await call(conn, '/api/health');
@@ -499,7 +522,7 @@ export function createHq(deps = {}) {
   function agentView(a) {
     const i = issueOf(a.id), hb = obj(obj(a.runtimeConfig).heartbeat), run = d.runs.get(a.id) || null;
     return {
-      id: a.id, name: text(a.name, 60) || 'Agent', role: roleLabel(a.role), title: text(a.title, 60), status: text(a.status, 30), kind: text(a.adapterType, 40),
+      id: a.id, name: text(a.name, 60) || 'Agent', reportsTo: a.reportsTo ? String(a.reportsTo) : null, role: roleLabel(a.role), title: text(a.title, 60), status: text(a.status, 30), kind: text(a.adapterType, 40),
       supervision: supOf(a), run: run ? { id: run.id, status: run.status } : null,
       task: i ? { id: i.id, identifier: text(i.identifier, 30), title: text(i.title, 100), status: i.status } : null,
       budget: { spent: cents(a.spentMonthlyCents), limit: cents(a.budgetMonthlyCents) },
@@ -514,18 +537,54 @@ export function createHq(deps = {}) {
     return { id: r.id, title: text(r.title, 100) || 'Routine', status: text(r.status, 30), agent: a ? text(a.name, 60) : '', next, cron: text((trig.find((t) => t.cronExpression) || {}).cronExpression, 60), last: ms(r.lastTriggeredAt) };
   }
 
+  // What the HQ read model keeps of the extra routes (#197): the fields the page shows and nothing else. An approval's payload, an activity's
+  // details and a secret's value are dropped here, so they cannot reach a view. null: the route was not read (unknown, not zero).
+  function readHq(x) {
+    const rows = (v) => (v ? list(v).filter((r) => r && r.id) : null);
+    const goals = rows(x.goals), approvals = rows(x.approvals), activity = rows(x.activity);
+    return {
+      goals: goals && goals.slice(0, 50).map((g) => ({ id: String(g.id), title: text(g.title, 100), status: text(g.status, 30), level: text(g.level, 30), parentId: g.parentId ? String(g.parentId) : null, ownerAgentId: g.ownerAgentId ? String(g.ownerAgentId) : null })),
+      approvals: approvals && approvals.slice(0, 50).map((a) => ({ id: String(a.id), type: text(a.type, 40), status: text(a.status, 30), requestedByAgentId: a.requestedByAgentId ? String(a.requestedByAgentId) : null, at: ms(a.createdAt) })),
+      activity: activity && activity.slice(0, 50).map((l) => ({ id: String(l.id), actorType: text(l.actorType, 20), actorId: l.actorId ? String(l.actorId) : '', action: text(l.action, 60), entityType: text(l.entityType, 30), at: ms(l.createdAt) })),
+      costs: x.costs && typeof x.costs === 'object' ? { spent: cents(x.costs.spendCents), limit: cents(x.costs.budgetCents) } : null,
+      secrets: x.secrets ? list(x.secrets).filter((r) => r && r.name).map((r) => text(r.name, 60)) : null,
+    };
+  }
+  const known = (n) => !!d && !d.unread.some((u) => u === n || u.startsWith(`${n} `));
+  const activityOf = (n) => {
+    const a = d.hqRead.activity;
+    if (!a) return null;
+    return a.slice().sort((x, y) => (y.at || 0) - (x.at || 0)).slice(0, n).map((l) => {
+      const who = l.actorType === 'agent' ? (d.agents.get(l.actorId) ? text(d.agents.get(l.actorId).name, 60) : 'An agent') : (l.actorId ? text(l.actorId, 40) : l.actorType || 'Someone');
+      return { id: l.id, text: `${who}: ${l.action}${l.entityType ? ` (${l.entityType})` : ''}`, at: l.at };
+    });
+  };
+
   /** The HQ part of the snapshot, or null while the office is not connected. Money in dollars, times in ms. */
   function view() {
     if (!c) return null;
     const base = { state: c.state, url: c.url, error: c.error, companies: c.state === 'choose' ? c.companies : null };
-    if (!d) return { ...base, company: null, budget: null, agents: [], routines: [] };
+    if (!d) return { ...base, company: null, budget: null, agents: [], routines: [], floors: [], lobby: null, contract: [] };
+    const agents = [...d.agents.values()].filter((a) => a.status !== 'terminated').map(agentView), hr = d.hqRead;
+    const lobby = lobbyOf({
+      agents, issues: known('issues') ? d.issues : null, approvals: known('approvals') ? hr.approvals : null, goals: known('goals') ? hr.goals : null, activity: known('activity') ? activityOf(8) : null,
+      costs: known('costs') && hr.costs ? hr.costs : { spent: cents(d.company.spentMonthlyCents), limit: cents(d.company.budgetMonthlyCents) }, secrets: known('secrets') ? hr.secrets : null, unread: d.unread,
+    });
     return {
       ...base,
       company: { id: String(d.company.id || c.companyId), name: text(d.company.name, 80) || 'Paperclip' },
       budget: { spent: cents(d.company.spentMonthlyCents), limit: cents(d.company.budgetMonthlyCents) },
-      agents: [...d.agents.values()].filter((a) => a.status !== 'terminated').map(agentView),
+      agents,
+      floors: floorsOf(agents).map((f) => ({ key: f.key, name: f.name, rank: f.rank, employees: f.employees.map((e) => ({ id: e.id, name: e.name, role: e.role, floor: f.name })) })),
+      lobby, contract: d.contract,
       routines: d.routines.filter((r) => r && r.id && r.status !== 'archived').map(routineView),
     };
+  }
+  /** The view plus the lists behind the Lobby (goals, pending approvals, activity), for GET /api/hq/lobby. Names and counts, never a payload, a value or a key. */
+  function model() {
+    const v = view();
+    if (!v || !d) return v;
+    return { ...v, goals: known('goals') ? d.hqRead.goals : null, approvals: known('approvals') ? d.hqRead.approvals : null, activity: known('activity') ? activityOf(30) : null };
   }
   /** A Paperclip run's label for its office session (hook ids), or null when the agent is not one of the watched company. */
   function labelOf(ids) {
@@ -657,5 +716,5 @@ export function createHq(deps = {}) {
     return { written, company: name };
   }
 
-  return { connect, disconnect, supervise, handoffGoal, handoffTasks, view, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
+  return { connect, disconnect, supervise, handoffGoal, handoffTasks, view, model, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
 }
