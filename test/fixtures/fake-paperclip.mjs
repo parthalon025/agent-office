@@ -61,6 +61,11 @@ const withHq = (d) => {
     budgets: { companyId, policies: [{ policyId: 'bp1', companyId, scopeType: 'company', scopeId: companyId, scopeName: 'Acme Robotics', metric: 'billed_cents', windowKind: 'calendar_month_utc', amount: 10000, observedAmount: 1240, utilizationPercent: 12.4, status: 'ok', isActive: true },
       { policyId: 'bp2', companyId, scopeType: 'agent', scopeId: ada.id, scopeName: 'Ada', metric: 'billed_cents', windowKind: 'calendar_month_utc', amount: 5000, observedAmount: 4500, utilizationPercent: 90, status: 'warning', isActive: true }],
       activeIncidents: [], pausedAgentCount: 0, pausedProjectCount: 0, pendingApprovalCount: 0 },
+    // company admin (#213): shapes of routes/access.ts (an invite has a tokenHash in the table; the list never carries the token)
+    invites: [{ id: 'v1000000-0000-4000-8000-000000000001', companyId, inviteType: 'company_join', allowedJoinTypes: 'human', humanRole: 'operator', inviteMessage: null, state: 'active', expiresAt: '2026-11-13T10:00:00.000Z', createdAt: '2026-11-06T10:00:00.000Z', tokenHash: 'do-not-show' }],
+    joinRequests: [{ id: 'j1000000-0000-4000-8000-000000000001', companyId, inviteId: 'v1000000-0000-4000-8000-000000000001', requestType: 'human', status: 'pending_approval', requestIp: '203.0.113.9', requestingUserId: 'u9', requestEmailSnapshot: 'sam@example.com', agentName: null, createdAt: '2026-11-06T11:00:00.000Z' }],
+    members: [{ id: 'm1000000-0000-4000-8000-000000000001', companyId, principalType: 'user', principalId: 'u1', status: 'active', membershipRole: 'owner', user: { id: 'u1', name: 'Justin', email: 'j@example.com' }, grants: [] },
+      { id: 'm1000000-0000-4000-8000-000000000002', companyId, principalType: 'user', principalId: 'u2', status: 'active', membershipRole: 'viewer', user: { id: 'u2', name: 'Pat', email: 'pat@example.com' }, grants: [] }],
     secrets: [{ id: 's1', companyId, name: 'GITHUB_TOKEN', provider: 'local_encrypted', description: null, latestVersion: 1, value: 'do-not-show' }],
   };
 };
@@ -96,7 +101,8 @@ const DEMO0 = (hooksFile = null) => {
  */
 export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
   const st = { companies: structuredClone(seed.companies || []), agents: structuredClone(seed.agents || []), issues: structuredClone(seed.issues || []), routines: structuredClone(seed.routines || []), projects: structuredClone(seed.projects || []), liveRuns: structuredClone(seed.liveRuns || []),
-    goals: structuredClone(seed.goals || []), approvals: structuredClone(seed.approvals || []), activity: structuredClone(seed.activity || []), costs: structuredClone(seed.costs || null), secrets: structuredClone(seed.secrets || []), costMonths: structuredClone(seed.costMonths || {}), budgets: structuredClone(seed.budgets || null) };
+    goals: structuredClone(seed.goals || []), approvals: structuredClone(seed.approvals || []), activity: structuredClone(seed.activity || []), costs: structuredClone(seed.costs || null), secrets: structuredClone(seed.secrets || []), costMonths: structuredClone(seed.costMonths || {}), budgets: structuredClone(seed.budgets || null),
+    invites: structuredClone(seed.invites || []), joinRequests: structuredClone(seed.joinRequests || []), members: structuredClone(seed.members || []) };
   const requests = [], sockets = new Set();
   const api = { afterPatch: null, failIssueAfter: null, created: 0, comments: 0 };   // set by a test: runs right after a PATCH is answered (a change made in Paperclip at the same time)
   let seq = 0;
@@ -197,6 +203,43 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/budgets\/overview$/))) return st.budgets ? send(res, 200, st.budgets) : send(res, 404, { error: 'Not found' });
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/secrets$/))) return send(res, 200, st.secrets.filter((r) => r.companyId === x[1]));
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/live-runs$/))) return send(res, 200, st.liveRuns);
+      // company admin (#213): settings, invites, join requests and members (routes/companies.ts, routes/access.ts)
+      if (req.method === 'PATCH' && (x = m(/^\/api\/companies\/([^/]+)$/))) {
+        const co = st.companies.find((y) => y.id === x[1]);
+        if (!co) return send(res, 404, { error: 'Company not found' });
+        Object.assign(co, parsed || {});
+        emit('activity.logged', { actorType: 'user', actorId: 'board', action: 'company.updated', entityType: 'company', entityId: co.id, agentId: null, runId: null, details: {} }, co.id);
+        return send(res, 200, co);
+      }
+      if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/invites$/))) return send(res, 200, { invites: st.invites.filter((r) => r.companyId === x[1]), nextOffset: null });
+      if (req.method === 'POST' && (x = m(/^\/api\/companies\/([^/]+)\/invites$/))) {
+        if (!parsed || !['human', 'agent', 'both'].includes(parsed.allowedJoinTypes)) return send(res, 422, { error: 'Validation error' });
+        const v = { id: `v2000000-0000-4000-8000-${String(st.invites.length + 1).padStart(12, '0')}`, companyId: x[1], inviteType: 'company_join', allowedJoinTypes: parsed.allowedJoinTypes, humanRole: parsed.humanRole || null, inviteMessage: parsed.agentMessage || null, state: 'active', expiresAt: '2026-11-13T10:00:00.000Z', createdAt: new Date().toISOString() };
+        st.invites.push(v);
+        return send(res, 201, { ...v, token: 'pcp_invite_do-not-show', inviteUrl: 'http://127.0.0.1/invite/pcp_invite_do-not-show' });
+      }
+      if (req.method === 'POST' && (x = m(/^\/api\/invites\/([^/]+)\/revoke$/))) {
+        const v = st.invites.find((y) => y.id === x[1]);
+        if (!v) return send(res, 404, { error: 'Invite not found' });
+        v.state = 'revoked';
+        return send(res, 200, v);
+      }
+      if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/join-requests$/))) return send(res, 200, st.joinRequests.filter((r) => r.companyId === x[1]));
+      if (req.method === 'POST' && (x = m(/^\/api\/companies\/([^/]+)\/join-requests\/([^/]+)\/(approve|reject)$/))) {
+        const j = st.joinRequests.find((y) => y.id === x[2] && y.companyId === x[1]);
+        if (!j) return send(res, 404, { error: 'Join request not found' });
+        if (j.status !== 'pending_approval') return send(res, 409, { error: 'Join request is not pending' });
+        j.status = x[3] === 'approve' ? 'approved' : 'rejected';
+        return send(res, 200, j);
+      }
+      if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/members$/))) return send(res, 200, { members: st.members.filter((r) => r.companyId === x[1]), access: { currentUserRole: 'owner' } });
+      if (req.method === 'PATCH' && (x = m(/^\/api\/companies\/([^/]+)\/members\/([^/]+)$/))) {
+        const mm = st.members.find((y) => y.id === x[2] && y.companyId === x[1]);
+        if (!mm) return send(res, 404, { error: 'Member not found' });
+        if (parsed && parsed.membershipRole) mm.membershipRole = parsed.membershipRole;
+        if (parsed && parsed.status) mm.status = parsed.status;
+        return send(res, 200, mm);
+      }
       // the agent as saved, with what buildAgentDetail adds (routes/agents.ts; the board reads the whole config)
       if (req.method === 'GET' && (x = m(/^\/api\/agents\/([^/]+)$/))) { const a = st.agents.find((y) => y.id === x[1]); return a ? send(res, 200, { ...a, chainOfCommand: [], access: {} }) : send(res, 404, { error: 'Agent not found' }); }
       if (req.method === 'PATCH' && (x = m(/^\/api\/agents\/([^/]+)$/))) {

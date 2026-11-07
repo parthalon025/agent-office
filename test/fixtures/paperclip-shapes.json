@@ -170,6 +170,26 @@
     "pausedProjectCount": "number",
     "pendingApprovalCount": "number"
    }
+  },
+  "invites": {
+   "list": false,
+   "fields": {
+    "invites": "array"
+   }
+  },
+  "joinRequests": {
+   "list": true,
+   "fields": {
+    "id": "string",
+    "status": "string",
+    "requestType": "string"
+   }
+  },
+  "members": {
+   "list": false,
+   "fields": {
+    "members": "array"
+   }
   }
  }
 }

@@ -1320,6 +1320,7 @@ export function createOffice(cfg) {
     R('POST', '/api/hq/grid/set', 'page', ({ body }) => setHqGrid(body)),
     R('POST', '/api/hq/write', 'page', ({ body }) => writeHq(body)),
     R('GET', '/api/hq/costs', 'page', async () => ({ costs: await hq.costs() })),
+    R('GET', '/api/hq/access', 'page', async () => ({ access: await hq.access() })),
     // The Paperclip runtime (#193): install (409 without the Confirm), start, stop, and the board key's approval link. Never the key.
     R('GET', '/api/paperclip/runtime', 'page', () => ({ runtime: runtime.status() })),
     // The transcript of a run of the office adapter, for the desk screen (#211): the log the plugin reads, live or kept after the end.

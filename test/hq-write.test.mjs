@@ -143,3 +143,75 @@ test('the company is read again after a write, so the view shows it', async () =
     await until(() => r.hq.view().lobby.tasks.open === n + 1, 'the task in the Lobby');
   } finally { await r.done(); }
 });
+
+// ---------- company admin (#213): settings, invites and access ----------
+const INVITE = D.invites[0].id, JOIN = D.joinRequests[0].id, PAT = D.members[1].id;
+
+test('company settings and every access write are one request each', async () => {
+  const r = await rig({ company: 'allow', access: 'allow' });
+  try {
+    await r.hq.write({ kind: 'company', action: 'update', name: 'Acme Labs', requireBoardApprovalForNewAgents: true });
+    const made = await r.hq.write({ kind: 'access', action: 'invite', allowedJoinTypes: 'human', humanRole: 'viewer', agentMessage: 'Welcome.' });
+    await r.hq.write({ kind: 'access', action: 'revoke', invite: INVITE });
+    await r.hq.write({ kind: 'access', action: 'approveJoin', join: JOIN });
+    await r.hq.write({ kind: 'access', action: 'member', member: PAT, role: 'operator' });
+    assert.deepEqual(Object.keys(made).sort(), ['id', 'ok']);
+    assert.deepEqual(r.writes(), [
+      ['PATCH', `/api/companies/${CO}`, { name: 'Acme Labs', requireBoardApprovalForNewAgents: true }],
+      ['POST', `/api/companies/${CO}/invites`, { allowedJoinTypes: 'human', humanRole: 'viewer', agentMessage: 'Welcome.' }],
+      ['POST', `/api/invites/${INVITE}/revoke`, {}],
+      ['POST', `/api/companies/${CO}/join-requests/${JOIN}/approve`, {}],
+      ['PATCH', `/api/companies/${CO}/members/${PAT}`, { membershipRole: 'operator' }],
+    ]);
+    assert.doesNotMatch(JSON.stringify(made) + JSON.stringify(r.feed), /do-not-show|pcp_invite/, 'the invite token and link reach no result or feed line');
+  } finally { await r.done(); }
+});
+
+test('access writes wait for the Confirm by default, and Deny refuses them', async () => {
+  const r = await rig({});
+  try {
+    const e = await r.hq.write({ kind: 'access', action: 'rejectJoin', join: JOIN }).then(() => null, (x) => x);
+    assert.equal(e.status, 409);
+    assert.equal(e.answer.body.write.summary, 'Reject a join request');
+    const u = await r.hq.write({ kind: 'company', action: 'update', description: 'Robots.' }).then(() => null, (x) => x);
+    assert.equal(u.status, 409);
+    assert.equal(r.writes().length, 0);
+    await r.hq.write({ kind: 'access', action: 'rejectJoin', join: JOIN }, { confirmed: true });
+    assert.deepEqual(r.writes(), [['POST', `/api/companies/${CO}/join-requests/${JOIN}/reject`, {}]]);
+  } finally { await r.done(); }
+  const d = await rig({ access: 'deny' });
+  try {
+    await assert.rejects(d.hq.write({ kind: 'access', action: 'invite', allowedJoinTypes: 'both' }, { confirmed: true }), (e) => e.status === 403 && /Invites and access/.test(e.message));
+    assert.equal(d.writes().length, 0);
+  } finally { await d.done(); }
+});
+
+test('an invite, join request or member that is not in the company, or already decided, is refused before the write; bad bodies are 400', async () => {
+  const r = await rig({ access: 'allow' });
+  try {
+    await assert.rejects(r.hq.write({ kind: 'access', action: 'revoke', invite: 'v0000000-0000-4000-8000-000000000404' }), (e) => e.status === 404);
+    await assert.rejects(r.hq.write({ kind: 'access', action: 'member', member: 'm0000000-0000-4000-8000-000000000404', role: 'admin' }), (e) => e.status === 404);
+    await r.hq.write({ kind: 'access', action: 'approveJoin', join: JOIN });
+    await assert.rejects(r.hq.write({ kind: 'access', action: 'rejectJoin', join: JOIN }), (e) => e.status === 409);
+    await r.hq.write({ kind: 'access', action: 'revoke', invite: INVITE });
+    await assert.rejects(r.hq.write({ kind: 'access', action: 'revoke', invite: INVITE }), (e) => e.status === 409);
+    for (const b of [{ allowedJoinTypes: 'everyone' }, { humanRole: 'owner' }, { humanRole: 'root' }]) await assert.rejects(r.hq.write({ kind: 'access', action: 'invite', ...b }), (e) => e.status === 400, JSON.stringify(b));
+    await assert.rejects(r.hq.write({ kind: 'access', action: 'member', member: PAT }), (e) => e.status === 400);
+    await assert.rejects(r.hq.write({ kind: 'access', action: 'member', member: PAT, status: 'banned' }), (e) => e.status === 400);
+    await assert.rejects(r.hq.write({ kind: 'company', action: 'update' }), (e) => e.status === 400);
+    await assert.rejects(r.hq.write({ kind: 'company', action: 'update', requireBoardApprovalForNewAgents: 'yes' }), (e) => e.status === 400);
+    assert.equal(r.writes().length, 2, 'only the approval and the revoke were sent');
+  } finally { await r.done(); }
+});
+
+test('access() lists names, roles and states, never a token, a link or an address', async () => {
+  const r = await rig({});
+  try {
+    const a = await r.hq.access();
+    assert.deepEqual(a.invites.map((x) => [x.id, x.state, x.joins, x.role]), [[INVITE, 'active', 'human', 'operator']]);
+    assert.deepEqual(a.joins.map((x) => [x.id, x.status, x.type, x.name]), [[JOIN, 'pending_approval', 'human', 'sam@example.com']]);
+    assert.deepEqual(a.members.map((x) => [x.name, x.role, x.status]), [['Justin', 'owner', 'active'], ['Pat', 'viewer', 'active']]);
+    assert.equal(a.error, null);
+    assert.doesNotMatch(JSON.stringify(a), /do-not-show|203\.0\.113|tokenHash/);
+  } finally { await r.done(); }
+});

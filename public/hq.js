@@ -172,6 +172,91 @@
           })]);
   }
 
+  // Company admin (#213), owner only: the settings of the company, invites, join requests and members. Read from the hqAccess command
+  // when the HQ opens; each change is one write of the write grid (kinds Company and Invites and access) behind a painted Confirm.
+  // The page is the owner's (the agent token never reaches it) and the invite link stays in Paperclip: the office shows no token.
+  var JOINS = [{ value: 'human', label: 'People' }, { value: 'agent', label: 'Agents' }, { value: 'both', label: 'People and agents' }];
+  var ROLES = [{ value: 'admin', label: 'Admin' }, { value: 'operator', label: 'Operator' }, { value: 'viewer', label: 'Viewer' }];
+  var MEMBER_ROLES = [{ value: 'owner', label: 'Owner' }].concat(ROLES);
+  var APPROVAL = [{ value: 'keep', label: 'Keep as it is' }, { value: 'on', label: 'New employees need approval' }, { value: 'off', label: 'New employees start at once' }];
+  function Access(p) {
+    var st = useState({ access: undefined, err: '' }), s = st[0], setS = st[1];
+    var ps = useState(null), pend = ps[0], setPend = ps[1];      // { key, body, text }: the write that waits for its Confirm
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var fm = useState({ name: p.company || '', approval: 'keep', joins: 'human', role: 'viewer', picks: {} }), form = fm[0], setForm = fm[1];
+    function load() {
+      client.get('hqAccess').then(function (j) { setS({ access: j.access || null, err: '' }); }, function (x) { setS({ access: null, err: x.message }); });
+    }
+    useEffect(function () { load(); }, []);
+    function set(k) { return function (v) { var n = {}; n[k] = v; setForm(Object.assign({}, form, n)); }; }
+    function pick(id, v) { var n = {}; n[id] = v; setForm(Object.assign({}, form, { picks: Object.assign({}, form.picks, n) })); }
+    function send() {
+      setBusy(true);
+      client.send('hqWrite', Object.assign({}, pend.body, { confirmed: true })).then(function () { setBusy(false); p.toast({ tone: 'success', title: 'Done', text: pend.text }); setPend(null); load(); },
+        function (x) { setBusy(false); setPend(null); p.toast({ tone: 'error', title: 'Not changed', text: x.message }); });
+    }
+    function want(key, body, text) { setPend({ key: key, body: body, text: text }); }
+    function confirm(key) {
+      return pend && pend.key === key ? h('div', { key: 'c' + key, className: 'past-actions' },
+        h(A.Button, { variant: 'primary', icon: 'approve', loading: busy, disabled: busy, onClick: send }, 'Confirm: ' + pend.text),
+        h(A.Button, { variant: 'quiet', onClick: function () { setPend(null); } }, 'Cancel')) : null;
+    }
+    var a = s.access, known = (a && a.known) || {};
+    function list(rows, empty, row) { return rows.length ? h('ul', { className: 'past' }, rows.map(row)) : h('p', { className: 'note' }, empty); }
+    var settings = {};
+    if (form.name.trim() && form.name.trim() !== (p.company || '')) settings.name = form.name.trim();
+    if (form.approval !== 'keep') settings.requireBoardApprovalForNewAgents = form.approval === 'on';
+    var joins = a ? a.joins.filter(function (x) { return x.status === 'pending_approval'; }) : [];
+    var live = a ? a.invites.filter(function (x) { return x.state === 'active'; }) : [];
+    return h('div', { className: 'hq-floor', id: 'hq-access' },
+      h('h3', { className: 'ext-h' }, 'Company admin'),
+      h('p', { className: 'note' }, 'Only you, the owner, can change these. Each change asks first, as the write grid says (Company, Invites and access). The invite link stays in Paperclip.'),
+      s.err ? h('p', { className: 'ao-err', role: 'alert' }, 'The office could not read the access. ' + s.err)
+        : a === undefined ? h('p', { className: 'note', role: 'status' }, 'Reading the access.')
+        : !a ? h('p', { className: 'note' }, 'The office is not connected to Paperclip.')
+        : [
+          a.error ? h('p', { key: 'e', className: 'ao-err', role: 'alert' }, a.error) : null,
+          h('h4', { key: 'sh', className: 'ext-h' }, 'Company settings'),
+          h('div', { key: 's', className: 'form' },
+            h(A.TextInput, { id: 'co-name', label: 'Company name', value: form.name, onChange: set('name') }),
+            h(A.Select, { id: 'co-approval', ariaLabel: 'Approval of new employees', options: APPROVAL, value: form.approval, onChange: set('approval') }),
+            h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'approve', disabled: !Object.keys(settings).length, onClick: function () { want('co', Object.assign({ kind: 'company', action: 'update' }, settings), 'Save the company settings'); } }, 'Save settings')),
+            confirm('co')),
+          h('h4', { key: 'ih', className: 'ext-h' }, 'Invites'),
+          h('div', { key: 'inew', className: 'form' },
+            h(A.Select, { id: 'inv-joins', ariaLabel: 'Who may join', options: JOINS, value: form.joins, onChange: set('joins') }),
+            form.joins !== 'agent' ? h(A.Select, { id: 'inv-role', ariaLabel: 'Role of a person', options: ROLES, value: form.role, onChange: set('role') }) : null,
+            h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'approve', onClick: function () { want('inv', Object.assign({ kind: 'access', action: 'invite', allowedJoinTypes: form.joins }, form.joins !== 'agent' ? { humanRole: form.role } : {}), 'Create the invite'); } }, 'Create invite')),
+            confirm('inv')),
+          known.invites === false ? h('p', { key: 'iu', className: 'note' }, 'Unknown: Paperclip did not answer.')
+            : list(live, 'No invite is open.', function (x) {
+              return h('li', { key: x.id, className: 'past-row' },
+                h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h('b', null, (JOINS.filter(function (j) { return j.value === x.joins; })[0] || { label: x.joins }).label), x.role ? h(Tag, null, x.role) : null), x.expiresAt ? h('div', { className: 'past-meta' }, 'Ends ' + new Date(x.expiresAt).toLocaleString()) : null),
+                h('div', { className: 'past-actions' }, h(A.Button, { variant: 'quiet', icon: 'decline', onClick: function () { want('rv' + x.id, { kind: 'access', action: 'revoke', invite: x.id }, 'Revoke the invite'); } }, 'Revoke')),
+                confirm('rv' + x.id));
+            }),
+          h('h4', { key: 'jh', className: 'ext-h' }, 'Join requests'),
+          known.joins === false ? h('p', { key: 'ju', className: 'note' }, 'Unknown: Paperclip did not answer.')
+            : list(joins, 'No request waits.', function (x) {
+              return h('li', { key: x.id, className: 'past-row' },
+                h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h('b', null, x.name), h(Tag, null, x.type === 'agent' ? 'Agent' : 'Person'))),
+                h('div', { className: 'past-actions' },
+                  h(A.Button, { variant: 'quiet', icon: 'approve', onClick: function () { want('ja' + x.id, { kind: 'access', action: 'approveJoin', join: x.id }, 'Approve ' + x.name); } }, 'Approve'),
+                  h(A.Button, { variant: 'quiet', icon: 'decline', onClick: function () { want('jr' + x.id, { kind: 'access', action: 'rejectJoin', join: x.id }, 'Reject ' + x.name); } }, 'Reject')),
+                confirm('ja' + x.id), confirm('jr' + x.id));
+            }),
+          h('h4', { key: 'mh', className: 'ext-h' }, 'Members'),
+          known.members === false ? h('p', { key: 'mu', className: 'note' }, 'Unknown: Paperclip did not answer.')
+            : list(a.members, 'No member.', function (x) {
+              var v = form.picks[x.id] || x.role || 'viewer';
+              return h('li', { key: x.id, className: 'past-row' },
+                h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h('b', null, x.name), h(Tag, null, x.status))),
+                h(A.Select, { id: 'mem-' + x.id, ariaLabel: 'Role of ' + x.name, options: MEMBER_ROLES, value: v, onChange: function (nv) { pick(x.id, nv); } }),
+                v !== x.role ? h('div', { className: 'past-actions' }, h(A.Button, { variant: 'quiet', icon: 'approve', onClick: function () { want('mm' + x.id, { kind: 'access', action: 'member', member: x.id, role: v }, 'Make ' + x.name + ' ' + v); } }, 'Change role')) : null,
+                confirm('mm' + x.id));
+            })]);
+  }
+
   // The HQ: what Paperclip says about its company. Read only: Paperclip runs its heartbeats, routines and budgets. Supervise
   // in office is on the Agents screen of a Security room, with its painted Confirm (no button here: one place for a write).
   function HqDialog(p) {
@@ -200,6 +285,7 @@
         q.contract && q.contract.length ? h('p', { className: 'ao-err', role: 'alert' }, 'Paperclip answered in a shape the office does not know, so the office does not show that part. ' + q.contract.join(' ')) : null,
         q.lobby ? h(Lobby, { q: q, mark: mark, toast: p.toast }) : null,
         h(Costs, null),
+        h(Access, { company: q.company.name, toast: p.toast }),
         h('h3', { className: 'ext-h' }, 'Agents'),
         q.agents.length ? h('ul', { className: 'past' }, q.agents.map(function (a) {
           var st = H.status(a), sup = H.supervision(a);
