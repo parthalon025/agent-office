@@ -182,7 +182,7 @@ test('the local providers are registered, and an unknown agent kind is refused',
   assert.match(noModel.json.error, /Pick a model/);
   const info = await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
   const kinds = info.providers.map((p) => p.kind);
-  assert.deepEqual(kinds.sort(), ['acp', 'agent-framework', 'claude-code', 'copilot', 'copilot-studio', 'cursor-cloud', 'dsh', 'foundry', 'gemini', 'hermes', 'hermes-gateway', 'kimi', 'lmstudio', 'ollama', 'openclaw', 'opencode']);
+  assert.deepEqual(kinds.sort(), ['acp', 'agent-framework', 'claude-code', 'codex', 'copilot', 'copilot-studio', 'cursor', 'cursor-cloud', 'dsh', 'foundry', 'gemini', 'grok', 'hermes', 'hermes-gateway', 'kimi', 'lmstudio', 'ollama', 'openclaw', 'opencode', 'pi']);
   const dsh = info.providers.find((p) => p.kind === 'dsh');
   assert.deepEqual([dsh.ready, dsh.cost, dsh.gated, dsh.paid], [false, 'unknown', true, true]);
   // Not on the PATH, or only an npm install (dsh.cmd), which the office cannot start without a shell: not ready either way.
