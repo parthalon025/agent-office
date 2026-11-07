@@ -17,5 +17,5 @@
     "gate:jobs": "node test/core-jobs.mjs",
     "test": "node --import ./test/fixtures/temp-leaks.mjs --test \"test/*.test.mjs\""
   },
-  "engines": { "node": ">=22" }
+  "engines": { "node": ">=24.11" }
 }

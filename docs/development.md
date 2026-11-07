@@ -13,7 +13,7 @@ npm run gate:jobs    # count the steps of the five core jobs in a headless brows
 npm test             # offline tests
 ```
 
-- `npm test` passes a quoted glob to `node --test`, which Node reads only from version 21 on. That is why the office needs Node 22 or newer.
+- `npm test` passes a quoted glob to `node --test`, which Node reads only from version 21 on. The office needs Node 24.11 or newer (the minimum of Paperclip). `src/node-check.mjs` stops an older Node at start.
 - `npm run probe -- <port>` and `npm run smoke -- <port>` test an office on another port.
 - `npm run gate:jobs` is not part of `npm test` and not in CI. It needs Chrome or Edge, starts its own office on a free port (never 4317), seeds it with fake hooks, and fails when a job takes more steps than its limit. The five jobs are start an agent, answer an approval, read the change, discard a room and find a past session. Its screenshots go to `.screens/core-jobs/` and are never committed. Run it before a UI merge.
 - Before you finish a UI change, run the design system checker:
