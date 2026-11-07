@@ -270,3 +270,38 @@ export function searchOf(i) {
   for (const r of (i.routines || []).slice(0, SEARCH_CAPS.routine)) out.push({ kind: 'routine', id: r.id, label: r.title, hint: ['Routine', r.agent ? 'for ' + r.agent : '', r.status].filter(Boolean).join(' · ') });
   return out;
 }
+
+// ---------- projects and workspaces as rooms (#211) ----------
+const OPEN_RANK = { in_progress: 0, in_review: 1, blocked: 2, todo: 3, backlog: 4 };
+const str = (v, n) => (typeof v === 'string' ? v.slice(0, n) : '');
+/**
+ * The rooms of the HQ: one per Paperclip project, with its workspaces and the employees who work in it. A Paperclip workspace is the
+ * room its employee works in. An employee sits in the room of its best open task (in progress first, then review, blocked, todo,
+ * backlog), in the workspace the task names, else the project's primary one. An employee with no open task in a project is in no room.
+ * Reads tolerantly (a Paperclip that has no workspaces on a project gives none) and never invents a folder: a workspace with no `cwd`
+ * has folder null. projects, issues: Paperclip lists or null; agents: [{ id, name }]. Never throws.
+ */
+export function roomsOf({ projects, agents, issues }) {
+  if (!Array.isArray(projects)) return [];
+  const rooms = new Map();
+  for (const p of projects) {
+    if (!p || typeof p !== 'object' || typeof p.id !== 'string' || !p.id) continue;
+    const workspaces = (Array.isArray(p.workspaces) ? p.workspaces : []).filter((w) => w && typeof w === 'object' && typeof w.id === 'string' && w.id)
+      .map((w) => ({ id: w.id, name: str(w.name, 80) || w.id, folder: str(w.cwd, 260) || null, primary: w.isPrimary === true }));
+    rooms.set(p.id, { id: p.id, name: str(p.name, 80) || p.id, status: str(p.status, 40) || null, workspaces, employees: [] });
+  }
+  const best = new Map(); // agent id -> { rank, issue }
+  for (const i of Array.isArray(issues) ? issues : []) {
+    if (!i || !i.assigneeAgentId || !rooms.has(i.projectId) || !(i.status in OPEN_RANK)) continue;
+    const cur = best.get(i.assigneeAgentId), rank = OPEN_RANK[i.status];
+    if (!cur || rank < cur.rank) best.set(i.assigneeAgentId, { rank, issue: i });
+  }
+  for (const a of Array.isArray(agents) ? agents : []) {
+    const b = a && best.get(a.id);
+    if (!b) continue;
+    const room = rooms.get(b.issue.projectId);
+    const ws = room.workspaces.find((w) => w.id === b.issue.projectWorkspaceId) || room.workspaces.find((w) => w.primary) || null;
+    room.employees.push({ id: a.id, name: str(a.name, 80) || a.id, workspace: ws ? ws.name : null });
+  }
+  return [...rooms.values()];
+}

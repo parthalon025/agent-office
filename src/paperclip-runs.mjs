@@ -4,6 +4,7 @@
 // through its provider seam, so the Security room, the holds and Needs you apply as for any session. The plugin then asks for the log and
 // the result. This module owns the run records and the wire rules; opening, messaging and closing a session are injected.
 //
+// transcript(uid) gives the log of a run by its office session, for the desk screen (#211).
 // The wire (all POST, JSON, agent token):
 //   start  { run_id, agent: { id, company_id, name }, agent_kind?, model?, cwd, isolation?, prompt, task_id? } -> { key, resumed }
 //   wait   { key, cursor? }  -> { done, cursor, log: [{ stream, text }], result? }   holds up to WAIT_MS for news, then answers with none
@@ -98,7 +99,7 @@ export function resultOf(s, { ok, why = '' }) {
 }
 
 /**
- * createRuns(deps) -> { start, wait, cancel, tick, live }.
+ * createRuns(deps) -> { start, wait, cancel, tick, transcript, live }.
  * deps: open(opts) -> uid (an office session, opened as the Open dialog opens one: refusals and the cost question are thrown),
  *   send(uid, text), session(uid) -> the tracker's session or undefined, close(uid) -> promise, feed(s, kind, text), changed(),
  *   setTimer(fn, ms), clearTimer(h), now().
@@ -187,6 +188,7 @@ export function createRuns(deps) {
     s.paperclip = { agent: x.agent.id, company: x.agent.company, run: x.runId.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 80), ...(x.task ? { task: x.task } : {}), ...(desk ? { desk } : {}) };
     const r = { key: x.runId, uid, log: [], base: 0, done: false, result: null, doneAt: 0, waiters: new Set(), timer: null, seen: { reply: 0, calls: new Set(), failed: new Set(), asks: new Set() } };
     runs.set(r.key, r);
+    s.paperclipRun = true; // the desk screen shows this session's transcript (#211)
     push(r, 'stdout', `[agent-office] ${x.kind} opened for ${x.agent.name} in ${x.cwd}. Its calls follow the Security room.`);
     deps.feed?.(s, 'start', `a Paperclip run for ${x.agent.name} (run ${x.runId}): the office supervises its calls`);
     try { deps.send(uid, x.prompt); } catch (e) {
@@ -222,5 +224,16 @@ export function createRuns(deps) {
     return { ok: true, done: true };
   }
 
-  return { start, wait, cancel, tick, live: () => [...runs.values()].filter((r) => !r.done).map((r) => ({ key: r.key, uid: r.uid })) };
+  /** The log of the run an office session belongs to ({ key, done, lines }), live or kept after the end, or null when the session is not a run. For the desk screen (#211). */
+  function transcript(uid) {
+    for (const r of runs.values()) {
+      if (r.uid !== uid) continue;
+      const s = deps.session(uid);
+      if (s && !r.done) collect(r, s);
+      return { key: r.key, done: r.done, lines: r.log.map((l) => ({ stream: l.stream, text: l.text })) };
+    }
+    return null;
+  }
+
+  return { start, wait, cancel, tick, transcript, live:() => [...runs.values()].filter((r) => !r.done).map((r) => ({ key: r.key, uid: r.uid })) };
 }

@@ -26,7 +26,7 @@
   // A field the page does not read stays on the server. Add a field here when the page starts to read it.
   var SESSION_FIELDS = ['persona', 'uid', 'provider', 'name', 'status', 'cwd', 'headless', 'note', 'model', 'mode', 'tool', 'prompt', 'promptAt', 'live',
     'error', 'turns', 'cost', 'costUnknown', 'supervision', 'usage', 'ctxTokens', 'ctxWindow', 'todos', 'agents', 'calls', 'replies', 'pending', 'questions',
-    'inbox', 'commands', 'skills', 'features', 'scheduleId', 'startedAt', 'endedAt', 'lastEvent', 'git', 'place', 'seat', 'olderReplies', 'hq', 'deskCtx'];
+    'inbox', 'commands', 'skills', 'features', 'scheduleId', 'startedAt', 'endedAt', 'lastEvent', 'git', 'place', 'seat', 'olderReplies', 'hq', 'deskCtx', 'paperclipRun'];
   // Per session and broadcast. calls: the tracker's own limit (MAX_CALLS); the boards and the terminal count all of them.
   // replyChars: the newest replies whose text fits, and always the newest one. The rest is on request, and the session says
   // how many it left out (olderReplies), so the page asks for them before it fills the chat (#80).

@@ -182,6 +182,14 @@
               h('div', { className: 'past-sub mono' }, facts),
               h('div', { className: 'past-meta', title: a.supervision.why || undefined }, sup + (a.supervision.why ? '. ' + a.supervision.why : ''))));
         })) : h('p', { className: 'note' }, 'This company has no agents yet.'),
+        h('h3', { className: 'ext-h' }, 'Projects and workspaces'),
+        q.rooms && q.rooms.length ? h('ul', { className: 'past', 'aria-label': 'Project rooms' }, q.rooms.map(function (r) {
+          return h('li', { key: r.id, className: 'past-row' },
+            h('div', { className: 'past-main' },
+              h('div', { className: 'past-title' }, h('b', null, r.name), r.status ? h(Tag, null, r.status.replace(/_/g, ' ')) : null),
+              h('div', { className: 'past-meta' }, r.employees.length ? 'In the room: ' + r.employees.map(function (e) { return e.name + (e.workspace ? ' (' + e.workspace + ')' : ''); }).join(', ') : 'Nobody works here now'),
+              r.workspaces.length ? h('div', { className: 'past-sub mono' }, r.workspaces.map(function (w) { return w.name + (w.folder ? ': ' + w.folder : ''); }).join(' · ')) : h('div', { className: 'past-meta' }, 'No workspace')));
+        })) : h('p', { className: 'note' }, 'No projects.'),
         h('h3', { className: 'ext-h' }, 'Routines'),
         q.routines.length ? h('ul', { className: 'past' }, q.routines.map(function (r) {
           return h('li', { key: r.id, id: 'hq-routine-' + r.id, className: 'past-row' + (mark('routine', r.id) ? ' is-found' : '') },
