@@ -151,9 +151,7 @@
               h('div', { className: 'org-who' }, h('b', null, r.name), h(Tag, null, r.role), h('span', { className: 'past-meta' }, r.line)),
               h(A.Select, { id: 'org-' + r.id, ariaLabel: 'Manager of ' + r.name, options: r.options, value: waiting ? pend.manager : r.managerId, disabled: !o.write || busy === r.id,
                 onChange: function (v) { setPend(v === r.managerId ? null : { id: r.id, manager: v }); } }),
-              waiting ? h('div', { className: 'past-actions' },
-                h(A.Button, { variant: 'primary', icon: 'approve', loading: busy === r.id, disabled: busy === r.id, onClick: send }, 'Change reporting line'),
-                h(A.Button, { variant: 'quiet', onClick: function () { setPend(null); } }, 'Cancel')) : null);
+              waiting ? h(ConfirmBar, { key: r.id + ':' + pend.manager, label: 'Change reporting line', busy: busy === r.id, onConfirm: send, onCancel: function () { setPend(null); } }) : null);
           })));
       }));
   }
@@ -309,9 +307,7 @@
             : h(A.Select, { id: id + '-level', label: 'Level', options: v.levelOptions, value: form.level || '', onChange: set('level') }),
           h(A.Select, { id: id + '-owner', label: 'Owner', options: v.ownerOptions, value: form.owner || '', onChange: set('owner') })),
         row ? null : h(A.Select, { id: id + '-parent', label: 'Parent goal', options: v.parentOptions(), value: form.parent || '', onChange: set('parent') }),
-        ask ? h('div', { className: 'hq-found', role: 'alert' }, h('span', null, ask.text),
-          h(A.Button, { variant: 'primary', icon: 'approve', loading: busy, onClick: function () { send(ask.body, true); } }, 'Send to Paperclip'),
-          h(A.Button, { variant: 'quiet', onClick: function () { setAsk(null); } }, 'Cancel'))
+        ask ? h(ConfirmBar, { key: ask.text, className: 'hq-found', note: ask.text, label: 'Send to Paperclip', busy: busy, onConfirm: function () { send(ask.body, true); }, onCancel: function () { setAsk(null); } })
           : h('div', { className: 'past-actions' },
             h(A.Button, { variant: 'primary', icon: 'approve', loading: busy, disabled: busy || !changed, onClick: function () { send(b, false); } }, row ? 'Save goal' : 'Create goal'),
             h(A.Button, { variant: 'quiet', onClick: function () { show(row ? row.id : 'new', row); } }, 'Close')));
@@ -424,9 +420,7 @@
             h('div', { className: 'past-title' }, h('b', null, x.text)),
             h('div', { className: 'past-meta' }, [from, x.task ? 'task ' + x.task : '', x.run ? 'run ' + x.run : '', ago(x.at)].filter(Boolean).join(' · '))),
           confirm === x.id
-            ? h('div', { className: 'inline-actions' },
-              h(A.Button, { variant: 'primary', icon: 'remove', loading: busy, onClick: function () { forget(x.id, true); } }, 'Forget it'),
-              h(A.Button, { variant: 'quiet', onClick: function () { setConfirm(0); } }, 'Keep it'))
+            ? h(ConfirmBar, { key: 'f' + x.id, className: 'inline-actions', icon: 'remove', label: 'Forget it', cancelLabel: 'Keep it', busy: busy, onConfirm: function () { forget(x.id, true); }, onCancel: function () { setConfirm(0); } })
             : h(A.Button, { variant: 'quiet', icon: 'remove', onClick: function () { forget(x.id); } }, 'Forget'));
       })) : h('p', { className: 'note' }, d.query ? 'Nothing in memory matches.' : 'Nothing is remembered yet. A run that ends well adds its last words. You can add a fact above.'),
       !d.query && d.total > d.items.length ? h('p', { className: 'note' }, 'Showing the newest ' + d.items.length + ' of ' + d.total + '. Search to find the rest.') : null);
@@ -463,9 +457,7 @@
     }
     function want(key, body, text) { setPend({ key: key, body: body, text: text }); }
     function confirm(key) {
-      return pend && pend.key === key ? h('div', { key: 'c' + key, className: 'past-actions' },
-        h(A.Button, { variant: 'primary', icon: 'approve', loading: busy, disabled: busy, onClick: send }, 'Confirm: ' + pend.text),
-        h(A.Button, { variant: 'quiet', onClick: function () { setPend(null); } }, 'Cancel')) : null;
+      return pend && pend.key === key ? h(ConfirmBar, { key: 'c' + key, busy: busy, text: pend.text, onConfirm: send, onCancel: function () { setPend(null); } }) : null;
     }
     var a = s.access, known = (a && a.known) || {};
     function list(rows, empty, row) { return rows.length ? h('ul', { className: 'past' }, rows.map(row)) : h('p', { className: 'note' }, empty); }
@@ -530,17 +522,13 @@
   function useConfirm(toast, done) {
     var ps = useState(null), pend = ps[0], setPend = ps[1];   // { body, text, done }: the change that waits for its Confirm
     var bz = useState(false), busy = bz[0], setBusy = bz[1];
-    var ref = React.useRef(null);
-    useEffect(function () { if (pend && ref.current && ref.current.scrollIntoView) ref.current.scrollIntoView({ block: 'nearest' }); }, [pend]);
     function send() {
       setBusy(true);
       client.send('hqWrite', Object.assign({}, pend.body, { confirmed: true })).then(function () { setBusy(false); toast({ tone: 'success', title: 'Done', text: pend.done }); setPend(null); if (done) done(); },
         function (x) { setBusy(false); setPend(null); toast({ tone: 'error', title: 'Not changed', text: x.message }); });
     }
     function box() {
-      return pend ? h('div', { className: 'past-actions', ref: ref },
-        h(A.Button, { variant: 'primary', icon: 'approve', loading: busy, disabled: busy, onClick: send }, 'Confirm: ' + pend.text),
-        h(A.Button, { variant: 'quiet', onClick: function () { setPend(null); } }, 'Cancel')) : null;
+      return pend ? h(ConfirmBar, { key: pend.text, busy: busy, text: pend.text, onConfirm: send, onCancel: function () { setPend(null); } }) : null;
     }
     return { pend: pend, want: function (body, text, doneText) { setPend({ body: body, text: text, done: doneText || text }); }, box: box };
   }
@@ -569,10 +557,8 @@
   function SelfApproval(p) {
     var st = useState({ s: undefined, err: '' }), v = st[0], setV = st[1];
     var ps = useState(null), pend = ps[0], setPend = ps[1], bz = useState(false), busy = bz[0], setBusy = bz[1];
-    var ref = React.useRef(null);
     function load() { client.get('hqGrid').then(function (j) { setV({ s: j.selfApproval || null, err: '' }); }, function (x) { setV({ s: null, err: x.message }); }); }
     useEffect(function () { load(); }, []);
-    useEffect(function () { if (pend && ref.current && ref.current.scrollIntoView) ref.current.scrollIntoView({ block: 'nearest' }); }, [pend]);
     function set(type, value, confirmed) {
       setBusy(true);
       client.send('hqSelfApproval', { type: type, value: value, confirmed: confirmed === true }).then(function (j) { setBusy(false); setPend(null); setV({ s: j.selfApproval, err: '' }); p.toast({ tone: 'success', title: 'Self-approval ' + (value ? 'on' : 'off') }); },
@@ -592,22 +578,23 @@
               h('div', { className: 'past-actions' }, k.on
                 ? h(A.Button, { variant: 'quiet', disabled: busy, onClick: function () { set(k.type, false); } }, 'Turn off')
                 : h(A.Button, { variant: 'quiet', disabled: busy, onClick: function () { setPend(k); } }, 'Turn on')),
-              pend && pend.type === k.type ? h('div', { className: 'past-actions', ref: ref },
-                h(A.Button, { variant: 'primary', icon: 'approve', loading: busy, disabled: busy, onClick: function () { set(k.type, true, true); } }, 'Confirm: employees approve their own "' + k.label + '"'),
-                h(A.Button, { variant: 'quiet', onClick: function () { setPend(null); } }, 'Cancel')) : null);
+              pend && pend.type === k.type ? h(ConfirmBar, { key: 'sa' + k.type, busy: busy, text: 'employees approve their own "' + k.label + '"', onConfirm: function () { set(k.type, true, true); }, onCancel: function () { setPend(null); } }) : null);
           }).concat(s.never.map(function (t) {
             return h('li', { key: t, className: 'past-row' }, h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h('b', null, t.replace(/_/g, ' ')), h(Tag, null, 'Always yours'))));
           }))));
   }
 
-  // The Confirm of a write that waits for the user (#221): a bar with the exact words of the change. It scrolls into view when it appears,
-  // because it sits under a long form in a scrolling dialog (a phone shows one screen of it).
+  // The one Confirm of an ask-first change in the HQ (#221): the exact words of the change, a Confirm and a Cancel. It scrolls its
+  // buttons into view when it appears, because it sits under a long form in a scrolling dialog (a phone shows one screen of it). Every
+  // inline Confirm of this file uses it; the caller keeps the pending and busy state. Props: text (the words after "Confirm: ") or
+  // label (the whole button text), note (a line before the buttons), icon, cancelLabel, className (the box), busy, onConfirm, onCancel.
   function ConfirmBar(p) {
     var ref = React.useRef(null);
     useEffect(function () { if (ref.current && ref.current.scrollIntoView) ref.current.scrollIntoView({ block: 'nearest' }); }, []);
-    return h('div', { ref: ref, className: 'past-actions' },
-      h(A.Button, { variant: 'primary', icon: 'approve', loading: p.busy, disabled: p.busy, onClick: p.onConfirm }, 'Confirm: ' + p.text),
-      h(A.Button, { variant: 'quiet', onClick: p.onCancel }, 'Cancel'));
+    return h('div', { ref: ref, className: p.className || 'past-actions', role: p.note ? 'alert' : undefined },
+      p.note ? h('span', null, p.note) : null,
+      h(A.Button, { variant: 'primary', icon: p.icon || 'approve', loading: p.busy, disabled: p.busy, onClick: p.onConfirm }, p.label || ('Confirm: ' + p.text)),
+      p.onCancel ? h(A.Button, { variant: 'quiet', onClick: p.onCancel }, p.cancelLabel || 'Cancel') : null);
   }
   function download(name, text) {
     var url = URL.createObjectURL(new Blob([text], { type: 'application/json;charset=utf-8' }));
@@ -822,8 +809,6 @@
     var bz = useState(false), busy = bz[0], setBusy = bz[1];
     var er = useState(''), err = er[0], setErr = er[1];
     var qs = useState(''), ask = qs[0], setAsk = qs[1];
-    var ref = React.useRef(null);
-    useEffect(function () { if (ask && ref.current && ref.current.scrollIntoView) ref.current.scrollIntoView({ block: 'nearest' }); }, [ask]);
     function install(confirmed) {
       setBusy(true); setErr('');
       client.send('hqWrite', { kind: 'adapter', action: 'install', confirmed: confirmed === true ? true : undefined }).then(function (r) {
@@ -845,9 +830,9 @@
       W.install && !ad.write ? h('p', { className: 'note' }, 'The HQ write grid denies this. Allow Office adapter in the write grid to install it here.') : null,
       ask ? h('p', { className: 'note', role: 'alert' }, ask) : null,
       err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
-      W.install && ad.write ? h('div', { className: 'inline-actions', ref: ref },
-        ask ? h(A.Button, { variant: 'primary', icon: 'approve', loading: busy, onClick: function () { install(true); } }, 'Confirm install') : h(A.Button, { variant: 'primary', icon: 'add', loading: busy, onClick: function () { install(false); } }, 'Install office adapter'),
-        ask ? h(A.Button, { variant: 'quiet', onClick: function () { setAsk(''); } }, 'Do not install') : null) : null);
+      W.install && ad.write
+        ? (ask ? h(ConfirmBar, { key: 'ai', className: 'inline-actions', label: 'Confirm install', cancelLabel: 'Do not install', busy: busy, onConfirm: function () { install(true); }, onCancel: function () { setAsk(''); } })
+          : h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'primary', icon: 'add', loading: busy, onClick: function () { install(false); } }, 'Install office adapter'))) : null);
   }
 
   // ---------- the HR desk (#201): hire an employee ----------
@@ -945,9 +930,10 @@
             h('div', { className: 'past-main' },
               h('div', { className: 'past-title' }, h('b', null, x.rowLabel), h(Tag, null, x.agent), h(Tag, null, x.buildingName)),
               h('div', { className: 'past-meta' }, x.text)),
-            h('div', { className: 'past-actions' },
-              asking ? h(A.Button, { variant: 'primary', icon: 'approve', loading: busy === x.id, onClick: function () { run(x.id, 'trustApply', { id: x.id, confirmed: true }, { tone: 'success', title: 'Rule granted', text: x.rowLabel + ' for ' + x.agent }); } }, 'Confirm allow') : h(A.Button, { variant: 'quiet', icon: 'approve', onClick: function () { setSure(x.id); setErr(''); } }, 'Allow'),
-              asking ? h(A.Button, { variant: 'quiet', onClick: function () { setSure(null); } }, 'Cancel') : h(A.Button, { variant: 'quiet', icon: 'decline', loading: busy === x.id, onClick: function () { run(x.id, 'trustDismiss', { id: x.id }); } }, 'Not now')));
+            asking ? h(ConfirmBar, { key: 'tr' + x.id, label: 'Confirm allow', busy: busy === x.id, onConfirm: function () { run(x.id, 'trustApply', { id: x.id, confirmed: true }, { tone: 'success', title: 'Rule granted', text: x.rowLabel + ' for ' + x.agent }); }, onCancel: function () { setSure(null); } })
+              : h('div', { className: 'past-actions' },
+                h(A.Button, { variant: 'quiet', icon: 'approve', onClick: function () { setSure(x.id); setErr(''); } }, 'Allow'),
+                h(A.Button, { variant: 'quiet', icon: 'decline', loading: busy === x.id, onClick: function () { run(x.id, 'trustDismiss', { id: x.id }); } }, 'Not now')));
         })) : h(A.EmptyState, { icon: 'security', compact: true, title: 'No proposals', text: 'A proposal shows after you approve the same kind of call five times with no decline.' }),
         h('h3', { className: 'ext-h' }, 'Rules you granted'),
         grants.length ? h('ul', { className: 'past' }, grants.map(function (g) {

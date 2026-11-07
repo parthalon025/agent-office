@@ -82,3 +82,27 @@ test('Orientation opens by itself once: the server has not seen it closed and th
   store['ao-orientation'] = '1';
   assert.equal(O.Reception.orientationDue({ seen: false }), false);
 });
+
+test('hq.js: every inline ask-first Confirm is the one shared ConfirmBar, which scrolls its buttons into view', () => {
+  const code = src('public/hq.js');
+  const fn = (name) => {
+    const at = code.indexOf('function ' + name + '(');
+    assert.ok(at >= 0, name);
+    const next = code.indexOf('\n  function ', at + 1);
+    return code.slice(at, next < 0 ? code.length : next);
+  };
+  // The shared part scrolls on mount and keeps the busy state of its caller.
+  const bar = fn('ConfirmBar');
+  assert.match(bar, /scrollIntoView\(\{ block: 'nearest' \}\)/);
+  assert.match(bar, /loading: p\.busy, disabled: p\.busy/);
+  // Each Confirm path renders it and has no scroll code of its own.
+  for (const name of ['OrgChart', 'MemoryPanel', 'Access', 'useConfirm', 'SelfApproval', 'Goals', 'AdapterInstall', 'TrustDialog', 'Instance']) {
+    const body = fn(name);
+    assert.match(body, /h\(ConfirmBar,/, name + ' uses ConfirmBar');
+    assert.doesNotMatch(body, /scrollIntoView/, name + ' has no scroll code of its own');
+  }
+  // Outside the shared part and the hire form (another change) no hand-built scroll or "Confirm: " button is left.
+  const outside = code.replace(fn('ConfirmBar'), '').replace(fn('HireForm'), '');
+  assert.doesNotMatch(outside, /ref\.current\.scrollIntoView|actionsRef\.current\.scrollIntoView/);
+  assert.doesNotMatch(outside, /'Confirm: '/);
+});
