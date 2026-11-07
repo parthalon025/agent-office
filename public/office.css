@@ -1,6 +1,20 @@
 /* Agent Office for Claude Code x0.2: page styles. Only Agent Office DS tokens, no literal colors.
    The 3D office and its HUD come from the design system; this file styles what the page adds:
-   the Reception, the lobby tour, the dialogs, the diff, and the chat grips and slash list. */
+   the Reception, the lobby tour, the dialogs, the diff, and the chat grips and slash list.
+   The page's own styles go in this file. The DS sets its theme on .ao-office, and chat-extras.js mirrors it to
+   <html data-theme>, so page UI reads tokens only.
+
+   Never hide a DS right column (.ao-hud-right) with display: none above 820 px. Use visibility: hidden with
+   pointer-events: none. The DS camera reads that column's left edge to frame the scene, and it does not measure again
+   when a page class goes away, so a collapsed box frames the room small and off to the left.
+
+   Status colors. A status word on a theme surface (bg, panel, chip) uses status-*-text with a dot in the status color
+   (a ::before). On a bubble face it uses status-*-on-bubble. A raw status-* color is a fill or a dot: it is not 4.5:1 as
+   text in Day. The terminal (the desk screen's Terminal tab) is a scene-dark face, where neither text token reads, so its
+   tones mix the status color into bubble. test/contrast.test.mjs computes the pairs from tokens.json and fails on a rule
+   that colors text with a raw status-* color outside the pinned mixes. A word that marks something other than a status (a
+   hot file, a building that needs you) stays ink. The DS checker rejects custom properties that are not DS tokens, so
+   write the value in the rule. */
 /* The bottom edge of the DS chat, the roster, the Since you left card, the page panels and the toast stack: above the DS
    broadcast bar and activity log lane. There is no dock since #92; the value follows the DS HUD at each width. */
 :root { --strip-clear: 84px; --panel-w: min(420px, calc(100vw - 2 * var(--space-4))); }

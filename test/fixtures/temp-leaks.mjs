@@ -1,7 +1,11 @@
 // Temp folder guard for the tests. `npm test` loads this file in every test process (node --import).
 // It notes each folder the process makes with fs.mkdtempSync, fs.mkdtemp or fs.promises.mkdtemp in the system temp folder. When the
 // process ends, every folder that still exists is a leak: the guard removes it, names it on stderr
-// and fails the process. A test that makes a folder must remove it in a finally block (issue #124).
+// and fails the process. A test that makes a folder must remove it in a finally block (issue #124), or, for a rig that many tests
+// share, in the file's after() list (test/floors.test.mjs and test/acp-provider.test.mjs do). A process that ends with a temp
+// folder still there has it removed, named on stderr, and fails.
+// The guard wraps fs.mkdtempSync, fs.mkdtemp and fs.promises.mkdtemp and syncs the ESM named exports, so a named import is caught
+// too. To count leaks by hand, run the suite with a private TEMP and read the folder after.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

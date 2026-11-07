@@ -14,6 +14,17 @@
 //
 // The API shapes are NOT checked against a recording (no account, no paid call): they follow Paperclip's adapters and the vendors'
 // public notes. The live check waits for the owner's accounts. The plumbing (setup, token, calls, turn loop) is providers/cloud.mjs.
+//
+// This file owns createCursorCloud and createHermesGateway.
+// - createCursorCloud launches a Cursor cloud agent on OFFICE_CURSORCLOUD_REPOSITORY with no pull request, polls its status and
+//   conversation, follows up on the same agent, and stops it.
+// - createHermesGateway streams a chat completion from a Hermes gateway the user runs: https on any host or http on loopback.
+//   The key goes only there.
+// - Both ride createRemoteAgents and cloudConfig/cloudSetup of cloud.mjs, and share the Cloud agent column
+//   (public/vocab-security.js). They have cloud: true and a host (words for where their tools run; describe() sends it and
+//   OfficeVocab.kindNote uses it), cost: 'unknown', and are gated: false with "Unsupervised: ...". They take deps.blocked like the
+//   other cloud kinds: off until the Agents screen turns on Cloud agent, and no call before.
+// - Tested in test/remote-tools.test.mjs with a fake fetch.
 import { providerError } from './index.mjs';
 import { cloudSetup, cloudSend, jsonOf, readSse, createRemoteAgents } from './cloud.mjs';
 

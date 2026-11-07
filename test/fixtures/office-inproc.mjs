@@ -6,6 +6,11 @@
 // choice and the files written at listen. The office owns its port only when own() is called, so a driver office writes no file.
 //
 // One office per process (a test file is one process): the driver sets the environment the office reads, then imports it.
+// startInProcess({ dir, env, state }) gives call(route, body?), hook(body, signal) and snapshot() over core.handle. It sets the
+// environment the office reads (home, rate file, explainer off) before it imports the office, takes an optional saved state that
+// the office finds at start, and keeps the office from owning its port, so it writes no file. The response is a copy, as the wire
+// gives. Use it for any test that needs no gate, no body parsing, no file written at listen and no spawned program. The tests of
+// the gate, the static files, the branch ports, the start-up files and the paid smoke run stay on real HTTP.
 import fs from 'node:fs';
 import path from 'node:path';
 import { REPO_ROOT } from './office-server.mjs';

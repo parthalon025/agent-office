@@ -1,5 +1,8 @@
-// Recent folders: the list of folders the user started from, kept in one form. One job: the folder rules of the list (no
+// Recent folders (#179, split from place.mjs): the list of folders the user started from, kept in one form. One job: the folder rules of the list (no
 // duplicates in any case or slash style, no agent room folders). Pure functions, no I/O, no timers: safe to import in tests.
+// The list is kept by addRecent, cleanRecent and recentChoices: one form, no duplicates in any case or slash style, and never an
+// agent room folder (<repo>.worktrees/<name> or anything in it, or an old .agent-office/worktrees one). Do not compare folder
+// strings by hand. Tested in test/recent.test.mjs.
 import { win32 as path } from 'node:path'; // Windows-first, like place.mjs
 import { normPath } from './place.mjs';
 

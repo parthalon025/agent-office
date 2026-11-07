@@ -6,7 +6,13 @@
    The page then sends the same call again with its confirmation flag (`confirmed: true`; `confirmCost: true` for cost).
    A cost question is a normal answer (200 { confirm, question }, no error); every other server kind is 409 { error, confirm }.
    Plain script, no I/O: the page loads it as a script (window.OfficeAsk); the server and the tests import it for its side
-   effect and read globalThis.OfficeAsk. */
+   effect and read globalThis.OfficeAsk. Tested in test/ask.test.mjs.
+   KINDS is the table. The server asks merge, fork, skill, goal, handoff, cost, runtime, memory (forget one company
+   memory, #205) and write (a Paperclip write the HQ write grid says Confirm for, #198; the Company step of Orientation,
+   #199, is one). The page asks pr and rm in its own dialog. answer(kind, text, extra) is the one builder (askFirst in
+   src/server.mjs: 409 { error, confirm }, and for cost a normal 200 { confirm, question }). asked(x, kind, confirmed) is
+   the one reader: the page asks, then sends the same call again with confirmed: true, or confirmCost: true for cost.
+   isQuestion(j) is what the page's api() turns into a rejection. A new kind is one row. */
 (function (root) {
   'use strict';
   var KINDS = Object.freeze({

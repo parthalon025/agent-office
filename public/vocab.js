@@ -4,6 +4,17 @@
    Plain script, no I/O, no timers. The page loads it as a script (window.OfficeVocab). The server and the tests
    import it for its side effect and read globalThis.OfficeVocab.
 
+   One global, OfficeVocab, in four files (#186). This file is the core and loads first. The topic files add their own
+   names to the global: vocab-security.js adds security; vocab-layers.js adds layers; vocab-persona.js adds persona,
+   wall and rituals. They read the core names they share (own, bare, has, count, clip, oneLine, money) through its
+   unlisted `shared` property. The server and the tests load all four through src/vocab.mjs.
+   These words live only here. Do not write a second copy of a status word, a task line, a tool name or kind, a to-do
+   status or a room figure in building.js, adapter.js, office.js, terminal.js, board.js or server.mjs. The server
+   computes the room figures once per snapshot (snapshot.figures, keyed by notes key); the page reads them with
+   mount.figures(roomId). figures() also gives `supervision`: the label of the least supervised agent in the room.
+   "Always allow" and the risk of a request come from alwaysOffer and requests below. A question has no risk and no
+   rule. A high-risk request never offers Always allow.
+
      status(s)        -> { key, word, live }  key is a DS status: working, waiting, error, finished, resting
      worst(keys)      -> the worst state of a set of desks (error, waiting, review, working, finished, resting), or null
      stateWord(key)   -> the word of a worst state ('Needs you', 'Review ready', ...), '' for none
@@ -16,7 +27,8 @@
      toolArg(name)    -> the argument name of the tool's detail text
      todoStatus(t)    -> a DS plan step status
      figures(list)    -> the numbers of a room, from its open sessions
-     agentsSign(n)    -> "N agents" for a room shared by 2 or more agents (top-level sessions; helpers do not count), else ''
+     agentsSign(n)    -> "N agents" for a room shared by 2 or more agents (top-level sessions; helpers do not count), else ''.
+                         board.js paints it on the door sign.
      plan             -> the Manager board words (#154): sourceWord(kind) 'Office' or 'Paperclip', stepState(state), stepWord(state), notConnected, notConnectedReason(why)
      requests(s)      -> every open request of a session, oldest first: { id, kind, tool, text, detail, risk, always, t }
                          kind is 'permission' (Approve or Decline) or 'question' (Yes or No; no risk value)
@@ -63,6 +75,12 @@
                          cost }: one sentence, "2 of 5 steps" and the cost so far), remember(mem, place, layer) and layerFor(mem, place) (the layer
                          a place is used at most; Glance for a new place). No page code invents a detail rule.
      platform(s, kinds) -> the bot card line: the supervision label or the kind word, after "Paperclip <role>, " for a Paperclip run.
+     limitShown(k)    -> true when the Open dialog shows the spend limit field: only for a paid kind that reports cost.
+     costNote(k)      -> what the form says instead for a kind whose cost is unknown.
+   The supervision words (supervision(s), supervisionHead(label) for a desk monitor title bar, supervisionLines(label) for
+   the door sign and the desk screen) are defined with their notes below. The Security room grid is in vocab-security.js:
+   its tables have no prototype, and rule maps are read by own keys only (own), so __proto__ or constructor is never a row,
+   an agent kind or a rule.
 */
 (function (root) {
   'use strict';

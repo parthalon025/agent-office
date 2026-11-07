@@ -2,6 +2,16 @@
 // Four rules live here: the absolute program path (resolveExe), the helper folder (helperCwd), the process start time
 // (processStart) and the process-tree kill (killTree). Providers and the server import this module to start a program,
 // never git.mjs. test/spawn-safety.test.mjs scans every source for a start that does not go through resolveExe.
+// (#169) Start every program with resolveExe(name) from this module, never a bare name. On Windows a bare name is looked up in the
+// child's folder first, so a planted git.exe in a repo would run. The entry points also set NoDefaultCurrentDirectoryInExePath.
+// resolveExe throws for a .cmd, .bat or .ps1 install with code 'SCRIPT_INSTALL' and the file; callers read those, not the message.
+// killTree(pid, run) is taskkill /T by absolute path, else the process group, and never rejects; killTreeSync(pid, run) is the
+// same, waiting, for an exit handler. processStart(pid) gives a pid's start time, so a reused pid is not mistaken for the old
+// process. Only node: built-ins.
+// Every program the office starts names its cwd: the session folder for work in it, helperCwd() (%SystemRoot%) for a helper. On
+// Windows a process keeps its current folder busy, so a helper that inherited the office folder (the walker, icacls, the ACL
+// reader) made rmSync of a test's temp office fail with EBUSY after the server was killed (#78). test/spawn-safety.test.mjs
+// checks the sources, bare names and cwd included.
 import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';

@@ -1,20 +1,148 @@
-// Paperclip as an optional HQ above the office (#76). A watcher of an outside system, not a provider: the office never opens,
-// drives or closes a Paperclip run. Paperclip owns its goals, heartbeats, routines and budgets; the office reads its REST
-// routes and its live events (WebSocket /api/companies/{id}/events/ws) and shows them. Its Claude Code runs reach the office
-// like any terminal session, through the office hooks (hook.mjs adds the PAPERCLIP_* ids of the run), once "Supervise in
-// office" has set the agent up for that. That PATCH, after the Security room's painted Confirm, is the one write the office
-// made to Paperclip (ADR 0005); the goal handoff (ADR 0007) is the second. Since ADR 0010 every other write goes through `write` (#198), after the
-// HQ write grid. The office never sends a heartbeat and never runs a routine.
+// Paperclip as an optional HQ above the office (#76, ADR 0005). This file owns: the loopback address check (checkUrl), the
+// supervision rules (does an agent's config send its runs through the office hooks?), the Paperclip watcher (createHq: reads,
+// live events, views), and the one writer (hq.write). A watcher of an outside system, not a provider: the office never opens,
+// messages or closes a Paperclip run, so it does not fit the provider seam. Paperclip owns its goals, heartbeats, routines and
+// budgets; the office reads its REST routes and its live events (WebSocket /api/companies/{id}/events/ws) and shows them. The office
+// never sends a heartbeat and never runs a routine.
 //
-// Facts from the spike (#75, Paperclip 2026.1023.0 on Windows, Node 24.11+): a claude_local agent holds its calls in the
-// office only with engine 'cli', dangerouslySkipPermissions false and extraArgs ['--permission-mode', 'default', '--settings',
-// <office hooks file>]. The default ACP engine approves every call and ignores extraArgs; without --permission-mode default
-// the machine's default (Auto) asks nothing. The shapes of the routes and events come from the Paperclip source (0.3.1,
-// server/src/routes, server/src/services/heartbeat.ts, packages/shared/src/types). PATCH /api/agents/:id merges adapterConfig
-// key by key (a list such as extraArgs is replaced whole), so the patch carries the whole new extraArgs.
+// Writes. "Supervise in office" (one PATCH, after the Security room's painted Confirm) was the first write the office made to
+// Paperclip (ADR 0005); the goal handoff (ADR 0007) is the second. Since ADR 0010 every other write goes through `write` (#198),
+// after the HQ write grid (hq-model.mjs). The two earlier writes keep their own Confirm and are not folded into `write` yet.
 //
-// Pure apart from createHq, whose network, clock and timers are injected (tests: test/paperclip.test.mjs with the fake server
-// test/fixtures/fake-paperclip.mjs; through the server: test/paperclip-routes.test.mjs).
+// How a run reaches the office (#76). Paperclip's Claude Code runs come in through the command hooks like terminal sessions, once
+// "Supervise in office" has set the agent up for that. hook.mjs sends `paperclip`, the PAPERCLIP_* ids of the run's environment
+// (runIds, cleanIds; both live in payload.mjs, so hook.mjs stays light). /hook and onPermission keep only plain ids (cleanIds), the
+// tracker stores them as `s.paperclip`, and HTTP hooks never carry them. A held call of a session with Paperclip run ids (also of a
+// company the office does not watch: a `claude --print` run has no terminal dialog; the company match is for the labels only, review
+// 76) waits PAPERCLIP_ASK_MS (office.mjs holdRequest: 15 min; a command hook waits up to 1000 s since #128, because hook.mjs posts
+// with node:http; OFFICE_PAPERCLIP_ASK_S in tests), not the terminal 60 s, and on timeout gets a deny with a reason. `onRun` names a
+// run that Paperclip marks succeeded after that. Each session shows its run's label from `hq.labelOf(s.paperclip)`.
+//
+// Routes (page group; the office.mjs route table calls this file). Off until POST /api/paperclip/connect { url, company? }: 400 for
+// an address that is not on 127.0.0.1, before any request; 200 { choose } when Paperclip has several companies. The saved
+// connection, `persisted.paperclip = { url, company }` (no secret), is connected again at listen with `keep` (a Paperclip that is
+// down is tried again). POST /api/paperclip/disconnect forgets it; GET /api/paperclip gives the view. Supervise in office is
+// POST /api/paperclip/supervise { agent, confirmed: true } (409 without the Confirm): it reads the agent again and sends one PATCH
+// with this office's command hooks file (HOOKS_CMD_FILE in office.mjs, forward slashes). The company step of Orientation (#199)
+// is POST /api/paperclip/company; a reporting line (#202) is POST /api/hq/reporting-line, a thin call of `write`. The snapshot
+// `hq.reportingWrite` is false only when the grid says Deny: the org chart editor (`OrgChart` in public/hq.js) is then read only.
+// The routes of the read model, costs, catalog, access and instance are with the functions below; the grid and write routes are
+// in hq-model.mjs. User words and the Paperclip routes used by #221 and their source files are also in docs/paperclip.md.
+//
+// Facts from the spike (#75, Paperclip 2026.1023.0 on Windows, Node 24.11+) and the Paperclip source (0.3.1, in
+// D:\SSD\AI_Tools\paperclip: server/src/routes, live-events-ws.ts, heartbeat.ts, packages/shared/src/types). Never installed for
+// the office at that time, and no live run against the office code then (2026-11-05, #75, #76). Paperclip needs Node 24.11+, and so
+// does the office since #192 (node-check.mjs).
+// - A claude_local agent holds its calls in the office only with engine 'cli', dangerouslySkipPermissions false and extraArgs
+//   ['--permission-mode', 'default', '--settings', <office hooks file>]. The default ACP engine approves every call and ignores
+//   extraArgs. The CLI engine defaults skip permissions to true. Without --permission-mode default the machine's default (Auto)
+//   asks nothing.
+// - PATCH /api/agents/:id merges adapterConfig key by key (a list such as extraArgs is replaced whole), so the patch carries the
+//   whole new extraArgs: the agent's other arguments too.
+// - A model profile (runtimeConfig.modelProfiles[*].adapterConfig) and an issue's assigneeAdapterOverrides.adapterConfig are merged
+//   over the config for some runs (heartbeat.ts). The office checks them and each run's adapter.invoke command line. It cannot stop
+//   such a run.
+// - Claude Code 2.1.318 (`claude --help` and the hidden options in its binary, read 2026-11-05): a repeated --settings or
+//   --permission-mode keeps its last value. --allowedTools is a list (the next argument, then each next one up to a flag). `manual`
+//   is its name for `default`. --bare (and CLAUDE_CODE_SIMPLE) turns off settings-file, flag, policy and plugin hooks.
+//   --managed-settings takes policy settings. Paperclip passes --allowedTools <its list> in place of --dangerously-skip-permissions
+//   on a sandbox target (claude-local permissions.ts). Its adapter.invoke `command` is the resolved program, or
+//   ssh://... :: claude / sandbox://... :: claude for a run on another computer.
+// - The flag table (CLAUDE_FLAGS, claude-code.mjs) and the env keys (ENV_OFF, ENV_LOAD, below) come from the 2.1.318 binary (its
+//   main command ends at run_main_options_built). Read them again when Claude Code changes. CLAUDE_CONFIG_DIR is left out of both:
+//   it only moves the machine's user settings, which the office does not read for any session.
+// - Still not seen: Paperclip's own process environment (passed to the run, not in its config; the logged env of adapter.invoke has
+//   only the adapter env, the Paperclip ids, HOME and CLAUDE_CONFIG_DIR); the machine's and the project's own Claude Code settings,
+//   hooks, plugins, skills and agents (as for every terminal session); a flag of a newer Claude Code (Partly supervised, not guessed).
+// - Live events are { id, companyId, type, createdAt, payload }. In local_trusted mode the socket needs no token. A Paperclip
+//   approval is a business decision (hire, strategy), never an office request.
+//
+// Supervision (supervisionOf, argsRead, configWhy, partlyOf, runCheck). Paperclip is the graph harness that runs the agents and the
+// office supervises them. What the office cannot read, does not know or may be cut is never Supervised (ADR 0001). Rules:
+// - `supervised` only with engine 'cli', dangerouslySkipPermissions false, and in extraArgs (else the older args) the last
+//   --permission-mode `default` (or `manual`) and the last --settings this office's command hooks file (Claude Code loads one
+//   --settings), and no `self` flag (--dangerously-skip-permissions, --allow-dangerously-skip-permissions, --permission-prompt-tool,
+//   --allowedTools / --allowed-tools, --managed-settings, --bare, --safe-mode). readArgs (claude-code.mjs, with the flag list) reads
+//   the arguments the way Claude Code's parser (commander) does, with the value count of each of the 133 flags of the 2.1.318 main
+//   command (0, 1, ? an optional value, + a list; short flags together, --flag=value, text after --), so a flag inside another
+//   flag's value is text (review 76).
+// - `unsupervised` with can: false (Supervise does not change it, and the wall says so) for a `cloud` flag (--cloud, --remote,
+//   --environment, --pool, --attach-serve) or an adapterConfig.env key that turns off hooks or permissions (ENV_OFF). The env is
+//   read by key name only: no value is read, and env is never written.
+// - `partly` when `command` is not unset or claude (commandWhy: a plain name, or a path whose file is claude or claude.exe; Paperclip
+//   uses `command` when it is a text that is not empty), a `load` flag (plugins, agents, settings, an SDK host, Remote Control,
+//   channels, --teleport, --chrome: FLAG_KINDS), a flag that is not in CLAUDE_FLAGS (its values are not guessed), an env key in
+//   ENV_LOAD, a model profile or an open issue's assigneeAdapterOverrides that breaks it, or a last run like that.
+// - `unsupervised` for another adapter type, or a last run whose command line skipped the office (runCheck(command, args, hooksFile,
+//   envKeys): its arguments, the key names of its logged env, or an ssh:// or sandbox:// program, a run on another computer).
+// - `can`: Supervise in office can fix it. supervisePatch is the one PATCH body: the three settings (before a --), each `self` flag
+//   taken out with its values, the agent's other arguments kept; `load` and unknown flags, `command` and `env` are never changed.
+// Rounds 3 and 4 of the review: env keys that can answer the hook (CLAUDE_CODE_SHELL_PREFIX, BASH_ENV, PATH, NODE_OPTIONS, ...) are
+// Unsupervised. Project and routine env are read as key names only (`layers`). These are Partly supervised or unknown: a failed read
+// of issues, routines or projects; an issue list of 500 or more (Paperclip's default cut); a project or routine with no `env` field;
+// an env key of the families CLAUDE_CODE_*, CLAUDE_BG_* or NODE_* that is not known (ENV_FAMILY, ENV_KNOWN_SAFE); a program that is
+// not the bare name claude; --chrome; --input-format stream-json; a run line of 50 arguments or more; an empty config. Env values
+// are dropped on read (scrubAgent, scrubIssue, envOnly); `hq.held()` shows what is kept, for tests. Every project of the company is
+// an env layer of every agent, and so is a routine of the agent or of nobody. The issues read include backlog and blocked.
+//
+// The watcher (createHq). Fetch uses redirect 'error'; WebSocket and timers are injected. connect({ url, company, keep }) reads
+// health, companies ({ choose } when several), then company, agents (no query: Paperclip answers 400 to one), issues, routines and
+// live runs, then opens the events socket. A lost connection is tried again at 1, 2, 5, 10, then 30 s. Events: heartbeat.run.queued
+// and .status set the agent's run (an ended run reads the budgets again and calls `onRun`); agent.status; heartbeat.run.event
+// adapter.invoke checks the run's `command` and `commandArgs` (runCheck) and puts a feed line when it skips the office or starts
+// another program; activity.logged reads everything again. view() is the snapshot's `hq`: state, company, budget in dollars, agents
+// with role, task, supervision, run, budget and heartbeat, and routines. labelOf(ids) gives a run's label, only for an agent of the
+// watched company. supervise(agentId) reads the agent again with GET /api/agents/:id just before its PATCH and builds the PATCH from
+// that read, so a change made in Paperclip since the last read stays. It reads the agent once more after the PATCH, because
+// Paperclip's PATCH has no version check: saved extraArgs other than the ones sent are named in the feed, and the agent shows what
+// that read says. The feed also names an own --settings of the agent that no longer loads.
+//
+// The HQ read model (#197). createHq also reads goals, pending approvals, activity, the cost summary and secret NAMES, each through
+// the contract check (hq-model.mjs shapeProblems): a route that answers in a shape the office does not know is not used, is named in
+// view().contract, is fed once, and the Lobby says unknown for it. A changed shape of company or agents stops the read with a 502.
+// An approval's payload, an activity's details and a secret's value are dropped when read. The board key is sent as a bearer from
+// deps.key(url) (office.mjs passes the runtime's key() for the runtime's own address only; the WebSocket gets it as an upgrade
+// header) and is held in no view. view() carries `floors` (the org chart) and `lobby`; model() adds the goal, approval and activity
+// lists (GET /api/hq/lobby).
+// - costs() (#208) reads by-agent, by-project (3 months) and the budgets overview on request, for GET /api/hq/costs (the Costs part
+//   of the HQ dialog, public/hq.js). Reads only.
+// - catalog() (#212) reads company skills, secret NAMES, plugins and adapters on request, for GET /api/hq/catalog. catalogOf
+//   (hq-model.mjs) keeps names, descriptions, versions and states only: a secret value, a skill file, a plugin manifest and a source
+//   path are dropped. A part Paperclip lacks or answers in an unknown shape is null. SHAPES has skills, plugins and adapters. Reads
+//   only; no write kind is planned for them. The page parts are OfficePage.HqCatalog (use, Skills, Secrets, Plugins, Adapters, in
+//   page-core.js), shown in the HQ dialog, the Skills dialog (company skills) and the Extensions dialog (plugins and adapters).
+//   Tested in test/hq-read.test.mjs and test/paperclip-routes.test.mjs (no secret value on any page response).
+// - Company admin, the rest (#221, owner only: page routes, and Paperclip's own instance admin check). view().others lists the other
+//   companies of the Paperclip (conn.all, read at connect and with every read of the company); the city shows each as an HQ building
+//   with no floors read (office.js otherHqBuildings; a click calls the connect route for that company and opens its HQ, and the
+//   office watches one company at a time). instance() reads the instance settings and the environments (GET /api/instance/settings,
+//   GET /api/companies/<id>/environments; an environment is its id, name, description, driver and state, never its config or env
+//   values) for GET /api/hq/instance and the writer's `environment` target check. exportCompany({ include }) is
+//   POST /api/companies/<id>/export, a read: it changes nothing in Paperclip, and Paperclip leaves secret values out.
+//   POST /api/hq/company/export hands the bundle to the page as a file, and the office keeps no copy.
+//
+// The writer (#198, ADR 0010; tested in test/hq-write.test.mjs and test/hq-write-routes.test.mjs). write(body, { confirmed }) plans
+// the write (planWrite, 400), reads the cell of the write grid (deps.grid(); Deny is 403 with a feed line and nothing sent), reads
+// every thing the write names from Paperclip (an issue or approval must be in the connected company, an agent in the read model, an
+// approval must wait for a decision: 404 or 409), and only then, for Confirm without `confirmed: true`, throws
+// deps.askFirst('write', ...) (the ask-first 409 with write: { kind, action, summary }), or sends one request and leaves a feed
+// line (a Paperclip refusal leaves one too). Its result is ids only (a created task: id, identifier), never a body from Paperclip.
+// The company is the one write with no company yet: companyDraft (#199) checks the name and the building kind of the company the
+// Orientation Company step makes, and the write (kind `company`, action `create`, scope 'none') names the loopback address it goes
+// to, needs no connection, and reuses a name that exists with no write. A reporting line (#202, kind `reporting`, action `set`):
+// the plan's `review` reads the org chart (reportingProblem: a loop, a self report or someone who is not in the company is 400 or
+// 404 before anything is asked); the PATCH { reportsTo } marks the employee busy, the agent is read again, and the floors and
+// view().cables rebuild. A plan may carry `preflight` (a company import first asks POST /api/companies/import/preview: its `errors`
+// refuse the write and its counts are the words of the Confirm) and `timeoutMs`.
+//
+// Employee management (#203). selfApprove runs after each read: it approves once each pending approval an employee of the company
+// asked for, of a kind that is on (deps.selfApproval(), the saved slice hqSelfApproval), through `write` with a fixed note, so a
+// Deny in the Approvals cell still wins. NEVER_SELF_APPROVED (hire_agent and budget_override_required) are never approved this way.
+// The slice and its rules are in hq-model.mjs.
+//
+// Pure apart from createHq, whose network, clock and timers are injected. Tests: test/paperclip.test.mjs and
+// test/paperclip-routes.test.mjs, with the fake server test/fixtures/fake-paperclip.mjs (it also runs by hand for a browser check:
+// `node test/fixtures/fake-paperclip.mjs 3199`); test/hq-read.test.mjs (the watcher against the fake).
 import fs from 'node:fs';
 import path from 'node:path';
 import { runIds, cleanIds } from './payload.mjs';
@@ -331,7 +459,7 @@ const ENDED = new Set(['succeeded', 'failed', 'cancelled', 'timed_out', 'error']
  * onChange(), onFeed(text, kind), onRun({ agentId, runId, status }) (a run ended), fetch, WebSocket, setTimer, clearTimer,
  * refetchMs, retryMs, key(url) (the board key for that address, or null: sent only as a bearer to that address, never held in a view) }.
  * connect, disconnect, supervise, write (the one writer, #198; a reporting line is its kind `reporting`, #202), view (the snapshot part, with the HQ floors and Lobby, #197), model (the fuller read model), labelOf (a session's label). Only the
- * labels need the company match: a held call of any Paperclip run waits the long hold (server.mjs holdRequest).
+ * labels need the company match: a held call of any Paperclip run waits the long hold (office.mjs holdRequest).
  */
 export function createHq(deps = {}) {
   const doFetch = deps.fetch || globalThis.fetch;

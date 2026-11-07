@@ -84,7 +84,39 @@
    diff) exactly over host.layer().rect, so text can be read, typed, selected and copied there. The layer follows the
    screen every frame, hides during a flight, and refits at once (no flight) on a resize (of the canvas or of the camera's
    frustum), a theme rebuild, a floor rebuild or a frame the engine cut. The page positions it with setProperty, never a
-   style attribute (the CSP). Every focused screen, pinned or not, has a bezel: the page shows layer().waiting on it. */
+   style attribute (the CSP). Every focused screen, pinned or not, has a bezel: the page shows layer().waiting on it.
+
+   Only this module reads the DS stage's floors, views and room geometry. A new painted screen is one host.screen(spec) call
+   (target, rebuild, frame, tick) plus its paint; a decoration with no screen registers a frame (host.frame) alone. No other
+   file adds a pick Raycaster (one that turns the pointer into an action), pointer listeners or canvas.style.cursor writes:
+   two raycasts gave two actions for one click. Geometry raycasts that do not react to the pointer, like terminal.js placing
+   the desk light, are fine. The building view is host.inBuilding() (no floor group is visible), not the aria-pressed state
+   of the Building button.
+
+   Room screens, the two steps in detail. The free part of the view is the box that freeRect finds between the page's covers
+   (sceneCovers() in panels.js: HUD columns, the dock, a side panel, the look bar). Only the host moves the camera; adapters
+   give a look(item) spec (key, mesh, verb, kind, clear) and a find(key) for floor rebuilds. After the landing the camera
+   stands clear units in front of the screen: the view is orthographic, so only the clipping changes, and the bot, its bubble
+   and the desk in front are cut away. The camera steps back out on its line of sight before any flight, so the cut never
+   sweeps through the room. Picks wait for the DS intro to end (host.skipIntro finishes it, #189). The page listens with
+   host.onFocus: a look shows the look bar and closes the panels; refit() runs when a side panel opens, the dock changes
+   height or the window resizes.
+   While a screen is in focus the host holds back a new st.goal where it is set (an accessor on the stage: the engine applies
+   a goal before the page's frame, so clearing it there let one frame through, and selecting a bot makes the DS HUD reframe
+   the floor). It lets the held goal run when the floor or the view changes. It widens ctl.maxZoom for the wheel, and the wheel
+   gate does not leave the floor.
+   A theme change rebuilds every floor and the DS frames the floor at once (zoom 1); the host puts the camera back on the
+   screen in the same frame. A window resize does the same while the HUD has a frame inset (over 820 px: the stage's
+   ResizeObserver, after the page's frame, calls frameFloor(true)), so the host wraps st.frame: a cut while a screen is in
+   focus is undone in the same call (in the next frame when a rebuild took the screen's mesh out of the scene), so neither the
+   next draw nor the page's refit() sees the floor framing. A new canvas size or camera frustum frames the screen again at
+   once, also when the page's refit() asks before the host's frame saw it (review 89; on main a plain look dropped to the
+   floor framing and flew back).
+   The wait for a screen (wantClock): the page's 5 s clock starts when the scene is up and settled, with a hard limit before that.
+
+   Reduced motion: stage.rm is read when the stage is made. The DS engine cuts every camera move under reduced motion
+   (stage.goal ends on its first step), so city.js passes no reduced-motion flag to stage.frame. The page's own motion still
+   reads stage.rm: here a flight to a room screen and back lands in one frame. The DS engine's own camera moves are the DS's. */
 (function (root) {
   'use strict';
 

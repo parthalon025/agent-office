@@ -22,7 +22,28 @@
 // number is that limit, 0 is no limit. A goal that only local agents can take has none, because they cost $0.
 // Steps run one after the other. A spend limit is checked before every dispatch, never after. Agent mail has two caps:
 // a hop cap (a reply chain is cut) and a message cap per goal. snapshot() and events() let the server show the same
-// plan again on every scene mount (the design system does not restore a plan itself).
+// plan again on every scene mount (the design system does not restore a plan itself). events() gives `plan` and `plan.step`.
+//
+// To-dos and the board hook. Every goal's plan is a to-do list (`todos(goalId)`; a failed step is `error`). The optional `board(report)`
+// hook fires on each change with the board text: the goal line is cut at 300 characters, the steps at 240 and shrinking, the status
+// and spend lines are never clipped, and the whole text stays under `limits.boardMax` = `NOTES_MAX - 100`. A throwing hook never stops a
+// goal. Also exported by the deps: `spendOf`, `defaultSpendLimit`, `board`.
+//
+// Model ladder (#74). Its rules (`LADDER`, `ladderStart`, `stageSignal`, `stepUp`, `suggestSwitch`) are pure, and `check(agentId)`
+// applies them: it reads `callsOf` for the working step and takes one step up. `ready(building)` turns the ladder on: a step then has a
+// `tier` and goes only to an agent whose `tiers` has it. `up` re-queues the step on the next tier. `ask` holds the goal in
+// awaiting-approval until `approve()` for the first paid tier. `stop` is the spend limit. A connected Paperclip company leaves the step
+// alone. The server's `dispatch` sets a Claude Code agent to the tier's model with `set_model`; a free agent is the local tier.
+//
+// Saved goals. `export()` and `restore()` keep goals in `persisted.goals`. A step that ran when the office stopped comes back as an
+// error step to retry, and a plan that was still being made comes back failed.
+//
+// Server wiring (not in this file): office.mjs has `startGoal`, `goalAgents` (idle agents of the same building) and `goalTick` (a step
+// ends with its agent's turn; a freed agent takes a waiting step), and the page-group routes goal start, approve, cancel and retry.
+// A connected Paperclip company (`persisted.paperclip.company`) refuses an office goal: 409 with `confirm: 'goal'` until
+// `confirmed: true`. Not yet wired: the board text into the room board. When it is, the text goes to its own section of the room board,
+// never over the user's notes (owner decision, default).
+// Tested in test/manager.test.mjs and, for the server wiring, test/goal-routes.test.mjs.
 //
 // Plan source contract (#154, spec #130). The board, the page and the snapshot read plans only through createPlanBoard, never from a
 // planner. A plan source is one object:

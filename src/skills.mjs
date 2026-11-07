@@ -8,7 +8,7 @@
 // leading dot), so a name can never leave the folder. A link or junction is never followed: a folder or file that is
 // a link is not a skill. The office edits and deletes; it does not make skills (the agent does).
 //
-// The caller holds the user's confirm before save and remove (server.mjs). Sync file calls; the folder is small.
+// The caller holds the user's confirm before save and remove (office.mjs). Sync file calls; the folder is small.
 import fs from 'node:fs';
 import path from 'node:path';
 

@@ -7,6 +7,18 @@
 // lines of its settings files; no argument means the default port. The page token file is outside the folder and is
 // per port already (auth.mjs pageFile).
 // Pure: names only, no I/O. Only node:path, so the command hook (one Node start per event) stays light.
+//
+// Files a second office writes (#100): an office in a folder where another office runs, on another port (OFFICE_PORT=<n>,
+// npm run start:branch in the main checkout), writes only its own files, with its port in the name. It never rewrites the plain
+// files of the office on 4317, so the owner's hooks keep going to 4317, and it never loads the owner's state.json, so it never
+// runs the owner's schedules or saves over the owner's notes. Its settings pass the port to hook.mjs and mcp.mjs. The only file
+// it reads from the plain set is .office-token, and only when that file names its own port (an office from before #100): then it
+// keeps that agent token, so the settings files that office made still work. A copy that stops on a busy port writes nothing.
+// Do not add a file to the office folder outside officeFiles, and rate any new token or settings name in risk.mjs for every
+// port (test/risk.test.mjs checks the officeFiles names).
+// OFFICE_ROOT is the one constant that knows the layout: server.mjs, hook.mjs, mcp.mjs, probe.mjs, the ownCode rule of risk.mjs
+// and the tests import it.
+// Tested in test/files.test.mjs, which also runs two offices from one folder.
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 

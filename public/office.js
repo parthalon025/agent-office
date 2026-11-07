@@ -3,7 +3,51 @@
    screens (#89) laid over the 3D scene). The parts it wires are in the other page files, which load first and share their names
    on window.OfficePage: page-core.js (helpers, kinds), dialogs.js (the session dialogs), the feature files (changes, schedules, extensions, hq, characters, reception), panels.js (board, stats,
    notes, Look and the pinned screens), needs.js (Needs you, paper flow, the phone list). Split out of this file in #1 story 26.
-   There is no dock (#92): the office's actions are in the scene (open desks, the reception memo, the elevator) and in Ctrl+K. */
+   There is no dock (#92): the office's actions are in the scene (open desks, the reception memo, the elevator) and in Ctrl+K.
+   This file holds the city (CityView), the page commands in Ctrl+K (pageActions) and App. It loads last of the page files
+   and mounts OfficeScene once. The page files load in this order from public/index.html: page-core.js, skills.js,
+   dialogs.js, schedules.js, extensions.js, hq.js, characters.js, reception.js, panels.js, changes.js, screens.js, merge.js,
+   needs.js, office.js. A new page file goes into index.html, STATIC_FILES, the kit/check.py list in CI and the Map in
+   CLAUDE.md. A top-level var another file reads must never be reassigned (the other files hold a copy: layerMem is read
+   through layerMemory()).
+
+   Layout rules.
+   - There is no dock. --strip-clear is a fixed value per width in office.css (above the DS broadcast bar and log lane);
+     the DS chat, roster, Since you left card, the page panels and the toast stack use it as their bottom edge. Do not
+     hard-code another bottom offset for them. The dock's actions live in the scene (open desks, the reception memo), in
+     the Reception dialog (officeActions, so a touch screen reaches them) and in Ctrl+K.
+   - The scene height is state here (win.h): a resize renders the page again, and the DS sets the new inline height. Do
+     not override the .ao-office height in CSS (#55).
+   - At 820 px and below the room card waits while the DS Since you left card shows (onSinceYouLeft sets syl), because
+     both sit at the bottom (#66). The lobby tour card sits at the top (at the bottom below 820 px) and is a cover for
+     framing (COVERS in panels.js) and for the toasts (KEEP).
+   - One panel at a time: this file adds has-panel to #office while a pinned screen (the desk screen, the changes on the
+     wall), the board or the stats panel is open, and office.css hides .ao-hud-right (the DS chat and roster) then. Every
+     such panel must show a way to the open requests (the board and stats panels show NeedsButton; a pinned screen gets
+     the waiting count and onGo), or an approval could hide behind the hidden chat. Every screen in focus shows the bezel count
+     (Bezel, every request of every building; one click goes to the desk of the oldest).
+
+   Commands and keys.
+   - Ctrl+K page commands are built from App state each render and handed to the palette in an effect (pageActions). Room
+     tools (board.open) and session commands (terminal, changes, Stop turn, Go to) are built by liveActions() at that
+     moment, so the rooms of the floor on screen are current. The DS calls CommandPalette.actions on every scene render, so
+     liveActions() runs on each scene event; keep it cheap. Do not mutate a module array during render.
+   - Esc closes the top layer only. A dialog (.ao-dialog) or the palette (.ao-cmdk) takes it first; a DS Dialog is gone
+     from the DOM before window bubble listeners run. So decide in the bubble phase with OfficeBoard.escTaken(e), which
+     records the layer state in window capture. Do not move the handler to capture: chat-extras.js stops Esc for the /
+     list there.
+
+   Needs you and the inbox.
+   - Needs you is officeAdapter.requests(snap), not a sum of the DS inboxes (they list one building). The page runs the
+     one Notifier (the scene gets notifier: false): its count is the Needs you total, so the tab title counts every
+     building, in the city too. The same count is the scene's top bar button (OfficeScene waitingCount and onWaiting, every
+     width; #92 review: with no dock a request in another building showed only in the tab title) and the City panel's: one
+     tap runs goOldest (needs[0], then openDesk: its session's building, floor and desk screen). Its notifications are
+     officeAdapter.alerts(snap) (requests and errors of every building). The DS ao-alerts setting turns the alerts on. Do
+     not mount a second Notifier with a title: two of them write the title over each other.
+   - The Decisions inbox is page state: OfficeScene gets inbox and onInbox. A page panel that opens closes it
+     (setInbox(false)); a new scene starts with it closed in its first render (the state carries its scene key). Do not read
+     or click DS inbox class names. */
 (function () {
   'use strict';
   var O = window.OfficePage;

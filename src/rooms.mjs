@@ -1,4 +1,4 @@
-// Room records (#92): the names and floors of the rooms of git workspaces, kept in state.json (persisted.rooms). One job:
+// Room records (#92; #179 split them from place.mjs): the names and floors of the rooms of git workspaces, kept in state.json (persisted.rooms). One job:
 // the rules that name a room from its task and settle its floors from the agents in it. Place rules (which room a folder is)
 // stay in place.mjs. Pure functions, no I/O, no timers: safe to import in tests.
 import { functionOf } from './archetypes.mjs';
@@ -45,7 +45,11 @@ export function betterTitle(old, next) {
 //           of the room sits on is dropped, so a room never collects floors; a room with no agent left has none)
 //   title   its name from the task (roomTitle), kept for the next agent until a better source comes. The main checkout is shared
 //           by ad-hoc sessions, so only its branch names it, never a prompt, a goal or an issue in a prompt.
-// The server drops a record when its worktree goes (server.mjs dropGoneRooms).
+// A record is dropped when its worktree goes (campus.mjs dropGoneRooms). cleanRooms is the one form at load, like archetypes.mjs
+// cleanRecord: a record with no floors or a junk key no longer throws on every broadcast. settleRooms runs on every broadcast:
+// a room is on the floors where its agents sit now, a floor no agent of it sits on goes, the name stays. viewRooms is the
+// snapshot's `rooms`. The main checkout (isMainCheckout) is named by its branch only (owner rule, #92 review). Tested in
+// test/rooms.test.mjs.
 const TITLE_BY = new Set(Object.keys(TITLE_RANK));
 const SHARED_BY = new Set(['branch', 'folder']);   // the sources that may name the main checkout
 const cleanTitle = (t) => {

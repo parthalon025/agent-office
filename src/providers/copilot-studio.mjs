@@ -10,6 +10,11 @@
 //
 // The activity shapes follow the public Copilot Studio client documents. They are NOT yet checked against a recording; the live
 // run waits for the owner's account (#24). Copilot Studio reports no tokens: the cost is the price the owner sets per message.
+//
+// Supervision: gated: false, "Unsupervised: its tools run in the cloud". Cost: unknown unless PRICE_MESSAGE is set (shared rules
+// and the other cloud kind are in providers/cloud.mjs). deps.blocked (the server passes security.openRefusal for the kind): while
+// the Cloud agent switch is off, readiness() is not ready with that reason, and readiness() and models() make no call. Service ids
+// go into paths through encodeURIComponent. Tested in test/cloud-providers.test.mjs with test/fixtures/fake-azure.mjs.
 import { providerError } from './index.mjs';
 import { cloudConfig, cloudSetup, cloudSend, readSse, createRemoteAgents, textOf } from './cloud.mjs';
 

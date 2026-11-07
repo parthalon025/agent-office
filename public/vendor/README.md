@@ -1,8 +1,12 @@
 # Vendored files
 
-The page loads every file from the office server. Nothing comes from a CDN or a font service (security audit #27, M2). The server serves these files from its exact-match list (`STATIC_FILES` in `server.mjs`). The content security policy (`auth.mjs`, `CSP`) allows scripts, style sheets and fonts from the office's own origin only.
+The page loads every file from the office server. Nothing comes from a CDN or a font service (security audit #27, M2). The server serves these files from its exact-match list (`staticFiles` in `src/office-core.mjs`). The content security policy (`auth.mjs`, `CSP`) allows scripts, style sheets and fonts from the office's own origin only.
 
 The files are kept byte for byte as published (`.gitattributes`: `public/vendor/** -text`). `test/static.test.mjs` checks the React hashes below and fails when a file changes.
+
+Why `-text`: with `core.autocrlf` (the Windows default) the version control tool would write CRLF at checkout, and the pinned SHA-256 in `test/static.test.mjs` would fail. Change a vendored file only with the steps below, and update the pins in the same commit.
+
+The vendored files are React and ReactDOM 18.3.1 (umd production) and the DS fonts (`fonts/fonts.css` plus 30 woff2 files, with the OFL texts). `staticFiles` in `src/office-core.mjs` (the exact-match list of static files) reads the font names once from `public/vendor/fonts` and serves only names that match `^[a-z0-9-]+\.woff2$`.
 
 ## React 18.3.1
 

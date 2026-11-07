@@ -14,8 +14,13 @@
      from the same data (propCounts, userData.setCount); the page never builds them.
    - A nameplate stands at each bot's desk: name, model lane (Haiku, Sonnet, Opus, Fable) and cost. It faces the camera and keeps
      the DS body and caption sizes on screen at every zoom (plateBox; #92 review: a plate on the desk was 2 px text at the floor's zoom).
-   Pure part (window.OfficeLobby.pure; tested in test/lobby.test.mjs): tourSteps, tourDue, plateLines, plateBox, directoryRows, memoLines,
-   FACES and dotOf (the painted colors, test/contrast.test.mjs).
+   The plate is a sprite drawn at those sizes and scaled each frame to that many CSS pixels. A plate whose screen box overlaps
+   one shown before it waits until the zoom parts them (declutter).
+   The lobby tour flies to its monitor stop at an agent's monitor (terminal.js look(), passed as o.monitor), else at an open
+   desk's DS screen (K.screens).
+   Pure part (window.OfficeLobby.pure; tested in test/lobby.test.mjs): tourSteps, tourDue, plateLines, plateBox, declutter,
+   directoryRows, memoLines, FACES and dotOf (the painted colors: paper faces and on-bubble state dots, test/contrast.test.mjs).
+   The tour's flights run on the real scene host with a plain scene graph in that test too.
    It reads the stage only through the host (rooms, shown floor, pick targets, frames) and office.inspect().bots, like terminal.js.
    It never moves a bot. Colors come from DS tokens (K.tok). */
 (function (root) {

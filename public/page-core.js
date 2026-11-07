@@ -1,7 +1,22 @@
 /* Agent Office for Claude Code x0.2: page core (split out of office.js, #1 story 26).
    The helpers every page file shares: the calls to the server, the formats, the small parts (Area, Tag, Busy, Pairs, CostDialog,
    FeatureTags) and the agent kind hooks (useKinds, KindFields, KindNeeds). It loads first and puts its names on
-   window.OfficePage; the other page files read them from there. No DOM work at load, no scene code. */
+   window.OfficePage; the other page files read them from there. No DOM work at load, no scene code.
+   Plain scripts, no bundler: each page file is one IIFE that reads what it needs from OfficePage at its top and puts what
+   the later files need on it at its end. This file holds: the formats and small parts (Area, Tag, Busy, Pairs, CostDialog,
+   FeatureTags), the agent kind hooks (useKinds, KindFields, KindNeeds, modelWord, and fetchProviders, the one shared
+   providers answer, #101), useSnapshot, useChatBot, refocusRow and sceneName. The calls to the server go through the one
+   client (O.client, from adapter.js), which owns the error and question rules.
+
+   The shared namespace (OfficePage). Only what more than one feature needs stays on it (#184). A new shared part goes on
+   it only when a second feature reads it.
+   - page-core.js: Area Busy CostDialog DEFAULT_KIND F FeatureTags HqCatalog ISOLATION KIND KV KindFields MODELS MODES Pair
+     Pairs Tag WHERE ago cadence client clip costAsked cssMs exportSession getInfo kindOf limitHint limitSent limitText look
+     modelWord money plural reduced refocusRow resetText sceneName statusOf useChatBot useFirstModel useKinds useSnapshot.
+   - dialogs.js: FloorsDialog HooksDialog KindsDialog OpenDialog PastDialog PaperclipRuntime RoomDialog SessionsDialog.
+   - panels.js: Bezel BoardPanel LOOK_ICON LookBar NotesEditor StatsPanel WANT_MS putBox usePinBox usePinFocus noteLayer
+     sceneCovers layerMemory.
+   - Every feature Module adds one name: Skills Schedules Extensions Hq Characters Reception Changes Screens Merge Needs. */
 (function () {
   'use strict';
   var O = window.OfficePage = {};

@@ -6,6 +6,45 @@
 // Everything outside the rules is injected, so a test needs no server, no timers, no git and no
 // child process. Importing this module starts nothing. The server passes real adapters; tests pass
 // in-memory ones (see test/tracker.test.mjs).
+//
+// Inputs. Hook payloads (onHook, permissionRequest, askQuestion) and stream messages (onStream, a JSON line or an object) go in;
+// tracker.sessions and tracker.feed come out. A stream line { type: 'usage', used?, ctx?: { used, size } } sets the session's
+// token total with `used`. `ctx` (both numbers, size above 0) sets ctxTokens and ctxWindow, and from then on the per-message
+// usage no longer sets ctxTokens (#164). A provider sends `ctx` only when `used` is tokens in context: the ACP kinds except
+// OpenClaw, a local model whose model list names its window, and Agent Framework teams on one. Otherwise the Context bar says
+// unknown (OfficeVocab.context). A usage line never carries a cost. Every provider feeds the tracker through providerEvents.
+// s.provider is the agent kind ('claude-code' for a session first seen in a hook).
+//
+// Injected: the clock, the id maker, git locate, one persistence call (deps.record(what, a, b): history, recentDir, commands,
+// placed, spent), the change callback and the hold release (createTracker(deps)), so importing it starts nothing. The check
+// before a hold is injected too (deps.screen, the Security room rules): permissionRequest(p, opts) returns
+// `auto: { allow, message? }` when a rule decided, with a feed line unless quiet, and nothing waits. A quiet decision returns
+// `quiet: true` before the hook record, the git place and the change callback, and the server sends no snapshot for it (a local
+// agent asks about every read). refuseCall ends a call the office refused before it ran. record('spent', s, dollars) feeds the
+// Spend screen. rootOf(s) is the root a call is rated against.
+//
+// Rules that live only here: session status, tool calls, subagent links, the 60-call cap, errors, budget stops and interrupts.
+// Rules read the clock, ids and timers only through now(), makeId() and setTimer(). Their real defaults are at the top of
+// createTracker and nowhere else. Never call git or broadcast() from the tracker: use deps.locate and deps.onChange. Test a rule in
+// test/tracker.test.mjs with the fixtures in test/fixtures/ (small stand-ins, shapes checked against a real recording; subagent
+// agent_id payloads are not recorded yet; no paid call). The server keeps the parts that need a socket: the permission and
+// question holds (holds.mjs) and sendMessage. The parts that need a process (spawn, stdin, control requests, taskkill) are the
+// provider's. A provider never passes a bare program name to spawn or execFile: it uses resolveExe, and
+// test/spawn-safety.test.mjs scans src/providers/ too.
+// - Waiting = a pending permission prompt or an open question (isWaiting). The `status` field alone does not count, and a
+//   subagent's tool call does not hide a request.
+// - A tool result settles one permission request: the oldest one with the same callKey (agent, tool and trimmed input). Never match
+//   on the short label from describeTool: it keeps only a basename or the start of a command.
+// - A permission request is rated against the session's root (rootOf): worktree.root, else startDir (the office's launch folder,
+//   or the first cwd a hook reported). Never against the live cwd: it follows the agent, so a cd would widen what is low risk.
+// - A failed turn shows as Error on every surface until Dismiss (the dismiss route, tracker.dismissError) or the next turn starts
+//   (tracker.startTurn, or the UserPromptSubmit hook).
+// - A turn that fails at once can end on the stream (`result`) before its UserPromptSubmit hook arrives. The tracker keeps
+//   s.turnEnded: a hook with the same prompt after it counts the turn and neither starts work nor clears the error (#188).
+// - `result` with error_during_execution after an interrupt is not an error. Check s.interrupted.
+// - Hooks fired inside a subagent carry agent_id. Use it to put the call on the helper bot, and keep it off the parent's task line.
+// - git.locate gives null both outside git and when git fails for a moment, so placeSession keeps the last known place when a
+//   lookup in the same folder gives null. A new folder is believed.
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { riskOf } from './risk.mjs';

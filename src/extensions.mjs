@@ -5,6 +5,9 @@
 // after the name too, and the last --scope wins (checked with `claude mcp add`), so a name `-suser` would become
 // `--scope user`. Two fences stop that: a name or id starts with a letter or a digit, and `--` ends the options
 // before every connector name. Plugin verbs keep --scope as the last argument, so it wins over anything before it.
+// mcp_status, mcp_toggle, mcp_reconnect and reload_plugins are control requests on the session's stdin; they work before
+// the first prompt. Persistent changes use `claude mcp` and `claude plugin` with scope local or project only.
+// createExtensions({ sessions, control, claude, addFeed, root }) (#185) runs the lists for one session: list(uid) and action(body).
 import path from 'node:path';
 import { httpError } from './office-core.mjs';
 

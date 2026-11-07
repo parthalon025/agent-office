@@ -18,15 +18,18 @@
                         pattern, for commands and errors that are kept or exported (history.json, Export). notes.mjs keeps
                         its own list of the key shapes it refuses; test/format.test.mjs holds both to the same samples.
      cleanupNote(result) -> [tone, title, text] for the toast after a floor clean-up ({ deleted, skipped } from the server).
+                        A skipped floor is an error, and the text is singular for one floor.
      remoteNote(remote) -> the text of the Remote access part of the Attach sessions dialog ({ state, host, missing, reason } from the info read).
      cleanupEmpty(kept) -> the empty text of the clean-up dialog: the true reason (the user kept every floor, or none was ready).
      tokens(n)       -> '999', '1.2k', '3.4M' (token counts, one form on every surface)
      clock(t, zone?) -> 'HH:MM:SS' local time (zone 'utc' for tests); a dash when t is not a time
      duration(ms)    -> '420 ms', '1.5 s', '2 min 5 s'; a dash when unknown
      timeline(calls, { start, zone }) -> the tool calls as rows, oldest first: { id, time, after, duration, state (done, failed, open), text, err }
-     exportText(s, { zone }) / exportFileName(s, zone) -> a session (live or a past record) as Markdown, and its file name (#72)
+     exportText(s, { zone }) / exportFileName(s, zone) -> a session (live or a past record) as Markdown, and its file name (#72).
+                        The server and the page use the same rows (timeline).
      hintPill(textW, keyW) -> where the parts of a scene hint pill sit, in pill pixels: { w, textX, keyX, keyW }.
                         The pill grows with its label. keyW 0 gives a label only (keyX is null).
+   Tested in test/format.test.mjs.
 */
 (function (root) {
   'use strict';

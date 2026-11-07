@@ -1,11 +1,18 @@
 // Saved state (#181): the office's one state file, as slices. Each area owns its slice and its cleaner (SLICES: key -> the
-// cleaner that area exports); this module loads the file, hands each cleaner its own part, and writes the file back. The server
+// cleaner that area exports); this module loads the file, hands each cleaner its own part, and writes the file back. The office (office.mjs)
 // reads a slice by name (`get`), never the whole object.
 // One writer (the Interface): `save()` writes plainly and only once the office owns its port (`claim()`); `claim()` makes the
 // first, owner-only write of the whole file through the injected `writeFirst` (writeSecret: user, SYSTEM and Administrators).
 // So a copy on a busy port writes nothing (#100): until `claim()` a change stays in memory.
 // Keys the file has that no slice knows are kept as they are, so an older or newer office does not lose them.
 // Pure apart from the injected file functions: tests give them in memory.
+// Each area exports its own cleaner (cleanRules and cleanCosts in security.mjs, cleanTrust in trust.mjs, cleanRooms in rooms.mjs,
+// cleanRecord in archetypes.mjs through cleanLayouts here, cleanPersonas, cleanTeams and cleanScreens in personas.mjs, cleanRecent
+// in recent.mjs, cleanNotes and cleanPins in notes.mjs, cleanMerges, cleanStandups and cleanFocus in rituals.mjs); SLICES only
+// names them. A new slice is a cleaner in its owning module plus one line in SLICES.
+// slice(...keys) is for a module that takes a slice of its own: campus gets layouts, rooms and merges; exportCustom gets the
+// customization keys.
+// Tested in test/state.test.mjs.
 import fs from 'node:fs';
 import { cleanRules, cleanCosts } from './security.mjs';
 import { cleanTrust } from './trust.mjs';

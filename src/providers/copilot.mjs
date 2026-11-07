@@ -8,7 +8,20 @@
 //   MODEL_RE                   a model id the office passes as --model
 // From Copilot CLI 1.0.105 (copilot help config, copilot help permissions, copilot help environment; the handshake in
 // test/fixtures/copilot-acp.json signed out, copilot-acp-signed-in.json signed in). Its request bodies come from the SDK schema of that version
-// (copilot-sdk/generated/session-events.d.ts PermissionRequest*), not from a signed-in run: no prompt was sent yet.
+// (copilot-sdk/generated/session-events.d.ts PermissionRequest*), not from a signed-in run that asked for a permission. One signed-in prompt with no tools ("Reply with the word ok.") was recorded on
+// 2026-11-06 (test/fixtures/copilot-acp-prompt.json).
+//
+// What Copilot does (2026-11-05, from 1.0.105 on the owner's PC). Its default permission mode ("manual") asks before writes and
+// commands and approves read-only requests by itself, so it reads in its folder and runs a command or MCP tool it rates read-only
+// without asking. Hooks (user settings, .github/hooks) run commands without asking, and allowedUrls open without asking.
+// defaultPermissionMode is ignored outside interactive runs, so --acp sessions cannot be set to allow-all from its config.
+// requestCall returns the ACP kind, tool name and input the office shows and rates; an edit carries only its file, like every ACP edit.
+// argsCall reads a later rawInput and its location in the shape of the card: the command, file or address it shows, or an MCP
+// tool's plain arguments object. A wrapper that names the server or tool, or a card that showed no arguments, gives null until a
+// signed-in run records the real shape.
+// No spend limit (owner decision Q22, decision 1 of the #22 review pending; default A: one rule for every no-cost kind), so the
+// office never passes --max-ai-credits. The office MCP server is not given to it (mcpServers: [], as for every ACP agent).
+// Tested in test/copilot.test.mjs with the fake test/fixtures/fake-copilot.mjs (the handshakes and the prompt recorded from 1.0.105).
 // Pure: no I/O.
 
 // Every session: ACP on stdio, the installed version (no download), no ask_user tool (the office cannot show its questions

@@ -10,6 +10,15 @@
 //   - No answer means deny: no token file, no office, a refused request, an answer that is not allow, the wait limit.
 //
 // The office keeps the same key rule in providers/openclaw.mjs (OFFICE_KEY); test/openclaw-plugin.test.mjs checks that the two agree.
+//
+// Timing (OpenClaw v2026.10.10): a handler that throws or passes its timeoutMs blocks the call (default 15 s). The plugin asks for 600 s,
+// the most the operator settings take, and waits 595 s itself. The operator settings plugins.entries.agent-office.hooks.timeouts.before_tool_call,
+// then .hooks.timeoutMs, win over it, so the plugin reads them from api.config and waits 5 s less. OpenClaw does not cancel a handler that
+// timed out, which is why the plugin ends its own wait first and closes its request. An approval after 5 minutes still runs (the 310 s check
+// passed with httpPost on Node 22.18, 2026-11-05; the global fetch would give up at 300 s).
+// The plugin reads the token and port from the office token file at each call and posts only to 127.0.0.1. The file is named by its config
+// (plugins.entries.agent-office.config.tokenFile, read as api.pluginConfig). The plugin stays self-contained: it imports nothing from the office
+// or from OpenClaw, and has its own httpPost. Install steps are in docs/agents.md (OpenClaw).
 import http from 'node:http';
 
 export const OFFICE_KEY = /(?:^|:)agent-office:(o[0-9a-f]{8})$/i;

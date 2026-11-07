@@ -7,6 +7,9 @@
 //
 // Interface: createFiles({ events, asks, emit, makeId }) -> { handles(method), serve(s, st, method, params) -> Promise|value };
 // commandLine({ command, args, env }) (the one line a terminal runs, quoted for the shell it runs in).
+//
+// The agent's fs/* and terminal/* calls come from the client capabilities the office sends in initialize. The office answers every
+// one itself, in the root only. Tested in test/acp-files.test.mjs.
 import path from 'node:path';
 import { fileKey } from '../risk.mjs';
 import { clip } from '../tracker.mjs';

@@ -10,6 +10,12 @@
    The engine builds the desks and walks the bots. This file only repaints the screens and adds the
    cursor and the light pool (decor, noNav). Colors and fonts come from the DS tokens (stage.K).
    Helpers (subagents) have no session of their own; their monitors show what the engine traced.
+   The monitor title bar adds the short supervision label (OfficeVocab.supervisionHead); the desk screen's Terminal tab starts
+   with the full label (supervisionLines); the stats display has an Oversight row. The tray counts come from
+   OfficeTerminal.trays(s): inbox is s.inbox (queued office messages), outbox is the open requests and questions.
+   OfficeTerminal.timeline(s, cols) lists the calls with their times for the desk screen's Timeline tab (#72). A host
+   adapter, like board.js. The stats rows (OfficeTerminal.stats) are tested in test/terminal.test.mjs.
+   Under reduced motion (stage.rm) the terminal cursors are solid.
 
    window.OfficeTerminal
      attach(office, { session(botName) -> session or null, onOpen(uid, name), host? }) -> { refresh(), open(uid), dispose(), screens() }

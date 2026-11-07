@@ -9,7 +9,11 @@
    The error rules live here: a failed call rejects with an Error that carries .status and .body (the server's text, or
    "The office could not do that (<status>)."), and a question that answers 200 (the cost question, ask.js) rejects the same
    way so OfficeAsk.asked reads it. Every call waits for ready(): the page knows whether it has access first.
-   Plain script, no I/O of its own: the page loads it as a script (window.OfficeClient); tests import it. */
+   Plain script, no I/O of its own: the page loads it as a script (window.OfficeClient); tests import it.
+   Tested in test/client.test.mjs with a fake fetch. createClient({ fetch, ready }) gives one method per route in ROUTES.
+   No other file in public/ has a route string (the test fails on one). A new route is one row in ROUTES. The Security
+   room wall sends { cmd, body }, a command name, not a route. adapter.js makes the one client (officeAdapter.client) and
+   page-core.js hands it to the dialogs as O.client. */
 (function (root) {
   'use strict';
   // name -> route. A name is the route in camel case. Add a route here and it is a method.

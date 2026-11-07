@@ -1,12 +1,21 @@
 // The Agent Office adapter for Paperclip (#200, ADR 0010). Paperclip loads this folder as an external adapter plugin
 // (adapter-plugin contract: the package entry exports createServerAdapter). It runs inside Paperclip; the office never imports it.
 // When Paperclip wakes an employee whose adapter is `agent_office`, execute() hands the run to the office (run.js), which runs it with
-// the employee's agent kind under the Security room, and reports result, usage, cost and transcript back.
+// the employee's agent kind under the Security room, and reports result, usage, cost and transcript back. The package entry exports
+// `createServerAdapter`; the adapter type is `agent_office`. The office side is src/paperclip-runs.mjs.
+//
+// Config (agentConfigurationDoc below): `agentKind` (default claude-code), `model`, `cwd` (else the workspace Paperclip gives the run),
+// `isolation` (same, default, or worktree), `promptTemplate`, and `tokenFile` (else AGENT_OFFICE_TOKEN_FILE, which
+// src/paperclip-runtime.mjs sets for the Paperclip it runs).
 //
 // Install (docs/paperclip.md): as the board, POST /api/adapters on Paperclip with { "localPath": "<office folder>/src/integrations/paperclip-adapter" },
 // and give the adapter the office token file: AGENT_OFFICE_TOKEN_FILE in Paperclip's environment (the office sets it when it starts
-// Paperclip), or `tokenFile` in an agent's adapter config.
-// Plain JavaScript with no imports from Paperclip, so nothing is installed for it (the OpenClaw plugin does the same).
+// Paperclip), or `tokenFile` in an agent's adapter config. The office also installs the plugin into Paperclip itself (#222; the writer
+// is in src/hq-model.mjs and src/paperclip.mjs).
+// Plain JavaScript with no imports from Paperclip, so nothing is installed for it. It has its own `httpPost` in run.js, like the
+// OpenClaw plugin: Paperclip loads it, so it must stay self-contained.
+// Tested in test/paperclip-adapter.test.mjs with the stand-in host test/fixtures/fake-paperclip-host.mjs (it loads the plugin the way
+// Paperclip's plugin loader does).
 import fs from 'node:fs/promises';
 import { createRunner } from './run.js';
 

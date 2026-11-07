@@ -3,7 +3,11 @@
    the fallback dialog, the pinned wall screen of a room and the Ctrl+K action. Its Interface is window.OfficePage.Changes:
    { Dialog, Screen, use, Body, Confirm, actions, paletteAction }. office.js keeps the page state (which dialog or screen is
    shown) and the flight to the wall screen; it calls this Module and holds none of its parts. Loads after panels.js, which
-   gives it the pinned-screen helpers (Bezel, usePinBox, usePinFocus, putBox). */
+   gives it the pinned-screen helpers (Bezel, usePinBox, usePinFocus, putBox).
+   use(uid, toast) is the data hook: the diff, the pull request and the worktree removal. Both always ask first.
+   Dialog is for a session with no room on screen; Screen is the room's pinned wall screen (#89); paletteAction(s, nm,
+   where, kw, open) is the Ctrl+K action.
+   Tested in test/changes-feature.test.mjs (the page file in a VM with the DS bundle and a fake client). */
 (function () {
   'use strict';
   var O = window.OfficePage;

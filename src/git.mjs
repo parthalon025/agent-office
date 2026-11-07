@@ -1,6 +1,30 @@
 // Git helpers for Agent Office: one worktree per session, a changes view, and a pull request step.
 // Every call runs `git` as a child process with an argument list (no shell), so folder and branch names
 // can never be read as commands. The program itself comes from resolveExe, an absolute path.
+//
+// This file owns: worktrees (the room of an agent, the rooms and floors of a building), the changes view, the pull
+// request, `locate` (repo, worktree and branch of a folder; `base` for an agent worktree), `layout`, `relayout` and
+// `refreshEntry`, `roomNameOf`, `defaultBranch` and `staleFloors`, and the runner that starts git and gh.
+// - Raw execFile of git outside this file is not allowed (test/spawn-safety.test.mjs). Every git call gets
+//   GIT_HARDENING before its subcommand (test/git-hardening.test.mjs); createPr refuses when the repository config
+//   sets a filter driver (assertNoFilters).
+// - Every program the office runs in a room goes through the record (git() or recorded()), or a removal cannot wait
+//   for it. Do not call run() or execFile with a room as cwd. A lookup in a room that is being removed waits for the
+//   removal.
+// - locate tries a passing git failure 3 times before it answers null (#98). Null means "not in git" and the office
+//   acts on it, so one slow git call must never give it. The office start reads its recent folders and its branch
+//   with locateOrKeep, which answers KEEP after the last try. A lasting failure (not a repository, a folder git
+//   refuses for its owner, no git) is null at once and is not tried again. `run` keeps only the last 3 lines of git's
+//   message, so the dubious-ownership check also matches safe.directory. A recent folder that still got KEEP after its
+//   3 tries is asked again every 30 s (campus.mjs, with the room-list refresh, never twice at once), and
+//   OFFICE_PORT=branch stops with "git did not give the branch of this folder" (server.mjs), so a busy start never
+//   reads a timeout as "not in a git repository".
+// - Rooms and floors: the office never removes a room by itself (the one exception is discardNew, a fork that did not
+//   start). deleteFloor refuses while an agent room sits on the floor. floorCandidates (GET /api/branches) is
+//   `branches` without the agent branches. staleFloors serves /api/floor/stale and /api/floor/cleanup; both read git's
+//   own room list and never force. defaultBranch is never cleaned up.
+// - A worktree made inside an agent worktree keeps the first base. When the base branch is gone, layout and locate
+//   report no base. Two worktrees on one branch need `git worktree add --force`.
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';

@@ -10,7 +10,51 @@
 //   with POST /launch. A code works once, for LAUNCH_TTL_MS.
 // Neither token opens the other group. Tokens never come from the URL. Every compare is constant-time.
 // Pure: no I/O and no clock of its own (both injected), so the route matrix runs without a server
-// (test/auth.test.mjs). writeOwnerOnly is the one helper that writes; it gets the file system and icacls injected.
+// (test/auth.test.mjs, which also runs the route matrix on a copy of the server on a free port). writeOwnerOnly is
+// the one helper that writes; it gets the file system and icacls injected.
+//
+// Route groups. routeOf gives public, launch, agent or page; its prefix rule decides a path that the office's route
+// table does not list, and the table must agree with it (office-core.mjs checks that). The gate reads the table
+// first through site.groupOf, so an unlisted path under /api/ or /hook/ still needs the token of its group. A new
+// route goes into one group in routeOf.
+//
+// Tokens and where they must not be (owner decision on #27 H1).
+// - Never put the page token where an agent reads files: not in GET /, not in a file in the office folder, not in a
+//   URL. Never accept a token from the URL: ?t= opens nothing, also on /events (the cookie authenticates EventSource).
+// - The page holds no token in JavaScript. Its fetch and EventSource send the cookie by themselves.
+// - Compare tokens and launch codes only with tokenEqual (hashed, crypto.timingSafeEqual, any length).
+//   test/auth.test.mjs fails on a plain equality compare of a token name in server.mjs.
+// - Cookies do not keep ports apart, and SameSite counts every port of 127.0.0.1 as the same site. So the cookie name
+//   has the port (ao_<port>), and checkRequest refuses a foreign Origin and a Sec-Fetch-Site of same-site or
+//   cross-site on token routes. A POST must say application/json (Claude Code HTTP hooks, hook.mjs and mcp.mjs all
+//   do), so a form or a plain-text post from a page cannot reach a route.
+//
+// Response headers. X-Frame-Options: DENY and the CSP below go on every response: the server calls res.setHeader at the
+// top of its handler, and setHeader merges into later writeHead calls, so held hook answers get them too. So the page
+// has no inline <script>, no on...= attribute, no style="..." in markup or setAttribute('style', ...), no eval or
+// new Function, and no file from another site. A new page script or style sheet is a file in public/ with an entry in
+// STATIC_FILES (the exact-match map from URL path to file; the request path is never part of a file path). React
+// style props are fine: they go through the DOM. Never add 'unsafe-inline', 'unsafe-eval' or a CDN to the CSP;
+// test/auth.test.mjs fails on them.
+//
+// Page file life (#126). Nothing else owns the life of the page file. A clean exit (SIGINT, SIGTERM, exit) removes it
+// through removeOwnPageFile while it still holds this office's token. A taskkill /F runs no handler, so the start
+// sweep (stalePageFiles) clears the files of ports with no listener. A listener that is not an office keeps its file.
+//
+// Owner-only files (writeOwnerOnly; the server calls it as writeSecret). These files are written with it: the files
+// with a token (.office-token, office-hooks-http.json, the page file); the settings files whose commands sessions run
+// (office-hooks.json, office-mcp.json); and the saved state and past sessions (state.json: schedule prompts and
+// notes; history.json: replies and the last calls of each session, with keys and token values masked; #27 L10). On a
+// port other than 4317 each name carries the port (files.mjs). state.json and history.json go through it once, in the
+// listen callback (so a second copy never rewrites them), with what the office loaded; savePersisted and saveHistory
+// then write plainly and keep the ACL. A new file that holds user or agent text joins that list the same way. icacls
+// starts through resolveExe('icacls'). The ACL is read back by SID (readAcl in the server: Windows PowerShell runs
+// ACL_SCRIPT, .NET only, about 0.2 s) and checked with aclProblems. SDDL is no use for the check: it writes a RID-500
+// account (GitHub's runneradmin) as LA. A failed icacls or PowerShell prints a warning and the office runs on. The
+// office folder itself keeps its drive's ACL (on E: Authenticated Users can change files); per-file ACLs do not fix
+// that. Test real ACLs by SID in folders the test sets up itself with .NET (aclOf, folderAcl, wideFolder in
+// test/auth.test.mjs), never by account name, never in the repo folder, and read each folder back before you trust it.
+// The steps and the reasons for them are at writeOwnerOnly.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';

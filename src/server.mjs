@@ -1,7 +1,19 @@
 #!/usr/bin/env node
-// Agent Office server: the HTTP adapter of the office (office.mjs). It picks the port and the files, gates every request
-// (auth.mjs), parses its body, hands it to the office core (office-core.mjs handle), writes the answer, and owns the start-up:
-// listening, the files written once the port is ours (in this order), the launch link. Zero dependencies. Windows-first.
+// Agent Office server: the HTTP adapter and the start-up of the office (#185). office.mjs is the office; this file picks the
+// port (OFFICE_PORT=branch), the tokens and the files of the office, makes the one createOffice(...) call, then http.createServer.
+// Every request goes through auth.gateRequest first (the group is the route table's, core.groupOf). Its JSON body is parsed here,
+// office.core.handle answers it, and this file writes the response (a feed for /events, an abort signal when the client goes
+// away). Zero dependencies. Windows-first.
+//
+// Start-up. At listen the callback writes, in this order: office.own(), the token file, the command hooks file, the HTTP hooks
+// file, the MCP file, office.claim() (state and history, whole and owner-only), office.resume(), the page file, then the
+// launch link. A second copy that fails with EADDRINUSE reaches none of it, so it can never change a running office's tokens or
+// settings. savePersisted and saveHistory write nothing until own() sets ownPort (#92 review): a copy on a busy port waits up to
+// 5 s for the running office's launch link, and meanwhile its recent folders become buildings and get a floor record. That stays
+// in memory, and the callback writes state.json whole (test/files.test.mjs holds the port with a slow stand-in).
+// The agent token is reused across restarts on purpose, so hooks of sessions that already run keep working. The page token is
+// not: a restart needs a new launch link, and open tabs ask the auth route every 5 s until a link opened in any tab gives the
+// browser the new cookie.
 // First statement: Windows must never look for a program in a child's folder (Node reads this from the office's
 // own environment at each spawn; children inherit it). The imports load first, but none starts a process.
 // Every spawn also uses an absolute path from launch.resolveExe.

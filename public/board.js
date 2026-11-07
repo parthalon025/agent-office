@@ -17,7 +17,20 @@
    pictures and adds the decor. The engine builds walls 5.2 high with the
    room sign at 4.45, where the cable tray covers it, so the walls go up to WALL_H and the sign moves up.
    The engine rebuilds a floor when a bot joins or leaves and when the theme changes. The per-frame hook
-   sees that and puts the decor back before the frame draws. */
+   sees that and puts the decor back before the frame draws.
+
+   The door sign shows "Agents", the count, and under it the short supervision label of an ungated agent in the room. The
+   blackboard, the notes board and the stats display are screens for the host's two steps (the look spec; open calls
+   onOpen(roomId, kind)); the door is one click. open(roomId, kind) is the Ctrl+K path (both steps at once, host.show).
+   OfficeBoard.escTaken(e) tells Esc that a dialog or the palette is on top. raiseRoom and lowerRoom raise the walls to 7 and
+   move the room sign above the cable tray; the Security room shares them.
+   A host adapter: it registers a pick target and a frame, and never raycasts, sets the cursor or moves the camera itself.
+   Boards are matched to rooms by order: the shown floor's lab rooms, left to right (host.rooms() of OfficeSceneHost),
+   against the chalkboards (4 x 2.5 planes). The engine rebuilds a floor when a bot joins or the theme changes. The host sees
+   that (new bot list, floor, floor groups, theme tokens, or a lost anchor) and fires onRebuild before the frame draws;
+   board.js and terminal.js rescan then, and still on a 1.5 s timer.
+   The notes editor sits on a light face in every theme (bubble). Its ink is the mix this file uses, not --ink (light at
+   night). Under reduced motion (stage.rm) the door stays shut and shows a still ring (d.ring). */
 (function () {
   'use strict';
   var T = window.THREE, H = window.OfficeSceneHost;

@@ -1,6 +1,9 @@
-// Trims a Claude Code hook payload to what the office shows. hook.mjs (command hooks) and
-// server.mjs (HTTP hooks) both use it, so the two hook paths carry the same fields.
+// Trims a Claude Code hook payload to what the office shows. hook.mjs (command hooks) and the HTTP hook route of office.mjs both
+// use it, so the two hook paths carry the same fields.
 // Never forward file contents or tool output: only names, short inputs, timings and flags.
+// Also here: the tool label (describeTool) and the call key (callKey, settles) that links a tool result to its permission
+// request. On PreToolUse the payload keeps the path fields the rating reads whole (rate_input: file_path, notebook_path, path,
+// pattern, glob; never contents), so the Security room rates a call before it runs.
 
 const clip = (v, n) => (typeof v === 'string' && v.length > n ? v.slice(0, n) + '…' : v);
 // element and key: what a browser tool (Playwright) clicks or presses. Typed text is never kept.

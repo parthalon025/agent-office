@@ -1,4 +1,4 @@
-// The settings files an office hands to Claude Code: command hooks, HTTP hooks and the MCP config. Pure: the folder, the port
+// The settings files an office hands to Claude Code (#185): command hooks, HTTP hooks and the MCP config. Pure: the folder, the port
 // and the agent token go in, three plain objects come out. The office writes them (owner-only) once it owns its port.
 import path from 'node:path';
 import { portArgs } from './files.mjs';

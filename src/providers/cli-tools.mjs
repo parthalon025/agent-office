@@ -12,6 +12,16 @@
 //   message; none is promised, so cost is 'unknown' (the office asks once, no spend limit can stop it).
 // Codex is not here: it has an ACP bridge (codex-acp), so it is an entry of the ACP list in providers/acp.mjs.
 //
+// This file owns the three tools, one entry each in TOOLS, and createCliTool({ events, kind }).
+// - One process per turn: the program starts by resolveExe in the session folder with the prompt (stdin for cursor, an argument
+//   for grok and pi), prints JSON lines, and exits. read(msg) of each entry turns a line into items (sid, text, tool, done,
+//   usage, error, end), which the provider reports as tracker hooks and stream lines.
+// - Every kind is gated: false, "Unsupervised", cost: 'unknown', canResume: false. The office passes no approve switch (--yolo,
+//   --force, --always-approve). A prompt that starts with a dash gets a space first. Only Pi shows its tool calls (the others say
+//   so in the feed).
+// - The three share the Security room column cli (CLI tools, with Codex, an entry of the ACP list: codex-acp, ungated).
+// - Tested in test/cli-tools.test.mjs with test/fixtures/fake-cli.mjs.
+//
 // What each tool prints is learned from Paperclip's adapters (packages/adapters/cursor-local, grok-local, pi-local, parse.ts and
 // execute.ts; MIT, Copyright (c) 2025 Paperclip AI, credit in NOTICE.md). Not recorded from a run of the real tools: none of them is
 // installed on the owner's PC (pi is an npm pi.cmd, which resolveExe refuses). `pin: null` until a real run.

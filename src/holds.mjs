@@ -13,6 +13,8 @@
 //   queue.size
 // Deps, injected so a test needs no server: settle(uid, id) (the tracker clears the request), changed() (the broadcast),
 // setTimer / clearTimer (default setTimeout / clearTimeout). `timeout.after()` runs only when the timeout ended the hold.
+// office.mjs wires the queue (holdQueue) and keeps the timeout kinds (terminal, office, Paperclip, office_ask) and the replies.
+// Tested in test/holds.test.mjs (fake clock); the behaviour through the server in test/hold-behaviour.test.mjs.
 export function createHolds({ settle = () => {}, changed = () => {}, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
   /** @type {Map<string, {uid: string, timer: any, kind?: 'ask', suggestions?: object[], call?: object, reply: (decision: object) => void}>} */
   const holds = new Map();

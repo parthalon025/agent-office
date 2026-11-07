@@ -8,7 +8,26 @@
 // The server address and fetch are injected, so tests use a fake server and nothing here touches the network on import.
 //
 // Local servers are shared with other tools (LM Studio also serves embeddings). So this file only reads the model list and
-// sends chat requests. It never loads, unloads or downloads a model.
+// sends chat requests. It never loads, unloads or downloads a model, and it leaves embedding models out of the list.
+//
+// This file owns: createLocal({ events, kind: 'ollama' | 'lmstudio', baseUrl?, fetch?, officeTools? }) (the agent loop against
+// an OpenAI-compatible chat server on loopback) and createToolGate, the one tool call rule (see below).
+// - Approval. It asks the office about every tool call through events.permission. The Security room rules decide first: every
+//   call cell is Ask by default, except the local model's reads and edits inside the worktree, which default to Allow as they did
+//   before the Security room (a low call runs with no question and no feed line). Deny refuses with the reason for the model.
+//   The tool then runs with local-tools.mjs.
+// - Office tools (office_inbox, office_ask, office_room, office_room_update) run in-process through officeTools from the server.
+// - createToolGate asks events.permission about every call and keeps no approval rule of its own. It is exported for Agent
+//   Framework teams too: never write a second copy.
+// - canResume is false. Cost is 0.
+// - Server address. OFFICE_OLLAMA_URL and OFFICE_LMSTUDIO_URL move the local providers to another server on loopback.
+//   createLocal refuses any host that is not loopback, and then the office stops at start. The tests use them to point at the
+//   fake server (test/fixtures/fake-openai.mjs).
+// - Request shape. The provider sends only model, messages, tools, stream and stream_options, by POST to /chat/completions.
+//   LM Studio can run its own MCP servers (for example run-command) when a request names them. Never add a field or call another
+//   endpoint: a tool call could then skip riskOf and the approval check. test/local-provider.test.mjs fails on any other key or
+//   path.
+// - Tested in test/local-provider.test.mjs and test/mcp-routes.test.mjs (Windows only).
 import crypto from 'node:crypto';
 import { providerError } from './index.mjs';
 import { createLocalTools } from './local-tools.mjs';

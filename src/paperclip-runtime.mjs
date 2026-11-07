@@ -19,6 +19,65 @@
 //     key; a signed-in admin approves the link in a browser; the office polls the challenge, checks the key with
 //     GET /api/cli-auth/me and then writes it. A board key lives 30 days (Paperclip's rule); the office reads the expiry.
 //
+// Lifecycle and rules (#193, ADR 0010).
+// - Install. createRuntime(deps) installs the pinned `paperclipai` (PINNED: exact version and the SHA-512 of its tarball, checked
+//   against npm's own lock file after the install, so files that do not match are "not installed") into <office folder>/.paperclip-runtime
+//   (git-ignored). It runs npm's own JS entry with node (npmCli: npm.cmd is refused by resolveExe; OFFICE_NPM_CLI overrides), with
+//   --ignore-scripts. The office never installs over a Paperclip that already answers on the port.
+// - Start. It starts `paperclipai run -c <config> -i agent-office` by node's absolute path, with cwd = the data folder (never the office
+//   folder). buildConfig writes the login-mode config once (authenticated, private, loopback, telemetry and update checks off, strict
+//   secrets) and never overwrites it. childEnv drops PAPERCLIP_*, BETTER_AUTH_*, OFFICE_*, DATABASE_URL, HOST and PORT from the office's
+//   environment (an owner's own Paperclip settings never reach it) and sets its own. A health answer whose deploymentMode is not
+//   `authenticated` stops the process (state `failed`). ensureSecrets makes `.env` and secrets/master.key through writeSecret (owner-only)
+//   before the first start (see the facts above). The data is %LOCALAPPDATA%\AgentOffice\paperclip[-<port>] (runtimePaths; ~/.agent-office
+//   elsewhere), the instance is `agent-office` (never the user's `default`), and the ports are 3100 and 54339 for its database
+//   (OFFICE_PAPERCLIP_PORT, OFFICE_PAPERCLIP_DB_PORT; Paperclip's own default database port 54329 may be the user's). Only the office on the
+//   default port shares nothing with another: an office on another port has its own data folder and key file.
+// - Health. The office watches GET /api/health: every 2 s while starting (up to 180 s), then every 15 s. Three misses in a row are `failed`.
+// - Stop. It stops Paperclip by pid (killTree). killNow is the synchronous version for the office's exit handler (server.mjs registers it
+//   with process.once('exit', ...)). A kill that runs no handler leaves the process, and the next office takes it over by pid and start
+//   time (office-runtime.json). Only a pid this office started, or one adopted that way, is ever killed.
+// - Others. A Paperclip that already answers on the port is `external`, and a program that holds it is `busy`: never installed over, never
+//   started again, never killed.
+// - Update (#195, behind a Confirm in the route). update({ background }) installs the pin in <office folder>/.paperclip-runtime-next while
+//   the old release runs, checks it (version and SHA-512), then stops Paperclip if it runs, swaps the folders (.paperclip-runtime-prev is the
+//   backup), starts the new release and waits for it. A download failure changes nothing. A start failure rolls back to the old folder and
+//   starts it. The status carries `update.error`, `installedVersion` and `updateAvailable`, and the state is `updating` meanwhile. An older
+//   release stays usable through its marker `office-verified.json` (VERIFIED, written after a verified install; `usable` versus
+//   `current`), so a moved pin offers an update and never breaks a running install.
+// - Board key. connectKey() posts /api/cli-auth/challenges (no sign-in; requestedAccess: board), shows the approval link (built from the
+//   path on Paperclip's own origin, never the answer's host), polls the challenge, checks the key with /api/cli-auth/me (source:
+//   board_key) and writes it with writeSecret to %LOCALAPPDATA%\AgentOffice\paperclip-board-key[-<port>].json (risk.mjs rates it a
+//   secret, and %LOCALAPPDATA%\AgentOffice is a config home: an edit of the Paperclip config or `.env` is settings that run code). The key
+//   lives 30 days: the expiry is read from /api/board-api-keys, and `expired` is a state. The first admin is a person (the bootstrap invite
+//   that Paperclip prints at the first start, or Claim this instance in a signed-in browser) and so is the approval; the office does not
+//   invent an account. status() never carries the key. key() hands it to the HQ's own calls (paperclip.mjs createHq deps.key), and it is
+//   never in a route answer, the snapshot, a feed line or state.json.
+// - Connect mode (#194). connectExisting({ url, key }) takes the address of a Paperclip the user runs (paperclip.mjs checkUrl: 127.0.0.1
+//   only, 400) and a board key (pcp_board_..., 400 for a wrong shape). It probes /api/health (nothing answers: 502; another program: 502),
+//   checks the key with /api/cli-auth/me (401 or 403: 400 "does not accept this board key"; a Paperclip in local_trusted mode needs none,
+//   and in login mode an empty key reuses the saved key of the same address only), then writes it with writeSecret to the same key file
+//   and sets state `connected` (status().mode is `connect`; `url` and `port` are the user's). It installs, starts, stops, updates and
+//   writes nothing in that Paperclip, and never starts an approval on it. install, start and update refuse (409) while connected
+//   (status().updateAvailable is false then), and connectExisting refuses (409) while the office's own Paperclip runs or updates.
+//   disconnect() deletes the key file of that address and returns to the office's own address; nothing is sent to the user's Paperclip.
+//   resume(enabled, connectUrl) connects again at the office start (persisted.paperclipRuntime = { connect: url }, never the key); a
+//   Paperclip that is gone is `failed` with the reason. keyFor(url) gives the key for the connected address only; createHq sends it as
+//   Authorization: Bearer on every read and on the live stream of that address (redirects stay refused).
+//
+// Page routes (office.mjs; page group). GET /api/paperclip/runtime. POST /api/paperclip/runtime/install: 409 with confirm 'runtime' until
+// `confirmed: true`, because it downloads packages. .../start keeps persisted.paperclipRuntime = { enabled: true }, so the runtime comes
+// back at the next office start (office.resume()); .../stop clears it. .../update (#195): 409 with confirm 'runtime' until `confirmed:
+// true`, then the update runs in the background; the HQ dialog shows Update Paperclip when `updateAvailable`. .../key starts the board
+// key approval and answers the status with the approval link, never the key. .../connect { url, key? } and .../disconnect are connect
+// mode (#194); `stop` keeps the connect address in state.json, `disconnect` removes it. The snapshot carries `paperclipRuntime` (status:
+// state, reason, steps for the user, bootstrap, inviteUrl, key state and approval link; public/wire.js). The page panel is
+// `PaperclipRuntime` in public/dialogs.js (words in OfficeVocab.hq.runtime; it carries Update Paperclip and the Connect panel; its connect
+// part is `PaperclipOwn`), in the HQ dialog since #197. Attach sessions shows its state and a button to the HQ.
+//
+// Tests: test/paperclip-runtime.test.mjs (a fake package, spawn, Paperclip and clock), test/paperclip-runtime-routes.test.mjs, and
+// test/paperclip.test.mjs (a fake Paperclip with a `boardKey`).
+//
 // Pure apart from createRuntime, whose file system, programs, network, clock and timers are injected: test/paperclip-runtime.test.mjs
 // runs it with a fake package and a fake Paperclip, so no test installs anything or opens a socket.
 import fs from 'node:fs';

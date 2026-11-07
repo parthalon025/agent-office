@@ -1,7 +1,24 @@
-// The office: its state and its handlers, composed once (createOffice) and reached only through its core (office-core.mjs):
-// a route table and handle(request). Nothing here listens, parses a body or writes a socket: the HTTP server (server.mjs) and the
-// test driver (test/fixtures/office-inproc.mjs) are its two adapters. What the adapter owes the office at start-up (the files, in
-// their order) is in the returned object: own(), claim(), resume().
+// The office (#185): its state and its handlers, composed once (createOffice) and reached only through its core (office-core.mjs):
+// a route table and handle(request). createOffice(cfg) composes the state and every handler and returns
+// { core, subscribe, settings, own, claim, resume, hooks, stop } (plus runtime, the Paperclip the office runs).
+// The route table lists every route once (R(method, path, group, handler), 90-odd routes) and builds the core from it.
+// Nothing here listens, parses a body or writes a socket: the HTTP server (server.mjs) and the test driver
+// (test/fixtures/office-inproc.mjs, startInProcess) are its two adapters. A test builds the office in process: no port, no
+// token, no file written (the office owns its port only when own() is called). What the adapter owes the office at start-up (the
+// files, in their order) is in the returned object: own(), claim(), resume().
+//
+// This file holds what has no module of its own yet: the hold glue, the tracker wiring, the Security room glue, providers,
+// Paperclip glue, open, reopen, fork and close, goals, past sessions and search, the snapshot and its broadcast. Other comments in
+// the repo that say "server.mjs" for this code mean this file.
+//
+// Past sessions: history also holds open sessions (a crash must leave a resumable record), but pastInUse() counts a session that
+// is open now as in use. pastShown() (the history route, search) and the Reopen guard use that one rule, so an open session shows
+// once, as live, and ends up past.
+// The desk role comes in with the session (the open route's role -> s.deskRole at newSession), never in a later broadcast:
+// noteRooms runs on every broadcast() and would seat the room in the Lobby first (the Lobby room would show in a scene mounted
+// between the two, empty after).
+// The hook's parent shell dies right after the hook returns, so the process walk to the claude process must happen while the
+// hook waits. A persistent PowerShell helper (walkToClaude) does it.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';

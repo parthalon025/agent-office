@@ -220,6 +220,15 @@ test('CI checks the DS files with kit/check.py', () => {
   for (const f of ['components/bundle.css', 'components/bundle.js', 'kit/page.html']) assert.ok(line.split(/\s+/).includes(f), `${f} is in the CI check list`);
 });
 
+// CLAUDE.md and docs/development.md print the same checker command for people and agents; it drifted once (nine page
+// files missing), so the file lists must equal the CI step's.
+test('CLAUDE.md and docs/development.md give the kit/check.py file list of CI', () => {
+  const files = (text) => (text.match(/python kit\/check\.py ([^`\n]+)/) || [, ''])[1].trim().split(/\s+/);
+  const ci = files(read('.github/workflows/ci.yml'));
+  assert.ok(ci.length > 3, 'CI has a kit/check.py step with files');
+  for (const doc of ['CLAUDE.md', 'docs/development.md']) assert.deepEqual(files(read(doc)), ci, `${doc}: the kit/check.py files are not the ones CI checks`);
+});
+
 // A theme's own look rules (scan lines, faces) are its data: test/skin.test.mjs checks, the same way for every theme, that each one
 // uses tokens only. No test here names one theme.
 test('the DS CSS uses the scrim token for the overlay', () => {

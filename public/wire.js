@@ -3,7 +3,12 @@
    The snapshot is lean: per session only the fields the page reads, with caps. Full data of one session is on
    request (the session read). Both ends use this one file, so they never disagree. Plain script, no I/O, no
    timers. The page loads it as a script (window.OfficeWire). The server and the tests import it for its side effect
-   and read globalThis.OfficeWire.
+   and read globalThis.OfficeWire. Tested in test/wire.test.mjs.
+   lean() keeps per session only the fields the page reads (SESSION_FIELDS), the calls up to the tracker cap, and the
+   replies up to 32,000 characters, newest first, with olderReplies (how many it left out, #80). The Security room
+   (security: rules, enforce, spend) goes whole. diff() and apply() make the patch from one broadcast to the next
+   (keyed lists for sessions, calls and replies; maps for figures, notes and pins). sender() makes the numbered patches
+   of the server.
 
      lean(state)        -> the snapshot the page gets. state: { sessions (each with place and seat), plan, plans, figures, notes, pins, screens, repos, kinds, security, layouts, rooms, catalog, changes }
      leanCall(c)        -> one tool call as the page reads it

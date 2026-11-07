@@ -10,6 +10,14 @@
 //
 // The event shapes follow the public Agent Service documents. They are NOT yet checked against a recording; the live run waits
 // for the owner's account (#24). The office keeps the thread after the session ends and deletes nothing of yours.
+//
+// Supervision: gated: false, "Partly supervised: only MCP approvals ask" (partly: { mcp }), because its MCP approvals go through
+// events.permission and the Security room. Cost: unknown unless both PRICE_IN and PRICE_OUT are set (shared rules and the other
+// cloud kind are in providers/cloud.mjs).
+// deps.blocked (the server passes security.openRefusal for the kind): while the Cloud agent switch is off, readiness() is not
+// ready with that reason, and readiness() and models() make no call. An MCP server label is made safe by serverLabel (never
+// office, which risk.mjs rates as the office's own tool), and service ids go into paths through encodeURIComponent.
+// Tested in test/cloud-providers.test.mjs with test/fixtures/fake-azure.mjs.
 import { providerError } from './index.mjs';
 import { cloudConfig, cloudSetup, cloudSend, jsonOf, readSse, createRemoteAgents, textOf } from './cloud.mjs';
 

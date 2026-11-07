@@ -16,6 +16,12 @@
 // status, header or feed, or a promise of either. A held request (a permission prompt, an office_ask question) is a promise
 // that settles when the user answers; signal aborts when the client gives up first. A handler throws httpError(status, text)
 // for a refusal, or askFirst(...) for a call that needs the user's yes first (ask.js): the answer is built here, once.
+//
+// Groups and the gate (#185): a path the table does not list keeps the prefix rule of auth.routeOf, so an unlisted path under
+// /api/ or /hook/ still needs its token. test/office-core.test.mjs checks that every listed group equals the prefix rule. When
+// the client gives up (signal aborts), handle answers 499 at once, so no test waits for ever on a held request.
+// staticFiles(root) and staticRoutes(root) are the public routes: the exact-match list of static files (STATIC_FILES of older
+// notes; a new page file goes there), "/" and the favicon.
 import path from 'node:path';
 import fs from 'node:fs';
 

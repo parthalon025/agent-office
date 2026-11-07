@@ -19,7 +19,11 @@
    POST /launch. Every later call and the event stream send the cookie by themselves, so a reload keeps working.
    Without a working cookie the page says so (officeAdapter.onAuth) and asks again every 5 s: a launch link opened
    in another tab gives this tab the new cookie too. On the remote address (#133) the cookie comes from POST /remote/signin
-   instead: Cloudflare Access adds its login to every request, and the server checks it. */
+   instead: Cloudflare Access adds its login to every request, and the server checks it.
+   window.officeAdapter is the facade: the store plus mount(repo), which adds the DS adapter as .adapter. ready and
+   onAuth(fn) are for access. onProblem(fn) fires when the older replies of a chat did not load (#80). The one client
+   (officeAdapter.client) is made here; page-core.js hands it to the dialogs as O.client. DS commands go out as client
+   calls (client.js). */
 (function () {
   var problemFns = [];
   var ready;   // set below, once the access flow starts; the client reads it at each call

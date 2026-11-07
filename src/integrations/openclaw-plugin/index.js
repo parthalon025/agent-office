@@ -6,6 +6,10 @@
 //   openclaw plugins enable agent-office
 // A plain entry object, the shape definePluginEntry returns (src/plugin-sdk/plugin-entry.ts, v2026.10.10), so the plugin
 // needs no package from OpenClaw and nothing is installed for it.
+// The entry is a plain { id, name, description, configSchema, register } object, so the plugin imports nothing from OpenClaw. The manifest
+// is openclaw.plugin.json (id agent-office, config tokenFile). The config is api.pluginConfig (plugins.entries.agent-office.config.tokenFile).
+// A call of a session whose key does not end in agent-office:<uid> is not the office's: gate.js returns nothing for it.
+// Facts about OpenClaw that the plugin relies on, and the live-run checklist, are in providers/openclaw.mjs.
 import fs from 'node:fs/promises';
 import { createGate, hookLimit, waitFor, HOOK_MS } from './gate.js';
 

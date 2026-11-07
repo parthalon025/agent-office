@@ -2,6 +2,14 @@
 // Pure rules from `gh pr list --json` to a folder state, a pipeline stage and the Ready to merge entries, and a reader that asks
 // `gh` (read-only, through an injected runner: git.mjs ghRun, argument lists, today's hardening) and never shows old data as live:
 // a failed read is "PR state unknown", with no old list behind it. Nothing here starts a process or reads a clock but through deps.
+// stateOf gives the folder state (draft, open, checks, review, changes, approved, ready, conflict, merged, closed, unknown);
+// checksOf the checks; stageOf and pipelineOf the pipeline stage (Intake and Release have no source yet and say unknown); viewPrs
+// the list (merged today); readyEntries the Ready to merge decision summaries (an Operations Hub building needs a Quality record: a
+// reviewer session on the Quality floor on the change's branch); createReader one read-only gh per building through the injected
+// git.ghRun, kept 60 s. campus.mjs reads on change events and every 30 s (refreshChanges), and mergeChange is the one write: 409
+// with confirm 'merge' until `confirmed: true`, and only for a change read as ready now.
+// Not built yet: 3D props (trays, folder, stamp, cabinet, archive box) and the lobby pipeline board in the scene.
+// Tested in test/changes.test.mjs, test/paper-flow.test.mjs and, on a real server with a fake gh, test/merge-routes.test.mjs.
 
 const FIELDS = 'number,title,state,isDraft,headRefName,baseRefName,mergeable,reviewDecision,statusCheckRollup,additions,deletions,changedFiles,url,mergedAt,latestReviews,reviewRequests';
 export const UNKNOWN = 'PR state unknown';

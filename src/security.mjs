@@ -22,6 +22,23 @@
 // and Edit inside apply only then (for the local model also in a plain folder), and never for a wide root (risk.mjs
 // wideRoot: the home folder, a drive): any other root has no worktree, so its reads and edits are Read or edit outside it.
 // The rules apply only while the office runs: a stopped office answers no hook, and Claude Code then decides alone.
+//
+// Saving and checks. The office-wide rules with the per-building overrides are saved as persisted.security; the month's
+// cost per agent kind (addCost, costThisMonth, the Spend screen ledger) as persisted.costs. cleanRules also drops the
+// building keys __proto__, constructor and prototype, and setRule answers 400 for those same three keys. setRule: a
+// looser change needs `confirmed`, the two Secrets rows never take Allow, the Agents rows are office-wide, and it stores
+// the user's value even when it equals the default (the user set it). `value: null` in the office scope is Use default.
+// decide: Allow and Deny answer at once, with a feed line; `quiet` marks a low call a provider may run; a `firm` call is
+// not answered by an Allow rule. A call of a session not placed yet has `building: null`: the office rule applies,
+// unless a building has a stricter override, and then the call is held (PreToolUse: ask). A default Ask forces nothing
+// (review B1): preToolDecision asks only for an Ask the user set on a row Claude Code does not ask about by itself
+// (read or edit inside, settings, secrets), and permissionModeFor keeps the mode the Open dialog asked for.
+// openRefusal covers an ungated kind that is off and a no-cost kind set to Deny; the server also hands it to each ACP
+// provider as `blocked`. enforcement gives each agent kind { reason, rows, asks, unset, partly, reports }: `asks` is why an
+// Ask cell is only partly enforced; `unset` is why a default Ask is only partly enforced (Claude Code's four rows it does
+// not ask about by itself); `reports` is true when every provider of the column is paid and reports cost, so the Spend
+// screen shows its dollars ($0.00 too) and its "Run without cost reports" cell says why it is not used.
+// Tested in test/security.test.mjs; the server wiring in test/security-routes.test.mjs.
 import { ratingOf, wideRoot } from './risk.mjs';
 import './vocab.mjs';
 import { traitsOf } from './providers/index.mjs';

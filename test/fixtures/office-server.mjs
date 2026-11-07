@@ -8,6 +8,17 @@
 //   between. startOnFreePort() sees that (the server says "already running" or "is busy" and exits) and starts again
 //   on a new port. A copy of the office takes its file names from its port (files.mjs), so `prepare(port)` makes the
 //   files that depend on the port, once for each try.
+//
+// How a test uses it. A test that starts server.mjs copies the code to a temp folder first, with copyOffice(dest) (package.json,
+// launch.ps1, src/, public/; { components: true } adds components/ and tokens.css, as test/static.test.mjs needs; never a file
+// list of your own). The copy has the layout of the repository, so its OFFICE_ROOT is the copy and the server writes its state,
+// hook files and token file into its own folder. The test sets its own OFFICE_PORT, LOCALAPPDATA (the page file goes there; the
+// test reads the page token from auth.pageFile(env, port)) and OFFICE_OPEN=0 (no browser). A free port is never 4317, so the test
+// finds or seeds the office's files with officeFiles(copy, port) (files.mjs), never by the plain names.
+// Tests that run a real server.mjs copy start it with startOnFreePort or startOffice, never with their own spawn and freePort.
+// The wait is START_MS (240 s), but a server that exits first fails at once with its output. Files that carry the port in their
+// name (officeFiles(dir, port)) are made in prepare(port). OFFICE_PORT=branch tests move the branch name instead (git branch -m),
+// because the port comes from the name (#98).
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';

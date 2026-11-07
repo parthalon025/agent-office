@@ -6,6 +6,10 @@
 //
 // Interface: createPolicy({ spec, label, events, emit, hook, asks, killChild }) -> { track, recheck, openCall, endCall,
 // onPermission, CANCELLED, norm }. hook(s, st, payload) reports a hook event; killChild(st) stops the agent process.
+//
+// onPermission holds the request on a frozen card and gives one approval per call; a declined file is refused for the turn under
+// any spelling. endCall also names what the OpenClaw plugin gate (gateFailed) and a call that ran without the office mean for the
+// feed. Tested in test/acp-policy.test.mjs.
 import path from 'node:path';
 import { fileKey, riskOf } from '../risk.mjs';
 import { clip } from '../tracker.mjs';

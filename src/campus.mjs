@@ -8,7 +8,12 @@
 //   changed() a view changed (the server's broadcast); adoptNotes(place); feed(session, kind, text)
 //   fail(status, message) builds the error the HTTP layer reads; askFirst(kind, text) builds the ask-first error
 //   recent    folders to look up as buildings once start() runs
-// Nothing runs a timer or a folder lookup until start().
+// Nothing runs a timer or a folder lookup until start() (the recent-folder lookups and the 30 s refresh). The state slice is
+// saved.slice('layouts', 'rooms', 'merges') (#181).
+// Interface: addRepo, refreshRepo, reposView, layoutRecord, seatOfSession, layoutsView, changeLayout, roomsView, noteRooms,
+// changesView, changesStale, mergeChange (409 ask-first until confirmed), repoTree, branches, staleFloors, floorAction (a room
+// or floor with a live session in it is never removed). office.mjs builds one and routes to it. Tested in test/campus.test.mjs
+// with real temporary git repos and a gh stand-in.
 import fs from 'node:fs';
 import path from 'node:path';
 import { createReader as createPrReader, readyEntries, mergeArgs } from './changes.mjs';

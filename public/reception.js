@@ -1,5 +1,5 @@
 /* Agent Office for Claude Code x0.2: the reception feature (#184, the page features of #168).
-   The weekly recap with Focus mode (#151), the Reception and the lobby tour (#92). One Module: its Interface is window.OfficePage.Reception = { Recap: RecapDialog, Reception: ReceptionDialog, TourCard: TourCard, tourSeen: tourSeen, setTourSeen: setTourSeen }.
+   The weekly recap with Focus mode (#151), the Reception and the lobby tour (#92). One Module: its Interface is window.OfficePage.Reception = { Recap: RecapDialog, Reception: ReceptionDialog, Orientation: OrientationDialog, orientationDue: orientationDue, TourCard: TourCard, tourSeen: tourSeen, setTourSeen: setTourSeen }.
    Plain functions over the page core (window.OfficePage); office.js calls the Interface and holds none of the parts. */
 (function () {
   'use strict';

@@ -1,6 +1,9 @@
 /* Agent Office for Claude Code x0.2: Needs you and the phone list (split out of office.js, #1 story 26).
-   The paper flow (Ready to merge, the pipeline board), the request rows with their three layers, the Needs you list and the
-   phone list below 820 px. Plain functions over the page core (window.OfficePage); they put their names on it for office.js. */
+   The request rows with their three layers (RequestLayers), GroupRow, QueueList (uses Merge.use and Merge.Row), NeedsDialog,
+   PhoneView (#148; PHONE_MAX; below 820 px) and openPalette. The paper flow itself (Ready to merge, the pipeline board) is
+   in merge.js. The Paperclip HQ card of the phone list lists the employees and what needs the user from OfficeVocab.hq.phone
+   (#215). Plain functions over the page core (window.OfficePage); they put their names on it for office.js.
+   Interface: OfficePage.Needs = { Dialog, Phone, PHONE_MAX, openPalette }. Needs page-core.js and merge.js. */
 (function () {
   'use strict';
   var O = window.OfficePage;
