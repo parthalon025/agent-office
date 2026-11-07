@@ -558,3 +558,16 @@ test('the HQ in the phone list (#215): employees with their status, and what nee
   assert.equal(H.phone({ agents: [], lobby: { approvals: null } }).approvalsUnknown, true);
   assert.deepEqual(H.phone({ agents: [], lobby: null }), { employees: [], needs: [], approvalsUnknown: false });
 });
+
+test('the employee desk context words (#206): rows from the run, the context from the session, never a guess', () => {
+  const H = V.hq;
+  assert.deepEqual(H.desk({}), [], 'a session with no run context has no rows');
+  assert.deepEqual(H.desk({ deskCtx: null }), []);
+  const d = { wake: 'issue_assigned', resumed: false, fresh: 'It works in another folder than the saved session.', instructions: { file: 'C:\\work\\AGENTS.md', key: 'k' }, skills: ['review', 'deploy'] };
+  const rows = H.desk({ deskCtx: d, ctxTokens: 50000, ctxWindow: 200000 });
+  assert.deepEqual(rows, [['Wake reason', 'issue assigned'], ['Session', 'Fresh. It works in another folder than the saved session.'], ['Instructions', 'AGENTS.md'], ['Skills', 'review, deploy'], ['Context used', '25%']]);
+  const bare = H.desk({ deskCtx: { wake: null, resumed: false, fresh: 'x', instructions: null, skills: [] } });
+  assert.deepEqual(bare.map((r) => r[0]), ['Session', 'Instructions', 'Skills', 'Context used']);
+  assert.deepEqual(bare.slice(1).map((r) => r[1]), ['not reported', 'none reported', 'unknown']);
+  assert.equal(H.desk({ deskCtx: { ...d, resumed: true, fresh: null } })[1][1], 'Resumed');
+});

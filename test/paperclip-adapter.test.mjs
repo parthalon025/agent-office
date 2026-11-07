@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadAdapter } from './fixtures/fake-paperclip-host.mjs';
-import { createRunner, promptOf, ROUTES } from '../src/integrations/paperclip-adapter/run.js';
+import { createRunner, promptOf, contextOf, ROUTES } from '../src/integrations/paperclip-adapter/run.js';
 import { routeOf } from '../src/auth.mjs';
 
 const DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'integrations', 'paperclip-adapter');
@@ -73,7 +73,7 @@ test('a run goes end to end: start, the log reaches onLog, the result carries co
     const start = o.seen.find((r) => r.url === ROUTES.start);
     assert.equal(start.headers['x-office-token'], 'agent-token-1');
     assert.equal(start.headers['content-type'], 'application/json');
-    assert.deepEqual({ ...start.body, prompt: undefined }, { run_id: 'run-1', agent: { id: 'agent-1', company_id: 'co-1', name: 'Ada' }, agent_kind: 'claude-code', model: 'haiku', cwd: 'C:\\work\\acme', isolation: 'same', task_id: 'task-9', prompt: undefined });
+    assert.deepEqual({ ...start.body, prompt: undefined }, { run_id: 'run-1', agent: { id: 'agent-1', company_id: 'co-1', name: 'Ada' }, agent_kind: 'claude-code', model: 'haiku', cwd: 'C:\\work\\acme', isolation: 'same', task_id: 'task-9', prompt: undefined, context: { wake_reason: 'issue_assigned' } });
     assert.match(start.body.prompt, /Add a health route/);
     assert.match(start.body.prompt, /issue_assigned/);
     assert.deepEqual(o.seen.filter((r) => r.url === ROUTES.wait).map((r) => r.body), [{ key: 'run-1', cursor: 0 }, { key: 'run-1', cursor: 2 }]);
@@ -202,4 +202,15 @@ test('testEnvironment: pass when the office answers; the token file, the office 
     const bad = await office(() => ({ status: 401, json: {} }));
     try { assert.equal((await host.test(config(bad.tokenFile))).checks.find((c) => c.code === 'office_refused').level, 'error'); } finally { bad.close(); }
   } finally { o.close(); }
+});
+
+test('contextOf (#206): the wake reason, the saved session, the instructions file and the skills, only as Paperclip passed them', () => {
+  assert.equal(contextOf({}), undefined, 'nothing passed: nothing sent');
+  const c = contextOf({
+    config: { instructionsFilePath: 'C:\\work\\AGENTS.md', paperclipRuntimeSkills: [{ key: 'a/review', name: 'review' }, { runtimeName: 'deploy' }, 'lint', {}] },
+    context: { wakeReason: 'issue_assigned' },
+    runtime: { sessionParams: { sessionId: 'sess-1', cwd: 'C:\\work', taskId: 'task-1', instructionsFile: 'C:\\old\\AGENTS.md' } },
+  });
+  assert.deepEqual(c, { wake_reason: 'issue_assigned', prior: { session_id: 'sess-1', cwd: 'C:\\work', task_id: 'task-1', instructions: 'C:\\old\\AGENTS.md' }, instructions: { file: 'C:\\work\\AGENTS.md', key: 'C:\\work\\AGENTS.md' }, skills: ['review', 'deploy', 'lint'] });
+  assert.deepEqual(contextOf({ runtime: { sessionId: 's2' } }), { prior: { session_id: 's2' } });
 });

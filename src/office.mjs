@@ -1204,7 +1204,7 @@ export function createOffice(cfg) {
   // handshake. The page shows a feature only when the kind declares it (vocab.js featuresOf).
   const kindInfo = (s) => { try { const p = providers.of(s); return { agent: p.label, features: traitsOf(p).features }; } catch { return { agent: '', features: [] }; } };
   // hq: a Paperclip run's label (its agent, role, company, task and budget, #76), while the office watches that company.
-  const fullSession = (s) => ({ ...s, ...kindInfo(s), persona: personaOf(saved.get('personas'), s.name), place: s.placed ? roomPlace(s) : null, seat: seatOfSession(s), hq: s.paperclip ? hq.labelOf(s.paperclip) : null });
+  const fullSession = (s) => ({ ...s, ...kindInfo(s), persona: personaOf(saved.get('personas'), s.name), place: s.placed ? roomPlace(s) : null, seat: seatOfSession(s), hq: s.paperclip ? hq.labelOf(s.paperclip) : null, deskCtx: (s.paperclip && s.paperclip.desk) || null });
   const CATALOG = catalogView();
   // What /events sends: only what the page reads, with caps per session (public/wire.js lean).
   const snapshot = () => (W.lean({

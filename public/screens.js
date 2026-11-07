@@ -39,6 +39,15 @@
   // The desk monitor of one session, pinned (#89): its chat, its terminal and the timeline of its tool calls, Export, Stop turn
   // and Back. The requests are on the desk (the paper and the note, desk.js); the bezel count in the head goes to the oldest one.
   // On a small screen the head takes one row (the bezel shows its icon and count, Stop turn and Export their icon).
+  // The context of a Paperclip run (#206): why it woke, fresh or resumed (and why), the instructions and skills, the context in use.
+  // Rows come from OfficeVocab.hq.desk, which reads what the run carried; no row for a session that is not such a run.
+  function RunContext(p) {
+    var rows = window.OfficeVocab.hq.desk(p.s);
+    if (!rows.length) return null;
+    return h('details', { className: 'desk-run' },
+      h('summary', null, 'Run context'),
+      h('ul', { className: 'stats-list', 'aria-label': 'Run context of ' + p.s.name }, rows.map(function (r) { return h('li', { key: r[0] }, h('span', null, r[0]), h('b', null, r[1])); })));
+  }
   var DESK_TABS = [{ id: 'chat', label: 'Chat', icon: 'chat' }, { id: 'terminal', label: 'Terminal', icon: 'terminal' }, { id: 'timeline', label: 'Timeline', icon: 'trace' }];
   function DeskScreen(p) {
     var snap = useSnapshot(), kinds = useKinds();
@@ -61,6 +70,7 @@
         s ? act('copy', 'Export', 'Save this session as a Markdown file', function () { exportSession(s.uid, p.toast); }) : null,
         p.onRules ? act('security', 'Rules', 'Open the Security room: the rules behind this agent', p.onRules) : null,
         h(A.Button, { variant: 'quiet', icon: 'chevron-right', className: 'btn-back', onClick: p.onBack }, 'Back')),
+      s ? h(RunContext, { s: s }) : null,
       h(A.Tabs, { label: 'Desk screen', tabs: DESK_TABS, value: tab, onChange: p.onTab, render: function (id) {
         if (id === 'chat') return h(ChatTab, { office: p.office, bot: p.bot, name: p.name });
         return h(TermTab, { s: s, name: p.name, toast: p.toast, timeline: id === 'timeline' });

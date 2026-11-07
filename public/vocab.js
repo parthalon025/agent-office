@@ -55,7 +55,7 @@
                          rules: { office: { 'row|col': value }, buildings: { buildingKey: { 'row|col': value } } }.
      hq               -> Paperclip HQ words (#76): status(agent) { key, word } (never waiting: a Paperclip approval is not an
                          office request), budget(b) ("$8.30 of $50.00 this month"), every(seconds) (a heartbeat), supervision(agent)
-                         ("Supervised in office" or the label), state(snap.hq) (the connection as a line).
+                         ("Supervised in office" or the label), state(snap.hq) (the connection as a line), desk(s) (#206: the rows of a Paperclip run's context, [] for another session).
      layers           -> the four layers of detail (ADR 0006): glance (is all fine), look (what is it doing, how is it going), inspect (exactly
                          what happened), deep (proof and rules). order, opens(layer) (the next layer, '' at deep), surfaces (each surface's
                          layer and the layer it opens), surface(id), mood(state) ({ key, word } of a worst state: calm, busy, needs you, failed),
@@ -301,7 +301,21 @@
     employees.forEach(function (e) { if (e.mood.key === 'error') needs.push({ key: 'error:' + e.id, text: e.name + ': ' + e.mood.word }); });
     return { employees: employees, needs: needs, approvalsUnknown: !!l && !ap };
   }
-  var hq = { searchItems: hqSearchItems, phone: hqPhone, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards };
+  // The run context on the employee desk (#206): label and value rows of what Paperclip handed the office with the run (s.deskCtx:
+  // paperclip-runs.mjs deskOf), plus the context window in use (the session's own numbers). [] for a session that is not such a run.
+  function hqDesk(s) {
+    var d = s && s.deskCtx;
+    if (!d) return [];
+    var file = d.instructions && d.instructions.file ? String(d.instructions.file).replace(/[\\/]+$/, '').split(/[\\/]/).pop() : '';
+    var rows = [];
+    if (d.wake) rows.push(['Wake reason', String(d.wake).replace(/_/g, ' ')]);
+    rows.push(['Session', d.resumed ? 'Resumed' : 'Fresh.' + (d.fresh ? ' ' + d.fresh : '')]);
+    rows.push(['Instructions', file || (d.instructions && d.instructions.key ? 'bundle ' + d.instructions.key : 'not reported')]);
+    rows.push(['Skills', d.skills && d.skills.length ? d.skills.join(', ') : 'none reported']);
+    rows.push(['Context used', context(s).word]);
+    return rows;
+  }
+  var hq = { searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards };
 
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
   // priced: sessions with a cost figure. unknown: sessions whose agent reports no cost (costUnknown), shown as "unknown".
