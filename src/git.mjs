@@ -192,7 +192,9 @@ async function bases(repo) {
   return map;
 }
 
-const WORKTREE_ROOT = path.join(os.homedir(), '.agent-office', 'worktrees');
+// Where rooms of floors (createFloor, createRoom) stand. OFFICE_ROOMS_DIR moves it: the test runner points it at a temp folder
+// (test/fixtures/temp-leaks.mjs), so a test never writes into the real home folder.
+const WORKTREE_ROOT = process.env.OFFICE_ROOMS_DIR ? path.resolve(process.env.OFFICE_ROOMS_DIR) : path.join(os.homedir(), '.agent-office', 'worktrees');
 const nameSlug = (name) => String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'session';
 
 /**

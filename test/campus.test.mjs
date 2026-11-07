@@ -108,6 +108,7 @@ test('cleanup-floors deletes a merged floor and never one the page named that is
   await campus.floorAction('create-floor', { repo: dir, branch: 'done', from: 'main', name: 'done' });
   await until(() => wt(campus, dir).some((w) => w.branch === 'done'), 'floor');
   const root = wt(campus, dir).find((w) => w.branch === 'done').root;
+  made.push(root); // the skipped floor keeps its room, which stands outside `dir`: the after() hook removes it
   fs.writeFileSync(path.join(root, 'new.txt'), 'dirty');
   const out = await campus.floorAction('cleanup-floors', { repo: dir, branches: ['done', 'main'] });
   assert.deepEqual(out.deleted, []);
