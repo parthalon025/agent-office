@@ -571,3 +571,20 @@ test('the employee desk context words (#206): rows from the run, the context fro
   assert.deepEqual(bare.slice(1).map((r) => r[1]), ['not reported', 'none reported', 'unknown']);
   assert.equal(H.desk({ deskCtx: { ...d, resumed: true, fresh: null } })[1][1], 'Resumed');
 });
+
+test('the org chart editor words (#202): top floor first, the line of each employee, no manager that would make a loop, read only when the write grid denies it', () => {
+  const ag = [{ id: 'g', name: 'Grace', reportsTo: null }, { id: 'a', name: 'Ada', reportsTo: 'g' }, { id: 'l', name: 'Linus', reportsTo: 'a' }];
+  const fl = (key, name, ids) => ({ key, name, employees: ids.map((id) => ({ ...ag.find((x) => x.id === id), role: 'General' })) });
+  const q = { agents: ag, floors: [fl('records', 'Records', []), fl('lobby', 'Lobby', []), fl('rank-2', 'Teams', ['l']), fl('rank-1', 'Leads', ['a']), fl('rank-0', 'Executive', ['g'])] };
+  const o = V.hq.org(q);
+  assert.deepEqual(o.floors.map((f) => f.name), ['Executive', 'Leads', 'Teams'], 'empty floors are left out');
+  assert.equal(o.write, false);
+  assert.match(o.note, /Read only/);
+  assert.match(o.note, /write grid denies/);
+  const grace = o.floors[0].rows[0], linus = o.floors[2].rows[0];
+  assert.deepEqual([grace.line, linus.line, linus.managerId], ['No manager', 'Reports to Ada', 'a']);
+  assert.deepEqual(grace.options.map((x) => x.label), ['No manager'], 'Ada and Linus are below Grace: a manager there would make a loop');
+  assert.deepEqual(linus.options.map((x) => x.label), ['No manager', 'Grace', 'Ada']);
+  assert.equal(V.hq.org({ ...q, reportingWrite: true }).write, true);
+  assert.deepEqual(V.hq.org(null).floors, []);
+});

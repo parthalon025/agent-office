@@ -152,15 +152,44 @@ test('the snapshot plans field carries the Paperclip plan beside the office goal
   assert.deepEqual(s.plans.unreadable, []);
 });
 
+test('org chart editor (#202): the snapshot carries the cables; the reporting line is a write of the HQ write grid (#198): Confirm asks, Deny refuses and turns the editor read only', async () => {
+  const s = await snapshot();
+  assert.ok(Array.isArray(s.hq.cables) && s.hq.cables.length === 2, 'cables in the snapshot');
+  assert.equal(s.hq.reportingWrite, true, 'the grid does not deny reporting lines by default: the editor is writable');
+  const [grace, ada, linus] = DEMO().agents;
+  const patches = () => pc.requests.filter((q) => q.method === 'PATCH').length;
+  const before = patches();
+  const ask = await page('/api/hq/reporting-line', { agent: linus.id, manager: grace.id });
+  assert.equal(ask.status, 409);
+  assert.equal(ask.json.confirm, 'write');
+  assert.equal(ask.json.write.kind, 'reporting');
+  assert.equal(ask.json.write.summary, 'Make Linus report to Grace', 'the question names both employees');
+  const bad = await page('/api/hq/reporting-line', { agent: grace.id, manager: linus.id, confirmed: true });
+  assert.equal(bad.status, 400, 'a loop is refused first');
+  assert.equal(patches(), before, 'neither the question nor the refusal sent a PATCH');
+  const deny = await page('/api/hq/grid/set', { kind: 'reporting', value: 'deny' });
+  assert.equal(deny.status, 200);
+  assert.equal((await snapshot()).hq.reportingWrite, false, 'Deny: the editor is read only');
+  const refused = await page('/api/hq/reporting-line', { agent: linus.id, manager: grace.id, confirmed: true });
+  assert.equal(refused.status, 403);
+  assert.equal(patches(), before);
+  assert.equal((await page('/api/hq/grid/set', { kind: 'reporting', value: null, confirmed: true })).status, 200);
+  const done = await page('/api/hq/reporting-line', { agent: linus.id, manager: grace.id, confirmed: true });
+  assert.equal(done.status, 200);
+  assert.equal(patches(), before + 1);
+  assert.equal((await page('/api/hq/reporting-line', { agent: linus.id, manager: ada.id, confirmed: true })).status, 200, 'and back, for the tests after this one');
+});
+
 test('Supervise in office: 409 without the Confirm (no PATCH), then one PATCH with this office\'s own hooks file', async () => {
   const no = await page('/api/paperclip/supervise', { agent: ADA.id });
   assert.equal(no.status, 409);
   assert.match(no.json.error, /Confirm Supervise in office first/);
-  assert.equal(pc.requests.filter((q) => q.method === 'PATCH').length, 0);
+  const p0 = pc.requests.filter((q) => q.method === 'PATCH').length;   // the two reporting line writes of the test before are earlier PATCHes
+  assert.equal(p0, 2);
   const ok = await page('/api/paperclip/supervise', { agent: ADA.id, confirmed: true });
   assert.equal(ok.status, 200, JSON.stringify(ok.json));
   assert.deepEqual([ok.json.ok, ok.json.supervision.state], [true, 'supervised']);
-  const patches = pc.requests.filter((q) => q.method === 'PATCH');
+  const patches = pc.requests.filter((q) => q.method === 'PATCH').slice(p0);
   assert.equal(patches.length, 1);
   const hooksFile = officeFiles(copy, port).hooksCmd.replace(/\\/g, '/');
   assert.deepEqual(patches[0].body, { adapterConfig: { engine: 'cli', dangerouslySkipPermissions: false, extraArgs: ['--max-turns', '8', '--permission-mode', 'default', '--settings', hooksFile] } });
@@ -170,7 +199,7 @@ test('Supervise in office: 409 without the Confirm (no PATCH), then one PATCH wi
   const linus = await page('/api/paperclip/supervise', { agent: DEMO().agents[2].id, confirmed: true });
   assert.equal(linus.status, 409);
   assert.match(linus.json.error, /codex_local, not Claude Code/);
-  assert.equal(pc.requests.filter((q) => q.method === 'PATCH').length, 1);
+  assert.equal(pc.requests.filter((q) => q.method === 'PATCH').length, 3, 'still one Supervise PATCH, after the two reporting line PATCHes');
 });
 
 test('a Paperclip run is labelled from the ids hook.mjs reads in its environment; its held call waits longer and is denied with a reason', async () => {
@@ -216,10 +245,10 @@ test('a run with Paperclip ids of a company the office does not watch has no lab
   assert.ok((await full(s.uid)).feed.some((f) => f.text === 'question timed out, the office denied the call. Paperclip may still mark this run succeeded.'));
 });
 
-test('watch only: the office only read Paperclip, apart from the one Supervise PATCH; Disconnect forgets the connection', async () => {
+test('watch only: the office only read Paperclip, apart from the one Supervise PATCH and the two reporting line PATCHes; Disconnect forgets the connection', async () => {
   const methods = pc.requests.map((q) => q.method);
   assert.deepEqual([...new Set(methods)].sort(), ['GET', 'PATCH', 'UPGRADE']);
-  assert.equal(methods.filter((m) => m === 'PATCH').length, 1);
+  assert.equal(methods.filter((m) => m === 'PATCH').length, 3);
   assert.ok(pc.requests.every((q) => q.method !== 'POST'), 'no heartbeat, no task, no routine run');
   assert.equal((await page('/api/paperclip/disconnect', {})).status, 200);
   assert.equal(await hq(), null);

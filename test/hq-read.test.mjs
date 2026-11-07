@@ -133,3 +133,65 @@ test('read model: a Paperclip with no projects route has no rooms, not an error 
     assert.deepEqual(hq.view().rooms, []);
   } finally { hq.disconnect(); await pc.close(); }
 });
+
+test('org chart (#202): the view carries the reporting cables; a reporting line is one write of hq.write: one PATCH, and the floors rebuild from the change', async () => {
+  const pc = await startFakePaperclip(DEMO());
+  const [grace, ada, linus] = DEMO().agents;
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS });
+  const line = (id, mgr, o = { confirmed: true }) => hq.write({ kind: 'reporting', action: 'set', agent: id, manager: mgr }, o);
+  try {
+    await hq.connect({ url: pc.url });
+    await until(() => hq.state() === 'on', 'the events socket');
+    assert.deepEqual(hq.view().cables, [{ from: ada.id, to: grace.id }, { from: linus.id, to: ada.id }]);
+    assert.equal(hq.view().floors.at(-3).employees[0].reportsTo, ada.id, 'an employee carries its manager');
+    const before = pc.requests.filter((r) => r.method === 'PATCH').length;
+    const r = await line(linus.id, grace.id);
+    assert.equal(r.ok, true);
+    const patches = pc.requests.filter((r2) => r2.method === 'PATCH').slice(before);
+    assert.equal(patches.length, 1, 'one PATCH');
+    assert.deepEqual(patches[0].body, { reportsTo: grace.id }, 'the body names the reporting line and nothing else');
+    assert.deepEqual(hq.view().floors.map((f) => [f.key, f.employees.map((e) => e.name).sort()]), [['records', []], ['lobby', []], ['rank-1', ['Ada', 'Linus']], ['rank-0', ['Grace']]], 'Linus moved up a floor');
+    assert.deepEqual(hq.view().cables, [{ from: ada.id, to: grace.id }, { from: linus.id, to: grace.id }]);
+    await line(ada.id, null);   // a root: no manager
+    assert.equal(hq.view().cables.length, 1);
+  } finally { hq.disconnect(); await pc.close(); }
+});
+
+test('org chart (#202): the write grid decides a reporting line: Confirm asks, Deny refuses, Allow sends; the write names both employees', async () => {
+  const pc = await startFakePaperclip(DEMO());
+  const [grace, , linus] = DEMO().agents;
+  let grid = {};
+  const fed = [];
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS, grid: () => grid, onFeed: (t) => fed.push(t) });
+  const line = (o) => hq.write({ kind: 'reporting', action: 'set', agent: linus.id, manager: grace.id }, o);
+  const patches = () => pc.requests.filter((r) => r.method === 'PATCH').length;
+  try {
+    await hq.connect({ url: pc.url });
+    await until(() => hq.state() === 'on', 'the events socket');
+    await assert.rejects(() => line({}), (e) => e.status === 409 && e.confirm === 'write' && e.write.summary === 'Make Linus report to Grace', 'Confirm is the default: it asks first, with both names');
+    assert.equal(patches(), 0);
+    grid = { reporting: 'deny' };
+    await assert.rejects(() => line({ confirmed: true }), (e) => e.status === 403, 'Deny refuses, also with a confirmation');
+    assert.equal(patches(), 0);
+    grid = { reporting: 'allow' };
+    assert.equal((await line({})).ok, true, 'Allow sends with no question');
+    assert.equal(patches(), 1);
+    assert.ok(fed.some((t) => /Wrote to .*Make Linus report to Grace/.test(t)), 'the write leaves its feed line');
+  } finally { hq.disconnect(); await pc.close(); }
+});
+
+test('org chart (#202): a loop, a self report, an unknown employee or manager is refused before any PATCH', async () => {
+  const pc = await startFakePaperclip(DEMO());
+  const [grace, ada, linus] = DEMO().agents;
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS });
+  try {
+    const line = (id, mgr) => hq.write({ kind: 'reporting', action: 'set', agent: id, manager: mgr }, { confirmed: true });
+    await assert.rejects(() => line(linus.id, grace.id), (e) => e.status === 409, 'not connected');
+    await hq.connect({ url: pc.url });
+    await until(() => hq.state() === 'on', 'the events socket');
+    for (const [id, mgr, status, re] of [[grace.id, linus.id, 400, /loop/], [ada.id, ada.id, 400, /itself/], ['nobody', grace.id, 404, /not in the company/], [linus.id, 'ghost', 400, /manager is not/]]) {
+      await assert.rejects(() => line(id, mgr), (e) => e.status === status && re.test(e.message), `${id} -> ${mgr}`);
+    }
+    assert.equal(pc.requests.filter((r) => r.method === 'PATCH').length, 0);
+  } finally { hq.disconnect(); await pc.close(); }
+});

@@ -78,11 +78,42 @@
         })));
   }
 
+  // The org chart (#202): the floors of the HQ top floor first, a cable (a line) from each employee to its manager, and the editor. Words and
+  // options are OfficeVocab.hq.org. A change waits for its painted Confirm, then one call (hqReportingLine). The write grid is the
+  // server's seam (#198): while it is not built the Selects are off and say why, and the server refuses the call anyway.
+  function OrgChart(p) {
+    var o = window.OfficeVocab.hq.org(p.q);
+    var ps = useState(null), pend = ps[0], setPend = ps[1];   // { id, manager }: the change that waits for its Confirm
+    var bz = useState(''), busy = bz[0], setBusy = bz[1];
+    function send() {
+      setBusy(pend.id);
+      client.send('hqReportingLine', { agent: pend.id, manager: pend.manager || null, confirmed: true }).then(function () { setBusy(''); setPend(null); p.toast({ tone: 'success', title: 'Reporting line changed' }); },
+        function (x) { setBusy(''); setPend(null); p.toast({ tone: 'error', title: 'Reporting line not changed', text: x.message }); });
+    }
+    if (!o.floors.length) return h('p', { className: 'note' }, 'No employees yet.');
+    return h('div', { className: 'org-chart' },
+      h('p', { className: 'note', role: 'status' }, o.note),
+      o.floors.map(function (f) {
+        return h('section', { key: f.key, id: 'hq-floor-' + f.key, className: 'org-floor' + (p.mark && p.mark('floor', f.key) ? ' is-found' : ''), 'aria-label': f.name + ' floor' },
+          h('h4', { className: 'org-floor-name' }, f.name),
+          h('ul', { className: 'org-rows' }, f.rows.map(function (r) {
+            var waiting = pend && pend.id === r.id;
+            return h('li', { key: r.id, className: 'org-row' },
+              h('span', { className: 'org-cable' + (r.managerId ? '' : ' is-root'), 'aria-hidden': 'true' }),
+              h('div', { className: 'org-who' }, h('b', null, r.name), h(Tag, null, r.role), h('span', { className: 'past-meta' }, r.line)),
+              h(A.Select, { id: 'org-' + r.id, ariaLabel: 'Manager of ' + r.name, options: r.options, value: waiting ? pend.manager : r.managerId, disabled: !o.write || busy === r.id,
+                onChange: function (v) { setPend(v === r.managerId ? null : { id: r.id, manager: v }); } }),
+              waiting ? h('div', { className: 'past-actions' },
+                h(A.Button, { variant: 'primary', icon: 'approve', loading: busy === r.id, disabled: busy === r.id, onClick: send }, 'Change reporting line'),
+                h(A.Button, { variant: 'quiet', onClick: function () { setPend(null); } }, 'Cancel')) : null);
+          })));
+      }));
+  }
+
   // The Lobby (#197): the dashboard of the company, the pending approvals and goals, the live activity and the org chart as floors, top floor
-  // first. The words are OfficeVocab.hq (cards, glance); unknown data says Unknown. Read only: the writes come with the write grid.
+  // first. The words are OfficeVocab.hq (cards, glance, org); unknown data says Unknown. The org chart is the one write here (OrgChart).
   function Lobby(p) {
     var q = p.q, l = q.lobby, H = window.OfficeVocab.hq;
-    var floors = (q.floors || []).filter(function (f) { return f.employees.length; }).slice().reverse();
     return h(React.Fragment, null,
       h('h3', { className: 'ext-h' + (p.mark('floor', 'lobby') ? ' is-found' : ''), id: 'hq-floor-lobby' }, 'Lobby'),
       h('ul', { className: 'hq-cards', 'aria-label': 'Company dashboard' }, H.cards(l).map(function (c) {
@@ -97,9 +128,7 @@
         return h('li', { key: g.id, className: 'past-row' }, h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h('b', null, g.title), g.status ? h(Tag, null, g.status) : null)));
       })) : null,
       h('h3', { className: 'ext-h' }, 'Org chart'),
-      floors.length ? h('div', { className: 'hq-floor' }, floors.map(function (f) {
-        return h('p', { key: f.key, id: 'hq-floor-' + f.key, className: 'note' + (p.mark('floor', f.key) ? ' is-found' : '') }, h('b', null, f.name + ': '), f.employees.map(function (e) { return e.name; }).join(', '));
-      })) : h('p', { className: 'note' }, 'No employees yet.'),
+      h(OrgChart, { q: q, toast: p.toast, mark: p.mark }),
       h('h3', { className: 'ext-h' }, 'Activity'),
       l.activity === null ? h('p', { className: 'note' }, 'The office could not read the activity.')
         : l.activity.length ? h('ul', { className: 'stats-list' }, l.activity.map(function (x) { return h('li', { key: x.id }, h('span', null, x.text), h('b', null, x.at ? ago(x.at) : '')); }))
@@ -169,7 +198,7 @@
         h('p', { className: 'note' }, 'Budget for its runs: ' + H.budget(q.budget) + '. Paperclip keeps this budget. The office sets no second limit on Paperclip runs.'),
         found ? h('div', { className: 'hq-found', role: 'status', 'aria-label': 'Found in Paperclip' }, h(Tag, null, 'Found'), h('b', null, found.label), found.hint ? h('span', { className: 'hq-note' }, found.hint) : null) : null,
         q.contract && q.contract.length ? h('p', { className: 'ao-err', role: 'alert' }, 'Paperclip answered in a shape the office does not know, so the office does not show that part. ' + q.contract.join(' ')) : null,
-        q.lobby ? h(Lobby, { q: q, mark: mark }) : null,
+        q.lobby ? h(Lobby, { q: q, mark: mark, toast: p.toast }) : null,
         h(Costs, null),
         h('h3', { className: 'ext-h' }, 'Agents'),
         q.agents.length ? h('ul', { className: 'past' }, q.agents.map(function (a) {

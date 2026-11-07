@@ -315,7 +315,26 @@
     rows.push(['Context used', context(s).word]);
     return rows;
   }
-  var hq = { searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards };
+  // The org chart editor (#202): the floors of the HQ, top floor first, an employee a row with its manager and the managers it may take. A
+  // manager below the employee is left out (it would make a loop). write is false when the HQ write grid denies reporting lines (#198): the rows then read only.
+  function hqOrg(q) {
+    var agents = (q && q.agents) || [], by = {}, write = !!(q && q.reportingWrite);
+    agents.forEach(function (a) { by[a.id] = a; });
+    function below(a, id) {   // does a report to id, directly or through others
+      for (var cur = a, n = 0; cur && cur.reportsTo && n <= agents.length; n++) { if (cur.reportsTo === id) return true; cur = by[cur.reportsTo]; }
+      return false;
+    }
+    var floors = ((q && q.floors) || []).filter(function (f) { return f.employees.length; }).slice().reverse().map(function (f) {
+      return { key: f.key, name: f.name, rows: f.employees.map(function (e) {
+        var m = e.reportsTo && by[e.reportsTo];
+        return { id: e.id, name: e.name, role: e.role, managerId: m ? m.id : '', manager: m ? m.name : '',
+          line: m ? 'Reports to ' + m.name : 'No manager',
+          options: [{ value: '', label: 'No manager' }].concat(agents.filter(function (a) { return a.id !== e.id && !below(a, e.id); }).map(function (a) { return { value: a.id, label: a.name }; })) };
+      }) };
+    });
+    return { floors: floors, write: write, note: write ? 'Pick a manager to change a reporting line.' : 'Read only. The HQ write grid denies reporting line changes. Allow them in the write grid to edit.' };
+  }
+  var hq = { searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg };
 
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
   // priced: sessions with a cost figure. unknown: sessions whose agent reports no cost (costUnknown), shown as "unknown".
