@@ -15,7 +15,7 @@ function scratch() {
   fs.writeFileSync(path.join(root, 'a.txt'), 'one\ntwo\nthree\n');
   fs.writeFileSync(path.join(root, 'src', 'b.js'), 'const needle = 1;\n');
   fs.writeFileSync(path.join(outside, 'key.txt'), 'top secret');
-  return { base, root, outside, done: () => fs.rmSync(base, { recursive: true, force: true }) };
+  return { base, root, outside, done: () => fs.rmSync(base, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }) };
 }
 const SLEEP = 'node -e "setTimeout(()=>{},60000)"';
 
