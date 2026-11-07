@@ -28,3 +28,7 @@ The vocabulary of the office layout (#88). Plain company terms only.
 | Main cabinet | Where merged folders are filed, in Records (#93) |
 | Pinned screen | A DOM layer laid over a focused screen in the scene (#89) |
 | Decision summary | The key point first, one line per decision, a recommended default |
+| HQ | A Paperclip company shown in the office: its building in the campus and its full-page view. Not a repository building |
+| Employee | A Paperclip agent of an HQ. An office session is an agent; an employee is the Paperclip record it runs as |
+| Hire | Creating an employee from the office, behind a Confirm, supervised and with a budget |
+| Company memory | The shared, searchable memory of one company: what its employees learned, each item with where it came from |
