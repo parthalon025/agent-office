@@ -20,6 +20,7 @@ The office reads these environment variables when it starts. Set them before `np
 | `OFFICE_COPILOTSTUDIO_TOKEN_FILE` / `OFFICE_COPILOTSTUDIO_TOKEN` | none | The same as for Foundry. |
 | `OFFICE_COPILOTSTUDIO_PRICE_MESSAGE` | `0` | Dollars the spend limit counts for each message you send. Without it, Copilot Studio does not report cost, as for Foundry. |
 | `OFFICE_OPENCLAW_PORT` | `18789` | The loopback port of your OpenClaw Gateway. The office only checks that something listens there (see [OpenClaw](agents.md#openclaw)). |
+| `OFFICE_ACP_PROGRAM` / `OFFICE_ACP_ARGS` | none | The program (a plain name on the PATH) and the arguments (a JSON list of strings) of the generic **ACP agent** kind. The kind is not ready without a program (see [ACP tools](agents.md#acp-tools-gemini-cli-opencode-kimi-cli-and-other-acp-agents)). |
 | `OFFICE_PAPERCLIP_ASK_S` | the 15 minute office wait | Seconds a request of a Paperclip run waits for you before the office denies it. |
 | `OFFICE_RATE_FILE` | `~/.claude/rate_limits_state.json` | The file with Claude Code's `rate_limits` that the weekly limit meter reads. Without the file the meter stays hidden. |
 | `OFFICE_EXPLAIN` | on | `off` stops the one-line explanation that a local model adds to a waiting request. The explanation only informs: the raw command always shows next to it. |

@@ -1454,3 +1454,60 @@ test('openclaw policy: the settings an office session needs, each with the Secur
     assert.deepEqual(p.gaps, []);
   } finally { fs.rmSync(r.base, { recursive: true, force: true }); }
 });
+
+// ---- ACP tools of #216: Gemini CLI, OpenCode, Kimi CLI and a generic ACP command, one AGENTS entry each ----
+const TOOLS = [
+  { kind: 'gemini', label: 'Gemini CLI', program: 'gemini', args: ['--acp'], supervision: /^Partly supervised/ },
+  { kind: 'opencode', label: 'OpenCode', program: 'opencode', args: ['acp'], supervision: /^Unsupervised/ },
+  { kind: 'kimi', label: 'Kimi CLI', program: 'kimi', args: ['acp'], supervision: /^Unsupervised/ },
+];
+
+for (const t of TOOLS) {
+  test(`${t.kind}: an entry of the ACP provider, ungated with its label, started by absolute path with its ACP switch`, async () => {
+    const r = rig({ kind: t.kind });
+    const s = r.session();
+    try {
+      assert.equal(checkProvider(r.p), r.p);
+      assert.deepEqual([r.p.kind, r.p.label, traitsOf(r.p).paid, r.p.cost, traitsOf(r.p).gated], [t.kind, t.label, true, 'unknown', false]);
+      assert.match(traitsOf(r.p).supervision, t.supervision);
+      await started(r, s);
+      assert.deepEqual([r.spawned[0].file, r.spawned[0].args], [`C:/bin/${t.program}.exe`, t.args]);
+      assert.deepEqual([r.sent('session/new').length, s.status], [1, 'idle']);
+      // a call the agent asks about is held for the user like any ACP request
+      r.steps(s, [{ ask: { toolCall: EDIT_CALL(r.root), options: OPTIONS } }]);
+      await until(() => r.holds.size === 1, 'the request to be held');
+    } finally { await r.done(s); }
+  });
+  test(`${t.kind}: readiness says how to install it; a script install is named`, async () => {
+    const r = rig({ kind: t.kind, exe: (name) => { throw new Error(`${name} was not found on PATH.`); } });
+    try {
+      const ready = await r.p.readiness();
+      assert.equal(ready.ready, false);
+      assert.match(ready.needs.join(' '), new RegExp(`Install ${t.label}`));
+      assert.throws(() => r.p.check({}), (e) => e.status === 409 && e.message.includes(`${t.program}.exe is not on the PATH`));
+    } finally { await r.done(); }
+  });
+}
+
+test('acp (generic): off until OFFICE_ACP_PROGRAM names a program; its arguments are a JSON list; no shell, no path', async () => {
+  const none = rig({ kind: 'acp', env: {} });
+  try {
+    const ready = await none.p.readiness();
+    assert.equal(ready.ready, false);
+    assert.match(ready.needs.join(' '), /OFFICE_ACP_PROGRAM/);
+    assert.throws(() => none.p.check({}), (e) => e.status === 409 && /OFFICE_ACP_PROGRAM/.test(e.message));
+  } finally { await none.done(); }
+  for (const bad of ['C:\\x\\agent.exe', '../agent', 'a b', 'agent;calc']) {
+    const r = rig({ kind: 'acp', env: { OFFICE_ACP_PROGRAM: bad } });
+    try { assert.throws(() => r.p.check({}), (e) => e.status === 409 && /plain program name/.test(e.message), bad); } finally { await r.done(); }
+  }
+  const badArgs = rig({ kind: 'acp', env: { OFFICE_ACP_PROGRAM: 'myagent', OFFICE_ACP_ARGS: 'not json' } });
+  try { assert.throws(() => badArgs.p.check({}), (e) => e.status === 409 && /OFFICE_ACP_ARGS/.test(e.message)); } finally { await badArgs.done(); }
+  const r = rig({ kind: 'acp', env: { ...process.env, OFFICE_ACP_PROGRAM: 'myagent', OFFICE_ACP_ARGS: '["serve","--stdio"]' } });
+  const s = r.session();
+  try {
+    assert.deepEqual([r.p.label, traitsOf(r.p).gated, traitsOf(r.p).supervision.split(':')[0]], ['ACP agent', false, 'Unsupervised']);
+    await started(r, s);
+    assert.deepEqual([r.spawned[0].file, r.spawned[0].args], ['C:/bin/myagent.exe', ['serve', '--stdio']]);
+  } finally { await r.done(s); }
+});

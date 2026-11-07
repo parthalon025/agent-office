@@ -42,7 +42,7 @@ const DANGER = [
 // name (files.mjs); Copilot CLI's home folder (.copilot: settings, hooks, MCP list, skills) and the .agents skills folder (#22).
 // An edit to one of them is high. The Start Menu folder holds the Startup folder (Programs\Startup): Windows runs what is in
 // it at sign-in.
-const RUNS = new Set(['.git', '.claude', '.hermes', '.vscode', '.idea', '.ssh', '.mcp.json', '.claude.json', '.gitconfig', 'start menu', '.copilot', '.agents']);
+const RUNS = new Set(['.git', '.claude', '.hermes', '.vscode', '.idea', '.ssh', '.mcp.json', '.claude.json', '.gitconfig', 'start menu', '.copilot', '.agents', '.gemini', '.kimi', '.opencode']);
 // Parts that run code only directly below .github: Copilot CLI's repo hooks (shell commands that run without asking), repo
 // settings (.github/copilot/settings*.json: hooks and allowedUrls), custom agents (they can start MCP servers), skills and the
 // workspace MCP list (copilot help config, copilot mcp --help, copilot skill --help; 1.0.105). .github/workflows and

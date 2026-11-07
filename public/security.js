@@ -265,7 +265,8 @@
   var LEVELS = [
     { fs: 21, lh: 29, y0: 168, sub: 132, subS: 24, rowH: 104, cy: 16, ch: 52, ng: 26, bk: 22, hint: 24, hintY: 34, gap: 36 },
     { fs: 18, lh: 23, y0: 128, sub: 110, subS: 22, rowH: 96, cy: 8, ch: 44, ng: 20, bk: 19, hint: 22, hintY: 30, gap: 30 },
-    { fs: 18, lh: 23, y0: 128, sub: 110, subS: 22, rowH: 86, cy: 6, ch: 42, ng: 19, bk: 18, hint: 22, hintY: 30, gap: 24 }
+    { fs: 18, lh: 23, y0: 128, sub: 110, subS: 22, rowH: 86, cy: 6, ch: 42, ng: 19, bk: 18, hint: 22, hintY: 30, gap: 24 },
+    { fs: 16, lh: 20, y0: 128, sub: 110, subS: 22, rowH: 86, cy: 6, ch: 42, ng: 19, bk: 18, hint: 20, hintY: 28, gap: 22 }
   ];
   function rowHOf(L, rows) { return rows > 2 ? L.rowH : 120; }
 
@@ -285,8 +286,8 @@
   function heads(p, cols, gx, colW, s, yOne, yTwo) {
     var max = colW - 8;
     var two = cols.some(function (c) { return c.label.length * charW(s, 600) > max; }), size = two ? s - 2 : s;
-    // seven kinds (#22, #23): the longest word of a head must fit too, so the type goes down to 18 px, never cut
-    if (two) cols.forEach(function (c) { c.label.split(' ').forEach(function (w) { while (size > 18 && w.length * charW(size, 600) > max) size--; }); });
+    // nine kinds (#22, #23, #216): the longest word of a head must fit too, so the type goes down to 16 px, never cut
+    if (two) cols.forEach(function (c) { c.label.split(' ').forEach(function (w) { while (size > 16 && w.length * charW(size, 600) > max) size--; }); });
     cols.forEach(function (c, i) {
       var lines = two ? wrap(c.label, size, max, 600).slice(0, 2) : [c.label];
       lines.forEach(function (l, k) {
@@ -297,9 +298,9 @@
 
   // The rows of a rules or Agents screen as a grid: one column per agent kind.
   function grid(p, view, data, L) {
-    // eight kinds (#22, #24): the label column is 300 px and the grid runs to 24 px from the edge, so a column is 113 px and
+    // nine kinds (#22, #24, #216): the label column is 220 px and the grid runs to 24 px from the edge, so a column is 109 px and
     // "Framework" and "Not enforced" fit it; a row label that does not fit at 28 px takes a smaller size (fit).
-    var sc = screenOf(view.screen), W = view.w, x0 = 48, labelW = 300, gx = x0 + labelW, cols = S().columns;
+    var sc = screenOf(view.screen), W = view.w, x0 = 48, labelW = 220, gx = x0 + labelW, cols = S().columns;
     var colW = Math.floor((W - 24 - gx) / cols.length), y0 = L.y0, rowH = rowHOf(L, sc.rows.length);
     heads(p, cols, gx, colW, 24, y0 + 30, y0 + 42);
     var y = y0 + 52;
@@ -465,9 +466,9 @@
       // takes 24 px.
       var gx = 48, colW = Math.floor((W - 48 - gx) / cols.length), gy = y + 66;
       heads(p, cols, gx, colW, 22, gy + 30, gy + 30);
-      // One size for the row, up to 28 px, so that the longest word fits its column by the plan's estimate (seven kinds: 161 px).
+      // One size for the row, up to 28 px, so that the longest word fits its column by the plan's estimate (nine kinds: 123 px).
       var longest = Math.max.apply(null, cols.map(function (c) { return costWord(c).length; }));
-      var cs = Math.max(18, Math.min(28, Math.floor((colW - 8) / (longest * 0.62))));
+      var cs = Math.max(16, Math.min(28, Math.floor((colW - 8) / (longest * 0.62))));
       cols.forEach(function (c, i) {
         var w = costWord(c);
         text(p, gx + i * colW + colW / 2, gy + 68, cs, 'ink', w, { wt: 600, align: 'center', maxW: colW - 8, mono: c.id === 'claude-code' });

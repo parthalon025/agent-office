@@ -12,6 +12,7 @@ The numbered jobs (job 3, job 9) are the core jobs in [Using the office](using-t
 | Hermes Agent, DeepSeek Harness | ACP agents | Unknown | Hermes: partly supervised. DeepSeek Harness: gated, but the office cannot start it yet |
 | OpenClaw | ACP agent behind your own Gateway | Unknown | Gated through the office plugin |
 | Copilot CLI | GitHub Copilot as an ACP agent | Unknown | Partly supervised |
+| Gemini CLI, OpenCode, Kimi CLI, ACP agent | ACP tools (see [ACP tools](#acp-tools-gemini-cli-opencode-kimi-cli-and-other-acp-agents)) | Unknown | Gemini: partly supervised. The others: unsupervised |
 | Azure AI Foundry, Copilot Studio | Agents in your Microsoft cloud account | Unknown unless you set prices | Partly supervised or unsupervised |
 
 ## Local model agents
@@ -129,3 +130,19 @@ When the hour ends, save a new token in the same file. The office reads the file
 - **Cost.** Copilot reports no cost. The office shows "unknown", asks once per session (the **Run without cost reports** cell), and has no spend limit for it. Copilot counts AI credits on your plan: check them in your GitHub account.
 - **The check.** Each readiness check starts Copilot once in a temp folder, opens one session and closes it: no prompt, no update, none of its built-in MCP servers, and its log goes to a temp folder that the office removes after the check. A first start can take more than 10 s: the check then says "still starting" and goes on for up to 60 s. Copilot has no way to delete that session: an empty folder stays in `~/.copilot/session-state` after each check (it is not listed by `session/list`). So a Ready answer is kept for one hour, and a failed one for 10 seconds. If you sign out later, the next session start says "Sign in to GitHub Copilot".
 - **Tested signed in.** The office was checked against the signed-in and signed-out handshakes of Copilot CLI 1.0.105 (`test/fixtures/copilot-acp-signed-in.json`). No prompt was sent, so the shapes of its requests and replies still come from its SDK schema, not from a real turn.
+
+## ACP tools: Gemini CLI, OpenCode, Kimi CLI and other ACP agents
+
+Four more kinds start through the same ACP client as Hermes Agent and Copilot CLI. The parts of the ACP agents above apply (the cost question, Approve and Decline, the files and commands the office serves, Reopen). None of them is gated, so each is **off until you turn on ACP tools** on the **Agents** screen of the Security room (one switch for all four), and each opens only in a new git worktree. All four share one column on the wall, **ACP tools**, and its reasons say "ACP tools ask the office only when their own settings say so." The facts below come from each tool's own documentation (read 2026-11-06). No tool was run against the office yet, so the version is not pinned.
+
+| Kind | The office starts | Supervision | What its documentation says |
+| --- | --- | --- | --- |
+| Gemini CLI | `gemini --acp` | Partly supervised | It asks (`session/request_permission`) for the calls its approval mode asks about, MCP tools included, and file reads and writes go through the office. Its own settings can allow a tool. |
+| OpenCode | `opencode acp` | Unsupervised | It works over ACP as in the terminal, with no approval flow for ACP. Most of its tools default to allow. A tool you set to ask in its own permission settings reaches the office. |
+| Kimi CLI | `kimi acp` | Unsupervised | It names `kimi login` for a signed-out start. Its documentation does not say how approvals work over ACP, so the office assumes none. |
+| ACP agent | the program you name | Unsupervised | The office knows nothing about its tools. |
+
+- **Before you start.** Install the native program so that `gemini.exe`, `opencode.exe` or `kimi.exe` is on the PATH (Kimi: `uv tool install kimi-cli`). An npm install makes a `.cmd` file, which the office refuses. Then sign in once in a terminal (`gemini`, `opencode auth login`, `kimi login`). The office never signs in for you. **Agent kinds** shows the next step for each.
+- **ACP agent.** Set `OFFICE_ACP_PROGRAM` to a plain program name found on the PATH (no path, no spaces) and `OFFICE_ACP_ARGS` to its arguments as a JSON list, for example `["serve","--stdio"]`, then start the office again. Without a program it is not ready and says so. The office starts the program by its absolute path, never through a shell.
+- **Settings paths.** An edit of `~/.gemini`, `~/.kimi` or `~/.opencode` (or the same names in a project) is high risk, like the other agents' settings.
+- **Paperclip.** These are the ACP tools of Paperclip's adapter list (`gemini-local`, `kimi-local`, `opencode-local`, `acpx-local`). The office learned the launch commands from the same sources.

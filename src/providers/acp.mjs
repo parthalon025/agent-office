@@ -49,6 +49,7 @@ export const PROTOCOL_VERSION = 1;
 const HERMES_EDITS = 'Edit requests come to the office and the rule applies. Reads, and writes to its own skills and memory, run without asking.';
 const HERMES_SHELL = 'Only the commands Hermes rates dangerous come to the office.';   // one line on the wall
 const HERMES_READS = 'This agent reads files without asking the office.';   // Hermes and Copilot CLI: one line on the wall
+const ACP_TOOLS_ASK = 'ACP tools ask the office only when their own settings say so.';   // one sentence for the wall (Gemini CLI asks by default, the others by their own config)
 export const AGENTS = {
   hermes: {
     label: 'Hermes Agent', program: 'hermes', args: ['acp'],
@@ -130,6 +131,47 @@ export const AGENTS = {
     askTimeoutMs: null, features: [], pin: null, // only the signed-out handshake of 1.0.105 was recorded: no signed-in run yet
     needs: [COPILOT.INSTALL], // the native copilot.exe: an npm copilot.cmd is not accepted (resolveExe)
   },
+  // The ACP tools of Paperclip's adapter list (#216, ADR 0010). Read from each tool's own docs on 2026-11-06, not from a run: no tool
+  // was installed on the owner's PC, so pin stays null. Paperclip starts the same commands (adapters gemini-local, kimi-local and
+  // acpx-local). None of the four is gated, so each is off until the Agents screen turns it on and runs only in a room of its own
+  // (ADR 0001). They share one Security room column, "ACP tools" (public/vocab-security.js), so a reason there holds for all four.
+  // Gemini CLI (`gemini --acp`, docs/cli/acp-mode.md): it sends session/request_permission for the tool calls its approval mode
+  // asks about (an MCP tool names its server in toolCall._meta), the client can change that mode with session/set_mode, and its file
+  // reads and writes go through the client. Its own settings can still allow a tool, so edits, commands and MCP tools are partly
+  // enforced, and nothing is claimed for reads.
+  gemini: {
+    label: 'Gemini CLI', program: 'gemini', args: ['--acp'],
+    gated: false, supervision: 'Partly supervised: tool calls ask unless its approval mode allows them',
+    partly: { 'edit-inside': ACP_TOOLS_ASK, 'files-outside': ACP_TOOLS_ASK, shell: ACP_TOOLS_ASK, mcp: ACP_TOOLS_ASK },
+    askTimeoutMs: null, features: [], pin: null,
+    needs: ['Install Gemini CLI so that gemini.exe is on the PATH (npm i -g @google/gemini-cli makes gemini.cmd, which the office does not accept), then run gemini once in a terminal to sign in.'],
+  },
+  // OpenCode (`opencode acp`, opencode.ai/docs/acp): its docs say it works over ACP as in the terminal, and give no approval flow for
+  // ACP. In its permission settings most tools default to allow (only .env reads default to ask), so the office cannot rely on a
+  // request: Unsupervised. A tool the user set to ask in opencode.json does reach the office as a request and is held.
+  opencode: {
+    label: 'OpenCode', program: 'opencode', args: ['acp'],
+    gated: false, supervision: 'Unsupervised: its own permission settings decide which calls ask',
+    askTimeoutMs: null, features: [], pin: null,
+    needs: ['Install OpenCode so that opencode.exe is on the PATH (an npm install makes opencode.cmd, which the office does not accept), then run opencode auth login in a terminal.'],
+  },
+  // Kimi CLI (`kimi acp`, moonshotai.github.io/kimi-cli): a multi-session ACP server; signed out it answers AUTH_REQUIRED (-32000) and
+  // wants `kimi login`. Its docs do not say how approvals work over ACP, so nothing is assumed: Unsupervised.
+  kimi: {
+    label: 'Kimi CLI', program: 'kimi', args: ['acp'],
+    gated: false, supervision: 'Unsupervised: the office has not confirmed which calls it asks about',
+    askTimeoutMs: null, features: [], pin: null,
+    needs: ['Install Kimi CLI so that kimi.exe is on the PATH (uv tool install kimi-cli), then run kimi login in a terminal.'],
+  },
+  // Any other ACP agent (Paperclip's acpx-local takes an agentCommand): the owner names the program in OFFICE_ACP_PROGRAM (a plain
+  // program name found on the PATH, started by absolute path, no shell) and its arguments in OFFICE_ACP_ARGS (a JSON list of
+  // strings). The office knows nothing about its tools, so it is Unsupervised. env: where program and args come from.
+  acp: {
+    label: 'ACP agent', program: null, args: [], env: { program: 'OFFICE_ACP_PROGRAM', args: 'OFFICE_ACP_ARGS' },
+    gated: false, supervision: 'Unsupervised: the office does not know which calls this agent asks about',
+    askTimeoutMs: null, features: [], pin: null,
+    needs: ['Set OFFICE_ACP_PROGRAM to the name of an agent that speaks ACP on stdio, and OFFICE_ACP_ARGS to its arguments as a JSON list, then start the office again. Example: OFFICE_ACP_PROGRAM=myagent, OFFICE_ACP_ARGS=["serve","--stdio"].'],
+  },
 };
 
 const INIT_MS = 20_000;          // the handshake and the first session
@@ -188,7 +230,23 @@ export function createAcp(deps) {
   // blocked(): why the Security room does not let this agent kind run now (its Agents screen), or null. It is the server's
   // security.mjs openRefusal, so the provider keeps no switch of its own.
   const blocked = deps.blocked || (() => null);
-  const args = spec.gateway && port !== DEFAULT_GATEWAY_PORT ? [...spec.args, '--url', `ws://${GATEWAY_HOST}:${port}`] : spec.args;
+  // The generic ACP agent (spec.env): its program and arguments come from the owner's environment, read at each call.
+  const programName = () => {
+    if (!spec.env) return spec.program;
+    const v = env[spec.env.program];
+    if (!v) throw providerError(409, `The office has no ${label} to start: set ${spec.env.program} to a program name.`);
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(v)) throw providerError(409, `${spec.env.program} must be a plain program name found on the PATH, not a path or a command line.`);
+    return v;
+  };
+  const argsNow = () => {
+    if (!spec.env) return spec.gateway && port !== DEFAULT_GATEWAY_PORT ? [...spec.args, '--url', `ws://${GATEWAY_HOST}:${port}`] : spec.args;
+    let a = [];
+    if (env[spec.env.args]) {
+      try { a = JSON.parse(env[spec.env.args]); } catch { a = null; }
+      if (!Array.isArray(a) || !a.every((x) => typeof x === 'string')) throw providerError(409, `${spec.env.args} must be a JSON list of strings, for example ["serve","--stdio"].`);
+    }
+    return a;
+  };
   const probeMs = deps.probeMs || spec.probeMs || PROBE_MS;
   const readyWaitMs = deps.readyWaitMs || READY_WAIT_MS;
   // The agent's environment: the caller's, without the switches that let the agent approve its own calls (spec.envDrop; Windows
@@ -209,9 +267,10 @@ export function createAcp(deps) {
 
   // The absolute path of the program, or a status error the user can act on (409).
   function program() {
-    try { return exe(spec.program); } catch (e) {
-      if (e.code === 'SCRIPT_INSTALL') throw providerError(409, `The office needs ${spec.program}.exe. It found only ${e.file} (a script install). The office starts programs without a shell.`);
-      throw providerError(409, `The office cannot find ${label}: ${spec.program}.exe is not on the PATH. Install it, then try again.`);
+    const name = programName(); argsNow();   // the generic entry: a bad name or argument list is its own 409
+    try { return exe(name); } catch (e) {
+      if (e.code === 'SCRIPT_INSTALL') throw providerError(409, `The office needs ${name}.exe. It found only ${e.file} (a script install). The office starts programs without a shell.`);
+      throw providerError(409, `The office cannot find ${label}: ${name}.exe is not on the PATH. Install it, then try again.`);
     }
   }
   function remember(init) {
@@ -246,7 +305,7 @@ export function createAcp(deps) {
     const dropLog = () => { if (logDir) { try { fs.rmSync(logDir, { recursive: true, force: true }); } catch { /* the agent still holds it */ } } };
     let child;
     try {
-      child = spawn(file, [...(spec.probeArgs || args), ...(logDir ? [spec.logDirArg, logDir] : [])], { cwd: probeDir, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: envOf() });
+      child = spawn(file, [...(spec.probeArgs || argsNow()), ...(logDir ? [spec.logDirArg, logDir] : [])], { cwd: probeDir, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: envOf() });
     } catch (e) {
       dropLog();
       learned = { caps: null, version: null, at: now(), ok: false, why: textOf(e), auth: false };
@@ -712,7 +771,7 @@ export function createAcp(deps) {
       try {
         file = program();
         // Only a model id goes on the command line (a Reopen's model is not behind check()): never a value that reads as a switch.
-        const sessionArgs = o.model && spec.modelArg && spec.modelRe.test(String(o.model)) ? [...args, spec.modelArg, String(o.model)] : args;
+        const sessionArgs = o.model && spec.modelArg && spec.modelRe.test(String(o.model)) ? [...argsNow(), spec.modelArg, String(o.model)] : argsNow();
         child = spawn(file, sessionArgs, { cwd: s.cwd, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'], env: envOf({ OFFICE_ID: s.officeId }) });
       } catch (e) {
         setImmediate(() => { events.reply(s, `Could not start ${label}: ${textOf(e)}`); events.end(s, 'could not start'); });
