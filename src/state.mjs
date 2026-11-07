@@ -15,6 +15,7 @@ import { cleanPersonas, cleanTeams, cleanScreens } from './personas.mjs';
 import { cleanRecent } from './recent.mjs';
 import { cleanNotes, cleanPins } from './notes.mjs';
 import { cleanMerges, cleanStandups, cleanFocus } from './rituals.mjs';
+import { cleanRuntime } from './paperclip-runtime.mjs';
 
 const isMap = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
 const list = (raw) => (Array.isArray(raw) ? raw : []);
@@ -51,6 +52,7 @@ export const SLICES = {
   schedules: list,
   spendLimit: cleanSpendLimit,
   paperclip: cleanPaperclip,
+  paperclipRuntime: cleanRuntime,   // { enabled: true } while the user wants the office's own Paperclip to run with the office (#193)
   httpHooks: (raw) => (isMap(raw) ? raw : undefined),
   commands: (raw) => (Array.isArray(raw) ? raw : undefined),
   goals: (raw) => raw,   // the Manager (manager.mjs restore) reads its own export

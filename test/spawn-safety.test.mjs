@@ -302,3 +302,21 @@ test('killTree on Windows runs taskkill /T /F by its absolute path from the help
   assert.ok(same(calls[0].opts.cwd, launch.helperCwd()));
   await launch.killTree(1, () => { throw new Error('no taskkill'); }); // never rejects
 });
+
+test('killTreeSync ends a process before it returns and does nothing for no pid (the exit handler cannot wait)', () => {
+  launch.killTreeSync(0);
+  launch.killTreeSync(undefined);
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: launch.helperCwd(), stdio: 'ignore', windowsHide: true, detached: !win });
+  launch.killTreeSync(child.pid);
+  assert.throws(() => process.kill(child.pid, 0), /ESRCH|EPERM/, 'the process is gone');
+});
+
+test('killTreeSync on Windows runs taskkill /T /F by its absolute path from the helper folder, and never throws', { skip: !win }, () => {
+  const calls = [];
+  launch.killTreeSync(4242, (file, args, opts) => { calls.push({ file, args, opts }); });
+  assert.equal(calls.length, 1);
+  assert.ok(same(calls[0].file, resolveExe('taskkill')) && path.isAbsolute(calls[0].file));
+  assert.deepEqual(calls[0].args, ['/PID', '4242', '/T', '/F']);
+  assert.ok(same(calls[0].opts.cwd, launch.helperCwd()));
+  launch.killTreeSync(1, () => { throw new Error('no taskkill'); });
+});

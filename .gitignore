@@ -12,5 +12,7 @@ history.json
 /history-*.json
 .playwright-mcp/
 .scratch/
+# The Paperclip release the office installs with npm (src/paperclip-runtime.mjs): not part of the repository.
+/.paperclip-runtime/
 # Screenshots of a visual check: never commit them.
 /.screens/

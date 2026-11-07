@@ -13,11 +13,11 @@ import { REPO_ROOT } from './office-server.mjs';
 /**
  * startInProcess({ dir, port, env }) -> { office, call, snapshot, hook, stop }.
  * dir: a folder the test made and removes; the office keeps its runtime files' names there (nothing is written) and its home is dir/home.
- * state: the saved state the office finds at start (state.json of its port), as an object. port: the office's port number as the settings files name it; nothing listens on it. env: more environment for the office.
+ * runtime: a stand-in for the Paperclip runtime (a route test of its glue). state: the saved state the office finds at start (state.json of its port), as an object. port: the office's port number as the settings files name it; nothing listens on it. env: more environment for the office.
  * call(route, body?, { signal, headers }): GET when body is undefined, else POST. Resolves { status, json, response }.
  * snapshot(): the whole /events snapshot the page would get first. hook(body, signal): the HTTP hook route as Claude Code posts it.
  */
-export async function startInProcess({ dir, port = 4391, env = {}, state = null }) {
+export async function startInProcess({ dir, port = 4391, env = {}, state = null, runtime = null }) {
   const home = path.join(dir, 'home');
   fs.mkdirSync(home, { recursive: true });
   Object.assign(process.env, {
@@ -34,7 +34,7 @@ export async function startInProcess({ dir, port = 4391, env = {}, state = null 
     root: REPO_ROOT, port, files, agentToken: auth.newAgentToken(), pageToken: auth.newPageToken(),
     launchCodes: auth.createLaunchCodes(), remote: auth.remoteConfig(process.env, { port, branch: false }), remotePageToken: auth.newPageToken(),
     writeSecret: () => {}, cloud: { foundry: cloudConfig(process.env, 'OFFICE_FOUNDRY'), studio: cloudConfig(process.env, 'OFFICE_COPILOTSTUDIO') },
-    warmWalker: false,
+    warmWalker: false, runtime, // runtime: a stand-in for the Paperclip runtime (paperclip-runtime.mjs); none makes the real one, which starts nothing until asked
   });
   const call = async (route, body, { signal, headers } = {}) => {
     const url = new URL(route, 'http://127.0.0.1');

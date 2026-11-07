@@ -82,6 +82,7 @@
       security: state.security || null,  // the Security room (#70): rules, what is enforced, the Spend screen
       plans: state.plans || { plans: [], unreadable: [] }, // Manager board (#154, #156)
       hq: state.hq || null,              // Paperclip HQ (#76, paperclip.mjs view): null until the user connects it
+      paperclipRuntime: state.paperclipRuntime || null, // the Paperclip the office runs (#193, paperclip-runtime.mjs status): state, reason, steps, key state
       // Function floors (#92): building key -> floors (archetypes.mjs layoutView); notes key -> { floors, title } of each room;
       // the function catalog (fixed while the server runs)
       layouts: state.layouts || {},

@@ -12,6 +12,7 @@ import * as launch from './launch.mjs';
 import { createCampus } from './campus.mjs';
 import { slimPayload, cleanIds as cleanPaperclipIds } from './payload.mjs';
 import { createHq } from './paperclip.mjs';
+import { createRuntime } from './paperclip-runtime.mjs';
 import { recap as recapOf, away as awayOf } from './rituals.mjs';
 import { createTracker, clip } from './tracker.mjs';
 import { createAdmission } from './admission.mjs';
@@ -376,6 +377,31 @@ export function createOffice(cfg) {
     if (saved.get('paperclip')) { saved.set('paperclip', undefined); savePersisted(); addFeed(PAPERCLIP, 'end', 'disconnected. Paperclip runs on as before.'); }
     broadcast();
     return { ok: true };
+  }
+  // The Paperclip runtime (#193, ADR 0010): the office installs a pinned paperclipai, starts it in login mode on 127.0.0.1, keeps the board
+  // key in an owner-only file and stops it with the office. A Paperclip the user runs is never installed over or touched. Off until the
+  // user installs and starts it (Attach sessions); once started it comes back with the office (persisted.paperclipRuntime).
+  const runtime = cfg.runtime || createRuntime({
+    root: ROOT, port: PORT, env: process.env, writeSecret, spawn: (file, args, opts) => spawn(file, args, opts),
+    onChange: () => broadcast(), onFeed: (text, kind) => addFeed(PAPERCLIP, kind, text),
+  });
+  async function installRuntime(body) {
+    if (body.confirmed !== true) throw askFirst('runtime', `Install Paperclip ${runtime.status().version} from npm into the office folder? The office downloads about 440 packages with npm (a few minutes, several hundred megabytes) and npm runs their install scripts. It checks the download against the SHA-512 it pins. Apart from npm's own download cache, nothing outside the office folder is changed.`);
+    const st = await runtime.install({ background: true }); // the page watches the state: a download of minutes is not held in a request
+    broadcast();
+    return { runtime: st };
+  }
+  async function startRuntime() {
+    const st = await runtime.start();
+    saved.set('paperclipRuntime', { enabled: true }); savePersisted();
+    broadcast();
+    return { runtime: st };
+  }
+  async function stopRuntime() {
+    const st = await runtime.stop();
+    if (saved.get('paperclipRuntime')) { saved.set('paperclipRuntime', undefined); savePersisted(); }
+    broadcast();
+    return { runtime: st };
   }
   // Goal handoff (ADR 0007, #159): the second and last write to Paperclip. Without confirmed: true the answer is 409 with the exact tasks the Confirm shows.
   async function handoffGoalHq(body) {
@@ -1131,6 +1157,7 @@ export function createOffice(cfg) {
     kinds: KINDS,             // the agent kinds: the label of each session's kind, and the Open dialog's options before readiness comes
     plans: planBoard.snapshot(), // Manager board (#154, #156): every plan of every source, with its source word and the steps' state words
     hq: hq.view(),            // Paperclip HQ (#76): null until connected; company, budget, agents (role, task, supervision, run), routines
+    paperclipRuntime: runtime.status(), // the Paperclip the office runs (#193): state and why, the steps for the user, the board key's state (never the key)
     // Function floors (#92): each building's floors (archetypes.mjs layoutView), each room's floors and name, and the catalog
     layouts: layoutsView(), rooms: roomsView(), catalog: CATALOG,
     changes: changesView(),   // paper flow (#93): building key -> { ok, at, error, mergedToday, prs, ready } from gh
@@ -1196,6 +1223,12 @@ export function createOffice(cfg) {
     R('GET', '/api/providers', 'page', async ({ query }) => { const list = await providers.statusCached({ fresh: query.get('fresh') === '1' }); void refreshEnforce(); return { providers: list }; }),
     // Paperclip HQ (#76): what the office reads from it now (tests and scripts; the page gets it in the snapshot).
     R('GET', '/api/paperclip', 'page', () => ({ hq: hq.view() })),
+    // The Paperclip runtime (#193): install (409 without the Confirm), start, stop, and the board key's approval link. Never the key.
+    R('GET', '/api/paperclip/runtime', 'page', () => ({ runtime: runtime.status() })),
+    R('POST', '/api/paperclip/runtime/install', 'page', ({ body }) => installRuntime(body)),
+    R('POST', '/api/paperclip/runtime/start', 'page', () => startRuntime()),
+    R('POST', '/api/paperclip/runtime/stop', 'page', () => stopRuntime()),
+    R('POST', '/api/paperclip/runtime/key', 'page', async () => { const st = await runtime.connectKey(); broadcast(); return { runtime: st }; }),
     R('GET', '/api/info', 'page', () => ({
       port: PORT, hooksFile: activeHooksFile(), recent: saved.get('recent'), home: os.homedir(),
       settingsSnippet: JSON.stringify(hooksMode === 'http' ? httpSettings : commandSettings, null, 2),
@@ -1364,9 +1397,13 @@ export function createOffice(cfg) {
       // What an ungated agent's own config carries, for the Security room wall (read-only; nothing is read while it is off).
       void refreshEnforce();
       // Paperclip HQ (#76): the connection the user made before, again (a Paperclip that is not up yet is tried again later).
+      // The Paperclip runtime the user started before comes back with the office.
+      void runtime.resume(!!(saved.get('paperclipRuntime') && saved.get('paperclipRuntime').enabled)).then(() => broadcast());
       if (saved.get('paperclip') && saved.get('paperclip').url) hq.connect({ url: saved.get('paperclip').url, company: saved.get('paperclip').company || null, keep: true }).catch((e) => console.warn(`Paperclip: ${e.message}`));
     },
     hooks: { mode: () => hooksMode, file: activeHooksFile, version: CLAUDE_VERSION },
+    /** The Paperclip the office runs: the adapter ends it at exit (killNow is synchronous) and tests drive it. */
+    runtime,
     /** Ends what the office started that would hold a process open (the process helper). */
     stop() { if (walker) { walker.kill(); walker = null; } },
   };

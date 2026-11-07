@@ -208,6 +208,10 @@ server.listen(PORT, HOST, () => {
   // Saved state (schedule prompts, notes) and past sessions (replies) are limited too (#27 L10): once here, with
   // what this office loaded. savePersisted and saveHistory then write plainly, and a plain write keeps the ACL.
   // After listen, so a second copy that exits on EADDRINUSE never rewrites them.
+  // The office ends: Paperclip, when this office started it, goes with it (killNow is synchronous: an exit handler cannot wait). A signal
+  // makes the exit, so a Ctrl+C or a stop by process id still runs it; a kill that runs no handler leaves it for the next office to take over.
+  for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => process.exit(0));
+  process.once('exit', () => office.runtime.killNow());
   office.claim();
   office.resume(); // the sign-in entry, what an ungated agent's config carries, the Paperclip connection made before
   try {
@@ -215,7 +219,6 @@ server.listen(PORT, HOST, () => {
     writeSecret(PAGE_FILE, JSON.stringify({ token: PAGE_TOKEN, port: PORT }));
     // Only after the own file is written, so a second copy that failed above never removes one. A clean exit removes it
     // (taskkill /F runs nothing, so the next start also sweeps the files of ports that nobody listens on, #126).
-    for (const sig of ['SIGINT', 'SIGTERM']) process.once(sig, () => process.exit(0));
     process.once('exit', () => auth.removeOwnPageFile(PAGE_FILE, PAGE_TOKEN));
     void auth.stalePageFiles({ file: PAGE_FILE, port: PORT, readdir: fs.promises.readdir, unlink: fs.promises.unlink,
       isListening: (port) => probeGateway({ port }) })

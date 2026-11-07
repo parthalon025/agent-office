@@ -25,7 +25,7 @@ Needs you lists every held request of every building. Approve or decline it from
 - Claude Code 2.1.295 or newer, already signed in. The office uses your existing login. It was tested on 2.1.317.
 - Git for worktrees and the Changes view. The GitHub CLI (`gh`) for pull requests.
 
-There is nothing to install. The server has no dependencies, and the page needs no internet access: React and the fonts come with the office (`public/vendor`, with their versions and licenses in `public/vendor/README.md`).
+There is nothing to install. The server has no dependencies, and the page needs no internet access: React and the fonts come with the office (`public/vendor`, with their versions and licenses in `public/vendor/README.md`). One optional part downloads software: if you click Install Paperclip in Attach sessions, the office installs a pinned Paperclip with npm into its own folder ([Paperclip HQ](docs/paperclip.md#run-paperclip-from-the-office)).
 
 ## Start it
 
@@ -54,7 +54,7 @@ All the jobs, with every control, are in [Using the office](docs/using-the-offic
 | [Agent kinds](docs/agents.md) | Claude Code, local models, ACP agents, OpenClaw, Agent Framework, cloud agents and Copilot CLI: setup, readiness and supervision. |
 | [Security](docs/security.md) | The Security room, the two tokens, what the office keeps on disk, and links to the [security review](docs/security-review.md) and the decision records in [docs/adr](docs/adr). |
 | [Remote access](docs/remote-access.md) | Open the office from a phone or laptop through Cloudflare Tunnel and Access. |
-| [Paperclip HQ](docs/paperclip.md) | Watch a Paperclip company as a building, and hold its Claude Code calls. |
+| [Paperclip HQ](docs/paperclip.md) | Watch a Paperclip company as a building, hold its Claude Code calls, and let the office install and run Paperclip for you. |
 | [Manager board](docs/manager.md) | Goals, plans, steps and the handoff to Paperclip. |
 | [Customization](docs/customization.md) | Personas, teams, wall screens, export, rituals and Focus mode. |
 | [Configuration](docs/configuration.md) | Every environment variable. |

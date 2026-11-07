@@ -581,3 +581,22 @@ test('M3: files in the home .claude and .hermes folders are settings that run co
     assert.equal(riskOf('Edit', { file_path: path.join(alias, 'settings.json') }, alias, opts), 'high');
   } finally { fs.rmSync(base, { recursive: true, force: true }); }
 });
+
+// The Paperclip the office runs (#193): its board key is a secret, and its config, .env and database live in the office's data folder,
+// where an edit could turn off login mode.
+test('the Paperclip board key file is a secret, inside the root and outside it', () => {
+  for (const f of ['paperclip-board-key.json', 'paperclip-board-key-4392.json']) {
+    assert.equal(riskOf('Read', { file_path: f }, cwd), 'medium', f);
+    assert.equal(riskOf('Read', { file_path: path.join(home, 'AppData', 'Local', 'AgentOffice', f) }, cwd), 'high', 'outside the root: ' + f);
+  }
+});
+
+test('an edit in the office data folder (the Paperclip config and secrets) is settings that run code, from any root', () => {
+  const dir = path.join(home, 'AppData', 'Local', 'AgentOffice', 'paperclip', 'instances', 'agent-office');
+  const opts = { home, env: { LOCALAPPDATA: path.join(home, 'AppData', 'Local') } };
+  for (const f of ['config.json', '.env', path.join('secrets', 'master.key')]) {
+    assert.equal(riskOf('Edit', { file_path: path.join(dir, f) }, cwd, opts), 'high', f);
+    // config.json is settings; .env and master.key are secrets by name (the Secrets row): neither is ever low
+    assert.equal(actionOf('Edit', { file_path: path.join(dir, f) }, cwd, opts), f === 'config.json' ? 'settings' : 'secrets', f);
+  }
+});

@@ -397,6 +397,23 @@ test('the pick of Foundry speaks of agents, not models, in every word around it'
   assert.equal(V.pickFact({ ...OL, needsModel: false }), null);
 });
 
+test('the Paperclip runtime words (#193): a state is a DS status and a word, and the board key has a line', () => {
+  const H = V.hq;
+  assert.equal(H.runtime(null), null);
+  assert.deepEqual(H.runtime({ state: 'off' }), { key: 'resting', word: 'Not installed' });
+  assert.deepEqual(H.runtime({ state: 'starting' }), { key: 'working', word: 'Starting' });
+  assert.deepEqual(H.runtime({ state: 'running' }), { key: 'working', word: 'Running' });
+  assert.deepEqual(H.runtime({ state: 'failed' }), { key: 'error', word: 'Failed' });
+  assert.deepEqual(H.runtime({ state: 'external' }), { key: 'resting', word: 'Another Paperclip runs' });
+  assert.deepEqual(H.runtime({ state: 'busy' }), { key: 'error', word: 'Port in use' });
+  assert.deepEqual(H.runtime({ state: '__proto__' }), { key: 'resting', word: '__proto__' }, 'an unknown state is shown, never a table lookup through the prototype');
+  assert.equal(H.runtimeKey({ key: { state: 'none' } }), 'No board key yet');
+  assert.equal(H.runtimeKey({ key: { state: 'waiting' } }), 'Waiting for your approval in Paperclip');
+  assert.equal(H.runtimeKey({ key: { state: 'ready', expiresAt: '2026-12-07T03:21:22.918Z' } }), 'Board key ready, valid until 2026-12-07');
+  assert.equal(H.runtimeKey({ key: { state: 'expired', reason: 'The board key expired. Connect a new one.' } }), 'The board key expired. Connect a new one.');
+  assert.equal(H.runtimeKey(null), '');
+});
+
 test('Paperclip HQ words (#76): an agent\'s state is never "Needs you", budgets, heartbeats, supervision, the connection', () => {
   const H = V.hq;
   assert.deepEqual(H.status({ status: 'running', run: { status: 'running' } }), { key: 'working', word: 'Runs in Paperclip' });
