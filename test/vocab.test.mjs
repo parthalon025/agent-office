@@ -528,3 +528,18 @@ test('plan handoff words: the preview rows mark the tasks already written, and t
   assert.equal(V.plan.handoffFailed({ company: 'Acme', written: 2, left: 1 }), 'Handoff failed. 2 tasks are in Acme. 1 task is left. Retry writes only the rest.');
   assert.equal(V.plan.handoffDone({ company: 'Acme', written: 1 }), '1 task is in Acme. Paperclip plans this work now. The office does not run it.');
 });
+
+test('the HQ Lobby words (#197): the Glance line and the dashboard cards say unknown where the office could not read', () => {
+  const H = V.hq;
+  const l = { employees: { total: 3, working: 1, paused: 0, error: 0, unsupervised: 2 }, tasks: { open: 2, inProgress: 1, blocked: 0 }, approvals: { pending: 1, items: [] }, goals: { total: 2, items: [] }, spend: { spent: 12.4, limit: 100, percent: 12 }, secrets: { count: 1, names: ['A'] }, activity: [] };
+  assert.equal(H.glance({ lobby: l }), 'Lobby: 3 employees · 2 open tasks · 1 approval waits · $12.40 of $100.00 this month');
+  assert.equal(H.glance({ lobby: { ...l, employees: { ...l.employees, total: 1 }, approvals: { pending: 0, items: [] }, tasks: null, spend: { spent: 0, limit: 0, percent: null } } }), 'Lobby: 1 employee · tasks unknown · $0.00 this month, no budget');
+  assert.equal(H.glance({ lobby: null }), '');
+  const c = Object.fromEntries(H.cards(l).map((x) => [x.key, x]));
+  assert.deepEqual([c.employees.value, c.employees.note], ['3', '1 working · 2 not supervised in office']);
+  assert.deepEqual([c.tasks.value, c.tasks.note], ['2', '1 in progress · 0 blocked']);
+  assert.deepEqual([c.approvals.value, c.approvals.note], ['1', 'Decide them in Paperclip']);
+  assert.deepEqual([c.spend.value, c.spend.note], ['$12.40', '12% of $100.00']);
+  const u = Object.fromEntries(H.cards({ ...l, tasks: null, approvals: null, goals: null, spend: null }).map((x) => [x.key, x]));
+  assert.deepEqual([u.tasks.value, u.approvals.value, u.goals.value, u.spend.value], ['Unknown', 'Unknown', 'Unknown', 'Unknown']);
+});

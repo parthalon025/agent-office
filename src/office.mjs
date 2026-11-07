@@ -352,6 +352,8 @@ export function createOffice(cfg) {
   // Paperclip owns the budgets of its runs: the office shows them and sets no second limit (a hook session has no spend limit).
   const PAPERCLIP = { uid: 'paperclip', name: 'Paperclip' };
   const hq = createHq({
+    // The board key of the Paperclip the office runs (#193), for that address only: the HQ sends it as a bearer and holds it nowhere (#197).
+    key: (url) => (url === runtime.status().url ? runtime.key() : null),
     sessions: () => [...sessions.values()], // the plan source links a Paperclip task to the session that runs it (#155)
     hooksFile: () => HOOKS_CMD_FILE.replace(/\\/g, '/'),
     token: (u) => (runtime.keyFor ? runtime.keyFor(u) : null), // the board key (#194), for the address it was made for only
@@ -1254,6 +1256,8 @@ export function createOffice(cfg) {
     R('GET', '/api/providers', 'page', async ({ query }) => { const list = await providers.statusCached({ fresh: query.get('fresh') === '1' }); void refreshEnforce(); return { providers: list }; }),
     // Paperclip HQ (#76): what the office reads from it now (tests and scripts; the page gets it in the snapshot).
     R('GET', '/api/paperclip', 'page', () => ({ hq: hq.view() })),
+    // The HQ read model behind the Lobby (#197): the snapshot's HQ part plus goals, pending approvals and activity. Names and counts only: no key, secret value or payload.
+    R('GET', '/api/hq/lobby', 'page', () => ({ hq: hq.model() })),
     // The Paperclip runtime (#193): install (409 without the Confirm), start, stop, and the board key's approval link. Never the key.
     R('GET', '/api/paperclip/runtime', 'page', () => ({ runtime: runtime.status() })),
     R('POST', '/api/paperclip/runtime/install', 'page', ({ body }) => installRuntime(body)),

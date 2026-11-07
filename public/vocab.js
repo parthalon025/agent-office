@@ -251,7 +251,33 @@
     if (k.state === 'expired' || k.state === 'refused') return k.reason || 'No board key';
     return 'No board key yet';
   }
-  var hq = { status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey };
+  // The Lobby of the HQ building (#197, paperclip.mjs view().lobby): the Glance line (the city card, the building sign) and the dashboard
+  // cards. null in the data is unknown, said so: the office never shows a zero it did not read.
+  function hqPlural(n, one) { return n + ' ' + (n === 1 ? one : one + 's'); }
+  function hqGlance(q) {
+    var l = q && q.lobby;
+    if (!l) return '';
+    var out = ['Lobby: ' + hqPlural(l.employees.total, 'employee')];
+    out.push(l.tasks ? hqPlural(l.tasks.open, 'open task') : 'tasks unknown');
+    if (!l.approvals) out.push('approvals unknown');
+    else if (l.approvals.pending) out.push(hqPlural(l.approvals.pending, 'approval') + (l.approvals.pending === 1 ? ' waits' : ' wait'));
+    if (l.spend) out.push(hqBudget(l.spend));
+    return out.join(' · ');
+  }
+  function hqCards(l) {
+    var U = 'Unknown', e = l.employees;
+    var emp = [e.working + ' working', e.unsupervised ? e.unsupervised + ' not supervised in office' : 'all supervised in office'];
+    if (e.paused) emp.push(e.paused + ' paused');
+    if (e.error) emp.push(e.error + ' in error');
+    return [
+      { key: 'employees', label: 'Employees', value: String(e.total), note: emp.join(' · ') },
+      { key: 'tasks', label: 'Open tasks', value: l.tasks ? String(l.tasks.open) : U, note: l.tasks ? l.tasks.inProgress + ' in progress · ' + l.tasks.blocked + ' blocked' : 'The office could not read the tasks' },
+      { key: 'approvals', label: 'Approvals', value: l.approvals ? String(l.approvals.pending) : U, note: l.approvals ? (l.approvals.pending ? 'Decide them in Paperclip' : 'None wait') : 'The office could not read the approvals' },
+      { key: 'goals', label: 'Goals', value: l.goals ? String(l.goals.total) : U, note: l.goals ? '' : 'The office could not read the goals' },
+      { key: 'spend', label: 'Spend this month', value: l.spend ? money(l.spend.spent) : U, note: !l.spend ? 'The office could not read the costs' : l.spend.percent != null ? l.spend.percent + '% of ' + money(l.spend.limit) : 'No budget' }
+    ];
+  }
+  var hq = { status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards };
 
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
   // priced: sessions with a cost figure. unknown: sessions whose agent reports no cost (costUnknown), shown as "unknown".

@@ -78,17 +78,51 @@
         })));
   }
 
+  // The Lobby (#197): the dashboard of the company, the pending approvals and goals, the live activity and the org chart as floors, top floor
+  // first. The words are OfficeVocab.hq (cards, glance); unknown data says Unknown. Read only: the writes come with the write grid.
+  function Lobby(p) {
+    var q = p.q, l = q.lobby, H = window.OfficeVocab.hq;
+    var floors = (q.floors || []).filter(function (f) { return f.employees.length; }).slice().reverse();
+    return h(React.Fragment, null,
+      h('h3', { className: 'ext-h' }, 'Lobby'),
+      h('ul', { className: 'hq-cards', 'aria-label': 'Company dashboard' }, H.cards(l).map(function (c) {
+        return h('li', { key: c.key, className: 'hq-card' }, h('span', { className: 'hq-label' }, c.label), h('b', null, c.value), c.note ? h('span', { className: 'hq-note' }, c.note) : null);
+      })),
+      l.approvals && l.approvals.items.length ? h('h3', { className: 'ext-h' }, 'Approvals waiting') : null,
+      l.approvals && l.approvals.items.length ? h('ul', { className: 'past' }, l.approvals.items.map(function (a) {
+        return h('li', { key: a.id, className: 'past-row' }, h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h('b', null, a.kind.replace(/_/g, ' ')), a.by ? h(Tag, null, 'From ' + a.by) : null)));
+      })) : null,
+      l.goals && l.goals.items.length ? h('h3', { className: 'ext-h' }, 'Goals') : null,
+      l.goals && l.goals.items.length ? h('ul', { className: 'past' }, l.goals.items.map(function (g) {
+        return h('li', { key: g.id, className: 'past-row' }, h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h('b', null, g.title), g.status ? h(Tag, null, g.status) : null)));
+      })) : null,
+      h('h3', { className: 'ext-h' }, 'Org chart'),
+      floors.length ? h('div', { className: 'hq-floor' }, floors.map(function (f) {
+        return h('p', { key: f.key, className: 'note' }, h('b', null, f.name + ': '), f.employees.map(function (e) { return e.name; }).join(', '));
+      })) : h('p', { className: 'note' }, 'No employees yet.'),
+      h('h3', { className: 'ext-h' }, 'Activity'),
+      l.activity === null ? h('p', { className: 'note' }, 'The office could not read the activity.')
+        : l.activity.length ? h('ul', { className: 'stats-list' }, l.activity.map(function (x) { return h('li', { key: x.id }, h('span', null, x.text), h('b', null, x.at ? ago(x.at) : '')); }))
+        : h('p', { className: 'note' }, 'No activity yet.'));
+  }
+
   // The HQ: what Paperclip says about its company. Read only: Paperclip runs its heartbeats, routines and budgets. Supervise
   // in office is on the Agents screen of a Security room, with its painted Confirm (no button here: one place for a write).
   function HqDialog(p) {
     var q = p.snap && p.snap.hq, H = window.OfficeVocab.hq;
     var close = [h(A.Button, { key: 'a', variant: 'quiet', onClick: p.onAttach }, 'Connection'), h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')];
+    // The runtime panel (install, start, stop, board key) lives here since #197; it is the first step while no company is connected.
+    var runtime = O.PaperclipRuntime ? h(O.PaperclipRuntime, { runtime: p.snap && p.snap.paperclipRuntime, toast: p.toast }) : null;
     if (!q || !q.company) return h(A.Dialog, { open: true, title: 'Paperclip HQ', onClose: p.onClose, actions: close },
-      h(A.EmptyState, { icon: 'hq', compact: true, title: 'Paperclip is not connected', text: q ? H.state(q) : 'Connect it in Attach sessions.' }));
+      h('div', { className: 'form wide' },
+        h(A.EmptyState, { icon: 'hq', compact: true, title: 'Paperclip is not connected', text: q ? H.state(q) : 'Install and start Paperclip below, or connect to yours. Then connect it in Attach sessions.' }),
+        runtime));
     return h(A.Dialog, { open: true, title: q.company.name + ': Paperclip HQ', onClose: p.onClose, actions: close },
       h('div', { className: 'form wide' },
         h('p', { className: 'note', role: 'status' }, H.state(q)),
         h('p', { className: 'note' }, 'Budget for its runs: ' + H.budget(q.budget) + '. Paperclip keeps this budget. The office sets no second limit on Paperclip runs.'),
+        q.contract && q.contract.length ? h('p', { className: 'ao-err', role: 'alert' }, 'Paperclip answered in a shape the office does not know, so the office does not show that part. ' + q.contract.join(' ')) : null,
+        q.lobby ? h(Lobby, { q: q }) : null,
         h('h3', { className: 'ext-h' }, 'Agents'),
         q.agents.length ? h('ul', { className: 'past' }, q.agents.map(function (a) {
           var st = H.status(a), sup = H.supervision(a);
@@ -107,6 +141,7 @@
               h('div', { className: 'past-title' }, h('b', null, r.title), r.status ? h(Tag, null, r.status) : null),
               h('div', { className: 'past-meta' }, [r.agent ? 'For ' + r.agent : '', r.cron ? 'Cron ' + r.cron : '', r.next ? 'Next ' + new Date(r.next).toLocaleString() : 'No next run'].filter(Boolean).join(' · '))));
         })) : h('p', { className: 'note' }, 'No routines.'),
+        runtime,
         h('p', { className: 'note' }, 'Both schedulers run: Paperclip runs its heartbeats and routines, the office runs its own schedules. The office never starts, changes or stops a Paperclip run. To hold the Claude Code calls of an agent here, use Supervise in office on the Agents screen of a Security room.')));
   }
 
