@@ -18,7 +18,7 @@
 import path from 'node:path';
 import { runIds, cleanIds } from './payload.mjs';
 import { readArgs, CLAUDE_FLAGS_VERSION } from './providers/claude-code.mjs';
-import { floorsOf, cablesOf, goalsOf, lobbyOf, inboxOf, costsOf, catalogOf, roomsOf, monthWindows, searchOf, shapeProblems, planWrite, writeValueOf, WRITE_KINDS } from './hq-model.mjs';
+import { floorsOf, cablesOf, goalsOf, lobbyOf, inboxOf, costsOf, catalogOf, roomsOf, monthWindows, searchOf, shapeProblems, planWrite, writeValueOf, WRITE_KINDS, EXPORT_INCLUDES } from './hq-model.mjs';
 import { archetypeOf, GENERAL } from './archetypes.mjs';
 
 export const DEFAULT_URL = 'http://127.0.0.1:3100';
@@ -349,11 +349,11 @@ export function createHq(deps = {}) {
 
   // The board key (the connect mode #194, the Paperclip the office runs #197): asked per call for the address it is used at (deps.key), so it goes only to the Paperclip it was made for (redirects are refused) and is held nowhere.
   const keyOf = (url) => { try { return deps.key?.(url) || null; } catch { return null; } };
-  async function call(conn, route, init = {}) {
+  async function call(conn, route, { timeoutMs, ...init } = {}) {
     let res;
     const key = keyOf(conn.url);
     try {
-      res = await doFetch(conn.url + route, { ...init, redirect: 'error', signal: AbortSignal.timeout(init.method ? 15000 : 8000), headers: { accept: 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}), ...(init.body ? { 'content-type': 'application/json' } : {}) } });
+      res = await doFetch(conn.url + route, { ...init, redirect: 'error', signal: AbortSignal.timeout(timeoutMs || (init.method ? 15000 : 8000)), headers: { accept: 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}), ...(init.body ? { 'content-type': 'application/json' } : {}) } });
     } catch (e) { throw httpError(502, `No Paperclip answers at ${conn.url} (${e.cause?.code || e.name || 'no answer'}).`); }
     const body = await res.text();
     if (res.status === 401 || res.status === 403) {
@@ -386,7 +386,7 @@ export function createHq(deps = {}) {
       if (p.length) throw httpError(502, `Paperclip answered in a shape the office does not know (${p[0]}) Update the office or the pinned Paperclip.`);
       return json;
     };
-    const [company, agents, issues, routines, projects, live, goals, approvals, activity, costs, secrets] = await Promise.all([
+    const [company, agents, issues, routines, projects, live, goals, approvals, activity, costs, secrets, everyCompany] = await Promise.all([
       must('company', `/api/companies/${id}`),
       must('agents', `/api/companies/${id}/agents`),
       shaped('issues', `/api/companies/${id}/issues?status=backlog,todo,in_progress,in_review,blocked`, []),
@@ -398,8 +398,10 @@ export function createHq(deps = {}) {
       shaped('activity', `/api/companies/${id}/activity`, null),
       shaped('costs', `/api/companies/${id}/costs/summary`, null),
       shaped('secrets', `/api/companies/${id}/secrets`, null),
+      call(conn, '/api/companies').catch(() => null),   // the other companies of this Paperclip (#221): buildings of the campus; a failed read keeps the last list
     ]);
     if (c !== conn) return;
+    if (Array.isArray(everyCompany)) conn.all = everyCompany.filter((x) => x && x.id).map((x) => ({ id: String(x.id), name: text(x.name, 80) || String(x.id) }));
     // What the office cannot tell fails closed (review 76, round 4). Paperclip lists at most 500 issues by default, so a list
     // that long may be cut; and a project or routine with no env field may come from a Paperclip that has none.
     if (list(issues).length >= ISSUE_LIST_LIMIT) unread.push('issues (the list may be cut)');
@@ -496,13 +498,14 @@ export function createHq(deps = {}) {
     const u = checkUrl(url);
     if (!u.ok) throw httpError(400, u.error);
     stop();
-    const conn = c = { url: u.url, companyId: company ? String(company) : null, state: 'connecting', error: '', ws: null, tries: 0, timer: null, refetch: null, busy: new Set(), companies: null, told: new Set() };
+    const conn = c = { url: u.url, companyId: company ? String(company) : null, state: 'connecting', error: '', ws: null, tries: 0, timer: null, refetch: null, busy: new Set(), companies: null, all: [], told: new Set() };
     changed();
     try {
       const health = await call(conn, '/api/health');
       if (!health || health.status !== 'ok') throw httpError(502, `${conn.url} is not a Paperclip that is ready (its /api/health did not say ok).`);
       const all = list(await call(conn, '/api/companies')).filter((x) => x && x.id).map((x) => ({ id: String(x.id), name: text(x.name, 80) || String(x.id) }));
       if (c !== conn) return { ok: false };
+      conn.all = all;
       if (conn.companyId && !all.some((x) => x.id === conn.companyId)) throw httpError(404, 'Paperclip has no company with that id.');
       if (!conn.companyId) {
         if (!all.length) throw httpError(409, 'Paperclip has no company yet. Make one in Paperclip, then connect again.');
@@ -594,7 +597,8 @@ export function createHq(deps = {}) {
   /** The HQ part of the snapshot, or null while the office is not connected. Money in dollars, times in ms. */
   function view() {
     if (!c) return null;
-    const base = { state: c.state, url: c.url, error: c.error, companies: c.state === 'choose' ? c.companies : null };
+    const others = c.companyId ? list(c.all).filter((x) => x.id !== c.companyId).slice(0, 12).map((x) => ({ id: x.id, name: x.name })) : [];
+    const base = { state: c.state, url: c.url, error: c.error, companies: c.state === 'choose' ? c.companies : null, others };
     if (!d) return { ...base, company: null, budget: null, agents: [], routines: [], floors: [], cables: [], inbox: null, rooms: [], goals: null, lobby: null, search: [], contract: [] };
     const agents = [...d.agents.values()].filter((a) => a.status !== 'terminated').map(agentView), hr = d.hqRead;
     const lobby = lobbyOf({
@@ -852,6 +856,56 @@ export function createHq(deps = {}) {
     const { problem, known, ...rest } = a;
     return { ...rest, known, error: problem || null };
   }
+  /**
+   * The instance part of company admin (#221, owner only): the environments and the settings of the whole Paperclip, read when the HQ opens
+   * them, for GET /api/hq/instance and for the writer's checks. An environment is its id, name, description, driver and status: never its
+   * config or env values. A part Paperclip does not answer, or answers in a shape the office does not know, is null (unknown). Reads only.
+   */
+  async function instanceRead(conn = c) {
+    if (!conn || !d) return { environments: [], general: null, defaultEnvironmentId: null, known: {}, problem: 'Paperclip is not connected.' };
+    const id = encodeURIComponent(conn.companyId);
+    const get = async (name, route) => {
+      let json;
+      try { json = await call(conn, route); } catch (e) { return { err: e.message }; }
+      const p = shapeProblems(name, json);
+      return p.length ? { err: `Paperclip answered in a shape the office does not know (${p[0]}) Update the office or the pinned Paperclip.` } : { json };
+    };
+    const [set, env] = await Promise.all([get('instanceSettings', '/api/instance/settings'), get('environments', `/api/companies/${id}/environments`)]);
+    const def = set.json ? (typeof set.json.defaultEnvironmentId === 'string' ? set.json.defaultEnvironmentId : null) : null;
+    const environments = env.json ? list(env.json).filter((x) => x && typeof x.id === 'string' && x.id).map((x) => ({ id: String(x.id), name: text(x.name, 80) || 'Environment', description: text(x.description, 200) || null, driver: text(x.driver, 20), status: text(x.status, 20), isDefault: x.id === def })) : null;
+    const g = set.json ? obj(set.json.general) : null;
+    const general = g ? { censorUsernameInLogs: g.censorUsernameInLogs === true, feedbackDataSharingPreference: text(g.feedbackDataSharingPreference, 20) || 'prompt' } : null;
+    return { environments: environments || [], general, defaultEnvironmentId: set.json ? def : null, known: { environments: !!environments, general: !!general }, problem: [set, env].map((x) => x.err).find(Boolean) || '' };
+  }
+  async function instance() {
+    const conn = c;
+    if (!conn || !d) return null;
+    const a = await instanceRead(conn);
+    if (c !== conn) return null;
+    const { problem, ...rest } = a;
+    return { ...rest, error: problem || null };
+  }
+  /**
+   * Export the connected company as a bundle (#221, routes/companies.ts POST /:companyId/export). It changes nothing in Paperclip, so it is
+   * a read and not a write of the grid; Paperclip leaves secret values out of it (the manifest lists the env inputs by name). The bundle
+   * goes to the page as a file the user saves; the office keeps no copy. include: { company, agents, projects, issues, skills } booleans.
+   */
+  async function exportCompany(body = {}) {
+    const conn = c;
+    if (!conn || !d || conn.state === 'choose' || !conn.companyId) throw httpError(409, 'Paperclip is not connected.');
+    const include = {};
+    const given = obj(body.include);
+    for (const k of EXPORT_INCLUDES) if (given[k] !== undefined) { if (typeof given[k] !== 'boolean') throw httpError(400, 'Choose what to export.'); include[k] = given[k]; }
+    const name = text(d.company.name, 80) || 'Paperclip';
+    let json;
+    try { json = await call(conn, `/api/companies/${encodeURIComponent(conn.companyId)}/export`, { method: 'POST', body: JSON.stringify(Object.keys(include).length ? { include } : {}), timeoutMs: 120000 }); }
+    catch (e) { feed(`Paperclip refused the export of ${name}. ${e.message}`, 'wait'); throw e; }
+    const p = shapeProblems('exportBundle', json);
+    if (p.length) throw httpError(502, `Paperclip answered in a shape the office does not know (${p[0]}) Update the office or the pinned Paperclip.`);
+    if (c !== conn) throw httpError(409, 'Paperclip is not connected.');
+    feed(`Exported the company ${name} from Paperclip as a file (${Object.keys(json.files).length} files). The office keeps no copy.`);
+    return { rootPath: json.rootPath, manifest: json.manifest, files: json.files, warnings: Array.isArray(json.warnings) ? json.warnings.map((w) => text(w, 200)).slice(0, 50) : [] };
+  }
   const askWrite = deps.askFirst || ((kind, message, extra) => Object.assign(httpError(409, message), { confirm: kind, ...extra }));
   const OPEN_APPROVAL = new Set(['pending', 'revision_requested']);
   async function check(conn, t) {
@@ -864,6 +918,13 @@ export function createHq(deps = {}) {
       const r = d.routines.find((x) => x && x.id === (t.type === 'routine' ? t.id : t.routine) && x.status !== 'archived');
       if (!r || (r.companyId && r.companyId !== conn.companyId)) throw httpError(404, 'Paperclip has no such routine in this company.');
       if (t.type === 'trigger' && !list(r.triggers).some((x) => x && x.id === t.id)) throw httpError(404, 'Paperclip has no such schedule on this routine.');
+      return;
+    }
+    if (t.type === 'environment') {
+      const a = await instanceRead(conn);
+      if (a.problem) throw httpError(502, a.problem);
+      const row = a.environments.find((x) => x.id === t.id);
+      if (!row) throw httpError(404, 'Paperclip has no such environment.');
       return;
     }
     if (t.type === 'invite' || t.type === 'join' || t.type === 'member') {
@@ -913,6 +974,16 @@ export function createHq(deps = {}) {
       const have = list(await call(conn, '/api/companies')).find((x) => x && x.id && text(x.name, 80) === plan.name);
       if (have) { feed(`The company "${plan.name}" was already in Paperclip. Nothing was sent.`); return { ok: true, id: String(have.id), name: plan.name, existed: true }; }
     }
+    if (plan.preflight) {
+      // A write that asks Paperclip for a preview first (a company import): its errors refuse the write, its counts are the words of the Confirm.
+      let pv;
+      try { pv = await call(conn, plan.preflight.path, { method: 'POST', body: JSON.stringify(plan.preflight.body), timeoutMs: 120000 }); }
+      catch (e) { feed(`Paperclip refused the preview: ${plan.summary}. ${e.message}`, 'wait'); throw e; }
+      const bad = shapeProblems('importPreview', pv);
+      if (bad.length) throw httpError(502, `Paperclip answered in a shape the office does not know (${bad[0]}) Update the office or the pinned Paperclip.`);
+      if (pv.errors.length) throw httpError(400, `Paperclip cannot import this file: ${text(pv.errors[0], 200)}`);
+      plan.summary = plan.summarize(pv);
+    }
     if (cell === 'confirm' && confirmed !== true) {
       throw askWrite('write', `${plan.summary} in ${name}? The office sends this one change to Paperclip and nothing else.`, { write: { kind: plan.kind, action: plan.action, summary: plan.summary } });
     }
@@ -924,7 +995,7 @@ export function createHq(deps = {}) {
     }
     let made, hireApproval = null;
     try {
-      try { made = obj(await call(conn, plan.path(conn.companyId), { method: plan.method, body: JSON.stringify(plan.body) })); }
+      try { made = obj(await call(conn, plan.path(conn.companyId), { method: plan.method, body: JSON.stringify(plan.body), timeoutMs: plan.timeoutMs })); }
       catch (e) { feed(`Paperclip refused the write: ${plan.summary}. ${e.message}`, 'wait'); throw e; }
       // A hire answers { agent, approval } (routes/agents.ts handleAgentHire, 0.3.1): approval is the board's pending hire_agent approval
       // when the company asks the board to approve new employees, else null. The employee is the agent.
@@ -951,6 +1022,10 @@ export function createHq(deps = {}) {
     if (plan.kind === 'routine' && plan.action === 'create' && !made.id) { feed(`Paperclip did not name the routine it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the routine it made.'); }
     if (plan.kind === 'access' && plan.action === 'invite' && !made.id) { feed(`Paperclip did not name the invite it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the invite it made.'); }
     if (plan.kind === 'company' && plan.action === 'create' && !made.id) { feed(`Paperclip did not name the company it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the company it made.'); }
+    if (plan.kind === 'company' && plan.action === 'import') {
+      const bad = shapeProblems('importResult', made), co = obj(made.company);
+      if (bad.length || typeof co.id !== 'string' || !co.id) { feed(`Paperclip did not name the company it imported: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the company it imported.'); }
+    }
     if (plan.kind === 'hire' && !(typeof made.id === 'string' && made.id)) { feed(`Paperclip did not name the employee it hired: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the employee it hired.'); }
     const waitsForBoard = plan.kind === 'hire' && (made.status === 'pending_approval' || !!(hireApproval && hireApproval.id));
     feed(`Wrote to ${name}: ${plan.summary}.${waitsForBoard ? ' Paperclip waits for the board to approve the hire.' : ''}`);
@@ -958,6 +1033,7 @@ export function createHq(deps = {}) {
     const out = { ok: true };
     if (plan.kind === 'company' && plan.action === 'create') { out.id = String(made.id); out.name = plan.name; out.existed = false; }
     if (plan.kind === 'hire') { out.id = String(made.id); out.name = plan.body.name; out.pendingApproval = waitsForBoard; }
+    if (plan.kind === 'company' && plan.action === 'import') { out.id = String(made.company.id); out.name = text(made.company.name, 80) || plan.name; }
     if (plan.kind === 'goal' && plan.action === 'create') out.id = String(made.id);
     if (plan.kind === 'routine' && plan.action === 'create') out.id = String(made.id);
     if (plan.kind === 'access' && plan.action === 'invite') out.id = String(made.id);
@@ -965,5 +1041,5 @@ export function createHq(deps = {}) {
     return out;
   }
 
-  return { connect, disconnect, supervise, handoffGoal, handoffTasks, write, tasksOf, access, view, model, costs, catalog, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
+  return { connect, disconnect, supervise, handoffGoal, handoffTasks, write, tasksOf, access, instance, exportCompany, view, model, costs, catalog, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
 }

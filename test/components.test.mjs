@@ -102,7 +102,7 @@ test('office.js: Needs you in the scene top bar and the city panel: the Notifier
   assert.match(office, /function goOldest\(\) \{\s+openQueueItem\(queue && queue\.oldest\);/, 'the oldest request of the one queue (#146)');
   assert.match(office, /if \(deskRef\.current && way\.id && cur2\.view === 'office' && deskRef\.current\.show\(way\.id, false\)\) return;\s+openDesk\(way\.uid, 'chat'\);/, 'the camera looks at its paper or note (#90), else the scene goes to its desk (#89)');
   assert.match(office, /if \(way\.via === 'list'\) \{ setDlg\(\{ name: 'needs' \}\); return; \}/, 'a Ready to merge decision with no desk opens the Needs you list (#93)');
-  assert.match(office, /h\(CityView, \{ key: 'city', shown: shown, onEnter: enter, needs: needs\.length, onNeeds: goOldest, onHq: function \(\) \{ setDlg\(\{ name: 'hq' \}\); \} \}\)/, 'the city too');
+  assert.match(office, /h\(CityView, \{ key: 'city', shown: shown, onEnter: enter, needs: needs\.length, onNeeds: goOldest, onHq: openHq \}\)/, 'the city too');
   assert.match(office, /p\.needs > 0 \? h\(A\.Button, \{ variant: 'emphasis', icon: 'waiting', className: 'city-needs',[^\n]*onClick: p\.onNeeds \}, 'Needs you · ' \+ p\.needs\)/);
   assert.match(css, /@media \(pointer: coarse\) \{ \.city-needs \{ min-height: 44px; \} \}/);
 });

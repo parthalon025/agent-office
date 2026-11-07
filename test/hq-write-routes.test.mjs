@@ -49,11 +49,11 @@ test('not connected: a write is 409 and nothing is sent', async () => {
   assert.equal(pc.requests.length, 0);
 });
 
-test('the grid: twelve kinds, the defaults, and no cell saved until the user sets one', async () => {
+test('the grid: thirteen kinds, the defaults, and no cell saved until the user sets one', async () => {
   const r = await get('/api/hq/grid');
   assert.equal(r.status, 200);
   assert.deepEqual(r.json.grid.map((x) => [x.kind, x.value, x.set]), [['hire', 'confirm', false], ['pause', 'confirm', false], ['budget', 'confirm', false], ['approval', 'confirm', false], ['reporting', 'confirm', false],
-    ['routine', 'confirm', false], ['access', 'confirm', false], ['secret', 'confirm', false], ['task', 'allow', false], ['comment', 'allow', false], ['company', 'confirm', false], ['goal', 'confirm', false]]);
+    ['routine', 'confirm', false], ['access', 'confirm', false], ['secret', 'confirm', false], ['task', 'allow', false], ['comment', 'allow', false], ['company', 'confirm', false], ['goal', 'confirm', false], ['instance', 'confirm', false]]);
   assert.deepEqual(r.json.grid.find((x) => x.kind === 'secret').options, ['confirm', 'deny']);
   assert.deepEqual(state().hqGrid || {}, {});
 });
@@ -149,4 +149,31 @@ test('company admin (#213): the access read and an access write are page routes 
   assert.deepEqual([yes.status, yes.json], [200, { ok: true }]);
   assert.deepEqual(writes().at(-1), ['POST', `/api/invites/${INVITE}/revoke`, {}]);
   for (const r of [await call('/api/hq/write', { kind: 'access', action: 'invite', allowedJoinTypes: 'both', confirmed: true }, agentToken), await call('/api/hq/access', null, agentToken, 'GET')]) assert.ok(r.status === 401 || r.status === 403);
+});
+
+test('company admin, the rest (#221): export, import, the instance and a second company are page routes only, and the agent token reaches none', async () => {
+  const bundle = { rootPath: 'acme', files: { 'COMPANY.md': '---\nname: Acme Labs\n---\n', 'agents/ada/AGENTS.md': 'Ada' } };
+  const inst = await get('/api/hq/instance');
+  assert.equal(inst.status, 200);
+  assert.deepEqual(inst.json.instance.environments.map((x) => x.name), ['Local', 'Build box']);
+  assert.doesNotMatch(JSON.stringify(inst.json), /do-not-show|privateKey/);
+  const exp = await call('/api/hq/company/export', {});
+  assert.equal(exp.status, 200);
+  assert.ok(exp.json.files['COMPANY.md']);
+  const n = writes().length;
+  const q = await call('/api/hq/write', { kind: 'company', action: 'import', bundle, name: 'Acme Labs' });
+  assert.equal(q.status, 409);
+  assert.equal(q.json.confirm, 'write');
+  assert.match(q.json.write.summary, /^Import "Acme Labs" as a new company \(1 employee, 0 projects, 0 tasks/);
+  assert.equal(writes().filter((w) => w[1] === '/api/companies/import').length, 0, 'the question imported nothing');
+  const yes = await call('/api/hq/write', { kind: 'company', action: 'import', bundle, name: 'Acme Labs', confirmed: true });
+  assert.equal(yes.status, 200);
+  assert.equal(yes.json.name, 'Acme Labs');
+  assert.ok(writes().length > n);
+  await until(async () => ((await get('/api/paperclip')).json.hq?.others || []).length === 1, 'the second company in the HQ view');
+  assert.deepEqual((await get('/api/paperclip')).json.hq.others.map((x) => x.name), ['Acme Labs']);
+  const set = await call('/api/hq/write', { kind: 'instance', action: 'general', censorUsernameInLogs: true });
+  assert.equal(set.status, 409);
+  for (const r of [await call('/api/hq/company/export', {}, agentToken), await call('/api/hq/instance', null, agentToken, 'GET'),
+    await call('/api/hq/write', { kind: 'company', action: 'import', bundle, confirmed: true }, agentToken)]) assert.ok(r.status === 401 || r.status === 403);
 });

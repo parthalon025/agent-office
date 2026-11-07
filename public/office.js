@@ -31,7 +31,7 @@
       return { key: b.key, name: b.name, sessions: b.sessions, waiting: b.waiting, state: b.state, floors: def.floors.map(function (f) { return { name: f.name, key: f.key }; }), bots: bots };
     });
     var hq = hqBuilding(snap);
-    return hq ? [hq].concat(out) : out;
+    return hq ? [hq].concat(otherHqBuildings(snap), out) : out;
   }
   // Paperclip HQ (#76): its company as the first building, once the office has read it. A pip per Paperclip agent, in the
   // state Paperclip reports (hq.status: never waiting, a Paperclip approval is not an office request). It is not a repository:
@@ -48,6 +48,16 @@
     return { key: HQ_KEY, hq: true, name: q.company.name, sub: 'HQ · ' + plural(q.agents.length, 'agent', 'agents') + (money ? ' · ' + money : ''),
       line: (q.state === 'on' ? 'Paperclip HQ' : 'Paperclip HQ, not live') + ' · ' + (H.glance(q) || plural(q.agents.length, 'agent', 'agents') + (q.budget ? ' · ' + H.budget(q.budget) : '')),
       sessions: 0, waiting: 0, live: q.state === 'on', floors: floors.map(function (f) { return { name: f.name, key: f.key }; }), bots: bots };
+  }
+  // More than one company (#221): each other company of the connected Paperclip is its own HQ building of the campus, with no floors read.
+  // A click makes it the watched company (the office reads one company at a time) and opens its HQ.
+  function otherHqBuildings(snap) {
+    var q = snap && snap.hq;
+    if (!q || !q.company || !q.others || !q.others.length) return [];
+    return q.others.map(function (o) {
+      return { key: HQ_KEY + ':' + o.id, hq: true, companyId: o.id, name: o.name, sub: 'HQ · another company', line: 'Another company in this Paperclip. Open it to watch it.',
+        sessions: 0, waiting: 0, live: false, floors: [{ name: 'HQ', key: 'hq' }], bots: [] };
+    });
   }
   // The themes come from the DS (AgentOffice.MODES); the page keeps no copy of the list and names no theme. With no theme set,
   // the first theme whose dark flag matches the system scheme (the DS engine reads the system scheme the same way).
@@ -79,7 +89,7 @@
     var list = snap ? cityData(snap) : [];
     useEffect(function () {
       if (!window.OfficeCity) return undefined;
-      city.current = window.OfficeCity.mount(ref.current, { root: document.documentElement, onHover: setHov, onPick: function (d) { if (d.hq) p.onHq(); else p.onEnter(d.key, city.current); } });
+      city.current = window.OfficeCity.mount(ref.current, { root: document.documentElement, onHover: setHov, onPick: function (d) { if (d.hq) p.onHq(d.companyId); else p.onEnter(d.key, city.current); } });
       return function () { if (city.current) city.current.dispose(); city.current = null; };
     }, []);
     useEffect(function () {
@@ -101,7 +111,7 @@
     // Ctrl+K in the city: the page's own actions (they include Go to each building), the theme, and the city view.
     var palActions = A.CommandPalette.actions({ setMode: function (m) { if (city.current) city.current.setMode(m); } })
       .filter(function (a) { return a.id.indexOf('page-b-') !== 0 && a.id.indexOf('page-s-go-') !== 0 && a.id !== 'page-city'; })   // the page's Go to only picks the building, and the bot rows already go to a session
-      .concat(list.map(function (b) { return b.hq ? { id: 'city-hq', label: 'Open Paperclip HQ', icon: 'hq', group: 'Buildings', keywords: 'paperclip hq company agents budget heartbeats routines ' + b.name, run: p.onHq }
+      .concat(list.map(function (b) { return b.hq ? { id: 'city-hq' + (b.companyId ? ':' + b.companyId : ''), label: b.companyId ? 'Open the HQ of ' + b.name : 'Open Paperclip HQ', icon: 'hq', group: 'Buildings', keywords: 'paperclip hq company agents budget heartbeats routines ' + b.name, run: function () { p.onHq(b.companyId); } }
         : { id: 'city-go-' + b.key, label: 'Go to ' + b.name, icon: 'building', group: 'Buildings', keywords: 'building repository ' + b.name, run: function () { p.onEnter(b.key, city.current); } }; }))
       .concat([{ id: 'city-fit', label: 'Show all buildings', icon: 'building', group: 'City', run: function () { if (city.current) city.current.fit(false); } }]);
     return h('div', { className: 'city' },
@@ -116,7 +126,7 @@
           !list.length ? h(A.EmptyState, { icon: 'building', compact: true, title: 'No buildings yet', text: 'Open a session in a git repository to add its building.' }) : null,
           h('ul', { className: 'city-list' }, list.map(function (b) {
             return h('li', { key: b.key },
-              h('button', { type: 'button', className: 'city-row' + (b.key === p.shown ? ' is-shown' : '') + (hov && hov.key === b.key ? ' is-hover' : '') + (b.hq ? ' is-hq' : ''), onClick: function () { if (b.hq) p.onHq(); else p.onEnter(b.key, city.current); } },
+              h('button', { type: 'button', className: 'city-row' + (b.key === p.shown ? ' is-shown' : '') + (hov && hov.key === b.key ? ' is-hover' : '') + (b.hq ? ' is-hq' : ''), onClick: function () { if (b.hq) p.onHq(b.companyId); else p.onEnter(b.key, city.current); } },
                 h('span', { className: 'city-main' },
                   h('span', { className: 'city-name' }, b.hq ? h(A.Icon, { name: 'hq', size: 14, label: 'Paperclip HQ' }) : null, b.name),
                   h('span', { className: 'city-sub mono' }, b.hq ? b.line : plural(b.floors.length, 'floor', 'floors') + ' · ' + plural(b.sessions, 'session', 'sessions')),
@@ -165,6 +175,13 @@
     var sy = useState(false), syl = sy[0], setSyl = sy[1];
     // Toasts (toasts.js): an error or a toast with an action stays until closed; the others close after 8 s, and wait while the pointer or focus is on them, or while the stack has no room (is-off).
     var tt = useState([]), toasts = tt[0], setToasts = tt[1], tid = React.useRef(0), toastBox = React.useRef(null);
+    // The HQ dialog; with a company id (a building of another company of the Paperclip, #221) the office first watches that company.
+    function openHq(companyId) {
+      var q = latestSnap.current && latestSnap.current.hq;
+      if (!companyId || !q || !q.url) { setDlg({ name: 'hq' }); return; }
+      O.client.paperclipConnect({ url: q.url, company: companyId }).then(function () { setDlg({ name: 'hq' }); },
+        function (x) { toast({ tone: 'error', title: 'Company not opened', text: x.message }); });
+    }
     function toast(t) {
       var id = ++tid.current;
       if (t.action) {   // a click on the action closes its toast
@@ -566,7 +583,7 @@
     }, [cur2.view]);
     // notifier: false: the page runs the one Notifier (alerts and the tab title for every building, below).
     // Since you left shows on every scene: the adapter seeds the state it sends again, so the card counts only news.
-    var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter, needs: needs.length, onNeeds: goOldest, onHq: function () { setDlg({ name: 'hq' }); } }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: mount.adapter, floor: cur2.floor == null ? undefined : cur2.floor, height: win.h, quality: 'auto', intro: intro, editable: false, simulate: false, toasts: false,
+    var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter, needs: needs.length, onNeeds: goOldest, onHq: openHq }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: mount.adapter, floor: cur2.floor == null ? undefined : cur2.floor, height: win.h, quality: 'auto', intro: intro, editable: false, simulate: false, toasts: false,
       inbox: inbox, onInbox: setInbox, notifier: false, onSinceYouLeft: setSyl, floorsTitle: 'Elevator',
       // Needs you in the top bar, at every width (#92 review: with no dock, a request in another building showed only in the tab title)
       waitingCount: needs.length, onWaiting: goOldest,

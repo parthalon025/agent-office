@@ -28,6 +28,13 @@ export const SHAPES = {
   invites: { list: false, fields: { invites: 'array' } },
   joinRequests: { list: true, fields: { id: 'string', status: 'string', requestType: 'string' } },
   members: { list: false, fields: { members: 'array' } },
+  // Company admin, the rest (#221): the instance settings (routes/instance-settings.ts: the default environment and the general settings), the
+  // instance's environments (routes/environments.ts), the export bundle of a company (routes/companies.ts) and what an import answers.
+  instanceSettings: { list: false, fields: { id: 'string', defaultEnvironmentId: 'string?', general: 'object' } },
+  environments: { list: true, fields: { id: 'string', name: 'string', driver: 'string', status: 'string' } },
+  exportBundle: { list: false, fields: { rootPath: 'string', manifest: 'object', files: 'object' } },
+  importPreview: { list: false, fields: { plan: 'object', warnings: 'array', errors: 'array' } },
+  importResult: { list: false, fields: { company: 'object' } },
 };
 
 const typeOf = (v) => (v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v);
@@ -189,6 +196,7 @@ export const WRITE_KINDS = {
   comment: { label: 'Comments', options: RULES, def: 'allow' },
   company: { label: 'Company', options: RULES, def: 'confirm' },
   goal: { label: 'Goals', options: RULES, def: 'confirm' },
+  instance: { label: 'Instance and environments', options: RULES, def: 'confirm' },
 };
 const kindRow = (k) => (typeof k === 'string' && Object.hasOwn(WRITE_KINDS, k) ? WRITE_KINDS[k] : null);
 const gridError = (status, message) => Object.assign(new Error(message), { status });
@@ -240,6 +248,8 @@ export const GOAL_STATUSES = ['planned', 'active', 'achieved', 'cancelled'], GOA
 const ROUTINE_STATUS = ['active', 'paused', 'archived'];
 const CRON_RE = /^[0-9*/,\-A-Za-z ]+$/, TZ_RE = /^[A-Za-z][A-Za-z0-9_+\-/]{0,63}$/;
 const JOIN_TYPES = ['human', 'agent', 'both'], HUMAN_ROLES = ['owner', 'admin', 'operator', 'viewer'], MEMBER_STATUS = ['pending', 'active', 'suspended'];
+export const FEEDBACK_SHARING = ['allowed', 'not_allowed', 'prompt'], ENVIRONMENT_STATUS = ['active', 'archived'];
+export const IMPORT_FILES_MAX = 2000, IMPORT_BYTES_MAX = 10 * 1024 * 1024, EXPORT_INCLUDES = ['company', 'agents', 'projects', 'issues', 'skills'];
 const TITLE_MAX = 200, TEXT_MAX = 10000, NOTE_MAX = 2000, DESC_MAX = 4000, NAME_MAX = 80, COMPANY_DESC_MAX = 300;
 const short = (t, n = 80) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 function idOf(v, what) {
@@ -369,6 +379,50 @@ const PLANS = {
       if (typeof b.url !== 'string' || !b.url) throw gridError(400, 'Give the Paperclip address.');
       return { method: 'POST', path: () => '/api/companies', body: { name, description }, targets: [], scope: 'none', url: b.url, name, summary: `Create the company "${short(name)}"` };
     },
+  // Company import (#221): a bundle from a company export, as a NEW company (Paperclip: routes/companies.ts POST /import, instance admin only).
+  // Never the replace strategy, never secret values or adapter overrides (those stay in Paperclip), and imported routines start paused. The
+  // writer first asks Paperclip for a preview (POST /import/preview, no change made): its errors refuse the write, and its counts are the
+  // words of the Confirm. The bundle is checked here: a list of files (text or base64), no path that leaves the bundle, and a size limit.
+  import(b) {
+    const bundle = b.bundle;
+    if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle) || !bundle.files || typeof bundle.files !== 'object' || Array.isArray(bundle.files)) throw gridError(400, 'Give the company export file.');
+    const names = Object.keys(bundle.files);
+    if (!names.length) throw gridError(400, 'The company export has no files.');
+    if (names.length > IMPORT_FILES_MAX) throw gridError(400, `The company export has too many files (at most ${IMPORT_FILES_MAX}).`);
+    let size = 0;
+    const files = {};
+    for (const n of names) {
+      if (!n || n.length > 400 || n.startsWith('/') || n.includes('\\') || n.includes('\0') || n.split('/').some((x) => x === '..')) throw gridError(400, 'A file name in the company export is not valid.');
+      const v = bundle.files[n];
+      if (typeof v === 'string') { size += v.length; files[n] = v; }
+      else if (v && typeof v === 'object' && v.encoding === 'base64' && typeof v.data === 'string') { size += v.data.length; files[n] = { encoding: 'base64', data: v.data, ...(typeof v.contentType === 'string' && v.contentType ? { contentType: v.contentType.slice(0, 100) } : {}) }; }
+      else throw gridError(400, 'A file in the company export is not text or base64.');
+    }
+    if (size > IMPORT_BYTES_MAX) throw gridError(413, 'The company export is too large (at most 10 MB).');
+    const rootPath = typeof bundle.rootPath === 'string' && bundle.rootPath ? bundle.rootPath.slice(0, 200) : null;
+    const name = textOf(b.name, 'company name', NAME_MAX);
+    const source = { type: 'inline', rootPath, files, expectedFileCount: names.length };
+    const target = { mode: 'new_company', ...(name ? { newCompanyName: name } : {}) };
+    let include;
+    if (b.include !== undefined && b.include !== null) {
+      if (typeof b.include !== 'object' || Array.isArray(b.include)) throw gridError(400, 'Choose what to import.');
+      include = {};
+      for (const k of EXPORT_INCLUDES) if (b.include[k] !== undefined) { if (typeof b.include[k] !== 'boolean') throw gridError(400, 'Choose what to import.'); include[k] = b.include[k]; }
+    }
+    const base = { source, target, collisionStrategy: 'rename', ...(include ? { include } : {}) };
+    const front = Object.keys(files).find((n) => n === 'COMPANY.md' || n.endsWith('/COMPANY.md')), fromFile = front && typeof files[front] === 'string' ? (/^name:\s*["']?(.+?)["']?\s*$/m.exec(files[front]) || [])[1] : '';
+    const label = name || (bundle.manifest && typeof bundle.manifest === 'object' && bundle.manifest.source && typeof bundle.manifest.source.companyName === 'string' ? bundle.manifest.source.companyName : '') || fromFile || 'a company';
+    const count = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+    return {
+      method: 'POST', path: () => '/api/companies/import', body: { ...base, pauseAutomations: true }, targets: [], name, timeoutMs: 120000,
+      preflight: { path: '/api/companies/import/preview', body: base },
+      summarize: (pv) => {
+        const pl = pv && pv.plan && typeof pv.plan === 'object' ? pv.plan : {}, n = (x) => (Array.isArray(x) ? x.length : 0);
+        return `Import "${short(String(label), 60)}" as a new company (${count(n(pl.agentPlans), 'employee')}, ${count(n(pl.projectPlans), 'project')}, ${count(n(pl.issuePlans), 'task')}; routines start paused)`;
+      },
+      summary: `Import "${short(String(label), 60)}" as a new company`,
+    };
+  },
     // Company settings (#213): name, description and whether a new employee needs the board's approval. One PATCH of the connected company.
     update(b) {
       const body = {};
@@ -418,6 +472,33 @@ const PLANS = {
       if (b.status !== undefined && b.status !== null) { if (!MEMBER_STATUS.includes(b.status)) throw gridError(400, 'Choose a status: pending, active or suspended.'); body.status = b.status; }
       if (!Object.keys(body).length) throw gridError(400, 'Give a role or a status.');
       return { method: 'PATCH', path: (co) => `/api/companies/${encodeURIComponent(co)}/members/${member}`, body, targets: [{ type: 'member', id: member }], summary: `Change the access of a member${body.membershipRole ? ` to ${body.membershipRole}` : ''}${body.status ? ` (${body.status})` : ''}` };
+    },
+  },
+  // Instance and environments (#221, owner only: Paperclip needs an instance admin for each). The office changes only what it can show and
+  // undo: the two general settings, one environment's name, description and status, and the instance's default environment. It makes and
+  // deletes no environment (a sandbox, an ssh host or a plugin: those hold credentials and leases) and never sends a config or env value.
+  instance: {
+    general(b) {
+      const body = {};
+      if (b.censorUsernameInLogs !== undefined) { if (typeof b.censorUsernameInLogs !== 'boolean') throw gridError(400, 'Hiding the user name must be on or off.'); body.censorUsernameInLogs = b.censorUsernameInLogs; }
+      if (b.feedbackDataSharingPreference !== undefined) { if (!FEEDBACK_SHARING.includes(b.feedbackDataSharingPreference)) throw gridError(400, 'Choose: allowed, not allowed or ask each time.'); body.feedbackDataSharingPreference = b.feedbackDataSharingPreference; }
+      if (!Object.keys(body).length) throw gridError(400, 'Give a setting to change.');
+      const what = [body.censorUsernameInLogs !== undefined && 'user name in logs', body.feedbackDataSharingPreference !== undefined && 'feedback sharing'].filter(Boolean).join(', ');
+      return { method: 'PATCH', path: () => '/api/instance/settings/general', body, targets: [], summary: `Change the Paperclip instance settings (${what})` };
+    },
+    defaultEnvironment(b) {
+      const none = b.environment === undefined || b.environment === null || b.environment === '';
+      const env = none ? null : idOf(b.environment, 'environment');
+      return { method: 'PATCH', path: () => '/api/instance/settings', body: { defaultEnvironmentId: env }, targets: env ? [{ type: 'environment', id: env }] : [], summary: env ? 'Set the default environment' : 'Clear the default environment' };
+    },
+    environment(b) {
+      const environment = idOf(b.environment, 'environment'), body = {};
+      if (b.name !== undefined) body.name = textOf(b.name, 'environment name', NAME_MAX, { required: true });
+      if (b.description !== undefined) body.description = b.description === null ? null : textOf(b.description, 'description', DESC_MAX);
+      if (b.status !== undefined) { if (!ENVIRONMENT_STATUS.includes(b.status)) throw gridError(400, 'Choose a status: active or archived.'); body.status = b.status; }
+      if (!Object.keys(body).length) throw gridError(400, 'Give something to change.');
+      const what = body.status && Object.keys(body).length === 1 ? (body.status === 'archived' ? 'Archive an environment' : 'Restore an environment') : 'Change an environment';
+      return { method: 'PATCH', path: () => `/api/environments/${environment}`, body, targets: [{ type: 'environment', id: environment }], summary: what };
     },
   },
   // A reporting line (#202): PATCH { reportsTo } of one agent (manager null: no manager). review(org) reads the org chart the writer holds:

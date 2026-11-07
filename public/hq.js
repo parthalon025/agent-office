@@ -516,6 +516,144 @@
             })]);
   }
 
+  // The Confirm of a write that waits for the user (#221): a bar with the exact words of the change. It scrolls into view when it appears,
+  // because it sits under a long form in a scrolling dialog (a phone shows one screen of it).
+  function ConfirmBar(p) {
+    var ref = React.useRef(null);
+    useEffect(function () { if (ref.current && ref.current.scrollIntoView) ref.current.scrollIntoView({ block: 'nearest' }); }, []);
+    return h('div', { ref: ref, className: 'past-actions' },
+      h(A.Button, { variant: 'primary', icon: 'approve', loading: p.busy, disabled: p.busy, onClick: p.onConfirm }, 'Confirm: ' + p.text),
+      h(A.Button, { variant: 'quiet', onClick: p.onCancel }, 'Cancel'));
+  }
+  function download(name, text) {
+    var url = URL.createObjectURL(new Blob([text], { type: 'application/json;charset=utf-8' }));
+    var a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  }
+
+  // Company export and import (#221), next to the office setup export of Agent characters. Export is a read of Paperclip: the file holds no
+  // secret value and the office keeps no copy. Import makes a NEW company (one write of the grid's Company cell, behind a painted Confirm that
+  // names what the file holds): its routines start paused, and the company shows as another building of the city when it exists.
+  var IMPORT_MAX = 10 * 1024 * 1024;
+  function Portability(p) {
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var ps = useState(null), pend = ps[0], setPend = ps[1];      // { body, text }: the import that waits for its Confirm
+    var er = useState(''), err = er[0], setErr = er[1];
+    var nm = useState(''), name = nm[0], setName = nm[1];
+    var fileRef = React.useRef(null);
+    function doExport() {
+      setBusy(true); setErr('');
+      client.send('hqCompanyExport', {}).then(function (j) {
+        setBusy(false);
+        var file = String(p.company || 'company').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') + '-export.json';
+        download(file, JSON.stringify({ rootPath: j.rootPath, manifest: j.manifest, files: j.files }, null, 1));
+        p.toast({ tone: 'success', title: 'Company exported', text: file + ' holds no secret value.' });
+      }, function (x) { setBusy(false); setErr(x.message); });
+    }
+    function ask(body, confirmed) {
+      setBusy(true); setErr('');
+      return client.send('hqWrite', Object.assign({}, body, confirmed ? { confirmed: true } : {})).then(function (r) {
+        setBusy(false); setPend(null);
+        p.toast({ tone: 'success', title: 'Company imported', text: (r.name || 'The company') + ' is a new building in the city.' });
+      }, function (x) {
+        setBusy(false);
+        if (!confirmed && x.status === 409 && x.body && x.body.write) setPend({ body: body, text: x.body.write.summary });
+        else { setPend(null); setErr(x.message); }
+      });
+    }
+    function pickFile(e) {
+      var f = e.target.files && e.target.files[0]; e.target.value = '';
+      if (!f) return;
+      if (f.size > IMPORT_MAX) { setErr('This file is too large. The limit is 10 MB.'); return; }
+      setErr(''); setPend(null);
+      f.text().then(function (t) {
+        var j = JSON.parse(t);
+        if (!j || typeof j !== 'object' || !j.files || typeof j.files !== 'object') throw new SyntaxError('files');
+        var src = j.manifest && j.manifest.source ? { source: j.manifest.source } : undefined;
+        var body = { kind: 'company', action: 'import', bundle: { rootPath: j.rootPath || null, manifest: src, files: j.files } };
+        if (name.trim()) body.name = name.trim();
+        return ask(body, false);
+      }).catch(function (x) { setBusy(false); setErr(x instanceof SyntaxError ? 'This file is not a company export.' : x.message); });
+    }
+    return h('div', { className: 'hq-floor', id: 'hq-portability' },
+      h('h3', { className: 'ext-h' }, 'Company export and import'),
+      h('p', { className: 'note' }, 'Export saves this company as one file: no secret value is in it, and the office keeps no copy. Import makes a new company from a file like it. Its routines start paused. Only an instance admin of Paperclip can import.'),
+      err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
+      h('div', { className: 'form' },
+        h(A.TextInput, { id: 'co-import-name', label: 'Name of the new company (optional)', value: name, onChange: setName }),
+        h('div', { className: 'inline-actions' },
+          h(A.Button, { variant: 'quiet', icon: 'copy', loading: busy && !pend, disabled: busy, onClick: doExport }, 'Export this company'),
+          h(A.Button, { variant: 'quiet', icon: 'add', disabled: busy, onClick: function () { if (fileRef.current) fileRef.current.click(); } }, 'Import a company file'),
+          h('input', { ref: fileRef, type: 'file', accept: 'application/json,.json', className: 'persona-file', 'aria-label': 'Company export file', onChange: pickFile, tabIndex: -1 })),
+        pend ? h(ConfirmBar, { key: pend.text, busy: busy, text: pend.text, onConfirm: function () { ask(pend.body, true); }, onCancel: function () { setPend(null); } }) : null));
+  }
+
+  // Instance and environments (#221), owner only, the top of the HQ: the two general settings of the whole Paperclip, its environments (name,
+  // driver and state: never a config or an env value) and the default environment. The office renames and archives an environment and sets the
+  // default; it makes and deletes none. Each change is one write of the grid's Instance cell behind a painted Confirm; Paperclip lets only an
+  // instance admin do them.
+  var SHARING = [{ value: 'prompt', label: 'Ask each time' }, { value: 'allowed', label: 'Allowed' }, { value: 'not_allowed', label: 'Not allowed' }];
+  var ON_OFF = [{ value: 'off', label: 'Show it' }, { value: 'on', label: 'Hide it' }];
+  function Instance(p) {
+    var st = useState({ inst: undefined, err: '' }), s = st[0], setS = st[1];
+    var ps = useState(null), pend = ps[0], setPend = ps[1];      // { key, body, text }
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var fm = useState({ censor: null, sharing: null, names: {} }), form = fm[0], setForm = fm[1];
+    function load() { client.get('hqInstance').then(function (j) { setS({ inst: j.instance || null, err: '' }); }, function (x) { setS({ inst: null, err: x.message }); }); }
+    useEffect(function () { load(); }, []);
+    function set(k) { return function (v) { var n = {}; n[k] = v; setForm(Object.assign({}, form, n)); }; }
+    function rename(id, v) { var n = {}; n[id] = v; setForm(Object.assign({}, form, { names: Object.assign({}, form.names, n) })); }
+    function want(key, body, text) { setPend({ key: key, body: body, text: text }); }
+    function send() {
+      setBusy(true);
+      client.send('hqWrite', Object.assign({}, pend.body, { confirmed: true })).then(function () { setBusy(false); p.toast({ tone: 'success', title: 'Done', text: pend.text }); setPend(null); setForm({ censor: null, sharing: null, names: {} }); load(); },
+        function (x) { setBusy(false); setPend(null); p.toast({ tone: 'error', title: 'Not changed', text: x.message }); });
+    }
+    function confirm(key) { return pend && pend.key === key ? h(ConfirmBar, { key: 'c' + key, busy: busy, text: pend.text, onConfirm: send, onCancel: function () { setPend(null); } }) : null; }
+    var i = s.inst, known = (i && i.known) || {};
+    var g = i && i.general, censor = form.censor || (g && g.censorUsernameInLogs ? 'on' : 'off'), sharing = form.sharing || (g && g.feedbackDataSharingPreference) || 'prompt';
+    var change = {};
+    if (g && censor !== (g.censorUsernameInLogs ? 'on' : 'off')) change.censorUsernameInLogs = censor === 'on';
+    if (g && sharing !== g.feedbackDataSharingPreference) change.feedbackDataSharingPreference = sharing;
+    var envs = i ? i.environments : [];
+    var active = envs.filter(function (e) { return e.status === 'active'; });
+    return h('div', { className: 'hq-floor', id: 'hq-instance' },
+      h('h3', { className: 'ext-h' }, 'Instance and environments'),
+      h('p', { className: 'note' }, 'These settings are for the whole Paperclip, not for one company. Only you, the owner, and an instance admin of Paperclip can change them. Each change asks first, as the write grid says (Instance and environments). The office shows no config and no env value of an environment, and it makes and deletes no environment.'),
+      s.err ? h('p', { className: 'ao-err', role: 'alert' }, 'The office could not read the instance. ' + s.err)
+        : i === undefined ? h('p', { className: 'note', role: 'status' }, 'Reading the instance.')
+        : !i ? h('p', { className: 'note' }, 'The office is not connected to Paperclip.')
+        : [
+          i.error ? h('p', { key: 'e', className: 'ao-err', role: 'alert' }, i.error) : null,
+          h('h4', { key: 'gh', className: 'ext-h' }, 'General settings'),
+          known.general === false ? h('p', { key: 'gu', className: 'note' }, 'Unknown: Paperclip did not answer.')
+            : h('div', { key: 'g', className: 'form' },
+              h(A.Select, { id: 'inst-censor', ariaLabel: 'User name in logs', options: ON_OFF, value: censor, onChange: set('censor') }),
+              h(A.Select, { id: 'inst-sharing', ariaLabel: 'Sharing of feedback data', options: SHARING, value: sharing, onChange: set('sharing') }),
+              h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'approve', disabled: !Object.keys(change).length, onClick: function () { want('gen', Object.assign({ kind: 'instance', action: 'general' }, change), 'Save the instance settings'); } }, 'Save settings')),
+              confirm('gen')),
+          h('h4', { key: 'dh', className: 'ext-h' }, 'Default environment'),
+          known.environments === false ? h('p', { key: 'du', className: 'note' }, 'Unknown: Paperclip did not answer.')
+            : h('div', { key: 'd', className: 'form' },
+              h(A.Select, { id: 'inst-default', ariaLabel: 'Default environment', options: [{ value: '', label: 'None' }].concat(active.map(function (e) { return { value: e.id, label: e.name }; })), value: form.def === undefined ? (i.defaultEnvironmentId || '') : form.def, onChange: set('def') }),
+              h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'approve', disabled: form.def === undefined || form.def === (i.defaultEnvironmentId || ''), onClick: function () { want('def', { kind: 'instance', action: 'defaultEnvironment', environment: form.def || null }, form.def ? 'Set the default environment' : 'Clear the default environment'); } }, 'Save default')),
+              confirm('def')),
+          h('h4', { key: 'eh', className: 'ext-h' }, 'Environments'),
+          known.environments === false ? null
+            : envs.length ? h('ul', { key: 'el', className: 'past' }, envs.map(function (e) {
+              var v = form.names[e.id] === undefined ? e.name : form.names[e.id], archived = e.status === 'archived';
+              return h('li', { key: e.id, className: 'past-row' },
+                h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h('b', null, e.name), h(Tag, null, e.driver), archived ? h(Tag, null, 'Archived') : null, e.isDefault ? h(Tag, null, 'Default') : null), e.description ? h('div', { className: 'past-meta' }, e.description) : null),
+                h(A.TextInput, { id: 'env-' + e.id, label: 'Name of ' + e.name, value: v, onChange: function (nv) { rename(e.id, nv); } }),
+                h('div', { className: 'past-actions' },
+                  v.trim() && v.trim() !== e.name ? h(A.Button, { variant: 'quiet', icon: 'approve', onClick: function () { want('en' + e.id, { kind: 'instance', action: 'environment', environment: e.id, name: v.trim() }, 'Rename ' + e.name); } }, 'Rename') : null,
+                  h(A.Button, { variant: 'quiet', icon: archived ? 'retry' : 'decline', onClick: function () { want('es' + e.id, { kind: 'instance', action: 'environment', environment: e.id, status: archived ? 'active' : 'archived' }, (archived ? 'Restore ' : 'Archive ') + e.name); } }, archived ? 'Restore' : 'Archive')),
+                confirm('en' + e.id), confirm('es' + e.id));
+            })) : h('p', { key: 'en', className: 'note' }, 'Paperclip has no environment.')]);
+  }
+
   // The HQ: what Paperclip says about its company. Goals, routines and company admin have their own writes (Goals, Routines, Access); the rest
   // is read only. Supervise
   // in office is on the Agents screen of a Security room, with its painted Confirm (no button here: one place for a write).
@@ -549,6 +687,8 @@
         h(MemoryPanel, { toast: p.toast }),
         h(Catalog, null),
         h(Access, { company: q.company.name, toast: p.toast }),
+        h(Portability, { company: q.company.name, toast: p.toast }),
+        h(Instance, { toast: p.toast }),
         h('h3', { className: 'ext-h' }, 'Agents'),
         q.agents.length ? h('ul', { className: 'past' }, q.agents.map(function (a) {
           var st = H.status(a), sup = H.supervision(a);
