@@ -543,3 +543,18 @@ test('the HQ Lobby words (#197): the Glance line and the dashboard cards say unk
   const u = Object.fromEntries(H.cards({ ...l, tasks: null, approvals: null, goals: null, spend: null }).map((x) => [x.key, x]));
   assert.deepEqual([u.tasks.value, u.approvals.value, u.goals.value, u.spend.value], ['Unknown', 'Unknown', 'Unknown', 'Unknown']);
 });
+
+test('the HQ in the phone list (#215): employees with their status, and what needs the user', () => {
+  const H = V.hq;
+  const a = (o) => ({ id: 'a', name: 'Ada', title: 'Engineer', role: 'engineer', status: 'idle', run: null, task: null, supervision: { state: 'supervised', label: '' }, ...o });
+  const q = { agents: [a({ id: 'a1', run: { status: 'running' }, task: { identifier: 'ACM-1', title: 'Add a route' } }), a({ id: 'a2', name: 'Bo', status: 'error' }), a({ id: 'a3', name: 'Cy', supervision: { state: 'open', label: 'Unsupervised: runs skip the office' } })],
+    lobby: { approvals: { pending: 2, items: [{ id: 'p1', kind: 'hire_agent', by: 'Ada' }, { id: 'p2', kind: 'budget', by: '' }] } } };
+  const p = H.phone(q);
+  assert.deepEqual(p.employees.map((e) => [e.id, e.mood.key, e.line]), [['a1', 'working', 'ACM-1 Add a route'], ['a2', 'error', 'No open task'], ['a3', 'resting', 'No open task']]);
+  assert.equal(p.employees[2].supervision, 'Unsupervised: runs skip the office');
+  assert.deepEqual(p.needs.map((n) => n.text), ['Approval from Ada: hire agent', 'Approval: budget', 'Bo: Last run failed']);
+  assert.deepEqual(p.needs.map((n) => n.key), ['approval:p1', 'approval:p2', 'error:a2']);
+  // unknown approvals are said, not counted as none
+  assert.equal(H.phone({ agents: [], lobby: { approvals: null } }).approvalsUnknown, true);
+  assert.deepEqual(H.phone({ agents: [], lobby: null }), { employees: [], needs: [], approvalsUnknown: false });
+});
