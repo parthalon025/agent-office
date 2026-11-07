@@ -21,7 +21,7 @@ Needs you lists every held request of every building. Approve or decline it from
 ## Requirements
 
 - Windows 11. Opening and closing sessions is written for Windows.
-- Node.js 22 or newer.
+- Node.js 24.11 or newer.
 - Claude Code 2.1.295 or newer, already signed in. The office uses your existing login. It was tested on 2.1.317.
 - Git for worktrees and the Changes view. The GitHub CLI (`gh`) for pull requests.
 

@@ -9,6 +9,7 @@ process.env.NoDefaultCurrentDirectoryInExePath = '1';
 // Second: the cloud kinds read their settings, and cloudConfig takes the token settings out of process.env, so no process the
 // office starts (a Claude Code session, a local agent's command) inherits them and no agent can print the token into the chat.
 const CLOUD = { foundry: cloudConfig(process.env, 'OFFICE_FOUNDRY'), studio: cloudConfig(process.env, 'OFFICE_COPILOTSTUDIO') };
+import './node-check.mjs'; // first import: an old Node stops here with a clear message (#192)
 import http from 'node:http';
 import net from 'node:net';
 import fs from 'node:fs';

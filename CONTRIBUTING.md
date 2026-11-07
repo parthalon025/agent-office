@@ -8,7 +8,7 @@ Thank you for helping. This page tells you how to make a change that can be merg
 - Read [CLAUDE.md](CLAUDE.md). It has the rules for each file. Extend the file that owns the concern before you add a new file.
 - Read the decision records in [docs/adr](docs/adr) before you change approvals, providers or the Security room.
 - The office has no dependencies. Do not add one without asking in an issue first.
-- The office runs on Windows first. Node.js 22 or newer is required.
+- The office runs on Windows first. Node.js 24.11 or newer is required.
 
 ## Make a change
 
