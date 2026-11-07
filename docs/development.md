@@ -22,6 +22,21 @@ npm test             # offline tests
 python kit/check.py public/index.html public/office.css public/page-core.js public/skills.js public/dialogs.js public/schedules.js public/extensions.js public/hq.js public/characters.js public/reception.js public/panels.js public/needs.js public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/persona.js public/lobby.js public/desk.js public/wheel-gate.js public/vocab.js public/scene-host.js public/building.js public/format.js public/toasts.js public/wire.js public/security.js components/bundle.css components/bundle.js kit/page.html
 ```
 
+## The Paperclip contract
+
+The office pins one Paperclip release (`PINNED` in `src/paperclip-runtime.mjs`). Check every Paperclip route, body key and word against that release, never against a guess or a newer source tree.
+
+```
+npm run paperclip:source     # downloads the pinned release into .paperclip-source/ (git-ignored, about 11 MB)
+node --test test/paperclip-contract.test.mjs
+```
+
+`test/paperclip-source.mjs` fetches three packages from the npm registry: `paperclipai` (checked against the SHA-512 in `PINNED`) and its two exact-version dependencies `@paperclipai/server` and `@paperclipai/shared` (their SHA-512 are pinned in the same file). It checks each hash before it extracts anything, keeps only the routes, the realtime socket, the validators and the types, and runs no npm and no install script. It does nothing when the right version is already there. When you move the pin, add the two new hashes (`npm view @paperclipai/server@<version> dist.integrity`).
+
+Read the routes in `.paperclip-source/server/dist/routes/*.js` (`router.get("/path", validate(someSchema), ...)`; `app.js` mounts them under `/api`; `health.js`, `companies.js` and `auth.js` have their own prefix) and the validators in `.paperclip-source/shared/dist/validators/`.
+
+`test/paperclip-contract.test.mjs` checks that every route the office sends or reads (`paperclip.mjs`, `hq-model.mjs`, `paperclip-runtime.mjs`) and every route the stand-in `test/fixtures/fake-paperclip.mjs` serves exists in the release, that the body keys of each write plan are keys of the validator on that route, that the enum words the office writes (roles, statuses, levels) are words of the release, and that the answers it reads have the fields it expects. A new Paperclip call needs a row in `SAMPLES` of that test when it is a write. Without `.paperclip-source/` the test is skipped with the command above, so a run with no network passes. CI runs `npm run paperclip:source` on the Linux job before the tests, so the contract holds there.
+
 ## Branch ports
 
 `OFFICE_PORT=branch` (and `npm run start:branch`) takes a port from the name of the current branch, in the range 4330-4399, so each worktree has its own office. The name gives a fixed sequence of 12 ports. The office takes the first free one and prints which one it took. Final browser tests of a worktree run on that port and never on 4317, which is the port of your own office. Stop an office by the process id that owns its port (`netstat -ano | findstr :<port>`, then `taskkill /PID <pid> /F`). Never stop one by image name: that would stop your other Claude Code sessions. The full rule is under `OFFICE_PORT` in [Configuration](configuration.md).

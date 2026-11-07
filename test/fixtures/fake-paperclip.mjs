@@ -146,7 +146,7 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
       if (seed.key && u.pathname !== '/api/health' && req.headers.authorization !== `Bearer ${seed.key}`) return send(res, 401, { error: 'Board access required' });
       const m = (re) => re.exec(u.pathname);
       let x;
-      if (req.method === 'GET' && u.pathname === '/api/health') return send(res, 200, seed.health || { status: 'ok', version: '2026.1023.0' });
+      if (req.method === 'GET' && u.pathname === '/api/health') return send(res, 200, seed.health || { status: 'ok', version: '2026.1106.0' });
       // create a company (routes/companies.ts: name, description).
       if (req.method === 'POST' && u.pathname === '/api/companies') {
         if (!parsed || typeof parsed.name !== 'string' || !parsed.name) return send(res, 422, { error: 'Validation error' });

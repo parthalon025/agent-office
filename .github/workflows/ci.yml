@@ -18,6 +18,8 @@ jobs:
       - name: Syntax check
         run: |
           for f in src/*.mjs src/providers/*.mjs src/integrations/openclaw-plugin/*.js public/*.js test/*.mjs test/fixtures/*.mjs; do node --check "$f"; done
+      - name: Pinned Paperclip source (the contract test reads it)
+        run: npm run paperclip:source
       - name: Tests
         run: npm test
       - name: Design system check

@@ -15,6 +15,7 @@
     "probe": "node src/probe.mjs",
     "smoke": "node test/smoke.mjs",
     "gate:jobs": "node test/core-jobs.mjs",
+    "paperclip:source": "node test/paperclip-source.mjs",
     "test": "node --import ./test/fixtures/temp-leaks.mjs --test \"test/*.test.mjs\""
   },
   "engines": { "node": ">=24.11" }
