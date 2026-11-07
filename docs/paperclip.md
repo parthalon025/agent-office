@@ -77,4 +77,17 @@ The office ships an adapter plugin for Paperclip, `agent_office` (folder `src/in
 - **Context on the desk.** The desk screen of an employee run has a **Run context** block: the wake reason, whether the session is fresh or resumed and why, the instructions file, the skills, and the share of the context window in use. The office shows only what the run carried or the session reported, and says "not reported" or "unknown" for the rest. A session is always fresh today. It says why: Paperclip saved no earlier session, it is another task, another folder, the instructions changed, or the office does not resume yet. The plugin reads these from what Paperclip passes it (`runtime.sessionParams`, `config.instructionsFilePath`, `config.paperclipRuntimeSkills`, `context.wakeReason`); the names are from Paperclip's adapter interface and are not checked against a real Paperclip.
 - **Not done yet.** The office does not install the plugin for you, a new wake starts a fresh session (no resume), and an employee is not hired on this adapter by default yet. The plugin is tested with a stand-in Paperclip host, not with a real Paperclip.
 
+## Company memory
+
+The company has one memory that its employees share. It is free and local. It stays on this PC unless you choose another adapter later.
+
+- **Where.** One SQLite file per company, in `%LOCALAPPDATA%\AgentOffice\memory\` (`memory-<port>` for an office on another port). Only you, SYSTEM and Administrators can read it. It is outside the office folder, so an update never touches it.
+- **Keyword search always works.** It needs no model and no setup. If LM Studio or Ollama runs with an embedding model loaded, search also finds meaning, and the Memory panel says which model does it. The office never loads or downloads a model. Set `OFFICE_EMBED=off` to turn the model search off.
+- **Needs Node with `node:sqlite`.** Where it is missing, memory is off and the panel says why. Runs start without memory.
+- **Where it comes from.** Every memory shows who made it: you, or an employee with its task and run. A run that ends well adds its last reply. You can add a fact in the Memory panel.
+- **What the employee sees.** At each wake, up to five matching memories go in front of the prompt, marked as notes and not instructions. They are left out when the whole prompt would pass the office message limit.
+- **What is refused.** Text that holds a secret, an instruction to ignore earlier instructions, or hidden characters is refused before it is stored (the same scan as the notes board).
+- **Forget.** The Memory panel (HQ dialog, and the Orientation step) lists, searches and forgets memories. Forget asks first.
+- **More adapters.** The store is behind one interface (`OFFICE_MEMORY_ADAPTER`). Only the built-in SQLite adapter exists today. Milvus, mem0 and a Paperclip memory adapter are not built.
+
 Related: [ADR 0005](adr/0005-paperclip-watched-not-driven.md) (the office watches Paperclip and does not drive it), [ADR 0007](adr/0007-paperclip-goal-handoff-write.md) (the goal handoff was the second write; ADR 0010 opened the write grid, see Writes from the office) and the [Manager board](manager.md).

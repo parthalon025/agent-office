@@ -70,6 +70,7 @@ export function runtimePaths({ root, env = process.env, port = 4317, home = os.h
     config: path.join(data, 'instances', INSTANCE, 'config.json'),
     pid: path.join(data, 'office-runtime.json'),
     key: path.join(base, `paperclip-board-key${tag}.json`),
+    memory: path.join(base, `memory${tag}`), // company memory (#205, memory.mjs): one SQLite file per company
   };
 }
 

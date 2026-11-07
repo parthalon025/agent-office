@@ -5,6 +5,7 @@ import http from 'node:http';
 
 export async function startFakeOpenAI({ script = [{ text: 'ok' }], models = ['fake-model'] } = {}) {
   const requests = [];
+  const embeddings = []; // the bodies of POST /v1/embeddings (a hashed bag-of-words vector per input)
   const calls = []; // every request of any kind: { method, path }, so a test can see a different endpoint
   let n = 0;
   let steps = script;
@@ -17,6 +18,16 @@ export async function startFakeOpenAI({ script = [{ text: 'ok' }], models = ['fa
       if (req.method === 'GET' && url.pathname === '/v1/models') {
         res.writeHead(200, { 'content-type': 'application/json' });
         return res.end(JSON.stringify({ object: 'list', data: models.map((m) => (typeof m === 'string' ? { id: m, object: 'model' } : { object: 'model', ...m })) }));
+      }
+      if (req.method === 'POST' && url.pathname === '/v1/embeddings') {
+        // A fake embedding: a 16-bucket hashed bag of words, so texts that share words are close. No model, deterministic.
+        let json = {};
+        try { json = JSON.parse(body || '{}'); } catch { /* keep {} */ }
+        embeddings.push(json);
+        const inputs = Array.isArray(json.input) ? json.input : [json.input];
+        const vec = (t) => { const v = new Array(16).fill(0); for (const w of String(t).toLowerCase().match(/[a-z0-9]+/g) || []) { let h = 0; for (const c of w) h = (h * 31 + c.charCodeAt(0)) >>> 0; v[h % 16] += 1; } return v; };
+        res.writeHead(200, { 'content-type': 'application/json' });
+        return res.end(JSON.stringify({ object: 'list', model: json.model, data: inputs.map((t, index) => ({ object: 'embedding', index, embedding: vec(t) })) }));
       }
       if (req.method === 'POST' && url.pathname === '/v1/chat/completions') {
         let json = {};
@@ -61,6 +72,7 @@ export async function startFakeOpenAI({ script = [{ text: 'ok' }], models = ['fa
   return {
     url: `http://127.0.0.1:${port}/v1`,
     requests,
+    embeddings,
     calls,
     /** Start the script again with new steps (a shared server, one test after another). */
     reset(next) { steps = next; n = 0; requests.length = 0; calls.length = 0; },

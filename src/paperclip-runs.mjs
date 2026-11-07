@@ -102,7 +102,8 @@ export function resultOf(s, { ok, why = '' }) {
  * createRuns(deps) -> { start, wait, cancel, tick, transcript, live }.
  * deps: open(opts) -> uid (an office session, opened as the Open dialog opens one: refusals and the cost question are thrown),
  *   send(uid, text), session(uid) -> the tracker's session or undefined, close(uid) -> promise, feed(s, kind, text), changed(),
- *   setTimer(fn, ms), clearTimer(h), now().
+ *   setTimer(fn, ms), clearTimer(h), now(), recall(company, query) -> promise of a prompt block ('' for none; company memory, #205: it never
+ *   throws), remember(company, { text, source, employee, employeeId, task, run }) -> promise (what a finished run learned; a refusal is ignored).
  */
 export function createRuns(deps) {
   const setTimer = deps.setTimer || ((fn, ms) => { const h = setTimeout(fn, ms); h.unref?.(); return h; });
@@ -127,6 +128,10 @@ export function createRuns(deps) {
     r.done = true;
     r.result = s ? resultOf(s, { ok, why }) : { ok: false, error: clip(why, 500), uid: r.uid, provider: null, model: null, sessionId: null, summary: null, turns: 0, cost: null, costUnknown: true, usage: null };
     r.doneAt = now();
+    // Company memory (#205): what a run that ended well said last is kept, with where it came from. The scan refuses what it must (ignored).
+    if (ok && r.result.summary && r.agent?.company && deps.remember) {
+      Promise.resolve(deps.remember(r.agent.company, { text: clip(r.result.summary, 600), source: 'run', employee: r.agent.name, employeeId: r.agent.id, task: r.task, run: r.key })).catch(() => {});
+    }
     push(r, ok ? 'stdout' : 'stderr', ok ? '[agent-office] The run finished.' : `[agent-office] The run failed: ${r.result.error}`);
     // The session ends with its run. Its record stays in Past sessions; a session the user closed first is already gone.
     if (s && s.status !== 'ended') Promise.resolve().then(() => deps.close(r.uid)).catch(() => {});
@@ -186,12 +191,18 @@ export function createRuns(deps) {
     // The ids of a Paperclip run label the bot (paperclip.mjs labelOf) and name its Paperclip task, as for a run that comes in by hooks.
     const desk = deskOf(x.context, x);
     s.paperclip = { agent: x.agent.id, company: x.agent.company, run: x.runId.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 80), ...(x.task ? { task: x.task } : {}), ...(desk ? { desk } : {}) };
-    const r = { key: x.runId, uid, log: [], base: 0, done: false, result: null, doneAt: 0, waiters: new Set(), timer: null, seen: { reply: 0, calls: new Set(), failed: new Set(), asks: new Set() } };
+    const r = { key: x.runId, uid, log: [], base: 0, done: false, result: null, doneAt: 0, waiters: new Set(), timer: null, agent: x.agent, task: x.task, seen: { reply: 0, calls: new Set(), failed: new Set(), asks: new Set() } };
     runs.set(r.key, r);
     s.paperclipRun = true; // the desk screen shows this session's transcript (#211)
     push(r, 'stdout', `[agent-office] ${x.kind} opened for ${x.agent.name} in ${x.cwd}. Its calls follow the Security room.`);
     deps.feed?.(s, 'start', `a Paperclip run for ${x.agent.name} (run ${x.runId}): the office supervises its calls`);
-    try { deps.send(uid, x.prompt); } catch (e) {
+    // Company memory (#205): a few matching memories go in front of the prompt, only while the whole text fits the office message limit.
+    let prompt = x.prompt;
+    if (deps.recall && x.agent.company) {
+      const block = await deps.recall(x.agent.company, x.prompt.slice(0, 500));
+      if (block && block.length + 2 + prompt.length <= PROMPT_MAX) prompt = `${block}\n\n${prompt}`;
+    }
+    try { deps.send(uid, prompt); } catch (e) {
       finish(r, s, false, `The office could not send the prompt: ${e.message}`);
       throw httpError(e.status || 500, e.message);
     }

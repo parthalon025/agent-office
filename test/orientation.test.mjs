@@ -4,9 +4,9 @@ import assert from 'node:assert/strict';
 import { STEPS, cleanOrientation, mark, view } from '../src/orientation.mjs';
 import { createState } from '../src/state.mjs';
 
-test('the steps run in the order of the issue; only memory is a placeholder', () => {
+test('the steps run in the order of the issue; no step is a placeholder any more', () => {
   assert.deepEqual(STEPS.map((s) => s.id), ['kinds', 'security', 'spend', 'startup', 'remote', 'company', 'memory', 'tour']);
-  assert.deepEqual(STEPS.filter((s) => s.later).map((s) => s.id), ['memory']);
+  assert.deepEqual(STEPS.filter((s) => s.later).map((s) => s.id), [], 'every step is real since company memory (#205)');
   for (const s of STEPS) assert.ok(s.title && s.text, s.id);
 });
 

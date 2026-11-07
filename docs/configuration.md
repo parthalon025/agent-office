@@ -31,5 +31,7 @@ The office reads these environment variables when it starts. Set them before `np
 | `OFFICE_RATE_FILE` | `~/.claude/rate_limits_state.json` | The file with Claude Code's `rate_limits` that the weekly limit meter reads. Without the file the meter stays hidden. |
 | `OFFICE_EXPLAIN` | on | `off` stops the one-line explanation that a local model adds to a waiting request. The explanation only informs: the raw command always shows next to it. |
 | `OFFICE_EXPLAIN_MODEL` | first chat model of the first ready local server | The model that writes those explanations. |
+| `OFFICE_EMBED` | on | `off` stops the embedding model that makes company memory search find meaning. Keyword search still works. |
+| `OFFICE_MEMORY_ADAPTER` | `sqlite` | The company memory store. Only `sqlite` (built in) exists. |
 | `OFFICE_FLOOR_MIN_AGE_MS` | one hour | How old a floor must be before **Clean up unused floors** offers it. |
 | `OFFICE_REMOTE_HOST`, `OFFICE_REMOTE_TEAM`, `OFFICE_REMOTE_AUD`, `OFFICE_REMOTE_EMAILS`, `OFFICE_REMOTE_PORT` | none | Remote access. All four of the first four are needed. See [Remote access](remote-access.md). |
