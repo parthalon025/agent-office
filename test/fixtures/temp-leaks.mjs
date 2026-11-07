@@ -36,6 +36,10 @@ syncBuiltinESMExports();
 const realHome = path.join(os.homedir(), '.agent-office');
 const listing = (d) => { try { return new Set(fs.readdirSync(d)); } catch { return new Set(); } };
 const homeBefore = new Map([[realHome, listing(realHome)], [path.join(realHome, 'worktrees'), listing(path.join(realHome, 'worktrees'))]]);
+// Third line: the page files, Paperclip data folders and board key files live in the real %LOCALAPPDATA%\AgentOffice (auth.mjs pageFile,
+// paperclip-runtime.mjs runtimePaths). A test must point LOCALAPPDATA at its own folder; a new entry there is a leak.
+const realLocal = process.env.LOCALAPPDATA ? path.join(process.env.LOCALAPPDATA, 'AgentOffice') : null;
+const localBefore = realLocal ? listing(realLocal) : new Set();
 const roomsDir = realSync(path.join(tmp, 'ao-rooms-'));
 process.env.OFFICE_ROOMS_DIR = roomsDir;
 
@@ -44,8 +48,9 @@ process.on('exit', () => {
   try { fs.rmSync(roomsDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }); } catch { /* reported below */ }
   const homeLeft = [];
   for (const [dir, before] of homeBefore) for (const n of listing(dir)) if (!before.has(n)) homeLeft.push(path.join(dir, n));
+  if (realLocal) for (const n of listing(realLocal)) if (!localBefore.has(n)) homeLeft.push(path.join(realLocal, n));
   if (roomsLeft.size || homeLeft.length) {
-    const lines = [...[...roomsLeft].map((n) => path.join(roomsDir, n)), ...homeLeft.map((n) => `${n} (real home folder, not removed)`)];
+    const lines = [...[...roomsLeft].map((n) => path.join(roomsDir, n)), ...homeLeft.map((n) => `${n} (real user data folder, not removed)`)];
     fs.writeSync(2, `room leak: ${process.argv[1] || 'test'} left ${lines.length} room folder(s):
 ${lines.map((d) => `  ${d}
 `).join('')}`);

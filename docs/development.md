@@ -11,6 +11,8 @@ npm run probe        # prove HTTP hooks on this Claude Code version (one tiny ca
 npm run smoke        # open real Haiku sessions in a throwaway repo (a few cents); the office must be running
 npm run gate:jobs    # count the steps of the five core jobs in a headless browser (no paid call)
 npm test             # offline tests
+npm run test:junction # Windows: the room and floor tests with TEMP behind a junction
+npm run check:merge  # the merge checklist in one run (see below)
 ```
 
 - `npm test` passes a quoted glob to `node --test`, which Node reads only from version 21 on. The office needs Node 24.11 or newer (the minimum of Paperclip). `src/node-check.mjs` stops an older Node at start.
@@ -21,6 +23,12 @@ npm test             # offline tests
 ```
 python kit/check.py public/index.html public/office.css public/page-core.js public/skills.js public/dialogs.js public/schedules.js public/extensions.js public/hq.js public/characters.js public/reception.js public/panels.js public/needs.js public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/persona.js public/lobby.js public/desk.js public/wheel-gate.js public/vocab.js public/scene-host.js public/building.js public/format.js public/toasts.js public/wire.js public/security.js components/bundle.css components/bundle.js kit/page.html
 ```
+
+## Test guards and the merge check
+
+- `test/fixtures/temp-leaks.mjs` (loaded by `npm test` in every test process) fails a process that leaves a temp folder, a room under `OFFICE_ROOMS_DIR`, a new entry under the real `~/.agent-office`, or a new entry under the real `%LOCALAPPDATA%\AgentOffice` (page files, Paperclip data folders, board key files). A test must point `LOCALAPPDATA` at its own folder.
+- `npm run test:junction` (Windows only) runs the room, floor, campus and place tests with `TEMP` and `TMP` behind a junction to a fresh folder, as on GitHub's Windows runner, where TEMP is an 8.3 short path. It removes the junction after.
+- `npm run check:merge` runs the merge checklist and prints one line per step: `node --check` on the files changed against the merge-base with `origin/main` (`--base <ref>` to change it), `kit/check.py` with the file list read from `.github/workflows/ci.yml`, `npm test` twice, `test:junction` and `gate:jobs`. It exits 1 when any step fails and takes about 5 minutes. Linux is left to the ubuntu job of CI.
 
 ## Branch ports
 
