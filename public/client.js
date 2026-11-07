@@ -33,7 +33,7 @@
     startup: '/api/startup', teamDelete: '/api/team/delete', teamSave: '/api/team/save', teamStart: '/api/team/start',
     templateDelete: '/api/template/delete', templateSave: '/api/template/save', tree: '/api/tree', trustApply: '/api/trust/apply',
     trustDismiss: '/api/trust/dismiss', trustWithdraw: '/api/trust/withdraw', worktreeRemove: '/api/worktree/remove',
-    hqCosts: '/api/hq/costs',
+    hqCosts: '/api/hq/costs', hqHire: '/api/hq/hire', hqHireDesk: '/api/hq/hire-desk',
     events: '/events', launch: '/launch', signin: '/remote/signin'
   });
   var ACCESS = { auth: 1, launch: 1, signin: 1 };   // how the page gets ready: they never wait for it

@@ -98,7 +98,7 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
   const st = { companies: structuredClone(seed.companies || []), agents: structuredClone(seed.agents || []), issues: structuredClone(seed.issues || []), routines: structuredClone(seed.routines || []), projects: structuredClone(seed.projects || []), liveRuns: structuredClone(seed.liveRuns || []),
     goals: structuredClone(seed.goals || []), approvals: structuredClone(seed.approvals || []), activity: structuredClone(seed.activity || []), costs: structuredClone(seed.costs || null), secrets: structuredClone(seed.secrets || []), costMonths: structuredClone(seed.costMonths || {}), budgets: structuredClone(seed.budgets || null) };
   const requests = [], sockets = new Set();
-  const api = { afterPatch: null, failIssueAfter: null, created: 0, comments: 0 };   // set by a test: runs right after a PATCH is answered (a change made in Paperclip at the same time)
+  const api = { afterPatch: null, failIssueAfter: null, created: 0, comments: 0, hires: [] };   // set by a test: runs right after a PATCH is answered (a change made in Paperclip at the same time)
   let seq = 0;
   const send = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
   function emit(type, payload, companyId = st.companies[0]?.id) {
@@ -199,6 +199,17 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/live-runs$/))) return send(res, 200, st.liveRuns);
       // the agent as saved, with what buildAgentDetail adds (routes/agents.ts; the board reads the whole config)
       if (req.method === 'GET' && (x = m(/^\/api\/agents\/([^/]+)$/))) { const a = st.agents.find((y) => y.id === x[1]); return a ? send(res, 200, { ...a, chainOfCommand: [], access: {} }) : send(res, 404, { error: 'Agent not found' }); }
+      // hire an employee (#201, routes/agents.ts agent-hires, createAgentHireSchema 0.3.1: name, role, adapterType, adapterConfig, reportsTo,
+      // budgetMonthlyCents, desiredSkills). Answers the agent row, as Paperclip does. api.hires lists what was sent.
+      if (req.method === 'POST' && (x = m(/^\/api\/companies\/([^/]+)\/agent-hires$/))) {
+        if (!parsed || typeof parsed.name !== 'string' || !parsed.name || typeof parsed.adapterType !== 'string') return send(res, 422, { error: 'Validation error' });
+        if (parsed.reportsTo && !st.agents.some((y) => y.id === parsed.reportsTo)) return send(res, 422, { error: 'Manager not found' });
+        const n = st.agents.length + 1;
+        const a = { id: `a4000000-0000-4000-8000-${String(n).padStart(12, '0')}`, companyId: x[1], status: 'idle', title: null, reportsTo: null, budgetMonthlyCents: 0, spentMonthlyCents: 0, adapterConfig: {}, runtimeConfig: {}, ...parsed, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+        st.agents.push(a); api.hires.push(parsed);
+        emit('activity.logged', { actorType: 'user', actorId: 'board', action: 'agent.hired', entityType: 'agent', entityId: a.id, agentId: null, runId: null, details: {} }, a.companyId);
+        return send(res, 201, a);
+      }
       if (req.method === 'PATCH' && (x = m(/^\/api\/agents\/([^/]+)$/))) {
         const a = st.agents.find((y) => y.id === x[1]);
         if (!a) return send(res, 404, { error: 'Agent not found' });

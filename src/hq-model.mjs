@@ -198,6 +198,7 @@ export function setWriteCell(grid, change) {
 // (issue, approval, agent): it must belong to the connected company. Only the first writes are planned: task (create, assign), comment
 // (add), approval (approve, reject, revise), reporting (set, #202) and company (create, #199: scope 'none', it needs no connection). Another kind in the grid
 // has no plan yet, and is 400 (never sent).
+const OFFICE_ADAPTER_TYPE = 'agent_office';   // the word of OFFICE_ADAPTER in paperclip.mjs (which imports this module)
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const ISSUE_STATUS = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'];
 const TITLE_MAX = 200, TEXT_MAX = 10000, NOTE_MAX = 2000, DESC_MAX = 4000, NAME_MAX = 80, COMPANY_DESC_MAX = 300;
@@ -218,6 +219,33 @@ const decision = (action, route, summary) => [action, (b) => {
   const approval = idOf(b.approval, 'approval'), note = textOf(b.note, 'note', NOTE_MAX);
   return { method: 'POST', path: () => `/api/approvals/${approval}/${route}`, body: note ? { decisionNote: note } : {}, targets: [{ type: 'approval', id: approval }], summary };
 }];
+// The HR desk (#201): the role cards. role is Paperclip's role word (AGENT_ROLES of the pinned release); text is what the card says. A hire
+// always names a role from this list, so the writer never sends a role Paperclip does not know.
+export const HIRE_ROLES = [
+  { role: 'engineer', label: 'Engineer', text: 'Writes and changes code.' },
+  { role: 'qa', label: 'Quality', text: 'Tests changes and reports faults.' },
+  { role: 'designer', label: 'Designer', text: 'Shapes screens and flows.' },
+  { role: 'pm', label: 'Project manager', text: 'Plans work and keeps it moving.' },
+  { role: 'researcher', label: 'Researcher', text: 'Reads sources and writes findings.' },
+  { role: 'devops', label: 'Operations', text: 'Runs builds, releases and servers.' },
+  { role: 'security', label: 'Security', text: 'Reviews risk and access.' },
+  { role: 'general', label: 'General', text: 'Takes any task.' },
+];
+const HIRE_ROLE_IDS = new Set(HIRE_ROLES.map((r) => r.role));
+const HIRE_KIND_RE = /^[a-z][a-z0-9-]{0,39}$/, HIRE_MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,99}$/, SKILL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,79}$/;
+export const HIRE_BUDGET_MAX = 100000;   // dollars a month: a typing slip (an extra zero) is refused, not sent
+export const HIRE_ISOLATIONS = ['worktree', 'same'];
+function skillsOf(v) {
+  if (v === undefined || v === null) return [];
+  if (!Array.isArray(v)) throw gridError(400, 'Skills are a list of names.');
+  const out = [];
+  for (const k of v) {
+    if (typeof k !== 'string' || !SKILL_RE.test(k)) throw gridError(400, 'A skill name is not valid.');
+    if (!out.includes(k)) out.push(k);
+  }
+  if (out.length > 20) throw gridError(400, 'Give at most 20 skills.');
+  return out;
+}
 const PLANS = {
   task: {
     create(b) {
@@ -238,6 +266,43 @@ const PLANS = {
     add(b) {
       const issue = idOf(b.issue, 'task'), text = textOf(b.text, 'comment', TEXT_MAX, { required: true });
       return { method: 'POST', path: () => `/api/issues/${issue}/comments`, body: { body: text }, targets: [{ type: 'issue', id: issue }], summary: 'Comment on a task' };
+    },
+  },
+  // A hire (#201): POST /agent-hires with the office adapter (its runs go through the Security room, so a new employee is supervised), a
+  // monthly budget in whole cents (a hire without a budget is refused: 400) and nothing else the office has not named. The Confirm shows
+  // exactly what it creates: role, manager, agent kind, model, budget and skills. The manager is checked as a target.
+  hire: {
+    create(b) {
+      const name = textOf(b.name, 'name', NAME_MAX, { required: true });
+      if (typeof b.role !== 'string' || !HIRE_ROLE_IDS.has(b.role)) throw gridError(400, 'Pick a role.');
+      const title = textOf(b.title, 'title', NAME_MAX);
+      const manager = b.manager === undefined || b.manager === null || b.manager === '' ? null : idOf(b.manager, 'manager');
+      const kind = b.agentKind === undefined || b.agentKind === null || b.agentKind === '' ? 'claude-code' : b.agentKind;
+      if (typeof kind !== 'string' || !HIRE_KIND_RE.test(kind)) throw gridError(400, 'Give the agent kind.');
+      const model = b.model === undefined || b.model === null || b.model === '' ? '' : b.model;
+      if (model && (typeof model !== 'string' || !HIRE_MODEL_RE.test(model))) throw gridError(400, 'The model name is not valid.');
+      const isolation = b.isolation === undefined || b.isolation === null || b.isolation === '' ? 'worktree' : b.isolation;
+      if (!HIRE_ISOLATIONS.includes(isolation)) throw gridError(400, 'Isolation is worktree or same.');
+      const dollars = b.budgetDollars;
+      if (typeof dollars !== 'number' || !Number.isFinite(dollars) || dollars <= 0) throw gridError(400, 'Set a monthly budget for the new employee. The office does not hire without one.');
+      if (dollars > HIRE_BUDGET_MAX) throw gridError(400, `The monthly budget is too high (at most $${HIRE_BUDGET_MAX}).`);
+      const cents = Math.round(dollars * 100);
+      if (cents < 1) throw gridError(400, 'Set a monthly budget of at least one cent.');
+      const skills = skillsOf(b.skills);
+      const adapterConfig = { agentKind: kind, isolation };
+      if (model) adapterConfig.model = model;
+      const body = { name, role: b.role, adapterType: OFFICE_ADAPTER_TYPE, adapterConfig, budgetMonthlyCents: cents };
+      if (title) body.title = title;
+      if (manager) body.reportsTo = manager;
+      if (skills.length) body.desiredSkills = skills;
+      const roleLabel = HIRE_ROLES.find((r) => r.role === b.role).label;
+      const line = (mgr) => `Hire ${short(name, 60)} as ${roleLabel}, reporting to ${mgr}, agent kind ${kind}, model ${model || 'the default'}, $${(cents / 100).toFixed(2)} a month, skills ${skills.length ? skills.join(', ') : 'none'}`;
+      const review = (org) => {
+        const m = manager ? org.find((x) => x.id === manager) : null;
+        if (manager && !m) return { problem: 'Paperclip has no such manager in this company.', status: 404 };
+        return { problem: '', summary: line(m ? short(String(m.name || 'a manager'), 60) : 'no manager') };
+      };
+      return { method: 'POST', path: (co) => `/api/companies/${encodeURIComponent(co)}/agent-hires`, body, targets: manager ? [{ type: 'agent', id: manager }] : [], review, summary: line(manager ? 'a manager' : 'no manager') };
     },
   },
   // The first company (#199): the one write that has no company to belong to. It names the Paperclip it goes to (url, a loopback address the

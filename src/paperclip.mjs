@@ -845,6 +845,14 @@ export function createHq(deps = {}) {
     try {
       try { made = obj(await call(conn, plan.path(conn.companyId), { method: plan.method, body: JSON.stringify(plan.body) })); }
       catch (e) { feed(`Paperclip refused the write: ${plan.summary}. ${e.message}`, 'wait'); throw e; }
+      if (plan.kind === 'hire' && c === conn && d && typeof made.id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(made.id)) {
+        // the new employee is known at once, so the onboarding task can name it before the next read of the company (#201). A failed read is
+        // not an error of the hire: the read of the company that follows has the same data.
+        try {
+          const saved = scrubAgent(await call(conn, `/api/agents/${made.id}`));
+          if (c === conn && d && saved && saved.id === made.id && saved.companyId === conn.companyId) d.agents.set(made.id, saved);
+        } catch { /* refetchSoon below */ }
+      }
       if (busyId && c === conn && d) {
         // the agent as Paperclip kept it (the PATCH answer may be partial): the floors and cables come from this read. The write is done, so a
         // failed read is not an error of it; the read of the company that follows has the same data.
@@ -856,10 +864,12 @@ export function createHq(deps = {}) {
     } finally { if (busyId) { conn.busy.delete(busyId); changed(); } }
     if (plan.kind === 'task' && plan.action === 'create' && !made.id) { feed(`Paperclip did not name the task it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the task it made.'); }
     if (plan.kind === 'company' && !made.id) { feed(`Paperclip did not name the company it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the company it made.'); }
+    if (plan.kind === 'hire' && !(typeof made.id === 'string' && made.id)) { feed(`Paperclip did not name the employee it hired: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the employee it hired.'); }
     feed(`Wrote to ${name}: ${plan.summary}.`);
     if (!first) refetchSoon(conn);
     const out = { ok: true };
     if (plan.kind === 'company') { out.id = String(made.id); out.name = plan.name; out.existed = false; }
+    if (plan.kind === 'hire') { out.id = String(made.id); out.name = plan.body.name; }
     if (plan.kind === 'task' && plan.action === 'create') { out.id = String(made.id); if (typeof made.identifier === 'string') out.identifier = text(made.identifier, 30); }
     return out;
   }

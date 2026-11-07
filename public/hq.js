@@ -1,5 +1,5 @@
 /* Agent Office for Claude Code x0.2: the hq feature (#184, the page features of #168).
-   The Manager board, the Paperclip HQ and earned trust (#157, #76, #153). One Module: its Interface is window.OfficePage.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog }.
+   The Manager board, the Paperclip HQ and earned trust (#157, #76, #153). One Module: its Interface is window.OfficePage.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm } (the HR desk, #201).
    Plain functions over the page core (window.OfficePage); office.js calls the Interface and holds none of the parts. */
 (function () {
   'use strict';
@@ -230,6 +230,66 @@
         h('p', { className: 'note' }, 'Both schedulers run: Paperclip runs its heartbeats and routines, the office runs its own schedules. The office never starts, changes or stops a Paperclip run. To hold the Claude Code calls of an agent here, use Supervise in office on the Agents screen of a Security room.')));
   }
 
+  // ---------- the HR desk (#201): hire an employee ----------
+  // Role cards, then name, manager, agent kind, model, monthly budget and skills. The Hire button asks the office once (ask-first 'write'):
+  // the answer is the exact words of what it creates, shown with a Confirm, and only the Confirm sends. A hire has a budget (the office
+  // refuses one without) and the office adapter, so the new employee is supervised: its runs go through the Security room. The onboarding
+  // task (a first stand-up note on the room board) goes with the same Confirm. One write path: the hqHire command, which ends in hq.write.
+  function HireForm(p) {
+    var snap = useSnapshot(), q = snap && snap.hq;
+    var ds = useState(null), desk = ds[0], setDesk = ds[1];
+    var rs = useState(''), role = rs[0], setRole = rs[1];
+    var f = useState({ name: '', manager: '', agentKind: 'claude-code', model: '', budget: '20', skills: '' }), v = f[0], setV = f[1];
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var er = useState(''), err = er[0], setErr = er[1];
+    var qs = useState(''), ask = qs[0], setAsk = qs[1];
+    useEffect(function () { var live = true; client.get('hqHireDesk').then(function (j) { if (live) setDesk(j); }, function (x) { if (live) setErr(x.message); }); return function () { live = false; }; }, []);
+    if (!q || !q.company) return h('p', { className: 'note' }, 'Connect a company in Paperclip first. Then you can hire here.');
+    if (!desk) return err ? h('p', { className: 'ao-err', role: 'alert' }, err) : h('p', { className: 'note', role: 'status' }, 'Reading the HR desk.');
+    if (!desk.write) return h('p', { className: 'note' }, 'The HQ write grid denies hires. Allow them in the write grid to hire here.');
+    function set(k, x) { var o = {}; o[k] = x; setV(Object.assign({}, v, o)); setAsk(''); setErr(''); }
+    function pick(r) { setRole(r.role); setAsk(''); if (!v.name.trim()) setV(Object.assign({}, v, { name: r.label })); }
+    var dollars = Number(v.budget), budgetOk = v.budget.trim() !== '' && isFinite(dollars) && dollars > 0;
+    var ready = !!role && !!v.name.trim() && budgetOk;
+    function send(confirmed) {
+      setBusy(true); setErr('');
+      client.hqHire({ name: v.name, role: role, manager: v.manager || undefined, agentKind: v.agentKind, model: v.model.trim() || undefined, budgetDollars: dollars,
+        skills: v.skills.split(',').map(function (x) { return x.trim(); }).filter(Boolean), welcome: true, confirmed: confirmed === true ? true : undefined }).then(function (r) {
+        setBusy(false); setAsk('');
+        p.toast({ tone: 'success', title: v.name + ' is hired', text: r.onboarding === 'sent' ? 'The first stand-up task is sent.' : r.onboarding === 'failed' ? 'The first stand-up task was not sent. ' + r.onboardingError : '' });
+        if (p.onDone) p.onDone(r);
+      }, function (x) {
+        setBusy(false);
+        var a = window.OfficeAsk.asked(x, 'write', confirmed === true);
+        if (a) { setAsk(a.text); return; }
+        setErr(x.message);
+      });
+    }
+    var managers = [{ value: '', label: 'No manager' }].concat((q.agents || []).map(function (a) { return { value: a.id, label: a.name }; }));
+    var kinds = ((snap && snap.kinds) || []).map(function (k) { return { value: k.kind, label: k.label }; });
+    return h('div', { className: 'form wide' },
+      h('div', { className: 'hire-roles', role: 'group', 'aria-label': 'Role' }, desk.roles.map(function (r) {
+        return h('div', { key: r.role, className: 'hire-role' }, h(A.Button, { variant: role === r.role ? 'primary' : 'quiet', onClick: function () { pick(r); } }, r.label), h('span', { className: 'hq-note' }, r.text));
+      })),
+      h(A.TextInput, { id: 'hire-name', label: 'Name', value: v.name, onChange: function (t) { set('name', t); } }),
+      h(A.Select, { id: 'hire-manager', label: 'Reports to', options: managers, value: v.manager, onChange: function (t) { set('manager', t); } }),
+      kinds.length ? h(A.Select, { id: 'hire-kind', label: 'Agent kind', options: kinds, value: v.agentKind, onChange: function (t) { set('agentKind', t); } }) : null,
+      h(A.TextInput, { id: 'hire-model', label: 'Model (optional)', value: v.model, onChange: function (t) { set('model', t); } }),
+      h(A.TextInput, { id: 'hire-budget', label: 'Monthly budget in dollars', value: v.budget, onChange: function (t) { set('budget', t); } }),
+      h(A.TextInput, { id: 'hire-skills', label: 'Skills (names, separated by commas)', value: v.skills, onChange: function (t) { set('skills', t); } }),
+      h('p', { className: 'note' }, 'The new employee runs through the office adapter, so the Security room decides every call. It gets a first task: post a stand-up note on its room board.'),
+      !budgetOk ? h('p', { className: 'note', role: 'status' }, 'Set a monthly budget above zero. The office does not hire without one.') : null,
+      ask ? h('p', { className: 'note', role: 'alert' }, ask) : null,
+      err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
+      h('div', { className: 'inline-actions' },
+        ask ? h(A.Button, { variant: 'primary', icon: 'approve', loading: busy, onClick: function () { send(true); } }, 'Confirm hire') : h(A.Button, { variant: 'primary', icon: 'add', disabled: !ready, loading: busy, onClick: function () { send(false); } }, 'Hire'),
+        ask ? h(A.Button, { variant: 'quiet', onClick: function () { setAsk(''); } }, 'Do not hire') : null));
+  }
+  function HireDialog(p) {
+    return h(A.Dialog, { open: true, title: 'HR desk', onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'quiet', onClick: p.onClose }, 'Close')] },
+      h(HireForm, { toast: p.toast, onDone: p.onClose }));
+  }
+
   // ---------- earned trust (#153, trust.mjs, ADR 0009) ----------
   // The office proposes a rule from the answers the user gave; it never applies one. A proposal is one building-scope cell for
   // one agent kind. Allow is a looser change, so it asks for a second click (Confirm) and sends confirmed: true. A grant
@@ -277,5 +337,5 @@
         })) : h('p', { className: 'note' }, 'No agent has a history yet.')));
   }
 
-  O.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog };
+  O.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm };
 })();

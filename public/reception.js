@@ -210,11 +210,18 @@
           ask ? h(A.Button, { variant: 'quiet', onClick: function () { setAsk(''); } }, 'Do not create') : null))
         : h('p', { className: 'note' }, 'The company comes after Paperclip runs, the first account exists and the board key is approved. Skip this step for now if you want. You can come back from the Reception.'));
   }
+  // The first hire (#201): the HR desk form of the HQ (one place), inside the step. Once the company has an employee the step can be marked done.
+  function HireStep(p) {
+    var snap = useSnapshot(), q = snap && snap.hq;
+    if (!q || !q.company) return h('p', { className: 'note' }, 'The first hire comes after your company exists. Do the Company step first, or skip this step. You can come back from the Reception.');
+    return h('div', null, O.Hq && O.Hq.HireForm ? h(O.Hq.HireForm, { toast: p.toast, onDone: p.onDone }) : null);
+  }
   function StepBody(p) {
     var id = p.step.id;
     if (p.step.later) return h('p', { className: 'note' }, 'This step comes later. Skip it for now. You can come back from the Reception.');
     if (id === 'kinds') return h(KindsStep);
     if (id === 'company') return h(CompanyStep, { onDone: p.onDone, toast: p.toast });
+    if (id === 'hire') return h(HireStep, { onDone: p.onDone, toast: p.toast });
     if (id === 'security') return h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'security', onClick: function () { p.onSecurity(); } }, 'Open the Security room'));
     if (id === 'spend') return h(SpendStep, { info: p.info, onDone: p.onDone });
     if (id === 'startup') return h(StartupStep, { info: p.info, onDone: p.onDone });

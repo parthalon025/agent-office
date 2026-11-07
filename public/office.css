@@ -81,6 +81,9 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .hq-card .hq-label { color: var(--muted); font: var(--type-caption-weight) var(--type-caption-size)/var(--type-caption-line) var(--font-sans); }
 .hq-card b { color: var(--ink); font: var(--type-figure-weight) var(--type-figure-size)/var(--type-figure-line) var(--font-sans); }
 .hq-card .hq-note { color: var(--muted); font: var(--type-caption-weight) var(--type-caption-size)/var(--type-caption-line) var(--font-sans); overflow-wrap: anywhere; }
+.hire-roles { display: grid; grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr)); gap: var(--space-2); }
+.hire-role { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.hire-role .hq-note { color: var(--muted); font: var(--type-caption-weight) var(--type-caption-size)/var(--type-caption-line) var(--font-sans); overflow-wrap: anywhere; }
 .org-chart { display: grid; gap: var(--space-2); }
 .org-floor { display: grid; gap: var(--space-1); }
 .org-floor-name { margin: 0; color: var(--muted); text-transform: uppercase; letter-spacing: var(--type-eyebrow-tracking); font: var(--type-eyebrow-weight) var(--type-eyebrow-size)/var(--type-eyebrow-line) var(--font-sans); }
