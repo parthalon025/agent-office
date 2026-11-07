@@ -143,3 +143,61 @@ test('the company is read again after a write, so the view shows it', async () =
     await until(() => r.hq.view().lobby.tasks.open === n + 1, 'the task in the Lobby');
   } finally { await r.done(); }
 });
+
+// ---------- routines (#209) ----------
+const ROUTINE = D.routines[0].id, TRIGGER = D.routines[0].triggers[0].id;
+
+test('routines: create, edit, schedule and run are one request each, nothing else', async () => {
+  const r = await rig({ routine: 'allow' });
+  try {
+    const made = await r.hq.write({ kind: 'routine', action: 'create', title: 'Daily check', description: 'Look at the build.', agent: ADA });
+    assert.match(made.id, /^r2000000/);
+    await r.hq.write({ kind: 'routine', action: 'update', routine: ROUTINE, title: 'Weekly report', status: 'paused' });
+    await r.hq.write({ kind: 'routine', action: 'schedule', routine: ROUTINE, trigger: TRIGGER, cron: '0 8 * * 1-5', timezone: 'UTC' });
+    await r.hq.write({ kind: 'routine', action: 'run', routine: ROUTINE });
+    assert.deepEqual(r.writes(), [
+      ['POST', `/api/companies/${CO}/routines`, { title: 'Daily check', description: 'Look at the build.', assigneeAgentId: ADA }],
+      ['PATCH', `/api/routines/${ROUTINE}`, { title: 'Weekly report', status: 'paused' }],
+      ['PATCH', `/api/routine-triggers/${TRIGGER}`, { cronExpression: '0 8 * * 1-5', timezone: 'UTC' }],
+      ['POST', `/api/routines/${ROUTINE}/run`, {}],
+    ]);
+  } finally { await r.done(); }
+});
+
+test('routines: Run waits for the Confirm by default, Deny sends nothing, and a stranger routine is 404', async () => {
+  const r = await rig({});
+  try {
+    await assert.rejects(r.hq.write({ kind: 'routine', action: 'run', routine: ROUTINE }), (e) => e.status === 409 && e.answer.body.confirm === 'write');
+    assert.deepEqual(r.writes(), [], 'no request before the Confirm');
+    await r.hq.write({ kind: 'routine', action: 'run', routine: ROUTINE }, { confirmed: true });
+    assert.equal(r.writes().length, 1);
+    await assert.rejects(r.hq.write({ kind: 'routine', action: 'run', routine: 'r9999999-0000-4000-8000-000000000000' }, { confirmed: true }), (e) => e.status === 404);
+    await assert.rejects(r.hq.write({ kind: 'routine', action: 'schedule', routine: ROUTINE, trigger: 'nope', cron: '0 8 * * *' }, { confirmed: true }), (e) => e.status === 404);
+    assert.equal(r.writes().length, 1, 'refused writes send nothing');
+  } finally { await r.done(); }
+  const d = await rig({ routine: 'deny' });
+  try {
+    await assert.rejects(d.hq.write({ kind: 'routine', action: 'run', routine: ROUTINE }, { confirmed: true }), (e) => e.status === 403);
+    assert.deepEqual(d.writes(), []);
+  } finally { await d.done(); }
+});
+
+test('routines: bad fields are 400 before anything is asked', async () => {
+  const r = await rig({ routine: 'allow' });
+  try {
+    for (const b of [{ action: 'create' }, { action: 'create', title: 'x', status: 'weird' }, { action: 'update', routine: ROUTINE }, { action: 'schedule', routine: ROUTINE, trigger: TRIGGER, cron: 'drop table' }, { action: 'run', routine: '../x' }]) {
+      await assert.rejects(r.hq.write({ kind: 'routine', ...b }), (e) => e.status === 400, JSON.stringify(b));
+    }
+    assert.deepEqual(r.writes(), []);
+  } finally { await r.done(); }
+});
+
+test('routines: the view carries what the page edits (agent id, schedule trigger)', async () => {
+  const r = await rig({});
+  try {
+    const v = r.hq.view().routines[0];
+    assert.equal(v.id, ROUTINE);
+    assert.equal(v.agentId, D.routines[0].assigneeAgentId);
+    assert.deepEqual(v.trigger, { id: TRIGGER, cron: '0 9 * * 1', timezone: 'UTC', enabled: true });
+  } finally { await r.done(); }
+});

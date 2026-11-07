@@ -183,6 +183,31 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
         return send(res, 200, a);
       }
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/routines$/))) return send(res, 200, st.routines.filter((r) => r.companyId === x[1]));
+      // the routine writes (#209; routes/routines.ts): create, edit, one trigger's schedule, run now
+      if (req.method === 'POST' && (x = m(/^\/api\/companies\/([^/]+)\/routines$/))) {
+        if (!parsed || typeof parsed.title !== 'string' || !parsed.title) return send(res, 422, { error: 'Validation error' });
+        const r = { id: `r2000000-0000-4000-8000-${String(st.routines.length + 1).padStart(12, '0')}`, companyId: x[1], status: 'active', env: null, assigneeAgentId: null, lastTriggeredAt: null, triggers: [], ...parsed };
+        st.routines.push(r);
+        return send(res, 201, r);
+      }
+      if (req.method === 'PATCH' && (x = m(/^\/api\/routines\/([^/]+)$/))) {
+        const r = st.routines.find((y) => y.id === x[1]);
+        if (!r) return send(res, 404, { error: 'Routine not found' });
+        Object.assign(r, parsed || {});
+        return send(res, 200, r);
+      }
+      if (req.method === 'PATCH' && (x = m(/^\/api\/routine-triggers\/([^/]+)$/))) {
+        const t = st.routines.flatMap((y) => y.triggers).find((y) => y.id === x[1]);
+        if (!t) return send(res, 404, { error: 'Trigger not found' });
+        Object.assign(t, parsed || {});
+        return send(res, 200, t);
+      }
+      if (req.method === 'POST' && (x = m(/^\/api\/routines\/([^/]+)\/run$/))) {
+        const r = st.routines.find((y) => y.id === x[1]);
+        if (!r) return send(res, 404, { error: 'Routine not found' });
+        r.lastTriggeredAt = new Date().toISOString();
+        return send(res, 202, { id: `rr-${++api.comments}`, routineId: r.id, status: 'queued' });
+      }
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/projects$/))) return seed.noProjects ? send(res, 404, { error: 'Not found' }) : send(res, 200, st.projects.filter((r) => r.companyId === x[1]));
       // the HQ read model (#197): goals, pending approvals (the payload is in the answer, as in Paperclip), activity, the cost summary, secret names
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/goals$/))) return seed.noGoals ? send(res, 404, { error: 'Not found' }) : send(res, 200, st.goals.filter((r) => r.companyId === x[1]));

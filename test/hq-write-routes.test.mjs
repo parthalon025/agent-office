@@ -89,6 +89,20 @@ test('a task create answers with its id; a bad write is 400', async () => {
   assert.equal(writes().length, n);
 });
 
+test('routines (#209): Run sends one request only after the Confirm; the view lists the routine with its schedule', async () => {
+  const view = (await get('/api/paperclip')).json.hq.routines[0];
+  assert.equal(view.id, D.routines[0].id);
+  assert.equal(view.trigger.cron, '0 9 * * 1');
+  const body = { kind: 'routine', action: 'run', routine: D.routines[0].id };
+  const n = writes().length;
+  const q = await call('/api/hq/write', body);
+  assert.equal(q.status, 409);
+  assert.equal(q.json.write.summary, 'Run a routine now');
+  assert.equal(writes().length, n, 'the question sent nothing');
+  assert.equal((await call('/api/hq/write', { ...body, confirmed: true })).status, 200);
+  assert.deepEqual(writes().at(-1), ['POST', `/api/routines/${D.routines[0].id}/run`, {}]);
+});
+
 test('changing a cell: stricter at once, looser only with the painted Confirm, a secret never Allow; only set cells are saved', async () => {
   const deny = await call('/api/hq/grid/set', { kind: 'comment', value: 'deny' });
   assert.deepEqual([deny.status, deny.json.from, deny.json.to], [200, 'allow', 'deny']);
