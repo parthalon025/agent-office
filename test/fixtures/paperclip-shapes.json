@@ -235,6 +235,68 @@
    "fields": {
     "members": "array"
    }
+  },
+  "instanceSettings": {
+   "list": false,
+   "fields": {
+    "id": "string",
+    "defaultEnvironmentId": "null",
+    "general": "object",
+    "experimental": "object",
+    "createdAt": "string",
+    "updatedAt": "string"
+   }
+  },
+  "environments": {
+   "list": true,
+   "fields": {
+    "id": "string",
+    "name": "string",
+    "description": "null",
+    "driver": "string",
+    "status": "string",
+    "config": "object",
+    "envVars": "object",
+    "metadata": "null",
+    "createdAt": "string",
+    "updatedAt": "string"
+   }
+  },
+  "exportBundle": {
+   "list": false,
+   "fields": {
+    "rootPath": "string",
+    "manifest": "object",
+    "files": "object",
+    "warnings": "array",
+    "paperclipExtensionPath": "string"
+   }
+  },
+  "importPreview": {
+   "list": false,
+   "fields": {
+    "include": "object",
+    "targetCompanyId": "null",
+    "targetCompanyName": "string",
+    "collisionStrategy": "string",
+    "selectedAgentSlugs": "array",
+    "plan": "object",
+    "manifest": "object",
+    "files": "object",
+    "envInputs": "array",
+    "warnings": "array",
+    "errors": "array"
+   }
+  },
+  "importResult": {
+   "list": false,
+   "fields": {
+    "company": "object",
+    "agents": "array",
+    "skills": "array",
+    "projects": "array",
+    "warnings": "array"
+   }
   }
  }
 }

@@ -71,6 +71,11 @@ const withHq = (d) => {
     joinRequests: [{ id: 'j1000000-0000-4000-8000-000000000001', companyId, inviteId: 'v1000000-0000-4000-8000-000000000001', requestType: 'human', status: 'pending_approval', requestIp: '203.0.113.9', requestingUserId: 'u9', requestEmailSnapshot: 'sam@example.com', agentName: null, createdAt: '2026-11-06T11:00:00.000Z' }],
     members: [{ id: 'm1000000-0000-4000-8000-000000000001', companyId, principalType: 'user', principalId: 'u1', status: 'active', membershipRole: 'owner', user: { id: 'u1', name: 'Justin', email: 'j@example.com' }, grants: [] },
       { id: 'm1000000-0000-4000-8000-000000000002', companyId, principalType: 'user', principalId: 'u2', status: 'active', membershipRole: 'viewer', user: { id: 'u2', name: 'Pat', email: 'pat@example.com' }, grants: [] }],
+    // instance admin (#221): environments (routes/environments.ts: the list carries config and envVars, which the office never reads) and the
+    // instance settings (routes/instance-settings.ts: GET /api/instance/settings answers the row with general and experimental)
+    environments: [{ id: 'e1000000-0000-4000-8000-000000000001', name: 'Local', description: null, driver: 'local', status: 'active', config: {}, envVars: {}, metadata: null, createdAt: '2026-11-01T09:00:00.000Z', updatedAt: '2026-11-01T09:00:00.000Z' },
+      { id: 'e1000000-0000-4000-8000-000000000002', name: 'Build box', description: 'The ssh host', driver: 'ssh', status: 'active', config: { host: 'build.example.com', privateKey: 'do-not-show' }, envVars: { API_KEY: { type: 'plain', value: 'do-not-show' } }, metadata: null, createdAt: '2026-11-02T09:00:00.000Z', updatedAt: '2026-11-02T09:00:00.000Z' }],
+    instance: { id: 'is100000-0000-4000-8000-000000000001', defaultEnvironmentId: null, general: { censorUsernameInLogs: false, feedbackDataSharingPreference: 'prompt', backupRetention: { dailyDays: 7, weeklyWeeks: 4, monthlyMonths: 1 } }, experimental: { enableEnvironments: true }, createdAt: '2026-11-01T09:00:00.000Z', updatedAt: '2026-11-01T09:00:00.000Z' },
     secrets: [{ id: 's1', companyId, name: 'GITHUB_TOKEN', provider: 'local_encrypted', description: null, latestVersion: 1, value: 'do-not-show' }],
   };
 };
@@ -107,9 +112,10 @@ const DEMO0 = (hooksFile = null) => {
 export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
   const st = { companies: structuredClone(seed.companies || []), agents: structuredClone(seed.agents || []), issues: structuredClone(seed.issues || []), routines: structuredClone(seed.routines || []), projects: structuredClone(seed.projects || []), liveRuns: structuredClone(seed.liveRuns || []),
     goals: structuredClone(seed.goals || []), approvals: structuredClone(seed.approvals || []), activity: structuredClone(seed.activity || []), costs: structuredClone(seed.costs || null), secrets: structuredClone(seed.secrets || []), skills: structuredClone(seed.skills || []), plugins: structuredClone(seed.plugins || []), adapters: structuredClone(seed.adapters || []), costMonths: structuredClone(seed.costMonths || {}), budgets: structuredClone(seed.budgets || null),
-    invites: structuredClone(seed.invites || []), joinRequests: structuredClone(seed.joinRequests || []), members: structuredClone(seed.members || []) };
+    invites: structuredClone(seed.invites || []), joinRequests: structuredClone(seed.joinRequests || []), members: structuredClone(seed.members || []),
+    environments: structuredClone(seed.environments || []), instance: structuredClone(seed.instance || { id: 'is100000-0000-4000-8000-000000000001', defaultEnvironmentId: null, general: { censorUsernameInLogs: false, feedbackDataSharingPreference: 'prompt' }, experimental: {}, createdAt: '2026-11-01T09:00:00.000Z', updatedAt: '2026-11-01T09:00:00.000Z' }) };
   const requests = [], sockets = new Set();
-  const api = { afterPatch: null, failIssueAfter: null, created: 0, comments: 0, hires: [], goalsMade: 0 };   // set by a test: runs right after a PATCH is answered (a change made in Paperclip at the same time)
+  const api = { imports: [], exports: 0, afterPatch: null, failIssueAfter: null, created: 0, comments: 0, hires: [], goalsMade: 0 };   // set by a test: runs right after a PATCH is answered (a change made in Paperclip at the same time)
   let seq = 0;
   const send = (res, status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
   function emit(type, payload, companyId = st.companies[0]?.id) {
@@ -146,6 +152,74 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
         return send(res, 201, co);
       }
       if (req.method === 'GET' && u.pathname === '/api/companies') return send(res, 200, st.companies);
+      // company import (routes/companies.ts, companyPortabilityPreviewSchema / ImportSchema 0.3.1): source { type: 'inline', rootPath, files, expectedFileCount },
+      // target { mode: 'new_company', newCompanyName } or { mode: 'existing_company', companyId }, collisionStrategy rename | skip | replace, and for the
+      // import pauseAutomations. new_company needs an instance admin. A bundle with no COMPANY.md is 422 ("Company package is missing COMPANY.md").
+      // The preview answers { include, targetCompanyId, targetCompanyName, collisionStrategy, selectedAgentSlugs, plan: { companyAction, agentPlans,
+      // projectPlans, issuePlans }, manifest, files, envInputs, warnings, errors }; the import answers { company: { id, name, action }, agents, skills, projects, ... }.
+      if (req.method === 'POST' && (u.pathname === '/api/companies/import/preview' || u.pathname === '/api/companies/import')) {
+        const okSource = parsed && parsed.source && parsed.source.type === 'inline' && parsed.source.files && typeof parsed.source.files === 'object' && !Array.isArray(parsed.source.files);
+        const okTarget = parsed && parsed.target && (parsed.target.mode === 'new_company' || (parsed.target.mode === 'existing_company' && typeof parsed.target.companyId === 'string'));
+        if (!okSource || !okTarget || (parsed.collisionStrategy && !['rename', 'skip', 'replace'].includes(parsed.collisionStrategy))) return send(res, 422, { error: 'Validation error' });
+        if (parsed.target.mode === 'new_company' && seed.notInstanceAdmin) return send(res, 403, { error: 'Instance admin required' });
+        const files = Object.keys(parsed.source.files), co = files.find((f) => f === 'COMPANY.md' || f.endsWith('/COMPANY.md'));
+        if (!co) return send(res, 422, { error: 'Company package is missing COMPANY.md' });
+        const text = typeof parsed.source.files[co] === 'string' ? parsed.source.files[co] : '';
+        const named = (/^name:\s*(.+)$/m.exec(text) || [])[1] || 'Imported company';
+        const name = parsed.target.newCompanyName || named;
+        const kind = (re) => files.filter((f) => re.test(f)).map((f) => ({ slug: f.split('/').slice(-2)[0], action: 'create', plannedName: f.split('/').slice(-2)[0], existingId: null, reason: null }));
+        const agentPlans = kind(/(^|\/)agents\/[^/]+\/AGENTS\.md$/), projectPlans = kind(/(^|\/)projects\/[^/]+\/PROJECT\.md$/), issuePlans = kind(/(^|\/)tasks\/[^/]+\/TASK\.md$/);
+        if (u.pathname.endsWith('/preview')) {
+          const errors = seed.importErrors || [];
+          return send(res, 200, { include: parsed.include || { company: true, agents: true, projects: true, issues: false, skills: true }, targetCompanyId: null, targetCompanyName: name, collisionStrategy: parsed.collisionStrategy || 'rename', selectedAgentSlugs: agentPlans.map((a) => a.slug),
+            plan: { companyAction: 'create', agentPlans, projectPlans, issuePlans }, manifest: { schemaVersion: 1 }, files: {}, envInputs: [], warnings: [], errors });
+        }
+        const made = { id: `c4000000-0000-4000-8000-${String(st.companies.length + 1).padStart(12, '0')}`, name, status: 'active', budgetMonthlyCents: 0, spentMonthlyCents: 0 };
+        st.companies.push(made);
+        api.imports.push({ name, agents: agentPlans.length, projects: projectPlans.length, tasks: issuePlans.length, pauseAutomations: parsed.pauseAutomations === true, collisionStrategy: parsed.collisionStrategy || null });
+        return send(res, 200, { company: { id: made.id, name, action: 'created' }, agents: agentPlans.map((a) => ({ slug: a.slug, id: null, action: 'created', name: a.slug, reason: null })), skills: [], projects: [], issues: [], envInputs: [], warnings: [] });
+      }
+      // instance settings (routes/instance-settings.ts): the row with general and experimental; PATCH /instance/settings is strict (defaultEnvironmentId,
+      // a guid or null), PATCH /instance/settings/general is strict over the general keys (censorUsernameInLogs, feedbackDataSharingPreference,
+      // backupRetention) and answers the general object. Both need an instance admin (seed.notInstanceAdmin: 403).
+      if (req.method === 'GET' && u.pathname === '/api/instance/settings') return send(res, 200, st.instance);
+      if (req.method === 'PATCH' && u.pathname === '/api/instance/settings') {
+        if (seed.notInstanceAdmin) return send(res, 403, { error: 'Instance admin required' });
+        const keys = Object.keys(parsed || {});
+        if (!keys.length || keys.some((k) => k !== 'defaultEnvironmentId') || !('defaultEnvironmentId' in parsed) || (parsed.defaultEnvironmentId !== null && !st.environments.some((e) => e.id === parsed.defaultEnvironmentId && e.status === 'active'))) return send(res, 422, { error: 'Validation error' });
+        st.instance.defaultEnvironmentId = parsed.defaultEnvironmentId;
+        return send(res, 200, st.instance);
+      }
+      if (req.method === 'PATCH' && u.pathname === '/api/instance/settings/general') {
+        if (seed.notInstanceAdmin) return send(res, 403, { error: 'Instance admin required' });
+        const ok = { censorUsernameInLogs: (v) => typeof v === 'boolean', feedbackDataSharingPreference: (v) => ['allowed', 'not_allowed', 'prompt'].includes(v), backupRetention: (v) => v && typeof v === 'object' };
+        if (!parsed || !Object.keys(parsed).length || Object.entries(parsed).some(([k, v]) => !ok[k] || !ok[k](v))) return send(res, 422, { error: 'Validation error' });
+        Object.assign(st.instance.general, parsed);
+        return send(res, 200, st.instance.general);
+      }
+      // environments (routes/environments.ts): the list is instance wide whatever the company in the path; PATCH is strict over name, description,
+      // driver, status (active | archived), config, envVars, metadata.
+      if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/environments$/))) return send(res, 200, st.environments);
+      if (req.method === 'PATCH' && (x = m(/^\/api\/environments\/([^/]+)$/))) {
+        if (seed.notInstanceAdmin) return send(res, 403, { error: 'Instance admin required' });
+        const env = st.environments.find((y) => y.id === x[1]);
+        if (!env) return send(res, 404, { error: 'Environment not found' });
+        const allowed = ['name', 'description', 'driver', 'status', 'config', 'envVars', 'metadata'];
+        if (!parsed || !Object.keys(parsed).length || Object.keys(parsed).some((k) => !allowed.includes(k)) || (parsed.status && !['active', 'archived'].includes(parsed.status)) || ('name' in parsed && (typeof parsed.name !== 'string' || !parsed.name))) return send(res, 422, { error: 'Validation error' });
+        Object.assign(env, parsed, { updatedAt: new Date().toISOString() });
+        return send(res, 200, env);
+      }
+      // export a company (routes/companies.ts POST /:companyId/export, companyPortabilityExportSchema: include, agents, skills, ... all optional):
+      // { rootPath, manifest, files, warnings, paperclipExtensionPath }; secret values are never in it.
+      if (req.method === 'POST' && (x = m(/^\/api\/companies\/([^/]+)\/export$/))) {
+        const co = st.companies.find((y) => y.id === x[1]);
+        if (!co) return send(res, 404, { error: 'Company not found' });
+        api.exports++;
+        const inc = (parsed && parsed.include) || {}, agents = inc.agents === false ? [] : st.agents.filter((a) => a.companyId === co.id);
+        const files = { 'COMPANY.md': `---\nname: ${co.name}\n---\n` };
+        for (const a of agents) files[`agents/${a.name.toLowerCase()}/AGENTS.md`] = `---\nname: ${a.name}\n---\n`;
+        return send(res, 200, { rootPath: co.name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), manifest: { schemaVersion: 1, generatedAt: new Date().toISOString(), source: { companyId: co.id, companyName: co.name }, includes: { company: true, agents: inc.agents !== false, projects: true, issues: false, skills: true }, agents: [], envInputs: [] }, files, warnings: [], paperclipExtensionPath: '.paperclip.yaml' });
+      }
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)$/))) { const c = st.companies.find((y) => y.id === x[1]); return c ? send(res, 200, c) : send(res, 404, { error: 'Company not found' }); }
       if (req.method === 'GET' && (x = m(/^\/api\/companies\/([^/]+)\/agents$/))) {
         if (u.search) return send(res, 400, { error: 'Unsupported query parameter' });

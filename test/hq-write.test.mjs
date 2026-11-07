@@ -311,3 +311,136 @@ test('access() lists names, roles and states, never a token, a link or an addres
     assert.doesNotMatch(JSON.stringify(a), /do-not-show|203\.0\.113|tokenHash/);
   } finally { await r.done(); }
 });
+
+// ---------- company admin, the rest (#221): other companies, export and import, instance settings and environments ----------
+const ENV_LOCAL = D.environments[0].id, ENV_BOX = D.environments[1].id;
+const BUNDLE = { rootPath: 'acme', files: { 'COMPANY.md': '---\nname: Acme Labs\n---\n', 'agents/grace/AGENTS.md': 'Grace', 'agents/ada/AGENTS.md': 'Ada', 'projects/web/PROJECT.md': 'Web', 'tasks/fix/TASK.md': 'Fix' } };
+
+test('other companies of the Paperclip are listed as others, and a new company shows after a write that makes one', async () => {
+  const r = await rig({ company: 'allow' });
+  try {
+    assert.deepEqual(r.hq.view().others, [], 'one company: no other building');
+    await r.hq.write({ kind: 'company', action: 'import', bundle: BUNDLE, name: 'Acme Labs' });
+    await until(() => r.hq.view().others.length === 1, 'the company list read again');
+    assert.deepEqual(r.hq.view().others.map((x) => x.name), ['Acme Labs']);
+    assert.equal(r.hq.view().company.name, 'Acme Robotics', 'the watched company stays');
+  } finally { await r.done(); }
+});
+
+test('company import: the preview first, then one POST as a new company with automations paused, never replace', async () => {
+  const r = await rig({ company: 'allow' });
+  try {
+    const made = await r.hq.write({ kind: 'company', action: 'import', bundle: BUNDLE, name: 'Acme Labs' });
+    assert.deepEqual(Object.keys(made).sort(), ['id', 'name', 'ok']);
+    assert.equal(made.name, 'Acme Labs');
+    const sent = r.pc.requests.filter((x) => x.method === 'POST' && x.path.startsWith('/api/companies/import'));
+    assert.deepEqual(sent.map((x) => x.path), ['/api/companies/import/preview', '/api/companies/import']);
+    for (const x of sent) {
+      assert.equal(x.body.collisionStrategy, 'rename');
+      assert.deepEqual(x.body.target, { mode: 'new_company', newCompanyName: 'Acme Labs' });
+      assert.equal(x.body.source.expectedFileCount, 5);
+      assert.ok(!('secretValues' in x.body) && !('adapterOverrides' in x.body));
+    }
+    assert.equal(sent[1].body.pauseAutomations, true);
+    assert.deepEqual(r.pc.imports, [{ name: 'Acme Labs', agents: 2, projects: 1, tasks: 1, pauseAutomations: true, collisionStrategy: 'rename' }]);
+    assert.ok(r.feed.some(([, t]) => /Import "Acme Labs" as a new company/.test(t)));
+  } finally { await r.done(); }
+});
+
+test('company import waits for the Confirm and says what it holds; a preview with errors, no COMPANY.md and a bad bundle are refused', async () => {
+  const r = await rig({});
+  try {
+    const e = await r.hq.write({ kind: 'company', action: 'import', bundle: BUNDLE }).then(() => null, (x) => x);
+    assert.equal(e.status, 409);
+    assert.equal(e.answer.body.write.summary, 'Import "Acme Labs" as a new company (2 employees, 1 project, 1 task; routines start paused)');
+    assert.deepEqual(r.writes().map((w) => w[1]), ['/api/companies/import/preview'], 'only the preview was sent');
+    await assert.rejects(r.hq.write({ kind: 'company', action: 'import', bundle: { files: { 'agents/a/AGENTS.md': 'x' } } }, { confirmed: true }), (x) => x.status === 502 && /COMPANY\.md/.test(x.message));
+    for (const bundle of [null, {}, { files: {} }, { files: { '../x': 'a' } }, { files: { '/x': 'a' } }, { files: { 'a\\b': 'a' } }, { files: { a: 5 } }, { files: { a: { encoding: 'hex', data: 'zz' } } }, { files: ['COMPANY.md'] }]) {
+      await assert.rejects(r.hq.write({ kind: 'company', action: 'import', bundle }, { confirmed: true }), (x) => x.status === 400, JSON.stringify(bundle));
+    }
+    await assert.rejects(r.hq.write({ kind: 'company', action: 'import', bundle: BUNDLE, include: { agents: 'yes' } }, { confirmed: true }), (x) => x.status === 400);
+    await assert.rejects(r.hq.write({ kind: 'company', action: 'import', bundle: { files: { 'COMPANY.md': 'x'.repeat(10 * 1024 * 1024 + 1) } } }, { confirmed: true }), (x) => x.status === 413);
+    assert.ok(r.writes().every((w) => w[1] === '/api/companies/import/preview'), 'only previews, never the import');
+  } finally { await r.done(); }
+  const bad = await rig({ company: 'allow' }, { ...DEMO(), importErrors: ['Safe import does not allow project web.'] });
+  try {
+    await assert.rejects(bad.hq.write({ kind: 'company', action: 'import', bundle: BUNDLE }), (x) => x.status === 400 && /does not allow project web/.test(x.message));
+    assert.ok(bad.writes().every((w) => w[1].endsWith('/preview')), 'a preview with errors stops the write');
+  } finally { await bad.done(); }
+  const d = await rig({ company: 'deny' });
+  try {
+    await assert.rejects(d.hq.write({ kind: 'company', action: 'import', bundle: BUNDLE }, { confirmed: true }), (x) => x.status === 403);
+    assert.equal(d.pc.requests.filter((x) => x.path.startsWith('/api/companies/import')).length, 0, 'Deny: not even a preview');
+  } finally { await d.done(); }
+});
+
+test('company import: Paperclip refusing a non instance admin is an error, nothing changes', async () => {
+  const r = await rig({ company: 'allow' }, { ...DEMO(), notInstanceAdmin: true });
+  try {
+    await assert.rejects(r.hq.write({ kind: 'company', action: 'import', bundle: BUNDLE }), (x) => x.status === 502);
+    assert.equal(r.pc.imports.length, 0);
+  } finally { await r.done(); }
+});
+
+test('company export is one POST, returns the bundle, and leaves a feed line (no write grid: it changes nothing)', async () => {
+  const r = await rig({});
+  try {
+    const out = await r.hq.exportCompany({ include: { agents: false } });
+    assert.deepEqual(Object.keys(out).sort(), ['files', 'manifest', 'rootPath', 'warnings']);
+    assert.deepEqual(Object.keys(out.files), ['COMPANY.md']);
+    assert.deepEqual(r.writes(), [['POST', `/api/companies/${CO}/export`, { include: { agents: false } }]]);
+    assert.ok(r.feed.some(([, t]) => /Exported the company Acme Robotics/.test(t)));
+    await assert.rejects(r.hq.exportCompany({ include: { agents: 'no' } }), (e) => e.status === 400);
+    const again = await r.hq.exportCompany({});
+    assert.ok(again.files['agents/grace/AGENTS.md']);
+  } finally { await r.done(); }
+});
+
+test('instance settings, the default environment and an environment are one PATCH each', async () => {
+  const r = await rig({ instance: 'allow' });
+  try {
+    await r.hq.write({ kind: 'instance', action: 'general', censorUsernameInLogs: true, feedbackDataSharingPreference: 'not_allowed' });
+    await r.hq.write({ kind: 'instance', action: 'defaultEnvironment', environment: ENV_BOX });
+    await r.hq.write({ kind: 'instance', action: 'environment', environment: ENV_BOX, name: 'Builder', status: 'archived' });
+    await r.hq.write({ kind: 'instance', action: 'defaultEnvironment', environment: null });
+    assert.deepEqual(r.writes(), [
+      ['PATCH', '/api/instance/settings/general', { censorUsernameInLogs: true, feedbackDataSharingPreference: 'not_allowed' }],
+      ['PATCH', '/api/instance/settings', { defaultEnvironmentId: ENV_BOX }],
+      ['PATCH', `/api/environments/${ENV_BOX}`, { name: 'Builder', status: 'archived' }],
+      ['PATCH', '/api/instance/settings', { defaultEnvironmentId: null }],
+    ]);
+  } finally { await r.done(); }
+});
+
+test('instance writes wait for the Confirm by default; bad bodies and unknown environments are refused before anything is sent', async () => {
+  const r = await rig({});
+  try {
+    const e = await r.hq.write({ kind: 'instance', action: 'environment', environment: ENV_LOCAL, status: 'archived' }).then(() => null, (x) => x);
+    assert.equal(e.status, 409);
+    assert.equal(e.answer.body.write.summary, 'Archive an environment');
+    assert.equal(r.writes().length, 0);
+    for (const b of [{ action: 'general' }, { action: 'general', censorUsernameInLogs: 'yes' }, { action: 'general', feedbackDataSharingPreference: 'sometimes' }, { action: 'environment', environment: ENV_LOCAL }, { action: 'environment', environment: ENV_LOCAL, status: 'gone' }, { action: 'environment', environment: ENV_LOCAL, name: ' ' }, { action: 'environment' }]) {
+      await assert.rejects(r.hq.write({ kind: 'instance', ...b }, { confirmed: true }), (x) => x.status === 400, JSON.stringify(b));
+    }
+    await assert.rejects(r.hq.write({ kind: 'instance', action: 'environment', environment: 'e0000000-0000-4000-8000-000000000404', name: 'X' }, { confirmed: true }), (x) => x.status === 404);
+    await assert.rejects(r.hq.write({ kind: 'instance', action: 'defaultEnvironment', environment: 'e0000000-0000-4000-8000-000000000404' }, { confirmed: true }), (x) => x.status === 404);
+    assert.equal(r.writes().length, 0);
+  } finally { await r.done(); }
+  const d = await rig({ instance: 'deny' });
+  try {
+    await assert.rejects(d.hq.write({ kind: 'instance', action: 'general', censorUsernameInLogs: true }, { confirmed: true }), (x) => x.status === 403 && /Instance and environments/.test(x.message));
+    assert.equal(d.writes().length, 0);
+  } finally { await d.done(); }
+});
+
+test('instance() lists environments by name and state and the settings, never a config or an env value', async () => {
+  const r = await rig({});
+  try {
+    const i = await r.hq.instance();
+    assert.deepEqual(i.environments.map((x) => [x.id, x.name, x.driver, x.status, x.isDefault]), [[ENV_LOCAL, 'Local', 'local', 'active', false], [ENV_BOX, 'Build box', 'ssh', 'active', false]]);
+    assert.deepEqual(i.general, { censorUsernameInLogs: false, feedbackDataSharingPreference: 'prompt' });
+    assert.equal(i.defaultEnvironmentId, null);
+    assert.equal(i.error, null);
+    assert.doesNotMatch(JSON.stringify(i), /do-not-show|privateKey|build\.example/);
+  } finally { await r.done(); }
+});
