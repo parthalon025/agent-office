@@ -361,7 +361,36 @@
       parentOptions: function () { return [{ value: '', label: 'No parent goal' }].concat(rows.map(function (r) { return { value: r.id, label: r.title }; })); },
     };
   }
-  var hq = { goals: hqGoals, searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg };
+  // Routines (#209). routineFacts: the line under a routine. routineForm: the edit form of a routine (null: a new one). routineCalls: the
+  // hqWrite bodies a saved form needs, only for what changed (update for title, text, employee or state; schedule for the cron line).
+  var routineStates = [{ value: 'active', label: 'Active' }, { value: 'paused', label: 'Paused' }, { value: 'archived', label: 'Archived' }];
+  function routineFacts(r) {
+    return [r.agent ? 'For ' + r.agent : 'No employee', r.cron ? 'Cron ' + r.cron : 'No schedule', r.next ? 'Next ' + new Date(r.next).toLocaleString() : 'No next run'].join(' · ');
+  }
+  function routineForm(r) {
+    var t = r && r.trigger;
+    return { id: r ? r.id : null, title: r ? r.title : '', description: '', agent: r ? r.agentId || '' : '', status: r && r.status ? r.status : 'active', cron: t ? t.cron : '', timezone: t ? t.timezone : '', trigger: t ? t.id : '' };
+  }
+  function routineCalls(f, r) {
+    var title = String(f.title || '').trim(), desc = String(f.description || '').trim();
+    if (!f.id) {
+      var c = { kind: 'routine', action: 'create', title: title };
+      if (desc) c.description = desc;
+      if (f.agent) c.agent = f.agent;
+      return [c];
+    }
+    var u = { kind: 'routine', action: 'update', routine: f.id }, calls = [];
+    if (r && title !== r.title) u.title = title;
+    if (desc) u.description = desc;
+    if (r && (f.agent || '') !== (r.agentId || '')) u.agent = f.agent || null;
+    if (r && f.status !== r.status) u.status = f.status;
+    if (Object.keys(u).length > 3) calls.push(u);
+    var cron = String(f.cron || '').trim();
+    if (f.trigger && r && r.trigger && cron && cron !== r.trigger.cron) calls.push({ kind: 'routine', action: 'schedule', routine: f.id, trigger: f.trigger, cron: cron });
+    return calls;
+  }
+  function routineDone(c) { return c.action === 'create' ? 'Routine created' : c.action === 'schedule' ? 'Schedule changed' : 'Routine changed'; }
+  var hq = { goals: hqGoals, routineStates: routineStates, routineFacts: routineFacts, routineForm: routineForm, routineCalls: routineCalls, routineDone: routineDone, searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg };
 
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
   // priced: sessions with a cost figure. unknown: sessions whose agent reports no cost (costUnknown), shown as "unknown".

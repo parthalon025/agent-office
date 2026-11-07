@@ -610,3 +610,16 @@ test('the goals view words (#207): a row says level, status and owner, the optio
   assert.equal(V.hq.goals({ goalWrite: true, goals: null }).unknown, true);
   assert.equal(V.hq.goals(null).unknown, true);
 });
+
+test('routines (#209): the form, the calls it needs (only what changed) and the facts line', () => {
+  const r = { id: 'r1', title: 'Weekly', status: 'active', agent: 'Grace', agentId: 'a1', cron: '0 9 * * 1', next: null, trigger: { id: 't1', cron: '0 9 * * 1', timezone: 'UTC', enabled: true } };
+  assert.equal(V.hq.routineFacts(r), 'For Grace · Cron 0 9 * * 1 · No next run');
+  assert.equal(V.hq.routineFacts({ title: 'x' }), 'No employee · No schedule · No next run');
+  const f = V.hq.routineForm(r);
+  assert.deepEqual(V.hq.routineCalls(f, r), [], 'nothing changed: no call');
+  assert.deepEqual(V.hq.routineCalls({ ...f, title: 'Daily', status: 'paused', cron: '0 8 * * *' }, r), [
+    { kind: 'routine', action: 'update', routine: 'r1', title: 'Daily', status: 'paused' },
+    { kind: 'routine', action: 'schedule', routine: 'r1', trigger: 't1', cron: '0 8 * * *' }]);
+  assert.deepEqual(V.hq.routineCalls({ ...f, agent: '' }, r), [{ kind: 'routine', action: 'update', routine: 'r1', agent: null }]);
+  assert.deepEqual(V.hq.routineCalls({ ...V.hq.routineForm(null), title: ' New ', agent: 'a2' }, null), [{ kind: 'routine', action: 'create', title: 'New', agent: 'a2' }]);
+});

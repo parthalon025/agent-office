@@ -140,6 +140,82 @@
       }));
   }
 
+  // Routines (#209), the back office: the routines of the company with New, Edit and Run now. Every change is one call of hqWrite, which the
+  // server's write grid decides (the Routines cell). With Allow it goes at once; with Confirm the server answers its ask-first question, the
+  // dialog shows what it will send and the painted Confirm sends the same calls again with confirmed: true; Deny is the server's 403.
+  // A new routine has no schedule yet (Paperclip adds triggers); Edit changes the cron line of the routine's first schedule.
+  function Routines(p) {
+    var q = p.q, H = window.OfficeVocab.hq;
+    var ed = useState(null), edit = ed[0], setEdit = ed[1];   // { id|null, title, description, agent, status, cron, timezone, trigger }: the form
+    var pd = useState(null), pend = pd[0], setPend = pd[1];   // { calls, text }: calls that wait for the painted Confirm
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var er = useState(''), err = er[0], setErr = er[1];
+    var agents = [{ value: '', label: 'No employee' }].concat((q.agents || []).map(function (a) { return { value: a.id, label: a.name }; }));
+    function send(calls, confirmed, from) {
+      setBusy(true); setErr('');
+      var i = from || 0;
+      (function next() {
+        if (i >= calls.length) { setBusy(false); setPend(null); setEdit(null); p.toast({ tone: 'success', title: calls.length > 1 ? 'Routine changed' : H.routineDone(calls[0]) }); return; }
+        client.hqWrite(Object.assign({}, calls[i], { confirmed: confirmed === true })).then(function () { i++; next(); }, function (x) {
+          setBusy(false);
+          var a = window.OfficeAsk.asked(x, 'write', confirmed);
+          if (a) { setPend({ calls: calls, from: i, text: a.text }); return; }
+          setPend(null); setErr(x.message);
+          if (i > 0) p.toast({ tone: 'error', title: 'Routine only partly changed', text: x.message });
+        });
+      })();
+    }
+    function save() {
+      var calls = H.routineCalls(edit, (q.routines || []).filter(function (r) { return r.id === edit.id; })[0]);
+      if (!calls.length) { setErr('Nothing changed.'); return; }
+      send(calls, false, 0);
+    }
+    function set(k) { return function (v) { setEdit(Object.assign({}, edit, (function () { var o = {}; o[k] = v; return o; })())); }; }
+    var form = edit ? h(A.Dialog, { open: true, title: edit.id ? 'Edit routine' : 'New routine', onClose: function () { if (!busy) { setEdit(null); setPend(null); setErr(''); } }, actions: [
+      h(A.Button, { key: 'c', variant: 'quiet', disabled: busy, onClick: function () { setEdit(null); setPend(null); setErr(''); } }, 'Cancel'),
+      pend ? h(A.Button, { key: 'y', variant: 'primary', icon: 'approve', loading: busy, onClick: function () { send(pend.calls, true, pend.from); } }, 'Confirm and send')
+        : h(A.Button, { key: 's', variant: 'primary', loading: busy, onClick: save }, edit.id ? 'Save routine' : 'Create routine')] },
+      h('div', { className: 'form wide' },
+        h(A.TextInput, { id: 'rt-title', label: 'Title', value: edit.title, onChange: set('title'), disabled: !!pend }),
+        h(A.TextInput, { id: 'rt-desc', label: 'What to do', value: edit.description, onChange: set('description'), disabled: !!pend }),
+        h(A.Select, { id: 'rt-agent', label: 'Employee', options: agents, value: edit.agent, onChange: set('agent'), disabled: !!pend }),
+        edit.id ? h(A.Select, { id: 'rt-status', label: 'State', options: H.routineStates, value: edit.status, onChange: set('status'), disabled: !!pend }) : null,
+        edit.id && edit.trigger ? h(A.TextInput, { id: 'rt-cron', label: 'Schedule (cron, five fields)', value: edit.cron, placeholder: '0 9 * * 1', onChange: set('cron'), disabled: !!pend }) : null,
+        edit.id && !edit.trigger ? h('p', { className: 'note' }, 'This routine has no schedule. Add one in Paperclip.') : null,
+        !edit.id ? h('p', { className: 'note' }, 'A new routine has no schedule yet. Add one in Paperclip.') : null,
+        pend ? h('p', { className: 'note', role: 'status' }, pend.text) : null,
+        err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null)) : null;
+    // Run now has its own small Confirm (one POST, no body), so it never hides in the form.
+    var rn = useState(null), run = rn[0], setRun = rn[1];   // { r, text }
+    function runNow(r, confirmed) {
+      setBusy(true);
+      client.hqWrite({ kind: 'routine', action: 'run', routine: r.id, confirmed: confirmed === true }).then(function () { setBusy(false); setRun(null); p.toast({ tone: 'success', title: 'Routine started', text: r.title }); }, function (x) {
+        setBusy(false);
+        var a = window.OfficeAsk.asked(x, 'write', confirmed);
+        if (a) { setRun({ r: r, text: a.text }); return; }
+        setRun(null); p.toast({ tone: 'error', title: 'Routine not started', text: x.message });
+      });
+    }
+    var runDialog = run ? h(A.Dialog, { open: true, title: 'Run ' + run.r.title + ' now', onClose: function () { setRun(null); }, actions: [
+      h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setRun(null); } }, 'Keep it waiting'),
+      h(A.Button, { key: 'y', variant: 'primary', icon: 'approve', loading: busy, onClick: function () { runNow(run.r, true); } }, 'Run routine')] },
+      h('div', { className: 'form wide' }, h('p', { className: 'note' }, run.text))) : null;
+    var list = q.routines || [];
+    return h(React.Fragment, null,
+      h('h3', { className: 'ext-h' }, 'Routines'),
+      h('div', { className: 'past-actions' }, h(A.Button, { variant: 'quiet', icon: 'add', onClick: function () { setErr(''); setEdit(H.routineForm(null)); } }, 'New routine')),
+      list.length ? h('ul', { className: 'past' }, list.map(function (r) {
+        return h('li', { key: r.id, id: 'hq-routine-' + r.id, className: 'past-row' + (p.mark('routine', r.id) ? ' is-found' : '') },
+          h('div', { className: 'past-main' },
+            h('div', { className: 'past-title' }, h('b', null, r.title), r.status ? h(Tag, null, r.status) : null),
+            h('div', { className: 'past-meta' }, H.routineFacts(r)),
+            h('div', { className: 'past-actions' },
+              h(A.Button, { variant: 'quiet', icon: 'edit', onClick: function () { setErr(''); setEdit(H.routineForm(r)); } }, 'Edit'),
+              r.status === 'active' ? h(A.Button, { variant: 'quiet', icon: 'play', disabled: busy, onClick: function () { runNow(r, false); } }, 'Run now') : null)));
+      })) : h('p', { className: 'note' }, 'No routines.'),
+      form, runDialog);
+  }
+
   // The Lobby (#197): the dashboard of the company, the pending approvals and goals, the live activity and the org chart as floors, top floor
   // first. The words are OfficeVocab.hq (cards, glance, org); unknown data says Unknown. The org chart is the one write here (OrgChart).
   function Lobby(p) {
@@ -338,7 +414,7 @@
       !d.query && d.total > d.items.length ? h('p', { className: 'note' }, 'Showing the newest ' + d.items.length + ' of ' + d.total + '. Search to find the rest.') : null);
   }
 
-  // The HQ: what Paperclip says about its company. Read only: Paperclip runs its heartbeats, routines and budgets. Supervise
+  // The HQ: what Paperclip says about its company. Goals and routines have their own writes (Goals, Routines); the rest is read only. Supervise
   // in office is on the Agents screen of a Security room, with its painted Confirm (no button here: one place for a write).
   function HqDialog(p) {
     var q = p.snap && p.snap.hq, H = window.OfficeVocab.hq;
@@ -387,15 +463,9 @@
               h('div', { className: 'past-meta' }, r.employees.length ? 'In the room: ' + r.employees.map(function (e) { return e.name + (e.workspace ? ' (' + e.workspace + ')' : ''); }).join(', ') : 'Nobody works here now'),
               r.workspaces.length ? h('div', { className: 'past-sub mono' }, r.workspaces.map(function (w) { return w.name + (w.folder ? ': ' + w.folder : ''); }).join(' · ')) : h('div', { className: 'past-meta' }, 'No workspace')));
         })) : h('p', { className: 'note' }, 'No projects.'),
-        h('h3', { className: 'ext-h' }, 'Routines'),
-        q.routines.length ? h('ul', { className: 'past' }, q.routines.map(function (r) {
-          return h('li', { key: r.id, id: 'hq-routine-' + r.id, className: 'past-row' + (mark('routine', r.id) ? ' is-found' : '') },
-            h('div', { className: 'past-main' },
-              h('div', { className: 'past-title' }, h('b', null, r.title), r.status ? h(Tag, null, r.status) : null),
-              h('div', { className: 'past-meta' }, [r.agent ? 'For ' + r.agent : '', r.cron ? 'Cron ' + r.cron : '', r.next ? 'Next ' + new Date(r.next).toLocaleString() : 'No next run'].filter(Boolean).join(' · '))));
-        })) : h('p', { className: 'note' }, 'No routines.'),
+        h(Routines, { q: q, mark: mark, toast: p.toast }),
         runtime,
-        h('p', { className: 'note' }, 'Both schedulers run: Paperclip runs its heartbeats and routines, the office runs its own schedules. The office never starts, changes or stops a Paperclip run. To hold the Claude Code calls of an agent here, use Supervise in office on the Agents screen of a Security room.')));
+        h('p', { className: 'note' }, 'Both schedulers run: Paperclip runs its heartbeats and routines, the office runs its own schedules. The office changes a routine only through the HQ write grid. To hold the Claude Code calls of an agent here, use Supervise in office on the Agents screen of a Security room.')));
   }
 
   // ---------- the HR desk (#201): hire an employee ----------

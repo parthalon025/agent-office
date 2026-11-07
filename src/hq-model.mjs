@@ -197,12 +197,15 @@ export function setWriteCell(grid, change) {
 // planWrite(body) -> { kind, action, method, path(companyId), body, targets, summary }. body: { kind, action, ...fields }. The fields are
 // checked here (400), every id must be a plain id (it goes into a path), and a target is a thing the writer reads before it writes
 // (issue, approval, agent): it must belong to the connected company. Only the first writes are planned: task (create, assign), comment
-// (add), approval (approve, reject, revise), reporting (set, #202), goal (create, update, #207) and company (create, #199: scope 'none', it needs no connection). Another kind in the grid
+// (add), approval (approve, reject, revise), routine (create, update, schedule, run, #209), reporting (set, #202), goal (create, update, #207)
+// and company (create, #199: scope 'none', it needs no connection). Another kind in the grid
 // has no plan yet, and is 400 (never sent).
 const OFFICE_ADAPTER_TYPE = 'agent_office';   // the word of OFFICE_ADAPTER in paperclip.mjs (which imports this module)
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const ISSUE_STATUS = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'];
 export const GOAL_STATUSES = ['planned', 'active', 'achieved', 'cancelled'], GOAL_LEVELS = ['company', 'team', 'agent', 'task'];
+const ROUTINE_STATUS = ['active', 'paused', 'archived'];
+const CRON_RE = /^[0-9*/,\-A-Za-z ]+$/, TZ_RE = /^[A-Za-z][A-Za-z0-9_+\-/]{0,63}$/;
 const TITLE_MAX = 200, TEXT_MAX = 10000, NOTE_MAX = 2000, DESC_MAX = 4000, NAME_MAX = 80, COMPANY_DESC_MAX = 300;
 const short = (t, n = 80) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 function idOf(v, what) {
@@ -375,6 +378,39 @@ const PLANS = {
       if (!Object.keys(body).length) throw gridError(400, 'Give something to change.');
       const what = body.status && Object.keys(body).length === 1 ? `Mark a goal ${body.status}` : 'Change a goal';
       return { method: 'PATCH', path: () => `/api/goals/${goal}`, body, targets, summary: what };
+    },
+  },
+  // Routines (#209): create, edit (title, description, employee, status), change the schedule of one trigger (a cron line) and run now. The
+  // routine and trigger must be in the connected company (the writer checks them against what it holds). Run is one POST with no body.
+  routine: {
+    create(b) {
+      const title = textOf(b.title, 'title', TITLE_MAX, { required: true }), description = textOf(b.description, 'description', DESC_MAX);
+      const body = { title }, targets = [];
+      if (description) body.description = description;
+      if (b.agent !== undefined && b.agent !== null && b.agent !== '') { body.assigneeAgentId = idOf(b.agent, 'employee'); targets.push({ type: 'agent', id: body.assigneeAgentId }); }
+      if (b.status !== undefined && b.status !== null) { if (!ROUTINE_STATUS.includes(b.status) || b.status === 'archived') throw gridError(400, 'Unknown routine status.'); body.status = b.status; }
+      if (b.project !== undefined && b.project !== null && b.project !== '') body.projectId = idOf(b.project, 'project');
+      return { method: 'POST', path: (co) => `/api/companies/${encodeURIComponent(co)}/routines`, body, targets, summary: `Create the routine "${short(title)}"` };
+    },
+    update(b) {
+      const routine = idOf(b.routine, 'routine'), body = {}, targets = [{ type: 'routine', id: routine }];
+      if (b.title !== undefined) body.title = textOf(b.title, 'title', TITLE_MAX, { required: true });
+      if (b.description !== undefined) body.description = textOf(b.description, 'description', DESC_MAX);
+      if (b.agent !== undefined) { if (b.agent === null || b.agent === '') body.assigneeAgentId = null; else { body.assigneeAgentId = idOf(b.agent, 'employee'); targets.push({ type: 'agent', id: body.assigneeAgentId }); } }
+      if (b.status !== undefined) { if (!ROUTINE_STATUS.includes(b.status)) throw gridError(400, 'Unknown routine status.'); body.status = b.status; }
+      if (!Object.keys(body).length) throw gridError(400, 'Give a change for the routine.');
+      return { method: 'PATCH', path: () => `/api/routines/${routine}`, body, targets, summary: 'Change a routine' };
+    },
+    schedule(b) {
+      const routine = idOf(b.routine, 'routine'), trigger = idOf(b.trigger, 'schedule'), cron = textOf(b.cron, 'schedule', 100, { required: true });
+      if (!CRON_RE.test(cron) || cron.split(/\s+/).length !== 5) throw gridError(400, 'Give the schedule as five cron fields, for example 0 9 * * 1.');
+      const body = { cronExpression: cron.split(/\s+/).join(' ') };
+      if (b.timezone !== undefined && b.timezone !== null && b.timezone !== '') { if (typeof b.timezone !== 'string' || !TZ_RE.test(b.timezone)) throw gridError(400, 'Give a time zone such as UTC or Europe/Berlin.'); body.timezone = b.timezone; }
+      return { method: 'PATCH', path: () => `/api/routine-triggers/${trigger}`, body, targets: [{ type: 'trigger', id: trigger, routine }], summary: 'Change the schedule of a routine' };
+    },
+    run(b) {
+      const routine = idOf(b.routine, 'routine');
+      return { method: 'POST', path: () => `/api/routines/${routine}/run`, body: {}, targets: [{ type: 'routine', id: routine }], summary: 'Run a routine now' };
     },
   },
   approval: Object.fromEntries([decision('approve', 'approve', 'Approve an approval'), decision('reject', 'reject', 'Reject an approval'), decision('revise', 'request-revision', 'Request a revision of an approval')]),

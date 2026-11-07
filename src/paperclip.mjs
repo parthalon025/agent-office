@@ -563,7 +563,9 @@ export function createHq(deps = {}) {
     const trig = list(r.triggers).filter((t) => t && t.enabled !== false);
     const next = trig.map((t) => ms(t.nextRunAt)).filter((x) => x != null).sort((x, y) => x - y)[0] ?? null;
     const a = r.assigneeAgentId && d.agents.get(r.assigneeAgentId);
-    return { id: r.id, title: text(r.title, 100) || 'Routine', status: text(r.status, 30), agent: a ? text(a.name, 60) : '', next, cron: text((trig.find((t) => t.cronExpression) || {}).cronExpression, 60), last: ms(r.lastTriggeredAt) };
+    const st = trig.find((t) => t.cronExpression && t.id);   // the schedule the page edits: the first enabled cron trigger
+    return { id: r.id, title: text(r.title, 100) || 'Routine', status: text(r.status, 30), agent: a ? text(a.name, 60) : '', agentId: a ? a.id : '',
+      trigger: st ? { id: String(st.id), cron: text(st.cronExpression, 60), timezone: text(st.timezone, 64), enabled: true } : null, next, cron: text((trig.find((t) => t.cronExpression) || {}).cronExpression, 60), last: ms(r.lastTriggeredAt) };
   }
 
   // What the HQ read model keeps of the extra routes (#197): the fields the page shows and nothing else. An approval's payload, an activity's
@@ -805,6 +807,12 @@ export function createHq(deps = {}) {
       if (!a || a.status === 'terminated') throw httpError(404, 'Paperclip has no such agent in this company.');
       return;
     }
+    if (t.type === 'routine' || t.type === 'trigger') {   // from what the office holds: a routine of this company (not archived), and a trigger of that routine
+      const r = d.routines.find((x) => x && x.id === (t.type === 'routine' ? t.id : t.routine) && x.status !== 'archived');
+      if (!r || (r.companyId && r.companyId !== conn.companyId)) throw httpError(404, 'Paperclip has no such routine in this company.');
+      if (t.type === 'trigger' && !list(r.triggers).some((x) => x && x.id === t.id)) throw httpError(404, 'Paperclip has no such schedule on this routine.');
+      return;
+    }
     const issue = t.type === 'issue', goal = t.type === 'goal', noun = issue ? 'task' : goal ? 'goal' : 'approval', route = `/api/${issue ? 'issues' : goal ? 'goals' : 'approvals'}/${t.id}`;
     const json = await call(conn, route).catch((e) => { throw e.upstream === 404 ? httpError(404, `Paperclip has no such ${noun} in this company.`) : e; }), problems = goal ? [] : shapeProblems(issue ? 'issue' : 'approval', json);
     if (problems.length) throw httpError(502, `Paperclip answered in a shape the office does not know (${problems[0]}) Update the office or the pinned Paperclip.`);
@@ -875,6 +883,7 @@ export function createHq(deps = {}) {
     } finally { if (busyId) { conn.busy.delete(busyId); changed(); } }
     if (plan.kind === 'task' && plan.action === 'create' && !made.id) { feed(`Paperclip did not name the task it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the task it made.'); }
     if (plan.kind === 'goal' && plan.action === 'create' && !made.id) { feed(`Paperclip did not name the goal it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the goal it made.'); }
+    if (plan.kind === 'routine' && plan.action === 'create' && !made.id) { feed(`Paperclip did not name the routine it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the routine it made.'); }
     if (plan.kind === 'company' && !made.id) { feed(`Paperclip did not name the company it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the company it made.'); }
     if (plan.kind === 'hire' && !(typeof made.id === 'string' && made.id)) { feed(`Paperclip did not name the employee it hired: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the employee it hired.'); }
     feed(`Wrote to ${name}: ${plan.summary}.`);
@@ -883,6 +892,7 @@ export function createHq(deps = {}) {
     if (plan.kind === 'company') { out.id = String(made.id); out.name = plan.name; out.existed = false; }
     if (plan.kind === 'hire') { out.id = String(made.id); out.name = plan.body.name; }
     if (plan.kind === 'goal' && plan.action === 'create') out.id = String(made.id);
+    if (plan.kind === 'routine' && plan.action === 'create') out.id = String(made.id);
     if (plan.kind === 'task' && plan.action === 'create') { out.id = String(made.id); if (typeof made.identifier === 'string') out.identifier = text(made.identifier, 30); }
     return out;
   }
