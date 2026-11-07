@@ -18,7 +18,7 @@
 import path from 'node:path';
 import { runIds, cleanIds } from './payload.mjs';
 import { readArgs, CLAUDE_FLAGS_VERSION } from './providers/claude-code.mjs';
-import { floorsOf, cablesOf, goalsOf, lobbyOf, inboxOf, costsOf, catalogOf, roomsOf, monthWindows, searchOf, shapeProblems, planWrite, writeValueOf, WRITE_KINDS } from './hq-model.mjs';
+import { floorsOf, cablesOf, goalsOf, lobbyOf, inboxOf, costsOf, catalogOf, roomsOf, monthWindows, searchOf, shapeProblems, planWrite, writeValueOf, WRITE_KINDS, NEVER_SELF_APPROVED, selfApprovalOn } from './hq-model.mjs';
 import { archetypeOf, GENERAL } from './archetypes.mjs';
 
 export const DEFAULT_URL = 'http://127.0.0.1:3100';
@@ -411,6 +411,24 @@ export function createHq(deps = {}) {
     for (const p of contract) if (!conn.told.has(p)) { conn.told.add(p); feed(`Paperclip answered in a shape the office does not know, so the office does not use that part. ${p}`, 'wait'); }
     d = { company: obj(company), agents: new Map(list(agents).filter((a) => a && a.id).map((a) => [a.id, scrubAgent(a)])), issues: list(issues).map(scrubIssue), routines: list(routines).map(envOnly), projects: list(projects).map(envOnly), unread, contract, hqRead: readHq({ goals, approvals, activity, costs, secrets }), runs, last: d && d.last ? d.last : new Map() };
     changed();
+    selfApprove(conn);
+  }
+  // Self-approval (#203, ADR 0010): an approval an employee of this company asked for, of a kind the user turned on (deps.selfApproval()), is
+  // approved through the one writer. The user's setting is the consent, so the Approvals Confirm is not asked again; a Deny in the write grid
+  // still wins (the writer refuses it). hire_agent and budget_override_required are never self-approved, whatever is saved. Each approval is
+  // tried once per connection.
+  function selfApprove(conn) {
+    const on = deps.selfApproval ? deps.selfApproval() : null;
+    if (!on || !d || c !== conn || !d.hqRead || !d.hqRead.approvals) return;
+    for (const a of d.hqRead.approvals) {
+      if (!a.requestedByAgentId || conn.selfTried.has(a.id) || NEVER_SELF_APPROVED.includes(a.type) || !selfApprovalOn(on, a.type)) continue;
+      const who = d.agents.get(a.requestedByAgentId);
+      if (!who || who.status === 'terminated' || who.status === 'pending_approval') continue;
+      conn.selfTried.add(a.id);
+      write({ kind: 'approval', action: 'approve', approval: a.id, note: 'Approved by the office: self-approval is on for this kind.' }, { confirmed: true })
+        .then(() => feed(`Self-approval: ${text(who.name, 60) || 'An employee'} approved its own ${String(a.type).replace(/_/g, ' ')}.`))
+        .catch((e) => feed(`Self-approval did not apply: ${e.message}`, 'wait'));
+    }
   }
   function refetchSoon(conn) {
     if (conn.refetch) return;
@@ -496,7 +514,7 @@ export function createHq(deps = {}) {
     const u = checkUrl(url);
     if (!u.ok) throw httpError(400, u.error);
     stop();
-    const conn = c = { url: u.url, companyId: company ? String(company) : null, state: 'connecting', error: '', ws: null, tries: 0, timer: null, refetch: null, busy: new Set(), companies: null, told: new Set() };
+    const conn = c = { url: u.url, companyId: company ? String(company) : null, state: 'connecting', error: '', ws: null, tries: 0, timer: null, refetch: null, busy: new Set(), selfTried: new Set(), companies: null, told: new Set() };
     changed();
     try {
       const health = await call(conn, '/api/health');
@@ -916,8 +934,8 @@ export function createHq(deps = {}) {
     if (cell === 'confirm' && confirmed !== true) {
       throw askWrite('write', `${plan.summary} in ${name}? The office sends this one change to Paperclip and nothing else.`, { write: { kind: plan.kind, action: plan.action, summary: plan.summary } });
     }
-    // A reporting line marks its employee busy while it sends (the page keeps its Confirm off, #202); a second change waits.
-    const busyId = plan.kind === 'reporting' ? plan.targets[0].id : null;
+    // A reporting line, a pause, a let go and an employee budget (#203) mark their employee busy while they send (the page keeps its Confirm off, #202); a second change waits.
+    const busyId = plan.kind === 'reporting' || plan.kind === 'pause' || (plan.kind === 'budget' && plan.action === 'agent') ? plan.targets[0].id : null;
     if (busyId) {
       if (conn.busy.has(busyId)) throw httpError(409, 'The office is already changing this employee.');
       conn.busy.add(busyId); changed();
@@ -941,7 +959,7 @@ export function createHq(deps = {}) {
         // the agent as Paperclip kept it (the PATCH answer may be partial): the floors and cables come from this read. The write is done, so a
         // failed read is not an error of it; the read of the company that follows has the same data.
         try {
-          const saved = scrubAgent(await call(conn, plan.path()));
+          const saved = scrubAgent(await call(conn, `/api/agents/${busyId}`));
           if (c === conn && d && saved && saved.id === busyId && saved.companyId === conn.companyId) d.agents.set(busyId, saved);
         } catch { /* refetchSoon below */ }
       }
@@ -965,5 +983,5 @@ export function createHq(deps = {}) {
     return out;
   }
 
-  return { connect, disconnect, supervise, handoffGoal, handoffTasks, write, tasksOf, access, view, model, costs, catalog, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
+  return { connect, disconnect, supervise, handoffGoal, handoffTasks, write, selfApprove: () => { if (c) selfApprove(c); }, tasksOf, access, view, model, costs, catalog, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
 }

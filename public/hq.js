@@ -516,6 +516,83 @@
             })]);
   }
 
+  // ---------- employee management (#203): pause, let go, budgets and self-approval ----------
+  // Every change is one call of hqWrite (the one writer); the write grid decides it. The page shows the exact words of the change with a
+  // Confirm and sends it only on the Confirm. The Confirm scrolls into view when it appears, so it stays reachable at 400 px. A move is the
+  // reporting line of the org chart (OrgChart). Let go keeps the employee's tasks and history in Paperclip.
+  function useConfirm(toast, done) {
+    var ps = useState(null), pend = ps[0], setPend = ps[1];   // { body, text, done }: the change that waits for its Confirm
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var ref = React.useRef(null);
+    useEffect(function () { if (pend && ref.current && ref.current.scrollIntoView) ref.current.scrollIntoView({ block: 'nearest' }); }, [pend]);
+    function send() {
+      setBusy(true);
+      client.send('hqWrite', Object.assign({}, pend.body, { confirmed: true })).then(function () { setBusy(false); toast({ tone: 'success', title: 'Done', text: pend.done }); setPend(null); if (done) done(); },
+        function (x) { setBusy(false); setPend(null); toast({ tone: 'error', title: 'Not changed', text: x.message }); });
+    }
+    function box() {
+      return pend ? h('div', { className: 'past-actions', ref: ref },
+        h(A.Button, { variant: 'primary', icon: 'approve', loading: busy, disabled: busy, onClick: send }, 'Confirm: ' + pend.text),
+        h(A.Button, { variant: 'quiet', onClick: function () { setPend(null); } }, 'Cancel')) : null;
+    }
+    return { pend: pend, want: function (body, text, doneText) { setPend({ body: body, text: text, done: doneText || text }); }, box: box };
+  }
+  function EmployeeTools(p) {
+    var a = p.agent, c = useConfirm(p.toast), bs = useState(''), amount = bs[0], setAmount = bs[1];
+    var paused = a.status === 'paused', money = amount.trim() === '' ? NaN : Number(amount);
+    return h('div', { className: 'hq-manage' },
+      h('div', { className: 'past-actions' },
+        paused ? h(A.Button, { variant: 'quiet', icon: 'approve', disabled: !p.write || a.busy, onClick: function () { c.want({ kind: 'pause', action: 'resume', agent: a.id }, 'Resume ' + a.name); } }, 'Resume')
+          : h(A.Button, { variant: 'quiet', icon: 'pause', disabled: !p.write || a.busy, onClick: function () { c.want({ kind: 'pause', action: 'pause', agent: a.id }, 'Pause ' + a.name); } }, 'Pause'),
+        h(A.Button, { variant: 'quiet', icon: 'decline', disabled: !p.write || a.busy, onClick: function () { c.want({ kind: 'pause', action: 'retire', agent: a.id }, 'Let go of ' + a.name + '. Its tasks and history stay in Paperclip', a.name + ' is let go'); } }, 'Let go')),
+      h('div', { className: 'form' },
+        h(A.TextInput, { id: 'bud-' + a.id, label: 'Monthly budget in dollars', value: amount, onChange: setAmount, disabled: !p.write || a.busy }),
+        h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'approve', disabled: !p.write || a.busy || !(money > 0), onClick: function () { c.want({ kind: 'budget', action: 'agent', agent: a.id, budgetDollars: money }, 'Set the budget of ' + a.name + ' to $' + money.toFixed(2) + ' a month', 'Budget set'); } }, 'Set budget'))),
+      c.box());
+  }
+  function CompanyBudget(p) {
+    var c = useConfirm(p.toast), bs = useState(''), amount = bs[0], setAmount = bs[1], money = amount.trim() === '' ? NaN : Number(amount);
+    return h('div', { className: 'form', id: 'hq-company-budget' },
+      h(A.TextInput, { id: 'co-budget', label: 'Company budget per month in dollars', value: amount, onChange: setAmount }),
+      h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'approve', disabled: !(money > 0), onClick: function () { c.want({ kind: 'budget', action: 'company', budgetDollars: money }, 'Set the company budget to $' + money.toFixed(2) + ' a month', 'Company budget set'); } }, 'Set company budget')),
+      c.box());
+  }
+  // Self-approval: which approval kinds an employee may approve itself. Turning one on asks first; off is at once. Hire and budget kinds are
+  // shown locked: they stay with you (so do access and secrets, which are not approval kinds at all).
+  function SelfApproval(p) {
+    var st = useState({ s: undefined, err: '' }), v = st[0], setV = st[1];
+    var ps = useState(null), pend = ps[0], setPend = ps[1], bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var ref = React.useRef(null);
+    function load() { client.get('hqGrid').then(function (j) { setV({ s: j.selfApproval || null, err: '' }); }, function (x) { setV({ s: null, err: x.message }); }); }
+    useEffect(function () { load(); }, []);
+    useEffect(function () { if (pend && ref.current && ref.current.scrollIntoView) ref.current.scrollIntoView({ block: 'nearest' }); }, [pend]);
+    function set(type, value, confirmed) {
+      setBusy(true);
+      client.send('hqSelfApproval', { type: type, value: value, confirmed: confirmed === true }).then(function (j) { setBusy(false); setPend(null); setV({ s: j.selfApproval, err: '' }); p.toast({ tone: 'success', title: 'Self-approval ' + (value ? 'on' : 'off') }); },
+        function (x) { setBusy(false); setPend(null); p.toast({ tone: 'error', title: 'Not changed', text: x.message }); });
+    }
+    var s = v.s;
+    return h('div', { className: 'hq-floor', id: 'hq-self-approval' },
+      h('h3', { className: 'ext-h' }, 'Self-approval'),
+      h('p', { className: 'note' }, 'An employee may approve its own work only for the kinds you turn on. Hires and budgets always stay with you. So do access and secrets.'),
+      v.err ? h('p', { className: 'ao-err', role: 'alert' }, 'The office could not read the setting. ' + v.err)
+        : s === undefined ? h('p', { className: 'note', role: 'status' }, 'Reading the setting.')
+        : !s ? h('p', { className: 'note' }, 'The office could not read the setting.')
+        : h('ul', { className: 'past' },
+          s.kinds.map(function (k) {
+            return h('li', { key: k.type, className: 'past-row' },
+              h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h('b', null, k.label), h(Tag, null, k.on ? 'On' : 'Off')), h('div', { className: 'past-meta' }, k.text)),
+              h('div', { className: 'past-actions' }, k.on
+                ? h(A.Button, { variant: 'quiet', disabled: busy, onClick: function () { set(k.type, false); } }, 'Turn off')
+                : h(A.Button, { variant: 'quiet', disabled: busy, onClick: function () { setPend(k); } }, 'Turn on')),
+              pend && pend.type === k.type ? h('div', { className: 'past-actions', ref: ref },
+                h(A.Button, { variant: 'primary', icon: 'approve', loading: busy, disabled: busy, onClick: function () { set(k.type, true, true); } }, 'Confirm: employees approve their own "' + k.label + '"'),
+                h(A.Button, { variant: 'quiet', onClick: function () { setPend(null); } }, 'Cancel')) : null);
+          }).concat(s.never.map(function (t) {
+            return h('li', { key: t, className: 'past-row' }, h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h('b', null, t.replace(/_/g, ' ')), h(Tag, null, 'Always yours'))));
+          }))));
+  }
+
   // The HQ: what Paperclip says about its company. Goals, routines and company admin have their own writes (Goals, Routines, Access); the rest
   // is read only. Supervise
   // in office is on the Agents screen of a Security room, with its painted Confirm (no button here: one place for a write).
@@ -549,6 +626,8 @@
         h(MemoryPanel, { toast: p.toast }),
         h(Catalog, null),
         h(Access, { company: q.company.name, toast: p.toast }),
+        h(SelfApproval, { toast: p.toast }),
+        h(CompanyBudget, { toast: p.toast }),
         h('h3', { className: 'ext-h' }, 'Agents'),
         q.agents.length ? h('ul', { className: 'past' }, q.agents.map(function (a) {
           var st = H.status(a), sup = H.supervision(a);
@@ -558,7 +637,8 @@
               h('div', { className: 'past-title' }, h('b', null, a.name), h(Tag, null, a.title || a.role), h('span', { className: 'sess-state' }, h(A.StatusDot, { status: st.key }), st.word)),
               h('div', { className: 'past-meta' }, a.task ? (a.task.identifier ? a.task.identifier + ' ' : '') + a.task.title : 'No open task'),
               h('div', { className: 'past-sub mono' }, facts),
-              h('div', { className: 'past-meta', title: a.supervision.why || undefined }, sup + (a.supervision.why ? '. ' + a.supervision.why : ''))));
+              h('div', { className: 'past-meta', title: a.supervision.why || undefined }, sup + (a.supervision.why ? '. ' + a.supervision.why : '')),
+              h(EmployeeTools, { agent: a, write: q.employeeWrite !== false, toast: p.toast })));
         })) : h('p', { className: 'note' }, 'This company has no agents yet.'),
         h('h3', { className: 'ext-h' }, 'Projects and workspaces'),
         q.rooms && q.rooms.length ? h('ul', { className: 'past', 'aria-label': 'Project rooms' }, q.rooms.map(function (r) {

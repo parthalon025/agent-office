@@ -225,11 +225,41 @@ export function setWriteCell(grid, change) {
   return { grid: next, from, to };
 }
 
+// ---------- self-approval (#203, ADR 0010) ----------
+// An employee may approve its own work only for the approval kinds the user allows here. Paperclip's approval types (APPROVAL_TYPES of the
+// pinned release): hire_agent and budget_override_required are the hire and the budget, so they are never self-approvable; access and
+// secrets are not approval types at all. The saved slice holds the kinds the user turned on: { approval_type: true }.
+export const SELF_APPROVAL_KINDS = [
+  { type: 'request_board_approval', label: 'Request for the board', text: 'A request the employee makes of the board, for example a plan.' },
+  { type: 'approve_ceo_strategy', label: 'Strategy of the chief', text: 'The strategy the top employee proposes.' },
+];
+export const NEVER_SELF_APPROVED = ['hire_agent', 'budget_override_required'];
+const selfKind = (t) => (typeof t === 'string' && SELF_APPROVAL_KINDS.some((k) => k.type === t) ? t : null);
+export function cleanSelfApproval(raw) {
+  const out = {};
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return out;
+  for (const k of SELF_APPROVAL_KINDS) if (Object.hasOwn(raw, k.type) && raw[k.type] === true) out[k.type] = true;
+  return out;
+}
+export const selfApprovalOn = (slice, type) => !!selfKind(type) && !!slice && typeof slice === 'object' && Object.hasOwn(slice, type) && slice[type] === true;
+/** One change: { type, value: true|false, confirmed }. Turning it on is looser (409 until confirmed: true); a never-self kind is 400. Returns { slice, from, to }. */
+export function setSelfApproval(slice, change) {
+  const type = change && change.type;
+  if (NEVER_SELF_APPROVED.includes(type)) throw gridError(400, 'An employee never approves this kind itself. It stays with you.');
+  if (!selfKind(type)) throw gridError(400, 'Unknown approval kind.');
+  if (typeof change.value !== 'boolean') throw gridError(400, 'Self-approval is on or off.');
+  const from = selfApprovalOn(slice, type);
+  if (change.value && !from && change.confirmed !== true) throw gridError(409, 'Confirm the looser rule first.');
+  const next = { ...cleanSelfApproval(slice) };
+  if (change.value) next[type] = true; else delete next[type];
+  return { slice: next, from, to: change.value };
+}
+
 // ---------- the plan of a write ----------
 // planWrite(body) -> { kind, action, method, path(companyId), body, targets, summary }. body: { kind, action, ...fields }. The fields are
 // checked here (400), every id must be a plain id (it goes into a path), and a target is a thing the writer reads before it writes
 // (issue, approval, agent): it must belong to the connected company. Only the first writes are planned: task (create, assign), comment
-// (add), approval (approve, reject, revise), routine (create, update, schedule, run, #209), reporting (set, #202), goal (create, update, #207),
+// (add), pause (pause, resume, retire, #203), budget (company, agent, #203), approval (approve, reject, revise), routine (create, update, schedule, run, #209), reporting (set, #202), goal (create, update, #207),
 // hire (create, #201), company (create, #199: scope 'none', it needs no connection; update, #213) and access (invite, revoke, approveJoin,
 // rejectJoin, member, #213). Another kind in the grid
 // has no plan yet, and is 400 (never sent).
@@ -288,6 +318,28 @@ function skillsOf(v) {
   }
   if (out.length > 20) throw gridError(400, 'Give at most 20 skills.');
   return out;
+}
+const dollarsOf = (cents) => `$${(cents / 100).toFixed(2)}`;
+function budgetCents(dollars) {
+  if (typeof dollars !== 'number' || !Number.isFinite(dollars) || dollars <= 0) throw gridError(400, 'Give a monthly budget above zero. The office does not remove a budget.');
+  if (dollars > HIRE_BUDGET_MAX) throw gridError(400, `The monthly budget is too high (at most $${HIRE_BUDGET_MAX}).`);
+  const cents = Math.round(dollars * 100);
+  if (cents < 1) throw gridError(400, 'Set a monthly budget of at least one cent.');
+  return cents;
+}
+// One lifecycle POST of one employee (/api/agents/:id/<route>, no body): the employee is a target (it must be in the company) and review names it.
+function employeeStep(route, verb, problemOf, tail = '') {
+  return (b) => {
+    const agent = idOf(b.agent, 'employee');
+    const review = (org) => {
+      const a = org.find((x) => x.id === agent);
+      if (!a) return { problem: 'Paperclip has no such agent in this company.', status: 404 };
+      const problem = problemOf(a);
+      if (problem) return { problem, status: 409 };
+      return { problem: '', summary: `${verb} ${short(String(a.name || 'an employee'), 60)}${tail}` };
+    };
+    return { method: 'POST', path: () => `/api/agents/${agent}/${route}`, body: {}, targets: [{ type: 'agent', id: agent }], review, summary: `${verb} an employee${tail}` };
+  };
 }
 const PLANS = {
   task: {
@@ -495,6 +547,32 @@ const PLANS = {
     run(b) {
       const routine = idOf(b.routine, 'routine');
       return { method: 'POST', path: () => `/api/routines/${routine}/run`, body: {}, targets: [{ type: 'routine', id: routine }], summary: 'Run a routine now' };
+    },
+  },
+  // Employee management (#203): pause, resume and let go (terminate) of one employee. Letting go keeps its work and history (Paperclip's
+  // terminate ends the employee; it is not DELETE /api/agents/:id, which erases it). A move is a reporting line (kind reporting, #202).
+  // review(org) names the employee for the Confirm and refuses a change that cannot apply: pause of a paused employee, resume of one that
+  // is not paused.
+  pause: {
+    pause: employeeStep('pause', 'Pause', (a) => (a.status === 'paused' ? 'This employee is already paused.' : '')),
+    resume: employeeStep('resume', 'Resume', (a) => (a.status === 'paused' ? '' : 'This employee is not paused.')),
+    retire: employeeStep('terminate', 'Let go of', () => '', ' (its tasks and history stay in Paperclip)'),
+  },
+  // Budgets (#203): one monthly limit in whole cents, for the company or for one employee (PATCH .../budgets { budgetMonthlyCents }). The
+  // office never sets no limit (0 in Paperclip): an employee always has a budget (ADR 0010), so 0 and a typing slip over the cap are 400.
+  budget: {
+    company(b) {
+      const cents = budgetCents(b.budgetDollars);
+      return { method: 'PATCH', path: (co) => `/api/companies/${encodeURIComponent(co)}/budgets`, body: { budgetMonthlyCents: cents }, targets: [], summary: `Set the company budget to ${dollarsOf(cents)} a month` };
+    },
+    agent(b) {
+      const agent = idOf(b.agent, 'employee'), cents = budgetCents(b.budgetDollars);
+      const review = (org) => {
+        const a = org.find((x) => x.id === agent);
+        if (!a) return { problem: 'Paperclip has no such agent in this company.', status: 404 };
+        return { problem: '', summary: `Set the budget of ${short(String(a.name || 'an employee'), 60)} to ${dollarsOf(cents)} a month` };
+      };
+      return { method: 'PATCH', path: () => `/api/agents/${agent}/budgets`, body: { budgetMonthlyCents: cents }, targets: [{ type: 'agent', id: agent }], review, summary: `Set the budget of an employee to ${dollarsOf(cents)} a month` };
     },
   },
   approval: Object.fromEntries([decision('approve', 'approve', 'Approve an approval'), decision('reject', 'reject', 'Reject an approval'), decision('revise', 'request-revision', 'Request a revision of an approval')]),
