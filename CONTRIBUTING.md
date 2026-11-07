@@ -5,7 +5,7 @@ Thank you for helping. This page tells you how to make a change that can be merg
 ## Before you start
 
 - Read [docs/development.md](docs/development.md). It has the commands, the file map and how the office works.
-- Read [CLAUDE.md](CLAUDE.md). It has the rules for each file. A reviewer also reads [CODING_STANDARDS.md](CODING_STANDARDS.md). Extend the file that owns the concern before you add a new file.
+- Read [CLAUDE.md](CLAUDE.md). It has the UI and safety rules and a map of which file owns what. The rules of each file are in the header comment at the top of that file: read it before you change the file, and update it in the same change. A reviewer also reads [CODING_STANDARDS.md](CODING_STANDARDS.md). Extend the file that owns the concern before you add a new file.
 - Read the decision records in [docs/adr](docs/adr) before you change approvals, providers or the Security room.
 - The office has no dependencies. Do not add one without asking in an issue first.
 - The office runs on Windows first. Node.js 24.11 or newer is required.

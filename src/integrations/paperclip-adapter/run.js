@@ -5,7 +5,11 @@
 // The wire is the office's (src/paperclip-runs.mjs): start the run, then ask for news again and again (each ask is held by the office
 // for up to 25 s), until the answer says done, with the result. A call the office asks the user about waits in Needs you, so a run can
 // take hours; plain polls need no long request, and Paperclip's abort ends the loop and cancels the run in the office.
-// Every failure is a failed run with a reason, never a thrown error and never a guess.
+// Every failure is a failed run with a reason, never a thrown error and never a guess: no token file, no office, a refusal, or a lost run
+// (after RETRIES = 5 failed waits in a row, or at once when the office answers 404 because it restarted).
+// `execute` starts the run, polls the office's wait route until done, sends log lines to `onLog` and cancels the run in the office when
+// Paperclip aborts. `testEnvironment` checks the token file, that the office answers a wait for a run that does not exist with 404,
+// and the folder. The adapter is plain JavaScript with no import from Paperclip, and has its own `httpPost` like the OpenClaw plugin.
 import http from 'node:http';
 import path from 'node:path';
 

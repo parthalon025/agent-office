@@ -20,6 +20,9 @@
 //   1 provider check  2 Security refusal  3 own room only (ADR 0001)  4 preflight  5 question (cost; fork: the fork
 //   capability, the record check, then the fork question)  6 spend limit.
 // Provider facts come from traitsOf (providers/index.mjs); the Security rules from security.mjs.
+// Callers (openSession, which schedules also use, reopenSession and forkSession in office.mjs) make the worktree and the session
+// only after a plan. ruled() there turns the answer into the route's error or question.
+// Tested in test/admission.test.mjs with real rules and a fake provider.
 import { traitsOf, spendLimitFor } from './providers/index.mjs';
 import { openRefusal, costAsk } from './security.mjs';
 

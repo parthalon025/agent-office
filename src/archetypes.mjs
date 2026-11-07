@@ -7,6 +7,9 @@
 //   detection         from file names at the repository root and one level down. Mixed or unclear gives General.
 //   record            { proposed, why, archetype, confirmed, floors: [{ id, hidden? }], names: { id: name } }. Detection runs once:
 //                     the record keeps the result, and only a user action (edit) changes it.
+// newRecord and cleanRecord make the record of a building. edit(rec, op) applies the user's changes to it: confirm, switch, rename,
+// add, hide, show, move. floorsOf gives the floors (Lobby first, Records last) and floorOfKind seats an agent kind. The snapshot
+// carries layouts[key] (layoutView) and `catalog` (catalogView). Tested in test/archetypes.test.mjs.
 
 export const WINGS = [
   { id: 'product', name: 'Product and tech' },

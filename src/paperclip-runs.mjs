@@ -1,16 +1,44 @@
-// The office side of the office adapter (#200, ADR 0010): runs that Paperclip hands to the office. The plugin in
-// src/integrations/paperclip-adapter runs inside Paperclip. When Paperclip wakes an employee whose adapter is `agent_office`, the plugin
-// posts the run here (agent token, /hook/paperclip/run/*). The office opens an ordinary office session with the employee's agent kind
-// through its provider seam, so the Security room, the holds and Needs you apply as for any session. The plugin then asks for the log and
-// the result. This module owns the run records and the wire rules; opening, messaging and closing a session are injected.
+// The office side of the office adapter (#200, ADR 0010): the run records of runs that Paperclip hands to the office. A distinct job from
+// paperclip.mjs (the watcher) and paperclip-runtime.mjs (the process). The plugin in src/integrations/paperclip-adapter runs inside
+// Paperclip. When Paperclip wakes an employee whose adapter is `agent_office`, the plugin posts the run here (agent token,
+// /hook/paperclip/run/*). The office opens an ordinary office session with the employee's agent kind (default claude-code) through
+// `openSession`, so admission, the provider seam, the Security room, the holds and Needs you apply as for any session. The plugin then
+// asks for the log and the result. This module owns the run records and the wire rules; opening, messaging and closing a session are
+// injected by office.mjs (open, send, session, close, feed and changed).
 //
-// transcript(uid) gives the log of a run by its office session, for the desk screen (#211).
+// transcript(uid) gives the log of a run by its office session (live or kept after the end), for the desk screen (#211). The session
+// carries `paperclipRun: true`.
 // The wire (all POST, JSON, agent token):
 //   start  { run_id, agent: { id, company_id, name }, agent_kind?, model?, cwd, isolation?, prompt, task_id? } -> { key, resumed }
 //   wait   { key, cursor? }  -> { done, cursor, log: [{ stream, text }], result? }   holds up to WAIT_MS for news, then answers with none
 //   cancel { key }           -> { ok }
-// A run that Paperclip starts twice (same run_id, still live) is one run. A session ends with the first turn: the run ends and the
-// session closes (it stays in Past sessions). Nothing here answers a request for the user: a held call waits in Needs you.
+//
+// Start. `isolation` defaults to `same`, because Paperclip already gives the run its own workspace folder. So an ungated kind (ADR 0001)
+// is refused there (the 409 text reaches Paperclip), unless the plugin asks for `worktree`. A refusal, or the cost question, is the
+// start's error, because nobody can answer it inside a run. A run that Paperclip starts twice (same run_id, still live) starts nothing
+// twice: it is one run. At most MAX_RUNS (16) are live. The start puts the Paperclip ids on the session (`s.paperclip`, the bot label)
+// and sends the prompt with `sendMessage` (4000 characters, the office limit).
+//
+// Log and end. `tick` is called from `broadcast()`. It turns replies, calls and requests that wait into log lines. It ends the run when
+// the turn ends (`turnEnded` and idle), when the session ends, or when it leaves the office. `wait` is a held poll (25 s, answers at once
+// for news or a result), so a run of hours needs no long request. `cancel` ends the run and closes the session. The session closes with
+// its run and stays in Past sessions. Nothing here answers a request for the user: a held call is in Needs you like any session's, and
+// the run waits for it; the plugin's polls keep the run alive for hours. Runs live in memory: an office restart loses them, and the
+// plugin says so (the 404 of wait and cancel).
+//
+// Result. `resultOf` carries cost only when the agent reported one (null, never 0, for an agent without cost reports), usage only when
+// it splits into input and output, the last reply as summary, and the session uid.
+//
+// Context (#206). The start body may carry `context`: `wake_reason`, `prior` (the session Paperclip saved: `session_id`, `cwd`,
+// `task_id`, `instructions`), `instructions` (`file`, `key`) and `skills`. `cleanContext` checks it. `deskOf` gives the session
+// `paperclip.desk`: the wake reason, `resumed` (always false) and `fresh`, the reason: no saved session, another task, another folder,
+// changed instructions, else that the office does not resume. The snapshot carries it as `deskCtx` (`SESSION_FIELDS`), and the desk
+// screen shows it with the context window of the session. A run with no context shows no block. A session is not resumed on the next
+// wake: each run is a fresh session, and `sessionParams` are not returned; the desk says so and why. This module writes nothing to
+// Paperclip.
+//
+// Tested in test/paperclip-runs.test.mjs (broker, injected session) and test/paperclip-adapter-routes.test.mjs (the whole way: stand-in
+// host, plugin, HTTP, real office in process, local model, Windows only).
 import { httpError } from './office-core.mjs';
 
 export const WAIT_MS = 25_000;          // how long one wait holds for news (a plain HTTP poll, so a run of hours needs no long request)

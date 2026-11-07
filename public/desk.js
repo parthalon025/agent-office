@@ -8,6 +8,8 @@
      (the page, layer kind 'note'), and the typed answer goes to the agent as the next message.
    - Pause key on the monitor bezel: look at it, then click it to stop the turn (o.onPause).
    - An empty desk starts an agent with two clicks: lobby.js owns that (its open desks), the page starts the agent at once.
+     The open desk starts an agent at once in the room's workspace (deskStart in office.js, default kind); Open session in
+     Ctrl+K keeps the form. There is no request bar: the requests are on the desk.
    Every control is a box on a plane. Its hit area is padded to at least HIT px (44) around its centre at the size the plane has on
    screen (the host's hitBox, hitAt). Below NARROW px of width a paper shows one large Approve (or Confirm) and a Decline strip.
    Pure part (window.OfficeDesk.pure; tested in test/desk.test.mjs): plan, step, timeLeft, ACTIONS, paletteActions, FACES.

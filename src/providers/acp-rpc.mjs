@@ -5,6 +5,9 @@
 // Interface: channel(child, { onRequest, onNotify }) -> { request(method, params) -> Promise, notify(method, params), fail(why) };
 // within(promise, ms, why, setTimer, clearTimer); rpcError(code, message); textOf(e); isAuth(e); REFUSED (the error code for
 // "the office said no"); MAX_LINE.
+//
+// A request from the agent is answered at once, in the order sent (a notification on the next line may change the call the
+// request asks about). Tested in test/acp-rpc.test.mjs with a fake child.
 
 export const MAX_LINE = 8_000_000;      // characters of one JSON-RPC line; more is dropped
 export const textOf = (e) => String((e && e.message) || e || 'unknown error');

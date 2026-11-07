@@ -2,7 +2,10 @@
    One Module for what every painted wall and desk screen (board.js, terminal.js, security.js, lobby.js, desk.js) shares:
    text measure, clip, wrap and fit (by a canvas context, by a column count, or by an estimate of the character width where
    Node has no canvas), color mix, the rounded rectangle, the font string and the canvas texture. A fix to wrapping applies to
-   every screen. Plain script, no DOM at load: the canvas, the texture and the stage tokens come in as arguments.
+   every screen. A screen file never keeps its own copy of these helpers (test/screen-kit.test.mjs fails on one). Plain script,
+   no DOM at load: the canvas, the texture and the stage tokens come in as arguments. Load it before the screens (index.html),
+   and import it before a screen in a test. The estimate (charW, fitSize, wrapEst, wrapEstAll) is one rule for a plan and its
+   test. Tested in test/screen-kit.test.mjs.
    window.OfficeScreenKit
      clip(c, text, maxW, ell = '…')          text, or its start and ell, so it measures <= maxW
      chop(c, text, maxW, ell)                the start of text and ell (ell added even when it fits)

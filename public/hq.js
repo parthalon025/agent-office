@@ -1,6 +1,10 @@
 /* Agent Office for Claude Code x0.2: the hq feature (#184, the page features of #168).
    The Manager board, the Paperclip HQ and earned trust (#157, #76, #153). One Module: its Interface is window.OfficePage.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel, AdapterInstall: AdapterInstall } (the HR desk, #201; company memory, #205).
-   Plain functions over the page core (window.OfficePage); office.js calls the Interface and holds none of the parts. */
+   Plain functions over the page core (window.OfficePage); office.js calls the Interface and holds none of the parts.
+   The HQ dialog also holds the Lobby (#197): Lobby shows the dashboard cards (from OfficeVocab.hq.cards), the approvals
+   and goals that wait, the org chart as floors top first, and the activity. The HQ dialog carries the Paperclip runtime
+   panel (O.PaperclipRuntime, defined in dialogs.js). office.js hqBuilding makes the city's HQ floors from snap.hq.floors;
+   needs.js PhoneView lists the HQ on a phone. */
 (function () {
   'use strict';
   var O = window.OfficePage;

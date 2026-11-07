@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Checks that HTTP hooks work on this Claude Code version and, if so, switches the office to them.
-// Needs the office to be running. Makes one tiny Haiku call.
+// Needs the office to be running. Makes one tiny Haiku call. It calls a page route, so it reads the page token from pageFile.
 // Usage: npm run probe (the office of npm start), or npm run probe -- <port> (an office on another port).
 // First statement: Windows never looks for a program in the current folder (launch.mjs resolveExe has the reason).
 process.env.NoDefaultCurrentDirectoryInExePath = '1';

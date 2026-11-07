@@ -1,7 +1,21 @@
 /* Agent Office for Claude Code x0.2: the panels and pinned screens (split out of office.js, #1 story 26).
    The room board, stats and notes panels, the Look card and bar, and the pinned screens laid over a screen in focus (#89): the
    desk (chat, terminal, timeline), the changes of a room and the question note. Plain functions over the page core and the
-   dialogs (window.OfficePage); they put their names on it for office.js. */
+   dialogs (window.OfficePage); they put their names on it for office.js. Needs page-core.js.
+   This file holds the room board, stats and notes panels (NotesEditor), the Look card and bar (LookBar, layerMemory,
+   ADR 0006), the page's covers for the scene host (sceneCovers), and the pinned-screen parts (#89): the bezel count
+   (Bezel) and the Needs you button (NeedsButton). It gives putBox, usePinBox and usePinFocus to the features that pin a
+   screen.
+   Pinned screens (#89). A target's look spec with pin: true is a screen whose look is its use. This file defines
+   DeskScreen (chat from office.chatOf, Terminal and Timeline tabs; the requests are on the desk, desk.js); changes.js
+   defines Changes.Screen; office.js renders them over host.layer().rect, set as --pin-* with setProperty (putBox), never
+   a style prop or attribute (the CSP). The page renders again only when the layer's screen, state or count changes. The
+   face is opaque, so the painted screen does not show through. The terminal side panel is gone; the changes dialog is left
+   only for a session with no room on screen. The same holds for a Security room screen in focus at 820 px and below:
+   sec-look (set in a layout effect) hides .ao-hud-left and .ao-hud-right (not the inbox), and the look bar shows the open
+   requests (LookBar asks) and places itself again (layout).
+   The notes editor takes focus when it shows and again when the camera lands (it checks host.flying() each frame). Its
+   font is never under 16 px. */
 (function () {
   'use strict';
   var O = window.OfficePage;

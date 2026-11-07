@@ -6,6 +6,12 @@
    no cue and the arm stays hidden. The shape and the color of the persona are the bot's own look, set when the bot is seated
    (building.js), not here. Colors are DS tokens of the stage (stage.K.tok): scene-dark or bubble, whichever reads on the bot's body. A host adapter, like terminal.js: it registers a frame,
    never a pick target, and reads the stage only through office.inspect().
+   Per frame it dresses a bot that has a persona with its accessory and turns one small arm for the cue, from the session
+   status only. The words, the look (OfficeVocab.persona lookOf: persona shape to DS shape, color index into
+   AgentOffice.BODY_COLORS), the cue rule (cueOf: waiting raise-hand, error scratch-head, finished stretch; none under reduced
+   motion; personas.mjs bodyCue reads the same rule, one copy), pose and markOn are OfficeVocab.persona. Marks use scene-dark
+   or bubble, whichever reads on the body (test/contrast.test.mjs). Tested in test/personas.test.mjs and
+   test/persona-vocab.test.mjs.
 
    window.OfficePersona
      attach(office, { session(botName) -> session or null, host? }) -> { dispose(), cueOf(botName) }

@@ -1,7 +1,11 @@
 /* Agent Office for Claude Code x0.2: wheel gate.
    Decides when scrolling out leaves a level (floor, then building, then city). One trackpad flick sends
    dozens of wheel events, some of them after the finger lifts. Without a gate one flick would leave the
-   floor and the building in one go. The gate lets one gesture change one level.
+   floor and the building in one go. The gate lets one gesture change one level: events less than 140 ms apart (opts.gap)
+   are one gesture, and a gesture that changed a level changes no more. A trackpad flick sends wheel events for about a second.
+   Do not count scroll-out wheel events by hand. (city.js counts zoom-in pushes to enter, which is a different gesture.)
+   While the gate holds, office.js stops the wheel event so the DS camera feel does not clear the framing. Defaults: a 600 ms
+   pause after a change; 2 pushes at the floor, 3 at the building. Tested in test/wheel-gate.test.mjs.
    Plain script, no I/O, no timers: the caller passes the time. The page loads it as a script
    (window.OfficeWheelGate). The tests import it for its side effect and read globalThis.OfficeWheelGate.
 

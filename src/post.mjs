@@ -1,7 +1,10 @@
 // One POST to the local office, for hook.mjs and mcp.mjs (#128). Node built-ins only, so the command hook stays light.
 // Not the global fetch: its undici gives up after 300 s without answer headers (UND_ERR_HEADERS_TIMEOUT), and a held
 // request waits longer (a permission request 15 min, office_ask 10 min). So: node:http, no socket timeout, a socket of
-// its own (agent: false), and the caller's AbortSignal ends the wait. The answer is capped. Pure apart from the call.
+// its own (agent: false), and the caller's AbortSignal ends the wait. The answer is capped (MAX_ANSWER, 64 KB). Pure apart from
+// the call. httpPost({ port, path, headers, body, signal, maxAnswer }) is the Interface.
+// A distinct job with two callers. src/integrations/openclaw-plugin/gate.js keeps its own copy on purpose: OpenClaw loads it and
+// it must stay self-contained. Tested in test/hook-post.test.mjs (a stand-in gives fetch a short headers timeout).
 import http from 'node:http';
 
 export const MAX_ANSWER = 65_536; // bytes of the office's answer that are read

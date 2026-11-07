@@ -4,7 +4,9 @@
    1. Resize: drag the left edge, bottom edge or bottom-left corner of the chat. Arrow keys work on a focused grip,
       double-click resets. The size is remembered in this browser.
    2. Slash commands: type "/" in the chat box to pick one of the session's commands or skills.
-      Only sessions that run inside the office report their commands. */
+      Only sessions that run inside the office report their commands.
+   It depends on DS class names (.ao-hud-chat, .ao-input). Its window capture handler stops Esc for the / list, so the
+   page decides Esc in the bubble phase (office.js, OfficeBoard.escTaken). */
 (function () {
   var KEY = 'office-chat-size';
 

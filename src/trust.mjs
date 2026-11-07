@@ -11,6 +11,11 @@
 // A proposal is a building-scope cell for one agent kind. A cell has no command pattern, so Allow covers the whole row in that
 // building for that kind: the pattern is the evidence, and the text says so. Never proposed: the Secrets rows (settings,
 // secrets), the Agents rows, a cell that is already Allow or Deny, a streak with a decline or a high-risk call in it.
+// The ledger is persisted.trust (at most LEDGER_MAX = 400 answers). It records only answers the user gave on the page
+// (noteDecision in office.mjs). propose needs MIN_APPROVALS = 5 clean approvals in one cell of one building and agent kind;
+// a decline or a high-risk call ends the streak. grant goes through setRule, so it is 409 without `confirmed: true`.
+// withdraw restores the replaced cell in one tap. cards give clean runs, declined calls and rules granted per kind.
+// Tested in test/trust.test.mjs and test/trust-routes.test.mjs.
 import { setRule } from './security.mjs';
 import './vocab.mjs';
 

@@ -3,6 +3,14 @@
 // feed, the merges and the history, the weekly recap and the away list. The rules the page shares (Focus mode, reduced motion, the
 // stand-up due rule, the merged moment) are in public/vocab.js (OfficeVocab.rituals).
 // Pure: no I/O, no clock (the caller passes `now`). The server keeps the lists and calls these.
+//
+// `mergeRecord` is the record of a merge the user confirmed (saved as `persisted.merges`, `MERGES_KEPT` = 100 kept; the head branch
+// links it to the session that made it). `metrics` gives approvals per merge, minutes from done to merged and interruptions per hour,
+// from the feed lines the office writes (`approved`, `declined`, `answered ...`), the merge records and the history. A ratio with
+// nothing to divide by is null, never 0. `recap` is the week: shipped work, cost, the metrics, and each agent's best moment (its latest
+// merge, matched by head branch). `away` is the feed since a time, newest 12. The saved slices are `cleanMerges`, `cleanStandups`
+// (agent name -> the day of its last stand-up) and `cleanFocus` (Focus mode is on only when saved as true).
+// Tested in test/rituals.test.mjs, test/rituals-routes.test.mjs and test/building.test.mjs.
 
 const MIN = 60000, HOUR = 60 * MIN, DAY = 24 * HOUR;
 export const WEEK_DAYS = 7;

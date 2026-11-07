@@ -4,6 +4,14 @@
 // It uses the local provider seam as it is: the provider's readiness(), models() and baseUrl, and the chat endpoint with
 // the keys the local provider already sends (model, messages, stream). No new field or endpoint on the provider.
 // Fetch and clock are injected; importing starts nothing.
+//
+// createExplainer({ providers, fetch, model }) asks the first ready local server (LM Studio, then Ollama; OFFICE_EXPLAIN_MODEL
+// names the model, OFFICE_EXPLAIN=off turns it off) for a one-line intent and a reason of a request that waits (parseExplain,
+// explainMessages). One call runs at a time, with a 20 s limit, and at most 8 wait. office.mjs explainHeld runs it after the
+// hold, and tracker.explainRequest stores the text on the pending request. It only shows: never a decision, and a request the
+// Security room answered is never explained. The page shows intent, reason and the raw command (OfficeVocab.explainLayers; the raw
+// command is always there) and groups similar requests (requestGroups: same tool and trimmed text, never high risk or a question;
+// groupAnswers is one answer per request, sent one by one). Tested in test/explain.test.mjs.
 
 export const MAX_TEXT = 200;      // characters of the intent and of the reason
 export const MAX_INPUT = 1500;    // characters of the call that the model sees

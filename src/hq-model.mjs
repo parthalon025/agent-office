@@ -2,6 +2,114 @@
 // contract of the Paperclip API shapes the office reads. paperclip.mjs holds the connection and reads; this module only shapes what it
 // read. The write side is here too (#198): the write grid (Confirm, Allow, Deny per write kind: kinds, defaults, saved slice, the looser-change
 // rule) and planWrite (the exact request of a write, checked before anything is asked or sent); `write` in paperclip.mjs sends it. No I/O, no clock. Tested in test/hq-model.test.mjs against test/fixtures/paperclip-shapes.json (the recorded shapes).
+//
+// Read model (the views the page shows; each is `view().<name>` of paperclip.mjs unless said). A null is unknown, never a zero that
+// looks real.
+// - floorsOf(agents): the org chart as the floors of the HQ building, bottom to top: Records, Lobby, then one floor per reporting rank,
+//   the top role on top. Loop-safe, depth capped at 8, no employee lost.
+// - cablesOf(agents): one cable per reporting line whose manager is in the chart; none for a self report, a ghost manager or a loop.
+//   reportingProblem(agents, id, managerId) says why a reporting line change is refused: unknown employee or manager, self, loop (#202).
+// - lobbyOf(...): the dashboard counts and short lists.
+// - inboxOf({ agents, issues, approvals }) (#210): what Paperclip holds for the user, as items of the one queue: each pending
+//   approval, then each open task with a person assignee (assigneeUserId), oldest first, capped at INBOX_CAP. Names only, never a
+//   payload. Null when neither list was read. It is `view().inbox`. public/building.js hqRequests makes them requests of kind
+//   `paperclip` (id hq:..., no uid), so they count in Needs you, the queue, the alerts and the tab title, and open in the Needs you
+//   list with Open Paperclip HQ, not at a desk. Tested in test/hq-inbox.test.mjs and test/building.test.mjs.
+// - searchOf(...) (the Ctrl+K index, #214): one entry per employee, floor, open task, goal, pending approval and routine, names and
+//   statuses only, capped per kind by SEARCH_CAPS. It is `view().search`. The page turns it into palette actions with
+//   OfficeVocab.hq.searchItems, and a pick opens the HQ dialog with focus: { kind, id }: a found card, and the row of an employee,
+//   floor or routine marked and scrolled into view. Tested in test/hq-search.test.mjs.
+// - monthWindows and costsOf (the Costs view, #208): the last three UTC months per agent and per project, and the budgets. A part not
+//   read is null; a row with no cost is null and its month total is partial, never $0.00.
+// - goalsOf(goals, agents) (#207): the goals as a tree for the executive floor, parents first, depth capped at 6, owner names,
+//   children counts. Loop-safe, drops no goal. It is `view().goals`. The snapshot `hq.goalWrite` is false only when the grid says
+//   Deny. The page is `Goals` in public/hq.js (the HQ dialog and the Manager board), with its words in OfficeVocab.hq.goals.
+// - roomsOf({ projects, agents, issues }) (#211): a project is a room with its workspaces. An employee sits in the room of its best
+//   open task and in that task's workspace, else the primary one. The folder is null when Paperclip gives none. It is `view().rooms`,
+//   listed in the HQ dialog.
+// - catalogOf (#212) keeps names, descriptions, versions and states only (see paperclip.mjs catalog()).
+//
+// The contract. SHAPES lists the fields of each Paperclip route the office reads (also costsByAgent, costsByProject, budgets; one task
+// and one approval included). #213 adds the shapes invites, joinRequests and members. #221 adds instanceSettings, environments,
+// exportBundle, importPreview and importResult. shapeOf and shapeProblems check an answer. test/fixtures/paperclip-shapes.json holds
+// the recorded shapes of the pinned release: the test fails when a recorded type changes or the office reads a field nobody
+// recorded. The shapes follow the Paperclip source, not a live run, so record again against a real pinned Paperclip when the pin
+// moves. test/hq-read.test.mjs runs the watcher against the fake.
+//
+// The write side (#198, ADR 0010).
+// - The write grid. WRITE_KINDS has one row per kind, fourteen: hire, pause, budget, approval, reporting, routine, access, secret,
+//   task, comment, company (#199), goal (#207), instance (#221) and adapter (#222). Each is Confirm, Allow or Deny. The default is
+//   Confirm, except Allow for task and comment. secret offers Confirm and Deny only. cleanWriteGrid cleans the saved slice `hqGrid`,
+//   which holds only the cells the user set. writeValueOf gives a cell (an unknown kind is Deny). setWriteCell changes one: a looser
+//   change, Deny to Confirm or Confirm to Allow, is 409 until `confirmed: true` (the painted Confirm); a secret never takes Allow
+//   (400). Tested in test/hq-write-grid.test.mjs.
+// - Page routes (the office.mjs route table; the agent token never reaches them). GET /api/hq/grid gives one row per kind (kind,
+//   label, options, def, value, set) and the self-approval slice. POST /api/hq/grid/set { kind, value, confirmed } takes value null
+//   as Use default; it is 409 for a looser change without `confirmed: true` and 400 for Allow on a secret or an unknown kind or
+//   value; a change writes a feed line and saves persisted.hqGrid. POST /api/hq/write { kind, action, ...fields, confirmed } is the
+//   one writer: 409 { error, confirm: 'write', write: { kind, action, summary } } until the same call comes with `confirmed: true`,
+//   403 for Deny, 400 for a bad write, 404 for a task, approval or agent that is not in the connected company, 409 for an approval
+//   that waits for no decision. Every Paperclip write after #198 is a row in PLANS and a cell in WRITE_KINDS: never add a second
+//   sender. Every kind has a plan except `secret`.
+// - planWrite(body) gives the exact request of a write from { kind, action, ...fields }. Every id is a plain id that goes into a path,
+//   text is trimmed and capped, `targets` are what the writer reads first, `summary` is the words of the Confirm and the feed. Any
+//   other kind or action is 400, never sent. The plans:
+//   task: create (with parentId for a sub-task, #204), assign and status. comment: add. approval: approve, reject, revise.
+//   company: create (#199: scope 'none', it needs no connection and names the loopback address), update (#213) and import (#221:
+//   a bundle from a company export as a NEW company; files checked, no path out of the bundle, 10 MB, 2000 files; collisionStrategy
+//   always rename; never secret values or adapter overrides; pauseAutomations true).
+//   goal: create and update (#207: the parent goal and the owner are targets the writer reads first; an update must change something).
+//   access (#213, owner only): invite, revoke, approveJoin, rejectJoin, member. The answer of an invite is its id, never its link.
+//   GET /api/hq/access (hq.access(): invites, join requests and members as names, roles and states, read through the invites,
+//   joinRequests and members shapes) feeds `Access` in public/hq.js and the writer's checks: an invite, join request or member
+//   must be in the company (404), and an open invite or a waiting request (409).
+//   routine (#209): create, update, schedule, run. The routine and the trigger are checked against the routines the office holds, so
+//   a stranger is 404. The HQ dialog `Routines` in public/hq.js sends them through `hqWrite`, asks nothing itself, shows the
+//   server's ask-first text in a painted Confirm and sends the same calls again with `confirmed: true`; OfficeVocab.hq.routineForm
+//   and routineCalls send only what changed. A new routine has no schedule, since Paperclip's trigger create is not planned yet.
+//   reporting: set (#202). pause (#203): pause, resume, retire. budget (#203): company, agent. instance (#221): general,
+//   defaultEnvironment, environment (rename or archive, never create or delete). hire (#201) and adapter (#222), below.
+// - Employee management (#203; tested in test/hq-employees.test.mjs with the fake's pause|resume|terminate and budgets routes).
+//   PLANS.pause: pause, resume and retire are POST /api/agents/:id/pause|resume|terminate. Retire is terminate, which keeps the record,
+//   tasks and history: never DELETE. `review` refuses a pause of a paused employee and a resume of an unpaused one. PLANS.budget:
+//   company and agent are PATCH /api/companies/:id/budgets and PATCH /api/agents/:id/budgets with { budgetMonthlyCents }, whole cents;
+//   0 or over HIRE_BUDGET_MAX is 400: the office never removes a budget. A move is the `reporting` kind. The employee is marked busy
+//   while it sends and read again after. The snapshot `hq.employeeWrite` is false when the Pause cell is Deny. The page parts are
+//   `EmployeeTools`, `CompanyBudget` and `SelfApproval` in public/hq.js.
+// - Self-approval (ADR 0010). The saved slice is `hqSelfApproval` ({ approvalType: true }). SELF_APPROVAL_KINDS lists the kinds the
+//   user may turn on; NEVER_SELF_APPROVED (hire_agent and budget_override_required) are never self-approved. setSelfApproval: turning
+//   on is 409 until `confirmed: true`, a never kind is 400. After each read, selfApprove (paperclip.mjs) approves once each pending
+//   approval an employee of the company asked for, of a kind that is on, through `write`, so a Deny in the Approvals cell still wins.
+//   Routes (page group): GET /api/hq/grid also carries `selfApproval`, and POST /api/hq/self-approval/set { type, value, confirmed }.
+// - The hire (#201, PLANS.hire.create, HIRE_ROLES): POST /agent-hires with adapterType 'agent_office' (so the employee is Supervised),
+//   adapterConfig { agentKind, isolation, model? }, budgetMonthlyCents from `budgetDollars` (a missing, zero or non-number budget is 400
+//   before anything is asked; at most HIRE_BUDGET_MAX), the role from the role cards only, and skills as names. Its `review` names the
+//   manager in the Confirm summary (role, manager, kind, model, budget, skills). Paperclip answers 201 { agent, approval }
+//   (routes/agents.ts handleAgentHire): the writer takes the agent's id, and `pendingApproval` (in the result and a feed line) is true
+//   when the company sets requireBoardApprovalForNewAgents, so the agent is pending_approval and a hire_agent approval waits. Paperclip
+//   refuses an adapterType it has not installed (assertKnownAdapterType), so the agent_office adapter must be installed first. The
+//   office Manager (#204) is this same plan with `officeManager: true` (marked adapterConfig.manager, the Project manager role by
+//   default); there is no second hire plan. The writer reads the new agent back at once so the onboarding task can name it.
+//   POST /api/hq/hire (office.mjs hireHq: the hire, then with `welcome` one `task create` assigned to the new id, with the hire's
+//   Confirm; a failed task never undoes the hire, onboarding: 'failed') and GET /api/hq/hire-desk (role cards; `write` is false when
+//   the grid says Deny). The page is `HireForm` and `HireDialog` in public/hq.js (Ctrl+K Hire an employee, the Orientation step
+//   `hire`); tested in test/hq-hire.test.mjs. The core-jobs gate has a `hire` job (5 steps).
+// - The office adapter (#222, kind `adapter`, Confirm by default; PLANS.adapter.install; tested in test/hq-write.test.mjs,
+//   test/hq-hire.test.mjs and test/hq-model.test.mjs: the recorded adapterInstall shape, and the fake loads the plugin the way
+//   Paperclip does). It is one POST /api/adapters/install { packageName, isLocalPath: true } (Paperclip server/src/routes/adapters.ts,
+//   AdapterInstallRequest; instance admin only; answers 201 { type, packageName, version, installedAt, requiresRestart }; a local path
+//   loads at once, plugin-loader.ts loadExternalAdapterPackage). The plan never takes the folder from the request: the writer sets
+//   packageName to deps.adapterDir (office.mjs: src/integrations/paperclip-adapter of the office folder; a missing folder is 500
+//   before anything is sent). It is idempotent: hq.adapter() (GET /api/adapters; officeAdapterOf: installed, off, missing, unknown)
+//   is read first, and an adapter that is there sends nothing (existed: true). A 403 from Paperclip says an instance admin is needed
+//   (call(..., { forbidden })). The same read gates every hire: write() refuses a `hire` (the HR desk and the Manager alike) with 409
+//   and the reason, before any Confirm, unless the state is `installed`. GET /api/hq/adapter (page group: { adapter: { state, why },
+//   write }) and `adapter` on GET /api/hq/hire-desk feed `AdapterInstall` in public/hq.js (the HQ dialog, the company step of
+//   Orientation after the company exists, the HR desk and the Hire Manager dialog in place of the form while it is missing;
+//   OfficeVocab.hq.adapter has the words; its Confirm scrolls into view).
+// - Company admin, the rest (#221): GET /api/hq/instance (page group: the instance settings and the environments by name and state)
+//   and POST /api/hq/company/export (page group: the bundle of the connected company, a read) are the two reads. The import is
+//   POST /api/hq/write with kind 'company', action 'import', bundle: { rootPath, files, manifest? } and name?.
 
 // ---------- the contract: the fields of each route the office reads ----------
 // list: the answer is an array (the first element is checked) or one object. An empty list says nothing about its shape. A field the
@@ -269,11 +377,8 @@ export function setSelfApproval(slice, change) {
 // ---------- the plan of a write ----------
 // planWrite(body) -> { kind, action, method, path(companyId), body, targets, summary }. body: { kind, action, ...fields }. The fields are
 // checked here (400), every id must be a plain id (it goes into a path), and a target is a thing the writer reads before it writes
-// (issue, approval, agent): it must belong to the connected company. Only the first writes are planned: task (create, assign), comment
-// (add), pause (pause, resume, retire, #203), budget (company, agent, #203), approval (approve, reject, revise), routine (create, update, schedule, run, #209), reporting (set, #202), goal (create, update, #207),
-// hire (create, #201), company (create, #199: scope 'none', it needs no connection; update, #213) and access (invite, revoke, approveJoin,
-// rejectJoin, member, #213). Another kind in the grid
-// has no plan yet, and is 400 (never sent).
+// (issue, approval, agent): it must belong to the connected company. Every kind of the grid has a plan except `secret` (see the header): task, comment, pause, budget,
+// approval, routine, reporting, goal, hire, company, access, instance and adapter. A kind or action with no plan is 400 (never sent).
 export const OFFICE_ADAPTER_TYPE = 'agent_office';   // the word of OFFICE_ADAPTER in paperclip.mjs (which imports this module)
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 export const ISSUE_STATUS = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'];

@@ -1,13 +1,33 @@
 // Company memory (#205, parent #191, ADR 0010): what the employees of one company learned, each item with where it came from.
-// One module with remember, recall, browse, search and forget. The default adapter keeps one `node:sqlite` file per company
-// (owner-only) with full-text search (FTS5, always on) and, when a local OpenAI-compatible server (LM Studio, then Ollama) lists an
-// embedding model, a vector per memory; the two rankings are fused (reciprocal rank). Nothing leaves this PC: the embedder talks to
-// loopback only. Text passes the notes injection scan before it is stored (`notes.mjs scanNote`): the next employee reads a recalled
-// memory as context, like the notes board. Memory is off where `node:sqlite` is missing.
+// One module with remember, recall, browse, search and forget. `createMemory({ dir, sqlite, writeSecret, embedder, adapters?, adapter? })`
+// gives `status()` (`available`, `reason`, `search`: `keyword` | `semantic` | `off`, `model`, `server`), `remember`, `search`, `browse`,
+// `forget` and `recall`. Nothing leaves this PC: the embedder talks to loopback only.
 //
-// Adapter seam: `createMemory({ adapters })` takes stores that carry `ADAPTER_METHODS` (id, label, `available()` -> { ok, reason },
-// `remember`, `search`, `list`, `forget`, `count`). `sqliteAdapter` is the one built. Milvus, mem0 and a Paperclip memory API (there is
-// none yet) are later entries of the same shape; `OFFICE_MEMORY_ADAPTER` names the one in use (default `sqlite`).
+// remember(company, { text, source: 'user' | 'employee' | 'run', employee?, employeeId?, task?, run? }): 400 for no text, 413 over
+// `TEXT_MAX` = 1000 characters, 422 when the notes injection scan (`notes.mjs scanNote`) refuses the text, because the next employee
+// reads a recalled memory as context, like the notes board. The same fact is kept once.
+// recall(company, query, { limit, maxChars }) gives a capped prompt block of matching memories with their source, `''` for none, and
+// never throws, so a run starts without memory.
+//
+// The default adapter, `createSqliteAdapter`, keeps one `node:sqlite` file per company (`<LOCALAPPDATA>\AgentOffice\memory[-<port>]\<company id>.sqlite`,
+// `runtimePaths().memory`, created through `writeSecret` so it is owner-only) with a full-text index (FTS5, always on: `ftsQuery` quotes
+// every word, so no operator gets through) and, when `createEmbedder` finds an embedding model, a vector per memory. The two rankings
+// are fused (reciprocal rank). A memory made while no model ran has no vector and is found by words only. Memory is off with a note
+// where `process.getBuiltinModule('node:sqlite')` is missing: every call is 409 and `recall` is empty, so a run starts without memory.
+//
+// `createEmbedder({ servers })` reads `GET <server>/models` of LM Studio, then Ollama (loopback only, the same `OFFICE_LMSTUDIO_URL` and
+// `OFFICE_OLLAMA_URL` as the local providers), takes the first model whose id says embed (not rerank), and calls `POST /embeddings` with
+// `model` and `input`. It never loads or downloads a model, and any failure means keyword search. `OFFICE_EMBED=off` turns it off.
+//
+// Adapter seam: `ADAPTER_METHODS` and `checkAdapter`. An entry is `{ id, label, available(), remember, search, list, forget, count }`,
+// named by `OFFICE_MEMORY_ADAPTER` (default `sqlite`). The `sqlite` entry is the one built. Milvus, mem0 and a Paperclip memory API
+// (Paperclip has none) are later entries of the same shape.
+//
+// Not a Paperclip write, so it is not in the write grid: the office keeps this data itself. `office.mjs` wires it (`memory`) and gives
+// `createRuns` `recall` (a few memories go in front of the wake prompt while the whole text fits the 4000 characters) and `remember`
+// (a run that ends well leaves its last reply, clipped to 600 characters, with employee, task and run).
+// Tested in test/memory.test.mjs (a temp SQLite file, keyword only and with the fake embeddings server test/fixtures/fake-openai.mjs),
+// test/memory-routes.test.mjs and test/paperclip-runs.test.mjs.
 import fs from 'node:fs';
 import path from 'node:path';
 import { httpError } from './office-core.mjs';

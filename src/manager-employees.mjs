@@ -1,17 +1,34 @@
 // Office Managers as Paperclip employees (#204, spec #191, ADR 0010): the bridge between the Manager (manager.mjs, the rules of a goal) and the
 // HQ (paperclip.mjs, the one writer). A distinct job, so its own file: manager.mjs knows nothing of Paperclip and paperclip.mjs nothing of goals.
+// `createManagerEmployees({ hq, manager, state, feed, now })` gives `register`, `list` and `sync`.
 //   register({ building, name, budgetDollars, confirmed })
 //                                            hire the Manager as a Paperclip employee through the one hire plan (hq.write, kind hire, action
 //                                            create, officeManager: true: the Project manager role, since Paperclip has no 'manager' role, the
 //                                            office adapter and a monthly budget like every hire; the write grid's Hires cell decides, Confirm by
 //                                            default), and keep it as the Manager of that building.
+//   list()                                   the Managers of the connected company.
 //   sync()                                   a task assigned to a registered Manager becomes an office goal in its building; each step of the
 //                                            goal is a sub-issue of that task; a step's state moves its sub-issue; the result is a comment on
 //                                            the task, and a finished goal sets the task to done. Every write is hq.write (the one writer), so
 //                                            the write grid decides it: a cell set to Deny or Confirm leaves the write undone and says so once.
+// The hire plan (hq-model.mjs): `hq.write` kind `hire`, action `create` with `officeManager: true` sends `POST /agent-hires` with role `pm`
+// (`MANAGER_ROLE`: Paperclip's `AGENT_ROLES` enum has no `manager`, so `manager` would be a 400 of its validator), title `MANAGER_TITLE`,
+// `adapterConfig.manager: true`, isolation `same`, and a monthly budget (400 without one, as for every hire, ADR 0010). One Manager per
+// building and company. The office knows its Managers from the `managers` slice, never from the role.
+// sync() is single flight (`office.mjs` `managerSync` calls it from `broadcast()`). A task of the connected company assigned to a
+// registered Manager (`hq.tasksOf(id)`: open tasks, null while not connected or the list is unread or cut; sub-tasks and tasks with a
+// goal are skipped) becomes `manager.submit(building, goalTextOf(task), { approveFirst: true, paperclip: { task, ... } })` and is set in
+// progress. Each step is a sub-issue (task create with `parentId`, assigned to nobody) kept in `g.paperclip.subs`; a step's state moves
+// its sub-issue (`pushed`); an ended goal gets one result comment on the task (`reported`). A Confirm or Deny leaves the report undone,
+// with one feed line and a 30 s wait. Nothing here sends a request itself.
+// The goal keeps `g.paperclip` (`manager.mjs cleanLink`, saved, restored, in the snapshot and the plan board as `task`;
+// `OfficeVocab.plan.fromTask`).
 // The quick office goal (POST /api/goal/start) does not pass through here, so it works with no Paperclip at all. One Manager board shows both
 // (the plan board, manager.mjs createPlanBoard). Nothing here holds the board key: it only calls hq.write and reads hq.tasksOf.
-// Saved as the slice `managers`: { [employee id]: { building, name, company } }.
+// Saved as the slice `managers` (`cleanManagers`): { [employee id]: { building, name, company } }.
+// Not yet: the Manager does not run its own Paperclip runs through the office adapter (the plan comes from the task, the adapter is
+// registered for it).
+// Tested in test/manager-employees.test.mjs and test/manager-employees-routes.test.mjs.
 
 const clip = (s, n) => { s = String(s ?? ''); return s.length > n ? `${s.slice(0, n - 1)}…` : s; };
 const STEP_TO_TASK = { pending: 'backlog', working: 'in_progress', finished: 'done', error: 'blocked' };

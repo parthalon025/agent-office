@@ -40,6 +40,16 @@
 //
 // Everything is reported in the tracker's vocabulary (events.hook, events.stream). The process calls are injected (spawn,
 // execFile, exe, kill), so tests drive this file with a fake runner. Nothing starts on import.
+//
+// Provider facts (#23). One Python process per session (agent_framework_runner.py, JSON lines, protocol above).
+// - gated: true, features: ['teams']. The team is free: paid: false, cost 0, never 'unknown'.
+// - Security room column: agent-framework (OfficeVocab.security, free: true). Every call cell is Ask by default, reads and
+//   edits inside the worktree too (the local model's default Allow is history this new kind does not have), and its inside rows
+//   need a git worktree.
+// - Model client: the LM Studio or Ollama server (deps.servers). The runner gets a scrubbed env (no cloud keys).
+// - Team: agent-team.json in the folder (readTeam), or DEFAULT_TEAM.
+// - Tested in test/agent-framework.test.mjs with recorded runner lines and the real runner against a stand-in framework
+//   (test/fixtures/fake-af).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

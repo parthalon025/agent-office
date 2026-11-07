@@ -6,6 +6,12 @@
 // The entry is one file for the whole user, so one office owns it (#108): the one on the default port, in the main
 // folder. An office on another port, or in a git worktree, shows the entry read-only with a reason, and enable and
 // disable refuse (status 403). Otherwise a second office could turn the owner's entry off, or point sign-in at a worktree.
+// Routes (office.mjs): the startup field of GET /api/info is status(): the entry state plus canChange and reason, so the dialog
+// shows the state read-only when this office does not own the entry. POST /api/startup {enabled} runs change(): the entry state
+// plus canChange. The owner path runs only on port 4317, so test/startup.test.mjs covers it, not a test through a server.
+// The UI is in the Attach sessions dialog. At sign-in the server starts and opens its launch link. The entry runs src\server.mjs.
+// migrate() rewrites an older entry that still runs the root server.mjs. The office calls it once, from resume(), in the
+// listen callback.
 import fs from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_PORT } from './files.mjs';

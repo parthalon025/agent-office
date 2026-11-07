@@ -6,6 +6,25 @@
 // tracker's input vocabulary (hook-shaped events and stream messages). The rules stay in tracker.mjs: a provider never
 // sets a session's status, calls, to-dos or error itself.
 //
+// This file owns: the contract (checkProvider, PROVIDER_METHODS, the optional fields below), the events every provider reports
+// with (providerEvents: hook, permission, stream, reply, feed, drop, fresh, end), the registry (createRegistry), traitsOf(p),
+// providerError(status, message) and the spend limit rules (spendLimitFor).
+// - traitsOf(p) is the one traits value of a provider: paid, gated, supervision, cost, features, preflight(). The Security room
+//   and the start checks read it, never a provider field.
+// - createRegistry gives get(kind), of(s), list(), kinds() (each kind's describe(p), sent in the snapshot), reopenPlan(rec) for
+//   Reopen, status() for GET /api/providers (it adds readiness, models, canResume and features after readiness) and
+//   statusCached({ fresh }), which the route calls. statusCached keeps the answer for 30 s (createRegistry(list, { now,
+//   statusTtlMs })), asks that overlap share one round, ?fresh=1 (the page's Check again only) runs a new round, and a rejected
+//   round keeps nothing (#104).
+// - Spend limit rules live only here (spendLimitFor, traitsOf(p).paid, DEFAULT_SPEND_LIMIT = 2). A provider is paid unless it
+//   says paid: false (the local ones). A missing value is the default (persisted.spendLimit, changed in the Attach sessions
+//   dialog, POST /api/settings/spend); 0 means the user cleared it; a local provider never has a limit, and neither has one with
+//   cost: 'unknown' (pass cost to spendLimitFor). server.mjs (open, schedules) and manager.mjs (goals) call it; the page only
+//   fills the field from info.spendLimit.
+// - Hold and drop. A provider that holds requests itself frees one its agent no longer waits for with events.drop(s, id, why)
+//   (the server's releaseHold(id, {})); the feed says why.
+// - Tested in test/providers.test.mjs with a fake provider.
+//
 // Provider (checkProvider tests the shape)
 //   kind                               id of the agent kind: 'claude-code'. A session keeps it as `s.provider`.
 //   label                              name for the user: 'Claude Code'.
@@ -75,6 +94,7 @@
 //                       Returns the tracker's answer: queued office messages for the agent, or null.
 //                       A provider must deliver hook()'s return value (queued office messages: additionalContext, or
 //                       decision:block on Stop) to its agent.
+//                       A provider's hook-shaped event is trimmed by slimPayload like the HTTP hook route trims a hook.
 //                       Subagents (the contract for every provider that has them). An agent is a top-level session (uid); a subagent
 //                       is a guest of its parent. A provider reports a subagent with SubagentStart (agent_id, agent_type) after the
 //                       parent's Agent or Task tool call, tags every hook of the subagent with the same agent_id, and ends it with

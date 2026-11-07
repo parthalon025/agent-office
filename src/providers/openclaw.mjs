@@ -12,7 +12,70 @@
 //     the Security room shows "Not enforced for this agent" for it (ADR 0001).
 // The docs that name the keys: docs.openclaw.ai/gateway/config-tools/tool-policy (tool ids and groups), /tools/exec-approvals
 // (tools.exec.ask: off | on-miss | always; the newer tools.exec.mode: deny | allowlist | ask | auto | full), /cli/config.
-// None of this ran against a real Gateway yet (see CLAUDE.md, Gotchas).
+// None of this ran against a real Gateway yet (see "Facts and sources" below).
+//
+// The rest of the file: the office plugin's side (#77): PLUGIN_ID, PLUGIN_DIR, the session key rule (OFFICE_KEY, officeKey(uid),
+// officeIdOf(key); the plugin keeps the same regex, a test compares them), gateRequest(body) (the /hook/openclaw body) and
+// toolCall(name, params, derivedPaths, cwd, paths?) (an OpenClaw tool id as the office tool name and input). toolCall adds:
+// reason (what the card adds), firm (the user answers it) and files when there is more than one file (an apply_patch, or a path
+// OpenClaw can read as two files), each held on its own. An unknown tool stays openclaw:<id>, an "other" call. A tool that starts
+// work elsewhere or changes the Gateway, or an exec or browser on a paired device (host/target node, or node), gets handoff, the
+// reason it is denied. exec elevated is high risk (risk.mjs) and firm, env is firm, and workdir, env (secret-looking values hidden),
+// host and background go in reason. apply_patch files come from its text (patchFiles: Add, Update, Delete File, Move to, on lines
+// trimmed the way OpenClaw trims them) joined with the derivedPaths hints, and a text that names none is an other call. Every file
+// path, of a file tool, a patch line or a hint, is the file OpenClaw uses (pathsOf(raw, { cwd, home, exists, read }), from the
+// v2026.10.10 source: the "</arg_value>>" tail and invented Office extension repaired, one leading @ dropped, a literal ./@x file or
+// top folder kept and then held together with x, file:// URLs and ~ expanded, and for a read the other spellings OpenClaw tries when
+// a read misses), so @.env is a secret read and @.git/hooks/x a settings edit. browser is the Web row (an upload is firm).
+// <server>__<tool> is mcp__<server>__<tool>, the MCP row. Tools that start work elsewhere (sessions_spawn, sessions_send, subagents,
+// conversations_*, cron, automations, nodes, computer) or change the Gateway (gateway, plugins, openclaw) are denied. A Gateway
+// subagent session would not carry the office key, which is why spawning is denied.
+// wantedConfig({ tokenFile }): workspace-only, tools.exec.host not node, plugins on, the plugin not left out by plugins.allow or
+// plugins.deny, enabled, its tokenFile this office's; each with the Security rows it carries, no gaps. It adds one warn setting,
+// plugins.entries.agent-office.hooks: a before_tool_call limit under 600 s (hookLimit, the rule the plugin keeps too) is said with
+// its `config unset` command, never blocks, carries no row. checkConfig(wanted, read) gives on or off per setting and the command
+// that fixes it: lists go into commands as JSON5 arrays in double quotes with single-quoted names, paths in double quotes with
+// forward slashes, and an odd character gets no command. configReader runs `openclaw config get <path> --json` by absolute path in
+// helperCwd(), read-only. Exit 1 is "unset" only when `openclaw config validate` then passes; any other failure is "unreadable".
+// The office never writes the OpenClaw config: the Gateway is shared with other clients and lives outside the office folder, so a
+// write needs an owner decision and a confirm. The Gateway runs the tools, so --url, a config path or an env var on the bridge cannot
+// change what the tools do: only the Gateway's own config can. The server reads provider.policy() (refreshEnforce: at listen, after a
+// rule change, when the page asks for the kinds) and security.enforcement(providers, policies) marks each cell whose setting is off or
+// unreadable "Not enforced for this agent" with the reason.
+// Tested in test/openclaw.test.mjs and test/openclaw-plugin.test.mjs.
+//
+// Facts and sources (2026-11-05, #73, #77; review 77 fixes the same day). Not run against a real Gateway or openclaw.exe: from
+// docs.openclaw.ai and the OpenClaw sources at tag v2026.10.10 only.
+//   - openclaw acp: options --url, --token. session/new takes _meta.sessionKey (src/acp/session-mapper.ts). Shell approvals are
+//     relayed as session/request_permission during a prompt turn. usage_update is approximate, has no cost and comes only when Gateway
+//     token totals are fresh. `openclaw config get <path> --json` exits 1 for an unset key.
+//   - usage_update.used is taken as the session's token total (the Tokens figure) only: the spec says "tokens in context", but the
+//     OpenClaw bridge sends Gateway session totals, so ctxTokens and ctxWindow stay unknown and the Context bar is not drawn from it.
+//   - before_tool_call runs on the tool path from v2026.10.10 (src/agents/agent-tools.before-tool-call*.ts); the 2026.1 copy has no
+//     caller outside src/plugins/. The plugin side (timeouts, entry shape, token file) is in integrations/openclaw-plugin/.
+// Known gaps:
+//   - Another plugin that returns rewritten params can change a call after the office approved it (OpenClaw freezes params only for
+//     its own requireApproval).
+//   - For exec, OpenClaw's exec approval shows the command that runs and the office answers it only for the approved command.
+//   - api.registerTrustedToolPolicy does not close the gap (read at v2026.10.10, src/agents/agent-tools.before-tool-call.policy.ts):
+//     its freeze binds only a trusted requireApproval, which OpenClaw asks through its own plugin approvals, not over ACP, and a policy
+//     that returns no decision leaves later hooks free to rewrite.
+// Live-run checklist (#77):
+//   - The plugin loads on native Windows.
+//   - ctx.sessionKey ends in agent-office:<uid>.
+//   - The plugin's event.toolCallId is the ACP toolCallId (the source passes the same id, src/acp/translator.agent-events.ts, but
+//     nothing recorded it; a mismatch ends the session at the first call with the plugin Error).
+//   - An approval after 5 minutes still runs (the 310 s check passed with httpPost on Node 22.18, 2026-11-05).
+//   - No ACP tool call arrives for a call that skips before_tool_call (it would end the session).
+//   - A call the plugin blocks reaches ACP as failed with rawOutput.details.status blocked (the source says so, buildBlockedToolResult
+//     and translator.agent-events.ts rawOutput: result). If the bridge drops details, a block the office has no record of, such as an
+//     office that does not answer, ends the session.
+// State on the owner's PC (2026-11-04): openclaw is 2026.1.29, installed by npm as openclaw.cmd only, so the office, which accepts
+// .exe only, reports it as not installed, and that version is too old to start. Both need a native 2026.10.10 or later before the
+// Done-when check (an OpenClaw file edit held in the office) can pass.
+// Test stand-ins: the plugin host test/fixtures/fake-openclaw.mjs (test/openclaw-plugin.test.mjs, and through the server in
+// test/mcp-routes.test.mjs). The probe in test/mcp-routes.test.mjs uses node.exe as openclaw.exe, a plain TCP listener as the Gateway,
+// and test/fixtures/fake-openclaw-config.cjs (preloaded with NODE_OPTIONS) to answer `config get`.
 import net from 'node:net';
 import fs from 'node:fs';
 import os from 'node:os';

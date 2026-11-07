@@ -7,6 +7,22 @@
 // Every program starts from the absolute path that launch.mjs resolveExe gives, never from a bare name: Windows would look in
 // the session folder first. The process calls are injected (deps.spawn, deps.execFile, deps.exe), so tests drive it with a
 // fake runner. Nothing starts on import.
+//
+// This file owns: the claude CLI flag list and its reader (readArgs, CLAUDE_FLAGS_VERSION, below; moved from paperclip.mjs, #186),
+// and the Claude Code provider (createClaudeCode(deps)): the stream-json process, the terminal window (openWindow), stdin
+// messages and attachments, control requests and their responses (control), taskkill, the hook answer bodies, readiness
+// (claude --version, claude auth status), models, and the claude CLI for extensions and the probe (cli).
+// - Programs. Every program starts by its absolute path from resolveExe (programPath). The office requires claude.exe: a .cmd or
+//   .ps1 install (npm) gets a 409 that says to install the native Claude Code.
+// - Hook answers. answer() is the PermissionRequest body; a refusal says why with d.message. preToolAnswer() is the PreToolUse
+//   body: deny or ask, never allow.
+// - Always allow. It uses permission_suggestions from the hook payload and returns them as updatedPermissions. Pass only
+//   addRules with behavior allow (tracker.mjs allowRules does the filtering). Edits get a mode suggestion, not a rule.
+// - canResume is true. While close runs, the process exit ends nothing: the office ends the session as "closed from the office".
+//   When the process ends, a control request that waits fails at once with { subtype: 'error', error: 'The session ended.' }.
+// - Init. A headless session emits init (session id, commands, skills) only after its first message.
+// - Permission mode. Claude Code's default permission mode may be Auto, so no prompts appear. Tests that need a prompt must pass
+//   permissionMode: 'default'.
 import crypto from 'node:crypto';
 import { spawn as realSpawn, execFile as realExecFile, execFileSync as realExecFileSync } from 'node:child_process';
 import { resolveExe, helperCwd, processStart } from '../launch.mjs';

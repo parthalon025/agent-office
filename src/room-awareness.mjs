@@ -1,6 +1,11 @@
 // What an agent knows about the room it sits in (office_room) and the two things it may change there (office_room_update): the
 // notes board and the blackboard pin. The text the agent reads, and the checks on what it writes, live here; notes.mjs owns the
 // board rules (versions, merge, caps, scans). An agent changes only its own room: the room comes from the calling session.
+// createRoomAwareness(...) gives describe(s) (the office_room text, with the decor list roomContents) and update(s, args)
+// (office_room_update: every argument is checked before anything changes).
+// office_room lists the decor of a lab room under "What is in the room" from one list in roomContents(), next to the fixed
+// lab-room parts and the street. The list is the same for every room, so the page does not report it. Keep it in step with
+// board.js.
 import { clip } from './tracker.mjs';
 import { cleanPin, PIN_MAX, NOTES_MAX, AGENT_WRITE_MAX } from './notes.mjs';
 import { httpError } from './office-core.mjs';

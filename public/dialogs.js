@@ -1,7 +1,10 @@
 /* Agent Office for Claude Code x0.2: the session dialogs (split out of office.js, #1 story 26).
    Open session, skills, past sessions and search, hooks, Paperclip connect, the agent kinds, floors, all sessions and the
    agents of one room. Plain functions over the page core (window.OfficePage); the dialogs put their names on it for office.js
-   and panels.js. Schedules, Extensions and the office dialogs are page features of their own (#184). */
+   and panels.js. Schedules, Extensions and the office dialogs are page features of their own (#184).
+   Needs page-core.js. The agents of one room are RoomDialog, which opens Skills.Dialog. The Paperclip runtime panel
+   (PaperclipRuntime, in this file) is in the HQ dialog since #197; Attach sessions shows only the runtime state and a
+   button to the HQ. */
 (function () {
   'use strict';
   var O = window.OfficePage;

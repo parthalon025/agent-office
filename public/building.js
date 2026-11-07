@@ -44,7 +44,70 @@
                            the scene's connection name; an empty building gives the first kind (a new session's
                            kind), and '' before any snapshot
      session(botName), lookup(botName), uidsOf(cmd), roomsShown()
-   The scene's events are the DS events (kit/schema.json). */
+   The scene's events are the DS events (kit/schema.json). Tested in test/building.test.mjs.
+
+   Mapping: repo = building, branch = floor, worktree = room. The snapshot becomes DS events: tool calls, helpers, plan,
+   errors, triggers, usage. The Security room (type security, no bots, no notes key, never stale) is first on the ground
+   floor of every building; its id comes from the server (mount.securityRoom()).
+   store.phone() is the phone list model (#148): buildings, rooms, agents at Glance and Look, and the queue. office.js
+   PhoneView shows it below 820 px over the mounted scene, reading the store only. store.requests() is the Needs you
+   list. store.alerts() is that list plus each failed turn, for the page's one Notifier.
+   The SSE stream and the latest snapshot belong to the store, not to the scene. One scene shows one building, and each
+   scene gets its own building adapter (officeAdapter.mount(repo)). office.js keeps it in cur2.mount; its React key is
+   'm' + mount.id. The adapter holds the mirror, the layout and the bot names, so there is no global reset and no
+   generation counter. officeAdapter.session and lookup look in the adapter that is attached now.
+
+   Bot color. OfficeBuilding.colorOf(uid) gives the DS color of the bot's shape. It goes to the scene in the bot
+   definition, and lists read the same value, so a bot looks the same everywhere.
+
+   Floors and rooms.
+   - room.add needs floorId. Floors are added once at mount from the layout (Lobby id 1, then the shown function floors,
+     Records last) and then only renamed (floor.update). A switch, or an added, hidden or moved floor, makes
+     mount.stale() true, so the page mounts again.
+   - Floor memory (OfficeBuilding.floorMemory(), startFloor) owns the floor a new scene opens on: the floor on screen
+     before a rebuild of the same building, else the floor with the most live sessions, else the floor the user moved to
+     last (see, picked), else the first floor. It matches floors by floor key (mount.floorKey(id), mount.floorId(key)),
+     never by id. The page always opens that floor and never lets the DS choose its default (#85, #111).
+   - A room is a workspace on one floor (#92). A workspace with agents seated on two floors is a room on each. The first
+     (its home floor, the first floor of its room record) keeps the place room id. The other is roomId~floorKey
+     (OfficeBuilding.baseRoomId gives the place id back). Both have the workspace's notes key.
+   - A floor with no agent room has one room of open desks (spare-<floorKey>, "Open desks"). The first agent there
+     renames it in place (room.update with the new id). The Lobby has the Security room, the Reception (reception, DS
+     type lobby, open desks for agents with no role) and the rooms of agents with no role.
+   - A room is on the floors where an agent of it sits now (owner rule, #92 review). A floor no agent of the room
+     sits on leaves the room record. The DS has no room removal, so a room whose agents left stays on screen, empty, until
+     the next mount, which shows the floor's open desks; the record keeps the room's name for the next agent. A worktree
+     no agent sits in is no room. The main checkout (ad-hoc sessions share it) is named by its branch only.
+   - The DS has no event that removes a floor or a room (no room.remove, no floor.remove). mount.stale() is true only
+     when a room that was a worktree of the building (wtSeen, the worktree rooms the adapter has seen) is gone from the
+     scene's floor, for example after a worktree is removed or a branch switch, or when the shown floors are not the ones
+     the scene was built with (function floors, #92). Then office.js fades the scene out and mounts a new adapter (a new
+     React key). A room a session made stays on screen, empty, when the session ends (layout.places keeps its place).
+   - An empty building mounts with one spare floor and room. The first session or worktree renames them in place with
+     floor.update and room.update (no remount), and later floors and rooms come as floor.add and room.add. The spare room
+     has no notes key, so mount.usable(roomId) is false for it: board.js gets no board for it (usable option), so Ctrl+K
+     lists no room tools, and office.js hides the DS broadcast bar and roster (no-rooms on #office) while mount.spare()
+     is true. Dialogs that need a room (RoomDialog, StatsPanel) take mount as a prop.
+
+   Seeded events. A new scene starts empty, and this file sends the whole state again with seeded: true (DS Reference,
+   Scene mount). The first pass after attach restores the snapshot the store had at attach: seeded: true on every event,
+   and at where the snapshot has the time. It runs once, from the deferred call or from the first snapshot that comes
+   before it; that snapshot is then applied live on top.
+   - Seeded events record no history, play no sound and send no onNotify, so Since you left shows on every scene and
+     counts only news (a seeded event with at after the last visit).
+   - Choice: a seeded request or error makes no toast. It was news once, when it arrived live. An open request stays in
+     Needs you, the DS inbox and the tab title; the Since you left card counts it when it came in after the last visit.
+   - The first pass sends open requests, questions, replies (no speech bubble) and the error at once, not one snapshot
+     later.
+   - A restore inside a live pass is seeded without at: a bot seated again on another floor restores what its old seat
+     showed, and so does a bot that moves in from another building with its error and its replies (which also covers a
+     round trip and a reopened session that carries its old replies). A seeded event with at after the last visit is news
+     to the DS, which would record it a second time. Its new items are live.
+   - A request is never restored that way on first sight: a missed request is worse than a second toast.
+
+   Plan usage. The DS weekly-limit meter shows demo numbers when no usage events arrive, and its engine adds usage while
+   bots work. The server reads rate_limits from the status line file; this adapter sends the figure again every 15 s
+   (USAGE_REPEAT_MS); office.css hides the meter without it and always hides the per-bot rows. */
 (function (root) {
   'use strict';
   var V = root.OfficeVocab;

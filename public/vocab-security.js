@@ -1,6 +1,22 @@
 /* Agent Office for Claude Code x0.2: the Security room grid (#70).
    A topic file of the session vocabulary: it adds security to globalThis.OfficeVocab (one global, public/vocab.js).
-   Load it after vocab.js. Plain script, no I/O, no timers. */
+   Load it after vocab.js. Plain script, no I/O, no timers.
+   It is shared by the Security room wall screens (public/security.js) and the server's rules (src/security.mjs).
+   Parts of the grid:
+     screens   the six wall screens (Files, Commands, Network, Secrets, Agents, Spend) and the rows of each.
+     columns   the agent kinds, ten of them. columnOf(providerKind) gives the column of a provider kind: Ollama and LM
+               Studio share Local model; Azure AI Foundry, Copilot Studio and the remote tools share Cloud agent; the ACP
+               tools share one column; the four command-line tools share CLI tools. A column with `free` costs nothing.
+     rows      each row has a label, options and a default. `not` lists the kinds with no cell in the row (the five file
+               rows have none for Cloud agent: "No files"); `only` lists the kinds that have one.
+     defaultOf(row, col)  Ask for every call cell, also Read inside and Edit inside. The exception is `defs`: the local
+               model's two inside rows default to Allow.
+     valueOf, sourceOf    the rule of a cell and where it comes from (building override, office rule, default).
+     next, loosens        the click cycle, and what loosens a rule (a change to Allow or On).
+   The Agents row Turn on ungated agents has a cell for every kind whose provider is `gated: false` (Hermes, Copilot,
+   ACP tools, Cloud agent, CLI tools); the others say Gated. OpenClaw is gated through its office plugin (#77).
+   The tables have no prototype and rule maps are read by own keys only (`own`), so `__proto__` or `constructor` is
+   never a row, an agent kind or a rule. */
 (function (root) {
   'use strict';
   var shared = root.OfficeVocab.shared;

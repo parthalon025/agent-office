@@ -3,7 +3,19 @@
    - A toast with an action or an error stays until the user closes it.
    - Every other toast closes after AFTER_MS. The time stands still while the pointer or the focus is on the stack.
    - The stack holds MAX toasts. A new toast pushes out the oldest timed toast first, so one that needs action stays.
-   - The stack never covers the top controls, the floors card, the dock, a request bar or a message box, at any width (place, #79). */
+   - The stack never covers the top controls, the floors card, the dock, a request bar or a message box, at any width (place, #79).
+   Tested in test/toasts.test.mjs. office.js owns the timer.
+   Placement. The page toast stack (.page-toasts) is placed by one rule at every width and window height: OfficeToasts.place,
+   fed by office.js, which measures the boxes and sets --toast-x, --toast-bottom and --toast-room on the stack.
+   - It never covers a KEEP box: the top controls, the floors card, the zoom column, the dock and More list, every request
+     bar (.asks), the panel head and message box, the chat's Approve and Decline (.ao-act) and composer, the decisions
+     inbox and the city controls.
+   - It covers an AVOID box (DS HUD boxes, the panels, the welcome card) only when no band is free of it.
+   - A request bar can sit anywhere and grow: it is measured, cut by its scrolling parents, never assumed.
+   - With no band of 40 px the stack waits out of sight (is-off) and its clocks wait.
+   - Add a new box to KEEP or AVOID in office.js. Do not write a left, top or bottom rule for .page-toasts
+     (test/toasts.test.mjs fails on one).
+   - The Ctrl+K palette (.ao-cmdk-o) is one layer above the stack. */
 (function (root) {
   'use strict';
   var MAX = 4, AFTER_MS = 8000;

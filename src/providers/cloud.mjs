@@ -12,6 +12,23 @@
 // Approval (ADR 0001): the cloud tools run in the cloud and the office cannot hold them, so both kinds are gated: false, with a
 // supervision label, off until the Security room turns them on (one column, 'cloud', public/vocab.js).
 // Nothing here touches the network on import. Fetch, files and the environment are injected, so tests use a fake server.
+//
+// The cloud kinds (#24) are Azure AI Foundry and Copilot Studio. They are off until the owner sets OFFICE_FOUNDRY_* /
+// OFFICE_COPILOTSTUDIO_* (docs/agents.md). This file is the shared part, and each provider file only maps its service's events
+// into tracker events.
+// - cloudConfig reads the env and re-reads the token file per call. It takes *_TOKEN and *_TOKEN_FILE out of the env it reads, so
+//   the office (office.mjs) calls it first, before any spawn.
+// - cloudSetup checks https and a Microsoft host, and gives the "Not configured" steps.
+// - cloudSend makes one call with the bearer token and gives errors in words. The token is never in a message.
+// - createRemoteAgents is the turn loop: one turn at a time, busy set before the run is scheduled, queue, spend limit, stop. An
+//   inbox note from any hook of a turn is the next prompt, never dropped.
+// - Spec #67 facts. Both kinds are gated: false (the cloud tools run with no hold), so they are off until the Agents screen turns
+//   on Cloud agent, and they open only in a worktree of their own. Each kind's supervision label is in its own file.
+// - cost: 'unknown' unless the owner set the prices (Foundry both PRICE_IN and PRICE_OUT, Copilot Studio PRICE_MESSAGE;
+//   createRemoteAgents({ priced })). Without prices a turn result has no total_cost_usd, so the session cost stays unknown and
+//   spendLimitFor gives none.
+// - The office never signs in and never deletes a thread.
+// - Tested in test/cloud-providers.test.mjs with test/fixtures/fake-azure.mjs (fake events, not recordings).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { providerError } from './index.mjs';

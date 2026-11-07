@@ -8,6 +8,25 @@
 //
 // Pure: the two maps it changes (notes, pins) and the clock are injected. No timers, no I/O. The
 // server saves the maps after a change (state.json). Importing this module starts nothing.
+//
+// Room awareness (office_room_update changes only the room of the calling session). A board is kept in persisted.notes[key]
+// as { text, at, v, by? }: `v` is the version counter, `by` is set when an agent wrote it. The blackboard pin is in
+// persisted.pins. Each line an agent appends starts with the session name. A rewrite returns the old text in the reply.
+// All of these rules live here; the server only calls this module and saves the maps.
+//
+// The user's save (POST /api/notes/save takes { key, text, base, sent }). `base` is the version (`v`) the editor started
+// from. `sent: true` means the editor typed on while a merged answer came back, so the merge runs against the text the
+// editor sent with version `base` (kept as `sent` on that remembered version), not against that version's board text.
+// When the board moved on, the merge is three ways against the text of that version (kept in memory, the last 12
+// versions per board, KEEP_VERSIONS); an older base falls back to the server text plus the user's new lines. The answer
+// is { ok, version, text, merged }, and the editor shows `text` when `merged` is true. There is no 409. Over the 4000
+// character cap (NOTES_MAX; also for a merge result) the answer is 413 and nothing changes.
+//
+// What an agent writes (append, replace and the blackboard pin, in cleanPin) is capped and scanned for prompt injection
+// (scanNote: ignore-your-instructions text, also across a line break, chat control tokens, a download piped to a shell,
+// hidden characters but not an emoji joiner, secrets; 422), because the next agent reads the board and the pin as
+// context (#72). An append is capped at AGENT_WRITE_MAX (413); a rewrite may fill the board (NOTES_MAX). The user is
+// never scanned.
 
 export const NOTES_MAX = 4000;
 export const MAX_BOARDS = 500; // boards (one per room key) in state.json (#27 L9)

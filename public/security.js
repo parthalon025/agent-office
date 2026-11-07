@@ -30,7 +30,29 @@
    data: { sec (snap.security), building (key), buildingName, hq (snap.hq) }
    The Agents screen has two parts (section): the agent kinds (the grid) and Paperclip (#76): each agent of the watched
    company with its supervision and Supervise in office, which waits for the same painted Confirm and then sends
-   the paperclipSupervise command { agent, confirmed: true } (one PATCH of that agent in Paperclip). */
+   the paperclipSupervise command { agent, confirmed: true } (one PATCH of that agent in Paperclip).
+
+   More about the wall (#70). The cell routes: a cell change goes to the security/set route; Spend goes to the settings/spend
+   route; Supervise in office goes to the paperclip/supervise route. The screens show All buildings or This building, both
+   choices on the wall in the full and the paged view (a corner mark, Use office rule; office-wide, Use default under a cell
+   the user set). Spend: minus and plus in $1 steps; minus stops at $1, and No limit (a typed 0) waits for the painted
+   Confirm and is sent with confirmed: true. The value takes digits after a click on it.
+   Text size (#219): no text of a focused screen is under 18 px (MIN_TEXT; 11 px on screen at 1360 px). The look fills 0.96 of
+   the free part (LOOK_FILL). A caption under a cell (Partly enforced, Use default) and a word in a cell that does not fit
+   (Reports cost, No files) wrap to lines of 18 px. A full layout with any text under 18 px, or with no room for its reasons,
+   is not shown: plan checks smallest and overflow; planFull is the layout without that check, for tests. Below 820 px of
+   width that the screen can take (pagedFor: the free width, or the free height times its aspect), or when the full layout
+   fails that check, the screen shows one agent kind at a time (Previous, Next). At 1360 px Commands, Network, Secrets, Agents
+   and Spend keep the grid, and Files (three rows) pages.
+   The column heads (heads, grid and Spend) take one line. When one does not fit (six kinds, #23), all go two sizes down and
+   wrap to two lines. A Spend cost word that does not fit at 28 px takes 24 px. A column with free says Free.
+   Every color is a tone of pure.TONES (toneColors), and test/contrast.test.mjs checks every text on the fill under it at 4.5:1.
+   open(screen) is Ctrl+K Permissions (it shows the ground floor first).
+   The Agents screen has two parts (view.section, the header pair Agent kinds and Paperclip): the grid, and the Paperclip
+   agents of the watched company (#76, data.hq). Each has its role, its state in a chip (Supervised, Partly, Unsupervised),
+   the why, and Supervise in office when supervision.can. The click paints the Confirm (pending: { hq, name }; the text says
+   what it writes to Paperclip). Rows page with Previous and Next, and the paged view shows one agent at a time.
+   The pure part (plan, hotAt, step, key) is tested in test/security-screens.test.mjs. */
 (function (root) {
   'use strict';
   var V = root.OfficeVocab;

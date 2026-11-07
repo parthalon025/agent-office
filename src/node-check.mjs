@@ -1,4 +1,5 @@
-// Start check (#192): the office needs Node 24.11 or newer. server.mjs imports this file first, so on an older Node the
+// Start check (#192): the office needs Node 24.11 or newer, as Paperclip does (the office reads Paperclip with the global WebSocket
+// and fetch of that Node, so it needs no dependency for it). server.mjs imports this file first, so on an older Node the
 // message comes before any other module loads. Plain syntax only: it must parse on an old Node. Importing it runs the check.
 export const MIN_NODE = '24.11.0';
 

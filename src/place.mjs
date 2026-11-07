@@ -6,6 +6,16 @@
 //             below); the branch is small print on the room and the desk
 //   room      a worktree folder, or the folder itself outside git. An agent worktree shows its branch name
 // Room records are in rooms.mjs and the recent folders in recent.mjs. Pure functions, no I/O, no timers: safe to import in tests.
+//
+// Place rules live only here. Add a place field here and read it from s.place in the page; do not rebuild keys in building.js,
+// office.js or board.js. The branch label is the branch, except for an agent worktree (`base` from locate or layout): its room sits
+// on the floor of its base branch (place.baseBranch; place.branch is the worktree branch) and the room name is the worktree
+// branch. No base, or a base equal to the branch, means the folder's own branch is the floor. The room id is a readable tail of the
+// folder plus a hash of the whole normalized path, so look-alike folder names stay two rooms. Paths are normalized and
+// lower-cased, so path case never makes a second building. A session outside git has building key '' (name "Other folders") and
+// a notes key with the prefix `other`. Every place also carries its building's Security room id (securityRoomId,
+// securityRoomIdOf(buildingKey), `s-...`; a worktree room id is `w-...`, so the two never meet), and the snapshot's repo entries
+// carry it too (campus.mjs reposView).
 import { win32 as path } from 'node:path'; // Windows-first: folder keys follow Windows rules on every host (non-Windows launch is not built)
 import crypto from 'node:crypto';
 import { floorOfKind, LOBBY } from './archetypes.mjs';

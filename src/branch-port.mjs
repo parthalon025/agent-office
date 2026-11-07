@@ -1,5 +1,8 @@
 // Branch port module (#170): the port sequence of a checkout, apart from the git module. Pure apart from the injected isFree / isOwn.
-// Interface: branchPorts, branchPort, pickBranchPort, checkoutName (and the range constants). The start-up code in server.mjs reads it.
+// Interface: branchPorts, branchPort, pickBranchPort, checkoutName (and the range constants). The start-up code in server.mjs
+// reads it for OFFICE_PORT=branch (range 4330-4399). branchPorts(name, count) is the fixed sequence (12 by default),
+// branchPort(name) its first, checkoutName(loc) the branch or, on a detached HEAD, the worktree folder name.
+// Tested in test/branch-port.test.mjs.
 import path from 'node:path';
 
 // ---------- ports ----------

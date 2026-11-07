@@ -2,6 +2,18 @@
 // Names and argument names follow Claude Code's (Read, LS, Grep, Edit, Write, Bash), so risk.mjs rates a call the same way
 // and payload.mjs labels it the same way. This module never decides about approval: the caller asks the office first (the Security room rules, then a hold).
 // A path outside the folder is refused here also when the user approved the call: the tools are the last fence.
+//
+// This file owns the tools of a local-model agent (Read, LS, Grep, Edit, Write, Bash), limited to one worktree: inside() plus a
+// realpath check, a time limit, and a process-tree kill.
+// - The ACP provider reuses them for its agents' files and terminals: readText (whole raw text, refused over 4 MB, never cut),
+//   guard (the path fence without running anything) and start (a command handle: output, exit, kill, a byte limit that keeps
+//   the end). Bash runs on start.
+// - Commands go to cmd /d /s /c "<line>": the outer quotes are the ones /s strips.
+// - killTree and stop() return promises. stop() settles when every running command is killed and closed, or after stopWaitMs
+//   (2 s; a child that left the tree), so a provider close() waits for it and Remove room does not meet a busy folder (#123).
+//   The provider's interrupt() calls stop() without waiting.
+// - It never decides approval; the caller asks the office first.
+// - Tested in test/local-tools.test.mjs with the fake OpenAI server in test/fixtures/fake-openai.mjs.
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';

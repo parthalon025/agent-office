@@ -20,6 +20,98 @@
 // An agent may ignore those capabilities and use its own tools (Hermes does): the office then sees a call only in its
 // updates, cannot stop it, and says so in the feed. Such an agent is not gated (ADR 0001; AGENTS gated and supervision).
 //
+// Session: the office starts the agent, sends initialize with the client capabilities fs (read and write) and terminal, then
+// session/new with the session folder (or session/load on Reopen when the agent said loadSession; session/fork for open(s, { fork }),
+// and the replay is not shown again). Prompts are session/prompt. The agent's updates, permission requests, file calls and terminal
+// calls come back on stdout and are handled in the order the agent sent them. The office answers every fs/* and terminal/* call
+// itself, in the root only (acp-files.mjs). A resume that falls back to session/new reports events.fresh. canResume and features
+// come from the handshake (learn(); fork also from sessionCapabilities.fork). Messages: ACP has no way to add text to a turn that
+// runs, so a message that came back on a tool result (the return value of events.hook) is sent as the next prompt of the same turn,
+// or with the next prompt when the turn was stopped. The token counts in a prompt answer (usage) go to the tracker once per turn.
+// usage_update becomes a usage stream line; its optional cost (in the current ACP spec) is not read yet.
+//
+// Held requests: a request keeps a frozen copy of what its card showed. The grant and the declined file come from it, and a
+// tool_call_update that changes a held call declines that request at once (reject once, events.drop, a feed line that names the
+// change; the same input with its keys in another order is no change). A hold its agent stopped waiting for is freed with
+// events.drop (a tool result for a held call, or Hermes's 60 s on an edit). The feed says when the agent ran a command or changed a
+// file without asking, or changed a file the user declined; a read it ran without asking that riskOf does not rate low gets a feed
+// line too. The reason agent kinds (dsh) pass the reason the agent gives for a request (reason or _meta.reason, not yet checked
+// against a real dsh) as ask_reason.
+//
+// Files and terminals: a path outside the root is refused unasked. Every other call goes to the office like a local agent's
+// (events.permission: the Security room rules, then a hold; a Deny refuses with its reason). A write to a file whose edit the user
+// declined in the turn is refused under any spelling (risk.mjs fileKey; Hermes #31682). A declined edit that names no file makes
+// every write of the turn ask. An unanswered or changed edit makes that file ask (both firm: an Allow rule does not answer them, a
+// Deny rule does). An approved command or edit runs once without a second question until its call ends. commandLine refuses an
+// argument the shell cannot take as plain text (on Windows a quote, %, ! or a line break: cmd.exe ignores \" when it tracks quotes).
+//
+// Gating (ADR 0001): gated and supervision are set per AGENTS entry. cost is 'unknown' and the provider is paid. Every ACP agent: a
+// sign-in error (isAuth, the text, not -32000 alone) is the agent's sign-in step at start, in a turn and in readiness. One readiness
+// answer waits at most 12 s (READY_WAIT_MS, under the 15 s of registry.status) and says "still starting" while the same probe goes on.
+//   hermes    gated: false, "Partly supervised: file edits and risky commands ask". Every edit asks in its default mode, a command
+//             only when it matches Hermes's danger patterns: its Shell cell is Partly enforced. Off until the Agents screen turns
+//             it on, like OpenClaw.
+//   dsh       gated: true.
+//   openclaw  gated: true through its office plugin (#77, see the OpenClaw paragraph).
+//   copilot   gated: false, "Partly supervised: edits and most commands ask, reads do not". enforces Edit inside. Settings is Partly
+//             enforced (a write asks, a read in its folder does not). Read inside and Secret files are Not enforced in Hermes's words,
+//             one line on the wall. Outside files, shell, web and MCP are Partly enforced. Off until the Agents screen turns it on.
+//             Its extras are in copilot.mjs.
+// ACP tools (#216): gemini (gemini --acp, partly supervised), opencode (opencode acp), kimi (kimi acp) and acp (the generic agent:
+// spec.env makes its program and arguments come from OFFICE_ACP_PROGRAM (a plain name, never a path) and OFFICE_ACP_ARGS (a JSON
+// list), checked in program()). All are ungated (opencode, kimi and acp Unsupervised: their docs show no approval flow over ACP that
+// the office can rely on). All are in the one Security room column acp ("ACP tools", public/vocab-security.js), so there is one
+// switch and one reason sentence for the four. A new agent is a new entry in AGENTS, not a file.
+//
+// Hermes (2026-11-04). Not from a run against the office: from Hermes Agent's source (acp_adapter/server.py, modes.py on main, read
+// 2026-11-04) and a third-party report on 0.21.5 (upstream issue #139074). Hermes's initialize ignores the client's fs and terminal,
+// so the office's file and terminal service never sees its writes or commands. Its edits ask over ACP in its default mode. Its
+// terminal tool asks only for commands that match its danger patterns. Its 60 s limit is for edits only (#63302, a timeout reads as
+// a denial). So it is ungated, and the #31682 protection in serveWrite does not cover it: the feed lines are the only signal. The
+// feed says "ran a command without asking the office" when that happens. AGENTS.*.pin stays null until a real run. dsh comes from
+// npm (@deepseek-ai/dsh) as dsh.cmd, which resolveExe refuses, so the office cannot start it yet. A hermes program may also be the
+// React Native JS engine: readiness runs one ACP handshake (learn()), so a program that does not speak ACP is not ready.
+// skillsDir() is where Hermes keeps its skills (HERMES_HOME, else ~/.hermes, then skills).
+//
+// Copilot CLI: see copilot.mjs. The extras its AGENTS entry names: probeArgs and logDirArg (the check's log in a temp folder of its
+// own, removed after it), envDrop, probeSession (the check also opens and closes one session, because a signed-out Copilot answers
+// initialize and only session/new says auth_required, -32000 "Authentication required"; it also gives the models), probeMs 60 s,
+// readyTtlMs and notReadyTtlMs, modelArg (--model, from the models session/new listed), callOf (a call that had a request body keeps
+// that card), argsOf (the call's own later arguments in the shape of that card, kept as c.args: recheck compares them with what the
+// user saw, so a call changed after its request is declined while it waits or named in the feed after an approval, and endCall names
+// a declined file from them, #125) and signIn.
+//
+// OpenClaw (#73, #77, ADR 0004; its facts and the live-run checklist are in openclaw.mjs). openclaw acp is a bridge to a Gateway on
+// loopback that the office never starts. An entry with gateway: true is checked with probeGateway before the bridge starts, in
+// readiness and at session start, and gets --url ws://127.0.0.1:<port> only when OFFICE_OPENCLAW_PORT moves it. minVersion 2026.10.10
+// (the bridge's ACP agentInfo.version, OpenClaw's own release; the release the office plugin is built against): an old or unnamed
+// version is not ready and start() refuses it. plugin: true and gated: true: the office plugin in the Gateway sends every tool call
+// of an office session to POST /hook/openclaw, and gate(s, call, signal) holds it like every request (openclaw.mjs toolCall names it;
+// the Security room rules, then the user) and answers { allow, reason }.
+//   - The answer is kept by toolCallId (st.gated: { allow, pending, command, host }). pending runs from the moment the plugin sends
+//     the call until the office answers, so a call OpenClaw ends while the office still decides is not one the office never got. A
+//     call with no id is denied.
+//   - A no also answers OpenClaw's own exec approval for the same toolCallId at once. A yes does so only when the approval shows the
+//     same command, no paired device, and the host the call named if it named one. The approval carries only command and host
+//     (src/acp/permission-relay.ts), so env, workdir and elevated cannot be compared; another command or host is held again, with a
+//     feed line. A call of several files is held one file at a time.
+//   - A completed call without the office's yes, or a failed call the office never got (endCall: the office did not serve it, and
+//     OpenClaw did not mark it blocked before it ran: rawOutput.details.status blocked; the result text is never trusted), means the
+//     plugin did not hold it. The turn ends with an Error that names the plugin (gateFailed) and the agent is stopped.
+//   - signal aborts when the plugin stops waiting, and the hold goes (withdraw).
+//   - session/new and session/load carry _meta.sessionKey = s.gatewayKey (agent-office:<uid>, or the past record's gatewayKey on
+//     Reopen; a record without one, or one whose key a live session has, starts fresh).
+//   - policy(fresh) gives the config check (null while the kind is blocked by a no-cost Deny or not installed). start() goes Gateway,
+//     handshake, version, config (gateCheck), and only then session/new, so no prompt goes out before the config is read.
+//     tools.fs.workspaceOnly off, or the plugin not loaded for this office (plugins.enabled, plugins.allow, plugins.deny,
+//     plugins.entries.agent-office.enabled, its config.tokenFile = deps.tokenFile, the server's token file), or any of them
+//     unreadable, is not ready and ends the session with the commands that fix it (the office does not write the config, ADR 0004).
+//   - preflight() is that check without a session. The server asks it before the cost question and before a worktree (409
+//     "OpenClaw cannot start: ...").
+//
+// Tested in test/acp-provider.test.mjs with the fake agent test/fixtures/fake-acp.mjs, and through the server in
+// test/mcp-routes.test.mjs (Windows only).
+//
 // ACP reports no cost in the stable protocol, so the provider is paid with cost 'unknown' (owner decision Q22). The process
 // calls and the timers are injected, so tests drive a fake agent (test/fixtures/fake-acp.mjs). Nothing starts on import.
 import crypto from 'node:crypto';

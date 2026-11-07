@@ -2,6 +2,14 @@
 // Claude Code hook -> Agent Office. Reads the hook payload on stdin, trims it,
 // and posts it to the local office server. Never blocks or fails a session:
 // every error path exits 0 with no output.
+// Its first argument is the office's port when that is not 4317; it reads the token file of that port (files.mjs). It lives in
+// src/; the settings files that the server writes at listen point at src/hook.mjs and src/mcp.mjs (a Claude Code settings file
+// from before the move still names the old root paths: the hook then fails without blocking, and the settings file is made again
+// at the next start). It forwards real hook JSON for PermissionRequest, PostToolUse, UserPromptSubmit, Stop and PreToolUse (the
+// Security room's deny or ask).
+// HTTP hook failures are non-blocking. Command hooks must stay silent on stdout unless they return real hook JSON.
+// The hook's parent shell dies right after the hook returns, so the process walk to the claude process must happen while the hook
+// waits: the office's persistent PowerShell helper (walkToClaude in office.mjs) does it, from hook_ppid.
 // First statement: Windows never looks for a program in the current folder (launch.mjs resolveExe has the reason).
 process.env.NoDefaultCurrentDirectoryInExePath = '1';
 import fs from 'node:fs';

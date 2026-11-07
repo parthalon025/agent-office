@@ -1,8 +1,12 @@
 // Orientation (#196, parent #191): the first-run walk through the whole office. Each step is skippable and reachable again from the
 // Reception and Ctrl+K. This module owns the steps, their words and the saved progress (the `orientation` slice of the state file:
 // `{ seen, steps: { <id>: 'done' | 'skipped' } }`); the page draws each step's own controls and keeps no copy of the list.
-// The company step (#199) installs or connects Paperclip and creates the company; the first hire (#201) is the HR desk. The memory step
-// (#205) shows the company memory panel. A `later` step would be a placeholder the page says so for; none is left. Pure: no I/O, no clock.
+// `STEPS` (in order): kinds, security, spend, startup, remote, company, hire, memory, tour. `later` marks a placeholder step the page
+// says so for; none is left (#205 made memory real). The company step (#199) installs or connects Paperclip and creates the company;
+// the first hire (#201) is the HR desk. The memory step (#205) shows the company memory panel.
+// `cleanOrientation` makes the saved slice one form (unknown steps and words drop out). `mark(state, step, status)` sets done, skipped
+// or open (else 400). `view(state)` gives each step with its status, `next`, `finished` and `skipped`. Pure: no I/O, no clock.
+// Tested in test/orientation.test.mjs, test/orientation-routes.test.mjs and test/orientation-company.test.mjs.
 import { httpError } from './office-core.mjs';
 
 /** The steps in order. Words are Simplified Technical English: short sentences, buttons say the result. */

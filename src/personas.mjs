@@ -1,10 +1,13 @@
 // Agent character (#150): the persona record of an agent, its working style and its body cue.
 // Owns: the record (name, look, style), its clean-up, the style's tone line for the system prompt, and the cue
-// a status gives a bot. A style changes the TONE of what an agent says, never what it may do: the Security room
+// a status gives a bot. The record is kept by agent name: the look (shape, color index, accessory) and the working style. A style
+// changes the TONE of what an agent says, never what it may do: the style is a tone line for the system prompt only, and the Security room
 // never reads a persona (test/personas.test.mjs proves the decision is the same). A cue comes from a status
-// (adapter events) only, so a bot never moves by itself, and it is none under reduced motion.
+// (adapter events) only, so a bot never moves by itself, and it is none under reduced motion. The cue rule is
+// `OfficeVocab.persona.cueOf` (waiting raise-hand, error scratch-head, finished stretch); `bodyCue` here reads it, so there is one copy.
 //
 // Pure: no I/O, no clock (the cue rule is read from public/vocab.js, which is shared with the page). The map is injected; the server saves it in state.json (persisted.personas).
+// Tested in test/personas.test.mjs and test/persona-vocab.test.mjs.
 
 import './vocab.mjs';
 

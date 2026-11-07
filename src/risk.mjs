@@ -7,6 +7,18 @@
 // this one rule, so a local model or a Copilot session is rated like Claude Code.
 // One classifier (rate) gives both answers, so the grid and riskOf never disagree: the rows read-inside and
 // edit-inside are exactly the reads and edits that are low.
+//
+// riskOf(tool, input, root) rates a call; actionOf(tool, input, root) gives its row in the grid (read-inside, edit-inside,
+// files-outside, shell, web, mcp, settings, secrets, or other); ratingOf gives both. Relative paths are read against the
+// root. An edit to settings that run code is high anywhere; a secret read outside the root is high.
+// inside(root, target) compares path text only (no I/O, links not followed). realInside(root, target) also resolves
+// junctions, links and short names (realpathSync.native, nearest existing parent) and is what the rating uses.
+// fileKey(root, p) is one key per file whatever the spelling (case, trailing dots and spaces, ::$DATA, short names,
+// links), on the same Windows part rule as the rating (winPart). wideRoot(root): a drive root, the home folder or a
+// folder above it (also through a link) has no inside, so nothing there is low. An edit of state*.json or history*.json
+// by name (schedules run later) is high anywhere (#109); a read is not. The office's own copies in its folder are
+// settings that run code, and a read of them is medium. The rating takes opts.office and opts: { home, env } for tests.
+// Tested in test/risk.test.mjs (real junctions in a temp folder).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

@@ -4,7 +4,18 @@
    effects and every color come from the DS tokens. Drag to turn, scroll or pinch to zoom, click a
    building to fly to it and go inside.
    Effects: a new building rises, a removed one sinks; a new floor grows from the roof, a removed one
-   shrinks away; sessions pop in and out. Reduced motion skips them. */
+   shrinks away; sessions pop in and out. Reduced motion skips them.
+   The camera: zoom to mouse, bounded pan, click or zoom in to enter a building. OfficeCity.cameraFeel(stage) also gives the
+   office scene zoom to mouse. A building with hq: true (the Paperclip HQ, #76, from hqBuilding in office.js) gets a penthouse
+   and a mast (crown) and its own sign line (sub); its pips are Paperclip agents, and a click on it opens the HQ dialog, not a
+   scene.
+   Labels in the city sit on layer 1, so the bloom pass skips them. The City label card is the bg color (the DS K.tok has no
+   chip or line); its ink and muted read on bg in every theme.
+   The minimum zoom is Show all (SHOW_ZOOM times s.D over the fit distance), set every frame. Do not set ctl.minZoom to a
+   constant.
+   Reduced motion: stage.rm is read when the stage is made. The DS engine cuts every camera move under reduced motion, so this
+   file passes no reduced-motion flag to stage.frame. The page's own motion still reads stage.rm: zoom steps and tweens are
+   instant, and a building lifts at once. */
 (function () {
   'use strict';
   var A = window.AgentOffice, T = window.THREE;
