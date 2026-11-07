@@ -1,5 +1,5 @@
 /* Agent Office for Claude Code x0.2: the hq feature (#184, the page features of #168).
-   The Manager board, the Paperclip HQ and earned trust (#157, #76, #153). One Module: its Interface is window.OfficePage.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel } (the HR desk, #201; company memory, #205).
+   The Manager board, the Paperclip HQ and earned trust (#157, #76, #153). One Module: its Interface is window.OfficePage.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel, AdapterInstall: AdapterInstall } (the HR desk, #201; company memory, #205).
    Plain functions over the page core (window.OfficePage); office.js calls the Interface and holds none of the parts. */
 (function () {
   'use strict';
@@ -19,6 +19,8 @@
     // desk (#201, a write of the grid's Hires cell), so it asks for a monthly budget like every hire: the dialog takes a name and the budget,
     // the first call gets the server's question (ask-first 'write', the exact words of what it creates), and only the painted Confirm sends.
     var ms = useState([]), managers = ms[0], setManagers = ms[1];
+    var oa = useOfficeAdapter();   // #222: a hire needs the office adapter in Paperclip
+    var adapterOk = oa.loaded && !!oa.adapter && oa.adapter.state === 'installed';
     var hs = useState(null), hire = hs[0], setHire = hs[1];   // { building, name, budget, ask, err }: the Hire Manager dialog
     var bs = useState(''), pick = bs[0], setPick = bs[1];
     useEffect(function () {
@@ -53,7 +55,7 @@
     }
     var buildingName = function (key) { var r = ((snap && snap.repos) || []).filter(function (x) { return x.key === key; })[0]; return r ? r.name : ''; };
     if (hire) {
-      var hm = V.plan.hireManager, budgetOk = hm.budgetOk(hire.budget);
+      var hm = V.plan.hireManager, budgetOk = hm.budgetOk(hire.budget) && adapterOk;
       var setField = function (k, x) { var o = { ask: '', err: '' }; o[k] = x; setHire(Object.assign({}, hire, o)); };
       return h(A.Dialog, { open: true, title: hm.title, onClose: function () { setHire(null); }, actions: [
         h(A.Button, { key: 'c', variant: 'quiet', onClick: function () { setHire(null); } }, 'Not now'),
@@ -62,6 +64,7 @@
           : h(A.Button, { key: 'y', variant: 'primary', icon: 'hq', disabled: !budgetOk, loading: busy === 'hire', onClick: function () { hireManager(hire, false); } }, hm.button)] },
         h('div', { className: 'form wide' },
           h('p', { className: 'note' }, hm.intro(buildingName(hire.building) || 'Other folders')),
+          adapterOk ? null : h(AdapterInstall, { ad: oa, toast: p.toast }),
           h(A.TextInput, { id: 'mgr-name', label: hm.name, value: hire.name, onChange: function (t) { setField('name', t); } }),
           h(A.TextInput, { id: 'mgr-budget', label: hm.budget, value: hire.budget, onChange: function (t) { setField('budget', t); } }),
           !budgetOk ? h('p', { className: 'note', role: 'status' }, hm.needBudget) : null,
@@ -760,6 +763,8 @@
         q.contract && q.contract.length ? h('p', { className: 'ao-err', role: 'alert' }, 'Paperclip answered in a shape the office does not know, so the office does not show that part. ' + q.contract.join(' ')) : null,
         q.lobby ? h(Lobby, { q: q, mark: mark, toast: p.toast }) : null,
         h(Costs, null),
+        h('h3', { className: 'ext-h' }, 'Office adapter'),
+        h(AdapterInstall, { toast: p.toast }),
         h('h3', { className: 'ext-h' }, 'Company memory'),
         h(MemoryPanel, { toast: p.toast }),
         h(Catalog, null),
@@ -793,6 +798,54 @@
         h('p', { className: 'note' }, 'Both schedulers run: Paperclip runs its heartbeats and routines, the office runs its own schedules. The office changes a routine only through the HQ write grid. To hold the Claude Code calls of an agent here, use Supervise in office on the Agents screen of a Security room.')));
   }
 
+  // ---------- the office adapter (#222) ----------
+  // Every hire runs through the office adapter, and Paperclip refuses a hire for an adapter it does not have. This part says whether Paperclip has
+  // it and, when it does not, installs it: one write of the write grid (kind Office adapter) behind its Confirm. The same part shows in the HQ,
+  // in the company step of Orientation and where a hire is refused. The Confirm scrolls into view, so it stays reachable on a phone.
+  function useOfficeAdapter() {
+    var st = useState({ loaded: false, adapter: null, write: true, err: '' }), s = st[0], setS = st[1];
+    var n = useState(0), tick = n[0], setTick = n[1];
+    useEffect(function () {
+      var live = true;
+      client.get('hqAdapter').then(function (j) { if (live) setS({ loaded: true, adapter: j.adapter, write: j.write !== false, err: '' }); },
+        function (x) { if (live) setS({ loaded: true, adapter: null, write: true, err: x.message }); });
+      return function () { live = false; };
+    }, [tick]);
+    return Object.assign({ reload: function () { setTick(function (t) { return t + 1; }); } }, s);
+  }
+  function AdapterInstall(p) {
+    var own = useOfficeAdapter(), ad = p.ad || own, W = window.OfficeVocab.hq.adapter(ad.adapter);
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var er = useState(''), err = er[0], setErr = er[1];
+    var qs = useState(''), ask = qs[0], setAsk = qs[1];
+    var ref = React.useRef(null);
+    useEffect(function () { if (ask && ref.current && ref.current.scrollIntoView) ref.current.scrollIntoView({ block: 'nearest' }); }, [ask]);
+    function install(confirmed) {
+      setBusy(true); setErr('');
+      client.send('hqWrite', { kind: 'adapter', action: 'install', confirmed: confirmed === true ? true : undefined }).then(function (r) {
+        setBusy(false); setAsk('');
+        p.toast({ tone: 'success', title: 'Office adapter installed', text: r && r.requiresRestart ? 'Paperclip loaded it again. Restart Paperclip if a run uses the old copy.' : 'Paperclip loaded it. You can hire now.' });
+        ad.reload(); if (p.onDone) p.onDone();
+      }, function (x) {
+        setBusy(false);
+        var a = window.OfficeAsk.asked(x, 'write', confirmed === true);
+        if (a) { setAsk(a.text); return; }
+        setErr(x.message);
+      });
+    }
+    if (!ad.loaded) return h('p', { className: 'note', role: 'status' }, 'Reading the adapter list of Paperclip.');
+    if (ad.err) return h('p', { className: 'ao-err', role: 'alert' }, ad.err);
+    return h('div', { className: 'hq-adapter' },
+      h('p', { className: 'note', role: 'status' }, W.line + '.'),
+      W.why && !W.ok ? h('p', { className: 'note' }, W.why) : null,
+      W.install && !ad.write ? h('p', { className: 'note' }, 'The HQ write grid denies this. Allow Office adapter in the write grid to install it here.') : null,
+      ask ? h('p', { className: 'note', role: 'alert' }, ask) : null,
+      err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
+      W.install && ad.write ? h('div', { className: 'inline-actions', ref: ref },
+        ask ? h(A.Button, { variant: 'primary', icon: 'approve', loading: busy, onClick: function () { install(true); } }, 'Confirm install') : h(A.Button, { variant: 'primary', icon: 'add', loading: busy, onClick: function () { install(false); } }, 'Install office adapter'),
+        ask ? h(A.Button, { variant: 'quiet', onClick: function () { setAsk(''); } }, 'Do not install') : null) : null);
+  }
+
   // ---------- the HR desk (#201): hire an employee ----------
   // Role cards, then name, manager, agent kind, model, monthly budget and skills. The Hire button asks the office once (ask-first 'write'):
   // the answer is the exact words of what it creates, shown with a Confirm, and only the Confirm sends. A hire has a budget (the office
@@ -809,10 +862,12 @@
     var actionsRef = React.useRef(null);
     // The Confirm sits under a long form in a scrolling dialog (a phone shows one screen of it): bring it into view when the question comes.
     useEffect(function () { if (ask && actionsRef.current && actionsRef.current.scrollIntoView) actionsRef.current.scrollIntoView({ block: 'nearest' }); }, [ask]);
-    useEffect(function () { var live = true; client.get('hqHireDesk').then(function (j) { if (live) setDesk(j); }, function (x) { if (live) setErr(x.message); }); return function () { live = false; }; }, []);
+    var tk = useState(0), tick = tk[0], setTick = tk[1];   // read the desk again after the adapter is installed (#222)
+    useEffect(function () { var live = true; client.get('hqHireDesk').then(function (j) { if (live) setDesk(j); }, function (x) { if (live) setErr(x.message); }); return function () { live = false; }; }, [tick]);
     if (!q || !q.company) return h('p', { className: 'note' }, 'Connect a company in Paperclip first. Then you can hire here.');
     if (!desk) return err ? h('p', { className: 'ao-err', role: 'alert' }, err) : h('p', { className: 'note', role: 'status' }, 'Reading the HR desk.');
     if (!desk.write) return h('p', { className: 'note' }, 'The HQ write grid denies hires. Allow them in the write grid to hire here.');
+    if (desk.adapter && desk.adapter.state !== 'installed') return h('div', { className: 'form wide' }, h(AdapterInstall, { toast: p.toast, onDone: function () { setTick(tick + 1); } }));
     function set(k, x) { var o = {}; o[k] = x; setV(Object.assign({}, v, o)); setAsk(''); setErr(''); }
     function pick(r) { setRole(r.role); setAsk(''); if (!v.name.trim()) setV(Object.assign({}, v, { name: r.label })); }
     var dollars = Number(v.budget), budgetOk = v.budget.trim() !== '' && isFinite(dollars) && dollars > 0;
@@ -904,5 +959,5 @@
         })) : h('p', { className: 'note' }, 'No agent has a history yet.')));
   }
 
-  O.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel };
+  O.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel, AdapterInstall: AdapterInstall };
 })();

@@ -5,9 +5,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { goalsOf, floorsOf, cablesOf, reportingProblem, lobbyOf, costsOf, monthWindows, shapeProblems, shapeOf, SHAPES } from '../src/hq-model.mjs';
+import { goalsOf, floorsOf, cablesOf, reportingProblem, lobbyOf, costsOf, monthWindows, shapeProblems, shapeOf, SHAPES, officeAdapterOf, planWrite } from '../src/hq-model.mjs';
 import { startFakePaperclip, DEMO } from './fixtures/fake-paperclip.mjs';
 
+const ADAPTER_DIR = fileURLToPath(new URL('../src/integrations/paperclip-adapter', import.meta.url));
 const RECORDED = JSON.parse(fs.readFileSync(fileURLToPath(new URL('./fixtures/paperclip-shapes.json', import.meta.url)), 'utf8'));
 const a = (id, reportsTo, name = id) => ({ id, name, reportsTo, role: 'General' });
 
@@ -89,6 +90,37 @@ test('contract: the office needs only what was recorded, and the fake Paperclip 
       for (const [k, t] of Object.entries(want.fields)) assert.equal(got.fields[k], t, `${name}.${k} changed from ${t} to ${got.fields[k]}`);
     }
   } finally { await pc.close(); }
+});
+
+test('contract: the adapter install answer of the fake is the recorded shape (routes/adapters.ts POST /adapters/install)', async () => {
+  const pc = await startFakePaperclip({ ...DEMO(), adapters: [] });
+  try {
+    const r = await fetch(`${pc.url}/api/adapters/install`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ packageName: ADAPTER_DIR, isLocalPath: true }) });
+    assert.equal(r.status, 201);
+    const json = await r.json();
+    assert.deepEqual(shapeProblems('adapterInstall', json), []);
+    const got = shapeOf(json), want = RECORDED.routes.adapterInstall;
+    assert.equal(got.list, want.list);
+    for (const [k, t] of Object.entries(want.fields)) assert.equal(got.fields[k], t, `adapterInstall.${k}`);
+    assert.equal(json.type, 'agent_office', 'the type comes from createServerAdapter() of the plugin, loaded the way Paperclip loads it');
+    assert.equal(json.requiresRestart, false);
+    assert.equal((await fetch(`${pc.url}/api/adapters/install`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' })).status, 400);
+  } finally { await pc.close(); }
+});
+
+test('officeAdapterOf: installed, off, missing and unknown', () => {
+  assert.equal(officeAdapterOf([{ type: 'claude_local' }, { type: 'agent_office', disabled: false }]).state, 'installed');
+  assert.equal(officeAdapterOf([{ type: 'agent_office', disabled: true }]).state, 'off');
+  assert.match(officeAdapterOf([{ type: 'claude_local' }]).why, /Install it at the HQ/);
+  assert.equal(officeAdapterOf(null).state, 'unknown');
+});
+
+test('plan: the adapter install is one POST with no folder from the caller', () => {
+  const p = planWrite({ kind: 'adapter', action: 'install', packageName: 'C:/evil', localPath: 'C:/evil' });
+  assert.equal(p.method, 'POST');
+  assert.equal(p.path('c'), '/api/adapters/install');
+  assert.deepEqual(p.body, { isLocalPath: true }, 'the folder is set by the writer, never by the request');
+  assert.throws(() => planWrite({ kind: 'adapter', action: 'remove' }), (e) => e.status === 400);
 });
 
 // ---------- projects and workspaces as rooms (#211) ----------

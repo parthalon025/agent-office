@@ -361,6 +361,7 @@ export function createOffice(cfg) {
     key: (url) => runtime.keyFor(url),
     sessions: () => [...sessions.values()], // the plan source links a Paperclip task to the session that runs it (#155)
     hooksFile: () => HOOKS_CMD_FILE.replace(/\\/g, '/'),
+    adapterDir: path.join(ROOT, 'src', 'integrations', 'paperclip-adapter'),   // the office adapter plugin (#222): the one folder the adapter install names
     grid: () => saved.get('hqGrid'),   // the HQ write grid (#198): every Paperclip write asks it first (hq.write)
     selfApproval: () => saved.get('hqSelfApproval'),   // the approval kinds an employee may approve itself (#203)
     askFirst: (kind, text, extra) => askFirst(kind, text, extra),
@@ -1401,7 +1402,9 @@ export function createOffice(cfg) {
     R('GET', '/api/hq/lobby', 'page', () => ({ hq: hq.model() })),
     // The HQ write grid and the one writer (#198): the grid's cells, one change of a cell, and a write by kind (409 with the question until confirmed: true).
     R('POST', '/api/hq/hire', 'page', ({ body }) => hireHq(body)),
-    R('GET', '/api/hq/hire-desk', 'page', () => ({ roles: HIRE_ROLES, write: writeValueOf(saved.get('hqGrid'), 'hire') !== 'deny' })),
+    R('GET', '/api/hq/hire-desk', 'page', async () => ({ roles: HIRE_ROLES, write: writeValueOf(saved.get('hqGrid'), 'hire') !== 'deny', adapter: await hq.adapter() })),
+    // The office adapter in Paperclip (#222): installed, off, missing or unknown, with the reason; `write` is false when the grid says Deny. The install is the writer's (kind adapter).
+    R('GET', '/api/hq/adapter', 'page', async () => ({ adapter: await hq.adapter(), write: writeValueOf(saved.get('hqGrid'), 'adapter') !== 'deny' })),
     R('GET', '/api/hq/grid', 'page', () => ({ grid: hqGridView(), selfApproval: selfApprovalView() })),
     R('POST', '/api/hq/self-approval/set', 'page', ({ body }) => setHqSelfApproval(body)),
     R('POST', '/api/hq/grid/set', 'page', ({ body }) => setHqGrid(body)),

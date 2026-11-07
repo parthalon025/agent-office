@@ -145,3 +145,38 @@ test('route: the hire desk lists the role cards; the route asks first, then hire
   const none = await office.call('/api/hq/hire', { ...body, budgetDollars: 0, confirmed: true });
   assert.equal(none.status, 400);
 });
+
+// ---- the office adapter (#222): the HR desk and the Manager hire say what to do while it is missing; the install is the writer's ----
+test('route: the adapter state is on the hire desk and GET /api/hq/adapter; hires are refused with a reason while it is missing, until the install', async () => {
+  assert.equal(office.office.core.groupOf('GET', '/api/hq/adapter'), 'page');
+  const here = await office.call('/api/hq/adapter');
+  assert.deepEqual([here.json.adapter.state, here.json.write], ['installed', true]);
+  const pc2 = await startFakePaperclip({ ...DEMO(), adapters: [] });
+  try {
+    assert.equal((await office.call('/api/paperclip/connect', { url: pc2.url })).status, 200);
+    await until(() => office.snapshot().hq && office.snapshot().hq.state === 'on' && office.snapshot().hq.url === pc2.url, 'the HQ connected to the second Paperclip');
+    const desk = await office.call('/api/hq/hire-desk');
+    assert.equal(desk.json.adapter.state, 'missing');
+    assert.match(desk.json.adapter.why, /Install it at the HQ first/);
+    const hire = await office.call('/api/hq/hire', { name: 'Mira', role: 'engineer', budgetDollars: 25 });
+    assert.equal(hire.status, 409);
+    assert.match(hire.json.error, /office adapter/);
+    assert.equal(hire.json.confirm, undefined, 'no Confirm is asked for a hire that cannot happen');
+    const mgr = await office.call('/api/manager/hire', { building: 'any', budgetDollars: 25 });
+    assert.equal(mgr.status, 409);
+    assert.match(mgr.json.error, /office adapter/);
+    assert.equal(pc2.requests.filter((x) => x.method === 'POST').length, 0, 'nothing was sent');
+    const ask = await office.call('/api/hq/write', { kind: 'adapter', action: 'install' });
+    assert.equal(ask.status, 409);
+    assert.equal(ask.json.confirm, 'write');
+    const ok = await office.call('/api/hq/write', { kind: 'adapter', action: 'install', confirmed: true });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.json.type, 'agent_office');
+    assert.equal(pc2.adapterInstalls.length, 1);
+    assert.equal((await office.call('/api/hq/hire-desk')).json.adapter.state, 'installed');
+    const again = await office.call('/api/hq/write', { kind: 'adapter', action: 'install', confirmed: true });
+    assert.equal(again.json.existed, true);
+    assert.equal(pc2.adapterInstalls.length, 1, 'a second install sends nothing');
+    assert.equal((await office.call('/api/hq/hire', { name: 'Mira', role: 'engineer', budgetDollars: 25, confirmed: true })).status, 200);
+  } finally { await pc2.close(); }
+});

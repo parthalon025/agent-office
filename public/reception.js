@@ -184,6 +184,8 @@
     var er = useState(''), err = er[0], setErr = er[1];
     var qs = useState(''), ask = qs[0], setAsk = qs[1];
     if (co) return h('div', null, h('p', { className: 'note', role: 'status' }, 'Your company "' + co.name + '" is in Paperclip. The office watches it.'),
+      // The office adapter (#222): every hire runs through it, so the step installs it once the company exists (its own Confirm).
+      O.Hq && O.Hq.AdapterInstall ? h(O.Hq.AdapterInstall, { toast: p.toast }) : null,
       h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'approve', onClick: p.onDone }, 'Mark this step done')));
     if (!rt) return h(Busy, { on: true });
     var ready = rt.state === 'connected' || (rt.state === 'running' && rt.bootstrap !== 'pending' && rt.key && rt.key.state === 'ready');
