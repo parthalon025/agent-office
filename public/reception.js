@@ -120,8 +120,106 @@
         i > 0 ? h(A.Button, { variant: 'quiet', onClick: function () { setI(i - 1); } }, 'Back') : null,
         last ? h(A.Button, { variant: 'primary', onClick: p.onDone }, 'Done') : h(A.Button, { variant: 'primary', icon: 'chevron-right', onClick: function () { setI(i + 1); } }, 'Next')));
   }
+  // Orientation opens by itself once: when the server has not seen it closed and this browser has not closed it either (the gate and a returning browser set the key).
+  function orientationDue(v) { try { return !!v && v.seen !== true && localStorage.getItem('ao-orientation') !== '1'; } catch (x) { return !!v && v.seen !== true; } }
+  function orientationMark() { try { localStorage.setItem('ao-orientation', '1'); } catch (x) { /* private window: the server's seen flag still holds */ } }
   function tourSeen() { try { return localStorage.getItem('ao-tour') === '1'; } catch (x) { return false; } }
   function setTourSeen() { try { localStorage.setItem('ao-tour', '1'); } catch (x) { /* private window */ } }
 
-  O.Reception = { Recap: RecapDialog, Reception: ReceptionDialog, TourCard: TourCard, tourSeen: tourSeen, setTourSeen: setTourSeen };
+  // ---------- Orientation (#196): the first-run walk through the office ----------
+  // The steps, their words and the saved progress come from the server (src/orientation.mjs); this draws the controls of each step.
+  // Every step can be skipped and is reachable again from the Reception and Ctrl+K. The company and memory steps are placeholders.
+  function KindsStep() {
+    var K = O.useKinds();   // the shared provider read (page-core.js): the kept answer, never a fresh round
+    if (K.checking) return h(Busy, { on: true });
+    return h('ul', { className: 'past' }, K.list.map(function (k) {
+      return h('li', { key: k.kind, className: 'past-row' }, h('div', { className: 'past-main' },
+        h('div', { className: 'past-title' }, h('b', null, k.label)),
+        h('div', { className: 'past-meta' }, k.ready ? 'Ready' : (k.needs && k.needs[0]) || 'Not ready')));
+    }));
+  }
+  function SpendStep(p) {
+    var i = p.info || {};
+    var sl = useState(O.limitText(i.spendLimit)), limit = sl[0], setLimit = sl[1];
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var er = useState(''), err = er[0], setErr = er[1];
+    var sv = useState(false), saved = sv[0], setSaved = sv[1];
+    function save() {
+      setBusy(true); setErr('');
+      client.settingsSpend({ limit: O.limitSent(limit, true), confirmed: true }).then(function () { setBusy(false); setSaved(true); p.onDone(); }, function (x) { setBusy(false); setErr(x.message); });
+    }
+    return h('div', null,
+      h(A.TextInput, { id: 'o-spend', label: 'Spend limit in dollars. Empty means no limit.', value: limit, onChange: function (t) { setLimit(t); setSaved(false); } }),
+      err ? h('p', { className: 'note reception-err', role: 'alert' }, err) : null,
+      h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', loading: busy, onClick: save }, saved ? 'Saved' : 'Save the limit')));
+  }
+  function StartupStep(p) {
+    var su = useState((p.info && p.info.startup) || null), st = su[0], setSt = su[1];
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var er = useState(''), err = er[0], setErr = er[1];
+    if (!st || !st.available) return h('p', { className: 'note' }, 'This computer has no Startup folder, so the office cannot start with Windows.');
+    if (st.canChange === false) return h('p', { className: 'note' }, (st.enabled ? 'Start with Windows is on. ' : 'Start with Windows is off. ') + (st.reason || ''));
+    function toggle() {
+      setBusy(true); setErr('');
+      client.startup({ enabled: !st.enabled }).then(function (r) { setSt(r); setBusy(false); if (r.enabled) p.onDone(); }, function (x) { setBusy(false); setErr(x.message); });
+    }
+    return h('div', null,
+      h('p', { className: 'note' }, st.enabled ? 'The office starts when you sign in.' : 'The office adds one file to your Startup folder. It needs no admin rights.'),
+      err ? h('p', { className: 'note reception-err', role: 'alert' }, err) : null,
+      h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', loading: busy, onClick: toggle }, st.enabled ? 'Turn off start with Windows' : 'Turn on start with Windows')));
+  }
+  function RemoteStep(p) {
+    var r = (p.info && p.info.remote) || {};
+    if (r.state === 'on') return h('p', { className: 'note' }, 'Remote access is on at ' + r.host + '.');
+    return h('p', { className: 'note' }, 'Remote access is off.' + (r.reason ? ' ' + r.reason : '') + (r.missing && r.missing.length ? ' Missing: ' + r.missing.join(', ') + '.' : '') + ' The steps are in docs/remote-access.md.');
+  }
+  function StepBody(p) {
+    var id = p.step.id;
+    if (p.step.later) return h('p', { className: 'note' }, 'This step comes later. Skip it for now. You can come back from the Reception.');
+    if (id === 'kinds') return h(KindsStep);
+    if (id === 'security') return h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'security', onClick: function () { p.onSecurity(); } }, 'Open the Security room'));
+    if (id === 'spend') return h(SpendStep, { info: p.info, onDone: p.onDone });
+    if (id === 'startup') return h(StartupStep, { info: p.info, onDone: p.onDone });
+    if (id === 'remote') return h(RemoteStep, { info: p.info });
+    if (id === 'tour') return h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'chevron-right', onClick: function () { p.onTour(); } }, 'Start the tour'));
+    return null;
+  }
+  var STATUS_WORD = { done: 'Done', skipped: 'Skipped', open: 'Not yet' };
+  function OrientationDialog(p) {
+    var ls = useState(null), v = ls[0], setV = ls[1];
+    var ix = useState(null), at = ix[0], setAt = ix[1];
+    var er = useState(''), err = er[0], setErr = er[1];
+    var inf = useState(p.info || null), info = inf[0], setInfo = inf[1];
+    useEffect(function () {
+      client.get('orientation').then(function (j) { setV(j); setAt(j.next || j.steps[0].id); }, function (x) { setErr(x.message); });
+      if (!p.info) O.getInfo().then(setInfo, function () { /* the steps that read it say so */ });
+    }, []);
+    function send(body) { return client.orientationStep(body).then(function (j) { setV(j); return j; }, function (x) { setErr(x.message); }); }
+    function close() { orientationMark(); send({ seen: true }); p.onClose(); }
+    var steps = v ? v.steps : [], ixAt = steps.findIndex(function (s) { return s.id === at; }), step = steps[ixAt];
+    function mark(status) {
+      send({ step: step.id, status: status }).then(function () { if (ixAt < steps.length - 1) setAt(steps[ixAt + 1].id); });
+    }
+    var actions = [h(A.Button, { key: 'c', variant: 'quiet', onClick: close }, 'Close')];
+    if (step) {
+      if (ixAt > 0) actions.unshift(h(A.Button, { key: 'b', variant: 'quiet', onClick: function () { setAt(steps[ixAt - 1].id); } }, 'Back'));
+      actions.unshift(h(A.Button, { key: 's', variant: 'quiet', onClick: function () { mark('skipped'); } }, 'Skip this step'));
+      actions.push(h(A.Button, { key: 'd', variant: 'primary', icon: 'approve', onClick: function () { mark('done'); } }, step.status === 'done' ? 'Next step' : 'Mark done'));
+    }
+    return h(A.Dialog, { open: true, title: 'Orientation', onClose: close, actions: actions },
+      h('div', { className: 'form orient' },
+        h(Busy, { on: !v && !err }),
+        err ? h('p', { className: 'note reception-err', role: 'alert' }, err) : null,
+        v ? h('ol', { className: 'orient-steps', 'aria-label': 'Steps' }, steps.map(function (s, n) {
+          return h('li', { key: s.id }, h('button', { type: 'button', className: 'orient-step is-' + s.status + (s.id === at ? ' is-at' : ''), 'aria-current': s.id === at ? 'step' : undefined, onClick: function () { setAt(s.id); } },
+            h('span', { className: 'mono' }, String(n + 1)), h('span', null, s.title), h('span', { className: 'orient-state' }, STATUS_WORD[s.status])));
+        })) : null,
+        step ? h('div', { className: 'orient-body' },
+          h('h3', { className: 'reception-h' }, step.title),
+          h('p', null, step.text),
+          h(StepBody, { key: step.id, step: step, info: info, onDone: function () { send({ step: step.id, status: 'done' }); }, onSecurity: function () { close(); p.onSecurity(); }, onTour: function () { close(); p.onTour(); } })) : null,
+        v && v.finished ? h('p', { className: 'note' }, v.skipped.length ? 'You skipped ' + F.plural(v.skipped.length, 'step', 'steps') + '. Open Orientation from the Reception to finish them.' : 'Orientation is finished.') : null));
+  }
+
+  O.Reception = { Recap: RecapDialog, Reception: ReceptionDialog, Orientation: OrientationDialog, orientationDue: orientationDue, TourCard: TourCard, tourSeen: tourSeen, setTourSeen: setTourSeen };
 })();

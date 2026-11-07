@@ -14,13 +14,13 @@
       FloorsDialog = O.FloorsDialog, FlowDialog = O.Merge.Flow, HooksDialog = O.HooksDialog, HqDialog = O.Hq.Hq,
       KindsDialog = O.KindsDialog, LOOK_ICON = O.LOOK_ICON, LookBar = O.LookBar, MODELS = O.MODELS, MODES = O.MODES,
       ManagerDialog = O.Hq.Manager, NeedsDialog = O.Needs.Dialog, NoteScreen = O.Screens.Note, NotesEditor = O.NotesEditor,
-      OpenDialog = O.OpenDialog, PHONE_MAX = O.Needs.PHONE_MAX, PastDialog = O.PastDialog, PersonasDialog = O.Characters.Dialog,
+      OpenDialog = O.OpenDialog, OrientationDialog = O.Reception.Orientation, PHONE_MAX = O.Needs.PHONE_MAX, PastDialog = O.PastDialog, PersonasDialog = O.Characters.Dialog,
       PhoneView = O.Needs.Phone, RecapDialog = O.Reception.Recap, ReceptionDialog = O.Reception.Reception, RoomDialog = O.RoomDialog,
       SchedulesDialog = O.Schedules.Dialog, SessionsDialog = O.SessionsDialog, StatsPanel = O.StatsPanel,
       TourCard = O.Reception.TourCard, TrustDialog = O.Hq.Trust, WANT_MS = O.WANT_MS, client = O.client, clip = O.clip, cssMs = O.cssMs,
       getInfo = O.getInfo, kindOf = O.kindOf, layerMemory = O.layerMemory, noteLayer = O.noteLayer,
       openPalette = O.Needs.openPalette, plural = O.plural, reduced = O.reduced, resetText = O.resetText,
-      sceneCovers = O.sceneCovers, sceneName = O.sceneName, setTourSeen = O.Reception.setTourSeen, tourSeen = O.Reception.tourSeen,
+      sceneCovers = O.sceneCovers, orientationDue = O.Reception.orientationDue, sceneName = O.sceneName, setTourSeen = O.Reception.setTourSeen, tourSeen = O.Reception.tourSeen,
       useChatBot = O.useChatBot, useSnapshot = O.useSnapshot;
 
   // ---------- the city: every repository as a building ----------
@@ -731,6 +731,11 @@
         toast({ tone: 'error', title: 'Start agent', text: x.message });
       });
     }
+    // Orientation (#196): opens once for a new user (the server's seen flag and this browser's key), before the tour. null until read.
+    var oz = useState(null), orient = oz[0], setOrient = oz[1];
+    useEffect(function () {
+      client.get('orientation').then(function (j) { var due = orientationDue(j); setOrient(!due); if (due) setDlg({ name: 'orientation' }); }, function () { setOrient(true); });
+    }, []);
     // The lobby tour: once per browser, on the Lobby of the first building shown; Replay from the Reception or Ctrl+K.
     var tr = useState(false), touring = tr[0], setTouring = tr[1];
     function startTour() {
@@ -749,11 +754,11 @@
     }
     var readyFor = mount ? mount.id : null;
     useEffect(function () {
-      if (!readyFor || ambient || touring || !window.OfficeLobby || !window.OfficeLobby.pure.tourDue(tourSeen(), cur2.view === 'office')) return undefined;
+      if (!readyFor || orient !== true || ambient || touring || !window.OfficeLobby || !window.OfficeLobby.pure.tourDue(tourSeen(), cur2.view === 'office')) return undefined;
       // after the intro flight, once the scene and its lobby are ready (at most 10 s)
       var n = 0, t = setInterval(function () { if (lobbyRef.current && lobbyRef.current.idle()) { clearInterval(t); startTour(); } else if (++n > 40) clearInterval(t); }, reduced() ? 50 : 250);
       return function () { clearInterval(t); };
-    }, [readyFor]);
+    }, [readyFor, orient]);
 
     // A request toast goes once its request is answered.
     var needIds = needs.map(function (r) { return r.uid; }).join('|');
@@ -807,7 +812,7 @@
      ['city', 'City view', 'building', function () { go('city'); }], ['office', 'Office view', 'floor', function () { go('office'); }], ['floors', 'Branches and worktrees', 'floor', function () { setDlg({ name: 'floors' }); }],
      ['past', 'Past sessions', 'session', function () { show('past'); }], ['schedules', 'Schedules', 'schedule', function () { show('schedules'); }],
      ['hooks', 'Attach sessions', 'terminal', function () { show('hooks'); }], ['kinds', 'Agent kinds', 'bot', function () { setDlg({ name: 'kinds' }); }], ['personas', 'Agent characters', 'bot', function () { setDlg({ name: 'personas' }); }], ['recap', 'Weekly recap and while you were away', 'schedule', function () { setDlg({ name: 'recap' }); }], ['compact', 'Compact view', 'zoom-out', function () { setAmbient(true); }],
-     ['reception', 'Reception: floors and the kind of building', 'building', function () { setDlg({ name: 'reception' }); }], ['tour', 'Replay the lobby tour', 'chevron-right', function () { startTour(); }]]
+     ['reception', 'Reception: floors and the kind of building', 'building', function () { setDlg({ name: 'reception' }); }], ['orientation', 'Orientation: set up the office', 'approve', function () { setDlg({ name: 'orientation' }); }], ['tour', 'Replay the lobby tour', 'chevron-right', function () { startTour(); }]]
       .forEach(function (a) { actions.push({ id: 'page-' + a[0], label: a[1], icon: a[2], group: 'Office', run: a[3] }); });
     var selKind = selSess ? kindOf(window.officeAdapter.kinds(), selSess.provider) : null;
     if (selSess && (!selKind || selKind.control)) actions.push({ id: 'page-ext', label: 'Extensions of ' + selSess.name, icon: 'connector', group: 'Office', run: function () { extensions(selSess.uid, selSess.name); } });
@@ -822,7 +827,7 @@
     if (snap && snap.hq) actions.push({ id: 'page-hq', label: 'Paperclip HQ', icon: 'hq', group: 'Office', keywords: 'paperclip company agents budget heartbeats routines supervise', run: function () { setDlg({ name: 'hq' }); } });
     list.forEach(function (b) { if (b.key !== shown) actions.push({ id: 'page-b-' + b.key, label: 'Go to ' + b.name, icon: 'building', group: 'Buildings', keywords: 'building repository ' + b.name, run: function () { pick(b.key); } }); });
     // The Reception lists the office's own actions (the dock had them before #92), so a touch screen reaches them with no keyboard.
-    var officeActions = actions.filter(function (a) { return ['page-open', 'page-needs', 'page-flow', 'page-sessions', 'page-past', 'page-schedules', 'page-hooks', 'page-kinds', 'page-floors', 'page-city', 'page-compact'].indexOf(a.id) >= 0; })
+    var officeActions = actions.filter(function (a) { return ['page-orientation', 'page-open', 'page-needs', 'page-flow', 'page-sessions', 'page-past', 'page-schedules', 'page-hooks', 'page-kinds', 'page-floors', 'page-city', 'page-compact'].indexOf(a.id) >= 0; })
       .concat([{ id: 'page-search', label: 'Search actions', icon: 'search', run: openPalette }]);
 
     // Room tools and sessions are built when the palette draws, so the rooms of the floor on screen are current.
@@ -882,6 +887,7 @@
         onOpenAgent: function (uid) { var x = window.officeAdapter.sessionByUid(uid); if (x) { setPhoneList(false); goTo(x); } } }) : null,
       win.w <= PHONE_MAX && !phoneList ? h('div', { className: 'phone-back' }, h(A.Button, { variant: 'emphasis', icon: 'chevron-right', onClick: function () { blurScene(); setBoard(null); setPhoneList(true); } }, 'Back to the list')) : null,
       !ambient && touring && cur2.view === 'office' ? h(TourCard, { onStep: tourStep, onDone: endTour }) : null,
+      d === 'orientation' ? h(OrientationDialog, { info: info.port ? info : null, onSecurity: function () { var sec = securityRef.current; if (!sec || !sec.open('files')) toast({ tone: 'info', title: 'Permissions', text: 'This building shows no Security room yet.' }); }, onTour: startTour, onClose: function () { setOrient(true); close(); } }) : null,
       d === 'reception' ? h(ReceptionDialog, { repo: shown, actions: officeActions, onTour: startTour, onClose: close }) : null,
       d === 'open' ? h(OpenDialog, { shownPath: shownPath, kind: dlg.kind, role: dlg.role, roleName: dlg.roleName, folder: dlg.folder, spendLimit: info.spendLimit, recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
       d === 'personas' ? h(PersonasDialog, { toast: toast, folder: shownPath || (info.recent || [])[0] || '', onClose: close }) : null,

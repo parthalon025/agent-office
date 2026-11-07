@@ -119,7 +119,7 @@ export async function run({ shots = true } = {}) {
       if (first) {   // the launch link sets the cookie; the lobby tour is for a new user, so a returning one has seen it
         await p.goto(link.url);
         await p.waitFor('!!document.querySelector(".ao-office")', 40000, 'the page');
-        await p.evaluate(`try{localStorage.setItem('ao-tour','1')}catch(e){}`);
+        await p.evaluate(`try{localStorage.setItem('ao-tour','1');localStorage.setItem('ao-orientation','1')}catch(e){}`);
         first = false;
       }
       await p.goto(base + '/');
