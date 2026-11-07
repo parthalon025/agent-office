@@ -8,7 +8,7 @@
    The screens take the host's two steps. The first click looks at a screen; in focus, every click is the second step, and
    the host gives the point of the click on the screen (hit.uv). A click on a cell cycles Ask, Allow, Deny (Secrets: Ask,
    Deny). A looser rule (to Allow, or an agent toggle to On) turns the cell amber and paints "Confirm: <change>" with Confirm
-   and Cancel hotspots: no dialog. Ask and Deny apply at once. Below 700 px of width that the screen in focus can take (the free width, or the free height times its aspect) it shows one agent kind
+   and Cancel hotspots: no dialog. Ask and Deny apply at once. Below 820 px of width that the screen in focus can take, or when its full layout has text under 18 px (#219), (the free width, or the free height times its aspect) it shows one agent kind
    at a time, with Previous and Next. No keyboard or screen reader path (ADR 0003); the Spend value takes digits while it is
    being typed, after a click on it. Minus stops at $1, and No limit (a typed 0 or an empty value) is the loosest spend
    setting: it waits for the same painted Confirm.
@@ -24,7 +24,7 @@
      hotAt(p, uv, w, h)  -> the hotspot under a screen point (uv: { x, y } from the bottom left, as the host gives it), or null
      step(view, hot, data) -> { view, send? }: a click on a hotspot. send: { cmd, body } for the server
      key(view, e, data)  -> { view, send?, taken } for a key while the Spend value is being typed
-     PAGED_BELOW         -> 700: below this width (px) that the screen in focus can take, it shows one agent kind
+     PAGED_BELOW         -> 820: below this width (px) that the screen in focus can take, it shows one agent kind
      pagedFor(free, aspect) -> that check: the free width, or the free height times the screen aspect (review M6)
    view: { screen, w, h, focused, paged, page, scope, pending, edit, hover, busy, note, face, section, hqPage }
    data: { sec (snap.security), building (key), buildingName, hq (snap.hq) }
@@ -34,7 +34,12 @@
 (function (root) {
   'use strict';
   var V = root.OfficeVocab;
-  var PAGED_BELOW = 700;
+  // The smallest text a focused screen paints, in canvas px (#219). The plane shows at 0.62 of its canvas width or more at 1360 px
+  // (PAGED_BELOW and LOOK_FILL), so 18 px is 11 px on screen. A full layout with any text under it is not shown: the screen
+  // takes the one-kind view, whose text is 30 px and up.
+  var MIN_TEXT = 18;
+  var PAGED_BELOW = 820;
+  var LOOK_FILL = 0.96;
   var CANVAS_W = 1280;
 
   // ---------- pure ----------
@@ -262,15 +267,15 @@
   // y0: the top of the grid; sub/subS: the subtitle baseline and size; rowH: a row of a screen with 3 rows (2 rows or fewer
   // take 120); cy/ch: chip top in the row and chip height; ng: the note under the chip; bk: the Use default line under it;
   // hint/hintY: the hint size and its baseline from the bottom; gap: hint baseline to the last reason baseline.
+  // #219: no text under MIN_TEXT (18 px). A caption under a cell ("Partly enforced", "Use default") wraps to two lines of 18 px
+  // in a column of 109 px (n2: the line step), and a row keeps room for both captions: rowH = cy + ch + ng + n2 + bk + bk + 4.
+  // So a screen with many reasons or three rows does not fit any level and takes the one-kind view (plan).
   var LEVELS = [
-    { fs: 21, lh: 29, y0: 168, sub: 132, subS: 24, rowH: 104, cy: 16, ch: 52, ng: 26, bk: 22, hint: 24, hintY: 34, gap: 36 },
-    { fs: 18, lh: 23, y0: 128, sub: 110, subS: 22, rowH: 96, cy: 8, ch: 44, ng: 20, bk: 19, hint: 22, hintY: 30, gap: 30 },
-    { fs: 18, lh: 23, y0: 128, sub: 110, subS: 22, rowH: 86, cy: 6, ch: 42, ng: 19, bk: 18, hint: 22, hintY: 30, gap: 24 },
-    { fs: 16, lh: 20, y0: 128, sub: 110, subS: 22, rowH: 86, cy: 6, ch: 42, ng: 19, bk: 18, hint: 20, hintY: 28, gap: 22 },
-    // ten agent kinds (#217): the reasons take more lines again, so the rows are shorter and the gaps tighter; the type stays at 16 px
-    { fs: 16, lh: 20, y0: 124, sub: 106, subS: 22, rowH: 78, cy: 4, ch: 40, ng: 17, bk: 16, hint: 20, hintY: 26, gap: 18 }
+    { fs: 21, lh: 29, y0: 168, sub: 132, subS: 24, rowH: 162, cy: 16, ch: 52, ng: 26, n2: 20, bk: 22, hint: 24, hintY: 34, gap: 36 },
+    { fs: 18, lh: 23, y0: 128, sub: 110, subS: 22, rowH: 136, cy: 8, ch: 44, ng: 20, n2: 20, bk: 20, hint: 22, hintY: 30, gap: 30 },
+    { fs: 18, lh: 21, y0: 124, sub: 106, subS: 22, rowH: 123, cy: 4, ch: 40, ng: 18, n2: 19, bk: 19, hint: 20, hintY: 28, gap: 20 }
   ];
-  function rowHOf(L, rows) { return rows > 2 ? L.rowH : 120; }
+  function rowHOf(L, rows) { return rows > 2 ? L.rowH : Math.max(120, L.rowH); }
 
   // The subtitle under the header of a full screen.
   function subtitle(p, view, data, L) {
@@ -288,8 +293,8 @@
   function heads(p, cols, gx, colW, s, yOne, yTwo) {
     var max = colW - 8;
     var two = cols.some(function (c) { return c.label.length * charW(s, 600) > max; }), size = two ? s - 2 : s;
-    // ten kinds (#22, #23, #216, #217): the longest word of a head must fit too, so the type goes down to 16 px, never cut
-    if (two) cols.forEach(function (c) { c.label.split(' ').forEach(function (w) { while (size > 16 && w.length * Math.max(charW(size, 600), size * 0.62) > max) size--; }); });
+    // ten kinds (#22, #23, #216, #217): the longest word of a head must fit too, so the type goes down to MIN_TEXT, never cut
+    if (two) cols.forEach(function (c) { c.label.split(' ').forEach(function (w) { while (size > MIN_TEXT && w.length * Math.max(charW(size, 600), size * 0.62) > max) size--; }); });
     cols.forEach(function (c, i) {
       var words = c.label.split(' '), lines = two ? (words.length === 2 ? words : wrap(c.label, size, max, 600).slice(0, 2)) : [c.label]; // ten kinds (#217): a two-word head takes one word a line, so "ACP tools" never rests on the estimate
       lines.forEach(function (l, k) {
@@ -313,19 +318,25 @@
       ls2.forEach(function (l, k) { text(p, x0, y + rowH / 2 + lsz * 0.36 - (ls2.length - 1) * llh / 2 + k * llh, lsz, 'ink', l, { maxW: labelW - 12 }); });
       cols.forEach(function (c, i) {
         var cx = gx + i * colW, cw = colW - 16, ch = L.ch, cy = y + L.cy;
-        if (!S().applies(row, c.id)) { text(p, cx + colW / 2, cy + ch / 2 + 9, fit(S().na(row, c.id), 22, colW - 8, 400), 'muted', S().na(row, c.id), { align: 'center', maxW: colW - 8 }); return; }
+        if (!S().applies(row, c.id)) {
+          // a word that does not fit the column at 22 px wraps to lines of 18 px, never smaller ("Reports cost", "No files")
+          var na = S().na(row, c.id), ns = na.length * 22 * 0.62 <= colW - 8 ? 22 : MIN_TEXT, nl = ns === 22 ? [na] : wrap(na, ns, colW - 8, 400);
+          nl.forEach(function (l, k) { text(p, cx + colW / 2, cy + ch / 2 + 9 - (nl.length - 1) * 10 + k * 20, ns, 'muted', l, { align: 'center', maxW: colW - 8 }); });
+          return;
+        }
         var id = 'cell:' + row + '|' + c.id, pend = view.pending && view.pending.row === row && view.pending.col === c.id;
         chip(p, cx + 8, cy, cw, ch, shown(data, view.scope, row, c.id), 24, isHover(view, id), pend);
         if (overridden(data, row, c.id) && !pend) p.items.push({ t: 'mark', x: cx + 8 + cw - 4, y: cy + 4, s: 18, c: 'accent' });
         hot(p, { kind: 'cell', id: id, row: row, col: c.id, x: cx + 4, y: cy - 4, w: cw + 8, h: ch + 8 });
-        var nt = noteOf(data, view.scope, row, c.id);
-        if (nt) text(p, cx + colW / 2, cy + ch + L.ng, fit(nt.word, 18, colW - 8, 400), 'muted', nt.word, { align: 'center', maxW: colW - 8 });
+        var nt = noteOf(data, view.scope, row, c.id), ntl = nt ? wrap(nt.word, MIN_TEXT, colW - 8, 400) : [];
+        ntl.forEach(function (l, k) { text(p, cx + colW / 2, cy + ch + L.ng + k * L.n2, MIN_TEXT, 'muted', l, { align: 'center', maxW: colW - 8 }); });
         // Back to the office rule (a building override), or to the default (an office-wide rule the user set).
         var back = view.scope === 'building' ? overridden(data, row, c.id) && 'Use office rule' : officeSet(data, row, c.id) && 'Use default';
         if (back && !pend && view.focused) {
           var cid = 'clear:' + row + '|' + c.id;
-          text(p, cx + colW / 2, cy + ch + L.ng + (nt ? L.bk : 0), fit(back, 18, colW - 8, 400), isHover(view, cid) ? 'ink' : 'muted', back, { align: 'center', maxW: colW - 8 });
-          hot(p, { kind: 'clear', id: cid, row: row, col: c.id, x: cx + 4, y: cy + ch + 8, w: cw + 8, h: 26 });
+          var bl = wrap(back, MIN_TEXT, colW - 8, 400), b0 = cy + ch + L.ng + (nt ? (ntl.length - 1) * L.n2 + L.bk : 0);
+          bl.forEach(function (l, k) { text(p, cx + colW / 2, b0 + k * L.bk, MIN_TEXT, isHover(view, cid) ? 'ink' : 'muted', l, { align: 'center', maxW: colW - 8 }); });
+          hot(p, { kind: 'clear', id: cid, row: row, col: c.id, x: cx + 4, y: b0 - MIN_TEXT, w: cw + 8, h: MIN_TEXT + 8 + (bl.length - 1) * L.bk });
         }
       });
       y += rowH;
@@ -376,8 +387,8 @@
       var L = LEVELS[i], ls = wrapAll(rs, L.fs, W - 96, 400), hl = wrap(hintOf(view), L.hint, W - 96, 400);
       var hintTop = H - L.hintY - (hl.length - 1) * (L.hint + 4), last = hintTop - L.gap, first = last - Math.max(0, ls.length - 1) * L.lh;
       var end = L.y0 + 52 + rows * rowHOf(L, rows);
-      out = { L: L, lines: ls, hint: hl, first: first, hintTop: hintTop, end: end };
-      if (!ls.length || first - L.fs * 0.8 >= end + 16) break;
+      out = { L: L, lines: ls, hint: hl, first: first, hintTop: hintTop, end: end, fits: !ls.length || first - L.fs * 0.8 >= end + 16 };
+      if (out.fits) break;
     }
     return out;
   }
@@ -471,9 +482,9 @@
       heads(p, cols, gx, colW, 22, gy + 30, gy + 30);
       // One size for the row, up to 28 px, so that the longest word fits its column by the plan's estimate (ten kinds: 110 px).
       // Ten kinds (#217): a word of two parts that does not fit one line at 16 px ("Not reported") takes two lines.
-      var maxW = colW - 8, split = cols.map(function (c) { var w = costWord(c); return w.indexOf(' ') > 0 && w.length * 0.62 * 16 > maxW ? w.split(' ') : [w]; });
+      var maxW = colW - 8, split = cols.map(function (c) { var w = costWord(c); return w.indexOf(' ') > 0 && w.length * 0.62 * MIN_TEXT > maxW ? [w.slice(0, w.indexOf(' ')), w.slice(w.indexOf(' ') + 1)] : [w]; });
       var longest = Math.max.apply(null, split.map(function (ls) { return Math.max.apply(null, ls.map(function (l) { return l.length; })); }));
-      var cs = Math.max(16, Math.min(28, Math.floor(maxW / (longest * 0.62))));
+      var cs = Math.max(MIN_TEXT, Math.min(28, Math.floor(maxW / (longest * 0.62))));
       cols.forEach(function (c, i) {
         var ls = split[i];
         if (ls.length === 1) { text(p, gx + i * colW + colW / 2, gy + 68, cs, 'ink', ls[0], { wt: 600, align: 'center', maxW: maxW, mono: c.id === 'claude-code' }); return; }
@@ -492,25 +503,35 @@
 
   function plan(view, data) {
     var p = P(), W = view.w, H = view.h;
-    fill(p, 0, 0, W, H, 'face');
-    stroke(p, 5, 5, W - 10, H - 10, 'accent', 10);
-    if (view.face === 'back') {   // the plate on the outside of the glass: the title, and the first step
+    if (view.face === 'back') {
+      fill(p, 0, 0, W, H, 'face');
+      stroke(p, 5, 5, W - 10, H - 10, 'accent', 10);   // the plate on the outside of the glass: the title, and the first step
       text(p, 48, 120, 72, 'ink', screenOf(view.screen).title, { wt: 600 });
       text(p, 48, 200, 34, 'muted', 'Security room screen. Click to look at it.', { maxW: W - 96 });
       return p;
     }
-    var big = !!view.paged && view.focused;
-    var v = big === view.paged ? view : Object.assign({}, view, { paged: big });
+    var big = !!view.paged && view.focused, q = build(view, data, big);
+    // #219: a focused full layout with text under MIN_TEXT is not shown: the one-kind view, with its bigger type, takes its place.
+    if (!big && view.focused && (q.overflow || smallest(q) < MIN_TEXT)) q = build(view, data, true);
+    return q;
+  }
+  function build(view, data, big) {
+    var p = P(), W = view.w, H = view.h, v = big === view.paged ? view : Object.assign({}, view, { paged: big });
+    fill(p, 0, 0, W, H, 'face');
+    stroke(p, 5, 5, W - 10, H - 10, 'accent', 10);
     header(p, v, data, big);
     if (view.screen === 'spend') { spend(p, v, data); return p; }
     if (sectionOf(v) === 'hq') { hqScreen(p, v, data, big); return p; }
     if (big) { pagedRows(p, v, data); return p; }
     var lay = levelFor(v, data);
+    if (!lay.fits) p.overflow = true;   // no level keeps the grid, the reasons and the hint apart
     subtitle(p, v, data, lay.L);
     grid(p, v, data, lay.L);
     footer(p, v, lay);
     return p;
   }
+  // The smallest text of a plan, in canvas px.
+  function smallest(p) { return p.items.reduce(function (m, i) { return i.t === 'text' ? Math.min(m, i.s) : m; }, Infinity); }
 
   // The hotspot under a screen point. uv: { x, y }, x from the left edge and y from the bottom edge (0 to 1).
   function hotAt(p, uv, w, h) {
@@ -631,7 +652,7 @@
     return Math.min(free.right - free.left, (free.bottom - free.top) * (aspect || 1)) < PAGED_BELOW;
   }
 
-  var pure = { plan: plan, hotAt: hotAt, step: step, key: key, pagedFor: pagedFor, wrap: wrap, charW: charW, noteOf: noteOf, levelFor: levelFor, PAGED_BELOW: PAGED_BELOW, CANVAS_W: CANVAS_W, TONES: TONES, toneColors: toneColors };
+  var pure = { plan: plan, hotAt: hotAt, step: step, key: key, pagedFor: pagedFor, wrap: wrap, charW: charW, noteOf: noteOf, levelFor: levelFor, PAGED_BELOW: PAGED_BELOW, MIN_TEXT: MIN_TEXT, LOOK_FILL: LOOK_FILL, smallest: smallest, planFull: function (v, d) { return build(v, d, false); }, CANVAS_W: CANVAS_W, TONES: TONES, toneColors: toneColors };
 
   // ---------- browser ----------
   // opts: { host, data() -> data, post(cmd, body) -> Promise, onError(text) }
@@ -771,7 +792,7 @@
         if (id !== v.hover) { v.hover = id; refresh(); }
       },
       // the plane to face is always the front: a click on the outside plate of a right-wall screen flies into the room
-      look: function (it) { return { key: keyOf(it), mesh: it.front, verb: '', kind: 'security', clear: 1.2 }; },
+      look: function (it) { return { key: keyOf(it), mesh: it.front, verb: '', kind: 'security', clear: 1.2, fill: LOOK_FILL }; },
       open: function (it, hit) {
         if (!it || !hit || hit.object !== it.front) return;
         refresh();   // the plan of the view the user sees now (paged or not)

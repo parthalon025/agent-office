@@ -18,6 +18,8 @@ const NOT_SET_UP = { reason: 'The office has no provider for this agent kind yet
 const enforce = { 'claude-code': { reason: '', rows: {} }, hermes: NOT_SET_UP, dsh: NOT_SET_UP, openclaw: NOT_SET_UP, copilot: NOT_SET_UP, acp: NOT_SET_UP, local: { reason: '', rows: {} }, 'agent-framework': { reason: '', rows: {} } };
 const B = 'c:/work/repo';
 const data = (rules = { office: {}, buildings: {} }, spend = { limit: 2, month: '2026-11', byColumn: { 'claude-code': 1.5 } }) => ({ sec: { rules, enforce, spend }, building: B, buildingName: 'repo' });
+// the layout the grid tests read: the full grid, as it is painted when the text fits (plan itself takes the one-kind view when it does not, #219)
+const plan = (v, d) => ((v.paged && v.focused) || v.face === 'back' ? P.plan(v, d) : P.planFull(v, d));
 const view = (o = {}) => ({ screen: 'files', w: 1280, h: 686, focused: true, paged: false, page: 0, scope: 'office', pending: null, edit: null, hover: null, busy: false, note: null, ...o });
 const cell = (p, row, col) => p.hots.find((h) => h.kind === 'cell' && h.row === row && h.col === col);
 const hotOf = (p, kind) => p.hots.find((h) => h.kind === kind);
@@ -27,7 +29,7 @@ const texts = (p) => p.items.filter((i) => i.t === 'text').map((i) => i.text);
 const said = (p) => texts(p).join(' ').replace(/\s+/g, ' ');
 
 test('full screen: one cell per row and agent kind, found again from the point the host gives', () => {
-  const v = view(), p = P.plan(v, data());
+  const v = view(), p = plan(v, data());
   assert.equal(p.hots.filter((h) => h.kind === 'cell').length, 27, '3 rows x 10 agent kinds, none for the Cloud agent');
   for (const [row, col] of [['read-inside', 'claude-code'], ['files-outside', 'local'], ['edit-inside', 'openclaw']]) {
     assert.equal(P.hotAt(p, uvOf(cell(p, row, col), v), v.w, v.h), cell(p, row, col), `${row} ${col}`);
@@ -36,16 +38,16 @@ test('full screen: one cell per row and agent kind, found again from the point t
   const t = texts(p);
   assert.ok(t.includes('Files') && said(p).includes('Read inside the worktree') && said(p).includes('Read or edit outside it'), 'the row labels wrap in the label column (ten kinds, #217)');
   assert.ok(t.includes('Allow') && t.includes('Ask'), 'every cell says its value in words');
-  assert.ok(t.includes('Not enforced'), 'a cell the office cannot enforce says so');
+  assert.ok(t.includes('Not') && t.includes('enforced'), 'a cell the office cannot enforce says so (two lines of 18 px, #219)');
   assert.ok(said(p).includes('Not enforced for Hermes, dsh, OpenClaw, Copilot, ACP tools. The office has no provider for this agent kind yet. The rule applies when it has one.'), 'and why, once for the kinds it is true for');
 });
 
 test('a click on Ask paints the Confirm; a second click moves on to Deny; Confirm sends the looser rule', () => {
-  const d = data(), v = view(), p = P.plan(v, d), c = cell(p, 'files-outside', 'claude-code');
+  const d = data(), v = view(), p = plan(v, d), c = cell(p, 'files-outside', 'claude-code');
   const r1 = P.step(v, c, d);
   assert.equal(r1.send, undefined, 'a looser change waits');
   assert.deepEqual(r1.view.pending, { row: 'files-outside', col: 'claude-code', to: 'allow', office: null });
-  const p1 = P.plan(r1.view, d);
+  const p1 = plan(r1.view, d);
   assert.ok(texts(p1).includes('Confirm: Allow') && texts(p1).includes('Read or edit outside it, Claude Code'), 'the change, then what it is for');
   assert.ok(texts(p1).includes('Confirm?'), 'the cell itself turns to the Confirm');
   assert.ok(p1.items.some((i) => i.t === 'fill' && i.c === 'pending'), 'amber');
@@ -60,9 +62,9 @@ test('a click on Ask paints the Confirm; a second click moves on to Deny; Confir
 
 test('a tightening change goes to the server at once; the Secrets cells cycle Ask and Deny', () => {
   const d = data({ office: { 'secrets|local': 'deny' }, buildings: {} });
-  const fv = view(), fp = P.plan(fv, d);
+  const fv = view(), fp = plan(fv, d);
   assert.deepEqual(P.step(fv, cell(fp, 'read-inside', 'local'), d).send.body.value, 'deny', 'Allow to Deny');
-  const sv = view({ screen: 'secrets', h: 738 }), sp = P.plan(sv, d);
+  const sv = view({ screen: 'secrets', h: 738 }), sp = plan(sv, d);
   assert.equal(P.step(sv, cell(sp, 'secrets', 'claude-code'), d).send.body.value, 'deny');
   assert.equal(P.step(sv, cell(sp, 'secrets', 'local'), d).send.body.value, 'ask');
   assert.ok(texts(sp).includes('Click a cell to change it: Ask or Deny.'));
@@ -70,7 +72,7 @@ test('a tightening change goes to the server at once; the Secrets cells cycle As
 
 test('This building: a click changes the building rule; Use office rule clears it, with the Confirm when that is looser', () => {
   const d = data({ office: { 'shell|claude-code': 'allow' }, buildings: { [B]: { 'shell|claude-code': 'deny' } } });
-  const v = view({ screen: 'commands', scope: 'building' }), p = P.plan(v, d);
+  const v = view({ screen: 'commands', scope: 'building' }), p = plan(v, d);
   assert.ok(p.items.some((i) => i.t === 'mark'), 'a corner mark on the building rule');
   const c = cell(p, 'shell', 'claude-code');
   assert.deepEqual(P.step(v, c, d).send.body, { scope: 'building', building: B, row: 'shell', col: 'claude-code', value: 'ask' });
@@ -78,38 +80,38 @@ test('This building: a click changes the building rule; Use office rule clears i
   const r = P.step(v, clear, d);
   assert.equal(r.send, undefined, 'back to the office Allow is looser');
   assert.deepEqual(r.view.pending, { row: 'shell', col: 'claude-code', to: null, office: 'allow' });
-  assert.match(said(P.plan(r.view, d)), /Confirm: Allow every command for Claude Code, high risk too \(rm -rf, git push --force\)\?/, 'back to an office Allow on Shell commands says what Allow means');
-  const ok = P.step(r.view, hotOf(P.plan(r.view, d), 'confirm'), d);
+  assert.match(said(plan(r.view, d)), /Confirm: Allow every command for Claude Code, high risk too \(rm -rf, git push --force\)\?/, 'back to an office Allow on Shell commands says what Allow means');
+  const ok = P.step(r.view, hotOf(plan(r.view, d), 'confirm'), d);
   assert.deepEqual(ok.send.body, { scope: 'building', building: B, row: 'shell', col: 'claude-code', value: null, confirmed: true });
   // the scope switch
-  const s = P.step(view({ screen: 'commands' }), P.plan(view({ screen: 'commands' }), d).hots.find((h) => h.kind === 'scope' && h.scope === 'building'), d);
+  const s = P.step(view({ screen: 'commands' }), plan(view({ screen: 'commands' }), d).hots.find((h) => h.kind === 'scope' && h.scope === 'building'), d);
   assert.equal(s.view.scope, 'building');
 });
 
-test('below 700 px of free view a screen in focus shows one agent kind, with Previous and Next', () => {
-  assert.equal(P.PAGED_BELOW, 700);
-  const d = data(), v = view({ paged: true }), p = P.plan(v, d);
+test('below 820 px of free view a screen in focus shows one agent kind, with Previous and Next', () => {
+  assert.equal(P.PAGED_BELOW, 820);
+  const d = data(), v = view({ paged: true }), p = plan(v, d);
   assert.equal(p.hots.filter((h) => h.kind === 'cell').length, 3, 'one column');
   assert.ok(texts(p).includes('Claude Code (1 of 10)'));
   const next = P.step(v, hotOf(p, 'next'), d);
   assert.equal(next.view.page, 1);
-  assert.ok(texts(P.plan(next.view, d)).includes('Hermes (2 of 10)'));
-  assert.ok(texts(P.plan(next.view, d)).includes('Not enforced for this agent'));
+  assert.ok(texts(plan(next.view, d)).includes('Hermes (2 of 10)'));
+  assert.ok(texts(plan(next.view, d)).includes('Not enforced for this agent'));
   assert.equal(P.step(v, hotOf(p, 'prev'), d).view.page, 9, 'Previous from the first goes to the last');
   // a looser change in the paged view: the row turns to the Confirm
   const r = P.step(v, cell(p, 'files-outside', 'claude-code'), d);
-  const pp = P.plan(r.view, d);
+  const pp = plan(r.view, d);
   assert.ok(texts(pp).includes('Confirm: Allow'));
   assert.ok(hotOf(pp, 'confirm'));
   // not in focus: the whole grid (the paged view is for reading in focus)
-  assert.equal(P.plan(view({ paged: true, focused: false }), d).hots.filter((h) => h.kind === 'cell').length, 27, 'the Cloud agent has no file cells (#24); Copilot has them (#22); CLI tools too (#217)');
+  assert.equal(plan(view({ paged: true, focused: false }), d).hots.filter((h) => h.kind === 'cell').length, 27, 'the Cloud agent has no file cells (#24); Copilot has them (#22); CLI tools too (#217)');
 });
 
 test('Agents: turning on an ungated agent needs the Confirm; a gated kind has no cell, it says why', () => {
-  const d = data(), v = view({ screen: 'agents', h: 738 }), p = P.plan(v, d);
+  const d = data(), v = view({ screen: 'agents', h: 738 }), p = plan(v, d);
   assert.deepEqual(p.hots.filter((h) => h.kind === 'cell').map((h) => h.id).sort(),
     ['cell:no-cost|acp', 'cell:no-cost|cli', 'cell:no-cost|cloud', 'cell:no-cost|copilot', 'cell:no-cost|dsh', 'cell:no-cost|hermes', 'cell:no-cost|openclaw', 'cell:ungated|acp', 'cell:ungated|cli', 'cell:ungated|cloud', 'cell:ungated|copilot', 'cell:ungated|hermes'], 'Hermes and Copilot are ungated (M1, #22), and the cloud kinds (#24); OpenClaw is gated through its office plugin (#77)');
-  assert.ok(texts(p).includes('Gated') && texts(p).includes('Reports cost') && texts(p).includes('Free'));
+  assert.ok(texts(p).includes('Gated') && said(p).includes('Reports cost') && texts(p).includes('Free'));
   const r = P.step(v, cell(p, 'ungated', 'copilot'), d);
   assert.deepEqual(r.view.pending, { row: 'ungated', col: 'copilot', to: 'on', office: null });
   assert.equal(P.step(v, cell(p, 'no-cost', 'hermes'), d).send, undefined, 'Ask to Allow on no cost reports is looser too');
@@ -119,14 +121,14 @@ test('Agents: turning on an ungated agent needs the Confirm; a gated kind has no
 });
 
 test('Spend: minus and plus in 1 dollar steps, minus never under $1; a click on the value types it; Enter saves, Esc cancels', () => {
-  const d = data(), v = view({ screen: 'spend', h: 738 }), p = P.plan(v, d);
+  const d = data(), v = view({ screen: 'spend', h: 738 }), p = plan(v, d);
   assert.deepEqual(P.step(v, hotOf(p, 'spend-plus'), d).send, { cmd: 'settingsSpend', body: { limit: 3 } });
   assert.deepEqual(P.step(v, hotOf(p, 'spend-minus'), d).send.body, { limit: 1 });
   const zero = data(undefined, { limit: 0, month: '2026-11', byColumn: {} });
-  assert.equal(P.step(v, hotOf(P.plan(v, zero), 'spend-minus'), zero).send, undefined, 'No limit: minus does nothing');
-  assert.deepEqual(P.step(v, hotOf(P.plan(v, zero), 'spend-plus'), zero).send.body, { limit: 1 }, 'plus sets a limit of $1');
-  assert.ok(texts(P.plan(v, zero)).includes('No limit'));
-  assert.ok(texts(p).includes('$2.00') && texts(p).includes('$1.50') && texts(p).includes('Not set up'), 'the limit and the cost per agent kind');
+  assert.equal(P.step(v, hotOf(plan(v, zero), 'spend-minus'), zero).send, undefined, 'No limit: minus does nothing');
+  assert.deepEqual(P.step(v, hotOf(plan(v, zero), 'spend-plus'), zero).send.body, { limit: 1 }, 'plus sets a limit of $1');
+  assert.ok(texts(plan(v, zero)).includes('No limit'));
+  assert.ok(texts(p).includes('$2.00') && texts(p).includes('$1.50') && said(p).includes('Not set up'), 'the limit and the cost per agent kind');
   assert.ok(texts(p).includes('Cost, November 2026'));
   assert.ok(texts(p).includes('Extensions: local or project scope only. User scope stays out of reach.'));
   assert.deepEqual(p.items.filter((i) => i.t === 'icon').map((i) => i.name), ['remove', 'add'], 'minus and plus are DS icons, not text glyphs');
@@ -136,7 +138,7 @@ test('Spend: minus and plus in 1 dollar steps, minus never under $1; a click on 
   e = P.key(e, { key: '7' }).view;
   e = P.key(e, { key: '.' }).view;
   e = P.key(e, { key: '5' }).view;
-  assert.ok(texts(P.plan(e, d)).includes('$7.5|'), 'the typed value with a caret');
+  assert.ok(texts(plan(e, d)).includes('$7.5|'), 'the typed value with a caret');
   assert.equal(P.key(e, { key: 'x' }).taken, true, 'a letter does nothing while typing');
   assert.deepEqual(P.key(e, { key: 'Enter' }).send, { cmd: 'settingsSpend', body: { limit: 7.5 } });
   assert.equal(P.key(e, { key: 'Escape' }).view.edit, null);
@@ -151,7 +153,7 @@ test('Spend: minus at $1 (or under $1.50) never removes the limit; No limit need
   const v = view({ screen: 'spend', h: 738 });
   for (const limit of [1, 1.4, 0.5]) {
     const d = data(undefined, { limit, month: '2026-11', byColumn: {} });
-    const r = P.step(v, hotOf(P.plan(v, d), 'spend-minus'), d);
+    const r = P.step(v, hotOf(plan(v, d), 'spend-minus'), d);
     assert.ok(!r.send || r.send.body.limit >= 1, `minus at $${limit} sends ${JSON.stringify(r.send)}`);
     if (limit <= 1) { assert.equal(r.send, undefined, `minus at $${limit}`); assert.match(r.view.note, /lowest step is \$1/); }
   }
@@ -162,7 +164,7 @@ test('Spend: minus at $1 (or under $1.50) never removes the limit; No limit need
     assert.equal(r.send, undefined, `typed "${typed}": nothing is sent yet`);
     assert.deepEqual(r.view.pending, { spend: 0 });
     assert.equal(r.view.edit, null);
-    const p = P.plan(r.view, d), t = texts(p);
+    const p = plan(r.view, d), t = texts(p);
     assert.ok(t.includes('Confirm: No limit'), t.join(' / '));
     assert.ok(p.items.some((i) => i.c === 'pending'), 'the value turns amber');
     const ok = P.step(r.view, hotOf(p, 'confirm'), d);
@@ -172,7 +174,7 @@ test('Spend: minus at $1 (or under $1.50) never removes the limit; No limit need
     assert.equal(P.step(r.view, hotOf(p, 'cancel'), d).send, undefined);
   }
   const paged = P.key({ ...v, paged: true, edit: { text: '0' } }, { key: 'Enter' }).view;
-  assert.ok(texts(P.plan(paged, d)).includes('Confirm: No limit'), 'the paged view paints it too');
+  assert.ok(texts(plan(paged, d)).includes('Confirm: No limit'), 'the paged view paints it too');
   const already = data(undefined, { limit: 0, month: '2026-11', byColumn: {} });
   assert.equal(P.key({ ...v, edit: { text: '' } }, { key: 'Enter' }, already).view.pending, null, 'No limit again: nothing to confirm');
 });
@@ -182,12 +184,12 @@ test('an Ask that Claude Code decides by itself says Partly enforced, and why; D
   const enf = { ...enforce, 'claude-code': { ...enforce['claude-code'], asks: { shell: why } } };
   const d = (rules) => ({ sec: { rules, enforce: enf, spend: {} }, building: B, buildingName: 'repo' });
   const v = view({ screen: 'commands' });
-  const t = texts(P.plan(v, d({ office: {}, buildings: {} })));
-  assert.ok(t.includes('Partly enforced'), t.join(' / '));
-  assert.ok(said(P.plan(v, d({ office: {}, buildings: {} }))).includes('Partly enforced for Claude Code. ' + why));
-  const deny = texts(P.plan(v, d({ office: { 'shell|claude-code': 'deny' }, buildings: {} })));
+  const t = texts(plan(v, d({ office: {}, buildings: {} })));
+  assert.ok(t.includes('Partly') && t.includes('enforced'), t.join(' / '));
+  assert.ok(said(plan(v, d({ office: {}, buildings: {} }))).includes('Partly enforced for Claude Code. ' + why));
+  const deny = texts(plan(v, d({ office: { 'shell|claude-code': 'deny' }, buildings: {} })));
   assert.ok(!deny.includes('Partly enforced'), 'a Deny is enforced');
-  const pagedT = texts(P.plan(view({ screen: 'commands', paged: true }), d({ office: {}, buildings: {} })));
+  const pagedT = texts(plan(view({ screen: 'commands', paged: true }), d({ office: {}, buildings: {} })));
   assert.ok(pagedT.includes('Partly enforced for this agent'), pagedT.join(' / '));
 });
 
@@ -197,18 +199,18 @@ test('a row where only some calls reach the office says Partly enforced with its
   const d = (rules) => ({ sec: { rules, enforce: enf, spend: {} }, building: B, buildingName: 'repo' });
   const v = view({ screen: 'files' });
   for (const rules of [{ office: {}, buildings: {} }, { office: { 'files-outside|hermes': 'deny' }, buildings: {} }]) {
-    const t = texts(P.plan(v, d(rules)));
-    assert.ok(t.includes('Partly enforced'), t.join(' / '));
-    assert.ok(said(P.plan(v, d(rules))).includes('Partly enforced for Hermes. ' + why));
+    const t = texts(plan(v, d(rules)));
+    assert.ok(t.includes('Partly') && t.includes('enforced'), t.join(' / '));
+    assert.ok(said(plan(v, d(rules))).includes('Partly enforced for Hermes. ' + why));
   }
-  assert.ok(!texts(P.plan(v, d({ office: {}, buildings: {} }))).some((x) => /^Not enforced for [^.]*Hermes/.test(x)), 'it is not "Not enforced"');
+  assert.ok(!texts(plan(v, d({ office: {}, buildings: {} }))).some((x) => /^Not enforced for [^.]*Hermes/.test(x)), 'it is not "Not enforced"');
 });
 
 test('the outside plate of a right-wall screen shows its title and has no hotspot; a click in flight is ignored', () => {
-  const p = P.plan(view({ screen: 'agents', face: 'back' }), data());
+  const p = plan(view({ screen: 'agents', face: 'back' }), data());
   assert.deepEqual(p.hots, []);
   assert.ok(texts(p).includes('Agents'));
-  const v = view({ busy: true }), c = cell(P.plan(v, data()), 'shell', 'claude-code') || cell(P.plan(view(), data()), 'read-inside', 'local');
+  const v = view({ busy: true }), c = cell(plan(v, data()), 'shell', 'claude-code') || cell(plan(view(), data()), 'read-inside', 'local');
   assert.deepEqual(P.step(v, c, data()), { view: v });
 });
 
@@ -218,22 +220,22 @@ test('B1: a default Ask that Claude Code decides says Partly enforced; a click s
   const why = 'The agent decides until you click the cell: then the office makes it ask.';
   const enf = { ...enforce, 'claude-code': { ...enforce['claude-code'], asks: {}, unset: { 'read-inside': why, 'edit-inside': why } } };
   const d = (office) => ({ sec: { rules: { office, buildings: {} }, enforce: enf, spend: {} }, building: B, buildingName: 'repo' });
-  const v = view(), p = P.plan(v, d({}));
+  const v = view(), p = plan(v, d({}));
   assert.ok(said(p).includes('Partly enforced for Claude Code. ' + why), texts(p).join(' / '));
   const r = P.step(v, cell(p, 'read-inside', 'claude-code'), d({}));
   assert.deepEqual(r.send, { cmd: SET, body: { scope: 'office', row: 'read-inside', col: 'claude-code', value: 'ask' } }, 'the same word, now set by the user');
-  const setD = d({ 'read-inside|claude-code': 'ask' }), sp = P.plan(v, setD);
-  assert.equal(texts(sp).filter((x) => x === 'Partly enforced').length, 1, 'only Edit inside still has its note');
+  const setD = d({ 'read-inside|claude-code': 'ask' }), sp = plan(v, setD);
+  assert.equal(texts(sp).filter((x) => x === 'Partly').length, 1, 'only Edit inside still has its note');
   assert.equal(P.step(v, cell(sp, 'read-inside', 'claude-code'), setD).view.pending.to, 'allow', 'a set Ask cycles on to Allow');
   const use = sp.hots.find((h) => h.kind === 'clear' && h.row === 'read-inside' && h.col === 'claude-code');
-  assert.ok(use && texts(sp).includes('Use default'), 'a set cell offers Use default');
+  assert.ok(use && texts(sp).includes('default'), 'a set cell offers Use default');
   assert.deepEqual(P.step(v, use, setD).send, { cmd: SET, body: { scope: 'office', row: 'read-inside', col: 'claude-code', value: null } });
   // back to a looser default (the local model's Allow) waits for the Confirm
-  const ld = d({ 'read-inside|local': 'ask' }), lp = P.plan(v, ld);
+  const ld = d({ 'read-inside|local': 'ask' }), lp = plan(v, ld);
   const lr = P.step(v, lp.hots.find((h) => h.kind === 'clear' && h.col === 'local'), ld);
   assert.equal(lr.send, undefined);
-  assert.ok(texts(P.plan(lr.view, ld)).includes('Confirm: the default (Allow)'));
-  assert.ok(!P.plan(view({ focused: false }), setD).hots.some((h) => h.kind === 'clear'), 'only in focus');
+  assert.ok(texts(plan(lr.view, ld)).includes('Confirm: the default (Allow)'));
+  assert.ok(!plan(view({ focused: false }), setD).hots.some((h) => h.kind === 'clear'), 'only in focus');
 });
 
 // Review minor: the Spend screen cut "Not reported" off (the cost columns sat right of the 480 px label column, 142 px
@@ -242,28 +244,28 @@ test('Spend: every cost word fits its column, in the full and the paged view', (
   const NONE = { reason: '', rows: {} };
   const enf = { 'claude-code': NONE, hermes: NONE, dsh: NONE, openclaw: { reason: 'The office has no provider for this agent kind yet.', rows: {} }, copilot: NONE, acp: NONE, local: NONE, 'agent-framework': NONE, cloud: NONE, cli: NONE };
   const d = { sec: { rules: { office: {}, buildings: {} }, enforce: enf, spend: { limit: 2, month: '2026-11', byColumn: { 'claude-code': 1234.5 } } }, building: B, buildingName: 'repo' };
-  const words = /^(Not reported|Not|reported|Not set up|Free|\$[\d,.]+)$/;
+  const words = /^(Not reported|Not|reported|set up|Free|\$[\d,.]+)$/;
   for (const v of [view({ screen: 'spend', h: 686 }), view({ screen: 'spend', h: 738 })]) {
-    const items = P.plan(v, d).items.filter((i) => i.t === 'text' && words.test(i.text));
-    assert.deepEqual(items.map((i) => i.text).sort(), ['$2.00', '$1234.50', 'Free', 'Free', 'Not', 'Not', 'Not', 'Not', 'Not', 'Not', 'reported', 'reported', 'reported', 'reported', 'reported', 'reported', 'Not set up'].sort(), 'the limit and the ten cost words: an Agent Framework team is free (#23)');
+    const items = plan(v, d).items.filter((i) => i.t === 'text' && words.test(i.text));
+    assert.deepEqual(items.map((i) => i.text).sort(), ['$2.00', '$1234.50', 'Free', 'Free', 'Not', 'Not', 'Not', 'Not', 'Not', 'Not', 'reported', 'reported', 'reported', 'reported', 'reported', 'reported', 'Not', 'set up'].sort(), 'the limit and the ten cost words: an Agent Framework team is free (#23)');
     for (const i of items) assert.ok(i.text.length * i.s * 0.62 <= i.maxW, `${i.text} at ${i.s} px needs about ${Math.round(i.text.length * i.s * 0.62)} px, has ${i.maxW}`);
     // a head that does not fit one line takes two (Agent / Framework): every word of every kind is painted
-    const labels = P.plan(v, d).items.filter((i) => i.t === 'text' && /^(Claude|Code|Hermes|dsh|OpenClaw|Copilot|ACP|tools|Local|model|Agent|Framework|Cloud|agent|CLI|Claude Code|Copilot|ACP tools|Local model|Agent Framework|Cloud agent|CLI tools)$/.test(i.text));
+    const labels = plan(v, d).items.filter((i) => i.t === 'text' && /^(Claude|Code|Hermes|dsh|OpenClaw|Copilot|ACP|tools|Local|model|Agent|Framework|Cloud|agent|CLI|Claude Code|Copilot|ACP tools|Local model|Agent Framework|Cloud agent|CLI tools)$/.test(i.text));
     const said = labels.map((i) => i.text).join(' ');
     for (const c of globalThis.OfficeVocab.security.columns) for (const w of c.label.split(' ')) assert.ok(said.includes(w), `${w} of ${c.label} has its cost column head`);
     for (const i of labels) assert.ok(i.text.length * i.s * 0.62 <= i.maxW, `${i.text} fits`);
   }
   for (let page = 0; page < 10; page++) {
-    const t = P.plan(view({ screen: 'spend', h: 1100, paged: true, page }), d).items.find((i) => i.t === 'text' && /: /.test(i.text) && i.s === 44);
+    const t = plan(view({ screen: 'spend', h: 1100, paged: true, page }), d).items.find((i) => i.t === 'text' && /: /.test(i.text) && i.s === 44);
     assert.ok(t.text.length * t.s * 0.62 <= t.maxW, `${t.text} fits the paged view`);
   }
   // #24: a column whose agents all report cost (a cloud kind with its prices set) spent nothing yet: $0.00, not "Not reported".
   const priced = { ...d, sec: { ...d.sec, enforce: { ...enf, cloud: { ...NONE, reports: true } } } };
-  const words2 = P.plan(view({ screen: 'spend', h: 738 }), priced).items.filter((i) => i.t === 'text' && words.test(i.text)).map((i) => i.text);
+  const words2 = plan(view({ screen: 'spend', h: 738 }), priced).items.filter((i) => i.t === 'text' && words.test(i.text)).map((i) => i.text);
   assert.equal(words2.filter((w) => w === '$0.00').length, 1, 'the Cloud agent column says $0.00');
   // every word of a grid column fits its column at six columns, by the same estimate
   for (const screen of ['files', 'agents', 'network']) {
-    for (const i of P.plan(view({ screen, h: 738 }), d).items.filter((x) => x.t === 'text' && x.align === 'center' && x.maxW < 300)) {
+    for (const i of plan(view({ screen, h: 738 }), d).items.filter((x) => x.t === 'text' && x.align === 'center' && x.maxW < 300)) {
       assert.ok(i.text.length * i.s * 0.6 <= i.maxW, `${screen}: "${i.text}" at ${i.s} px fits ${i.maxW}`);
     }
   }
@@ -275,7 +277,7 @@ test('Spend: every cost word fits its column, in the full and the paged view', (
 // fit takes two lines (one word each), so every word of every column label is on the wall in full, by the plan's estimate.
 test('the column labels of a rules screen fit their column: a long one takes two lines', () => {
   for (const [screen, h] of [['files', 686], ['commands', 686], ['agents', 738]]) {
-    const p = P.plan(view({ screen, h }), data());
+    const p = plan(view({ screen, h }), data());
     const heads = p.items.filter((i) => i.t === 'text' && i.align === 'center' && i.c === 'muted' && i.wt === 600 && i.y < 230);
     const words = heads.map((i) => i.text).join(' ').split(/\s+/);
     for (const c of globalThis.OfficeVocab.security.columns) for (const w of c.label.split(' ')) assert.ok(words.includes(w), `${screen}: "${w}" of ${c.label} is painted`);
@@ -286,7 +288,7 @@ test('the column labels of a rules screen fit their column: a long one takes two
 
 test('paged view: both scope choices are on the wall, the chosen one marked; a click on the other switches', () => {
   for (const scope of ['office', 'building']) {
-    const v = view({ screen: 'commands', paged: true, h: 1100, scope }), p = P.plan(v, data());
+    const v = view({ screen: 'commands', paged: true, h: 1100, scope }), p = plan(v, data());
     const hots = p.hots.filter((h) => h.kind === 'scope');
     assert.deepEqual(hots.map((h) => h.scope).sort(), ['building', 'office']);
     const t = p.items.filter((i) => i.t === 'text' && /^(All buildings|This building)$/.test(i.text));
@@ -307,7 +309,8 @@ test('M6: paged mode starts on a narrow or a short free view, from the width the
   assert.equal(P.pagedFor(at(1300, 800), aspect), false, 'room for the full grid');
   assert.equal(P.pagedFor(at(600, 800), aspect), true, 'narrow');
   assert.equal(P.pagedFor(at(1300, 300), aspect), true, 'wide but short: the screen is only 549 px wide');
-  assert.equal(P.pagedFor(at(1300, 400), aspect), false, '731 px wide');
+  assert.equal(P.pagedFor(at(1300, 400), aspect), true, '731 px wide: 18 px text would be 10 px on screen (#219)');
+  assert.equal(P.pagedFor(at(1300, 500), aspect), false, '914 px wide');
   assert.equal(P.pagedFor(null, aspect), false, 'not in focus');
 });
 
@@ -330,7 +333,7 @@ test('M6: paged mode starts on a narrow or a short free view, from the width the
     { path: 'tools.exec.ask', have: 'off', ok: false, fix: 'openclaw config set tools.exec.ask always', rows: ['shell', 'web'] }] } } };
   const norm = (t) => t.replace(/\s+/g, ' ');
   const SEC = () => globalThis.OfficeVocab.security;
-  // [viewport width, paged]: a free width under 700 px pages the screen (PAGED_BELOW)
+  // [viewport width, paged]: a free width under 700 px pages the screen (PAGED_BELOW, 820)
   const WIDTHS = [[1360, false], [820, false], [400, true]];
   // the screen planes: Files and Commands on the back wall (1280 x 686), the others on the side walls (1280 x 738)
   const SCREENS = [['files', 686], ['commands', 686], ['network', 738], ['secrets', 738]];
@@ -355,7 +358,7 @@ test('M6: paged mode starts on a narrow or a short free view, from the width the
           for (const scope of ['office', 'building']) {
             const d = D(enf);
             for (const page of paged ? cols : [null]) {
-              const v = view({ screen, h, paged, page: paged ? cols.indexOf(page) : 0, scope }), p = P.plan(v, d), said_ = norm(texts(p).join(' '));
+              const v = view({ screen, h, paged, page: paged ? cols.indexOf(page) : 0, scope }), p = plan(v, d), said_ = norm(texts(p).join(' '));
               for (const col of paged ? [page] : cols) for (const n of wanted(d, screen, scope, col)) {
                 assert.ok(said_.includes(norm(n.why)), `${width} px, ${screen}, ${scope}, ${col}: "${n.why}" is not painted in full`);
                 checked++;
@@ -375,26 +378,28 @@ test('M6: paged mode starts on a narrow or a short free view, from the width the
     });
   }
 
-  test('the reasons sit below the grid and above the hint; Files takes the compact layout for them', () => {
-    const d = D(real(gaps));
-    for (const scope of ['office', 'building']) {
-      const v = view({ screen: 'files', h: 686, scope }), p = P.plan(v, d), lay = P.levelFor(v, d);
-      assert.ok(lay.L.fs <= 18, 'five agent kinds and their reasons need the smaller type: ' + lay.lines.length + ' lines');
-      const firstTop = lay.first - lay.L.fs * 0.8;
-      assert.ok(firstTop >= lay.end, `the reasons start (${Math.round(firstTop)}) under the grid (${lay.end})`);
-      const last = lay.first + (lay.lines.length - 1) * lay.L.lh;
-      assert.ok(last < lay.hintTop - lay.L.hint * 0.8, 'and end above the hint');
-      const rowBottom = Math.max(...p.hots.filter((h) => h.kind === 'cell').map((h) => h.y + h.h));
-      assert.ok(rowBottom <= lay.end, 'no cell reaches into them');
+  // #219: no text of a focused screen is under MIN_TEXT (18 px, 11 px on screen at 1360 px). A full layout that cannot keep every
+  // caption, reason and head at 18 px is not shown: the one-kind view takes its place (its type is 30 px and up).
+  test('a focused screen paints no text under 18 px: the full grid when it fits, else one agent kind', () => {
+    for (const [name, d] of [['no gaps', D(real())], ['gaps', D(real(gaps))]]) {
+      for (const screen of ['files', 'commands', 'network', 'secrets', 'agents', 'spend']) for (const scope of ['office', 'building']) for (const h of [686, 738]) {
+        const v = view({ screen, h, scope }), p = P.plan(v, d);
+        assert.ok(P.smallest(p) >= P.MIN_TEXT, name + ' / ' + screen + ' / ' + scope + ': the smallest text is ' + P.smallest(p) + ' px');
+        const grid = p.hots.some((x) => x.kind === 'cell') && !p.hots.some((x) => x.kind === 'prev');
+        if (grid) { const lay = P.levelFor(v, d); assert.ok(lay.first - lay.L.fs * 0.8 >= lay.end, screen + ': the reasons start under the grid'); }
+      }
     }
-    // a screen with few reasons keeps the roomy layout
-    assert.equal(P.levelFor(view({ screen: 'commands', h: 686 }), D(real())).L.fs, 21);
-    assert.equal(P.levelFor(view({ screen: 'secrets', h: 900 }), D(real())).L.fs, 21);
+    // Files has three rows and many reasons: it cannot keep 18 px in the full grid, so it takes the one-kind view; a screen with
+    // two rows and few reasons keeps the grid
+    const d = D(real(gaps));
+    assert.ok(P.plan(view({ screen: 'files', h: 686 }), d).hots.some((x) => x.kind === 'prev'), 'Files: one agent kind');
+    assert.ok(!P.plan(view({ screen: 'files', h: 686, focused: false }), d).hots.some((x) => x.kind === 'prev'), 'not in focus: the whole grid');
+    for (const screen of ['secrets', 'agents']) assert.ok(!P.plan(view({ screen, h: 738 }), D(real())).hots.some((x) => x.kind === 'prev'), screen + ': a short screen keeps the whole grid at 18 px');
   });
 
   test('the paged Spend screen wraps the Extensions line and the hint, none of it cut', () => {
     for (const edit of [null, { text: '7' }]) for (const note of [null, 'The spend limit is a number from 0 to 1000. 0 means no limit.']) {
-      const v = view({ screen: 'spend', h: 738, paged: true, edit, note }), p = P.plan(v, D(real()));
+      const v = view({ screen: 'spend', h: 738, paged: true, edit, note }), p = plan(v, D(real()));
       assert.match(norm(texts(p).join(' ')), /Extensions: local or project scope only\. User scope stays out of reach\./);
       for (const i of p.items.filter((x) => x.t === 'text' && x.maxW >= 1000)) assert.ok(i.text.length * P.charW(i.s, i.wt) <= i.maxW, `"${i.text}" fits`);
     }
@@ -406,19 +411,19 @@ test('M6: paged mode starts on a narrow or a short free view, from the width the
 test('Allow on Shell commands paints a Confirm that names high risk commands, in the full and the paged view', () => {
   const asked = data({ office: { 'shell|claude-code': 'ask' }, buildings: {} });   // a cell the user set to Ask: the next value is Allow
   const full = view({ screen: 'commands' });
-  const r = P.step(full, cell(P.plan(full, asked), 'shell', 'claude-code'), asked);
+  const r = P.step(full, cell(plan(full, asked), 'shell', 'claude-code'), asked);
   assert.equal(r.send, undefined, 'a looser change waits');
   assert.deepEqual(r.view.pending, { row: 'shell', col: 'claude-code', to: 'allow', office: null });
   const want = /Confirm: Allow every command for Claude Code, high risk too \(rm -rf, git push --force\)\?/;
-  assert.match(said(P.plan(r.view, asked)), want, 'full view');
-  const pv = { ...r.view, paged: true, h: 686, page: 0 }, pp = P.plan(pv, asked);
+  assert.match(said(plan(r.view, asked)), want, 'full view');
+  const pv = { ...r.view, paged: true, h: 686, page: 0 }, pp = plan(pv, asked);
   assert.match(said(pp), want, 'paged view');
   assert.ok(hotOf(pp, 'confirm') && hotOf(pp, 'cancel'), 'with its Confirm and Cancel');
-  for (const plan of [P.plan(r.view, asked), pp]) for (const i of plan.items.filter((x) => x.t === 'text' && x.maxW && x.align !== 'center')) assert.ok(i.text.length * P.charW(i.s, i.wt) <= i.maxW + 0.5, `"${i.text}" fits`);
+  for (const pl of [plan(r.view, asked), pp]) for (const i of pl.items.filter((x) => x.t === 'text' && x.maxW && x.align !== 'center')) assert.ok(i.text.length * P.charW(i.s, i.wt) <= i.maxW + 0.5, `"${i.text}" fits`);
   assert.equal(P.step(pv, hotOf(pp, 'confirm'), asked).send.body.value, 'allow');
   // other rows keep the short Confirm
-  const files = view({ screen: 'files' }), d = data(), fr = P.step(files, cell(P.plan(files, d), 'files-outside', 'claude-code'), d);
-  assert.ok(texts(P.plan(fr.view, d)).includes('Confirm: Allow'));
+  const files = view({ screen: 'files' }), d = data(), fr = P.step(files, cell(plan(files, d), 'files-outside', 'claude-code'), d);
+  assert.ok(texts(plan(fr.view, d)).includes('Confirm: Allow'));
 });
 
 // #23: a sixth agent kind (Agent Framework) makes the grid columns narrower. A column head that does not fit on one line takes
@@ -427,7 +432,7 @@ test('every column head of a rules screen is painted in full: a long one takes t
   const heads = (p) => p.items.filter((i) => i.t === 'text' && i.c === 'muted' && i.wt === 600 && i.align === 'center' && i.s <= 24);
   for (const [screen, h] of [['files', 686], ['commands', 686], ['network', 738], ['secrets', 738], ['agents', 738]]) {
     for (const scope of ['office', 'building']) {
-      const v = view({ screen, h, scope }), d = data(), p = P.plan(v, d), L = P.levelFor(v, d).L;
+      const v = view({ screen, h, scope }), d = data(), p = plan(v, d), L = P.levelFor(v, d).L;
       const said_ = heads(p).map((i) => i.text).join(' ');
       for (const c of globalThis.OfficeVocab.security.columns) assert.ok(said_.includes(c.label.split(' ')[0]), `${screen}: ${c.label} has its head`);
       assert.match(said_, /Agent Framework/);
@@ -451,19 +456,19 @@ const withHq = (hq = HQ) => ({ ...data(), hq });
 const hqView = (o = {}) => view({ screen: 'agents', h: 738, section: 'hq', ...o });
 
 test('Agents, Paperclip part: two parts in the header; not connected says where to connect; no Supervise without agents', () => {
-  const v = view({ screen: 'agents', h: 738 }), p = P.plan(v, withHq());
+  const v = view({ screen: 'agents', h: 738 }), p = plan(v, withHq());
   const sec = p.hots.filter((h) => h.kind === 'section');
   assert.deepEqual(sec.map((h) => h.section), ['kinds', 'hq']);
   assert.ok(texts(p).includes('Agent kinds') && texts(p).includes('Paperclip'));
   assert.equal(P.step(v, sec[1], withHq()).view.section, 'hq');
-  const off = P.plan(hqView(), { ...data(), hq: null });
+  const off = plan(hqView(), { ...data(), hq: null });
   assert.match(said(off), /Paperclip is not connected\. Connect it in Attach sessions/);
   assert.equal(off.hots.some((h) => h.kind === 'supervise'), false);
   assert.equal(off.hots.some((h) => h.kind === 'cell'), false, 'the kinds grid is the other part');
 });
 
 test('Agents, Paperclip part: each agent with its state in words; Supervise in office waits for the Confirm, then one change for one agent', () => {
-  const d = withHq(), v = hqView(), p = P.plan(v, d);
+  const d = withHq(), v = hqView(), p = plan(v, d);
   const t = said(p);
   for (const w of ['Grace', 'Ada', 'Linus', 'Backend engineer', 'Supervised', 'Unsupervised', 'Watching Acme Robotics at http://127.0.0.1:3100']) assert.ok(t.includes(w), w);
   assert.match(t, /codex_local, not Claude Code/, 'why an agent is not supervised, on the wall');
@@ -473,7 +478,7 @@ test('Agents, Paperclip part: each agent with its state in words; Supervise in o
   const r = P.step(v, sup[0], d);
   assert.equal(r.send, undefined, 'a write to Paperclip waits for the painted Confirm');
   assert.deepEqual(r.view.pending, { hq: 'a1', name: 'Grace' });
-  const pp = P.plan(r.view, d);
+  const pp = plan(r.view, d);
   assert.ok(texts(pp).includes('Confirm: Supervise Grace in office?'));
   assert.match(said(pp), /The office writes to its config in Paperclip: engine cli, skip permissions off, permission mode default and the office hooks file/);
   assert.ok(pp.items.some((i) => i.t === 'fill' && i.c === 'pending'), 'amber');
@@ -485,19 +490,19 @@ test('Agents, Paperclip part: each agent with its state in words; Supervise in o
 
 test('Agents, Paperclip part: many agents page in the full view; the narrow view shows one agent at a time with its Supervise', () => {
   const many = { ...HQ, agents: Array.from({ length: 9 }, (_, i) => ({ ...HQ.agents[0], id: 'g' + i, name: 'Agent ' + (i + 1) })) };
-  const d = withHq(many), v = hqView(), p = P.plan(v, d);
+  const d = withHq(many), v = hqView(), p = plan(v, d);
   assert.ok(hotOf(p, 'hq-next') && hotOf(p, 'hq-prev'));
   const shown = p.hots.filter((h) => h.kind === 'supervise').length;
   assert.ok(shown >= 3 && shown < 9, `${shown} rows on the first page`);
   assert.match(said(p), new RegExp(`Agents 1 to ${shown} of 9`));
-  const p2 = P.plan(P.step(v, hotOf(p, 'hq-next'), d).view, d);
+  const p2 = plan(P.step(v, hotOf(p, 'hq-next'), d).view, d);
   assert.equal(p2.hots.filter((h) => h.kind === 'supervise')[0].agent, 'g' + shown);
   for (const h of p.hots) assert.ok(h.y + h.h <= v.h - 40, `${h.id} sits above the hint`);
   // narrow: one agent, big, with Previous and Next
-  const nv = hqView({ paged: true }), np = P.plan(nv, withHq());
+  const nv = hqView({ paged: true }), np = plan(nv, withHq());
   assert.deepEqual(np.hots.filter((h) => h.kind === 'supervise').map((h) => h.agent), ['a1']);
   assert.ok(texts(np).includes('1 of 3') && hotOf(np, 'hq-next'));
-  const n2 = P.plan(P.step(nv, hotOf(np, 'hq-next'), withHq()).view, withHq());
+  const n2 = plan(P.step(nv, hotOf(np, 'hq-next'), withHq()).view, withHq());
   assert.ok(texts(n2).includes('Ada') && texts(n2).includes('2 of 3'));
   assert.equal(n2.hots.some((h) => h.kind === 'supervise'), false, 'Ada is supervised: nothing to set up');
 });
