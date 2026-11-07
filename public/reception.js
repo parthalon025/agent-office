@@ -128,7 +128,7 @@
 
   // ---------- Orientation (#196): the first-run walk through the office ----------
   // The steps, their words and the saved progress come from the server (src/orientation.mjs); this draws the controls of each step.
-  // Every step can be skipped and is reachable again from the Reception and Ctrl+K. The company and memory steps are placeholders.
+  // Every step can be skipped and is reachable again from the Reception and Ctrl+K. The memory step is a placeholder.
   function KindsStep() {
     var K = O.useKinds();   // the shared provider read (page-core.js): the kept answer, never a fresh round
     if (K.checking) return h(Busy, { on: true });
@@ -173,10 +173,48 @@
     if (r.state === 'on') return h('p', { className: 'note' }, 'Remote access is on at ' + r.host + '.');
     return h('p', { className: 'note' }, 'Remote access is off.' + (r.reason ? ' ' + r.reason : '') + (r.missing && r.missing.length ? ' Missing: ' + r.missing.join(', ') + '.' : '') + ' The steps are in docs/remote-access.md.');
   }
+  // The company step (#199): install or connect Paperclip (the runtime panel of the HQ, one place), then create the company. The first account
+  // and the board key approval are the user's: the panel shows their two links and this step waits. The server sends the write through the HQ writer (#198): the write grid, then the ask-first 'write'.
+  function CompanyStep(p) {
+    var snap = useSnapshot(), rt = snap && snap.paperclipRuntime, co = snap && snap.hq && snap.hq.company;
+    var cat = (snap && snap.catalog) || { archetypes: [] };
+    var nm = useState(''), name = nm[0], setName = nm[1];
+    var ar = useState('general'), arch = ar[0], setArch = ar[1];
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var er = useState(''), err = er[0], setErr = er[1];
+    var qs = useState(''), ask = qs[0], setAsk = qs[1];
+    if (co) return h('div', null, h('p', { className: 'note', role: 'status' }, 'Your company "' + co.name + '" is in Paperclip. The office watches it.'),
+      h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'approve', onClick: p.onDone }, 'Mark this step done')));
+    if (!rt) return h(Busy, { on: true });
+    var ready = rt.state === 'connected' || (rt.state === 'running' && rt.bootstrap !== 'pending' && rt.key && rt.key.state === 'ready');
+    function create(confirmed) {
+      setBusy(true); setErr('');
+      client.paperclipCompany({ name: name, archetype: arch, confirmed: confirmed === true ? true : undefined }).then(function () { setBusy(false); setAsk(''); p.onDone(); }, function (x) {
+        setBusy(false);
+        var a = window.OfficeAsk.asked(x, 'write', confirmed === true);
+        if (a) { setAsk(a.text); return; }
+        setErr(x.message);
+      });
+    }
+    var opts = cat.archetypes.map(function (x) { return { value: x.id, label: x.name }; });
+    return h('div', null,
+      O.PaperclipRuntime ? h(O.PaperclipRuntime, { runtime: rt, toast: p.toast }) : null,
+      ready ? h('div', { className: 'form' },
+        h('h3', { className: 'ext-h' }, 'Create your company'),
+        h(A.TextInput, { id: 'o-company', label: 'Company name', value: name, onChange: function (t) { setName(t); setAsk(''); } }),
+        opts.length ? h(A.Select, { id: 'o-company-kind', label: 'Kind of building', options: opts, value: arch, onChange: setArch }) : null,
+        ask ? h('p', { className: 'note', role: 'alert' }, ask) : null,
+        err ? h('p', { className: 'note reception-err', role: 'alert' }, err) : null,
+        h('div', { className: 'inline-actions' },
+          ask ? h(A.Button, { variant: 'primary', icon: 'approve', loading: busy, onClick: function () { create(true); } }, 'Create company') : h(A.Button, { variant: 'quiet', icon: 'add', disabled: !name.trim(), loading: busy, onClick: function () { create(false); } }, 'Create company'),
+          ask ? h(A.Button, { variant: 'quiet', onClick: function () { setAsk(''); } }, 'Do not create') : null))
+        : h('p', { className: 'note' }, 'The company comes after Paperclip runs, the first account exists and the board key is approved. Skip this step for now if you want. You can come back from the Reception.'));
+  }
   function StepBody(p) {
     var id = p.step.id;
     if (p.step.later) return h('p', { className: 'note' }, 'This step comes later. Skip it for now. You can come back from the Reception.');
     if (id === 'kinds') return h(KindsStep);
+    if (id === 'company') return h(CompanyStep, { onDone: p.onDone, toast: p.toast });
     if (id === 'security') return h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'security', onClick: function () { p.onSecurity(); } }, 'Open the Security room'));
     if (id === 'spend') return h(SpendStep, { info: p.info, onDone: p.onDone });
     if (id === 'startup') return h(StartupStep, { info: p.info, onDone: p.onDone });
@@ -217,7 +255,7 @@
         step ? h('div', { className: 'orient-body' },
           h('h3', { className: 'reception-h' }, step.title),
           h('p', null, step.text),
-          h(StepBody, { key: step.id, step: step, info: info, onDone: function () { send({ step: step.id, status: 'done' }); }, onSecurity: function () { close(); p.onSecurity(); }, onTour: function () { close(); p.onTour(); } })) : null,
+          h(StepBody, { key: step.id, step: step, info: info, toast: p.toast, onDone: function () { send({ step: step.id, status: 'done' }); }, onSecurity: function () { close(); p.onSecurity(); }, onTour: function () { close(); p.onTour(); } })) : null,
         v && v.finished ? h('p', { className: 'note' }, v.skipped.length ? 'You skipped ' + F.plural(v.skipped.length, 'step', 'steps') + '. Open Orientation from the Reception to finish them.' : 'Orientation is finished.') : null));
   }
 

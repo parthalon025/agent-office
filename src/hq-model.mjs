@@ -120,6 +120,7 @@ export const WRITE_KINDS = {
   secret: { label: 'Secrets', options: ['confirm', 'deny'], def: 'confirm' },
   task: { label: 'Tasks', options: RULES, def: 'allow' },
   comment: { label: 'Comments', options: RULES, def: 'allow' },
+  company: { label: 'Company', options: RULES, def: 'confirm' },
 };
 const kindRow = (k) => (typeof k === 'string' && Object.hasOwn(WRITE_KINDS, k) ? WRITE_KINDS[k] : null);
 const gridError = (status, message) => Object.assign(new Error(message), { status });
@@ -160,10 +161,11 @@ export function setWriteCell(grid, change) {
 // planWrite(body) -> { kind, action, method, path(companyId), body, targets, summary }. body: { kind, action, ...fields }. The fields are
 // checked here (400), every id must be a plain id (it goes into a path), and a target is a thing the writer reads before it writes
 // (issue, approval, agent): it must belong to the connected company. Only the first writes are planned: task (create, assign), comment
-// (add) and approval (approve, reject, revise). Another kind in the grid has no plan yet, and is 400 (never sent).
+// (add), approval (approve, reject, revise) and company (create, #199: scope 'none', it needs no connection). Another kind in the grid
+// has no plan yet, and is 400 (never sent).
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const ISSUE_STATUS = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'];
-const TITLE_MAX = 200, TEXT_MAX = 10000, NOTE_MAX = 2000, DESC_MAX = 4000;
+const TITLE_MAX = 200, TEXT_MAX = 10000, NOTE_MAX = 2000, DESC_MAX = 4000, NAME_MAX = 80, COMPANY_DESC_MAX = 300;
 const short = (t, n = 80) => (t.length > n ? `${t.slice(0, n - 1)}…` : t);
 function idOf(v, what) {
   if (typeof v !== 'string' || !ID_RE.test(v)) throw gridError(400, `Give the ${what}.`);
@@ -201,6 +203,15 @@ const PLANS = {
     add(b) {
       const issue = idOf(b.issue, 'task'), text = textOf(b.text, 'comment', TEXT_MAX, { required: true });
       return { method: 'POST', path: () => `/api/issues/${issue}/comments`, body: { body: text }, targets: [{ type: 'issue', id: issue }], summary: 'Comment on a task' };
+    },
+  },
+  // The first company (#199): the one write that has no company to belong to. It names the Paperclip it goes to (url, a loopback address the
+  // writer checks) and needs no connection: scope 'none'. The writer reads the company list first and reuses a company of the same name.
+  company: {
+    create(b) {
+      const name = textOf(b.name, 'company name', NAME_MAX, { required: true }), description = textOf(b.description, 'description', COMPANY_DESC_MAX);
+      if (typeof b.url !== 'string' || !b.url) throw gridError(400, 'Give the Paperclip address.');
+      return { method: 'POST', path: () => '/api/companies', body: { name, description }, targets: [], scope: 'none', url: b.url, name, summary: `Create the company "${short(name)}"` };
     },
   },
   approval: Object.fromEntries([decision('approve', 'approve', 'Approve an approval'), decision('reject', 'reject', 'Reject an approval'), decision('revise', 'request-revision', 'Request a revision of an approval')]),
