@@ -353,11 +353,10 @@ export function createOffice(cfg) {
   // Paperclip owns the budgets of its runs: the office shows them and sets no second limit (a hook session has no spend limit).
   const PAPERCLIP = { uid: 'paperclip', name: 'Paperclip' };
   const hq = createHq({
-    // The board key of the Paperclip the office runs (#193), for that address only: the HQ sends it as a bearer and holds it nowhere (#197).
-    key: (url) => (url === runtime.status().url ? runtime.key() : null),
+    // The board key (#193 the Paperclip the office runs, #194 one it connects to), for the address it was made for only: the HQ sends it as a bearer and holds it nowhere (#197).
+    key: (url) => runtime.keyFor(url),
     sessions: () => [...sessions.values()], // the plan source links a Paperclip task to the session that runs it (#155)
     hooksFile: () => HOOKS_CMD_FILE.replace(/\\/g, '/'),
-    token: (u) => (runtime.keyFor ? runtime.keyFor(u) : null), // the board key (#194), for the address it was made for only
     onChange: () => broadcast(),
     onFeed: (text, kind) => addFeed(PAPERCLIP, kind, text),
     // A run ended. One whose held call timed out (the office denied it) and that Paperclip marks succeeded is named, so the

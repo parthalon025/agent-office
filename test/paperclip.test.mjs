@@ -761,7 +761,7 @@ test('a board key goes in the Authorization header of every read and of the live
   const KEY = 'pcp_board_' + 'a'.repeat(40);
   const pc = await startFakePaperclip({ ...DEMO(), boardKey: KEY });
   const asked = [];
-  const hq = createHq({ ...fast, hooksFile: () => HOOKS, token: (u) => { asked.push(u); return u === pc.url ? KEY : null; } });
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS, key: (u) => { asked.push(u); return u === pc.url ? KEY : null; } });
   try {
     const r = await hq.connect({ url: pc.url, company: DEMO().companies[0].id });
     assert.equal(r.ok, true);
@@ -773,7 +773,7 @@ test('a board key goes in the Authorization header of every read and of the live
     const ws = pc.requests.find((q) => q.method === 'UPGRADE');
     assert.equal(ws && ws.authorization, `Bearer ${KEY}`, 'the live stream carries it too');
   } finally { hq.disconnect(); }
-  const bad = createHq({ ...fast, hooksFile: () => HOOKS, token: () => 'pcp_board_' + 'b'.repeat(40) });
+  const bad = createHq({ ...fast, hooksFile: () => HOOKS, key: () => 'pcp_board_' + 'b'.repeat(40) });
   try {
     await assert.rejects(bad.connect({ url: pc.url }), (e) => e.status === 502 && /does not accept the board key \(401\)/.test(e.message) && !e.message.includes('pcp_board_'));
   } finally { await pc.close(); }

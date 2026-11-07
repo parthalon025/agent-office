@@ -333,8 +333,8 @@ export function createHq(deps = {}) {
   let c = null;   // the connection: { url, companyId, state, error, ws, tries, timer, refetch, busy, companies }
   let d = null;   // what Paperclip said: { company, agents: Map, issues, routines, runs: Map agentId -> run, last: Map agentId -> lastRun }
 
-  // The board key (the connect mode #194, the Paperclip the office runs #197): asked per call for the address it is used at (deps.token or deps.key), so it goes only to the Paperclip it was made for (redirects are refused) and is held nowhere.
-  const keyOf = (url) => { try { return deps.token?.(url) || deps.key?.(url) || null; } catch { return null; } };
+  // The board key (the connect mode #194, the Paperclip the office runs #197): asked per call for the address it is used at (deps.key), so it goes only to the Paperclip it was made for (redirects are refused) and is held nowhere.
+  const keyOf = (url) => { try { return deps.key?.(url) || null; } catch { return null; } };
   async function call(conn, route, init = {}) {
     let res;
     const key = keyOf(conn.url);
