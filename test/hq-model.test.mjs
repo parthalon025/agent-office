@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { floorsOf, lobbyOf, costsOf, monthWindows, shapeProblems, shapeOf, SHAPES } from '../src/hq-model.mjs';
+import { floorsOf, cablesOf, reportingProblem, lobbyOf, costsOf, monthWindows, shapeProblems, shapeOf, SHAPES } from '../src/hq-model.mjs';
 import { startFakePaperclip, DEMO } from './fixtures/fake-paperclip.mjs';
 
 const RECORDED = JSON.parse(fs.readFileSync(fileURLToPath(new URL('./fixtures/paperclip-shapes.json', import.meta.url)), 'utf8'));
@@ -117,4 +117,19 @@ test('rooms: unreadable shapes give no room and never throw; the folder is never
   const r = roomsOf({ projects: [null, { name: 'x' }, { id: 'p', name: 'P', workspaces: [{ id: 'w' }, 5] }], agents: [], issues: null });
   assert.equal(r.length, 1);
   assert.deepEqual(r[0].workspaces, [{ id: 'w', name: 'w', folder: null, primary: false }]);
+});
+
+test('cables: one per reporting line whose manager is in the chart; no cable for a self report, a ghost manager or a loop', () => {
+  assert.deepEqual(cablesOf([a('ceo', null), a('cto', 'ceo'), a('dev', 'cto')]), [{ from: 'cto', to: 'ceo' }, { from: 'dev', to: 'cto' }]);
+  assert.deepEqual(cablesOf([a('x', 'y'), a('y', 'x'), a('z', 'ghost'), a('s', 's'), a('r', null)]), []);
+});
+
+test('a reporting line change: a root, a new manager and the refusals (unknown, self, loop)', () => {
+  const org = [a('ceo', null, 'Grace'), a('cto', 'ceo', 'Ada'), a('dev', 'cto', 'Linus'), a('cmo', 'ceo', 'Mae')];
+  assert.equal(reportingProblem(org, 'dev', 'cmo'), '');
+  assert.equal(reportingProblem(org, 'dev', null), '');
+  assert.match(reportingProblem(org, 'ghost', 'cmo'), /not in the company/);
+  assert.match(reportingProblem(org, 'dev', 'ghost'), /manager is not in the company/);
+  assert.match(reportingProblem(org, 'dev', 'dev'), /itself/);
+  assert.match(reportingProblem(org, 'ceo', 'dev'), /loop/);
 });

@@ -72,6 +72,41 @@ export function floorsOf(agents) {
   return floors;
 }
 
+// ---------- reporting lines (#202) ----------
+/**
+ * The reporting lines as cables between the pips of the floors: one per employee whose manager is in the list. A manager that is not in the
+ * list (terminated, or from another company), a self report and a line that closes a loop draw no cable. agents: [{ id, reportsTo }].
+ * Each cable: { from, to } (the employee, the manager), in the order of the list.
+ */
+export function cablesOf(agents) {
+  const by = new Map(agents.map((a) => [a.id, a]));
+  const out = [];
+  for (const a of agents) {
+    if (!a.reportsTo || a.reportsTo === a.id || !by.has(a.reportsTo)) continue;
+    let cur = by.get(a.reportsTo), n = 0, loop = false;
+    while (cur && n++ <= agents.length) { if (cur.id === a.id) { loop = true; break; } cur = cur.reportsTo ? by.get(cur.reportsTo) : null; }
+    if (!loop) out.push({ from: a.id, to: a.reportsTo });
+  }
+  return out;
+}
+/**
+ * Why a reporting line change cannot be made ('' = it can). managerId null (or '') makes the employee a root. A manager that already
+ * reports to the employee, directly or through others, would close a loop, so it is refused. Words for the user.
+ */
+export function reportingProblem(agents, id, managerId) {
+  const by = new Map(agents.map((a) => [a.id, a]));
+  if (!by.has(id)) return 'This employee is not in the company.';
+  if (managerId === null || managerId === undefined || managerId === '') return '';
+  if (!by.has(managerId)) return 'The manager is not in the company.';
+  if (managerId === id) return 'An employee cannot report to itself.';
+  let cur = by.get(managerId), n = 0;
+  while (cur && n++ <= agents.length) {
+    if (cur.id === id) return `${by.get(managerId).name || 'That manager'} already reports to ${by.get(id).name || 'this employee'}, directly or through others. That would make a loop.`;
+    cur = cur.reportsTo ? by.get(cur.reportsTo) : null;
+  }
+  return '';
+}
+
 // ---------- the Lobby ----------
 const ACTIVE_RUN = new Set(['running', 'queued']);
 /**
@@ -161,7 +196,7 @@ export function setWriteCell(grid, change) {
 // planWrite(body) -> { kind, action, method, path(companyId), body, targets, summary }. body: { kind, action, ...fields }. The fields are
 // checked here (400), every id must be a plain id (it goes into a path), and a target is a thing the writer reads before it writes
 // (issue, approval, agent): it must belong to the connected company. Only the first writes are planned: task (create, assign), comment
-// (add), approval (approve, reject, revise) and company (create, #199: scope 'none', it needs no connection). Another kind in the grid
+// (add), approval (approve, reject, revise), reporting (set, #202) and company (create, #199: scope 'none', it needs no connection). Another kind in the grid
 // has no plan yet, and is 400 (never sent).
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
 const ISSUE_STATUS = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'];
@@ -212,6 +247,23 @@ const PLANS = {
       const name = textOf(b.name, 'company name', NAME_MAX, { required: true }), description = textOf(b.description, 'description', COMPANY_DESC_MAX);
       if (typeof b.url !== 'string' || !b.url) throw gridError(400, 'Give the Paperclip address.');
       return { method: 'POST', path: () => '/api/companies', body: { name, description }, targets: [], scope: 'none', url: b.url, name, summary: `Create the company "${short(name)}"` };
+    },
+  },
+  // A reporting line (#202): PATCH { reportsTo } of one agent (manager null: no manager). review(org) reads the org chart the writer holds:
+  // a loop, a self report or someone who is not in the company is refused before anything is asked (reportingProblem), and the summary
+  // names the two employees for the Confirm and the feed.
+  reporting: {
+    set(b) {
+      const agent = idOf(b.agent, 'employee'), manager = b.manager === undefined || b.manager === null || b.manager === '' ? null : idOf(b.manager, 'manager');
+      const targets = [{ type: 'agent', id: agent }];
+      if (manager) targets.push({ type: 'agent', id: manager });
+      const review = (org) => {
+        const problem = reportingProblem(org, agent, manager);
+        if (problem) return { problem, status: problem.startsWith('This employee') ? 404 : 400 };
+        const nameOf = (id) => short(String((org.find((x) => x.id === id) || {}).name || 'an employee'), 60);
+        return { problem: '', summary: manager ? `Make ${nameOf(agent)} report to ${nameOf(manager)}` : `Give ${nameOf(agent)} no manager` };
+      };
+      return { method: 'PATCH', path: () => `/api/agents/${agent}`, body: { reportsTo: manager }, targets, review, summary: 'Change a reporting line' };
     },
   },
   approval: Object.fromEntries([decision('approve', 'approve', 'Approve an approval'), decision('reject', 'reject', 'Reject an approval'), decision('revise', 'request-revision', 'Request a revision of an approval')]),

@@ -50,6 +50,8 @@ Open **Paperclip HQ** for the Lobby: employees, open tasks, approvals, goals and
 
 **Projects and workspaces** are rooms. Each Paperclip project is a room in the HQ list, with its workspaces and their folders. An employee sits in the room of its best open task (in progress first), in the workspace that task names, else the project's primary one. A project with no workspace says so; the office never invents a folder. Paperclip lists that the office cannot read give no rooms, not an empty room.
 
+The org chart lists the floors from the top, each employee with a cable to its manager (a line in the accent color; an employee with no manager has a grey one) and a Manager list. The floors rebuild when Paperclip changes a reporting line, from the office or from Paperclip. Changing a reporting line is a write of the write grid (**Reporting lines**): pick a manager, then click Change reporting line. With Confirm (the default) that click is the confirmation, with Allow it sends at once, and with Deny the org chart is read only: the lists are off and the office refuses the call. The office sends one PATCH `{ reportsTo }` and nothing else. A change that would make a loop, or name a manager outside the company, is refused before any PATCH.
+
 The office reads Paperclip through its own server. The page never calls Paperclip, and the board key never leaves the office: it goes to Paperclip as a bearer token and is in no answer to the page. Secret names show, secret values and approval payloads do not. If an update of Paperclip changes the shape of an answer the office reads, the office does not use that part, says so in the HQ and in the feed, and shows Unknown for it.
 
 ## Writes from the office

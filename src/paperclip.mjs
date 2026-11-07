@@ -18,7 +18,7 @@
 import path from 'node:path';
 import { runIds, cleanIds } from './payload.mjs';
 import { readArgs, CLAUDE_FLAGS_VERSION } from './providers/claude-code.mjs';
-import { floorsOf, lobbyOf, costsOf, roomsOf, monthWindows, searchOf, shapeProblems, planWrite, writeValueOf, WRITE_KINDS } from './hq-model.mjs';
+import { floorsOf, cablesOf, lobbyOf, costsOf, roomsOf, monthWindows, searchOf, shapeProblems, planWrite, writeValueOf, WRITE_KINDS } from './hq-model.mjs';
 import { archetypeOf, GENERAL } from './archetypes.mjs';
 
 export const DEFAULT_URL = 'http://127.0.0.1:3100';
@@ -329,7 +329,7 @@ const ENDED = new Set(['succeeded', 'failed', 'cancelled', 'timed_out', 'error']
  * createHq(deps) -> the Paperclip watcher. deps: { hooksFile() (the office's command hooks file, the path Supervise writes),
  * onChange(), onFeed(text, kind), onRun({ agentId, runId, status }) (a run ended), fetch, WebSocket, setTimer, clearTimer,
  * refetchMs, retryMs, key(url) (the board key for that address, or null: sent only as a bearer to that address, never held in a view) }.
- * connect, disconnect, supervise, view (the snapshot part, with the HQ floors and Lobby, #197), model (the fuller read model), labelOf (a session's label). Only the
+ * connect, disconnect, supervise, write (the one writer, #198; a reporting line is its kind `reporting`, #202), view (the snapshot part, with the HQ floors and Lobby, #197), model (the fuller read model), labelOf (a session's label). Only the
  * labels need the company match: a held call of any Paperclip run waits the long hold (server.mjs holdRequest).
  */
 export function createHq(deps = {}) {
@@ -583,7 +583,7 @@ export function createHq(deps = {}) {
   function view() {
     if (!c) return null;
     const base = { state: c.state, url: c.url, error: c.error, companies: c.state === 'choose' ? c.companies : null };
-    if (!d) return { ...base, company: null, budget: null, agents: [], routines: [], floors: [], rooms: [], lobby: null, search: [], contract: [] };
+    if (!d) return { ...base, company: null, budget: null, agents: [], routines: [], floors: [], cables: [], rooms: [], lobby: null, search: [], contract: [] };
     const agents = [...d.agents.values()].filter((a) => a.status !== 'terminated').map(agentView), hr = d.hqRead;
     const lobby = lobbyOf({
       agents, issues: known('issues') ? d.issues : null, approvals: known('approvals') ? hr.approvals : null, goals: known('goals') ? hr.goals : null, activity: known('activity') ? activityOf(8) : null,
@@ -595,8 +595,9 @@ export function createHq(deps = {}) {
       company: { id: String(d.company.id || c.companyId), name: text(d.company.name, 80) || 'Paperclip' },
       budget: { spent: cents(d.company.spentMonthlyCents), limit: cents(d.company.budgetMonthlyCents) },
       agents,
-      floors: floors.map((f) => ({ key: f.key, name: f.name, rank: f.rank, employees: f.employees.map((e) => ({ id: e.id, name: e.name, role: e.role, floor: f.name })) })),
+      floors: floors.map((f) => ({ key: f.key, name: f.name, rank: f.rank, employees: f.employees.map((e) => ({ id: e.id, name: e.name, role: e.role, reportsTo: e.reportsTo, floor: f.name })) })),
       rooms: known('projects') ? roomsOf({ projects: d.projects, agents, issues: known('issues') ? d.issues : null }) : [],
+      cables: cablesOf(agents),
       lobby, contract: d.contract,
       routines,
       // what Ctrl+K searches (#214): names and statuses only; an unread route gives no entries
@@ -819,6 +820,11 @@ export function createHq(deps = {}) {
       name = text(d.company.name, 80) || 'Paperclip';
     }
     if (cell === 'deny') { feed(`Refused by the HQ write grid: ${label}. Nothing was sent.`, 'wait'); throw httpError(403, `Denied by the HQ write grid: ${label}.`); }
+    if (plan.review) {   // what the plan checks against the org chart held here (a reporting line: a loop, a self report, a stranger)
+      const r = plan.review([...d.agents.values()].filter((a) => a.status !== 'terminated').map(agentView));
+      if (r.problem) throw httpError(r.status || 400, r.problem);
+      plan.summary = r.summary || plan.summary;
+    }
     for (const t of plan.targets) await check(conn, t);
     if (!first && c !== conn) throw httpError(409, 'Paperclip is not connected.');
     if (first && plan.kind === 'company') {
@@ -829,9 +835,25 @@ export function createHq(deps = {}) {
     if (cell === 'confirm' && confirmed !== true) {
       throw askWrite('write', `${plan.summary} in ${name}? The office sends this one change to Paperclip and nothing else.`, { write: { kind: plan.kind, action: plan.action, summary: plan.summary } });
     }
+    // A reporting line marks its employee busy while it sends (the page keeps its Confirm off, #202); a second change waits.
+    const busyId = plan.kind === 'reporting' ? plan.targets[0].id : null;
+    if (busyId) {
+      if (conn.busy.has(busyId)) throw httpError(409, 'The office is already changing this employee.');
+      conn.busy.add(busyId); changed();
+    }
     let made;
-    try { made = obj(await call(conn, plan.path(conn.companyId), { method: plan.method, body: JSON.stringify(plan.body) })); }
-    catch (e) { feed(`Paperclip refused the write: ${plan.summary}. ${e.message}`, 'wait'); throw e; }
+    try {
+      try { made = obj(await call(conn, plan.path(conn.companyId), { method: plan.method, body: JSON.stringify(plan.body) })); }
+      catch (e) { feed(`Paperclip refused the write: ${plan.summary}. ${e.message}`, 'wait'); throw e; }
+      if (busyId && c === conn && d) {
+        // the agent as Paperclip kept it (the PATCH answer may be partial): the floors and cables come from this read. The write is done, so a
+        // failed read is not an error of it; the read of the company that follows has the same data.
+        try {
+          const saved = scrubAgent(await call(conn, plan.path()));
+          if (c === conn && d && saved && saved.id === busyId && saved.companyId === conn.companyId) d.agents.set(busyId, saved);
+        } catch { /* refetchSoon below */ }
+      }
+    } finally { if (busyId) { conn.busy.delete(busyId); changed(); } }
     if (plan.kind === 'task' && plan.action === 'create' && !made.id) { feed(`Paperclip did not name the task it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the task it made.'); }
     if (plan.kind === 'company' && !made.id) { feed(`Paperclip did not name the company it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the company it made.'); }
     feed(`Wrote to ${name}: ${plan.summary}.`);

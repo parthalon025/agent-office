@@ -101,7 +101,7 @@ test('an unknown command is refused at once', () => {
 
 test('every command is a server route, and no other page file has a route string', () => {
   const src = readFileSync(join(root, 'src/office.mjs'), 'utf8'); // the route table
-  const server = new Set([...src.matchAll(/'(\/api\/[a-z/]+)'/g)].map((m) => m[1]));
+  const server = new Set([...src.matchAll(/'(\/api\/[a-z/-]+)'/g)].map((m) => m[1]));
   const skills = ['/api/skills/list', '/api/skills/read', '/api/skills/save', '/api/skills/delete'];
   for (const p of Object.values(Client.ROUTES)) {
     if (p.startsWith('/api/')) assert.ok(server.has(p) || skills.includes(p), `${p} is not a server route`);

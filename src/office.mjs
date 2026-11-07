@@ -496,6 +496,16 @@ export function createOffice(cfg) {
     return r;
   }
 
+  // The org chart editor's write (#202) is one write of hq.write (#198): the kind `reporting`, so the HQ write grid decides it (Deny refuses with
+  // 403, Confirm asks first and the editor's own Change button is that Confirm, Allow sends) and the writer checks a loop, a self report or a
+  // stranger before anything is asked. The snapshot's hq tells the page whether to offer the editor: it is writable unless the grid says Deny.
+  const hqView = () => { const v = hq.view(); return v && { ...v, reportingWrite: writeValueOf(saved.get('hqGrid'), 'reporting') !== 'deny' }; };
+  async function reportingLineHq(body) {
+    const r = await hq.write({ kind: 'reporting', action: 'set', agent: String(body.agent || ''), manager: body.manager ? String(body.manager) : null }, { confirmed: body.confirmed === true });
+    broadcast();
+    return r;
+  }
+
   // ---------- buildings: repositories and their worktrees (campus.mjs) ----------
   // A repository is known when a session works in it or it is a recent folder. The campus owns the buildings, layouts, room
   // records, change views, tree cache and floor actions; the server hands it the state slice, the live sessions and git.
@@ -1235,7 +1245,7 @@ export function createOffice(cfg) {
     security: { rules: saved.get('security'), enforce: ENFORCE, trust: trustView(), spend: { limit: defaultSpend(), ...costThisMonth(saved.get('costs'), Date.now()) } },
     kinds: KINDS,             // the agent kinds: the label of each session's kind, and the Open dialog's options before readiness comes
     plans: planBoard.snapshot(), // Manager board (#154, #156): every plan of every source, with its source word and the steps' state words
-    hq: hq.view(),            // Paperclip HQ (#76): null until connected; company, budget, agents (role, task, supervision, run), routines
+    hq: hqView(),             // Paperclip HQ (#76): null until connected; company, budget, agents (role, task, supervision, run), routines
     paperclipRuntime: runtime.status(), // the Paperclip the office runs (#193): state and why, the steps for the user, the board key's state (never the key)
     // Function floors (#92): each building's floors (archetypes.mjs layoutView), each room's floors and name, and the catalog
     layouts: layoutsView(), rooms: roomsView(), catalog: CATALOG,
@@ -1474,6 +1484,7 @@ export function createOffice(cfg) {
     R('POST', '/api/paperclip/company', 'page', ({ body }) => createCompanyHq(body)),
     R('POST', '/api/paperclip/disconnect', 'page', () => disconnectHq()),
     R('POST', '/api/paperclip/supervise', 'page', ({ body }) => superviseHq(body)),
+    R('POST', '/api/hq/reporting-line', 'page', ({ body }) => reportingLineHq(body)),
     // Manager goals (#156): start { building, goal, approveFirst?, spendLimit?, confirmed? }, approve, cancel and retry { id, step }.
     R('POST', '/api/goal/start', 'page', ({ body }) => startGoal(body)),
     R('POST', '/api/goal/approve', 'page', async ({ body }) => { if (!await manager.approve(String(body.id))) throw httpError(409, 'That goal does not wait for approval.'); return { ok: true }; }),

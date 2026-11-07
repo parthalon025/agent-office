@@ -204,6 +204,10 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
         if (!a) return send(res, 404, { error: 'Agent not found' });
         if (parsed && parsed.permissions) return send(res, 422, { error: 'Use /api/agents/:id/permissions for permission changes' });
         if (parsed && parsed.adapterConfig) a.adapterConfig = parsed.replaceAdapterConfig ? parsed.adapterConfig : { ...a.adapterConfig, ...parsed.adapterConfig };
+        if (parsed && 'reportsTo' in parsed) {   // the reporting line (#202): a manager of this company or null
+          if (parsed.reportsTo !== null && !st.agents.some((y) => y.id === parsed.reportsTo)) return send(res, 422, { error: 'Manager not found' });
+          a.reportsTo = parsed.reportsTo;
+        }
         a.updatedAt = new Date().toISOString();
         emit('activity.logged', { actorType: 'user', actorId: 'board', action: 'agent.updated', entityType: 'agent', entityId: a.id, agentId: null, runId: null, details: {} }, a.companyId);
         send(res, 200, a);
