@@ -193,3 +193,13 @@ test('a finished run is forgotten after KEEP_MS', async () => {
   keep.fn();
   assert.throws(() => runs.wait({ key: 'run-1' }), (e) => e.status === 404);
 });
+
+test('a start under the id of a run that has ended is a new run, not the old result', async () => {
+  const { runs, sessions, calls } = rig();
+  await runs.start(BODY);
+  end(sessions.get('o1'));
+  runs.tick();
+  assert.deepEqual(await runs.start(BODY), { key: 'run-1', resumed: false });
+  assert.equal(calls.open.length, 2);
+  assert.equal((await runs.wait({ key: 'run-1', cursor: 99 }, AbortSignal.abort())).done, false);
+});

@@ -134,7 +134,8 @@ export function createRuns(deps) {
   async function start(body) {
     const x = cleanRun(body);
     const live = runs.get(x.runId);
-    if (live) return { key: live.key, resumed: true };
+    if (live && !live.done) return { key: live.key, resumed: true };
+    if (live) { clearTimer(live.timer); runs.delete(live.key); } // an ended run under the same id: this start is a new run
     if ([...runs.values()].filter((r) => !r.done).length >= MAX_RUNS) throw httpError(429, `The office runs ${MAX_RUNS} Paperclip runs at once. Try again when one ends.`);
     let uid;
     try {
