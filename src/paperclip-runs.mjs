@@ -24,7 +24,42 @@ const PLAIN = /^[A-Za-z0-9_-]{1,80}$/;
 const KIND = /^[a-z][a-z0-9-]{0,40}$/;
 const clip = (t, n) => { const x = String(t ?? ''); return x.length > n ? x.slice(0, n - 1) + '…' : x; };
 
-/** The run a request describes, checked: { runId, agent: { id, company, name }, kind, model, cwd, isolation, prompt, task }. Throws httpError 400. */
+const word = (v, n) => (typeof v === 'string' && v.trim() ? clip(v.trim(), n) : null);
+/**
+ * What Paperclip said about the run besides its prompt (#206): the wake reason, the session it saved last (prior), the instructions bundle
+ * and the skills. Null when it said none of it. Only what the run carried: nothing is read from a file or guessed.
+ */
+export function cleanContext(c) {
+  const b = c && typeof c === 'object' ? c : {};
+  const p = b.prior && typeof b.prior === 'object' ? b.prior : null;
+  const i = b.instructions && typeof b.instructions === 'object' ? b.instructions : null;
+  const prior = p ? { session: word(p.session_id, 120), cwd: word(p.cwd, 300), task: word(p.task_id, 80), instructions: word(p.instructions, 120) } : null;
+  const instructions = i && (word(i.file, 300) || word(i.key, 120)) ? { file: word(i.file, 300), key: word(i.key, 120) } : null;
+  const skills = [...new Set((Array.isArray(b.skills) ? b.skills : []).map((x) => word(x, 60)).filter(Boolean))].slice(0, 40);
+  const wake = word(b.wake_reason, 80);
+  const out = { wake, prior: prior && Object.values(prior).some(Boolean) ? prior : null, instructions, skills };
+  return wake || out.prior || instructions || skills.length ? out : null;
+}
+
+const sameDir = (a, b) => String(a).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase() === String(b).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+/**
+ * What the employee desk shows of a run's context (#206), or null with none. The office opens a new session on every wake and cannot
+ * resume one (ADR 0010), so `resumed` is false; `fresh` says why it is not a continuation, from the run's own facts: no saved session,
+ * another task, another folder, changed instructions, else that the office does not resume. x: { cwd, task }.
+ */
+export function deskOf(ctx, x) {
+  if (!ctx) return null;
+  const p = ctx.prior;
+  let fresh;
+  if (!p || !p.session) fresh = 'Paperclip saved no earlier session for this employee.';
+  else if (p.task && p.task !== x.task) fresh = 'It works on another task than the saved session.';
+  else if (p.cwd && !sameDir(p.cwd, x.cwd)) fresh = 'It works in another folder than the saved session.';
+  else if (p.instructions && ctx.instructions && ctx.instructions.key && p.instructions !== ctx.instructions.key) fresh = 'Its instructions changed since the saved session.';
+  else fresh = 'The office does not resume a saved session yet.';
+  return { wake: ctx.wake, resumed: false, fresh, instructions: ctx.instructions, skills: ctx.skills };
+}
+
+/** The run a request describes, checked: { runId, agent: { id, company, name }, kind, model, cwd, isolation, prompt, task, context }. Throws httpError 400. */
 export function cleanRun(body) {
   const b = body && typeof body === 'object' ? body : {};
   const agent = b.agent && typeof b.agent === 'object' ? b.agent : {};
@@ -42,7 +77,7 @@ export function cleanRun(body) {
   if (b.task_id != null && (typeof b.task_id !== 'string' || !PLAIN.test(b.task_id))) bad('task_id must be a plain id.');
   return {
     runId: b.run_id, agent: { id: agent.id, company: agent.company_id, name: clip(String(agent.name || '').trim(), 40) || 'Employee' },
-    kind, model: b.model ? b.model.trim() || null : null, cwd: b.cwd.trim(), isolation, prompt: b.prompt.trim().slice(0, PROMPT_MAX), task: b.task_id || null,
+    kind, model: b.model ? b.model.trim() || null : null, cwd: b.cwd.trim(), isolation, prompt: b.prompt.trim().slice(0, PROMPT_MAX), task: b.task_id || null, context: cleanContext(b.context),
   };
 }
 
@@ -148,7 +183,8 @@ export function createRuns(deps) {
     const s = deps.session(uid);
     if (!s) throw httpError(500, 'The office session did not open.');
     // The ids of a Paperclip run label the bot (paperclip.mjs labelOf) and name its Paperclip task, as for a run that comes in by hooks.
-    s.paperclip = { agent: x.agent.id, company: x.agent.company, run: x.runId.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 80), ...(x.task ? { task: x.task } : {}) };
+    const desk = deskOf(x.context, x);
+    s.paperclip = { agent: x.agent.id, company: x.agent.company, run: x.runId.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 80), ...(x.task ? { task: x.task } : {}), ...(desk ? { desk } : {}) };
     const r = { key: x.runId, uid, log: [], base: 0, done: false, result: null, doneAt: 0, waiters: new Set(), timer: null, seen: { reply: 0, calls: new Set(), failed: new Set(), asks: new Set() } };
     runs.set(r.key, r);
     push(r, 'stdout', `[agent-office] ${x.kind} opened for ${x.agent.name} in ${x.cwd}. Its calls follow the Security room.`);

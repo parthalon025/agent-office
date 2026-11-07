@@ -37,7 +37,7 @@ const end = (s, patch = {}) => Object.assign(s, { status: 'idle', turnEnded: tru
 
 test('cleanRun checks every field and fills the defaults', () => {
   const x = cleanRun(BODY);
-  assert.deepEqual(x, { runId: 'run-1', agent: { id: 'agent-1', company: 'co-1', name: 'Ada' }, kind: 'claude-code', model: 'haiku', cwd: 'C:\\work\\acme', isolation: 'same', prompt: 'Add a health route.', task: 'task-9' });
+  assert.deepEqual(x, { runId: 'run-1', agent: { id: 'agent-1', company: 'co-1', name: 'Ada' }, kind: 'claude-code', model: 'haiku', cwd: 'C:\\work\\acme', isolation: 'same', prompt: 'Add a health route.', task: 'task-9', context: null });
   const d = cleanRun({ ...BODY, agent_kind: undefined, model: undefined, task_id: undefined, agent: { ...BODY.agent, name: '' } });
   assert.deepEqual([d.kind, d.model, d.task, d.agent.name], ['claude-code', null, null, 'Employee']);
   for (const [what, body] of [['run id', { ...BODY, run_id: '../x' }], ['agent id', { ...BODY, agent: { ...BODY.agent, id: 'a b' } }], ['company', { ...BODY, agent: { ...BODY.agent, company_id: '' } }],
@@ -202,4 +202,44 @@ test('a start under the id of a run that has ended is a new run, not the old res
   assert.deepEqual(await runs.start(BODY), { key: 'run-1', resumed: false });
   assert.equal(calls.open.length, 2);
   assert.equal((await runs.wait({ key: 'run-1', cursor: 99 }, AbortSignal.abort())).done, false);
+});
+
+// ---------- the context of a run on the employee desk (#206) ----------
+import { cleanContext, deskOf } from '../src/paperclip-runs.mjs';
+
+test('cleanContext keeps only what the run said, clipped, and says nothing for a run with no context', () => {
+  assert.equal(cleanContext(undefined), null);
+  assert.equal(cleanContext({}), null);
+  const c = cleanContext({ wake_reason: 'issue_assigned', prior: { session_id: 'sess-1', cwd: 'C:\\work\\acme', task_id: 'task-8', instructions: 'k1' }, instructions: { file: 'C:\\work\\acme\\AGENTS.md', key: 'k2' }, skills: ['review', 'deploy', 5, '', 'review'] });
+  assert.deepEqual(c, { wake: 'issue_assigned', prior: { session: 'sess-1', cwd: 'C:\\work\\acme', task: 'task-8', instructions: 'k1' }, instructions: { file: 'C:\\work\\acme\\AGENTS.md', key: 'k2' }, skills: ['review', 'deploy'] });
+  assert.equal(cleanContext({ skills: Array.from({ length: 80 }, (_, i) => `s${i}`) }).skills.length, 40);
+  assert.equal(cleanContext({ wake_reason: 'x'.repeat(500) }).wake.length, 80);
+  assert.equal(cleanRun({ ...BODY, context: { wake_reason: 'timer' } }).context.wake, 'timer');
+  assert.equal(cleanRun(BODY).context, null);
+});
+
+test('deskOf: a fresh session says why, from what the run carried; the office never claims a resume', () => {
+  const base = { wake: 'issue_assigned', instructions: { file: 'AGENTS.md', key: 'k1' }, skills: ['review'], prior: null };
+  const x = { cwd: 'C:\\Work\\Acme', task: 'task-9' };
+  const why = (prior) => deskOf({ ...base, prior }, x).fresh;
+  assert.equal(deskOf(null, x), null, 'no context: nothing to show');
+  assert.equal(deskOf(base, x).resumed, false);
+  assert.match(why(null), /no earlier session/i);
+  assert.match(why({ session: 's', task: 'task-1', cwd: 'C:\\work\\acme' }), /another task/i);
+  assert.match(why({ session: 's', task: 'task-9', cwd: 'D:\\other' }), /another folder/i);
+  assert.match(why({ session: 's', task: 'task-9', cwd: 'c:/work/acme/', instructions: 'k0' }), /instructions changed/i);
+  assert.match(why({ session: 's', task: 'task-9', cwd: 'c:/work/acme/', instructions: 'k1' }), /does not resume/i, 'same folder (any spelling), task and instructions: still fresh, and it says so');
+  const d = deskOf(base, x);
+  assert.deepEqual([d.wake, d.skills, d.instructions.file], ['issue_assigned', ['review'], 'AGENTS.md']);
+});
+
+test('start keeps the run context on the session for the desk', async () => {
+  const r = rig();
+  await r.runs.start({ ...BODY, context: { wake_reason: 'issue_assigned', skills: ['review'], prior: { session_id: 's0', task_id: 'task-1' } } });
+  const d = r.sessions.get('o1').paperclip.desk;
+  assert.equal(d.wake, 'issue_assigned');
+  assert.match(d.fresh, /another task/i);
+  const r2 = rig();
+  await r2.runs.start(BODY);
+  assert.equal(r2.sessions.get('o1').paperclip.desk, undefined, 'no context: no desk block, nothing guessed');
 });

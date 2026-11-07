@@ -286,6 +286,12 @@ html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); 
 .stats-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
 .stats-list li { display: flex; justify-content: space-between; gap: var(--space-3); color: var(--muted); }
 .stats-list b { color: var(--ink); }
+/* the run context of a Paperclip employee on its desk screen (screens.js RunContext) */
+.desk-run { flex: none; padding: var(--space-1) var(--space-3); border-bottom: 1px solid var(--line); background: var(--panel); color: var(--muted); }
+.desk-run summary { cursor: pointer; color: var(--ink); }
+.desk-run .stats-list { padding-block: var(--space-1); }
+.desk-run .stats-list li { flex-wrap: wrap; }
+.desk-run .stats-list b { font-weight: 500; text-align: right; overflow-wrap: anywhere; }
 
 /* ---------- look bar: the camera looks at a screen (panels.js LookBar; scene-host.js places the screen above it) ---------- */
 .look-bar { position: fixed; z-index: var(--z-hud); display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-1) var(--space-2); background: var(--panel); backdrop-filter: blur(var(--blur-panel)); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow-panel); animation: page-fade var(--duration-base) var(--ease-out) both; }

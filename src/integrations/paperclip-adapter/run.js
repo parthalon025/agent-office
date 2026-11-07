@@ -56,6 +56,22 @@ export function promptOf({ agent = {}, config = {}, context = {} }) {
 }
 
 /**
+ * What the run says about itself for the employee desk (#206), only from what Paperclip passed: the wake reason, the session it saved last
+ * (runtime.sessionParams: its id, folder, task and instructions file), the instructions file of the config and the skills Paperclip
+ * lists (config.paperclipRuntimeSkills, or context.skills). Nothing is read from disk. Undefined when none of it came.
+ */
+export function contextOf({ config = {}, context = {}, runtime = {} }) {
+  const sp = (runtime && runtime.sessionParams) || {};
+  const sid = text(sp.sessionId) || text(runtime && runtime.sessionId);
+  const prior = sid ? { session_id: sid, ...(text(sp.cwd) ? { cwd: text(sp.cwd) } : {}), ...(text(sp.taskId) ? { task_id: text(sp.taskId) } : {}), ...(text(sp.instructionsFile) ? { instructions: text(sp.instructionsFile) } : {}) } : null;
+  const file = text(config.instructionsFilePath);
+  const raw = Array.isArray(config.paperclipRuntimeSkills) ? config.paperclipRuntimeSkills : Array.isArray(context.skills) ? context.skills : [];
+  const skills = raw.map((x) => (typeof x === 'string' ? x : text(x?.name) || text(x?.runtimeName) || text(x?.key))).map(text).filter(Boolean);
+  const out = { ...(text(context.wakeReason) ? { wake_reason: text(context.wakeReason) } : {}), ...(prior ? { prior } : {}), ...(file ? { instructions: { file, key: file } } : {}), ...(skills.length ? { skills } : {}) };
+  return Object.keys(out).length ? out : undefined;
+}
+
+/**
  * @param {object} deps
  * @param {() => object} deps.env the environment (AGENT_OFFICE_TOKEN_FILE).
  * @param {(file: string) => Promise<string>} deps.readFile reads the token file.
@@ -93,6 +109,7 @@ export function createRunner(deps) {
     const kind = text(config.agentKind) || 'claude-code';
     const prompt = promptOf({ agent, config, context });
     const taskId = text(context.taskId) || text(context.issueId);
+    const runContext = contextOf({ config, context, runtime: ctx.runtime });
     try { await ctx.onMeta?.({ adapterType: 'agent_office', command: `agent-office:${kind}`, cwd, prompt, context: { agentKind: kind } }); } catch { /* a log sink never stops a run */ }
 
     let key = null, start;
@@ -101,6 +118,7 @@ export function createRunner(deps) {
       start = await ask(o, ROUTES.start, {
         run_id: ctx.runId, agent: { id: agent.id, company_id: agent.companyId, name: agent.name }, agent_kind: kind, ...(text(config.model) ? { model: text(config.model) } : {}),
         cwd, isolation: config.isolation === 'worktree' ? 'worktree' : 'same', prompt, ...(PLAIN.test(taskId) ? { task_id: taskId } : {}),
+        ...(runContext ? { context: runContext } : {}),
       }, ctx.signal);
     } catch { return ctx.signal?.aborted ? cancelled() : failed(down(o), 'agent_office_down'); }
     if (start.status < 200 || start.status > 299 || !start.json || typeof start.json.key !== 'string') return failed(`Agent Office refused the run: ${reason(start)}`, 'agent_office_refused');

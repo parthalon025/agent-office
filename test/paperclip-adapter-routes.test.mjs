@@ -72,7 +72,9 @@ test('a call of the run waits in Needs you until the user answers; then the run 
   assert.equal(waiting.provider, 'ollama');
   assert.equal(waiting.name, 'Ada');
   assert.deepEqual([waiting.pending.length, waiting.pending[0].tool], [1, 'Bash'], 'every call cell is Ask: nothing is answered for the user');
-  assert.deepEqual((await fullOf(waiting.uid)).paperclip, { agent: 'agent-1', company: 'co-1', run: 'run-e2e-1', task: 'task-9' });
+  const desk = { wake: 'issue_assigned', resumed: false, fresh: 'Paperclip saved no earlier session for this employee.', instructions: null, skills: [] };
+  assert.deepEqual((await fullOf(waiting.uid)).paperclip, { agent: 'agent-1', company: 'co-1', run: 'run-e2e-1', task: 'task-9', desk });
+  assert.deepEqual(waiting.deskCtx, desk, 'the page gets the run context in its snapshot (#206)');
   assert.equal(fake.requests[0].messages.at(-1).content.includes('ACM-12 Say hello'), true, 'the task reached the agent in its prompt');
   await new Promise((r) => setTimeout(r, 300));
   assert.equal(settled, false, 'the run does not end while the call waits');
