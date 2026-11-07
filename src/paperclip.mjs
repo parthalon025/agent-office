@@ -205,6 +205,9 @@ export function runCheck(command, args, hooksFile, keys = []) {
   return p ? { ok: false, why: p.why, partly: true, kind: p.kind } : { ok: true, why: '', partly: false, kind: '' };
 }
 
+/** The adapter type of the office adapter plugin (src/integrations/paperclip-adapter). */
+export const OFFICE_ADAPTER = 'agent_office';
+
 /**
  * The supervision of one Paperclip agent: { state, label, why, can }.
  * state: 'supervised' (its runs hold every call Claude Code asks about in the office), 'partly' (the office cannot check all
@@ -218,6 +221,8 @@ export function runCheck(command, args, hooksFile, keys = []) {
  */
 export function supervisionOf(agent, hooksFile, { issues = [], lastRun = null, unread = [], layers = [] } = {}) {
   const a = obj(agent);
+  // The office adapter (#200) hands every run to the office: its calls go through the Security room, whatever the agent kind.
+  if (a.adapterType === OFFICE_ADAPTER) return { state: 'supervised', label: '', why: 'Its runs go through the office adapter, so the Security room decides every call.', can: false };
   if (a.adapterType !== 'claude_local') {
     const why = `Its runs use ${a.adapterType || 'another adapter'}, not Claude Code, so they never reach the office hooks.`;
     return { state: 'unsupervised', label: 'Unsupervised: runs without the office hooks', why, can: false };

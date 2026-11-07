@@ -13,6 +13,7 @@ import { createCampus } from './campus.mjs';
 import { slimPayload, cleanIds as cleanPaperclipIds } from './payload.mjs';
 import { createHq } from './paperclip.mjs';
 import { createRuntime } from './paperclip-runtime.mjs';
+import { createRuns } from './paperclip-runs.mjs';
 import { recap as recapOf, away as awayOf } from './rituals.mjs';
 import { mark as markOrientation, view as orientationView } from './orientation.mjs';
 import { createTracker, clip } from './tracker.mjs';
@@ -392,7 +393,7 @@ export function createOffice(cfg) {
   // key in an owner-only file and stops it with the office. A Paperclip the user runs is never installed over or touched. Off until the
   // user installs and starts it (Attach sessions); once started it comes back with the office (persisted.paperclipRuntime).
   const runtime = cfg.runtime || createRuntime({
-    root: ROOT, port: PORT, env: process.env, writeSecret, spawn: (file, args, opts) => spawn(file, args, opts),
+    root: ROOT, port: PORT, env: process.env, writeSecret, tokenFile: TOKEN_FILE, spawn: (file, args, opts) => spawn(file, args, opts),
     onChange: () => broadcast(), onFeed: (text, kind) => addFeed(PAPERCLIP, kind, text),
   });
   async function installRuntime(body) {
@@ -1028,6 +1029,12 @@ export function createOffice(cfg) {
     onChange: () => { saved.set('goals', manager.export()); savePersisted(); broadcast(); },
   });
   manager.restore(saved.get('goals'));
+  // The office adapter (#200, paperclip-runs.mjs): a run Paperclip hands to the office is an ordinary office session of the employee's agent kind
+  // (provider seam, Security room, holds, Needs you). The plugin in Paperclip asks for the log and the result; a call that waits is in Needs you.
+  const paperclipRuns = createRuns({
+    open: (o) => openSession(o), send: (uid, text) => sendMessage(uid, text, [], { answers: false }), session: (uid) => sessions.get(uid),
+    close: (uid) => closeSession(uid), feed: (s, kind, text) => addFeed(s, kind, text), changed: () => broadcast(),
+  });
   const planBoard = createPlanBoard({ sources: [officeSource(manager), hq.planSource] });
   // Called after every state change: a step ends with the turn of its agent, and a freed agent may take a waiting step.
   let goalTickQueued = false, freeSig = '';
@@ -1204,6 +1211,7 @@ export function createOffice(cfg) {
   readPlan();
   function broadcast() {
     goalTick();    // a step ends with its agent's turn (#156)
+    paperclipRuns.tick(); // so does a Paperclip run (#200)
     noteRooms();   // every state change: a room gets its floor and its name even while no page is connected (#92)
     if (!pending) pending = setTimeout(flush, BROADCAST_MS);
   }
@@ -1309,6 +1317,9 @@ export function createOffice(cfg) {
     }),
     R('POST', '/hook/permission', 'agent', ({ body, signal }) => onPermission(body, signal)),
     R('POST', '/hook/openclaw', 'agent', ({ body, signal }) => onOpenClawCall(body, signal)),
+    R('POST', '/hook/paperclip/run/start', 'agent', ({ body }) => paperclipRuns.start(body)),
+    R('POST', '/hook/paperclip/run/wait', 'agent', ({ body, signal }) => paperclipRuns.wait(body, signal)),
+    R('POST', '/hook/paperclip/run/cancel', 'agent', ({ body }) => paperclipRuns.cancel(body)),
     R('POST', '/mcp/inbox', 'agent', ({ body }) => onMcpInbox(body)),
     R('POST', '/mcp/ask', 'agent', ({ body, signal }) => onMcpAsk(body, signal)),
     R('POST', '/mcp/mail', 'agent', ({ body }) => onMcpMail(body)),

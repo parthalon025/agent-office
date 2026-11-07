@@ -3,7 +3,7 @@
 // call, no real Paperclip. Run: node --test test/paperclip.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { checkUrl, supervisionOf, supervisePatch, argsWhy, configWhy, runCheck, runIds, cleanIds, createHq, roleLabel, DEFAULT_URL } from '../src/paperclip.mjs';
+import { OFFICE_ADAPTER, checkUrl, supervisionOf, supervisePatch, argsWhy, configWhy, runCheck, runIds, cleanIds, createHq, roleLabel, DEFAULT_URL } from '../src/paperclip.mjs';
 import { startFakePaperclip, DEMO } from './fixtures/fake-paperclip.mjs';
 import { until } from './fixtures/office-server.mjs';
 
@@ -782,4 +782,12 @@ test('a board key goes in the Authorization header of every read and of the live
   try {
     await assert.rejects(hq0.connect({ url: none.url }), (e) => e.status === 502 && /asks for sign-in \(403\)/.test(e.message) && /board key/.test(e.message));
   } finally { await none.close(); }
+});
+
+test('an employee on the office adapter is Supervised, whatever its agent kind; the adapter of another type is not (#200)', () => {
+  assert.equal(OFFICE_ADAPTER, 'agent_office');
+  const s = supervisionOf({ id: 'a1', adapterType: OFFICE_ADAPTER, adapterConfig: { agentKind: 'codex' } }, HOOKS);
+  assert.deepEqual([s.state, s.label, s.can], ['supervised', '', false]);
+  assert.match(s.why, /office adapter/);
+  assert.equal(supervisionOf({ id: 'a1', adapterType: 'codex_local', adapterConfig: { cwd: 'C:/x' } }, HOOKS).state, 'unsupervised');
 });

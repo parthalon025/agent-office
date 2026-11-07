@@ -1,0 +1,9 @@
+{
+  "name": "agent-office-paperclip-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Paperclip adapter plugin: hands an employee run to Agent Office, which runs it under supervision and reports result, usage and cost back.",
+  "exports": { ".": "./index.js" }
+}
