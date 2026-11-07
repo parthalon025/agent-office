@@ -3,7 +3,8 @@
 // routes and its live events (WebSocket /api/companies/{id}/events/ws) and shows them. Its Claude Code runs reach the office
 // like any terminal session, through the office hooks (hook.mjs adds the PAPERCLIP_* ids of the run), once "Supervise in
 // office" has set the agent up for that. That PATCH, after the Security room's painted Confirm, is the one write the office
-// makes to Paperclip (ADR 0005). It never sends a heartbeat, never assigns or changes a task and never runs a routine.
+// made to Paperclip (ADR 0005); the goal handoff (ADR 0007) is the second. Since ADR 0010 every other write goes through `write` (#198), after the
+// HQ write grid. The office never sends a heartbeat and never runs a routine.
 //
 // Facts from the spike (#75, Paperclip 2026.1023.0 on Windows, Node 24.11+): a claude_local agent holds its calls in the
 // office only with engine 'cli', dangerouslySkipPermissions false and extraArgs ['--permission-mode', 'default', '--settings',
@@ -17,7 +18,7 @@
 import path from 'node:path';
 import { runIds, cleanIds } from './payload.mjs';
 import { readArgs, CLAUDE_FLAGS_VERSION } from './providers/claude-code.mjs';
-import { floorsOf, lobbyOf, shapeProblems } from './hq-model.mjs';
+import { floorsOf, lobbyOf, shapeProblems, planWrite, writeValueOf, WRITE_KINDS } from './hq-model.mjs';
 
 export const DEFAULT_URL = 'http://127.0.0.1:3100';
 
@@ -347,7 +348,7 @@ export function createHq(deps = {}) {
         ? `Paperclip at ${conn.url} does not accept the board key (${res.status}). It may be expired or revoked. Connect to Paperclip again with a new key.`
         : `Paperclip at ${conn.url} asks for sign-in (${res.status}). The office reads a Paperclip that runs in local_trusted mode (paperclipai run --bind loopback), or one that you connect with a board key (Attach sessions, Paperclip runtime).`);
     }
-    if (!res.ok) throw httpError(502, `Paperclip answered ${res.status} for ${route.split('?')[0]}${body ? `: ${text(body, 160)}` : '.'}`);
+    if (!res.ok) throw Object.assign(httpError(502, `Paperclip answered ${res.status} for ${route.split('?')[0]}${body ? `: ${text(body, 160)}` : '.'}`), { upstream: res.status });
     try { return body ? JSON.parse(body) : null; } catch { throw httpError(502, `Paperclip at ${conn.url} did not answer JSON for ${route.split('?')[0]}.`); }
   }
   const list = (v) => (Array.isArray(v) ? v : []);
@@ -721,5 +722,53 @@ export function createHq(deps = {}) {
     return { written, company: name };
   }
 
-  return { connect, disconnect, supervise, handoffGoal, handoffTasks, view, model, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
+  // ---------- the writer (#198, ADR 0010): the one function that sends a write ----------
+  // One write, keyed by its kind (hq-model.mjs planWrite). The write grid (deps.grid(): the saved cells; a cell not set uses its default)
+  // answers first: Deny refuses (403), Confirm asks first (deps.askFirst, the ask-first protocol, ask.js) until the same call comes with
+  // confirmed: true, Allow sends. Before the question and before the send, every thing the write names is read from Paperclip and must
+  // belong to the connected company (and an approval must wait for a decision), so a Confirm is never asked for a write that cannot
+  // happen. Every write, and every refusal, leaves a feed line. The result carries ids only, never a body from Paperclip.
+  // The two earlier writes (supervise and handoffGoal, ADR 0005 and 0007) predate it and keep their own Confirm.
+  const askWrite = deps.askFirst || ((kind, message, extra) => Object.assign(httpError(409, message), { confirm: kind, ...extra }));
+  const OPEN_APPROVAL = new Set(['pending', 'revision_requested']);
+  async function check(conn, t) {
+    if (t.type === 'agent') {
+      const a = d.agents.get(t.id);
+      if (!a || a.status === 'terminated') throw httpError(404, 'Paperclip has no such agent in this company.');
+      return;
+    }
+    const issue = t.type === 'issue', route = `/api/${issue ? 'issues' : 'approvals'}/${t.id}`, shape = issue ? 'issue' : 'approval';
+    const json = await call(conn, route).catch((e) => { throw e.upstream === 404 ? httpError(404, `Paperclip has no such ${issue ? 'task' : 'approval'} in this company.`) : e; }), problems = shapeProblems(shape, json);
+    if (problems.length) throw httpError(502, `Paperclip answered in a shape the office does not know (${problems[0]}) Update the office or the pinned Paperclip.`);
+    if (json.id !== t.id || json.companyId !== conn.companyId) throw httpError(404, `Paperclip has no such ${issue ? 'task' : 'approval'} in this company.`);
+    if (!issue && !OPEN_APPROVAL.has(json.status)) throw httpError(409, 'This approval is not waiting for a decision.');
+  }
+  /**
+   * write({ kind, action, ...fields }, { confirmed }) -> { ok: true, id?, identifier? } for what Paperclip made. Errors carry a status:
+   * 400 a bad write, 403 the grid says Deny, 409 not connected or an approval already decided, ask-first for Confirm, 404 a thing that is
+   * not in this company, 502 Paperclip failed or answered in another shape.
+   */
+  async function write(body, { confirmed = false } = {}) {
+    const conn = c;
+    if (!conn || !d || conn.state === 'choose' || !conn.companyId) throw httpError(409, 'Paperclip is not connected.');
+    const plan = planWrite(body), label = WRITE_KINDS[plan.kind].label, name = text(d.company.name, 80) || 'Paperclip';
+    const cell = writeValueOf(deps.grid ? deps.grid() : {}, plan.kind);
+    if (cell === 'deny') { feed(`Refused by the HQ write grid: ${label}. Nothing was sent.`, 'wait'); throw httpError(403, `Denied by the HQ write grid: ${label}.`); }
+    for (const t of plan.targets) await check(conn, t);
+    if (c !== conn) throw httpError(409, 'Paperclip is not connected.');
+    if (cell === 'confirm' && confirmed !== true) {
+      throw askWrite('write', `${plan.summary} in ${name}? The office sends this one change to Paperclip and nothing else.`, { write: { kind: plan.kind, action: plan.action, summary: plan.summary } });
+    }
+    let made;
+    try { made = obj(await call(conn, plan.path(conn.companyId), { method: plan.method, body: JSON.stringify(plan.body) })); }
+    catch (e) { feed(`Paperclip refused the write: ${plan.summary}. ${e.message}`, 'wait'); throw e; }
+    if (plan.kind === 'task' && plan.action === 'create' && !made.id) { feed(`Paperclip did not name the task it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the task it made.'); }
+    feed(`Wrote to ${name}: ${plan.summary}.`);
+    refetchSoon(conn);
+    const out = { ok: true };
+    if (plan.kind === 'task' && plan.action === 'create') { out.id = String(made.id); if (typeof made.identifier === 'string') out.identifier = text(made.identifier, 30); }
+    return out;
+  }
+
+  return { connect, disconnect, supervise, handoffGoal, handoffTasks, write, view, model, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
 }

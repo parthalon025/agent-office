@@ -17,6 +17,7 @@ import { cleanNotes, cleanPins } from './notes.mjs';
 import { cleanMerges, cleanStandups, cleanFocus } from './rituals.mjs';
 import { cleanOrientation } from './orientation.mjs';
 import { cleanRuntime } from './paperclip-runtime.mjs';
+import { cleanWriteGrid } from './hq-model.mjs';
 
 const isMap = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
 const list = (raw) => (Array.isArray(raw) ? raw : []);
@@ -55,6 +56,7 @@ export const SLICES = {
   spendLimit: cleanSpendLimit,
   paperclip: cleanPaperclip,
   paperclipRuntime: cleanRuntime,   // { enabled: true } while the user wants the office's own Paperclip to run with the office (#193)
+  hqGrid: cleanWriteGrid,   // the HQ write grid (#198): { writeKind: 'confirm' | 'allow' | 'deny' } for the cells the user set
   httpHooks: (raw) => (isMap(raw) ? raw : undefined),
   commands: (raw) => (Array.isArray(raw) ? raw : undefined),
   goals: (raw) => raw,   // the Manager (manager.mjs restore) reads its own export

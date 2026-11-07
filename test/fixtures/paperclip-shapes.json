@@ -113,6 +113,31 @@
     "latestVersion": "number",
     "value": "string"
    }
+  },
+  "issue": {
+   "list": false,
+   "fields": {
+    "id": "string",
+    "companyId": "string",
+    "identifier": "string",
+    "title": "string",
+    "status": "string",
+    "assigneeAgentId": "string",
+    "assigneeAdapterOverrides": "null"
+   }
+  },
+  "approval": {
+   "list": false,
+   "fields": {
+    "id": "string",
+    "companyId": "string",
+    "type": "string",
+    "status": "string",
+    "requestedByAgentId": "string",
+    "requestedByUserId": "null",
+    "payload": "object",
+    "createdAt": "string"
+   }
   }
  }
 }

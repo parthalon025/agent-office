@@ -1,5 +1,5 @@
 /* Agent Office for Claude Code x0.2: the ask-first protocol.
-   Some calls need the user's yes before they run: merge, fork, skill, cost, goal, handoff, runtime (the server asks), and pull request
+   Some calls need the user's yes before they run: merge, fork, skill, cost, goal, handoff, runtime, write (the server asks), and pull request
    and remove (the page asks before it calls). One Module owns both sides, so a ninth kind is one row in KINDS:
      build side (server):  OfficeAsk.answer(kind, text, extra) -> { status, body }   the first call, before it runs
      read side (page):     OfficeAsk.asked(x, kind, confirmed) -> { text, body } | null   x is the Error a client command rejects with
@@ -15,6 +15,7 @@
     skill: { status: 409 },
     goal: { status: 409 },
     handoff: { status: 409 },
+    write: { status: 409 },                  // a Paperclip write the HQ write grid says Confirm for (#198); the answer names the write
     runtime: { status: 409 },                // installing the Paperclip runtime (#193): downloads packages and runs their install scripts
     cost: { status: 200, question: true },   // not an error: the page logs no failed request each time it asks
     pr: { local: true },                     // the page asks in its own dialog, then makes the call
