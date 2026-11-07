@@ -2,7 +2,7 @@
 // Four rules live here: the absolute program path (resolveExe), the helper folder (helperCwd), the process start time
 // (processStart) and the process-tree kill (killTree). Providers and the server import this module to start a program,
 // never git.mjs. test/spawn-safety.test.mjs scans every source for a start that does not go through resolveExe.
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -119,4 +119,17 @@ export function killTree(pid, run = execFile) {
   }
   try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } }
   return Promise.resolve();
+}
+
+/**
+ * killTree for a moment that cannot wait: the exit handler of the office (an async kill would not finish). Same rule, same
+ * absolute taskkill; it waits for the kill and never throws. deps.execFileSync is injectable for tests.
+ */
+export function killTreeSync(pid, run = execFileSync) {
+  if (!pid) return;
+  if (process.platform === 'win32') {
+    try { run(resolveExe('taskkill'), ['/PID', String(pid), '/T', '/F'], { cwd: helperCwd(), windowsHide: true, stdio: 'ignore', timeout: 15000 }); } catch { /* gone */ }
+    return;
+  }
+  try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } }
 }

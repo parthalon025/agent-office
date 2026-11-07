@@ -235,7 +235,23 @@
     if (hq.state === 'connecting') return 'Connecting to ' + hq.url;
     return 'Lost ' + hq.url + ': ' + (hq.error || 'no answer') + ' The office tries again.';
   }
-  var hq = { status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState };
+  // The Paperclip the office runs itself (#193, paperclip-runtime.mjs status): its state as a DS status and a word, and the board key's line.
+  var RUNTIME = { off: ['resting', 'Not installed'], installing: ['working', 'Installing'], stopped: ['resting', 'Stopped'], starting: ['working', 'Starting'],
+    running: ['working', 'Running'], failed: ['error', 'Failed'], external: ['resting', 'Another Paperclip runs'], busy: ['error', 'Port in use'] };
+  function runtimeState(rt) {
+    if (!rt) return null;
+    var x = Object.prototype.hasOwnProperty.call(RUNTIME, rt.state) ? RUNTIME[rt.state] : ['resting', String(rt.state)];
+    return { key: x[0], word: x[1] };
+  }
+  function runtimeKey(rt) {
+    var k = rt && rt.key;
+    if (!k) return '';
+    if (k.state === 'ready') return k.expiresAt ? 'Board key ready, valid until ' + String(k.expiresAt).slice(0, 10) : 'Board key ready';
+    if (k.state === 'waiting') return 'Waiting for your approval in Paperclip';
+    if (k.state === 'expired' || k.state === 'refused') return k.reason || 'No board key';
+    return 'No board key yet';
+  }
+  var hq = { status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey };
 
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
   // priced: sessions with a cost figure. unknown: sessions whose agent reports no cost (costUnknown), shown as "unknown".

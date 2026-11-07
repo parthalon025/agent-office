@@ -82,6 +82,17 @@ test('a session sends only the fields the page reads; server-only fields stay on
   assert.equal(l.provider, 'claude-code');
 });
 
+test('the snapshot carries the Paperclip runtime status, and a patch sends only its change (#193)', () => {
+  const rt = (state) => ({ state, reason: '', key: { state: 'none' }, steps: [] });
+  const a = W.lean({ sessions: [], paperclipRuntime: rt('stopped') });
+  assert.deepEqual(a.paperclipRuntime, rt('stopped'));
+  assert.equal(W.lean({ sessions: [] }).paperclipRuntime, null, 'none until the office has one');
+  const b = W.lean({ sessions: [], paperclipRuntime: rt('running') });
+  const p = W.diff(a, b);
+  assert.deepEqual(p.set.paperclipRuntime, rt('running'));
+  assert.deepEqual(W.apply(a, p).paperclipRuntime, rt('running'));
+});
+
 test('the snapshot carries the agent kinds once, and a patch never repeats them', () => {
   const o = office(1, 1);
   const kinds = [{ kind: 'claude-code', label: 'Claude Code', paid: true, terminal: true, modes: ['default'], needsModel: false },

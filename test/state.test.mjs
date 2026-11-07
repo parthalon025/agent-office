@@ -15,7 +15,7 @@ test('a state file with bad slices: each area cleans its own, the rest is kept',
   const bad = {
     security: 'nope', costs: [1, 2], trust: 7, layouts: { b1: 'x', b2: null }, rooms: 'x',
     notes: { 'k': { text: 'hi', at: 1 } }, pins: [], merges: { not: 'a list' }, standups: 'x', focus: 'yes',
-    personas: 5, teams: [], screens: 'x', templates: 'x', schedules: { a: 1 }, spendLimit: -3, paperclip: { company: 'c' },
+    personas: 5, teams: [], screens: 'x', templates: 'x', schedules: { a: 1 }, spendLimit: -3, paperclip: { company: 'c' }, paperclipRuntime: { enabled: 'yes' },
     recent: 'x', future: { kept: true },
   };
   const { st } = open(JSON.stringify(bad));
@@ -29,6 +29,7 @@ test('a state file with bad slices: each area cleans its own, the rest is kept',
   assert.deepEqual(st.get('schedules'), []);
   assert.equal(st.get('spendLimit'), undefined);
   assert.equal(st.get('paperclip'), undefined);
+  assert.equal(st.get('paperclipRuntime'), undefined);
   assert.deepEqual(st.get('recent'), []);
   assert.equal(st.get('notes').k.v, 1, 'a board without a version counter gets 1');
   assert.deepEqual(st.get('future'), { kept: true }, 'a key no slice knows is kept');

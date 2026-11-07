@@ -25,6 +25,8 @@ The office reads these environment variables when it starts. Set them before `np
 | `OFFICE_HERMESGATEWAY_TOKEN_FILE` / `OFFICE_HERMESGATEWAY_TOKEN` | none | The gateway API key (16 characters or more), as for Cursor. `OFFICE_HERMESGATEWAY_MODEL` (optional) is the model name, default `hermes-agent`. |
 | `OFFICE_OPENCLAW_PORT` | `18789` | The loopback port of your OpenClaw Gateway. The office only checks that something listens there (see [OpenClaw](agents.md#openclaw)). |
 | `OFFICE_ACP_PROGRAM` / `OFFICE_ACP_ARGS` | none | The program (a plain name on the PATH) and the arguments (a JSON list of strings) of the generic **ACP agent** kind. The kind is not ready without a program (see [ACP tools](agents.md#acp-tools-gemini-cli-opencode-kimi-cli-and-other-acp-agents)). |
+| `OFFICE_PAPERCLIP_PORT` / `OFFICE_PAPERCLIP_DB_PORT` | `3100` / `54339` | The loopback port of the Paperclip that the office installs and runs, and the port of its embedded database (see [Run Paperclip from the office](paperclip.md#run-paperclip-from-the-office)). |
+| `OFFICE_NPM_CLI` | npm next to node | The full path of npm's `npm-cli.js`, when the office cannot find npm next to node. The office runs it with node: it never starts `npm.cmd`. |
 | `OFFICE_PAPERCLIP_ASK_S` | the 15 minute office wait | Seconds a request of a Paperclip run waits for you before the office denies it. |
 | `OFFICE_RATE_FILE` | `~/.claude/rate_limits_state.json` | The file with Claude Code's `rate_limits` that the weekly limit meter reads. Without the file the meter stays hidden. |
 | `OFFICE_EXPLAIN` | on | `off` stops the one-line explanation that a local model adds to a waiting request. The explanation only informs: the raw command always shows next to it. |

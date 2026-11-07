@@ -58,9 +58,10 @@ const RUNS_FILE = /^(office-(hooks|hooks-http|mcp)(-\d+)?\.json|(microsoft\.[\w.
 const LATER_FILE = /^(state|history)(-\d+)?\.json$/;
 // Credential folders and secret-looking file names. A read outside the root is high, inside it is medium.
 // .office-token[-<port>] and office-hooks-http[-<port>].json hold an office's agent token (files.mjs);
-// office-page-<port>.json holds the office's page token for the user's own tools (auth.mjs pageFile).
+// office-page-<port>.json holds the office's page token for the user's own tools (auth.mjs pageFile);
+// paperclip-board-key[-<port>].json holds the board key of the Paperclip the office runs (paperclip-runtime.mjs, #193).
 const SECRET_DIRS = new Set(['.ssh', '.gnupg', '.aws', '.azure', '.kube']);
-const SECRET_FILE = /^(\.env.*|.*\.(pem|key|pfx|p12)|id_(rsa|dsa|ecdsa|ed25519).*|\.credentials\.json|\.office-token(-\d+)?|office-hooks-http(-\d+)?\.json|office-page-\d+\.json|\.npmrc|\.netrc|_netrc|\.git-credentials|\.pypirc)$/;
+const SECRET_FILE = /^(\.env.*|.*\.(pem|key|pfx|p12)|id_(rsa|dsa|ecdsa|ed25519).*|\.credentials\.json|\.office-token(-\d+)?|office-hooks-http(-\d+)?\.json|office-page-\d+\.json|paperclip-board-key(-\d+)?\.json|\.npmrc|\.netrc|_netrc|\.git-credentials|\.pypirc)$/;
 
 const WIN = process.platform === 'win32';
 const norm = (p) => { const r = path.resolve(String(p)); return WIN ? r.toLowerCase() : r; };
@@ -199,7 +200,10 @@ export function configHomes(opts = {}) {
   const env = opts.env || process.env;
   const out = [];
   for (const d of [home && path.join(home, '.claude'), env.CLAUDE_CONFIG_DIR, home && path.join(home, '.hermes'), env.HERMES_HOME,
-    home && path.join(home, '.copilot'), env.COPILOT_HOME]) {
+    home && path.join(home, '.copilot'), env.COPILOT_HOME,
+    // The office's own data folder (auth.mjs pageFile, paperclip-runtime.mjs runtimePaths): the page token, the board key and the config,
+    // secrets and database of the Paperclip it runs (#193). An edit of its config or .env could turn off login mode.
+    env.LOCALAPPDATA ? path.join(env.LOCALAPPDATA, 'AgentOffice') : home && path.join(home, '.agent-office')]) {
     if (d && path.isAbsolute(String(d))) out.push(path.resolve(String(d)));
   }
   return out;

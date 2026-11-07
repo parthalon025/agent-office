@@ -36,3 +36,5 @@ The vocabulary of the office layout (#88). Plain company terms only.
 | Write grid | The HQ setting of what the office may write to Paperclip, per write kind: Confirm, Allow or Deny |
 | Self-approval | An employee approving its own work, only for the approval kinds the user allows in the write grid |
 | Office adapter | The Paperclip adapter that hands an employee run to the office, which runs it with the employee agent kind under supervision |
+| Paperclip runtime | The Paperclip that the office installs (one pinned release, git-ignored folder), starts in login mode on 127.0.0.1 and stops with the office. Not a Paperclip the user runs. Its board key is the one key the office holds (#193) |
+| Board key | The Paperclip credential of the office: a person approves it once in Paperclip, and the office keeps it in an owner-only file that no page shows |
