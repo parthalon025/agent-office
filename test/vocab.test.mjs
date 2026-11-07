@@ -142,7 +142,7 @@ test('security: six screens on three walls, each with its rows; six agent kinds 
   assert.deepEqual(S.screens.map((x) => x.title), ['Files', 'Commands', 'Network', 'Secrets', 'Agents', 'Spend']);
   assert.deepEqual(S.screens.find((x) => x.id === 'files').rows, ['read-inside', 'edit-inside', 'files-outside']);
   assert.deepEqual(S.screens.find((x) => x.id === 'secrets').rows, ['settings', 'secrets']);
-  assert.deepEqual(S.columns.map((c) => c.label), ['Claude Code', 'Hermes', 'dsh', 'OpenClaw', 'Copilot', 'Local model', 'Agent Framework', 'Cloud agent']);
+  assert.deepEqual(S.columns.map((c) => c.label), ['Claude Code', 'Hermes', 'dsh', 'OpenClaw', 'Copilot', 'ACP tools', 'Local model', 'Agent Framework', 'Cloud agent']);
   // A kind that runs on a model of this machine costs nothing: the Spend screen says Free, never Not reported (#23).
   assert.deepEqual(S.columns.filter((c) => c.free).map((c) => c.id), ['local', 'agent-framework']);
   assert.equal(S.rows.shell.label, 'Shell commands');

@@ -182,11 +182,17 @@ test('the local providers are registered, and an unknown agent kind is refused',
   assert.match(noModel.json.error, /Pick a model/);
   const info = await fetch(`http://127.0.0.1:${port}/api/providers`, { headers: { 'x-office-token': pageToken } }).then((r) => r.json());
   const kinds = info.providers.map((p) => p.kind);
-  assert.deepEqual(kinds.sort(), ['agent-framework', 'claude-code', 'copilot', 'copilot-studio', 'dsh', 'foundry', 'hermes', 'lmstudio', 'ollama', 'openclaw']);
+  assert.deepEqual(kinds.sort(), ['acp', 'agent-framework', 'claude-code', 'copilot', 'copilot-studio', 'dsh', 'foundry', 'gemini', 'hermes', 'kimi', 'lmstudio', 'ollama', 'openclaw', 'opencode']);
   const dsh = info.providers.find((p) => p.kind === 'dsh');
   assert.deepEqual([dsh.ready, dsh.cost, dsh.gated, dsh.paid], [false, 'unknown', true, true]);
   // Not on the PATH, or only an npm install (dsh.cmd), which the office cannot start without a shell: not ready either way.
   assert.match(dsh.needs[0], /dsh\.exe is not on the PATH|needs dsh\.exe\. It found only .*dsh\.cmd/);
+  // The ACP tools (#216): ungated, so each is off until the Agents screen turns it on; none is ready here and each says what to do.
+  for (const kind of ['gemini', 'opencode', 'kimi', 'acp']) {
+    const t = info.providers.find((p) => p.kind === kind);
+    assert.deepEqual([t.ready, t.cost, t.gated, t.paid], [false, 'unknown', false, true], kind);
+    assert.ok(t.needs.length > 0, `${kind} gives the steps`);
+  }
   // Agent Framework (#23): a free team kind. Without the framework on this machine it is not ready and says what to install.
   const af = info.providers.find((p) => p.kind === 'agent-framework');
   assert.deepEqual([af.paid, af.terminal, af.needsModel, af.team], [false, false, true, true]);
