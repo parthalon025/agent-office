@@ -47,6 +47,7 @@
 // Tested in test/paperclip-runs.test.mjs (broker, injected session) and test/paperclip-adapter-routes.test.mjs (the whole way: stand-in
 // host, plugin, HTTP, real office in process, local model, Windows only).
 import { httpError } from './office-core.mjs';
+import path from 'node:path';
 import { fileKey } from './risk.mjs';
 
 export const WAIT_MS = 25_000;          // how long one wait holds for news (a plain HTTP poll, so a run of hours needs no long request)
@@ -80,7 +81,16 @@ export function cleanContext(c) {
 
 // One folder whatever its spelling (case, slash style, a trailing slash, an 8.3 short name, a junction): risk.mjs fileKey, the office's path
 // identity. Two folders with no key (a path that is not text) are not the same.
-const sameDir = (a, b) => { try { return fileKey('', a) === fileKey('', b); } catch { return false; } };
+// A Windows path (drive letter) is a Windows folder whatever the office runs on: off Windows, fileKey keeps case and backslashes,
+// so it is compared by the Windows rule there.
+const WIN = /^[A-Za-z]:[\\/]/;
+const winKey = (p) => path.win32.normalize(p).replace(/\\+$/, '').toLowerCase();
+const sameDir = (a, b) => {
+  try {
+    if (process.platform !== 'win32' && WIN.test(String(a)) && WIN.test(String(b))) return winKey(a) === winKey(b);
+    return fileKey('', a) === fileKey('', b);
+  } catch { return false; }
+};
 /**
  * What the employee desk shows of a run's context (#206), or null with none. The office opens a new session on every wake and cannot
  * resume one (ADR 0010), so `resumed` is false; `fresh` says why it is not a continuation, from the run's own facts: no saved session,
