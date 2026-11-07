@@ -2,7 +2,9 @@
    The Manager board, the Paperclip HQ and earned trust (#157, #76, #153). One Module: its Interface is window.OfficePage.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel, AdapterInstall: AdapterInstall } (the HR desk, #201; company memory, #205).
    Plain functions over the page core (window.OfficePage); office.js calls the Interface and holds none of the parts.
    The HQ dialog also holds the Lobby (#197): Lobby shows the dashboard cards (from OfficeVocab.hq.cards), the approvals
-   and goals that wait, the org chart as floors top first, and the activity. The HQ dialog carries the Paperclip runtime
+   and goals that wait, the org chart as floors top first, and the activity. A waiting approval is decided here and in
+   Needs you (ApprovalDecide): Approve, Reject or Request revision, through hq.write. The Approvals cell asks first.
+   Nothing is sent when the row renders. The HQ dialog carries the Paperclip runtime
    panel (O.PaperclipRuntime, defined in dialogs.js). office.js hqBuilding makes the city's HQ floors from snap.hq.floors;
    needs.js PhoneView lists the HQ on a phone. */
 (function () {
@@ -232,8 +234,59 @@
       form, runDialog);
   }
 
+  // One waiting Paperclip approval (#225). The first click sends hq.write with no confirmed flag. Confirm (the Approvals cell)
+  // answers 409 { confirm: 'write' }; the painted Confirm sends that same body with confirmed: true. Allow resolves the first call.
+  // Deny (approvalWrite false, or a 403) sends nothing. A render sends nothing. A note edit, a new id, or a stale answer drops
+  // a waiting Confirm. Needs you uses this same part.
+  var APPROVAL_ACTIONS = ['approve', 'reject', 'revise'];
+  function ApprovalDecide(p) {
+    var H = window.OfficeVocab.hq;
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var pd = useState(null), pend = pd[0], setPend = pd[1];   // { body, text }: the decision that waits for the painted Confirm
+    var er = useState(''), err = er[0], setErr = er[1];
+    var nt = useState(''), note = nt[0], setNote = nt[1];
+    var idRef = React.useRef(p.id), lock = React.useRef(false), lockFor = React.useRef('');
+    idRef.current = p.id;
+    useEffect(function () { lock.current = false; lockFor.current = ''; setBusy(false); setPend(null); setErr(''); setNote(''); }, [p.id]);
+    function send(action, confirmed, body) {
+      if (p.write === false || lock.current) return;
+      var b = body || H.approvalBody(p.id, action, note);
+      if (!b) { setErr(H.approvalBlocked); return; }
+      var sentId = b.approval;
+      lock.current = true;
+      lockFor.current = sentId;
+      setBusy(true); setErr('');
+      client.hqWrite(Object.assign({}, b, confirmed === true ? { confirmed: true } : {})).then(function () {
+        if (lockFor.current !== sentId) return;
+        lock.current = false;
+        if (idRef.current !== sentId) return;
+        setBusy(false); setPend(null); setNote('');
+        if (p.toast) p.toast({ tone: 'success', title: H.approvalDone(b.action) });
+      }, function (x) {
+        if (lockFor.current !== sentId) return;
+        lock.current = false;
+        if (idRef.current !== sentId) return;
+        setBusy(false);
+        var q = window.OfficeAsk.asked(x, 'write', confirmed === true);
+        if (q) { setPend({ body: b, text: q.text }); return; }
+        setPend(null); setErr(x.message || 'The office could not decide this approval.');
+        if (p.toast) p.toast({ tone: 'error', title: 'Approval not decided', text: x.message });
+      });
+    }
+    if (p.write === false) return h('p', { className: 'note' }, H.approvalDenied);
+    if (!H.approvalBody(p.id, 'approve', '')) return h('p', { className: 'note' }, H.approvalBlocked);
+    return h(React.Fragment, null,
+      h(A.TextInput, { id: 'ap-note-' + (p.place || 'hq') + '-' + p.id, label: 'Note (optional)', value: note, disabled: busy || !!pend,
+        onChange: function (v) { if (lock.current) return; setNote(v); setPend(null); setErr(''); } }),
+      pend ? h(ConfirmBar, { text: pend.text, busy: busy, onConfirm: function () { send(pend.body.action, true, pend.body); }, onCancel: function () { if (lock.current) return; setPend(null); } })
+        : h('div', { className: 'past-actions' }, APPROVAL_ACTIONS.map(function (a) {
+          return h(A.Button, { key: a, variant: a === 'approve' ? 'emphasis' : 'quiet', icon: a === 'revise' ? 'edit' : a === 'reject' ? 'decline' : 'approve', disabled: busy, onClick: function () { send(a, false); } }, H.approvalLabel(a));
+        })),
+      err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null);
+  }
+
   // The Lobby (#197): the dashboard of the company, the pending approvals and goals, the live activity and the org chart as floors, top floor
-  // first. The words are OfficeVocab.hq (cards, glance, org); unknown data says Unknown. The org chart is the one write here (OrgChart).
+  // first. The words are OfficeVocab.hq (cards, glance, org); unknown data says Unknown. A waiting approval is decided here (ApprovalDecide).
   function Lobby(p) {
     var q = p.q, l = q.lobby, H = window.OfficeVocab.hq;
     return h(React.Fragment, null,
@@ -243,7 +296,9 @@
       })),
       l.approvals && l.approvals.items.length ? h('h3', { className: 'ext-h' }, 'Approvals waiting') : null,
       l.approvals && l.approvals.items.length ? h('ul', { className: 'past' }, l.approvals.items.map(function (a) {
-        return h('li', { key: a.id, className: 'past-row' }, h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h('b', null, a.kind.replace(/_/g, ' ')), a.by ? h(Tag, null, 'From ' + a.by) : null)));
+        return h('li', { key: a.id, id: 'hq-approval-' + a.id, className: 'past-row' }, h('div', { className: 'past-main' },
+          h('div', { className: 'past-title' }, h('b', null, String(a.kind || 'approval').replace(/_/g, ' ')), a.by ? h(Tag, null, 'From ' + a.by) : null),
+          h(ApprovalDecide, { id: a.id, write: q.approvalWrite !== false, toast: p.toast, place: 'lobby' })));
       })) : null,
       h('h3', { className: 'ext-h' + (p.mark('floor', 'rank-0') ? ' is-found' : ''), id: 'hq-floor-goals' }, 'Executive floor: goals'),
       h(Goals, { q: q, toast: p.toast, mark: p.mark }),
@@ -731,7 +786,8 @@
   function HqDialog(p) {
     var q = p.snap && p.snap.hq, H = window.OfficeVocab.hq;
     // Ctrl+K search (#214): p.focus = { kind, id } names what the user picked. The card says what was found, and the row of an employee,
-    // floor or routine is marked and scrolled into view. A task, goal or approval has no row here, so the card is its place.
+    // floor or routine is marked and scrolled into view. A task or a goal has no row here, so the card is its place.
+    // An approval row is hq-approval-<id>.
     var focus = p.focus, found = focus ? ((q && q.search) || []).filter(function (x) { return x.kind === focus.kind && x.id === focus.id; })[0] : null;
     var mark = function (kind, id) { return focus && focus.kind === kind && focus.id === id; };
     useEffect(function () {
@@ -978,5 +1034,5 @@
         })) : h('p', { className: 'note' }, 'No agent has a history yet.')));
   }
 
-  O.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel, AdapterInstall: AdapterInstall };
+  O.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel, AdapterInstall: AdapterInstall, ApprovalDecide: ApprovalDecide };
 })();

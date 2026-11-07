@@ -12,9 +12,11 @@
 // - lobbyOf(...): the dashboard counts and short lists.
 // - inboxOf({ agents, issues, approvals }) (#210): what Paperclip holds for the user, as items of the one queue: each pending
 //   approval, then each open task with a person assignee (assigneeUserId), oldest first, capped at INBOX_CAP. Names only, never a
-//   payload. Null when neither list was read. It is `view().inbox`. public/building.js hqRequests makes them requests of kind
-//   `paperclip` (id hq:..., no uid), so they count in Needs you, the queue, the alerts and the tab title, and open in the Needs you
-//   list with Open Paperclip HQ, not at a desk. Tested in test/hq-inbox.test.mjs and test/building.test.mjs.
+//   payload. Null when neither list was read. It is `view().inbox`. An approval item also carries `approval`, the plain id the page
+//   sends to hq.write (never the queue id). public/building.js hqRequests makes them requests of kind `paperclip` (id hq:..., no uid),
+//   so they count in Needs you, the queue, the alerts and the tab title. An approval is decided in that list and in the HQ lobby.
+//   A task row stays Open Paperclip HQ. Neither opens a desk. Tested in test/hq-inbox.test.mjs, test/building.test.mjs and
+//   test/approval-desk.test.mjs.
 // - searchOf(...) (the Ctrl+K index, #214): one entry per employee, floor, open task, goal, pending approval and routine, names and
 //   statuses only, capped per kind by SEARCH_CAPS. It is `view().search`. The page turns it into palette actions with
 //   OfficeVocab.hq.searchItems, and a pick opens the HQ dialog with focus: { kind, id }: a found card, and the row of an employee,
@@ -286,7 +288,8 @@ export function inboxOf(i) {
   const out = [];
   for (const p of i.approvals || []) {
     const by = nameOf(p.requestedByAgentId), kind = String(p.type || 'request').replace(/_/g, ' ');
-    out.push({ id: `approval:${p.id}`, kind: 'approval', text: by ? `Approval from ${by}: ${kind}` : `Approval: ${kind}`, by, at: p.at || 0 });
+    const raw = typeof p.id === 'string' ? p.id : '';
+    out.push({ id: `approval:${raw}`, kind: 'approval', approval: ID_RE.test(raw) ? raw : null, text: by ? `Approval from ${by}: ${kind}` : `Approval: ${kind}`, by, at: p.at || 0 });
   }
   for (const x of i.issues || []) {
     if (!x || !x.id || !x.assigneeUserId || x.status === 'done' || x.status === 'cancelled') continue;

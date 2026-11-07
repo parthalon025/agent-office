@@ -21,6 +21,10 @@ test('inbox: pending approvals, then tasks assigned to a person, oldest first; n
     ['approval:p2', 'approval', 'Approval: budget change'], ['issue:i1', 'issue', 'Task for you: ACM-1 Review the plan'],
     ['approval:p1', 'approval', 'Approval from Grace: hire agent'], ['issue:i4', 'issue', 'Task for you (blocked): Stuck']]);
   assert.ok(!JSON.stringify(r).includes('secret'));
+  assert.equal(r.find((x) => x.id === 'approval:p1').approval, 'p1');
+  assert.equal(r.find((x) => x.id === 'approval:p2').approval, 'p2');
+  assert.equal(Object.hasOwn(r.find((x) => x.kind === 'issue'), 'approval'), false, 'a task is not an approval');
+  assert.equal(inboxOf({ agents, approvals: [{ id: 'a/b', type: 't', at: 1 }], issues: [] })[0].approval, null, 'a bad id is not sent');
   assert.equal(inboxOf({ agents, approvals: null, issues: null }), null, 'unread is unknown, not empty');
   assert.deepEqual(inboxOf({ agents, approvals: [], issues: null }), []);
   const many = inboxOf({ agents, approvals: Array.from({ length: 50 }, (_, n) => ({ id: 'a' + n, type: 't', at: n })), issues: [] });

@@ -324,7 +324,7 @@
     return [
       { key: 'employees', label: 'Employees', value: String(e.total), note: emp.join(' · ') },
       { key: 'tasks', label: 'Open tasks', value: l.tasks ? String(l.tasks.open) : U, note: l.tasks ? l.tasks.inProgress + ' in progress · ' + l.tasks.blocked + ' blocked' : 'The office could not read the tasks' },
-      { key: 'approvals', label: 'Approvals', value: l.approvals ? String(l.approvals.pending) : U, note: l.approvals ? (l.approvals.pending ? 'Decide them in Paperclip' : 'None wait') : 'The office could not read the approvals' },
+      { key: 'approvals', label: 'Approvals', value: l.approvals ? String(l.approvals.pending) : U, note: l.approvals ? (l.approvals.pending ? 'Decide them here' : 'None wait') : 'The office could not read the approvals' },
       { key: 'goals', label: 'Goals', value: l.goals ? String(l.goals.total) : U, note: l.goals ? '' : 'The office could not read the goals' },
       { key: 'spend', label: 'Spend this month', value: l.spend ? money(l.spend.spent) : U, note: !l.spend ? 'The office could not read the costs' : l.spend.percent != null ? l.spend.percent + '% of ' + money(l.spend.limit) : 'No budget' }
     ];
@@ -436,7 +436,22 @@
     return calls;
   }
   function routineDone(c) { return c.action === 'create' ? 'Routine created' : c.action === 'schedule' ? 'Schedule changed' : 'Routine changed'; }
-  var hq = { kindSupervision: hqKindSupervision, hire: hqHire, adapter: hqAdapter, goals: hqGoals, routineStates: routineStates, routineFacts: routineFacts, routineForm: routineForm, routineCalls: routineCalls, routineDone: routineDone, searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg };
+  // One Paperclip approval decision (#225). The page sends this body through hq.write. The Approvals cell asks first.
+  // action is approve, reject or revise. The id is the plain approval id, never the queue id. A note is optional.
+  // null: the page must not send (a bad id or an unknown action).
+  var APPROVAL_ACT = { approve: 'Approve', reject: 'Reject', revise: 'Request revision' };
+  var APPROVAL_DONE = { approve: 'Approval sent', reject: 'Approval rejected', revise: 'Revision requested' };
+  var APPROVAL_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+  function approvalBody(id, action, note) {
+    if (!Object.prototype.hasOwnProperty.call(APPROVAL_ACT, action) || typeof id !== 'string' || !APPROVAL_ID.test(id)) return null;
+    var b = { kind: 'approval', action: action, approval: id };
+    var n = String(note || '').trim();
+    if (n) b.note = n.slice(0, 2000);
+    return b;
+  }
+  function approvalLabel(action) { return APPROVAL_ACT[action] || ''; }
+  function approvalDone(action) { return APPROVAL_DONE[action] || 'Approval decided'; }
+  var hq = { kindSupervision: hqKindSupervision, hire: hqHire, adapter: hqAdapter, goals: hqGoals, routineStates: routineStates, routineFacts: routineFacts, routineForm: routineForm, routineCalls: routineCalls, routineDone: routineDone, approvalBody: approvalBody, approvalLabel: approvalLabel, approvalDone: approvalDone, approvalDenied: 'Read only. The HQ write grid denies approvals.', approvalBlocked: 'This approval cannot be decided here.', searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg };
 
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
   // priced: sessions with a cost figure. unknown: sessions whose agent reports no cost (costUnknown), shown as "unknown".

@@ -538,10 +538,22 @@ test('the HQ Lobby words (#197): the Glance line and the dashboard cards say unk
   const c = Object.fromEntries(H.cards(l).map((x) => [x.key, x]));
   assert.deepEqual([c.employees.value, c.employees.note], ['3', '1 working · 2 not supervised in office']);
   assert.deepEqual([c.tasks.value, c.tasks.note], ['2', '1 in progress · 0 blocked']);
-  assert.deepEqual([c.approvals.value, c.approvals.note], ['1', 'Decide them in Paperclip']);
+  assert.deepEqual([c.approvals.value, c.approvals.note], ['1', 'Decide them here']);
   assert.deepEqual([c.spend.value, c.spend.note], ['$12.40', '12% of $100.00']);
   const u = Object.fromEntries(H.cards({ ...l, tasks: null, approvals: null, goals: null, spend: null }).map((x) => [x.key, x]));
   assert.deepEqual([u.tasks.value, u.approvals.value, u.goals.value, u.spend.value], ['Unknown', 'Unknown', 'Unknown', 'Unknown']);
+});
+
+test('an approval decision body is the hq.write body, or null when the page must not send', () => {
+  const H = V.hq, id = 'p1000000-0000-4000-8000-000000000001';
+  assert.deepEqual(H.approvalBody(id, 'approve', ''), { kind: 'approval', action: 'approve', approval: id });
+  assert.deepEqual(H.approvalBody(id, 'reject', '  No. '), { kind: 'approval', action: 'reject', approval: id, note: 'No.' });
+  assert.deepEqual(H.approvalBody(id, 'revise', 'Add a budget.'), { kind: 'approval', action: 'revise', approval: id, note: 'Add a budget.' });
+  assert.equal(H.approvalBody(id, 'revise', 'x'.repeat(2001)).note.length, 2000);
+  for (const bad of [null, '', 'approval:' + id, 'a/b', id + ' ', 'a'.repeat(65)]) assert.equal(H.approvalBody(bad, 'approve', ''), null, String(bad));
+  assert.equal(H.approvalBody(id, 'request-revision', ''), null, 'the route word is not the action');
+  assert.equal(H.approvalLabel('revise'), 'Request revision');
+  assert.equal(H.approvalDone('reject'), 'Approval rejected');
 });
 
 test('the HQ in the phone list (#215): employees with their status, and what needs the user', () => {
