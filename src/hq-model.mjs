@@ -276,11 +276,11 @@ export function setSelfApproval(slice, change) {
 // has no plan yet, and is 400 (never sent).
 export const OFFICE_ADAPTER_TYPE = 'agent_office';   // the word of OFFICE_ADAPTER in paperclip.mjs (which imports this module)
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
-const ISSUE_STATUS = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'];
+export const ISSUE_STATUS = ['backlog', 'todo', 'in_progress', 'in_review', 'blocked', 'done', 'cancelled'];
 export const GOAL_STATUSES = ['planned', 'active', 'achieved', 'cancelled'], GOAL_LEVELS = ['company', 'team', 'agent', 'task'];
-const ROUTINE_STATUS = ['active', 'paused', 'archived'];
+export const ROUTINE_STATUS = ['active', 'paused', 'archived'];
 const CRON_RE = /^[0-9*/,\-A-Za-z ]+$/, TZ_RE = /^[A-Za-z][A-Za-z0-9_+\-/]{0,63}$/;
-const JOIN_TYPES = ['human', 'agent', 'both'], HUMAN_ROLES = ['owner', 'admin', 'operator', 'viewer'], MEMBER_STATUS = ['pending', 'active', 'suspended'];
+export const JOIN_TYPES = ['human', 'agent', 'both'], HUMAN_ROLES = ['owner', 'admin', 'operator', 'viewer'], MEMBER_STATUS = ['pending', 'active', 'suspended'];
 export const FEEDBACK_SHARING = ['allowed', 'not_allowed', 'prompt'], ENVIRONMENT_STATUS = ['active', 'archived'];
 export const IMPORT_FILES_MAX = 2000, IMPORT_BYTES_MAX = 10 * 1024 * 1024, EXPORT_INCLUDES = ['company', 'agents', 'projects', 'issues', 'skills'];
 const TITLE_MAX = 200, TEXT_MAX = 10000, NOTE_MAX = 2000, DESC_MAX = 4000, NAME_MAX = 80, COMPANY_DESC_MAX = 300;
