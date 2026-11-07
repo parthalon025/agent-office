@@ -61,8 +61,18 @@ Every write to Paperclip goes through one writer, and the **write grid** decides
 - **Allow** sends the write. **Deny** refuses it and sends nothing, even with a Confirm. **Confirm** asks first: the office answers with the question ("Approve an approval in <company>?") and sends nothing until the same call comes again with the confirmation.
 - Before it asks or sends, the office reads the task, approval or employee the write names. It must be in the connected company, and an approval must still wait for a decision. A write that cannot happen is refused, not asked.
 - Every write leaves a feed line ("Wrote to <company>: ..."), and so does a refusal by the grid or by Paperclip.
-- The first writes are: create a task (with an optional first assignee), assign a task, comment on a task, approve, reject or request a revision of an approval (with a note), and create the first company (it needs no connection: it names the loopback address, and a company with that name is reused with no write). The other kinds are in the grid, and each gets its writes with its own page.
+- The first writes are: create a task (with an optional first assignee), assign a task, comment on a task, approve, reject or request a revision of an approval (with a note), hire an employee (see below), and create the first company (it needs no connection: it names the loopback address, and a company with that name is reused with no write). The other kinds are in the grid, and each gets its writes with its own page.
 - Routes (page token only): `GET /api/hq/grid`, `POST /api/hq/grid/set` and `POST /api/hq/write`. The answer of a write carries ids only, never a body from Paperclip, and the board key is in no answer.
+
+## Hiring at the HR desk
+
+Open **Hire an employee** in Ctrl+K (it shows once a company is connected), or do the **First hire** step of Orientation. The HR desk has a role card for each role (Engineer, Quality, Designer, Project manager, Researcher, Operations, Security, General). Pick a card, then set the name, who the employee reports to, the agent kind, the model (optional), the monthly budget and the skills.
+
+- **A budget is required.** The office refuses a hire with no budget, or a budget of zero, and sends nothing to Paperclip. The budget is in dollars a month.
+- **The new employee uses the office adapter** (`agent_office`), so its runs go through the Security room and it shows as Supervised. The default agent kind is Claude Code, and the employee works in a room of its own (`isolation: worktree`).
+- **The Confirm shows exactly what it creates.** Hire asks first. The question names the role, the manager, the agent kind, the model, the budget and the skills, and nothing is sent until you press Confirm hire. The write grid cell Hires can set Allow (no question) or Deny (no hire).
+- **Onboarding.** With the same Confirm, the office sends one first task to the new employee: read the room notes and post a stand-up note with `office_room_update`. This is a second write through the same writer (kind task). If it fails, the hire stays and the page says so.
+- Route (page token only): `POST /api/hq/hire` `{ name, role, manager?, agentKind?, model?, isolation?, budgetDollars, skills?, welcome?, confirmed? }`, and `GET /api/hq/hire-desk` for the role cards. The hire itself is `POST /api/companies/<company>/agent-hires`.
 
 ## The office adapter
 

@@ -21,12 +21,13 @@ import { launch, findBrowser } from './fixtures/cdp.mjs';
 import { officeFiles } from '../src/files.mjs';
 import { pageFile } from '../src/auth.mjs';
 import { resolveExe } from '../src/launch.mjs';
+import { startFakePaperclip, DEMO } from './fixtures/fake-paperclip.mjs';
 
 // ---------- the one place the step limits are set ----------
 // Steps per job, at every width. Lower a limit when a job gets shorter. Raise one only with a reason in the commit.
-export const LIMITS = { start: 3, approve: 2, read: 3, discard: 5, find: 3, approveAfterDesk: 5 };
+export const LIMITS = { start: 3, approve: 2, read: 3, discard: 5, find: 3, approveAfterDesk: 5, hire: 5 };
 export const WIDTHS = [1360, 400];
-export const JOBS = ['start', 'approve', 'approveAfterDesk', 'read', 'discard', 'find'];
+export const JOBS = ['start', 'approve', 'approveAfterDesk', 'read', 'discard', 'find', 'hire'];
 
 /**
  * results: [{ job, width, steps, ok, why? }]. Returns one line for every run that fails: the goal did not show, or the
@@ -86,7 +87,7 @@ export async function run({ shots = true } = {}) {
   const { office, port } = await startOnFreePort(root, env, { prepare: (n) => fs.writeFileSync(officeFiles(root, n).history, JSON.stringify([past])) });
   const files = officeFiles(root, port);
   const results = [];
-  let browser = null, room = null;
+  let browser = null, room = null, pc = null;
   try {
     const agent = JSON.parse(fs.readFileSync(files.token, 'utf8')).token;
     const pageTok = JSON.parse(fs.readFileSync(pageFile(process.env, port), 'utf8')).token;
@@ -109,6 +110,12 @@ export async function run({ shots = true } = {}) {
     room = made.root;
     if (!room) throw new Error('The seeded room was not made: ' + JSON.stringify(made));
     const repoName = live.place.building;
+
+    // the HQ for the hire job (#201): the fake Paperclip, connected, so the HR desk has a company to hire into
+    pc = await startFakePaperclip(DEMO());
+    const conn = await post('/api/paperclip/connect', { url: pc.url }, pageTok);
+    if (!conn.ok) throw new Error('The fake Paperclip did not connect: ' + (await conn.text()));
+    for (let i = 0; i < 50 && !((await snapshot()).hq || {}).company; i++) await sleep(200);
 
     browser = await launch({});
     const p = browser.page;
@@ -134,7 +141,7 @@ export async function run({ shots = true } = {}) {
     } };
     const entry = (text) => ({ label: `pick "${text}"`, run: async () => { await p.waitFor(seen(text), 5000, `palette entry ${text}`); return p.click(control(text)); } });
 
-    let held = null, answered = false;   // the held approval of the approve job
+    let held = null, answered = false, hired = 0;   // the held approval of the approve job
     const poll = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await fn()) return true; await sleep(100); } return false; };
     const approveJob = {};
     const jobs = {
@@ -181,6 +188,16 @@ export async function run({ shots = true } = {}) {
         goal: null,
         waitFor: (ms) => poll(async () => !fs.existsSync(room), ms),
       },
+      // #201: palette, the HR desk, a role card, Hire (the office answers with what it creates), Confirm. The hire reaches Paperclip once.
+      hire: {
+        before: async () => { hired = pc.requests.filter((r) => r.method === 'POST' && /agent-hires$/.test(r.path)).length; },
+        steps: [palette, entry('Hire an employee'),
+          { label: 'pick the Engineer card', run: async () => { await p.waitFor(seen('Engineer', { exact: true }), 8000, 'the Engineer card'); return p.click(control('Engineer', { exact: true })); } },
+          { label: 'Hire', run: async () => { await p.waitFor(seen('Hire', { exact: true }), 5000, 'Hire'); return p.click(control('Hire', { exact: true })); } },
+          { label: 'Confirm hire', run: async () => { await p.waitFor(seen('Confirm hire'), 8000, 'Confirm hire'); return p.click(control('Confirm hire')); } }],
+        goal: null,
+        waitFor: (ms) => poll(async () => pc.requests.filter((r) => r.method === 'POST' && /agent-hires$/.test(r.path)).length > hired, ms),
+      },
       find: {
         before: async () => {},
         steps: [palette, entry('Past sessions')],
@@ -220,6 +237,7 @@ export async function run({ shots = true } = {}) {
     }
   } finally {
     if (browser) await browser.close();
+    if (pc) await pc.close();
     await office.stop();
     for (const f of Object.values(files)) fs.rmSync(f, { force: true });
     try { execFileSync(resolveExe('git'), ['worktree', 'prune'], { cwd: repo, stdio: 'pipe' }); } catch { /* the repo is going */ }

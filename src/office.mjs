@@ -12,7 +12,7 @@ import * as launch from './launch.mjs';
 import { createCampus } from './campus.mjs';
 import { slimPayload, cleanIds as cleanPaperclipIds } from './payload.mjs';
 import { createHq, companyDraft } from './paperclip.mjs';
-import { WRITE_KINDS, writeValueOf, setWriteCell } from './hq-model.mjs';
+import { WRITE_KINDS, writeValueOf, setWriteCell, HIRE_ROLES } from './hq-model.mjs';
 import { createRuntime } from './paperclip-runtime.mjs';
 import { createRuns } from './paperclip-runs.mjs';
 import { recap as recapOf, away as awayOf } from './rituals.mjs';
@@ -504,6 +504,26 @@ export function createOffice(cfg) {
     const r = await hq.write({ kind: 'reporting', action: 'set', agent: String(body.agent || ''), manager: body.manager ? String(body.manager) : null }, { confirmed: body.confirmed === true });
     broadcast();
     return r;
+  }
+
+  // The HR desk (#201): a hire is one write of hq.write (kind `hire`), so the write grid decides it (Deny refuses, Confirm asks first with the
+  // exact summary, Allow sends). With `welcome` the new employee gets its onboarding task, a second write of the same writer (kind `task`,
+  // assigned to the new id): a first stand-up note. The task rides on the hire's Confirm. A failed task never undoes the hire: the answer says so.
+  const HIRE_FIELDS = ['name', 'role', 'title', 'manager', 'agentKind', 'model', 'isolation', 'budgetDollars', 'skills'];
+  const ONBOARDING = 'Introduce yourself. Read the room notes, then add one line to the notes board with office_room_update: who you are, what you will do first and what you need. That is your first stand-up note.';
+  async function hireHq(body) {
+    const confirmed = body.confirmed === true, plan = { kind: 'hire', action: 'create' };
+    for (const k of HIRE_FIELDS) if (body[k] !== undefined) plan[k] = body[k];
+    const r = await hq.write(plan, { confirmed });
+    const out = { ...r, onboarding: 'none' };
+    if (body.welcome === true) {
+      try {
+        await hq.write({ kind: 'task', action: 'create', title: `Welcome, ${String(r.name).slice(0, 60)}: post your first stand-up note`, description: ONBOARDING, assigneeAgentId: r.id }, { confirmed });
+        out.onboarding = 'sent';
+      } catch (e) { out.onboarding = 'failed'; out.onboardingError = e.message; }
+    }
+    broadcast();
+    return out;
   }
 
   // ---------- buildings: repositories and their worktrees (campus.mjs) ----------
@@ -1316,6 +1336,8 @@ export function createOffice(cfg) {
     // The HQ read model behind the Lobby (#197): the snapshot's HQ part plus goals, pending approvals and activity. Names and counts only: no key, secret value or payload.
     R('GET', '/api/hq/lobby', 'page', () => ({ hq: hq.model() })),
     // The HQ write grid and the one writer (#198): the grid's cells, one change of a cell, and a write by kind (409 with the question until confirmed: true).
+    R('POST', '/api/hq/hire', 'page', ({ body }) => hireHq(body)),
+    R('GET', '/api/hq/hire-desk', 'page', () => ({ roles: HIRE_ROLES, write: writeValueOf(saved.get('hqGrid'), 'hire') !== 'deny' })),
     R('GET', '/api/hq/grid', 'page', () => ({ grid: hqGridView() })),
     R('POST', '/api/hq/grid/set', 'page', ({ body }) => setHqGrid(body)),
     R('POST', '/api/hq/write', 'page', ({ body }) => writeHq(body)),
