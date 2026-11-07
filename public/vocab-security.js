@@ -17,12 +17,14 @@
   // every other row can have a per-building override. A rule the row does not offer is never used.
   // free: the kind runs on a model of this machine and costs nothing (the Spend screen says Free).
   var SEC_COLUMNS = [{ id: 'claude-code', label: 'Claude Code' }, { id: 'hermes', label: 'Hermes' }, { id: 'dsh', label: 'dsh' },
-    { id: 'openclaw', label: 'OpenClaw' }, { id: 'copilot', label: 'Copilot' }, { id: 'acp', label: 'ACP tools' }, { id: 'local', label: 'Local model', free: true }, { id: 'agent-framework', label: 'Agent Framework', free: true }, { id: 'cloud', label: 'Cloud agent' }];
+    { id: 'openclaw', label: 'OpenClaw' }, { id: 'copilot', label: 'Copilot' }, { id: 'acp', label: 'ACP tools' }, { id: 'local', label: 'Local model', free: true }, { id: 'agent-framework', label: 'Agent Framework', free: true }, { id: 'cloud', label: 'Cloud agent' }, { id: 'cli', label: 'CLI tools' }];
   // The tables are looked up by names that come from requests and saved files, so they have no prototype: '__proto__' or
   // 'constructor' is no row, agent kind or word. Rule maps (rules.office, rules.buildings) are read by own keys only (own).
+  // The four command-line tools (#217: Codex, Cursor CLI, Grok CLI, Pi) share the CLI tools column: all are ungated, none reports
+  // what it does to the office, so the same rules hold for each.
   // The Microsoft cloud kinds (#24) and the remote tools (#218: Cursor cloud, Hermes gateway) share one column, like the two local servers: no
   // call of any of them comes to the office (ungated, Unsupervised), so the same rules hold for all.
-  var SEC_KIND = bare({ 'claude-code': 'claude-code', ollama: 'local', lmstudio: 'local', hermes: 'hermes', dsh: 'dsh', openclaw: 'openclaw', 'agent-framework': 'agent-framework', copilot: 'copilot', gemini: 'acp', opencode: 'acp', kimi: 'acp', acp: 'acp', foundry: 'cloud', 'copilot-studio': 'cloud', 'cursor-cloud': 'cloud', 'hermes-gateway': 'cloud' });
+  var SEC_KIND = bare({ 'claude-code': 'claude-code', ollama: 'local', lmstudio: 'local', hermes: 'hermes', dsh: 'dsh', openclaw: 'openclaw', 'agent-framework': 'agent-framework', copilot: 'copilot', gemini: 'acp', opencode: 'acp', kimi: 'acp', acp: 'acp', foundry: 'cloud', 'copilot-studio': 'cloud', 'cursor-cloud': 'cloud', 'hermes-gateway': 'cloud', codex: 'cli', cursor: 'cli', grok: 'cli', pi: 'cli' });
   // not: the kinds a row has no cell for. A cloud agent runs in the owner's cloud account and cannot reach the files on this
   // machine, so the file rows have no cell for it (no rule there could mean anything).
   var NO_FILES = { not: ['cloud'], na: { cloud: 'No files' } };
@@ -38,12 +40,12 @@
     secrets: Object.assign({ label: 'Secret files', options: ASK_DENY, def: 'ask' }, NO_FILES),
     // Agents screen. Ungated agents run tool calls without asking the office (ADR 0001): off until the user turns them on.
     // only: the kinds whose provider is gated: false (src/providers/acp.mjs AGENTS, the cloud kinds); the others ask the office, so "Gated".
-    ungated: { label: 'Turn on ungated agents', options: TOGGLE, def: 'off', office: true, only: ['hermes', 'copilot', 'acp', 'cloud'], na: 'Gated' },
+    ungated: { label: 'Turn on ungated agents', options: TOGGLE, def: 'off', office: true, only: ['hermes', 'copilot', 'acp', 'cloud', 'cli'], na: 'Gated' },
     // Paperclip agents are not an agent kind: the Agents screen lists them by name in its Paperclip part, each with its own
     // Supervise in office (#76, public/security.js), so no cell stands for all of them.
     // An agent that reports no cost: Ask (the office asks once per session), Allow (it runs without asking), Deny (it never runs).
     // A cloud kind reports cost only from the prices the owner set (src/providers/cloud.mjs); without them it is such an agent.
-    'no-cost': { label: 'Run without cost reports', options: RULE, def: 'ask', office: true, only: ['hermes', 'dsh', 'openclaw', 'copilot', 'acp', 'cloud'], na: { 'claude-code': 'Reports cost', local: 'Free', 'agent-framework': 'Free' } }
+    'no-cost': { label: 'Run without cost reports', options: RULE, def: 'ask', office: true, only: ['hermes', 'dsh', 'openclaw', 'copilot', 'acp', 'cloud', 'cli'], na: { 'claude-code': 'Reports cost', local: 'Free', 'agent-framework': 'Free' } }
   });
   var SEC_SCREENS = [
     { id: 'files', title: 'Files', rows: ['read-inside', 'edit-inside', 'files-outside'] },

@@ -138,11 +138,11 @@ test('always allow is offered for low and medium risk, never for high risk or a 
 const S = V.security;
 const RULES = (office = {}, buildings = {}) => ({ office, buildings });
 
-test('security: six screens on three walls, each with its rows; six agent kinds as columns', () => {
+test('security: six screens on three walls, each with its rows; nine agent kinds as columns', () => {
   assert.deepEqual(S.screens.map((x) => x.title), ['Files', 'Commands', 'Network', 'Secrets', 'Agents', 'Spend']);
   assert.deepEqual(S.screens.find((x) => x.id === 'files').rows, ['read-inside', 'edit-inside', 'files-outside']);
   assert.deepEqual(S.screens.find((x) => x.id === 'secrets').rows, ['settings', 'secrets']);
-  assert.deepEqual(S.columns.map((c) => c.label), ['Claude Code', 'Hermes', 'dsh', 'OpenClaw', 'Copilot', 'ACP tools', 'Local model', 'Agent Framework', 'Cloud agent']);
+  assert.deepEqual(S.columns.map((c) => c.label), ['Claude Code', 'Hermes', 'dsh', 'OpenClaw', 'Copilot', 'ACP tools', 'Local model', 'Agent Framework', 'Cloud agent', 'CLI tools']);
   // A kind that runs on a model of this machine costs nothing: the Spend screen says Free, never Not reported (#23).
   assert.deepEqual(S.columns.filter((c) => c.free).map((c) => c.id), ['local', 'agent-framework']);
   assert.equal(S.rows.shell.label, 'Shell commands');
