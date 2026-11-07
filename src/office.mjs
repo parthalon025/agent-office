@@ -499,7 +499,7 @@ export function createOffice(cfg) {
   // The org chart editor's write (#202) is one write of hq.write (#198): the kind `reporting`, so the HQ write grid decides it (Deny refuses with
   // 403, Confirm asks first and the editor's own Change button is that Confirm, Allow sends) and the writer checks a loop, a self report or a
   // stranger before anything is asked. The snapshot's hq tells the page whether to offer the editor: it is writable unless the grid says Deny.
-  const hqView = () => { const v = hq.view(); return v && { ...v, reportingWrite: writeValueOf(saved.get('hqGrid'), 'reporting') !== 'deny' }; };
+  const hqView = () => { const v = hq.view(); return v && { ...v, reportingWrite: writeValueOf(saved.get('hqGrid'), 'reporting') !== 'deny', goalWrite: writeValueOf(saved.get('hqGrid'), 'goal') !== 'deny' }; };
   async function reportingLineHq(body) {
     const r = await hq.write({ kind: 'reporting', action: 'set', agent: String(body.agent || ''), manager: body.manager ? String(body.manager) : null }, { confirmed: body.confirmed === true });
     broadcast();

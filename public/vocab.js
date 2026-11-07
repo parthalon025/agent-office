@@ -334,7 +334,31 @@
     });
     return { floors: floors, write: write, note: write ? 'Pick a manager to change a reporting line.' : 'Read only. The HQ write grid denies reporting line changes. Allow them in the write grid to edit.' };
   }
-  var hq = { searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg };
+  // The goals of the executive floor (#207): the goal tree as rows (depth, state word, one line of level, owner and children), the option lists of the
+  // forms, and whether the HQ write grid lets the page write (goalWrite: not Deny). A goal not read is unknown, never an empty list.
+  var GOAL_STATUS = [['planned', 'Planned', 'idle'], ['active', 'Active', 'working'], ['achieved', 'Achieved', 'finished'], ['cancelled', 'Cancelled', 'resting']];
+  var GOAL_LEVEL = { company: 'Company goal', team: 'Team goal', agent: 'Agent goal', task: 'Task goal' };
+  function hqGoals(q) {
+    var write = !!(q && q.goalWrite), g = q && q.goals, agents = (q && q.agents) || [];
+    var rows = ((g && g.rows) || []).map(function (r) {
+      var st = GOAL_STATUS.filter(function (x) { return x[0] === r.status; })[0];
+      var bits = [];
+      if (GOAL_LEVEL[r.level]) bits.push(GOAL_LEVEL[r.level]);
+      bits.push(r.owner ? 'Owner ' + r.owner : r.ownerId ? 'Owner not in the company' : 'No owner');
+      if (r.children) bits.push(r.children + (r.children === 1 ? ' goal' : ' goals') + ' under it');
+      return { id: r.id, title: r.title, depth: r.depth, description: r.description || '', level: r.level, status: { key: st ? st[2] : 'idle', word: st ? st[1] : (r.status || 'Unknown'), value: r.status }, ownerId: r.ownerId || '', parentId: r.parentId || '',
+        line: bits.join(' · ') };
+    });
+    return {
+      unknown: !g, write: write, rows: rows,
+      note: write ? 'Goals are Paperclip\'s. A change here goes to Paperclip after you confirm it.' : 'Read only. The HQ write grid denies goal changes. Allow them in the write grid to edit.',
+      statusOptions: GOAL_STATUS.map(function (x) { return { value: x[0], label: x[1] }; }),
+      levelOptions: [{ value: '', label: 'No level' }].concat(Object.keys(GOAL_LEVEL).map(function (k) { return { value: k, label: GOAL_LEVEL[k].replace(' goal', '') }; })),
+      ownerOptions: [{ value: '', label: 'No owner' }].concat(agents.map(function (a) { return { value: a.id, label: a.name }; })),
+      parentOptions: function () { return [{ value: '', label: 'No parent goal' }].concat(rows.map(function (r) { return { value: r.id, label: r.title }; })); },
+    };
+  }
+  var hq = { goals: hqGoals, searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg };
 
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
   // priced: sessions with a cost figure. unknown: sessions whose agent reports no cost (costUnknown), shown as "unknown".

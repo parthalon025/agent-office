@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { WRITE_KINDS, cleanWriteGrid, writeValueOf, setWriteCell, planWrite } from '../src/hq-model.mjs';
 
 test('the grid has the ten write kinds of ADR 0010 and the first company (#199); Allow only for the user\'s own task edits and comments', () => {
-  assert.deepEqual(Object.keys(WRITE_KINDS), ['hire', 'pause', 'budget', 'approval', 'reporting', 'routine', 'access', 'secret', 'task', 'comment', 'company']);
+  assert.deepEqual(Object.keys(WRITE_KINDS), ['hire', 'pause', 'budget', 'approval', 'reporting', 'routine', 'access', 'secret', 'task', 'comment', 'company', 'goal']);
   for (const k of Object.keys(WRITE_KINDS)) assert.equal(writeValueOf({}, k), k === 'task' || k === 'comment' ? 'allow' : 'confirm', k);
   assert.deepEqual(WRITE_KINDS.secret.options, ['confirm', 'deny'], 'a secret never takes Allow');
   assert.deepEqual(WRITE_KINDS.task.options, ['confirm', 'allow', 'deny']);
@@ -67,6 +67,22 @@ test('planWrite: the exact request of each first write', () => {
   assert.throws(() => planWrite({ kind: 'company', action: 'create', url: 'http://127.0.0.1:3100', name: '  ' }), (e) => e.status === 400);
   assert.throws(() => planWrite({ kind: 'company', action: 'create', name: 'Acme' }), (e) => e.status === 400, 'the address is required');
   assert.throws(() => planWrite({ kind: 'company', action: 'create', url: 'http://127.0.0.1:3100', name: 'x'.repeat(81) }), (e) => e.status === 400);
+});
+
+test('planWrite goals (#207): create and update, the targets, and the refusals', () => {
+  const G = 'g1', A = 'a1';
+  const c = planWrite({ kind: 'goal', action: 'create', title: ' Ship ', description: 'Soon.', level: 'team', status: 'active', parent: G, owner: A });
+  assert.deepEqual([c.method, c.path('co 1'), c.body, c.targets, c.summary],
+    ['POST', '/api/companies/co%201/goals', { title: 'Ship', description: 'Soon.', level: 'team', status: 'active', parentId: G, ownerAgentId: A }, [{ type: 'goal', id: G }, { type: 'agent', id: A }], 'Create the goal "Ship"']);
+  assert.deepEqual(planWrite({ kind: 'goal', action: 'create', title: 'T' }).body, { title: 'T' });
+  const u = planWrite({ kind: 'goal', action: 'update', goal: G, status: 'achieved' });
+  assert.deepEqual([u.method, u.path(), u.body, u.targets, u.summary], ['PATCH', '/api/goals/g1', { status: 'achieved' }, [{ type: 'goal', id: G }], 'Mark a goal achieved']);
+  assert.deepEqual(planWrite({ kind: 'goal', action: 'update', goal: G, owner: null }).body, { ownerAgentId: null });
+  assert.deepEqual(planWrite({ kind: 'goal', action: 'update', goal: G, title: 'New', owner: A }).targets, [{ type: 'goal', id: G }, { type: 'agent', id: A }]);
+  for (const b of [{ action: 'create', title: '' }, { action: 'create', title: 'T', level: 'galaxy' }, { action: 'create', title: 'T', status: 'weird' }, { action: 'create', title: 'T', parent: '../x' },
+    { action: 'update', goal: G }, { action: 'update', goal: '../x', status: 'active' }, { action: 'update', goal: G, status: 'weird' }, { action: 'update', goal: G, title: '' }, { action: 'delete', goal: G }]) {
+    assert.throws(() => planWrite({ kind: 'goal', ...b }), (e) => e.status === 400, JSON.stringify(b));
+  }
 });
 
 test('planWrite: a bad write is 400 before anything is asked, and an id never changes the path', () => {

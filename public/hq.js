@@ -48,6 +48,7 @@
     return h(A.Dialog, { open: true, title: 'Manager board', onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
       h('div', { className: 'form wide manager-board' },
         v.unreadable.map(function (t) { return h('p', { key: t, className: 'note manager-warn', role: 'status' }, t); }),
+        connected && snap.hq.goals ? h('section', { className: 'manager-goal', 'aria-label': 'Paperclip goals' }, h('div', { className: 'past-title' }, h('b', null, 'Paperclip goals'), h(Tag, null, 'Paperclip')), h(Goals, { q: snap.hq, toast: p.toast })) : null,
         v.empty ? h(A.EmptyState, { icon: 'plan', compact: true, title: 'No plan yet', text: 'A goal and its steps show here. Paperclip tasks show here when a company is connected.' }) : null,
         v.groups.map(function (g) {
           var open = g.status === 'planning' || g.status === 'awaiting-approval' || g.status === 'running' || g.status === 'blocked';
@@ -123,16 +124,90 @@
       l.approvals && l.approvals.items.length ? h('ul', { className: 'past' }, l.approvals.items.map(function (a) {
         return h('li', { key: a.id, className: 'past-row' }, h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h('b', null, a.kind.replace(/_/g, ' ')), a.by ? h(Tag, null, 'From ' + a.by) : null)));
       })) : null,
-      l.goals && l.goals.items.length ? h('h3', { className: 'ext-h' }, 'Goals') : null,
-      l.goals && l.goals.items.length ? h('ul', { className: 'past' }, l.goals.items.map(function (g) {
-        return h('li', { key: g.id, className: 'past-row' }, h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h('b', null, g.title), g.status ? h(Tag, null, g.status) : null)));
-      })) : null,
+      h('h3', { className: 'ext-h' + (p.mark('floor', 'rank-0') ? ' is-found' : ''), id: 'hq-floor-goals' }, 'Executive floor: goals'),
+      h(Goals, { q: q, toast: p.toast, mark: p.mark }),
       h('h3', { className: 'ext-h' }, 'Org chart'),
       h(OrgChart, { q: q, toast: p.toast, mark: p.mark }),
       h('h3', { className: 'ext-h' }, 'Activity'),
       l.activity === null ? h('p', { className: 'note' }, 'The office could not read the activity.')
         : l.activity.length ? h('ul', { className: 'stats-list' }, l.activity.map(function (x) { return h('li', { key: x.id }, h('span', null, x.text), h('b', null, x.at ? ago(x.at) : '')); }))
         : h('p', { className: 'note' }, 'No activity yet.'));
+  }
+
+  // The goals of the company (#207), the executive floor: the goal tree (parents first, children indented), each goal with its state, owner and
+  // detail, and the forms to make a goal and to change one. Words and options are OfficeVocab.hq.goals. Every change is one call of hqWrite (the
+  // HQ write grid, #198): Allow sends, Confirm shows the exact change here and waits for the Confirm, Deny turns the forms off. Goals are Paperclip's.
+  function Goals(p) {
+    var v = window.OfficeVocab.hq.goals(p.q), mark = p.mark;
+    var os = useState(''), open = os[0], setOpen = os[1];          // the goal id whose detail shows, or 'new'
+    var fs = useState({}), form = fs[0], setForm = fs[1];
+    var as = useState(null), ask = as[0], setAsk = as[1];          // { body, text }: the change that waits for its Confirm
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    function show(id, row) {
+      if (open === id) { setOpen(''); setAsk(null); return; }
+      setOpen(id); setAsk(null);
+      setForm(row ? { title: row.title, description: row.description, status: row.status.value, owner: row.ownerId } : { title: '', description: '', level: '', parent: '', owner: '' });
+    }
+    var set = function (k) { return function (val) { var o = Object.assign({}, form); o[k] = val; setForm(o); setAsk(null); }; };
+    function send(body, confirmed) {
+      setBusy(true);
+      client.send('hqWrite', Object.assign({ kind: 'goal' }, body, { confirmed: confirmed === true })).then(function () {
+        setBusy(false); setAsk(null); setOpen(''); p.toast({ tone: 'success', title: body.action === 'create' ? 'Goal created' : 'Goal changed', text: body.title || form.title });
+      }, function (x) {
+        setBusy(false);
+        var q = window.OfficeAsk.asked(x, 'write', confirmed);
+        if (q) { setAsk({ body: body, text: q.text }); return; }
+        setAsk(null); p.toast({ tone: 'error', title: 'Goal not saved', text: x.message });
+      });
+    }
+    function bodyOf(row) {
+      if (!row) {
+        var b = { action: 'create', title: (form.title || '').trim() };
+        if (form.description) b.description = form.description;
+        if (form.level) b.level = form.level;
+        if (form.parent) b.parent = form.parent;
+        if (form.owner) b.owner = form.owner;
+        return b;
+      }
+      var u = { action: 'update', goal: row.id };
+      if ((form.title || '').trim() !== row.title) u.title = (form.title || '').trim();
+      if ((form.description || '') !== row.description) u.description = form.description || '';
+      if (form.status !== row.status.value) u.status = form.status;
+      if ((form.owner || '') !== row.ownerId) u.owner = form.owner || null;
+      return u;
+    }
+    function fields(row) {
+      var id = 'goal-' + (row ? row.id : 'new'), b = bodyOf(row), changed = row ? Object.keys(b).length > 2 : !!b.title;
+      return h('div', { className: 'form wide goal-form' },
+        h(A.TextInput, { id: id + '-title', label: 'Title', value: form.title || '', onChange: set('title') }),
+        h(O.Area, { id: id + '-desc', label: 'Description', rows: 3, value: form.description || '', onChange: set('description') }),
+        h('div', { className: 'row' },
+          row ? h(A.Select, { id: id + '-status', label: 'Status', options: v.statusOptions, value: form.status, onChange: set('status') })
+            : h(A.Select, { id: id + '-level', label: 'Level', options: v.levelOptions, value: form.level || '', onChange: set('level') }),
+          h(A.Select, { id: id + '-owner', label: 'Owner', options: v.ownerOptions, value: form.owner || '', onChange: set('owner') })),
+        row ? null : h(A.Select, { id: id + '-parent', label: 'Parent goal', options: v.parentOptions(), value: form.parent || '', onChange: set('parent') }),
+        ask ? h('div', { className: 'hq-found', role: 'alert' }, h('span', null, ask.text),
+          h(A.Button, { variant: 'primary', icon: 'approve', loading: busy, onClick: function () { send(ask.body, true); } }, 'Send to Paperclip'),
+          h(A.Button, { variant: 'quiet', onClick: function () { setAsk(null); } }, 'Cancel'))
+          : h('div', { className: 'past-actions' },
+            h(A.Button, { variant: 'primary', icon: 'approve', loading: busy, disabled: busy || !changed, onClick: function () { send(b, false); } }, row ? 'Save goal' : 'Create goal'),
+            h(A.Button, { variant: 'quiet', onClick: function () { show(row ? row.id : 'new', row); } }, 'Close')));
+    }
+    return h('div', { className: 'goal-tree' },
+      h('p', { className: 'note', role: 'status' }, v.note),
+      v.write && !v.unknown ? (open === 'new' ? fields(null) : h('div', { className: 'past-actions' }, h(A.Button, { variant: 'quiet', icon: 'plus', onClick: function () { show('new', null); } }, 'New goal'))) : null,
+      v.unknown ? h('p', { className: 'note' }, 'Unknown: Paperclip did not answer for the goals.')
+        : !v.rows.length ? h('p', { className: 'note' }, 'No goals yet.')
+        : h('ul', { className: 'past', 'aria-label': 'Goals' }, v.rows.map(function (r) {
+          var shown = open === r.id;
+          return h('li', { key: r.id, id: 'hq-goal-' + r.id, className: 'past-row goal-row goal-d' + r.depth + (mark && mark('goal', r.id) ? ' is-found' : '') },
+            h('div', { className: 'past-main' },
+              h('div', { className: 'past-title' }, h('b', null, r.title), h('span', { className: 'sess-state' }, h(A.StatusDot, { status: r.status.key }), r.status.word)),
+              h('div', { className: 'past-meta' }, r.line),
+              r.description && !shown ? h('div', { className: 'past-sub' }, r.description) : null,
+              shown ? fields(r) : null),
+            v.write && !shown ? h('div', { className: 'past-actions' }, h(A.Button, { variant: 'quiet', icon: 'edit', onClick: function () { show(r.id, r); } }, 'Edit')) : null);
+        })));
   }
 
   // Costs (#208), the Finance floor: spend per agent and per project for the last three months, and the budgets. Read from

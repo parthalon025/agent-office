@@ -18,7 +18,7 @@
 import path from 'node:path';
 import { runIds, cleanIds } from './payload.mjs';
 import { readArgs, CLAUDE_FLAGS_VERSION } from './providers/claude-code.mjs';
-import { floorsOf, cablesOf, lobbyOf, costsOf, roomsOf, monthWindows, searchOf, shapeProblems, planWrite, writeValueOf, WRITE_KINDS } from './hq-model.mjs';
+import { floorsOf, cablesOf, goalsOf, lobbyOf, costsOf, roomsOf, monthWindows, searchOf, shapeProblems, planWrite, writeValueOf, WRITE_KINDS } from './hq-model.mjs';
 import { archetypeOf, GENERAL } from './archetypes.mjs';
 
 export const DEFAULT_URL = 'http://127.0.0.1:3100';
@@ -562,7 +562,7 @@ export function createHq(deps = {}) {
     const rows = (v) => (v ? list(v).filter((r) => r && r.id) : null);
     const goals = rows(x.goals), approvals = rows(x.approvals), activity = rows(x.activity);
     return {
-      goals: goals && goals.slice(0, 50).map((g) => ({ id: String(g.id), title: text(g.title, 100), status: text(g.status, 30), level: text(g.level, 30), parentId: g.parentId ? String(g.parentId) : null, ownerAgentId: g.ownerAgentId ? String(g.ownerAgentId) : null })),
+      goals: goals && goals.slice(0, 50).map((g) => ({ id: String(g.id), title: text(g.title, 100), status: text(g.status, 30), description: text(g.description, 400), level: text(g.level, 30), parentId: g.parentId ? String(g.parentId) : null, ownerAgentId: g.ownerAgentId ? String(g.ownerAgentId) : null })),
       approvals: approvals && approvals.slice(0, 50).map((a) => ({ id: String(a.id), type: text(a.type, 40), status: text(a.status, 30), requestedByAgentId: a.requestedByAgentId ? String(a.requestedByAgentId) : null, at: ms(a.createdAt) })),
       activity: activity && activity.slice(0, 50).map((l) => ({ id: String(l.id), actorType: text(l.actorType, 20), actorId: l.actorId ? String(l.actorId) : '', action: text(l.action, 60), entityType: text(l.entityType, 30), at: ms(l.createdAt) })),
       costs: x.costs && typeof x.costs === 'object' ? { spent: cents(x.costs.spendCents), limit: cents(x.costs.budgetCents) } : null,
@@ -583,7 +583,7 @@ export function createHq(deps = {}) {
   function view() {
     if (!c) return null;
     const base = { state: c.state, url: c.url, error: c.error, companies: c.state === 'choose' ? c.companies : null };
-    if (!d) return { ...base, company: null, budget: null, agents: [], routines: [], floors: [], cables: [], rooms: [], lobby: null, search: [], contract: [] };
+    if (!d) return { ...base, company: null, budget: null, agents: [], routines: [], floors: [], cables: [], rooms: [], goals: null, lobby: null, search: [], contract: [] };
     const agents = [...d.agents.values()].filter((a) => a.status !== 'terminated').map(agentView), hr = d.hqRead;
     const lobby = lobbyOf({
       agents, issues: known('issues') ? d.issues : null, approvals: known('approvals') ? hr.approvals : null, goals: known('goals') ? hr.goals : null, activity: known('activity') ? activityOf(8) : null,
@@ -598,6 +598,7 @@ export function createHq(deps = {}) {
       floors: floors.map((f) => ({ key: f.key, name: f.name, rank: f.rank, employees: f.employees.map((e) => ({ id: e.id, name: e.name, role: e.role, reportsTo: e.reportsTo, floor: f.name })) })),
       rooms: known('projects') ? roomsOf({ projects: d.projects, agents, issues: known('issues') ? d.issues : null }) : [],
       cables: cablesOf(agents),
+      goals: known('goals') ? goalsOf(hr.goals, agents) : null,
       lobby, contract: d.contract,
       routines,
       // what Ctrl+K searches (#214): names and statuses only; an unread route gives no entries
@@ -794,11 +795,11 @@ export function createHq(deps = {}) {
       if (!a || a.status === 'terminated') throw httpError(404, 'Paperclip has no such agent in this company.');
       return;
     }
-    const issue = t.type === 'issue', route = `/api/${issue ? 'issues' : 'approvals'}/${t.id}`, shape = issue ? 'issue' : 'approval';
-    const json = await call(conn, route).catch((e) => { throw e.upstream === 404 ? httpError(404, `Paperclip has no such ${issue ? 'task' : 'approval'} in this company.`) : e; }), problems = shapeProblems(shape, json);
+    const issue = t.type === 'issue', goal = t.type === 'goal', noun = issue ? 'task' : goal ? 'goal' : 'approval', route = `/api/${issue ? 'issues' : goal ? 'goals' : 'approvals'}/${t.id}`;
+    const json = await call(conn, route).catch((e) => { throw e.upstream === 404 ? httpError(404, `Paperclip has no such ${noun} in this company.`) : e; }), problems = goal ? [] : shapeProblems(issue ? 'issue' : 'approval', json);
     if (problems.length) throw httpError(502, `Paperclip answered in a shape the office does not know (${problems[0]}) Update the office or the pinned Paperclip.`);
-    if (json.id !== t.id || json.companyId !== conn.companyId) throw httpError(404, `Paperclip has no such ${issue ? 'task' : 'approval'} in this company.`);
-    if (!issue && !OPEN_APPROVAL.has(json.status)) throw httpError(409, 'This approval is not waiting for a decision.');
+    if (!json || json.id !== t.id || json.companyId !== conn.companyId) throw httpError(404, `Paperclip has no such ${noun} in this company.`);
+    if (!issue && !goal && !OPEN_APPROVAL.has(json.status)) throw httpError(409, 'This approval is not waiting for a decision.');
   }
   /**
    * write({ kind, action, ...fields }, { confirmed }) -> { ok: true, id?, identifier? } for what Paperclip made. Errors carry a status:
@@ -855,11 +856,13 @@ export function createHq(deps = {}) {
       }
     } finally { if (busyId) { conn.busy.delete(busyId); changed(); } }
     if (plan.kind === 'task' && plan.action === 'create' && !made.id) { feed(`Paperclip did not name the task it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the task it made.'); }
+    if (plan.kind === 'goal' && plan.action === 'create' && !made.id) { feed(`Paperclip did not name the goal it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the goal it made.'); }
     if (plan.kind === 'company' && !made.id) { feed(`Paperclip did not name the company it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the company it made.'); }
     feed(`Wrote to ${name}: ${plan.summary}.`);
     if (!first) refetchSoon(conn);
     const out = { ok: true };
     if (plan.kind === 'company') { out.id = String(made.id); out.name = plan.name; out.existed = false; }
+    if (plan.kind === 'goal' && plan.action === 'create') out.id = String(made.id);
     if (plan.kind === 'task' && plan.action === 'create') { out.id = String(made.id); if (typeof made.identifier === 'string') out.identifier = text(made.identifier, 30); }
     return out;
   }
