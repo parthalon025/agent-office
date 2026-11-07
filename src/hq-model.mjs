@@ -20,6 +20,10 @@ export const SHAPES = {
   costsByAgent: { list: true, fields: { agentId: 'string', costCents: 'number' } },
   costsByProject: { list: true, fields: { projectId: 'string', costCents: 'number' } },
   budgets: { list: false, fields: { policies: 'array' } },
+  // Skills, plugins and adapters (#212): company skills (routes/company-skills.ts), installed plugins (routes/plugins.ts) and the adapter list (routes/adapters.ts).
+  skills: { list: true, fields: { id: 'string', key: 'string', name: 'string' } },
+  plugins: { list: true, fields: { id: 'string', pluginKey: 'string', status: 'string' } },
+  adapters: { list: true, fields: { type: 'string', label: 'string', source: 'string' } },
 };
 
 const typeOf = (v) => (v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v);
@@ -472,6 +476,25 @@ export function goalsOf(goals, agents) {
   for (const g of roots) walk(g, 0);
   for (const g of goals) walk(g, 0);   // a loop has no root: still shown
   return { total: goals.length, rows };
+}
+
+// ---------- skills, secrets, plugins and adapters (#212) ----------
+/**
+ * The catalog: what Paperclip has installed for the company, as names and states only. A secret is its name and provider, never a value
+ * (the value, if Paperclip sends one, is dropped here); a skill is its name, description and where it came from, never its files.
+ * A part the office could not read is null (unknown, never an empty list that looks real).
+ * in: { skills, secrets, plugins, adapters } (each the answer of its route, or null). out: the same four keys, shaped.
+ */
+export function catalogOf(i) {
+  const rows = (v) => (Array.isArray(v) ? v.filter((r) => r && typeof r === 'object') : null);
+  const t = (v, n) => (typeof v === 'string' ? short(v.trim(), n) : '');
+  const skills = rows(i.skills), secrets = rows(i.secrets), plugins = rows(i.plugins), adapters = rows(i.adapters);
+  return {
+    skills: skills && skills.filter((r) => r.id).slice(0, 200).map((r) => ({ id: String(r.id), key: t(r.key, 100), name: t(r.name, 80) || t(r.key, 80), description: t(r.description, 200), source: t(r.sourceType, 30), trust: t(r.trustLevel, 30) })),
+    secrets: secrets && secrets.filter((r) => r.id && r.name).slice(0, 200).map((r) => ({ id: String(r.id), name: t(r.name, 60), provider: t(r.provider, 40) })),
+    plugins: plugins && plugins.filter((r) => r.id).slice(0, 100).map((r) => ({ id: String(r.id), name: t(r.pluginKey, 100) || t(r.packageName, 100), version: t(r.version, 30), status: t(r.status, 30), error: t(r.lastError, 200) })),
+    adapters: adapters && adapters.filter((r) => r.type).slice(0, 100).map((r) => ({ type: t(r.type, 60), label: t(r.label, 60) || t(r.type, 60), source: t(r.source, 20), version: t(r.version, 30), loaded: r.loaded !== false, disabled: r.disabled === true })),
+  };
 }
 
 // ---------- the Costs view (#208) ----------

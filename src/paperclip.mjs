@@ -18,7 +18,7 @@
 import path from 'node:path';
 import { runIds, cleanIds } from './payload.mjs';
 import { readArgs, CLAUDE_FLAGS_VERSION } from './providers/claude-code.mjs';
-import { floorsOf, cablesOf, goalsOf, lobbyOf, inboxOf, costsOf, roomsOf, monthWindows, searchOf, shapeProblems, planWrite, writeValueOf, WRITE_KINDS } from './hq-model.mjs';
+import { floorsOf, cablesOf, goalsOf, lobbyOf, inboxOf, costsOf, catalogOf, roomsOf, monthWindows, searchOf, shapeProblems, planWrite, writeValueOf, WRITE_KINDS } from './hq-model.mjs';
 import { archetypeOf, GENERAL } from './archetypes.mjs';
 
 export const DEFAULT_URL = 'http://127.0.0.1:3100';
@@ -662,6 +662,28 @@ export function createHq(deps = {}) {
     return { ...costsOf({ months, budgets }), contract };
   }
 
+  /**
+   * The catalog (#212): company skills, secret names, plugins and adapters, read when the HQ asks (not polled). Null while not
+   * connected. A route Paperclip lacks, refuses or answers in a shape the office does not know is null (unknown); `contract` names the
+   * shapes. A secret is its name and provider only (`catalogOf` drops everything else). Reads only: no write is made here.
+   */
+  async function catalog() {
+    const conn = c;
+    if (!conn || !d) return null;
+    const id = encodeURIComponent(conn.companyId), contract = [];
+    const get = async (name, route) => {
+      let json;
+      try { json = await call(conn, route); } catch { return null; }
+      const p = shapeProblems(name, json);
+      if (p.length) { contract.push(...p.filter((x) => !contract.includes(x))); return null; }
+      return json;
+    };
+    const [skills, secrets, plugins, adapters] = await Promise.all([
+      get('skills', `/api/companies/${id}/skills`), get('secrets', `/api/companies/${id}/secrets`), get('plugins', '/api/plugins'), get('adapters', '/api/adapters')]);
+    if (c !== conn) return null;
+    return { ...catalogOf({ skills, secrets, plugins, adapters }), contract };
+  }
+
   /** A Paperclip run's label for its office session (hook ids), or null when the agent is not one of the watched company. */
   function labelOf(ids) {
     const x = cleanIds(ids);
@@ -898,5 +920,5 @@ export function createHq(deps = {}) {
     return out;
   }
 
-  return { connect, disconnect, supervise, handoffGoal, handoffTasks, write, tasksOf, view, model, costs, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
+  return { connect, disconnect, supervise, handoffGoal, handoffTasks, write, tasksOf, view, model, costs, catalog, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
 }

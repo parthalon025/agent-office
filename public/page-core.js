@@ -239,7 +239,44 @@
   // The scene's own name of a session (unique per building), else its plain name.
   function sceneName(s) { return window.officeAdapter.botName(s.uid) || s.name; }
 
-  Object.assign(O, { Area: Area, Busy: Busy, CostDialog: CostDialog, DEFAULT_KIND: DEFAULT_KIND, F: F,
+  // ---------- the Paperclip catalog (#212) ----------
+  // Company skills, secret names, plugins and adapters of the connected company (the hqCatalog command). Three features show a part of it
+  // (the Skills dialog, the Extensions dialog and the HQ), so the read and the parts are shared. A secret is a name: no value comes from the server.
+  // use(): { state: 'loading' | 'off' | 'error' | 'ready', catalog, error }. 'off' is a Paperclip that is not connected: the parts show nothing then.
+  function useHqCatalog() {
+    var st = useState({ state: 'loading', catalog: null, error: '' }), s = st[0], setS = st[1];
+    useEffect(function () {
+      var live = true;
+      client.get('hqCatalog').then(function (j) { if (live) setS(j.catalog ? { state: 'ready', catalog: j.catalog, error: '' } : { state: 'off', catalog: null, error: '' }); },
+        function (x) { if (live) setS({ state: 'error', catalog: null, error: x.message }); });
+      return function () { live = false; };
+    }, []);
+    return s;
+  }
+  function CatalogPart(p) {
+    var s = p.cat, rows = s.catalog && s.catalog[p.part];
+    if (s.state === 'off' && p.quiet) return null;
+    return h('section', { className: 'ext-group' },
+      h('h3', { className: 'ext-h' }, p.title, rows ? h('span', { className: 'ext-n' }, rows.length) : null),
+      s.state === 'loading' ? h('p', { className: 'note', role: 'status' }, 'Reading from Paperclip.')
+        : s.state === 'error' ? h('p', { className: 'ao-err', role: 'alert' }, 'The office could not read this. ' + s.error)
+        : s.state === 'off' ? h('p', { className: 'note' }, 'The office is not connected to Paperclip.')
+        : rows === null ? h('p', { className: 'note' }, 'Unknown: Paperclip did not answer, or answered in a shape the office does not know.')
+        : !rows.length ? h('p', { className: 'note' }, p.empty)
+        : h('ul', { className: 'ext-list' }, rows.map(function (r) {
+          var l = p.line(r);
+          return h('li', { key: r.id || r.type, className: 'ext-row' }, h('div', { className: 'ext-main' }, h('div', { className: 'ext-name' }, l[0]), l[1] ? h('div', { className: 'ext-sub' }, l[1]) : null));
+        })));
+  }
+  var HqCatalog = {
+    use: useHqCatalog,
+    Skills: function (p) { return h(CatalogPart, { cat: p.cat, part: 'skills', title: 'Company skills', quiet: p.quiet, empty: 'The company has no skills.', line: function (r) { return [r.name, [r.key, r.description].filter(Boolean).join(' · ')]; } }); },
+    Secrets: function (p) { return h(CatalogPart, { cat: p.cat, part: 'secrets', title: 'Secrets', quiet: p.quiet, empty: 'The company has no secrets.', line: function (r) { return [r.name, 'Name only. The office never shows or sets a value. Provider: ' + (r.provider || 'unknown')]; } }); },
+    Plugins: function (p) { return h(CatalogPart, { cat: p.cat, part: 'plugins', title: 'Paperclip plugins', quiet: p.quiet, empty: 'No plugin is installed in Paperclip.', line: function (r) { return [r.name, [r.version, r.status, r.error].filter(Boolean).join(' · ')]; } }); },
+    Adapters: function (p) { return h(CatalogPart, { cat: p.cat, part: 'adapters', title: 'Paperclip adapters', quiet: p.quiet, empty: 'Paperclip lists no adapter.', line: function (r) { return [r.label, [r.type, r.source, r.version, r.disabled ? 'off' : '', r.loaded ? '' : 'not loaded'].filter(Boolean).join(' · ')]; } }); }
+  };
+
+  Object.assign(O, { HqCatalog: HqCatalog, Area: Area, Busy: Busy, CostDialog: CostDialog, DEFAULT_KIND: DEFAULT_KIND, F: F,
       FeatureTags: FeatureTags, ISOLATION: ISOLATION, KIND: KIND, KV: KV, KindFields: KindFields, MODELS: MODELS,
       MODES: MODES, Pair: Pair, Pairs: Pairs, Tag: Tag, WHERE: WHERE, ago: ago, cadence: cadence, client: client,
       clip: clip, costAsked: costAsked, cssMs: cssMs, exportSession: exportSession, getInfo: getInfo, kindOf: kindOf,

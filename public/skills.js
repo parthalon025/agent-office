@@ -54,7 +54,7 @@
           h('p', { className: 'note' }, p.agent + ' follows this skill in later sessions. Saving asks you first.'),
           h(Area, { id: 'sk-text', label: 'SKILL.md', value: edit.text, rows: 14, onChange: function (v) { setEdit(Object.assign({}, edit, { text: v })); }, error: err || undefined })));
     }
-    var skills = list ? list.skills : null;
+    var skills = list ? list.skills : null, cat = O.HqCatalog.use();
     return h(A.Dialog, { key: 'list', open: true, title: 'Skills of ' + p.agent, onClose: p.onClose, actions: [h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')] },
       h('div', { className: 'form wide' },
         h('p', { className: 'note' }, 'Skills that ' + p.agent + ' wrote for itself. You can read, edit and delete them. It makes new ones on its own.'),
@@ -70,7 +70,8 @@
             h('div', { className: 'past-actions' },
               h(A.Button, { variant: 'quiet', icon: 'tool', loading: busy === k.name, onClick: function () { openEdit(k.name); } }, 'Edit'),
               h(A.Button, { variant: 'quiet', icon: 'remove', onClick: function () { write('delete', k.name, '', false); } }, 'Delete')));
-        }))));
+        })),
+        h(O.HqCatalog.Skills, { cat: cat, quiet: true })));
   }
 
   O.Skills = { Dialog: SkillsDialog };

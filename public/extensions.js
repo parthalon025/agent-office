@@ -29,6 +29,7 @@
     var cf = useState(null), confirm = cf[0], setConfirm = cf[1];
     var qq = useState(''), q = qq[0], setQ = qq[1];
     var pq = useState(''), pfind = pq[0], setPfind = pq[1];
+    var cat = O.HqCatalog.use();
     function load() { setErr(''); client.extList({ uid: p.uid }).then(setData, function (x) { setErr(x.message); setData({ servers: null, plugins: [] }); }); }
     useEffect(load, [p.uid]);
     function act(key, body, done) {
@@ -121,7 +122,9 @@
                 persistent(pl.scope) ? h(A.Button, { variant: 'ghost', icon: 'remove', title: 'Remove ' + name, onClick: function () { setConfirm({ title: 'Remove the plugin ' + name, text: 'Uninstalls ' + pl.id + ' from the ' + pl.scope + ' scope of this folder.', button: 'Remove plugin', body: { action: 'plugin-uninstall', id: pl.id, scope: pl.scope } }); } }, 'Remove') : null));
           })));
       }),
-      h('p', { className: 'note' }, 'Turn on and Turn off save a setting for this folder only. The session reloads its plugins at once.'));
+      h('p', { className: 'note' }, 'Turn on and Turn off save a setting for this folder only. The session reloads its plugins at once.'),
+      h(O.HqCatalog.Plugins, { cat: cat, quiet: true }),
+      h(O.HqCatalog.Adapters, { cat: cat, quiet: true }));
 
     return h(A.Dialog, { open: true, title: 'Extensions for ' + p.name, onClose: p.onClose, actions: [
       h(A.Button, { key: 'rf', variant: 'quiet', icon: 'retry', onClick: load }, 'Refresh'),
