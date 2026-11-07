@@ -586,6 +586,9 @@
     var bz = useState(false), busy = bz[0], setBusy = bz[1];
     var er = useState(''), err = er[0], setErr = er[1];
     var qs = useState(''), ask = qs[0], setAsk = qs[1];
+    var actionsRef = React.useRef(null);
+    // The Confirm sits under a long form in a scrolling dialog (a phone shows one screen of it): bring it into view when the question comes.
+    useEffect(function () { if (ask && actionsRef.current && actionsRef.current.scrollIntoView) actionsRef.current.scrollIntoView({ block: 'nearest' }); }, [ask]);
     useEffect(function () { var live = true; client.get('hqHireDesk').then(function (j) { if (live) setDesk(j); }, function (x) { if (live) setErr(x.message); }); return function () { live = false; }; }, []);
     if (!q || !q.company) return h('p', { className: 'note' }, 'Connect a company in Paperclip first. Then you can hire here.');
     if (!desk) return err ? h('p', { className: 'ao-err', role: 'alert' }, err) : h('p', { className: 'note', role: 'status' }, 'Reading the HR desk.');
@@ -625,7 +628,7 @@
       !budgetOk ? h('p', { className: 'note', role: 'status' }, 'Set a monthly budget above zero. The office does not hire without one.') : null,
       ask ? h('p', { className: 'note', role: 'alert' }, ask) : null,
       err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
-      h('div', { className: 'inline-actions' },
+      h('div', { className: 'inline-actions', ref: actionsRef },
         ask ? h(A.Button, { variant: 'primary', icon: 'approve', loading: busy, onClick: function () { send(true); } }, 'Confirm hire') : h(A.Button, { variant: 'primary', icon: 'add', disabled: !ready, loading: busy, onClick: function () { send(false); } }, 'Hire'),
         ask ? h(A.Button, { variant: 'quiet', onClick: function () { setAsk(''); } }, 'Do not hire') : null));
   }
