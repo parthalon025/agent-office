@@ -277,7 +277,16 @@
       { key: 'spend', label: 'Spend this month', value: l.spend ? money(l.spend.spent) : U, note: !l.spend ? 'The office could not read the costs' : l.spend.percent != null ? l.spend.percent + '% of ' + money(l.spend.limit) : 'No budget' }
     ];
   }
-  var hq = { status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards };
+  // Ctrl+K searches Paperclip (#214, hq-model.mjs searchOf: snap.hq.search). Each entry is a palette action that opens the HQ at it (ref).
+  var SEARCH_KINDS = { employee: ['employee', 'bot'], floor: ['floor', 'floor'], task: ['task', 'plan'], goal: ['goal', 'plan'], approval: ['approval', 'approve'], routine: ['routine', 'schedule'] };
+  function hqSearchItems(q) {
+    if (!q || !q.search) return [];
+    return q.search.filter(function (x) { return SEARCH_KINDS[x.kind]; }).map(function (x) {
+      var k = SEARCH_KINDS[x.kind], co = q.company && q.company.name ? ', ' + q.company.name : '';
+      return { id: 'hq-' + x.kind + '-' + x.id, label: x.label + ' (' + k[0] + co + ')', hint: x.hint, icon: k[1], group: 'Paperclip', keywords: 'paperclip hq ' + k[0] + ' ' + x.label + (x.hint ? ' ' + x.hint : ''), ref: { kind: x.kind, id: x.id } };
+    });
+  }
+  var hq = { searchItems: hqSearchItems, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards };
 
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
   // priced: sessions with a cost figure. unknown: sessions whose agent reports no cost (costUnknown), shown as "unknown".

@@ -84,7 +84,7 @@
     var q = p.q, l = q.lobby, H = window.OfficeVocab.hq;
     var floors = (q.floors || []).filter(function (f) { return f.employees.length; }).slice().reverse();
     return h(React.Fragment, null,
-      h('h3', { className: 'ext-h' }, 'Lobby'),
+      h('h3', { className: 'ext-h' + (p.mark('floor', 'lobby') ? ' is-found' : ''), id: 'hq-floor-lobby' }, 'Lobby'),
       h('ul', { className: 'hq-cards', 'aria-label': 'Company dashboard' }, H.cards(l).map(function (c) {
         return h('li', { key: c.key, className: 'hq-card' }, h('span', { className: 'hq-label' }, c.label), h('b', null, c.value), c.note ? h('span', { className: 'hq-note' }, c.note) : null);
       })),
@@ -98,7 +98,7 @@
       })) : null,
       h('h3', { className: 'ext-h' }, 'Org chart'),
       floors.length ? h('div', { className: 'hq-floor' }, floors.map(function (f) {
-        return h('p', { key: f.key, className: 'note' }, h('b', null, f.name + ': '), f.employees.map(function (e) { return e.name; }).join(', '));
+        return h('p', { key: f.key, id: 'hq-floor-' + f.key, className: 'note' + (p.mark('floor', f.key) ? ' is-found' : '') }, h('b', null, f.name + ': '), f.employees.map(function (e) { return e.name; }).join(', '));
       })) : h('p', { className: 'note' }, 'No employees yet.'),
       h('h3', { className: 'ext-h' }, 'Activity'),
       l.activity === null ? h('p', { className: 'note' }, 'The office could not read the activity.')
@@ -147,6 +147,15 @@
   // in office is on the Agents screen of a Security room, with its painted Confirm (no button here: one place for a write).
   function HqDialog(p) {
     var q = p.snap && p.snap.hq, H = window.OfficeVocab.hq;
+    // Ctrl+K search (#214): p.focus = { kind, id } names what the user picked. The card says what was found, and the row of an employee,
+    // floor or routine is marked and scrolled into view. A task, goal or approval has no row here, so the card is its place.
+    var focus = p.focus, found = focus ? ((q && q.search) || []).filter(function (x) { return x.kind === focus.kind && x.id === focus.id; })[0] : null;
+    var mark = function (kind, id) { return focus && focus.kind === kind && focus.id === id; };
+    useEffect(function () {
+      if (!focus) return;
+      var el = document.getElementById('hq-' + focus.kind + '-' + focus.id);
+      if (el && el.scrollIntoView) el.scrollIntoView({ block: 'center' });
+    }, [focus && focus.kind, focus && focus.id]);
     var close = [h(A.Button, { key: 'a', variant: 'quiet', onClick: p.onAttach }, 'Connection'), h(A.Button, { key: 'd', variant: 'primary', onClick: p.onClose }, 'Done')];
     // The runtime panel (install, start, stop, board key) lives here since #197; it is the first step while no company is connected.
     var runtime = O.PaperclipRuntime ? h(O.PaperclipRuntime, { runtime: p.snap && p.snap.paperclipRuntime, toast: p.toast }) : null;
@@ -158,14 +167,15 @@
       h('div', { className: 'form wide' },
         h('p', { className: 'note', role: 'status' }, H.state(q)),
         h('p', { className: 'note' }, 'Budget for its runs: ' + H.budget(q.budget) + '. Paperclip keeps this budget. The office sets no second limit on Paperclip runs.'),
+        found ? h('div', { className: 'hq-found', role: 'status', 'aria-label': 'Found in Paperclip' }, h(Tag, null, 'Found'), h('b', null, found.label), found.hint ? h('span', { className: 'hq-note' }, found.hint) : null) : null,
         q.contract && q.contract.length ? h('p', { className: 'ao-err', role: 'alert' }, 'Paperclip answered in a shape the office does not know, so the office does not show that part. ' + q.contract.join(' ')) : null,
-        q.lobby ? h(Lobby, { q: q }) : null,
+        q.lobby ? h(Lobby, { q: q, mark: mark }) : null,
         h(Costs, null),
         h('h3', { className: 'ext-h' }, 'Agents'),
         q.agents.length ? h('ul', { className: 'past' }, q.agents.map(function (a) {
           var st = H.status(a), sup = H.supervision(a);
           var facts = [a.kind || 'adapter', a.heartbeat.on ? 'Heartbeat ' + H.every(a.heartbeat.every) + (a.heartbeat.last ? ', last ' + ago(a.heartbeat.last) : '') : 'No heartbeat', H.budget(a.budget)].join(' · ');
-          return h('li', { key: a.id, className: 'past-row' },
+          return h('li', { key: a.id, id: 'hq-employee-' + a.id, className: 'past-row' + (mark('employee', a.id) ? ' is-found' : '') },
             h('div', { className: 'past-main' },
               h('div', { className: 'past-title' }, h('b', null, a.name), h(Tag, null, a.title || a.role), h('span', { className: 'sess-state' }, h(A.StatusDot, { status: st.key }), st.word)),
               h('div', { className: 'past-meta' }, a.task ? (a.task.identifier ? a.task.identifier + ' ' : '') + a.task.title : 'No open task'),
@@ -174,7 +184,7 @@
         })) : h('p', { className: 'note' }, 'This company has no agents yet.'),
         h('h3', { className: 'ext-h' }, 'Routines'),
         q.routines.length ? h('ul', { className: 'past' }, q.routines.map(function (r) {
-          return h('li', { key: r.id, className: 'past-row' },
+          return h('li', { key: r.id, id: 'hq-routine-' + r.id, className: 'past-row' + (mark('routine', r.id) ? ' is-found' : '') },
             h('div', { className: 'past-main' },
               h('div', { className: 'past-title' }, h('b', null, r.title), r.status ? h(Tag, null, r.status) : null),
               h('div', { className: 'past-meta' }, [r.agent ? 'For ' + r.agent : '', r.cron ? 'Cron ' + r.cron : '', r.next ? 'Next ' + new Date(r.next).toLocaleString() : 'No next run'].filter(Boolean).join(' · '))));

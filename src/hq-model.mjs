@@ -248,3 +248,25 @@ export function costsOf(i) {
   const b = i.budgets;
   return { months, budgets: b ? b.policies.slice().sort((x, y) => (y.percent ?? -1) - (x.percent ?? -1)) : null, pausedAgents: b ? b.paused : null };
 }
+
+// ---------- the search index (#214) ----------
+export const SEARCH_CAPS = { task: 60, goal: 30, approval: 20, routine: 30 };
+const clip = (s, n) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim().slice(0, n);
+const words = (n, one) => `${n} ${n === 1 ? one : one + 's'}`;
+/**
+ * What Ctrl+K searches in Paperclip: one entry per employee, floor, open task, goal, pending approval and routine, with the words the user
+ * types (label) and a hint that says where it is. Names, titles and statuses only, never a payload, a value or a key. Capped per kind
+ * (SEARCH_CAPS; employees and floors are never cut), so the snapshot stays small. in: { agents (views), floors, issues, goals, approvals, routines }.
+ * Entry: { kind: 'employee'|'floor'|'task'|'goal'|'approval'|'routine', id, label, hint }. The page opens the HQ at the entry (kind and id).
+ */
+export function searchOf(i) {
+  const name = (id) => (i.agents.find((a) => a.id === id) || {}).name || '';
+  const out = [];
+  for (const f of i.floors || []) if (f.key !== 'records' && (f.key === 'lobby' || f.employees.length)) out.push({ kind: 'floor', id: f.key, label: f.name, hint: f.key === 'lobby' ? 'Floor of the HQ' : `Floor of the HQ, ${words(f.employees.length, 'employee')}` });
+  for (const a of i.agents) out.push({ kind: 'employee', id: a.id, label: a.name, hint: [clip(a.title || a.role, 40), a.task ? clip(a.task.title, 50) : ''].filter(Boolean).join(' · ') });
+  for (const x of (i.issues || []).filter((t) => t && t.id && t.title).slice(0, SEARCH_CAPS.task)) out.push({ kind: 'task', id: String(x.id), label: `${x.identifier ? clip(x.identifier, 30) + ' ' : ''}${clip(x.title, 100)}`, hint: ['Task', clip(x.status, 30).replace(/_/g, ' '), name(x.assigneeAgentId)].filter(Boolean).join(' · ') });
+  for (const g of (i.goals || []).slice(0, SEARCH_CAPS.goal)) out.push({ kind: 'goal', id: g.id, label: g.title, hint: ['Goal', g.status].filter(Boolean).join(' · ') });
+  for (const p of (i.approvals || []).slice(0, SEARCH_CAPS.approval)) out.push({ kind: 'approval', id: p.id, label: `Approval: ${String(p.type).replace(/_/g, ' ')}`, hint: ['Approval', name(p.requestedByAgentId) ? 'from ' + name(p.requestedByAgentId) : '', p.status].filter(Boolean).join(' · ') });
+  for (const r of (i.routines || []).slice(0, SEARCH_CAPS.routine)) out.push({ kind: 'routine', id: r.id, label: r.title, hint: ['Routine', r.agent ? 'for ' + r.agent : '', r.status].filter(Boolean).join(' · ') });
+  return out;
+}

@@ -18,7 +18,7 @@
 import path from 'node:path';
 import { runIds, cleanIds } from './payload.mjs';
 import { readArgs, CLAUDE_FLAGS_VERSION } from './providers/claude-code.mjs';
-import { floorsOf, lobbyOf, costsOf, monthWindows, shapeProblems, planWrite, writeValueOf, WRITE_KINDS } from './hq-model.mjs';
+import { floorsOf, lobbyOf, costsOf, monthWindows, searchOf, shapeProblems, planWrite, writeValueOf, WRITE_KINDS } from './hq-model.mjs';
 
 export const DEFAULT_URL = 'http://127.0.0.1:3100';
 
@@ -570,20 +570,23 @@ export function createHq(deps = {}) {
   function view() {
     if (!c) return null;
     const base = { state: c.state, url: c.url, error: c.error, companies: c.state === 'choose' ? c.companies : null };
-    if (!d) return { ...base, company: null, budget: null, agents: [], routines: [], floors: [], lobby: null, contract: [] };
+    if (!d) return { ...base, company: null, budget: null, agents: [], routines: [], floors: [], lobby: null, search: [], contract: [] };
     const agents = [...d.agents.values()].filter((a) => a.status !== 'terminated').map(agentView), hr = d.hqRead;
     const lobby = lobbyOf({
       agents, issues: known('issues') ? d.issues : null, approvals: known('approvals') ? hr.approvals : null, goals: known('goals') ? hr.goals : null, activity: known('activity') ? activityOf(8) : null,
       costs: known('costs') && hr.costs ? hr.costs : { spent: cents(d.company.spentMonthlyCents), limit: cents(d.company.budgetMonthlyCents) }, secrets: known('secrets') ? hr.secrets : null, unread: d.unread,
     });
+    const floors = floorsOf(agents), routines = d.routines.filter((r) => r && r.id && r.status !== 'archived').map(routineView);
     return {
       ...base,
       company: { id: String(d.company.id || c.companyId), name: text(d.company.name, 80) || 'Paperclip' },
       budget: { spent: cents(d.company.spentMonthlyCents), limit: cents(d.company.budgetMonthlyCents) },
       agents,
-      floors: floorsOf(agents).map((f) => ({ key: f.key, name: f.name, rank: f.rank, employees: f.employees.map((e) => ({ id: e.id, name: e.name, role: e.role, floor: f.name })) })),
+      floors: floors.map((f) => ({ key: f.key, name: f.name, rank: f.rank, employees: f.employees.map((e) => ({ id: e.id, name: e.name, role: e.role, floor: f.name })) })),
       lobby, contract: d.contract,
-      routines: d.routines.filter((r) => r && r.id && r.status !== 'archived').map(routineView),
+      routines,
+      // what Ctrl+K searches (#214): names and statuses only; an unread route gives no entries
+      search: searchOf({ agents, floors, issues: known('issues') ? d.issues : [], goals: known('goals') ? hr.goals : [], approvals: known('approvals') ? hr.approvals : [], routines }),
     };
   }
   /** The view plus the lists behind the Lobby (goals, pending approvals, activity), for GET /api/hq/lobby. Names and counts, never a payload, a value or a key. */
