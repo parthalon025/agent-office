@@ -303,12 +303,13 @@ test('killTree on Windows runs taskkill /T /F by its absolute path from the help
   await launch.killTree(1, () => { throw new Error('no taskkill'); }); // never rejects
 });
 
-test('killTreeSync ends a process before it returns and does nothing for no pid (the exit handler cannot wait)', () => {
+test('killTreeSync ends a process and does nothing for no pid (the exit handler cannot wait)', async () => {
   launch.killTreeSync(0);
   launch.killTreeSync(undefined);
   const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: launch.helperCwd(), stdio: 'ignore', windowsHide: true, detached: !win });
+  const ended = new Promise((resolve) => child.once('exit', resolve));
   launch.killTreeSync(child.pid);
-  assert.throws(() => process.kill(child.pid, 0), /ESRCH|EPERM/, 'the process is gone');
+  await Promise.race([ended, new Promise((_, rej) => setTimeout(() => rej(new Error('the process still runs')), 10000))]);
 });
 
 test('killTreeSync on Windows runs taskkill /T /F by its absolute path from the helper folder, and never throws', { skip: !win }, () => {

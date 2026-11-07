@@ -171,6 +171,7 @@ test('installArgs names the exact pinned version and nothing like a range or a t
   const a = installArgs('/c/npm-cli.js');
   assert.deepEqual(a.slice(0, 3), ['/c/npm-cli.js', 'install', `paperclipai@${PINNED.version}`]);
   assert.ok(a.includes('--save-exact'));
+  assert.ok(a.includes('--ignore-scripts'), 'no package runs code at install time');
   assert.ok(!a.some((x) => /latest|canary|\^|~/.test(x)));
 });
 
@@ -728,6 +729,16 @@ test('a refusal that comes before the download (a Paperclip already there) still
   r.pc.up = true;
   try {
     await assert.rejects(() => r.runtime.install({ background: true }), /already runs/);
+    assert.equal(r.spawned.length, 0);
+  } finally { r.f.done(); }
+});
+
+test('a port that accepts a connection and never answers counts as held, not as free', async () => {
+  const r = rig({ plant: true });
+  try {
+    r.pc.fetch = async () => { const e = new DOMException('The operation was aborted due to timeout', 'TimeoutError'); throw e; };
+    await assert.rejects(() => r.runtime.start(), /Something else uses port/);
+    assert.equal(r.runtime.status().state, 'busy');
     assert.equal(r.spawned.length, 0);
   } finally { r.f.done(); }
 });

@@ -121,8 +121,14 @@ export function npmCli({ env = process.env, execPath = process.execPath, exists 
   throw new Error(`npm was not found next to node (${dir}). Install Node with npm, or set OFFICE_NPM_CLI to the full path of npm-cli.js.`);
 }
 
-/** The arguments of the install: this exact version only, in the install folder (the office has no dependencies of its own). */
-export const installArgs = (cli, pin = PINNED) => [cli, 'install', `paperclipai@${pin.version}`, '--save-exact', '--no-audit', '--no-fund', '--no-update-notifier'];
+/**
+ * The arguments of the install: this exact version only, in the install folder (the office has no dependencies of its own), and no
+ * install scripts. The tree has 442 packages; a few have install scripts (native builds of optional modules such as ssh2 and
+ * cpu-features, which node-gyp compiles for minutes or fails on a new Node, a binary download of opencode-ai, a symlink step of the
+ * embedded database for Linux and macOS). Paperclip ran in login mode on Windows x64 without any of them (verified on 2026.1106.0), and
+ * the office then runs the code of no package at install time.
+ */
+export const installArgs = (cli, pin = PINNED) => [cli, 'install', `paperclipai@${pin.version}`, '--save-exact', '--ignore-scripts', '--no-audit', '--no-fund', '--no-update-notifier'];
 
 // ---------- what Paperclip says ----------
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
@@ -155,7 +161,7 @@ export const runtimeError = (status, message) => Object.assign(new Error(message
  * createRuntime(deps): the runtime of one office. deps (all injectable):
  *   root, port (the office's port), env, paths? (override of runtimePaths), pin, serverPort, dbPort
  *   fs, spawn(file, args, opts), exe(name), npmCli(), processStart(pid), killTree(pid), killSync(pid), fetch, writeSecret(file, text)
- *   now, setTimer(fn, ms), clearTimer(h), onChange(), onFeed(text, kind), onEnabled(bool)
+ *   now, random(n), setTimer(fn, ms), clearTimer(h), onChange(), onFeed(text, kind)
  * Methods: status(), install({ background }), start(), stop(), killNow(), resume(enabled), connectKey(), key() (the token, for the
  * HQ's own calls: never in a route answer).
  */
@@ -163,7 +169,7 @@ export function createRuntime(deps = {}) {
   const d = {
     env: process.env, port: 4317, fs, spawn: null, exe: launch.resolveExe, npmCli, processStart: launch.processStart, killTree: launch.killTree,
     killSync: launch.killTreeSync, fetch: globalThis.fetch, writeSecret: (f, t) => fs.writeFileSync(f, t), now: () => new Date(),
-    random: (n) => crypto.randomBytes(n), setTimer: (fn, ms) => setTimeout(fn, ms), clearTimer: (h) => clearTimeout(h), onChange() {}, onFeed() {}, onEnabled() {}, pin: PINNED, ...deps,
+    random: (n) => crypto.randomBytes(n), setTimer: (fn, ms) => setTimeout(fn, ms), clearTimer: (h) => clearTimeout(h), onChange() {}, onFeed() {}, pin: PINNED, ...deps,
   };
   const fsx = d.fs;
   const P = d.paths || runtimePaths({ root: d.root, env: d.env, port: d.port });
@@ -203,13 +209,13 @@ export function createRuntime(deps = {}) {
     return '';
   }
 
-  const run = (file, args, opts, { limitMs, onLine } = {}) => new Promise((resolve) => {
+  const run = (file, args, opts, { limitMs } = {}) => new Promise((resolve) => {
     const lines = [];
     let c, over = false, done = false;
     const end = (r) => { if (done) return; done = true; if (t) d.clearTimer(t); resolve({ ...r, lines }); };
     let t = null;
     try { c = d.spawn(file, args, { cwd: opts.cwd, env: opts.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { return end({ code: null, error: e.message }); }
-    const eat = (chunk) => { for (const l of String(chunk).split(/\r?\n/)) { lines.push(l); if (lines.length > TAIL_LINES) lines.shift(); if (onLine) onLine(l); } };
+    const eat = (chunk) => { for (const l of String(chunk).split(/\r?\n/)) { lines.push(l); if (lines.length > TAIL_LINES) lines.shift(); } };
     if (c.stdout) c.stdout.on('data', eat);
     if (c.stderr) c.stderr.on('data', eat);
     c.once('error', (e) => end({ code: null, error: e.message }));
@@ -224,7 +230,7 @@ export function createRuntime(deps = {}) {
    */
   async function install({ background = false } = {}) {
     if (busy || state === 'installing') throw runtimeError(409, 'Paperclip is being installed already.');
-    if (isInstalled()) { if (state === 'off') set('stopped'); return status(); }
+    if (isInstalled()) { if (state === 'off' || state === 'failed') set('stopped'); return status(); }
     const seen = await probe();
     if (seen.kind === 'paperclip') { set('external', `A Paperclip already runs at ${url}. The office does not install another one. Connect to it instead.`); throw runtimeError(409, reason); }
     if (seen.kind === 'other') { set('busy', `Something else uses port ${serverPort}, so Paperclip could not start there.`); throw runtimeError(409, reason); }
@@ -270,7 +276,7 @@ export function createRuntime(deps = {}) {
       return { kind: 'other' };
     } catch (e) {
       const code = e && e.cause && e.cause.code;
-      return { kind: !code || code === 'ECONNREFUSED' ? 'free' : 'other' };
+      return { kind: code === 'ECONNREFUSED' ? 'free' : 'other' }; // a timeout or a reset: something holds the port
     }
   }
   function readHealth(h) {

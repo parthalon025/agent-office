@@ -386,7 +386,7 @@ export function createOffice(cfg) {
     onChange: () => broadcast(), onFeed: (text, kind) => addFeed(PAPERCLIP, kind, text),
   });
   async function installRuntime(body) {
-    if (body.confirmed !== true) throw askFirst('runtime', `Install Paperclip ${runtime.status().version} from npm into the office folder? The office downloads about 440 packages with npm (a few minutes, several hundred megabytes) and npm runs their install scripts. It checks the download against the SHA-512 it pins. Apart from npm's own download cache, nothing outside the office folder is changed.`);
+    if (body.confirmed !== true) throw askFirst('runtime', `Install Paperclip ${runtime.status().version} from npm into the office folder? The office downloads about 440 packages with npm (a few minutes, several hundred megabytes). npm runs none of their install scripts. It checks the download against the SHA-512 it pins. Apart from npm's own download cache, nothing outside the office folder is changed.`);
     const st = await runtime.install({ background: true }); // the page watches the state: a download of minutes is not held in a request
     broadcast();
     return { runtime: st };
@@ -1398,7 +1398,7 @@ export function createOffice(cfg) {
       void refreshEnforce();
       // Paperclip HQ (#76): the connection the user made before, again (a Paperclip that is not up yet is tried again later).
       // The Paperclip runtime the user started before comes back with the office.
-      void runtime.resume(!!(saved.get('paperclipRuntime') && saved.get('paperclipRuntime').enabled)).then(() => broadcast());
+      runtime.resume(!!(saved.get('paperclipRuntime') && saved.get('paperclipRuntime').enabled)).then(() => broadcast(), (e) => console.warn(`Paperclip runtime: ${e.message}`));
       if (saved.get('paperclip') && saved.get('paperclip').url) hq.connect({ url: saved.get('paperclip').url, company: saved.get('paperclip').company || null, keep: true }).catch((e) => console.warn(`Paperclip: ${e.message}`));
     },
     hooks: { mode: () => hooksMode, file: activeHooksFile, version: CLAUDE_VERSION },
