@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { SOURCE_DIR, current } from './paperclip-source.mjs';
 import { PINNED } from '../src/paperclip-runtime.mjs';
-import { planWrite } from '../src/hq-model.mjs';
+import { planWrite, KINDS } from '../src/hq-writes/index.mjs';
 
 const HERE = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([a-z]:)/i, '$1'));
 const ROOT = path.resolve(HERE, '..');
@@ -131,7 +131,8 @@ function officeRoutes(file) {
   return found;
 }
 
-const OFFICE_FILES = ['src/paperclip.mjs', 'src/hq-model.mjs', 'src/paperclip-runtime.mjs'].map((f) => path.join(ROOT, f));
+// The write kinds (src/hq-writes/, #232) hold the write routes and the routes their `before` and `send` read.
+const OFFICE_FILES = ['src/paperclip.mjs', 'src/hq-model.mjs', 'src/paperclip-runtime.mjs', ...fs.readdirSync(path.join(ROOT, 'src', 'hq-writes')).filter((f) => f.endsWith('.mjs')).map((f) => `src/hq-writes/${f}`)].map((f) => path.join(ROOT, f));
 
 test('the pinned source is the pinned version', { skip }, () => {
   const marker = JSON.parse(read(path.join(SOURCE_DIR, 'office-source.json')));
@@ -161,36 +162,11 @@ test('every Paperclip route the office sends or reads exists in the pinned relea
   assert.deepEqual(missing, [], `Routes the pinned release ${PINNED.version} does not have:\n${missing.join('\n')}`);
 });
 
-// One example input for every write plan of the office (planWrite). Its body keys must be keys of the validator the release runs on that route.
-const SAMPLES = [
-  { kind: 'task', action: 'create', title: 'T', description: 'D', status: 'todo', parentId: 'p1', assigneeAgentId: 'a1' },
-  { kind: 'task', action: 'status', issue: 'i1', status: 'done' },
-  { kind: 'task', action: 'assign', issue: 'i1', agent: 'a1' },
-  { kind: 'comment', action: 'add', issue: 'i1', text: 'hello' },
-  { kind: 'approval', action: 'approve', approval: 'ap1', note: 'n' },
-  { kind: 'approval', action: 'reject', approval: 'ap1', note: 'n' },
-  { kind: 'approval', action: 'revise', approval: 'ap1', note: 'n' },
-  { kind: 'hire', action: 'create', name: 'N', role: 'engineer', title: 'T', manager: 'a1', model: 'sonnet', budgetDollars: 10, skills: [] },
-  { kind: 'company', action: 'create', name: 'Co', description: 'D', url: 'http://127.0.0.1:3100' },
-  { kind: 'company', action: 'update', name: 'Co', description: 'D', requireBoardApprovalForNewAgents: true },
-  { kind: 'access', action: 'invite', allowedJoinTypes: 'both', humanRole: 'viewer', agentMessage: 'hi' },
-  { kind: 'access', action: 'member', member: 'm1', role: 'viewer', status: 'active' },
-  { kind: 'instance', action: 'general', censorUsernameInLogs: true, feedbackDataSharingPreference: 'prompt' },
-  { kind: 'instance', action: 'defaultEnvironment', environment: 'e1' },
-  { kind: 'instance', action: 'environment', environment: 'e1', name: 'E', description: 'D', status: 'archived' },
-  { kind: 'reporting', action: 'set', agent: 'a1', manager: 'a2' },
-  { kind: 'goal', action: 'create', title: 'G', description: 'D', level: 'team', status: 'active', parent: 'g1', owner: 'a1' },
-  { kind: 'goal', action: 'update', goal: 'g1', title: 'G', description: 'D', status: 'achieved', owner: 'a1' },
-  { kind: 'routine', action: 'create', title: 'R', description: 'D', agent: 'a1', status: 'active', project: 'pr1' },
-  { kind: 'routine', action: 'update', routine: 'r1', title: 'R', description: 'D', agent: 'a1', status: 'paused' },
-  { kind: 'routine', action: 'schedule', routine: 'r1', trigger: 't1', cron: '0 9 * * *', timezone: 'UTC' },
-  { kind: 'pause', action: 'pause', agent: 'a1' },
-  { kind: 'budget', action: 'company', budgetDollars: 50 },
-  { kind: 'budget', action: 'agent', agent: 'a1', budgetDollars: 5 },
-  // review of the HQ build, finding 4: the writes that were sent beside the writer (the handoff is a task create, above)
-  { kind: 'export', action: 'company', include: { company: true, agents: false, projects: true, issues: true, skills: true } },
-  { kind: 'supervise', action: 'set', agent: 'a1' },   // its body is built by the writer: checked below with supervisePatch
-];
+// One example input for every action of every write kind (planWrite): the samples of the kinds (src/hq-writes/*.mjs), so a new action
+// is checked as soon as it has its sample (test/hq-writes.test.mjs fails an action without one). Its body keys must be keys of the
+// validator the release runs on that route. The Supervise sample sends {}: its body is built by the writer and checked below with
+// supervisePatch.
+const SAMPLES = KINDS.flatMap((k) => Object.values(k.samples).map((x) => x.body));
 
 // Routes whose validator the reader cannot see in the route line (a middleware chain, or the schema parsed in the handler). Read from routes/*.js of the release.
 const VALIDATED_BY = {
@@ -230,7 +206,7 @@ test('the bodies the office sends carry only keys the release validators know', 
   const unchecked = [], wrong = [], seen = new Set();
   for (const s of SAMPLES) {
     let plan;
-    try { plan = planWrite(s); } catch (e) { assert.fail(`the sample ${s.kind}/${s.action} is no longer a valid write (${e.message}); update SAMPLES`); }
+    try { plan = planWrite(s); } catch (e) { assert.fail(`the sample ${s.kind}/${s.action} is no longer a valid write (${e.message}); update the samples of that kind`); }
     const route = norm(plan.path('c1').split('/').map((x) => (/^[a-z]{1,2}\d+$/.test(x) ? ':p' : x)).join('/')), key = `${plan.method} ${route}`;
     assert.ok(routes.has(key), `${key} is not a route of the release`);
     seen.add(key);
@@ -325,7 +301,7 @@ test('the enums the office writes are values of the release', { skip }, async ()
   const url = (f) => new URL(`file:///${path.join(shared, f).replace(/\\/g, '/')}`).href;
   const c = await import(url('constants.js'));
   const feedback = await import(url(path.join('types', 'feedback.js')));
-  const m = await import('../src/hq-model.mjs');
+  const m = Object.assign({}, ...(await Promise.all(['hire', 'task', 'goal', 'routine', 'access', 'instance'].map((k) => import(`../src/hq-writes/${k}.mjs`)))));
   const inside = (name, mine, theirs) => assert.deepEqual(mine.filter((x) => !theirs.includes(x)), [], `${name}: the office writes values the release ${PINNED.version} does not have (release: ${theirs.join(', ')})`);
   inside('agent role (HIRE_ROLES, the Manager role)', [...m.HIRE_ROLES.map((r) => r.role), m.MANAGER_ROLE], c.AGENT_ROLES);
   inside('issue status', m.ISSUE_STATUS, c.ISSUE_STATUSES);

@@ -98,7 +98,8 @@ Server (`src/`):
 
 Paperclip (`src/`):
 - `paperclip.mjs`: the HQ watcher, the supervision checks and the one writer (`hq.write`).
-- `hq-model.mjs`: the pure HQ read model (org chart, lobby, costs, rooms, search), the write grid and the write plans.
+- `hq-model.mjs`: the pure HQ read model (org chart, lobby, costs, rooms, search), self-approval, the office adapter state.
+- `hq-writes/`: the write kinds, one file each (grid row, requests, what Paperclip must answer, the ids returned, samples); `index.mjs` lists them in grid order with the grid rules and `planWrite`; `shared.mjs` their checks and limits.
 - `paperclip-runtime.mjs`: the Paperclip the office installs, runs, updates or connects to; the board key.
 - `paperclip-runs.mjs`, `integrations/paperclip-adapter/`: runs Paperclip hands to the office; the adapter plugin Paperclip loads.
 
@@ -126,7 +127,7 @@ Page (`public/`):
 
 ## One owner per rule
 
-Read a rule from its owner; never write a second copy. Place rules: `place.mjs` (the page reads `s.place`). Session rules: `tracker.mjs`. Provider facts: `describe()` and `traitsOf` in `providers/index.mjs` (spend limits: `spendLimitFor`). Risk of a call: `risk.mjs`. Words, status, room figures, Always allow: `public/vocab.js`. Ask-first: `public/ask.js`. Routes: `public/client.js`. Paperclip writes: a row of `PLANS` and a cell of `WRITE_KINDS` in `hq-model.mjs`, sent by `hq.write`. Git and gh: `git.mjs`. Programs: `launch.mjs`. Folder compares: `recent.mjs`.
+Read a rule from its owner; never write a second copy. Place rules: `place.mjs` (the page reads `s.place`). Session rules: `tracker.mjs`. Provider facts: `describe()` and `traitsOf` in `providers/index.mjs` (spend limits: `spendLimitFor`). Risk of a call: `risk.mjs`. Words, status, room figures, Always allow: `public/vocab.js`. Ask-first: `public/ask.js`. Routes: `public/client.js`. Paperclip writes: one write kind file in `src/hq-writes/` (listed in its `index.mjs`), sent by `hq.write`, which names no kind. Git and gh: `git.mjs`. Programs: `launch.mjs`. Folder compares: `recent.mjs`.
 
 ## Gotchas
 

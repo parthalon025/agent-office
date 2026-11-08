@@ -10,7 +10,7 @@ import { askFirst } from '../src/office-core.mjs';
 import { createHq } from '../src/paperclip.mjs';
 import { createManager, createPlanBoard, officeSource } from '../src/manager.mjs';
 import { createManagerEmployees, cleanManagers, goalTextOf } from '../src/manager-employees.mjs';
-import { planWrite } from '../src/hq-model.mjs';
+import { planWrite } from '../src/hq-writes/index.mjs';
 import { startFakePaperclip, DEMO } from './fixtures/fake-paperclip.mjs';
 import { until } from './fixtures/office-server.mjs';
 import { officeKinds } from './fixtures/office-kinds.mjs';

@@ -5,12 +5,12 @@
 // provider seam. Paperclip owns its goals, heartbeats, routines and budgets; the office reads its REST routes and its live events
 // (WebSocket /api/companies/{id}/events/ws) and shows them. In login mode (ADR 0010) every call carries the board key (deps.key).
 //
-// Writes. Every write to Paperclip goes through `write` (#198), after the HQ write grid (hq-model.mjs WRITE_KINDS): one plan per write
-// (hq-model.mjs PLANS), and a Deny in the grid stops it. That includes the two writes that came before the grid (review of the HQ build):
-// Supervise in office (kind `supervise`; its painted Confirm on the Agents screen is its Confirm, superviseSend builds its PATCH from a read
-// of the agent) and the goal handoff (each task a `task create`; its own Confirm lists the tasks), and the company export (kind `export`, a
-// POST that changes nothing: never asked, its answer is the bundle). test/paperclip-contract.test.mjs fails on a method in this file that
-// does not come from a plan.
+// Writes. Every write to Paperclip goes through `write` (#198), after the HQ write grid: each write kind is one file in src/hq-writes/
+// (#232: its grid row, its requests, what Paperclip must answer, the ids it returns), and a Deny in the grid stops it. That includes the
+// two writes that came before the grid (review of the HQ build): Supervise in office (kind `supervise`; its painted Confirm on the Agents
+// screen is its Confirm, and its `send` builds its PATCH from a read of the agent) and the goal handoff (each task a `task create`; its
+// own Confirm lists the tasks), and the company export (kind `export`, a POST that changes nothing: never asked, its answer is the
+// bundle). test/paperclip-contract.test.mjs fails on a method in this file that does not come from a plan.
 //
 // How a run reaches the office (#76). Paperclip's Claude Code runs come in through the command hooks like terminal sessions, once
 // "Supervise in office" has set the agent up for that. hook.mjs sends `paperclip`, the PAPERCLIP_* ids of the run's environment
@@ -31,7 +31,7 @@
 // is POST /api/paperclip/company; a reporting line (#202) is POST /api/hq/reporting-line, a thin call of `write`. The snapshot
 // `hq.reportingWrite` is false only when the grid says Deny: the org chart editor (`OrgChart` in public/hq.js) is then read only.
 // The routes of the read model, costs, catalog, access and instance are with the functions below; the grid and write routes are
-// in hq-model.mjs. User words and the Paperclip routes used by #221 and their source files are also in docs/paperclip.md.
+// in src/hq-writes/index.mjs. User words and the Paperclip routes used by #221 and their source files are also in docs/paperclip.md.
 //
 // Facts from the spike (#75, Paperclip 2026.1023.0 on Windows, Node 24.11+) and the Paperclip source (0.3.1, in
 // D:\SSD\AI_Tools\paperclip: server/src/routes, live-events-ws.ts, heartbeat.ts, packages/shared/src/types). Never installed for
@@ -126,26 +126,25 @@
 //   Paperclip; Deny stops it). Paperclip leaves secret values out. POST /api/hq/company/export hands the bundle to the page as a file, and
 //   the office keeps no copy.
 //
-// The writer (#198, ADR 0010; tested in test/hq-write.test.mjs and test/hq-write-routes.test.mjs). write(body, { confirmed }) plans
-// the write (planWrite, 400), reads the cell of the write grid (deps.grid(); Deny is 403 with a feed line and nothing sent), reads
-// every thing the write names from Paperclip (an issue or approval must be in the connected company, an agent in the read model, an
-// approval must wait for a decision: 404 or 409), and only then, for Confirm without `confirmed: true`, throws
-// deps.askFirst('write', ...) (the ask-first 409 with write: { kind, action, summary }), or sends one request and leaves a feed
-// line (a Paperclip refusal leaves one too). Its result is ids only (a created task: id, identifier), never a body from Paperclip, except the
-// bundle of a company export. A hire's review gets the office's agent kinds (deps.kinds): its Confirm names the kind's supervision, and a
-// kind the office does not have is 400.
-// The company is the one write with no company yet: companyDraft (#199) checks the name and the building kind of the company the
-// Orientation Company step makes, and the write (kind `company`, action `create`, scope 'none') names the loopback address it goes
-// to, needs no connection, and reuses a name that exists with no write. A reporting line (#202, kind `reporting`, action `set`):
-// the plan's `review` reads the org chart (reportingProblem: a loop, a self report or someone who is not in the company is 400 or
-// 404 before anything is asked); the PATCH { reportsTo } marks the employee busy, the agent is read again, and the floors and
-// view().cables rebuild. A plan may carry `preflight` (a company import first asks POST /api/companies/import/preview: its `errors`
-// refuse the write and its counts are the words of the Confirm) and `timeoutMs`.
+// The writer (#198, ADR 0010; tested in test/hq-write.test.mjs, test/hq-write-routes.test.mjs and, with a stand-in kind,
+// test/hq-writes.test.mjs). write(body, { confirmed }) is one pipeline for every write kind and names none (#232): what a kind does
+// differently is in its file in src/hq-writes/ (the entry and the context it gets are in src/hq-writes/index.mjs). The pipeline: it plans
+// the write (planWrite, 400), reads the cell of the write grid (deps.grid(); Deny is 403 with a feed line and nothing sent), runs the
+// plan's review against the org chart held here, reads every thing the write names from Paperclip (an issue or approval must be in the
+// connected company, an agent in the read model, an approval must wait for a decision: 404 or 409), runs the kind's `before` (the
+// adapter check of a hire, the idempotent adapter install, the company that exists, the import preview), and only then, for Confirm
+// without `confirmed: true`, throws deps.askFirst('write', ...) (the ask-first 409 with write: { kind, action, summary }), or sends one
+// request (with the employee of a `busy` kind marked busy, and read again after) and leaves a feed line (a Paperclip refusal leaves one
+// too). The kind's `expect` says what Paperclip must name (502 and a feed line otherwise) and its `result` the ids returned, never a body
+// from Paperclip. A kind with its own `send` (Supervise in office, the company export, whose answer is the bundle) asks the Confirm
+// itself. A hire's review gets the office's agent kinds (deps.kinds): its Confirm names the kind's supervision, and a kind the office
+// does not have is 400. The first company (#199) is the one write with no company yet: companyDraft checks the name and the building
+// kind of the company the Orientation Company step makes, and the write names the loopback address it goes to and needs no connection.
 //
 // Employee management (#203). selfApprove runs after each read: it approves once each pending approval an employee of the company
 // asked for, of a kind that is on (deps.selfApproval(), the saved slice hqSelfApproval), through `write` with a fixed note, so a
 // Deny in the Approvals cell still wins. NEVER_SELF_APPROVED (hire_agent and budget_override_required) are never approved this way.
-// The slice and its rules are in hq-model.mjs.
+// The slice and its rules are in hq-model.mjs; the approval itself is a write of src/hq-writes/approval.mjs.
 //
 // Pure apart from createHq, whose network, clock and timers are injected. Tests: test/paperclip.test.mjs and
 // test/paperclip-routes.test.mjs, with the fake server test/fixtures/fake-paperclip.mjs (it also runs by hand for a browser check:
@@ -154,7 +153,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { runIds, cleanIds } from './payload.mjs';
 import { readArgs, CLAUDE_FLAGS_VERSION } from './providers/claude-code.mjs';
-import { paperclipLinker, floorsOf, cablesOf, goalsOf, lobbyOf, inboxOf, costsOf, catalogOf, roomsOf, monthWindows, searchOf, shapeProblems, planWrite, writeValueOf, WRITE_KINDS, officeAdapterOf, OFFICE_ADAPTER_TYPE, NEVER_SELF_APPROVED, selfApprovalOn } from './hq-model.mjs';
+import { paperclipLinker, floorsOf, cablesOf, goalsOf, lobbyOf, inboxOf, costsOf, catalogOf, roomsOf, monthWindows, searchOf, shapeProblems, officeAdapterOf, NEVER_SELF_APPROVED, selfApprovalOn } from './hq-model.mjs';
+import { WRITES, writeRegistry } from './hq-writes/index.mjs';
+import { gridError as httpError, obj, strings, text, ID_RE } from './hq-writes/shared.mjs';
 import { archetypeOf, GENERAL } from './archetypes.mjs';
 
 export const DEFAULT_URL = 'http://127.0.0.1:3100';
@@ -182,8 +183,6 @@ export function checkUrl(raw) {
 const ROLE_LABELS = { ceo: 'CEO', cto: 'CTO', cmo: 'CMO', cfo: 'CFO', security: 'Security', engineer: 'Engineer', designer: 'Designer', pm: 'PM', qa: 'QA', devops: 'DevOps', researcher: 'Researcher', general: 'General' };
 export const roleLabel = (role) => (ROLE_LABELS[role] || (typeof role === 'string' && role ? role[0].toUpperCase() + role.slice(1) : 'Agent'));
 
-const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
-const strings = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
 // The CLI arguments Paperclip adds to a claude_local run: extraArgs, else the older args (execute.ts reads them in that order).
 export const argsOf = (cfg) => { const e = strings(obj(cfg).extraArgs); return e.length ? e : strings(obj(cfg).args); };
 const samePath = (a, b) => !!a && !!b && path.win32.normalize(String(a)).toLowerCase() === path.win32.normalize(String(b)).toLowerCase();
@@ -469,8 +468,6 @@ export { runIds, cleanIds };
 // ---------- the watcher ----------
 const cents = (n) => (Number.isFinite(+n) && +n >= 0 ? Math.round(+n) / 100 : 0);
 const ms = (t) => { const v = t ? Date.parse(t) : NaN; return Number.isFinite(v) ? v : null; };
-const text = (v, n = 120) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, n) : '');
-const httpError = (status, message) => Object.assign(new Error(message), { status });
 
 /**
  * The company the orientation step makes (#199): { name, archetype, description }. The name is 1 to 80 characters (a 400 otherwise); the
@@ -491,7 +488,8 @@ const ENDED = new Set(['succeeded', 'failed', 'cancelled', 'timed_out', 'error']
  * createHq(deps) -> the Paperclip watcher. deps: { hooksFile() (the office's command hooks file, the path Supervise writes),
  * onChange(), onFeed(text, kind), onRun({ agentId, runId, status }) (a run ended), fetch, WebSocket, setTimer, clearTimer,
  * refetchMs, retryMs, key(url) (the board key for that address, or null: sent only as a bearer to that address, never held in a view),
- * kinds(kind) (the office's agent kinds: { label, gated, supervision, word } or null; none given: no kind is known) }.
+ * kinds(kind) (the office's agent kinds: { label, gated, supervision, word } or null; none given: no kind is known), grid() (the saved
+ * write grid), askFirst, adapterDir, writeKinds (tests: the write kinds the writer knows, in place of src/hq-writes/ KINDS) }.
  * connect, disconnect, supervise, write (the one writer, #198; a reporting line is its kind `reporting`, #202), view (the snapshot part, with the HQ floors and Lobby, #197), model (the fuller read model), labelOf (a session's label). Only the
  * labels need the company match: a held call of any Paperclip run waits the long hold (office.mjs holdRequest).
  */
@@ -727,7 +725,7 @@ export function createHq(deps = {}) {
   async function task(id) {
     const conn = c;
     if (!conn || !d || conn.state === 'choose' || !conn.companyId) throw httpError(409, 'Paperclip is not connected.');
-    if (typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(id)) throw httpError(400, 'Give the task.');
+    if (typeof id !== 'string' || !ID_RE.test(id)) throw httpError(400, 'Give the task.');
     const json = await call(conn, `/api/issues/${id}`).catch((e) => { throw e.upstream === 404 ? httpError(404, 'Paperclip has no such task in this company.') : e; });
     const p = shapeProblems('issue', json);
     if (p.length) throw httpError(502, `Paperclip answered in a shape the office does not know (${p[0]}) Update the office or the pinned Paperclip.`);
@@ -902,60 +900,12 @@ export function createHq(deps = {}) {
   }
 
   /**
-   * "Supervise in office" for one agent: one write of the writer (kind `supervise`), confirmed by the caller (the painted Confirm of the
-   * Agents screen; superviseHq refuses a call without it). The grid's Supervise cell can still Deny it. See superviseSend.
+   * "Supervise in office" for one agent: one write of the writer (kind `supervise`, src/hq-writes/supervise.mjs: it reads the agent, PATCHes
+   * it and reads it again), confirmed by the caller (the painted Confirm of the Agents screen; superviseHq refuses a call without it). The
+   * grid's Supervise cell can still Deny it. Resolves { ok, supervision, already? }.
    */
   function supervise(agentId) {
     return write({ kind: 'supervise', action: 'set', agent: String(agentId || '') }, { confirmed: true });
-  }
-  /**
-   * The send of a `supervise` write (called by write() only, after the grid, the review and the target check): one PATCH of the agent's
-   * adapter config (supervisePatch). The PATCH replaces extraArgs whole, so the agent is read again (GET /api/agents/:id) just before it, and
-   * the change is built from that read: a change made in Paperclip since the office last read the company stays. Resolves { ok, supervision,
-   * already? }.
-   */
-  async function superviseSend(conn, plan, { ask, company }) {
-    const id = plan.targets[0].id;
-    const file = hooksFile();
-    if (!file) throw httpError(500, 'The office has no hooks file yet.');
-    if (conn.busy.has(id)) throw httpError(409, 'The office is already setting up this agent.');
-    conn.busy.add(id); changed();
-    try {
-      const route = `/api/agents/${encodeURIComponent(id)}`;
-      const a = scrubAgent(await call(conn, route));
-      if (c !== conn || !d) return { ok: false };
-      if (!a || a.id !== id || a.companyId !== conn.companyId) throw httpError(404, 'Paperclip has no such agent in this company.');
-      d.agents.set(id, a);
-      const before = supOf(a);
-      if (before.state === 'supervised') return { ok: true, already: true, supervision: before };
-      if (!before.can) throw httpError(409, `Supervise in office cannot set up ${text(a.name, 60)}: ${before.why}`);
-      const patch = supervisePatch(a, file);
-      if (ask) throw ask(`${plan.summary} in ${company}?`);
-      let out;
-      try { out = scrubAgent(await call(conn, plan.path(conn.companyId), { method: plan.method, body: JSON.stringify(patch) })); }
-      catch (e) { feed(`Paperclip refused the write: ${plan.summary}. ${e.message}`, 'wait'); throw e; }
-      if (c !== conn || !d) return { ok: false };
-      // Paperclip's PATCH has no version check, so a change saved in Paperclip at the same time can replace the office's.
-      // The agent is read once more, and its supervision comes from what Paperclip keeps, not from what the office sent.
-      const saved = scrubAgent(await call(conn, route));
-      if (c !== conn || !d) return { ok: false };
-      const now = saved && saved.id === id ? saved : out && out.id === id ? out : null;
-      if (now) d.agents.set(id, now);
-      d.last.delete(id);
-      const after = supOf(d.agents.get(id)), name = text(a.name, 60);
-      const sent = patch.adapterConfig.extraArgs, got = strings(obj(obj(now).adapterConfig).extraArgs);
-      if (now && (got.length !== sent.length || got.some((x, k) => x !== sent[k]))) {
-        feed(`Supervise in office: Paperclip saved other arguments for ${name} than the office sent (a change made in Paperclip at the same time). The office shows the saved config${after.why ? `: ${after.why}` : ', which holds its calls here.'}`, 'wait');
-        return { ok: after.state === 'supervised', supervision: after };
-      }
-      // the agent's own --settings stay in its arguments, but only the last one loads, and that is the office's now
-      const own = settingsOf(readArgs(sent)).filter((f) => !samePath(f, file)).map((f) => text(f, 80));
-      const lost = after.state === 'supervised' && own.length ? ` Its own --settings ${own.join(', ')} no longer ${own.length > 1 ? 'load' : 'loads'}: Claude Code loads only the last --settings.` : '';
-      feed(after.state === 'supervised'
-        ? `Supervise in office: ${name} now runs Claude Code with the office hooks. Its next run asks here.${lost}`
-        : `Supervise in office: Paperclip took the change for ${name}, but ${after.why.charAt(0).toLowerCase()}${after.why.slice(1)}`);
-      return { ok: after.state === 'supervised', supervision: after };
-    } finally { conn.busy.delete(id); changed(); }
   }
 
   // ---------- the plan source (#155, contract in manager.mjs) ----------
@@ -1028,14 +978,16 @@ export function createHq(deps = {}) {
   }
 
   // ---------- the writer (#198, ADR 0010): the one function that sends a write ----------
-  // One write, keyed by its kind (hq-model.mjs planWrite). The write grid (deps.grid(): the saved cells; a cell not set uses its default)
-  // answers first: Deny refuses (403), Confirm asks first (deps.askFirst, the ask-first protocol, ask.js) until the same call comes with
-  // confirmed: true, Allow sends. Before the question and before the send, every thing the write names is read from Paperclip and must
-  // belong to the connected company (and an approval must wait for a decision), so a Confirm is never asked for a write that cannot
-  // happen. Every write, and every refusal, leaves a feed line. The result carries ids only, never a body from Paperclip (the company
-  // export is the one exception: its answer is the bundle the page saves). Supervise in office and the goal handoff go through here too;
-  // their callers ask their own Confirm first and pass confirmed: true, so the grid's Deny still stops them.
+  // One pipeline for every write kind (src/hq-writes/, #232); it names no kind. The write grid (deps.grid(): the saved cells; a cell not
+  // set uses its default) answers first: Deny refuses (403), Confirm asks first (deps.askFirst, the ask-first protocol, ask.js) until the
+  // same call comes with confirmed: true, Allow sends. Before the question and before the send, every thing the write names is read from
+  // Paperclip and must belong to the connected company (and an approval must wait for a decision), so a Confirm is never asked for a
+  // write that cannot happen. Every write, and every refusal, leaves a feed line. The result carries ids only, never a body from
+  // Paperclip (the company export is the one exception: its answer is the bundle the page saves). Supervise in office and the goal
+  // handoff go through here too; their callers ask their own Confirm first and pass confirmed: true, so the grid's Deny still stops them.
   // The first company (#199) is the one write with no company yet: it names the loopback address it goes to and needs no connection.
+  // deps.writeKinds (tests): the write kinds this writer knows, in place of the office's.
+  const writes = deps.writeKinds ? writeRegistry(deps.writeKinds) : WRITES;
   /**
    * Company admin (#213): the invites, join requests and members of the connected company, read when asked (the HQ opens Access), for
    * GET /api/hq/access and for the writer's checks. Names, roles and states only: never an invite token or link, an address or a key.
@@ -1152,14 +1104,55 @@ export function createHq(deps = {}) {
     if (!json || json.id !== t.id || json.companyId !== conn.companyId) throw httpError(404, `Paperclip has no such ${noun} in this company.`);
     if (!issue && !goal && !OPEN_APPROVAL.has(json.status)) throw httpError(409, 'This approval is not waiting for a decision.');
   }
+  // An employee a write changes: marked busy while it runs (a second change of the same employee is 409 with busyText), and read again from
+  // Paperclip after it, so the floors, the cables and the next write see what Paperclip keeps (the PATCH answer may be partial).
+  async function hold(conn, id, busyText, fn) {
+    if (conn.busy.has(id)) throw httpError(409, busyText);
+    conn.busy.add(id); changed();
+    try { return await fn(); } finally { conn.busy.delete(id); changed(); }
+  }
+  const agentNow = async (conn, id) => scrubAgent(await call(conn, `/api/agents/${encodeURIComponent(id)}`));
+  // The write is done, so a failed read is not an error of it: the read of the company that follows has the same data.
+  async function reread(conn, id) {
+    if (typeof id !== 'string' || !ID_RE.test(id) || c !== conn || !d) return;
+    try {
+      const saved = await agentNow(conn, id);
+      if (c === conn && d && saved && saved.id === id && saved.companyId === conn.companyId) d.agents.set(id, saved);
+    } catch { /* refetchSoon */ }
+  }
+  // What a kind's `before` and `send` may do (src/hq-writes/index.mjs, the context). The board key stays inside call().
+  function context(conn, plan, company, connected, confirmFirst) {
+    return {
+      company, companyId: conn.companyId, feed, connected,
+      read: (route) => call(conn, route),
+      adapter: () => adapterState(conn),
+      adapterDir: () => (deps.adapterDir && fs.existsSync(path.join(deps.adapterDir, 'package.json')) ? deps.adapterDir : ''),
+      async preview() {
+        try { return await call(conn, plan.preflight.path, { method: 'POST', body: JSON.stringify(plan.preflight.body), timeoutMs: 120000 }); }
+        catch (e) { feed(`Paperclip refused the preview: ${plan.summary}. ${e.message}`, 'wait'); throw e; }
+      },
+      confirm() {
+        if (confirmFirst) throw askWrite('write', `${plan.summary} in ${company}? The office sends this one change to Paperclip and nothing else.`, { write: { kind: plan.kind, action: plan.action, summary: plan.summary } });
+      },
+      async request(body) {
+        try { return obj(await call(conn, plan.path(conn.companyId), { method: plan.method, body: JSON.stringify(body), timeoutMs: plan.timeoutMs, forbidden: plan.forbidden })); }
+        catch (e) { feed(`Paperclip refused the write: ${plan.summary}. ${e.message}`, 'wait'); throw e; }
+      },
+      hold: (id, busyText, fn) => hold(conn, id, busyText, fn),
+      employee: { read: (id) => agentNow(conn, id), keep: (a) => d.agents.set(a.id, scrubAgent(a)), changed: (id) => d.last.delete(id) },
+      supervision: { hooksFile, of: (id) => supOf(d.agents.get(id)), patch: supervisePatch, otherSettings: (args, file) => settingsOf(readArgs(args)).filter((f) => !samePath(f, file)) },
+    };
+  }
   /**
    * write({ kind, action, ...fields }, { confirmed }) -> { ok: true, id?, identifier? } for what Paperclip made. Errors carry a status:
    * 400 a bad write, 403 the grid says Deny, 409 not connected or an approval already decided, ask-first for Confirm, 404 a thing that is
    * not in this company, 502 Paperclip failed or answered in another shape.
+   * The pipeline: grid, review, targets, before, Confirm, send (busy, request, the employee read again), expect, feed, result.
    */
   async function write(body, { confirmed = false } = {}) {
-    if (!(body && body.kind === 'company') && (!c || !d || c.state === 'choose' || !c.companyId)) throw httpError(409, 'Paperclip is not connected.');
-    const plan = planWrite(body), label = WRITE_KINDS[plan.kind].label, cell = writeValueOf(deps.grid ? deps.grid() : {}, plan.kind);
+    const kind = writes.kindOf(body && body.kind);
+    if (!(kind && kind.ownAddress) && (!c || !d || c.state === 'choose' || !c.companyId)) throw httpError(409, 'Paperclip is not connected.');
+    const plan = writes.planWrite(body), cell = writes.writeValueOf(deps.grid ? deps.grid() : {}, plan.kind);
     // The first company has no connection and no company to belong to (#199): it goes to the address it names, which must be loopback.
     const first = plan.scope === 'none';
     let conn = c, name;
@@ -1171,7 +1164,7 @@ export function createHq(deps = {}) {
       if (!conn || !d || conn.state === 'choose' || !conn.companyId) throw httpError(409, 'Paperclip is not connected.');
       name = text(d.company.name, 80) || 'Paperclip';
     }
-    if (cell === 'deny') { feed(`Refused by the HQ write grid: ${label}. Nothing was sent.`, 'wait'); throw httpError(403, `Denied by the HQ write grid: ${label}.`); }
+    if (cell === 'deny') { feed(`Refused by the HQ write grid: ${kind.label}. Nothing was sent.`, 'wait'); throw httpError(403, `Denied by the HQ write grid: ${kind.label}.`); }
     if (plan.review) {   // what the plan checks against the org chart held here (a reporting line: a loop, a self report, a stranger) and the office's agent kinds (a hire)
       const r = plan.review([...d.agents.values()].filter((a) => a.status !== 'terminated').map(agentView), { kindOf });
       if (r.problem) throw httpError(r.status || 400, r.problem);
@@ -1179,108 +1172,22 @@ export function createHq(deps = {}) {
     }
     for (const t of plan.targets) await check(conn, t);
     if (!first && c !== conn) throw httpError(409, 'Paperclip is not connected.');
-    const confirmFirst = cell === 'confirm' && confirmed !== true;
-    // Supervise in office builds its body from a read of the agent made just before the PATCH: its own send (superviseSend).
-    if (plan.fill === 'supervise') {
-      return superviseSend(conn, plan, { company: name, ask: confirmFirst ? (q) => askWrite('write', `${q} The office sends this one change to Paperclip and nothing else.`, { write: { kind: plan.kind, action: plan.action, summary: plan.summary } }) : null });
-    }
-    // Hiring needs the office adapter (#222): every hire runs through it, and Paperclip refuses a hire for an adapter type it does not have. Both
-    // hire paths (the HR desk and the Manager) end here, so one check says what to do, before any Confirm is asked.
-    if (plan.kind === 'hire') {
-      const a = await adapterState(conn);
-      if (a.state !== 'installed') { feed(`Hire not sent: ${a.why}`, 'wait'); throw httpError(409, a.why); }
-    }
-    if (plan.kind === 'adapter') {
-      // Idempotent: an adapter that is there is left alone. Nothing is asked and nothing is sent.
-      const a = await adapterState(conn);
-      if (a.state === 'unknown') throw httpError(502, a.why);
-      if (a.state !== 'missing') { feed('The office adapter was already in Paperclip. Nothing was sent.'); return { ok: true, type: OFFICE_ADAPTER_TYPE, existed: true, off: a.state === 'off' }; }
-      if (!deps.adapterDir || !fs.existsSync(path.join(deps.adapterDir, 'package.json'))) throw httpError(500, 'The office cannot find its adapter folder.');
-      plan.body = { ...plan.body, packageName: deps.adapterDir };
-    }
-    if (first && plan.kind === 'company') {
-      // A retry never doubles the company: a name that exists is reused, with no write and no question.
-      const have = list(await call(conn, '/api/companies')).find((x) => x && x.id && text(x.name, 80) === plan.name);
-      if (have) { feed(`The company "${plan.name}" was already in Paperclip. Nothing was sent.`); return { ok: true, id: String(have.id), name: plan.name, existed: true }; }
-    }
-    if (plan.preflight) {
-      // A write that asks Paperclip for a preview first (a company import): its errors refuse the write, its counts are the words of the Confirm.
-      let pv;
-      try { pv = await call(conn, plan.preflight.path, { method: 'POST', body: JSON.stringify(plan.preflight.body), timeoutMs: 120000 }); }
-      catch (e) { feed(`Paperclip refused the preview: ${plan.summary}. ${e.message}`, 'wait'); throw e; }
-      const bad = shapeProblems('importPreview', pv);
-      if (bad.length) throw httpError(502, `Paperclip answered in a shape the office does not know (${bad[0]}) Update the office or the pinned Paperclip.`);
-      if (pv.errors.length) throw httpError(400, `Paperclip cannot import this file: ${text(pv.errors[0], 200)}`);
-      plan.summary = plan.summarize(pv);
-    }
-    if (confirmFirst) {
-      throw askWrite('write', `${plan.summary} in ${name}? The office sends this one change to Paperclip and nothing else.`, { write: { kind: plan.kind, action: plan.action, summary: plan.summary } });
-    }
-    // A reporting line, a pause, a let go and an employee budget (#203) mark their employee busy while they send (the page keeps its Confirm off, #202); a second change waits.
-    const busyId = plan.kind === 'reporting' || plan.kind === 'pause' || (plan.kind === 'budget' && plan.action === 'agent') ? plan.targets[0].id : null;
-    if (busyId) {
-      if (conn.busy.has(busyId)) throw httpError(409, 'The office is already changing this employee.');
-      conn.busy.add(busyId); changed();
-    }
-    let made, hireApproval = null;
-    try {
-      try { made = obj(await call(conn, plan.path(conn.companyId), { method: plan.method, body: JSON.stringify(plan.body), timeoutMs: plan.timeoutMs, forbidden: plan.forbidden })); }
-      catch (e) { feed(`Paperclip refused the write: ${plan.summary}. ${e.message}`, 'wait'); throw e; }
-      // A hire answers { agent, approval } (routes/agents.ts handleAgentHire, 0.3.1): approval is the board's pending hire_agent approval
-      // when the company asks the board to approve new employees, else null. The employee is the agent.
-      if (plan.kind === 'hire') { hireApproval = made.approval && typeof made.approval === 'object' ? made.approval : null; made = obj(made.agent); }
-      if (plan.kind === 'hire' && c === conn && d && typeof made.id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(made.id)) {
-        // the new employee is known at once, so the onboarding task can name it before the next read of the company (#201). A failed read is
-        // not an error of the hire: the read of the company that follows has the same data.
-        try {
-          const saved = scrubAgent(await call(conn, `/api/agents/${made.id}`));
-          if (c === conn && d && saved && saved.id === made.id && saved.companyId === conn.companyId) d.agents.set(made.id, saved);
-        } catch { /* refetchSoon below */ }
-      }
-      if (busyId && c === conn && d) {
-        // the agent as Paperclip kept it (the PATCH answer may be partial): the floors and cables come from this read. The write is done, so a
-        // failed read is not an error of it; the read of the company that follows has the same data.
-        try {
-          const saved = scrubAgent(await call(conn, `/api/agents/${busyId}`));
-          if (c === conn && d && saved && saved.id === busyId && saved.companyId === conn.companyId) d.agents.set(busyId, saved);
-        } catch { /* refetchSoon below */ }
-      }
-    } finally { if (busyId) { conn.busy.delete(busyId); changed(); } }
-    if (plan.bundle) {
-      // A company export: the one write whose answer is a body, the bundle the page saves (Paperclip leaves secret values out of it).
-      const p = shapeProblems('exportBundle', made);
-      if (p.length) throw httpError(502, `Paperclip answered in a shape the office does not know (${p[0]}) Update the office or the pinned Paperclip.`);
-      if (c !== conn) throw httpError(409, 'Paperclip is not connected.');
-      feed(`Exported the company ${name} from Paperclip as a file (${Object.keys(made.files).length} files). The office keeps no copy.`);
-      return { rootPath: made.rootPath, manifest: made.manifest, files: made.files, warnings: Array.isArray(made.warnings) ? made.warnings.map((w) => text(w, 200)).slice(0, 50) : [] };
-    }
-    if (plan.kind === 'task' && plan.action === 'create' && !made.id) { feed(`Paperclip did not name the task it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the task it made.'); }
-    if (plan.kind === 'goal' && plan.action === 'create' && !made.id) { feed(`Paperclip did not name the goal it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the goal it made.'); }
-    if (plan.kind === 'routine' && plan.action === 'create' && !made.id) { feed(`Paperclip did not name the routine it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the routine it made.'); }
-    if (plan.kind === 'access' && plan.action === 'invite' && !made.id) { feed(`Paperclip did not name the invite it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the invite it made.'); }
-    if (plan.kind === 'company' && plan.action === 'create' && !made.id) { feed(`Paperclip did not name the company it made: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the company it made.'); }
-    if (plan.kind === 'company' && plan.action === 'import') {
-      const bad = shapeProblems('importResult', made), co = obj(made.company);
-      if (bad.length || typeof co.id !== 'string' || !co.id) { feed(`Paperclip did not name the company it imported: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the company it imported.'); }
-    }
-    if (plan.kind === 'adapter') {
-      const bad = shapeProblems('adapterInstall', made);
-      if (bad.length || made.type !== OFFICE_ADAPTER_TYPE) { feed(`Paperclip did not confirm the office adapter: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not confirm that it loaded the office adapter.'); }
-    }
-    if (plan.kind === 'hire' && !(typeof made.id === 'string' && made.id)) { feed(`Paperclip did not name the employee it hired: ${plan.summary}.`, 'wait'); throw httpError(502, 'Paperclip did not name the employee it hired.'); }
-    const waitsForBoard = plan.kind === 'hire' && (made.status === 'pending_approval' || !!(hireApproval && hireApproval.id));
-    feed(`Wrote to ${name}: ${plan.summary}.${waitsForBoard ? ' Paperclip waits for the board to approve the hire.' : ''}`);
+    const ctx = context(conn, plan, name, () => first || (c === conn && !!d), cell === 'confirm' && confirmed !== true);
+    if (kind.before) { const answer = await kind.before(plan, ctx); if (answer !== undefined) return answer; }
+    if (kind.send) return kind.send(plan, ctx);
+    ctx.confirm();
+    const busyId = kind.busy ? kind.busy(plan) : null;
+    const send = async () => {
+      const made = await ctx.request(plan.body);
+      await reread(conn, kind.employee ? kind.employee(plan, made) : busyId);
+      return made;
+    };
+    const made = busyId ? await hold(conn, busyId, 'The office is already changing this employee.', send) : await send();
+    const problem = writes.problemOf(plan, made);
+    if (problem) { feed(`${problem.line}: ${plan.summary}.`, 'wait'); throw httpError(502, problem.error); }
+    feed(`Wrote to ${name}: ${plan.summary}.${kind.note ? kind.note(plan, made) : ''}`);
     if (!first) refetchSoon(conn);
-    const out = { ok: true };
-    if (plan.kind === 'company' && plan.action === 'create') { out.id = String(made.id); out.name = plan.name; out.existed = false; }
-    if (plan.kind === 'adapter') { out.type = OFFICE_ADAPTER_TYPE; out.existed = false; out.requiresRestart = made.requiresRestart === true; }
-    if (plan.kind === 'hire') { out.id = String(made.id); out.name = plan.body.name; out.pendingApproval = waitsForBoard; }
-    if (plan.kind === 'company' && plan.action === 'import') { out.id = String(made.company.id); out.name = text(made.company.name, 80) || plan.name; }
-    if (plan.kind === 'goal' && plan.action === 'create') out.id = String(made.id);
-    if (plan.kind === 'routine' && plan.action === 'create') out.id = String(made.id);
-    if (plan.kind === 'access' && plan.action === 'invite') out.id = String(made.id);
-    if (plan.kind === 'task' && plan.action === 'create') { out.id = String(made.id); if (typeof made.identifier === 'string') out.identifier = text(made.identifier, 30); }
-    return out;
+    return writes.resultOf(plan, made);
   }
 
   return { connect, disconnect, supervise, handoffGoal, handoffTasks, write, adapter: adapterState, selfApprove: () => { if (c) selfApprove(c); }, tasksOf, task, access, instance, exportCompany, view, model, costs, catalog, labelOf, held, planSource, state: () => (c ? c.state : 'off') };

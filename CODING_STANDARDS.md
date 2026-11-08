@@ -10,7 +10,7 @@ The reviewer reads this file when it reviews a diff. These are judgement rules: 
 
 ## Writes
 
-- Every Paperclip write goes through `hq.write`: one row in `PLANS` and one `WRITE_KINDS` cell. A second sender anywhere is a defect. This includes a "temporary" `fetch`.
+- Every Paperclip write goes through `hq.write`: one write kind in `src/hq-writes/` (its grid cell, its requests and their samples), and `hq.write` names no kind. A second sender anywhere is a defect. This includes a "temporary" `fetch`.
 - A write that changes money, people, access or secrets defaults to Confirm. Secrets never take Allow.
 - The board key, the tokens and secret values never reach a page answer, a feed line, an error text or `state.json`.
 

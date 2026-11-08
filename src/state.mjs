@@ -25,7 +25,8 @@ import { cleanMerges, cleanStandups, cleanFocus } from './rituals.mjs';
 import { cleanOrientation } from './orientation.mjs';
 import { cleanManagers } from './manager-employees.mjs';
 import { cleanRuntime } from './paperclip-runtime.mjs';
-import { cleanWriteGrid, cleanSelfApproval } from './hq-model.mjs';
+import { cleanSelfApproval } from './hq-model.mjs';
+import { cleanWriteGrid } from './hq-writes/index.mjs';
 
 const isMap = (x) => !!x && typeof x === 'object' && !Array.isArray(x);
 const list = (raw) => (Array.isArray(raw) ? raw : []);

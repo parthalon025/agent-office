@@ -29,7 +29,9 @@ import * as launch from './launch.mjs';
 import { createCampus } from './campus.mjs';
 import { slimPayload, cleanIds as cleanPaperclipIds } from './payload.mjs';
 import { createHq, companyDraft } from './paperclip.mjs';
-import { WRITE_KINDS, writeValueOf, setWriteCell, HIRE_ROLES, SELF_APPROVAL_KINDS, NEVER_SELF_APPROVED, selfApprovalOn, setSelfApproval, onboardingTask } from './hq-model.mjs';
+import { SELF_APPROVAL_KINDS, NEVER_SELF_APPROVED, selfApprovalOn, setSelfApproval } from './hq-model.mjs';
+import { WRITE_KINDS, writeValueOf, setWriteCell, gridRows } from './hq-writes/index.mjs';
+import { HIRE_ROLES, onboardingTask } from './hq-writes/hire.mjs';
 import { createRuntime, runtimePaths } from './paperclip-runtime.mjs';
 import { createMemory, createEmbedder } from './memory.mjs';
 import { createRuns } from './paperclip-runs.mjs';
@@ -498,10 +500,8 @@ export function createOffice(cfg) {
   // The HQ write grid (#198, ADR 0010): Confirm, Allow or Deny per write kind, saved as persisted.hqGrid (the cells the user set). A looser change
   // is 409 without confirmed: true (the painted Confirm), a secret never takes Allow (400). Every change leaves a feed line.
   const GRID_WORD = { confirm: 'Confirm', allow: 'Allow', deny: 'Deny' };
-  function hqGridView() {
-    const g = saved.get('hqGrid');
-    return Object.entries(WRITE_KINDS).map(([kind, w]) => ({ kind, label: w.label, options: w.options, def: w.def, value: writeValueOf(g, kind), set: Object.hasOwn(g, kind) }));
-  }
+  // The rows and their labels come from the write kinds (src/hq-writes/).
+  function hqGridView() { return gridRows(saved.get('hqGrid')); }
   // Self-approval (#203): per approval kind, on or off. Turning a kind on is looser (409 until confirmed: true); hire and budget kinds are listed
   // as never (the page shows them as locked), and a change of them is 400. A change leaves a feed line.
   function selfApprovalView() {
@@ -551,7 +551,7 @@ export function createOffice(cfg) {
   }
 
   // The HR desk (#201): a hire is one write of hq.write (kind `hire`), so the write grid decides it (Deny refuses, Confirm asks first with the
-  // exact summary, Allow sends). `welcome` (opt-in, off by default) adds the onboarding task (hq-model.mjs onboardingTask): the hire's summary
+  // exact summary, Allow sends). `welcome` (opt-in, off by default) adds the onboarding task (hq-writes/hire.mjs onboardingTask): the hire's summary
   // names it and the run it starts (Paperclip wakes the assignee of a new task), and the task is a second write of the same writer (kind `task`,
   // assigned to the new id) through its own Tasks cell. It never rides on the hire's Confirm: Deny refuses the whole hire before anything is asked
   // or sent; Confirm answers onboarding 'ask' with the task and its question, and the page sends that task again through /api/hq/write with its
