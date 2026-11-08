@@ -75,7 +75,14 @@
       return { key: b.key, name: b.name, sessions: b.sessions, waiting: b.waiting, state: b.state, floors: def.floors.map(function (f) { return { name: f.name, key: f.key }; }), bots: bots };
     });
     var hq = hqBuilding(snap);
+    if (!hq && window.OfficeVocab.setup.siteNeeded(snap)) return [setupSite()].concat(out);
     return hq ? [hq].concat(otherHqBuildings(snap), out) : out;
+  }
+  // The HQ before Paperclip is set up (#238): a building site in the city. A click opens Orientation at the company step. It is not a
+  // repository and not an HQ: no floors read, no mast, no agents.
+  function setupSite() {
+    var S = window.OfficeVocab.setup.site;
+    return { key: 'hq:site', site: true, name: S.name, sub: S.sub, line: S.line, sessions: 0, waiting: 0, state: 'resting', floors: [{ name: 'HQ', key: 'hq' }], bots: [] };
   }
   // Paperclip HQ (#76): its company as the first building, once the office has read it. A pip per Paperclip agent, in the
   // state Paperclip reports (hq.status: never waiting, a Paperclip approval is not an office request). It is not a repository,
@@ -134,7 +141,7 @@
     var list = snap ? cityData(snap) : [];
     useEffect(function () {
       if (!window.OfficeCity) return undefined;
-      city.current = window.OfficeCity.mount(ref.current, { root: document.documentElement, onHover: setHov, onPick: function (d) { if (d.hq) p.onHq(d.companyId, city.current); else p.onEnter(d.key, city.current); } });
+      city.current = window.OfficeCity.mount(ref.current, { root: document.documentElement, onHover: setHov, onPick: function (d) { if (d.site) p.onSetup('company'); else if (d.hq) p.onHq(d.companyId, city.current); else p.onEnter(d.key, city.current); } });
       return function () { if (city.current) city.current.dispose(); city.current = null; };
     }, []);
     useEffect(function () {
@@ -156,7 +163,7 @@
     // Ctrl+K in the city: the page's own actions (they include Go to each building), the theme, and the city view.
     var palActions = A.CommandPalette.actions({ setMode: function (m) { if (city.current) city.current.setMode(m); } })
       .filter(function (a) { return a.id.indexOf('page-b-') !== 0 && a.id.indexOf('page-s-go-') !== 0 && a.id !== 'page-city'; })   // the page's Go to only picks the building, and the bot rows already go to a session
-      .concat(list.map(function (b) { return b.hq ? { id: 'city-hq' + (b.companyId ? ':' + b.companyId : ''), label: 'Go to the HQ of ' + b.name, icon: 'hq', group: 'Buildings', keywords: 'paperclip hq company employees org chart floors desks budget ' + b.name, run: function () { p.onHq(b.companyId, city.current); } }
+      .concat(list.filter(function (b) { return !b.site; }).map(function (b) { return b.hq ? { id: 'city-hq' + (b.companyId ? ':' + b.companyId : ''), label: 'Go to the HQ of ' + b.name, icon: 'hq', group: 'Buildings', keywords: 'paperclip hq company employees org chart floors desks budget ' + b.name, run: function () { p.onHq(b.companyId, city.current); } }
         : { id: 'city-go-' + b.key, label: 'Go to ' + b.name, icon: 'building', group: 'Buildings', keywords: 'building repository ' + b.name, run: function () { p.onEnter(b.key, city.current); } }; }))
       .concat([{ id: 'city-fit', label: 'Show all buildings', icon: 'building', group: 'City', run: function () { if (city.current) city.current.fit(false); } }]);
     return h('div', { className: 'city' },
@@ -167,14 +174,15 @@
             h(A.ModeToggle, { value: mode, options: CITY_MODES, label: 'Theme', onChange: function (id) { if (city.current) city.current.setMode(id); } }),
             total ? h('div', { className: 'city-counts', title: 'Sessions in every building, by state' }, h(A.StatusCounts, { counts: counts })) : null,
             p.needs > 0 ? h(A.Button, { variant: 'emphasis', icon: 'waiting', className: 'city-needs', label: 'Needs you: ' + plural(p.needs, 'decision', 'decisions') + '. Go to the oldest.', title: 'Go to the oldest request', onClick: p.onNeeds }, 'Needs you · ' + p.needs) : null,
+            p.setupLeft > 0 ? h(A.Button, { variant: 'quiet', icon: 'approve', className: 'city-needs', label: window.OfficeVocab.setup.label(p.setupLeft) + '. Open Orientation.', title: 'Open Orientation', onClick: function () { p.onSetup(); } }, 'Set up · ' + p.setupLeft) : null,
             h(A.Button, { variant: 'quiet', icon: 'search', onClick: function () { setPalOpen(true); } }, 'Search actions', h('kbd', { className: 'ao-kbd city-kbd', 'aria-hidden': 'true' }, 'Ctrl+K'))),
           !list.length ? h(A.EmptyState, { icon: 'building', compact: true, title: 'No buildings yet', text: 'Open a session in a git repository to add its building.' }) : null,
           h('ul', { className: 'city-list' }, list.map(function (b) {
             return h('li', { key: b.key },
-              h('button', { type: 'button', className: 'city-row' + (b.key === p.shown ? ' is-shown' : '') + (hov && hov.key === b.key ? ' is-hover' : '') + (b.hq ? ' is-hq' : ''), onClick: function () { if (b.hq) p.onHq(b.companyId, city.current); else p.onEnter(b.key, city.current); } },
+              h('button', { type: 'button', className: 'city-row' + (b.key === p.shown ? ' is-shown' : '') + (hov && hov.key === b.key ? ' is-hover' : '') + (b.hq || b.site ? ' is-hq' : ''), onClick: function () { if (b.site) p.onSetup('company'); else if (b.hq) p.onHq(b.companyId, city.current); else p.onEnter(b.key, city.current); } },
                 h('span', { className: 'city-main' },
-                  h('span', { className: 'city-name' }, b.hq ? h(A.Icon, { name: 'hq', size: 14, label: 'Paperclip HQ' }) : null, b.name),
-                  h('span', { className: 'city-sub mono' }, b.hq ? b.line : plural(b.floors.length, 'floor', 'floors') + ' · ' + plural(b.sessions, 'session', 'sessions')),
+                  h('span', { className: 'city-name' }, b.hq || b.site ? h(A.Icon, { name: 'hq', size: 14, label: 'Paperclip HQ' }) : null, b.name),
+                  h('span', { className: 'city-sub mono' }, b.hq || b.site ? b.line : plural(b.floors.length, 'floor', 'floors') + ' · ' + plural(b.sessions, 'session', 'sessions')),
                   b.waiting ? h('span', { className: 'city-wait' }, plural(b.waiting, 'request', 'requests')) : null),
                 b.bots.length ? h('span', { className: 'city-dots', role: 'img', 'aria-label': b.bots.map(function (x) { return x.name + ' ' + x.word; }).join(', ') },
                   b.bots.slice(0, 12).map(function (x, i) { return h('span', { key: i, className: 'city-dot', title: x.name + ' · ' + x.word }, h(A.StatusDot, { status: x.status })); }),
@@ -182,7 +190,7 @@
           })),
           h('p', { className: 'note' }, 'Each building is a repository. Each floor is a function, from Engineering to Records. Click a building, or zoom in on it, to go inside. In a building, zoom out to come back.'),
           waiting ? h('p', { className: 'note' }, plural(waiting, 'request waits', 'requests wait') + '. Buildings with a request show a beacon and lit windows.') : null)),
-      hov ? h('div', { className: 'city-tag', role: 'status' }, h('b', null, hov.name), hov.hq ? ' · ' + hov.line : ' · ' + plural(hov.floors.length, 'floor', 'floors') + ' · ' + plural(hov.sessions, 'session', 'sessions') + (hov.waiting ? ' · ' + plural(hov.waiting, 'request', 'requests') : '')) : null,
+      hov ? h('div', { className: 'city-tag', role: 'status' }, h('b', null, hov.name), hov.hq || hov.site ? ' · ' + hov.line : ' · ' + plural(hov.floors.length, 'floor', 'floors') + ' · ' + plural(hov.sessions, 'session', 'sessions') + (hov.waiting ? ' · ' + plural(hov.waiting, 'request', 'requests') : '')) : null,
       h('div', { className: 'city-zoom', role: 'toolbar', 'aria-label': 'City zoom' },
         h(A.Button, { variant: 'quiet', icon: 'zoom-in', title: 'Zoom in', onClick: function () { if (city.current) city.current.zoomBy(1.35); } }, 'Zoom in'),
         h(A.Button, { variant: 'quiet', icon: 'zoom-out', title: 'Zoom out', onClick: function () { if (city.current) city.current.zoomBy(1 / 1.35); } }, 'Zoom out'),
@@ -210,6 +218,10 @@
     var ib = useState({ key: null, open: false }), ibKey = React.useRef(null);
     var setInbox = React.useCallback(function (v) { ib[1]({ key: ibKey.current, open: !!v }); }, []);
     var s2 = useState(null), dlg = s2[0], setDlg = s2[1];
+    // Orientation (#238): its view, so the top bar, the city and the phone list count the steps left, and the ways in that open it (a step id opens on that step).
+    var ov = useState(null), orientV = ov[0], setOrientV = ov[1];
+    var setupLeft = window.OfficeVocab.setup.left(orientV);
+    function openSetup(at) { setDlg({ name: 'orientation', at: typeof at === 'string' ? at : undefined }); }
     var s3 = useState({ recent: [], templates: [], schedules: [] }), info = s3[0], setInfo = s3[1];
     var ws = useState(winSize), win = ws[0], setWin = ws[1];   // the window size: the scene height follows it (#55)
     // The phone list (#148): below 820 px it covers the scene until the user opens an agent. The scene stays mounted under it (the palette and the dialogs live there).
@@ -636,10 +648,12 @@
     }, [cur2.view]);
     // notifier: false: the page runs the one Notifier (alerts and the tab title for every building, below).
     // Since you left shows on every scene: the adapter seeds the state it sends again, so the card counts only news.
-    var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter, needs: needs.length, onNeeds: goOldest, onHq: openHq }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: mount.adapter, floor: cur2.floor == null ? undefined : cur2.floor, height: win.h, quality: 'auto', intro: intro, editable: false, simulate: false, toasts: false,
+    var scene = cur2.view === 'city' ? h(CityView, { key: 'city', shown: shown, onEnter: enter, needs: needs.length, onNeeds: goOldest, onHq: openHq, onSetup: openSetup, setupLeft: setupLeft }) : def ? h(A.OfficeScene, { key: sceneKey, building: def, adapter: mount.adapter, floor: cur2.floor == null ? undefined : cur2.floor, height: win.h, quality: 'auto', intro: intro, editable: false, simulate: false, toasts: false,
       inbox: inbox, onInbox: setInbox, notifier: false, onSinceYouLeft: setSyl, floorsTitle: 'Elevator',
       // Needs you in the top bar, at every width (#92 review: with no dock, a request in another building showed only in the tab title)
       waitingCount: needs.length, onWaiting: goOldest,
+      // Set up in the top bar while Orientation has open steps (#238): one click opens it on the first open step
+      setupCount: setupLeft, onSetup: openSetup,
       // The scene's live request and error toasts go to the page stack, where they stay until closed. Seeded events
       // (a scene mounted again) send none: an open request stays in Needs you, the inbox and the tab title.
       onNotify: function (n) {
@@ -824,7 +838,7 @@
     // Orientation (#196): opens once for a new user (the server's seen flag and this browser's key), before the tour. null until read.
     var oz = useState(null), orient = oz[0], setOrient = oz[1];
     useEffect(function () {
-      client.get('orientation').then(function (j) { var due = orientationDue(j); setOrient(!due); if (due) setDlg({ name: 'orientation' }); }, function () { setOrient(true); });
+      client.get('orientation').then(function (j) { setOrientV(j); var due = orientationDue(j); setOrient(!due); if (due) setDlg({ name: 'orientation' }); }, function () { setOrient(true); });
     }, []);
     // The lobby tour: once per browser, on the Lobby of the first building shown; Replay from the Reception or Ctrl+K.
     var tr = useState(false), touring = tr[0], setTouring = tr[1];
@@ -903,8 +917,11 @@
      ['city', 'City view', 'building', function () { go('city'); }], ['office', 'Office view', 'floor', function () { go('office'); }], ['floors', 'Branches and worktrees', 'floor', function () { setDlg({ name: 'floors' }); }],
      ['past', 'Past sessions', 'session', function () { show('past'); }], ['schedules', 'Schedules', 'schedule', function () { show('schedules'); }],
      ['hooks', 'Attach sessions', 'terminal', function () { show('hooks'); }], ['kinds', 'Agent kinds', 'bot', function () { setDlg({ name: 'kinds' }); }], ['personas', 'Agent characters', 'bot', function () { setDlg({ name: 'personas' }); }], ['recap', 'Weekly recap and while you were away', 'schedule', function () { setDlg({ name: 'recap' }); }], ['compact', 'Compact view', 'zoom-out', function () { setAmbient(true); }],
-     ['reception', 'Reception: floors and the kind of building', 'building', function () { setDlg({ name: 'reception' }); }], ['orientation', 'Orientation: set up the office', 'approve', function () { setDlg({ name: 'orientation' }); }], ['tour', 'Replay the lobby tour', 'chevron-right', function () { startTour(); }]]
+     ['reception', 'Reception: floors and the kind of building', 'building', function () { setDlg({ name: 'reception' }); }], ['tour', 'Replay the lobby tour', 'chevron-right', function () { startTour(); }]]
       .forEach(function (a) { actions.push({ id: 'page-' + a[0], label: a[1], icon: a[2], group: 'Office', run: a[3] }); });
+    // Orientation is found by setup, start, paperclip and install (#238); Set up Paperclip goes straight to the company step while no company is read.
+    actions.push({ id: 'page-orientation', label: setupLeft ? 'Orientation: set up the office (' + window.OfficeVocab.setup.label(setupLeft).slice(8) + ')' : 'Orientation: set up the office', icon: 'approve', group: 'Office', keywords: window.OfficeVocab.setup.keywords, run: function () { openSetup(); } });
+    if (window.OfficeVocab.setup.siteNeeded(snap)) actions.push({ id: 'page-setup-paperclip', label: window.OfficeVocab.setup.paperclipLabel, icon: 'hq', group: 'Office', keywords: window.OfficeVocab.setup.keywords, run: function () { openSetup('company'); } });
     var selKind = selSess ? kindOf(window.officeAdapter.kinds(), selSess.provider) : null;
     if (selSess && (!selKind || selKind.control)) actions.push({ id: 'page-ext', label: 'Extensions of ' + selSess.name, icon: 'connector', group: 'Office', run: function () { extensions(selSess.uid, selSess.name); } });
     actions.push({ id: 'page-focus', label: focusOn ? 'Turn off Focus mode' : 'Turn on Focus mode', icon: 'sound-off', group: 'Office', keywords: 'quiet sound motion rituals calm', run: function () { client.settingsFocus({ on: !focusOn }).then(function () { toast({ tone: 'info', title: !focusOn ? 'Focus mode is on' : 'Focus mode is off', text: !focusOn ? 'Sound, motion and rituals are off.' : 'Rituals are back.' }); }, function (x) { toast({ tone: 'error', title: 'Focus mode', text: x.message }); }); } });
@@ -983,11 +1000,11 @@
 
     return h(React.Fragment, null,
       h('div', { className: 'view' + (fading ? ' is-fading' : '') }, scene),
-      phoneOn ? h(PhoneView, { toast: toast, onHq: function () { setDlg({ name: 'hq' }); }, onHqBuilding: enterHqHere, onManager: function () { setDlg({ name: 'manager' }); }, onGo: function (r) { var x = snap && snap.sessions.filter(function (y) { return y.uid === r.uid; })[0]; if (x) { setPhoneList(false); goTo(x); } },
+      phoneOn ? h(PhoneView, { toast: toast, onSetup: openSetup, setupLeft: setupLeft, onHq: function () { setDlg({ name: 'hq' }); }, onHqBuilding: enterHqHere, onManager: function () { setDlg({ name: 'manager' }); }, onGo: function (r) { var x = snap && snap.sessions.filter(function (y) { return y.uid === r.uid; })[0]; if (x) { setPhoneList(false); goTo(x); } },
         onOpenAgent: function (uid) { var x = window.officeAdapter.sessionByUid(uid); if (x) { setPhoneList(false); goTo(x); } } }) : null,
       win.w <= PHONE_MAX && !phoneList ? h('div', { className: 'phone-back' }, h(A.Button, { variant: 'emphasis', icon: 'chevron-right', onClick: function () { blurScene(); setBoard(null); setPhoneList(true); } }, 'Back to the list')) : null,
       !ambient && touring && cur2.view === 'office' ? h(TourCard, { onStep: tourStep, onDone: endTour }) : null,
-      d === 'orientation' ? h(OrientationDialog, { info: info.port ? info : null, toast: toast, onSecurity: function () { var sec = securityRef.current; if (!sec || !sec.open('files')) toast({ tone: 'info', title: 'Permissions', text: 'This building shows no Security room yet.' }); }, onTour: startTour, onClose: function () { setOrient(true); close(); } }) : null,
+      d === 'orientation' ? h(OrientationDialog, { info: info.port ? info : null, at: dlg.at, onView: setOrientV, toast: toast, onSecurity: function () { var sec = securityRef.current; if (!sec || !sec.open('files')) toast({ tone: 'info', title: 'Permissions', text: 'This building shows no Security room yet.' }); }, onTour: startTour, onClose: function () { setOrient(true); close(); } }) : null,
       d === 'reception' ? h(ReceptionDialog, { repo: shown, actions: officeActions, onTour: startTour, onClose: close }) : null,
       d === 'open' ? h(OpenDialog, { shownPath: shownPath, kind: dlg.kind, role: dlg.role, roleName: dlg.roleName, folder: dlg.folder, spendLimit: info.spendLimit, recent: info.recent || [], templates: info.templates || [], onTemplates: refresh, onClose: close }) : null,
       d === 'personas' ? h(PersonasDialog, { toast: toast, folder: shownPath || (info.recent || [])[0] || '', onClose: close }) : null,

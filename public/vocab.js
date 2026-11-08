@@ -533,6 +533,17 @@
     // the hints of the HQ Lobby's objects in the scene (#226): the HR desk hires, the memo and the task board open the HQ
     lobbyVerbs: { desk: 'Hire an employee', monitor: 'Hire an employee', memo: 'Open the HQ', pipeline: 'Open the HQ tasks', directory: 'Search the HQ' } };
 
+  // Set up (#238): the way to Orientation (src/orientation.mjs view) from the top bar, the city and the phone list, and its words in Ctrl+K.
+  // left(v): the steps still open (a skipped step is a choice, not a task). The top bar button shows while it is above 0.
+  // siteNeeded(snap): the HQ shows as a building site while no company is read from Paperclip (installed or not); a click opens the company step.
+  var setup = {
+    left: function (v) { return v && v.steps ? v.steps.filter(function (s) { return s.status === 'open'; }).length : 0; },
+    label: function (n) { return n > 0 ? 'Set up: ' + n + (n === 1 ? ' step left' : ' steps left') : ''; },
+    siteNeeded: function (snap) { return !!snap && !(snap.hq && snap.hq.company); },
+    keywords: 'setup set up start begin first run install paperclip company hq steps orientation',
+    paperclipLabel: 'Set up Paperclip',
+    site: { name: 'Paperclip HQ: set up', sub: 'HQ · set up', line: 'Paperclip HQ: set up', text: 'No Paperclip is installed or connected yet. Install it, or connect the one you run.', action: 'Set up Paperclip' } };
+
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
   // priced: sessions with a cost figure. unknown: sessions whose agent reports no cost (costUnknown), shown as "unknown".
   // supervision: the label of the least supervised agent in the room ('Unsupervised' before any other), '' when all are gated.
@@ -713,6 +724,6 @@
   function folderOf(state) { var f = FOLDER[state] || FOLDER.unknown; return { word: f.word, place: f.place, mark: f.mark, glyph: f.glyph }; }
 
   // The names the topic files (vocab-security.js, vocab-layers.js, vocab-persona.js) share with this file. Not part of the public list.
-  root.OfficeVocab = { explainLayers: explainLayers, requestGroups: requestGroups, groupAnswers: groupAnswers, stateWord: stateWord, laneOf: laneOf, limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, context: context, platform: platform, hq: hq, plan: plan, holdMs: holdMs, folderOf: folderOf };
+  root.OfficeVocab = { explainLayers: explainLayers, requestGroups: requestGroups, groupAnswers: groupAnswers, stateWord: stateWord, laneOf: laneOf, limitShown: limitShown, costNote: costNote, kindWord: kindWord, kindsWord: kindsWord, kindState: kindState, notConfigured: notConfigured, needsTitle: needsTitle, modelLabel: modelLabel, modelNoun: modelNoun, pickFact: pickFact, modelChoices: modelChoices, modelSwitch: modelSwitch, modelWord: modelWord, firstModel: firstModel, noModelFor: noModelFor, withKind: withKind, kindNote: kindNote, requests: requests, alwaysOffer: alwaysOffer, featuresOf: featuresOf, hasFeature: hasFeature, status: status, isWaiting: isWaiting, taskLine: taskLine, toolKind: toolKind, toolShort: toolShort, toolArg: toolArg, todoStatus: todoStatus, figures: figures, agentsSign: agentsSign, supervision: supervision, supervisionHead: supervisionHead, supervisionLines: supervisionLines, context: context, platform: platform, hq: hq, setup: setup, plan: plan, holdMs: holdMs, folderOf: folderOf };
   Object.defineProperty(root.OfficeVocab, 'shared', { value: { own: own, bare: bare, has: has, count: count, clip: clip, oneLine: oneLine, money: money } });
 })(typeof globalThis !== 'undefined' ? globalThis : window);

@@ -662,3 +662,30 @@ test('the office adapter line of the HQ (#222): installed, off, missing and unkn
   assert.deepEqual([u.line, u.install, u.ok], ['Office adapter: unknown', false, false]);
   assert.ok(u.why.length > 0, 'unknown says why');
 });
+
+// Set up (#238): the way to Orientation from the top bar, the city, the phone list and Ctrl+K.
+test('setup.left counts the open steps; skipped and done steps do not count', () => {
+  const S = V.setup;
+  assert.equal(S.left(null), 0);
+  const steps = (...st) => ({ steps: st.map((status, i) => ({ id: 's' + i, status })) });
+  assert.equal(S.left(steps('open', 'open', 'done', 'skipped', 'open')), 3);
+  assert.equal(S.left(steps('done', 'skipped')), 0);
+});
+
+test('setup.label says how many steps are left in Simplified Technical English', () => {
+  assert.equal(V.setup.label(6), 'Set up: 6 steps left');
+  assert.equal(V.setup.label(1), 'Set up: 1 step left');
+  assert.equal(V.setup.label(0), '');
+});
+
+test('setup.siteNeeded: the HQ site shows only while no company is read from Paperclip', () => {
+  assert.equal(V.setup.siteNeeded(null), false);
+  assert.equal(V.setup.siteNeeded({}), true);
+  assert.equal(V.setup.siteNeeded({ hq: { state: 'off', company: null } }), true);
+  assert.equal(V.setup.siteNeeded({ hq: { state: 'on', company: { id: 'c1', name: 'Acme' } } }), false);
+});
+
+test('setup: Ctrl+K finds Orientation by setup, start, paperclip and install', () => {
+  for (const w of ['setup', 'start', 'paperclip', 'install']) assert.ok(V.setup.keywords.includes(w), w);
+  assert.equal(V.setup.paperclipLabel, 'Set up Paperclip');
+});

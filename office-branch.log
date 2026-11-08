@@ -1,0 +1,8 @@
+
+> agent-office@0.1.0 start:branch
+> node -e "process.env.OFFICE_PORT='branch';process.env.OFFICE_OPEN='0';import('./src/server.mjs')"
+
+Branch "feat/238-find-orientation" uses port 4364.
+Agent Office is open: http://127.0.0.1:4364/#n=05e5961400a605549d752c1a161e4fac
+The link works once, for 5 minutes. A reload keeps working. For a new link, run npm start again.
+Hooks: command (Claude Code 2.1.319 (Claude Code)). For outside sessions: claude --settings "E:\agent-office\.claude\worktrees\agent-adeeecf9bbc50f1a3\office-hooks-4364.json" --mcp-config "E:\agent-office\.claude\worktrees\agent-adeeecf9bbc50f1a3\office-mcp-4364.json"

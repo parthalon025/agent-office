@@ -703,11 +703,18 @@ details.panel summary .cnt.hot,.ao-ph .hot{color:var(--emphasis)}
 /* with the Needs you button in the bar (a decision waits) the labels need more room (test/skin.test.mjs, part 14) */
 @container (max-width:1119px){.ao-hud-top:has(.ao-hud-needs) .ao-seg button:not([aria-pressed="true"]) .ao-seg-l{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.ao-hud-top:has(.ao-hud-needs) .ao-seg button:not([aria-pressed="true"]):has(.ao-seg-l){padding:6px 9px}}
 @container (max-width:1325px){[data-theme|="sublevel"] .ao-hud-top:has(.ao-hud-needs) .ao-seg button:not([aria-pressed="true"]) .ao-seg-l{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}[data-theme|="sublevel"] .ao-hud-top:has(.ao-hud-needs) .ao-seg button:not([aria-pressed="true"]):has(.ao-seg-l){padding:6px 9px}}
+/* Set up in the top bar (OfficeScene onSetup, agent-office issue 238): the same bar rules as Needs you; with both buttons the labels need more room */
+@container (max-width:1119px){.ao-hud-top:has(.ao-hud-setup) .ao-seg button:not([aria-pressed="true"]) .ao-seg-l{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.ao-hud-top:has(.ao-hud-setup) .ao-seg button:not([aria-pressed="true"]):has(.ao-seg-l){padding:6px 9px}}
+@container (max-width:1325px){[data-theme|="sublevel"] .ao-hud-top:has(.ao-hud-setup) .ao-seg button:not([aria-pressed="true"]) .ao-seg-l{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}[data-theme|="sublevel"] .ao-hud-top:has(.ao-hud-setup) .ao-seg button:not([aria-pressed="true"]):has(.ao-seg-l){padding:6px 9px}}
+@container (max-width:1249px){.ao-hud-top:has(.ao-hud-needs):has(.ao-hud-setup) .ao-seg button:not([aria-pressed="true"]) .ao-seg-l{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}.ao-hud-top:has(.ao-hud-needs):has(.ao-hud-setup) .ao-seg button:not([aria-pressed="true"]):has(.ao-seg-l){padding:6px 9px}}
+@container (max-width:1469px){[data-theme|="sublevel"] .ao-hud-top:has(.ao-hud-needs):has(.ao-hud-setup) .ao-seg button:not([aria-pressed="true"]) .ao-seg-l{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}[data-theme|="sublevel"] .ao-hud-top:has(.ao-hud-needs):has(.ao-hud-setup) .ao-seg button:not([aria-pressed="true"]):has(.ao-seg-l){padding:6px 9px}}
 @container (max-width:959px){.ao-hud-counts{display:none}}
 .ao-hud-top>.ao-seg{anchor-name:--ao-hud-seg}
 /* Needs you in the top bar (OfficeScene onWaiting, agent-office #92 review): one line, as tall as the brand panel; a finger target on a touch screen */
 .ao-hud-needs{white-space:nowrap;min-height:36px}
 @media (pointer:coarse){.ao-hud-needs{min-height:44px}}
+.ao-hud-setup{white-space:nowrap;min-height:36px}
+@media (pointer:coarse){.ao-hud-setup{min-height:44px}}
 .ao-hud-left,.ao-hud-right{top:max(68px,calc(anchor(--ao-hud-seg bottom,0px) + 16px))}
 @container (max-width:820px){.ao-hud-left{top:max(108px,calc(anchor(--ao-hud-seg bottom,0px) + 10px))}.ao-hud-right{top:auto}}
 @container (max-width:520px){.ao-hud-left{top:max(154px,calc(anchor(--ao-hud-seg bottom,0px) + 10px))}}

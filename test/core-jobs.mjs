@@ -25,9 +25,9 @@ import { startFakePaperclip, DEMO } from './fixtures/fake-paperclip.mjs';
 
 // ---------- the one place the step limits are set ----------
 // Steps per job, at every width. Lower a limit when a job gets shorter. Raise one only with a reason in the commit.
-export const LIMITS = { start: 3, approve: 2, read: 3, discard: 5, find: 3, approveAfterDesk: 5, hire: 5 };
+export const LIMITS = { start: 3, approve: 2, read: 3, discard: 5, find: 3, approveAfterDesk: 5, hire: 5, setup: 2 };
 export const WIDTHS = [1360, 400];
-export const JOBS = ['start', 'approve', 'approveAfterDesk', 'read', 'discard', 'find', 'hire'];
+export const JOBS = ['start', 'approve', 'approveAfterDesk', 'read', 'discard', 'find', 'hire', 'setup'];
 
 /**
  * results: [{ job, width, steps, ok, why? }]. Returns one line for every run that fails: the goal did not show, or the
@@ -199,6 +199,12 @@ export async function run({ shots = true } = {}) {
           { label: 'Confirm hire', run: async () => { await p.waitFor(seen('Confirm hire'), 8000, 'Confirm hire'); return p.click(control('Confirm hire')); } }],
         goal: null,
         waitFor: (ms) => poll(async () => pc.requests.filter((r) => r.method === 'POST' && /agent-hires$/.test(r.path)).length > hired, ms),
+      },
+      // #238: from a fresh office, Orientation is one visible click away: the Set up button (top bar; the phone list head below 820 px).
+      setup: {
+        before: async () => {},
+        steps: [{ label: 'Set up', run: async () => { await p.waitFor(seen('Set up'), 8000, 'the Set up button'); return p.click(control('Set up')); } }],
+        goal: `(()=>{const d=document.querySelector(".ao-dialog,[role=dialog]");return !!d&&d.innerText.includes("Orientation")&&d.innerText.includes("Agent kinds")})()`,
       },
       find: {
         before: async () => {},

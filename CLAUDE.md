@@ -13,12 +13,12 @@ A browser office for Claude Code sessions: bots at desks, a chat per bot, approv
 
 ## UI rules (the DS is law for anything visual)
 
-The UI is the Agent Office design system (DS x1.7.18). Read `docs/design-system/DS-README.md`, `Recipes.md` and `Reference.md` before you change the UI (`Concepts.md` explains the model), and follow the DS Rules and Definition of done.
+The UI is the Agent Office design system (DS x1.7.19). Read `docs/design-system/DS-README.md`, `Recipes.md` and `Reference.md` before you change the UI (`Concepts.md` explains the model), and follow the DS Rules and Definition of done.
 
 - Use DS tokens for every color, size and duration. No literal colors. A theme (skin) is its tokens plus its `AgentOffice.MODES` and engine `LOOKS` entries: page code reads flags (`K.dark`, `K.caps`, `K.term`) and tokens, never compares a look or theme id with a string, and styles a theme only with a family selector (`[data-theme|="<family>"]`). `test/skin.test.mjs` runs the same checks for every theme of `tokens.json`; to add a theme, follow Recipes, "Add a theme". Use the DS icon set and DS components (`Button`, `Dialog`, `Select`, `TextInput`, `EmptyState`, ...). No emoji.
 - Status text on a theme surface is `--status-*-text` (the dot is `--status-*`), on a bubble face `--status-*-on-bubble`. A raw `--status-*` is a fill or a dot, never text (`test/contrast.test.mjs`).
 - Write copy in Simplified Technical English: short sentences, active voice, buttons say the result. No "Oops", "Sorry", exclamation marks, "please".
-- Keep the `x` version prefix (page `x0.2`, DS `x1.7.18`) in titles.
+- Keep the `x` version prefix (page `x0.2`, DS `x1.7.19`) in titles.
 - The DS lives in this repo and its owner may change it. DS changes go in `components/`, `kit/`, the tokens and the DS docs, with a Changelog row and the DS Definition of done. Page code still uses only DS APIs: no DOM patching of DS internals.
 - Never move bots yourself. The scene changes only from adapter events.
 - The page's own styles go in `public/office.css`. The DS sets its theme on `.ao-office`, and `chat-extras.js` mirrors it to `<html data-theme>`, so page UI reads tokens only.

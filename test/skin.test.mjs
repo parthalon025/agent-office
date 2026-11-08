@@ -445,10 +445,10 @@ for (const [index, skin] of SKINS.entries()) {
       const caps = rules.some((r) => !r.cond && r.sel.split(',').some((s) => /\.ao-seg button$/.test(s.trim()) && themeSels(s).length && appliesTo(s.trim(), id)) && /text-transform:uppercase/.test(r.body));
       const T = caps ? { brand: 345, pad: 44, char: 7.8, btn: 32 } : { brand: 280, pad: 46, char: 5.2, btn: 42 }, MARGIN = 16;
       const seg = (labels) => 8 + labels.reduce((n, l) => n + T.pad + T.char * l.length, 0);
-      for (const needs of [false, true]) {
-        const top = needs ? '.ao-hud-top:has(.ao-hud-needs)' : '.ao-hud-top', what = needs ? 'with the Needs you button' : 'with no decision waiting';
+      for (const [needs, setup] of [[false, false], [true, false], [false, true], [true, true]]) {   // Set up (#238) is a second button, with its own bar rules
+        const top = '.ao-hud-top' + (needs ? ':has(.ao-hud-needs)' : '') + (setup ? ':has(.ao-hud-setup)' : ''), what = 'with ' + ([needs && 'the Needs you button', setup && 'the Set up button'].filter(Boolean).join(' and ') || 'no button');
         const label = `${top} .ao-seg button:not([aria-pressed="true"]) .ao-seg-l`;
-        const need = 16 + T.brand + 10 + (needs ? T.btn + T.char * NEEDS_TEXT.length + 10 : 0) + seg(AO.MODES.map((m) => m.label).concat('Tour')) + 10 + seg(['Building', 'Floor']) + 16 + MARGIN;
+        const need = 16 + T.brand + 10 + (needs ? T.btn + T.char * NEEDS_TEXT.length + 10 : 0) + (setup ? T.btn + T.char * 'Set up · 99'.length + 10 : 0) + seg(AO.MODES.map((m) => m.label).concat('Tour')) + 10 + seg(['Building', 'Floor']) + 16 + MARGIN;
         const widths = rules.filter((r) => r.file === 'components/bundle.css' && /^@container \(max-width:(\d+)px\)$/.test(r.cond) && r.sel.split(',').some((s) => s.trim().endsWith(label) && appliesTo(s.trim(), id)) && /position:absolute/.test(r.body))
           .map((r) => +r.cond.match(/(\d+)px/)[1]);
         ok(widths.length, `no icons-only rule for the top bar ${what}`);

@@ -16,6 +16,7 @@ The 3D office itself and the main component of the system. It holds a building o
 - **Decisions inbox.** The inbox state is open or closed. Pass `inbox` (boolean) and `onInbox(open)` to control it from the page: the page can then close it, and read its state, with no class names. Without `inbox`, the scene keeps the state itself. `onInbox` runs in both cases when the person opens or closes the inbox.
 - **Alerts and tab title.** The scene mounts a `Notifier` that counts the open decisions of the building on screen. Pass `waitingCount` (number) to use your own total, for example the open decisions of all buildings. Pass `notifier: false` to not mount it, and mount your own `Notifier` instead (see `Notifier`, `title`).
 - **Needs you in the top bar.** Pass `onWaiting` (function) and the top bar shows a Needs you button with the count (`waitingCount`, else the open decisions of the building) while one waits. A click calls `onWaiting`; a page with many buildings goes to the oldest request. The button sits after the brand, before the toggles, so it shows at every width: the zoom column with its Decisions button hides at 820 px and below, and the side columns start below the last toggle. On a touch screen it is 44 px tall.
+- **Set up in the top bar.** Pass `onSetup` (function) and `setupCount` (number). While the count is above 0 the top bar shows a Set up button with the count, after Needs you. A click calls `onSetup`; the page opens its first-run walk. The button goes when the count is 0. It follows the same size and width rules as Needs you.
 - **Agent panel tabs.** `extraTabs`, `hideTabs` and `onTabChange` go to the agent panel (see `AgentPanel`). To switch the open tab from the page, for example after a click on a desk monitor or from Ctrl+K, pass `agentTab` (a tab id) and keep it in step with `onTabChange`. Without `agentTab`, the panel keeps its own tab. The panel shows only while a bot is selected, so set `agentTab` and select the bot (`office.select(name)`) together.
 - **Top bar.** The brand, the mode toggle, the view toggle and the status counts keep to the rows above the side columns (one row above 820 px). Where the labels do not fit, the mode toggle shows icons only and the pressed mode keeps its label (to 999 px, and to 1199 px in Sublevel). The counts hide below 960 px. If a toggle still goes to a lower row (Sublevel from 821 to 899 px, or a long building or agent name), the columns start below it (Reference, breakpoint).
 - Without React: `AgentOffice.office.mount(el, opts)`.
@@ -54,6 +55,8 @@ The 3D office itself and the main component of the system. It holds a building o
 | `notifier` | no | `boolean` |
 | `waitingCount` | no | `number` |
 | `onWaiting` | no | `() => void`: with it, the top bar has Needs you (the count of `waitingCount`) |
+| `setupCount` | no | `number` |
+| `onSetup` | no | `() => void`: with it, the top bar has Set up (the count of `setupCount`) |
 | `extraTabs` | no | `AgentPanelTab[]` |
 | `hideTabs` | no | `("chat" \| "trace" \| "sessions" \| "agent")[]` |
 | `agentTab` | no | `string` |

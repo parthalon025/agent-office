@@ -239,10 +239,10 @@
     var er = useState(''), err = er[0], setErr = er[1];
     var inf = useState(p.info || null), info = inf[0], setInfo = inf[1];
     useEffect(function () {
-      client.get('orientation').then(function (j) { setV(j); setAt(j.next || j.steps[0].id); }, function (x) { setErr(x.message); });
+      client.get('orientation').then(function (j) { setV(j); setAt(p.at || j.next || j.steps[0].id); if (p.onView) p.onView(j); }, function (x) { setErr(x.message); });
       if (!p.info) O.getInfo().then(setInfo, function () { /* the steps that read it say so */ });
     }, []);
-    function send(body) { return client.orientationStep(body).then(function (j) { setV(j); return j; }, function (x) { setErr(x.message); }); }
+    function send(body) { return client.orientationStep(body).then(function (j) { setV(j); if (p.onView) p.onView(j); return j; }, function (x) { setErr(x.message); }); }
     function close() { orientationMark(); send({ seen: true }); p.onClose(); }
     var steps = v ? v.steps : [], ixAt = steps.findIndex(function (s) { return s.id === at; }), step = steps[ixAt];
     function mark(status) {

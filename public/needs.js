@@ -109,10 +109,18 @@
     return h('div', { className: 'phone', role: 'region', 'aria-label': 'Agents' },
       h('div', { className: 'phone-head' },
         h('h1', { className: 'phone-title' }, 'Agent Office'),
+        // Set up (#238): the phone list covers the scene and its top bar, so the button is here, with the count, while Orientation has open steps.
+        p.onSetup && p.setupLeft > 0 ? h(A.Button, { variant: 'emphasis', icon: 'approve', 'aria-label': window.OfficeVocab.setup.label(p.setupLeft) + '. Open Orientation.', onClick: function () { p.onSetup(); } }, 'Set up · ' + p.setupLeft) : null,
         h(A.Button, { variant: 'quiet', icon: 'search', 'aria-label': 'Open the command palette', onClick: openPalette }, 'Commands')),
       h('section', { className: 'phone-sec', 'aria-label': 'Needs you' },
         h('h2', { className: 'phone-h' }, 'Needs you', ph.queue.count ? h(Tag, null, String(ph.queue.count)) : null),
         h(QueueList, { toast: p.toast, onManager: p.onManager, onHq: p.onHq, onGo: p.onGo })),
+      // The HQ before Paperclip is set up (#238): the same building site as the city. One click opens Orientation at the company step.
+      p.onSetup && window.OfficeVocab.setup.siteNeeded(snap) ? h('section', { className: 'phone-sec', 'aria-label': window.OfficeVocab.setup.site.name },
+        h('h2', { className: 'phone-h' }, window.OfficeVocab.setup.site.name),
+        h('div', { className: 'phone-bld' },
+          h('p', { className: 'look-facts' }, window.OfficeVocab.setup.site.text),
+          h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'hq', onClick: function () { p.onSetup('company'); } }, window.OfficeVocab.setup.site.action)))) : null,
       // The HQ building (#197): the company of the connected Paperclip, its Lobby in one line, and the way to the dashboard.
       hqPh ? h('section', { className: 'phone-sec', 'aria-label': 'Paperclip HQ' },
         h('h2', { className: 'phone-h' }, 'Paperclip HQ'),
