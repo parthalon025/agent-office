@@ -16,7 +16,9 @@ test('read model: the view carries floors from the org chart and the Lobby, and 
     await hq.connect({ url: pc.url });
     await until(() => hq.state() === 'on', 'the events socket');
     const v = hq.view();
-    assert.deepEqual(v.floors.map((f) => [f.key, f.employees.map((e) => e.name)]), [['records', []], ['lobby', []], ['rank-2', ['Linus']], ['rank-1', ['Ada']], ['rank-0', ['Grace']]], 'the CEO is on the top floor');
+    assert.deepEqual(v.floors.map((f) => [f.key, f.employees.map((e) => e.name)]), [['records', []], ['lobby', []], ['dept-engineering', ['Ada', 'Linus']], ['dept-executive', ['Grace']]], 'a floor per department; the CEO is on the top floor');
+    assert.deepEqual(v.floors[2].rooms.map((r) => [r.name, r.employees.map((e) => [e.name, e.rank])]), [['Leads', [['Ada', 1]]], ['Teams', [['Linus', 2]]]], 'a room per rank (#226)');
+    assert.deepEqual(v.cables, [{ from: 'a1000000-0000-4000-8000-000000000002', to: 'a1000000-0000-4000-8000-000000000001' }, { from: 'a1000000-0000-4000-8000-000000000003', to: 'a1000000-0000-4000-8000-000000000002' }], 'a cable per reporting line');
     assert.equal(v.floors.at(-1).name, 'Executive');
     assert.equal(v.floors.at(-1).employees[0].floor, 'Executive');
     const l = v.lobby;
@@ -178,14 +180,15 @@ test('org chart (#202): the view carries the reporting cables; a reporting line 
     await hq.connect({ url: pc.url });
     await until(() => hq.state() === 'on', 'the events socket');
     assert.deepEqual(hq.view().cables, [{ from: ada.id, to: grace.id }, { from: linus.id, to: ada.id }]);
-    assert.equal(hq.view().floors.at(-3).employees[0].reportsTo, ada.id, 'an employee carries its manager');
+    assert.equal(hq.view().floors.at(-2).employees[1].reportsTo, ada.id, 'an employee carries its manager');
     const before = pc.requests.filter((r) => r.method === 'PATCH').length;
     const r = await line(linus.id, grace.id);
     assert.equal(r.ok, true);
     const patches = pc.requests.filter((r2) => r2.method === 'PATCH').slice(before);
     assert.equal(patches.length, 1, 'one PATCH');
     assert.deepEqual(patches[0].body, { reportsTo: grace.id }, 'the body names the reporting line and nothing else');
-    assert.deepEqual(hq.view().floors.map((f) => [f.key, f.employees.map((e) => e.name).sort()]), [['records', []], ['lobby', []], ['rank-1', ['Ada', 'Linus']], ['rank-0', ['Grace']]], 'Linus moved up a floor');
+    assert.deepEqual(hq.view().floors.map((f) => [f.key, f.employees.map((e) => e.name).sort()]), [['records', []], ['lobby', []], ['dept-engineering', ['Ada', 'Linus']], ['dept-executive', ['Grace']]], 'Linus stays in Engineering');
+    assert.deepEqual(hq.view().floors[2].rooms.map((x) => [x.name, x.employees.map((e) => e.name)]), [['Leads', ['Ada', 'Linus']]], 'Linus moved up a rank: the Leads room');
     assert.deepEqual(hq.view().cables, [{ from: ada.id, to: grace.id }, { from: linus.id, to: grace.id }]);
     await line(ada.id, null);   // a root: no manager
     assert.equal(hq.view().cables.length, 1);

@@ -46,6 +46,15 @@
      session(botName), lookup(botName), uidsOf(cmd), roomsShown()
    The scene's events are the DS events (kit/schema.json). Tested in test/building.test.mjs.
 
+   The Paperclip HQ (#226): store.mount(OfficeBuilding.HQ_KEY) mounts the HQ as a building you enter, with the same interface. Its floors
+   are snap.hq.floors (bottom to top: Records, Lobby, one floor per department going up by rank; hq-model.mjs floorsOf), one room per rank
+   on a department floor (the top rank a war room, DS type hq), each employee a bot at a desk of its room in the state Paperclip reports
+   (OfficeVocab.hq.status), with its title or role, its supervision, its company and its budget on the card. The Reception keeps one open
+   desk, the HR desk. mount.hq is true, mount.home is the Lobby (startFloor opens it), mount.cables() gives the reporting lines between
+   the seated bots (snap.hq.cables) by bot name and floor (public/cables.js draws them), mount.employee(botName) the agent view. A change
+   of the floors, the rooms or who sits where makes it stale (the DS cannot move a bot to another room); a run or a task is a status event;
+   a new card line (supervision, budget) seats the bot again. It has no session, request, note, Security room or agent start.
+
    Mapping: repo = building, branch = floor, worktree = room. The snapshot becomes DS events: tool calls, helpers, plan,
    errors, triggers, usage. The Security room (type security, no bots, no notes key, never stale) is first on the ground
    floor of every building; its id comes from the server (mount.securityRoom()).
@@ -410,6 +419,52 @@
       sig: shown.map(function (f) { return f.id; }).join('|') };
   }
 
+  // ---------- the Paperclip HQ as a building you enter (#226) ----------
+  // The HQ is not a repository: its floors are the org chart the server reads (snap.hq.floors, hq-model.mjs floorsOf), bottom to top:
+  // Records, Lobby, then one floor per department, going up by rank, with one room per rank. Each employee (snap.hq.agents) is a bot at a
+  // desk of its room, in the state Paperclip reports (OfficeVocab.hq.status: never waiting). The page keeps no copy of the org rules: a floor,
+  // a room and a seat come from the server; this part only names them for the DS (floor key, room type, desk role).
+  var HQ_KEY = 'paperclip:hq', HQ_RECORDS = 'hq-records';
+  var HQ_FLOOR_KEY = { executive: 'hq', engineering: 'ops', security: 'ops', product: 'content', research: 'research', marketing: 'sales', finance: 'sales', general: 'ops' };
+  // The desk of a Paperclip role (AGENT_ROLES of the pinned release; the view carries the office label, which lowercases to it).
+  var HQ_DESK = { ceo: 'planner', cto: 'planner', cmo: 'sales', cfo: 'analyst', security: 'analyst', engineer: 'coder', designer: 'designer', pm: 'planner', qa: 'analyst', devops: 'ops', researcher: 'research', general: 'writer' };
+  function hqOf(snap) { var q = snap && snap.hq; return q && q.company ? q : null; }
+  function hqTask(a, st) { return a.task ? clip((a.task.identifier ? a.task.identifier + ' ' : '') + a.task.title, 80) : st.word; }
+  // An employee as a DS bot: its card says it is a Paperclip employee (title or role, supervision), its company, and its budget.
+  function hqBot(a, name, q) {
+    var st = V.hq.status(a), sup = V.hq.supervision(a);
+    var b = withColor({ name: name, role: HQ_DESK[String(a.role || '').toLowerCase()] || 'writer', shape: shapeOf('hq:' + a.id), status: st.key, word: st.word, task: hqTask(a, st),
+      platform: 'Paperclip ' + (a.title || a.role || 'employee') + (sup ? ', ' + sup : ''), owner: q.company.name }, 'hq:' + a.id);
+    if (a.budget) b.cost = V.hq.budget(a.budget);
+    return b;
+  }
+  // The HQ building definition. seats: employee id -> { name, room, floor (DS id), floorName }. sig: what a change of needs a new mount
+  // (the floors, the rooms and who sits where: the DS has no event that removes a floor or moves a room).
+  function describeHq(snap, withBots) {
+    var q = hqOf(snap), taken = {}, seats = {}, byId = {}, sig = [];
+    (q ? q.agents : []).forEach(function (a) { byId[a.id] = a; });
+    var src = q && q.floors && q.floors.length ? q.floors : [{ key: LOBBY, name: 'Lobby', dept: '', wing: '', employees: [], rooms: [] }];
+    var floors = src.map(function (f, i) {
+      var id = i + 1, rooms = [];
+      if (f.key === LOBBY) rooms.push({ id: RECEPTION, type: 'lobby', name: 'Reception', note: q ? 'The HQ dashboard and the HR desk' : 'Paperclip is not connected', bots: [], spare: q ? 1 : 0 });
+      else if (f.key === 'records') rooms.push({ id: HQ_RECORDS, type: 'team', name: 'Records', note: 'Paperclip keeps the records', bots: [], spare: 0 });
+      else (f.rooms || []).forEach(function (r) {
+        var rid = 'hq-' + f.key + '-' + r.key, room = { id: rid, type: r.rank === 0 ? 'hq' : 'team', name: clip(r.name, 40), note: clip(f.name + ' · ' + r.employees.length + (r.employees.length === 1 ? ' employee' : ' employees'), 28), bots: [], spare: 0 };
+        r.employees.forEach(function (e) {
+          var a = byId[e.id];
+          if (!a || seats[e.id]) return;
+          seats[e.id] = { name: previewName(taken, a.name), room: rid, floor: id, floorName: f.name };
+          sig.push(e.id + '@' + rid);
+          if (withBots) room.bots.push(hqBot(a, seats[e.id].name, q));
+        });
+        rooms.push(room);
+      });
+      sig.push(f.key + ':' + rooms.map(function (r) { return r.id; }).join(','));
+      return { id: id, key: f.key === LOBBY ? 'ops' : f.key === 'records' ? 'content' : HQ_FLOOR_KEY[f.dept] || 'ops', name: clip(f.name, 22), wing: f.wing ? 'rank-' + f.rank : '', wingName: f.wing || '', fn: f.key, rooms: rooms };
+    });
+    return { def: { name: q ? q.company.name : 'Paperclip HQ', sessions: 'agent', floors: floors }, seats: seats, sig: (q ? q.company.id : '') + '|' + sig.join('|') };
+  }
+
   function createStore(opts) {
     opts = opts || {};
     var now = opts.now || Date.now;
@@ -475,7 +530,7 @@
     store.queue = function (snap) { return queue(snap || latest); };
     store.alerts = function (snap) { return alerts(snap || latest); };
     store.phone = function (snap, now) { return phone(snap || latest, now); };
-    store.preview = function (repo, snap) { return describe(repo, snap || latest, true).def; };
+    store.preview = function (repo, snap) { return repo === HQ_KEY ? describeHq(snap || latest, true).def : describe(repo, snap || latest, true).def; };
     store.shapeOf = shapeOf;
     store.colorOf = colorOf;
     store.buildingOf = function (s) { return s.place ? s.place.buildingKey : ''; };
@@ -489,7 +544,91 @@
     store.lookup = function (botName) { var m = current(); return m ? m.lookup(botName) : null; };
     store.botName = function (uid) { var m = current(); return m ? m.botName(uid) : null; };
 
+    // The HQ adapter (#226): the same interface as a repository's, so every page part that reads a mount works on it. Its bots are
+    // employees, not sessions: no session, no request, no notes, no Security room, no open desk but the Reception's (the HR desk).
+    // A change of the org chart (a hire, a move, a reporting line) makes it stale, and the page mounts the HQ again.
+    function mountHq() {
+      var d = describeHq(latest, false), known = {}, emitRef = null, primed = false, seedSnap = null;
+      var m = { repo: HQ_KEY, id: ++mountSeq, def: d.def, hq: true, home: LOBBY };
+      var byKey = {};
+      d.def.floors.forEach(function (f) { byKey[f.fn] = f; });
+      function apply(snap, out, seedAll) {
+        var e = seedAll ? function (ev) { ev.seeded = true; out(ev); } : out, q = hqOf(snap), here = {};
+        (q ? q.agents : []).forEach(function (a) {
+          var seat = d.seats[a.id];
+          if (!seat) return;   // a new employee: the scene is stale, the next mount seats it
+          here[a.id] = true;
+          var b = hqBot(a, seat.name, q), card = [b.platform, b.owner, b.cost || '', b.role].join('|'), k = known[a.id];
+          if (k && k.card !== card) { e({ type: 'bot.remove', bot: k.name }); k = null; }   // the DS sets the card lines only when the bot is added
+          if (!k) { known[a.id] = { name: seat.name, status: b.status, task: b.task, card: card, floor: seat.floor, room: seat.room }; delete b.word; e({ type: 'bot.add', roomId: seat.room, bot: b }); return; }
+          if (b.status !== k.status || b.task !== k.task) { e({ type: 'status', bot: k.name, status: b.status, task: b.task, quiet: b.status === k.status }); k.status = b.status; k.task = b.task; }
+        });
+        Object.keys(known).forEach(function (id) { if (!here[id]) { e({ type: 'bot.remove', bot: known[id].name }); delete known[id]; } });
+      }
+      function prime(emit) {
+        if (primed) return;
+        primed = true;
+        var s0 = seedSnap; seedSnap = null;
+        if (s0) apply(s0, emit, true);
+      }
+      m._follow = function (snap) { if (emitRef) { prime(emitRef); apply(snap, emitRef); } };
+      m.attach = function (emit) {
+        known = {}; emitRef = emit; primed = false; seedSnap = latest;
+        if (attached.indexOf(m) < 0) attached.push(m);
+        defer(function () { if (emitRef === emit) prime(emit); });
+      };
+      m.detach = function () { emitRef = null; attached = attached.filter(function (x) { return x !== m; }); };
+      m.stale = function (snap) { return describeHq(snap || latest, false).sig !== d.sig; };
+      m.floorKey = function (id) { var f = d.def.floors.filter(function (x) { return x.id === id; })[0]; return f ? f.fn : null; };
+      m.floorId = function (fn) { return byKey[fn] ? byKey[fn].id : null; };
+      m.roomFloor = function (roomId) { var f = d.def.floors.filter(function (x) { return x.rooms.some(function (r) { return r.id === roomId; }); })[0]; return f ? f.fn : null; };
+      m.floors = function () { return d.def.floors.map(function (f) { return { id: f.id, key: f.fn, name: f.name, wing: f.wing, wingName: f.wingName, role: '' }; }); };
+      m.agentsByFloor = function () {
+        var out = {};
+        Object.keys(known).forEach(function (id) { var k = known[id]; (out[k.floor] = out[k.floor] || []).push(k.name); });
+        return out;
+      };
+      m.rollup = function () {
+        var rooms = {}, floors = {}, all = [], out = { building: null, floors: {}, rooms: {} };
+        Object.keys(known).forEach(function (id) { var k = known[id]; (rooms[k.room] = rooms[k.room] || []).push(k.status); (floors[k.floor] = floors[k.floor] || []).push(k.status); all.push(k.status); });
+        out.building = worst(all);
+        Object.keys(rooms).forEach(function (r) { out.rooms[r] = worst(rooms[r]); });
+        Object.keys(floors).forEach(function (f) { out.floors[f] = worst(floors[f]); });
+        return out;
+      };
+      // The reporting lines of the scene, between the bots that sit in it: { from, to } (bot names: the employee, its manager), with the
+      // DS floor id and name of each end. A line whose manager is not seated here (a new hire before the next mount) draws nothing.
+      m.cables = function (snap) {
+        var q = hqOf(snap || latest);
+        return ((q && q.cables) || []).map(function (c) {
+          var a = d.seats[c.from], b = d.seats[c.to];
+          return a && b ? { from: a.name, to: b.name, fromFloor: a.floor, toFloor: b.floor, fromFloorName: a.floorName, toFloorName: b.floorName } : null;
+        }).filter(Boolean);
+      };
+      // The employee a bot name stands for (the snapshot's agent view), or null.
+      m.employee = function (botName, snap) {
+        var q = hqOf(snap || latest), id = Object.keys(d.seats).filter(function (x) { return d.seats[x].name === botName; })[0];
+        return q && id ? q.agents.filter(function (a) { return a.id === id; })[0] || null : null;
+      };
+      m.securityRoom = function () { return null; };
+      m.roomsShown = function () { return []; };
+      m.spare = function () { return false; };
+      m.usable = function () { return false; };
+      m.roomInfo = function () { return { sessions: [], place: null }; };
+      m.spareRoomOf = function (fn) { return fn === LOBBY && hqOf(latest) ? RECEPTION : null; };
+      m.deskTargets = function () { return { papers: [], notes: [], empty: [] }; };
+      m.noteKey = function () { return ''; };
+      m.dsRoom = function () { return null; };
+      m.figures = function () { return V.figures([]); };
+      m.agentName = function () { return 'Paperclip'; };
+      m.botName = function () { return null; };
+      m.session = function () { return null; };
+      m.lookup = function () { return null; };
+      m.uidsOf = function () { return []; };
+      return m;
+    }
     store.mount = function (repo) {
+      if (repo === HQ_KEY) return mountHq();
       var d = describe(repo, latest, false);
       function freshLayout() { return { floors: JSON.parse(JSON.stringify(d.floors)), homes: Object.assign({}, d.homes), keys: Object.assign({}, d.keys), roots: Object.assign({}, d.roots), places: Object.assign({}, d.places), signs: Object.assign({}, d.signs) }; }
       var layout = freshLayout();
@@ -1008,7 +1147,7 @@
       if (!best || count[fn] > best.n || (count[fn] === best.n && bid < best.id)) best = { id: bid, key: fn, n: count[fn] };
     });
     if (best) return { id: best.id, key: best.key };
-    hit = by(picked);
+    hit = by(picked) || by(toMount.home);   // home: the floor a mount opens on when nothing else names one (the HQ: its Lobby, #226)
     if (hit) return hit;
     var f0 = toMount.def && toMount.def.floors && toMount.def.floors[0];
     return f0 ? { id: f0.id, key: toMount.floorKey(f0.id) } : null;
@@ -1037,5 +1176,5 @@
     };
   }
 
-  root.OfficeBuilding = { createStore: createStore, startFloor: startFloor, floorMemory: floorMemory, shapeOf: shapeOf, colorOf: colorOf, buildings: buildings, requests: requests, queue: queue, changes: changes, folderAt: folderAt, describe: describe, roomsNow: roomsNow, tagOf: tagOf, baseRoomId: baseRoomId, EMPTY_NOTE: EMPTY_NOTE };
+  root.OfficeBuilding = { HQ_KEY: HQ_KEY, createStore: createStore, startFloor: startFloor, floorMemory: floorMemory, shapeOf: shapeOf, colorOf: colorOf, buildings: buildings, requests: requests, queue: queue, changes: changes, folderAt: folderAt, describe: describe, roomsNow: roomsNow, tagOf: tagOf, baseRoomId: baseRoomId, EMPTY_NOTE: EMPTY_NOTE };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

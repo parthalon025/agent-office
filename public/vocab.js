@@ -69,6 +69,8 @@
                          office request), budget(b) ("$8.30 of $50.00 this month"), every(seconds) (a heartbeat), supervision(agent)
                          ("Supervised in office" or the label), state(snap.hq) (the connection as a line), desk(s) (#206: the rows of a Paperclip run's context, [] for another session),
                          kindSupervision(kind) ("Supervised" for a gated office agent kind, else its label: the hire's Confirm and the HR desk), hire (the HR desk words).
+                         The HQ building in the scene (#226): memo(snap.hq) (the reception memo), taskBoard(snap.hq) (the open tasks by
+                         state on the Reception's back wall) and lobbyVerbs (the hints of the Lobby's objects: the HR desk hires).
      layers           -> the four layers of detail (ADR 0006): glance (is all fine), look (what is it doing, how is it going), inspect (exactly
                          what happened), deep (proof and rules). order, opens(layer) (the next layer, '' at deep), surfaces (each surface's
                          layer and the layer it opens), surface(id), mood(state) ({ key, word } of a worst state: calm, busy, needs you, failed),
@@ -316,6 +318,24 @@
     if (l.spend) out.push(hqBudget(l.spend));
     return out.join(' · ');
   }
+  // The HQ building in the scene (#226): the reception memo of its Lobby (the company, the Lobby counts, what a click does) and the task
+  // board on the Reception's back wall (the open tasks by state). null in the data is unknown, said so.
+  function hqMemo(q) {
+    if (!q || !q.company) return { title: 'Paperclip HQ', lines: ['Paperclip is not connected.', 'Click the memo to open the HQ and connect it.'] };
+    // four lines at most, as the memo of an office building: the rest is in the HQ
+    var l = q.lobby, lines = [hqPlural((q.agents || []).length, 'employee') + (l ? ' · ' + (l.tasks ? hqPlural(l.tasks.open, 'open task') : 'tasks unknown') : '')];
+    if (l) {
+      lines.push(!l.approvals ? 'Approvals unknown' : l.approvals.pending ? hqPlural(l.approvals.pending, 'approval') + (l.approvals.pending === 1 ? ' waits for you' : ' wait for you') : 'No approval waits');
+      if (l.spend) lines.push(hqBudget(l.spend));
+    }
+    return { title: q.company.name, lines: lines.concat(['Click the memo for the HQ.']) };
+  }
+  var HQ_TASK_ROWS = [['backlog', 'Backlog'], ['todo', 'To do'], ['inProgress', 'In progress'], ['inReview', 'In review'], ['blocked', 'Blocked']];
+  function hqTaskBoard(q) {
+    var t = q && q.lobby && q.lobby.tasks;
+    return { title: 'Tasks', rows: HQ_TASK_ROWS.map(function (r) { var n = t ? +t[r[0]] || 0 : 0; return { id: r[0], name: r[1], count: n, text: t ? String(n) : 'No data' }; }),
+      foot: t ? hqPlural(t.open, 'open task') : 'The office could not read the tasks' };
+  }
   function hqCards(l) {
     var U = 'Unknown', e = l.employees;
     var emp = [e.working + ' working', e.unsupervised ? e.unsupervised + ' not supervised in office' : 'all supervised in office'];
@@ -450,7 +470,9 @@
   }
   function approvalLabel(action) { return APPROVAL_ACT[action] || ''; }
   function approvalDone(action) { return APPROVAL_DONE[action] || 'Approval decided'; }
-  var hq = { kindSupervision: hqKindSupervision, hire: hqHire, adapter: hqAdapter, goals: hqGoals, routineStates: routineStates, routineFacts: routineFacts, routineForm: routineForm, routineCalls: routineCalls, routineDone: routineDone, approvalBody: approvalBody, approvalLabel: approvalLabel, approvalDone: approvalDone, linkLabel: 'Open in Paperclip', approvalDenied: 'Read only. The HQ write grid denies approvals.', approvalBlocked: 'This approval cannot be decided here.', searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg };
+  var hq = { kindSupervision: hqKindSupervision, hire: hqHire, adapter: hqAdapter, goals: hqGoals, routineStates: routineStates, routineFacts: routineFacts, routineForm: routineForm, routineCalls: routineCalls, routineDone: routineDone, approvalBody: approvalBody, approvalLabel: approvalLabel, approvalDone: approvalDone, linkLabel: 'Open in Paperclip', approvalDenied: 'Read only. The HQ write grid denies approvals.', approvalBlocked: 'This approval cannot be decided here.', searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg, memo: hqMemo, taskBoard: hqTaskBoard,
+    // the hints of the HQ Lobby's objects in the scene (#226): the HR desk hires, the memo and the task board open the HQ
+    lobbyVerbs: { desk: 'Hire an employee', monitor: 'Hire an employee', memo: 'Open the HQ', pipeline: 'Open the HQ tasks', directory: 'Search the HQ' } };
 
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
   // priced: sessions with a cost figure. unknown: sessions whose agent reports no cost (costUnknown), shown as "unknown".

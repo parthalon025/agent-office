@@ -810,7 +810,11 @@ export function createHq(deps = {}) {
       company: { id: String(d.company.id || c.companyId), name: text(d.company.name, 80) || 'Paperclip' },
       budget: { spent: cents(d.company.spentMonthlyCents), limit: cents(d.company.budgetMonthlyCents) },
       agents,
-      floors: floors.map((f) => ({ key: f.key, name: f.name, rank: f.rank, employees: f.employees.map((e) => ({ id: e.id, name: e.name, role: e.role, reportsTo: e.reportsTo, floor: f.name })) })),
+      // the org chart as floors (#226): one per department, going up by rank, a room per rank; an employee carries its floor and its rank
+      floors: floors.map((f) => {
+        const emp = (e) => ({ id: e.id, name: e.name, role: e.role, reportsTo: e.reportsTo, floor: f.name, rank: e.rank });
+        return { key: f.key, name: f.name, dept: f.dept, rank: f.rank, wing: f.wing, employees: f.employees.map(emp), rooms: f.rooms.map((r) => ({ key: r.key, name: r.name, rank: r.rank, employees: r.employees.map(emp) })) };
+      }),
       rooms: known('projects') ? roomsOf({ projects: d.projects, agents, issues: known('issues') ? d.issues : null }) : [],
       cables: cablesOf(agents),
       goals: known('goals') ? goalsOf(hr.goals, agents) : null,

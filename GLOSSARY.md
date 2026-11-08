@@ -30,6 +30,8 @@ The vocabulary of the office layout (#88). Plain company terms only.
 | Decision summary | The key point first, one line per decision, a recommended default |
 | HQ | A Paperclip company shown in the office: its building in the campus and its full-page view. Not a repository building |
 | Employee | A Paperclip agent of an HQ. An office session is an agent; an employee is the Paperclip record it runs as |
+| Department | The employees of an HQ grouped by their Paperclip role (Executive, Engineering, Security, Product, Research, Marketing, Finance, General); a general employee is in its manager's department. Each department is one HQ floor, the floors go up by rank, and each rank is a room on it (#226) |
+| Reporting line | Who an employee reports to in Paperclip. In the HQ building it is a cable from the employee's desk to its manager's desk, or to the elevator when the manager sits on another floor |
 | Hire | Creating an employee from the office, behind a Confirm, supervised and with a budget |
 | Company memory | The shared, searchable memory of one company: what its employees learned, each item with where it came from |
 | Orientation | The first-run walk through the whole office, step by step and skippable: agent kinds, Security room, spend limit, company setup, company memory, Start with Windows, remote access, the tour |
