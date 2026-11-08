@@ -307,6 +307,15 @@
     if (st === 'missing') return { line: 'Office adapter: not installed', ok: false, install: true, why: why };
     return { line: 'Office adapter: unknown', ok: false, install: false, why: why || 'The office has not read the adapter list of Paperclip yet.' };
   }
+  // The Paperclip line of the Spend screen (#227): the company's cost this month and its budget. No connection: no line. A cost the office
+  // could not read is unknown, never $0.00.
+  function hqSpendLine(q) {
+    if (!q || !q.company) return '';
+    var sp = q.lobby && q.lobby.spend;
+    if (!sp) return 'Paperclip, this month: cost unknown.';
+    if (!(sp.limit > 0)) return 'Paperclip, this month: ' + money(sp.spent) + '. No budget set.';
+    return 'Paperclip, this month: ' + money(sp.spent) + ' of ' + money(sp.limit) + (sp.percent != null ? ' (' + sp.percent + '%)' : '') + '.';
+  }
   function hqPlural(n, one) { return n + ' ' + (n === 1 ? one : one + 's'); }
   function hqGlance(q) {
     var l = q && q.lobby;
@@ -520,7 +529,7 @@
   }
   var hqGrid = { title: 'Write rules', note: 'Each kind of change the office makes in Paperclip has a rule. Confirm asks you first. Allow sends at once. Deny never sends. Secrets never take Allow.',
     cell: gridCell, change: gridChange, looser: gridLooser, search: { id: 'page-hq-grid', label: 'Paperclip write rules', keywords: 'paperclip hq write grid rules confirm allow deny tasks comments approvals secrets permissions' } };
-  var hq = { grid: hqGrid, kindSupervision: hqKindSupervision, hire: hqHire, adapter: hqAdapter, goals: hqGoals, tasks: hqTasks, routineStates: routineStates, routineFacts: routineFacts, routineForm: routineForm, routineCalls: routineCalls, routineDone: routineDone, approvalBody: approvalBody, approvalLabel: approvalLabel, approvalDone: approvalDone, linkLabel: 'Open in Paperclip', approvalDenied: 'Read only. The HQ write grid denies approvals.', approvalBlocked: 'This approval cannot be decided here.', searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg, memo: hqMemo, taskBoard: hqTaskBoard,
+  var hq = { grid: hqGrid, kindSupervision: hqKindSupervision, hire: hqHire, adapter: hqAdapter, goals: hqGoals, tasks: hqTasks, routineStates: routineStates, routineFacts: routineFacts, routineForm: routineForm, routineCalls: routineCalls, routineDone: routineDone, approvalBody: approvalBody, approvalLabel: approvalLabel, approvalDone: approvalDone, linkLabel: 'Open in Paperclip', approvalDenied: 'Read only. The HQ write grid denies approvals.', approvalBlocked: 'This approval cannot be decided here.', searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, spendLine: hqSpendLine, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg, memo: hqMemo, taskBoard: hqTaskBoard,
     // the hints of the HQ Lobby's objects in the scene (#226): the HR desk hires, the memo and the task board open the HQ
     lobbyVerbs: { desk: 'Hire an employee', monitor: 'Hire an employee', memo: 'Open the HQ', pipeline: 'Open the HQ tasks', directory: 'Search the HQ' } };
 
