@@ -11,7 +11,7 @@
 //                                            goal is a sub-issue of that task; a step's state moves its sub-issue; the result is a comment on
 //                                            the task, and a finished goal sets the task to done. Every write is hq.write (the one writer), so
 //                                            the write grid decides it: a cell set to Deny or Confirm leaves the write undone and says so once.
-// The hire plan (hq-model.mjs): `hq.write` kind `hire`, action `create` with `officeManager: true` sends `POST /agent-hires` with role `pm`
+// The hire plan (src/hq-writes/hire.mjs): `hq.write` kind `hire`, action `create` with `officeManager: true` sends `POST /agent-hires` with role `pm`
 // (`MANAGER_ROLE`: Paperclip's `AGENT_ROLES` enum has no `manager`, so `manager` would be a 400 of its validator), title `MANAGER_TITLE`,
 // `adapterConfig.manager: true`, isolation `same`, and a monthly budget (400 without one, as for every hire, ADR 0010). One Manager per
 // building and company. The office knows its Managers from the `managers` slice, never from the role.

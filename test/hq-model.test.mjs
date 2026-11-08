@@ -5,7 +5,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { goalsOf, floorsOf, cablesOf, reportingProblem, lobbyOf, costsOf, monthWindows, shapeProblems, shapeOf, SHAPES, officeAdapterOf, planWrite } from '../src/hq-model.mjs';
+import { goalsOf, floorsOf, cablesOf, reportingProblem, lobbyOf, costsOf, monthWindows, shapeProblems, shapeOf, SHAPES, officeAdapterOf } from '../src/hq-model.mjs';
+import { planWrite } from '../src/hq-writes/index.mjs';
 import { startFakePaperclip, DEMO } from './fixtures/fake-paperclip.mjs';
 
 const ADAPTER_DIR = fileURLToPath(new URL('../src/integrations/paperclip-adapter', import.meta.url));

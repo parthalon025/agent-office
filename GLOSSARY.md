@@ -34,6 +34,7 @@ The vocabulary of the office layout (#88). Plain company terms only.
 | Company memory | The shared, searchable memory of one company: what its employees learned, each item with where it came from |
 | Orientation | The first-run walk through the whole office, step by step and skippable: agent kinds, Security room, spend limit, company setup, company memory, Start with Windows, remote access, the tour |
 | Write grid | The HQ setting of what the office may write to Paperclip, per write kind: Confirm, Allow or Deny |
+| Write kind | One kind of change the office can make in Paperclip (a hire, a task, an approval decision, ...): its row in the write grid, the requests it sends and what Paperclip must answer. Each write kind is defined in one place |
 | Self-approval | An employee approving its own work, only for the approval kinds the user allows in the write grid |
 | Office adapter | The Paperclip adapter that hands an employee run to the office, which runs it with the employee agent kind under supervision |
 | Paperclip runtime | The Paperclip that the office installs (one pinned release, git-ignored folder), starts in login mode on 127.0.0.1 and stops with the office. Not a Paperclip the user runs. Its board key is the one key the office holds (#193) |

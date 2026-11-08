@@ -1,9 +1,9 @@
-// The HQ write grid (#198, spec #191): the pure rules in src/hq-model.mjs. Which write kinds the grid has, their defaults, the saved
+// The HQ write grid (#198, spec #191): the pure rules in src/hq-writes/. Which write kinds the grid has, their defaults, the saved
 // slice, a change (loosening needs the painted Confirm, a secret never takes Allow) and the plan of each first write (the exact
 // request, checked before anything is asked or sent). No server, no network. Run: node --test test/hq-write-grid.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { WRITE_KINDS, cleanWriteGrid, writeValueOf, setWriteCell, planWrite } from '../src/hq-model.mjs';
+import { WRITE_KINDS, cleanWriteGrid, writeValueOf, setWriteCell, planWrite } from '../src/hq-writes/index.mjs';
 
 test('the grid has the ten write kinds of ADR 0010 and the first company (#199); Allow only for the user\'s own task edits and comments', () => {
   assert.deepEqual(Object.keys(WRITE_KINDS), ['hire', 'pause', 'budget', 'approval', 'reporting', 'routine', 'access', 'secret', 'task', 'comment', 'company', 'goal', 'instance', 'adapter', 'supervise', 'export']);
