@@ -23,7 +23,7 @@
     dismiss: '/api/dismiss', export: '/api/export', ext: '/api/ext', extList: '/api/ext/list',
     floorCleanup: '/api/floor/cleanup', floorCreate: '/api/floor/create', floorDelete: '/api/floor/delete', floorStale: '/api/floor/stale',
     fork: '/api/fork', goalApprove: '/api/goal/approve', goalCancel: '/api/goal/cancel', goalHandoff: '/api/goal/handoff',
-    goalRetry: '/api/goal/retry', managerHire: '/api/manager/hire', managers: '/api/managers', hqReportingLine: '/api/hq/reporting-line', hqWrite: '/api/hq/write', hqGrid: '/api/hq/grid', hqSelfApproval: '/api/hq/self-approval/set', history: '/api/history', historyForget: '/api/history/forget', info: '/api/info',
+    goalRetry: '/api/goal/retry', managerHire: '/api/manager/hire', managers: '/api/managers', hqReportingLine: '/api/hq/reporting-line', hqWrite: '/api/hq/write', hqGrid: '/api/hq/grid', hqGridSet: '/api/hq/grid/set', hqSelfApproval: '/api/hq/self-approval/set', history: '/api/history', historyForget: '/api/history/forget', info: '/api/info',
     interrupt: '/api/interrupt', layout: '/api/layout', merge: '/api/merge', message: '/api/message', notesSave: '/api/notes/save',
     open: '/api/open', orientation: '/api/orientation', orientationStep: '/api/orientation/step', paperclipConnect: '/api/paperclip/connect', paperclipCompany: '/api/paperclip/company', paperclipDisconnect: '/api/paperclip/disconnect',
     paperclipSupervise: '/api/paperclip/supervise', personaDelete: '/api/persona/delete', personaSave: '/api/persona/save',
