@@ -506,3 +506,15 @@ test('Agents, Paperclip part: many agents page in the full view; the narrow view
   assert.ok(texts(n2).includes('Ada') && texts(n2).includes('2 of 3'));
   assert.equal(n2.hots.some((h) => h.kind === 'supervise'), false, 'Ada is supervised: nothing to set up');
 });
+
+test('Agents, Paperclip part: when the write grid denies Supervise in office, no button and the wall says why (#231)', () => {
+  const denied = withHq({ ...HQ, superviseWrite: false }), allowed = withHq({ ...HQ, superviseWrite: true });
+  for (const paged of [false, true]) {
+    const v = hqView(paged ? { paged: true } : {});
+    assert.deepEqual(plan(v, allowed).hots.filter((h) => h.kind === 'supervise').map((h) => h.agent), ['a1'], 'the cell allows it: the button shows');
+    const p = plan(v, denied);
+    assert.equal(p.hots.some((h) => h.kind === 'supervise'), false, 'Deny: no button');
+    assert.match(said(p), /Security room denies Supervise in office/, 'the wall says why');
+  }
+  assert.equal(plan(hqView(), withHq()).hots.some((h) => h.kind === 'supervise'), true, 'a snapshot without the flag keeps the button');
+});

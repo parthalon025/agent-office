@@ -543,7 +543,7 @@ export function createOffice(cfg) {
   // 403, Confirm asks first and the editor's own Change button is that Confirm, Allow sends) and the writer checks a loop, a self report or a
   // stranger before anything is asked. The snapshot's hq tells the page whether to offer the editor, and an approval decision:
   // each is writable unless the grid says Deny (`approvalWrite` for the Approvals cell).
-  const hqView = () => { const v = hq.view(); return v && { ...v, reportingWrite: writeValueOf(saved.get('hqGrid'), 'reporting') !== 'deny', goalWrite: writeValueOf(saved.get('hqGrid'), 'goal') !== 'deny', employeeWrite: writeValueOf(saved.get('hqGrid'), 'pause') !== 'deny', approvalWrite: writeValueOf(saved.get('hqGrid'), 'approval') !== 'deny' }; };
+  const hqView = () => { const v = hq.view(); return v && { ...v, reportingWrite: writeValueOf(saved.get('hqGrid'), 'reporting') !== 'deny', goalWrite: writeValueOf(saved.get('hqGrid'), 'goal') !== 'deny', employeeWrite: writeValueOf(saved.get('hqGrid'), 'pause') !== 'deny', approvalWrite: writeValueOf(saved.get('hqGrid'), 'approval') !== 'deny', superviseWrite: writeValueOf(saved.get('hqGrid'), 'supervise') !== 'deny' }; };
   async function reportingLineHq(body) {
     const r = await hq.write({ kind: 'reporting', action: 'set', agent: String(body.agent || ''), manager: body.manager ? String(body.manager) : null }, { confirmed: body.confirmed === true });
     broadcast();
