@@ -5,28 +5,42 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { goalsOf, floorsOf, cablesOf, reportingProblem, lobbyOf, costsOf, monthWindows, shapeProblems, shapeOf, SHAPES, officeAdapterOf } from '../src/hq-model.mjs';
+import { goalsOf, floorsOf, departmentsOf, cablesOf, reportingProblem, lobbyOf, costsOf, monthWindows, shapeProblems, shapeOf, SHAPES, officeAdapterOf } from '../src/hq-model.mjs';
 import { planWrite } from '../src/hq-writes/index.mjs';
 import { startFakePaperclip, DEMO } from './fixtures/fake-paperclip.mjs';
 
 const ADAPTER_DIR = fileURLToPath(new URL('../src/integrations/paperclip-adapter', import.meta.url));
 const RECORDED = JSON.parse(fs.readFileSync(fileURLToPath(new URL('./fixtures/paperclip-shapes.json', import.meta.url)), 'utf8'));
-const a = (id, reportsTo, name = id) => ({ id, name, reportsTo, role: 'General' });
+const a = (id, reportsTo, name = id, role = 'General') => ({ id, name, reportsTo, role });
 
-test('floors follow the org chart: the top role on the top floor, Records and Lobby fixed, bottom to top', () => {
-  const f = floorsOf([a('ceo', null), a('cto', 'ceo'), a('dev', 'cto'), a('dev2', 'cto'), a('cmo', 'ceo')]);
-  assert.deepEqual(f.map((x) => x.key), ['records', 'lobby', 'rank-2', 'rank-1', 'rank-0']);
-  assert.deepEqual(f.map((x) => x.employees.map((e) => e.id)), [[], [], ['dev', 'dev2'], ['cto', 'cmo'], ['ceo']]);
-  assert.equal(f.at(-1).name, 'Executive');
-  assert.equal(f.find((x) => x.key === 'lobby').name, 'Lobby');
+test('floors follow the org chart (#226): a floor per department, going up by rank, a room per rank; Records and Lobby fixed, bottom to top', () => {
+  // roles as the office labels them (roleLabel): the department comes from the Paperclip role
+  const f = floorsOf([a('ceo', null, 'Grace', 'CEO'), a('cto', 'ceo', 'Ada', 'CTO'), a('dev', 'cto', 'Linus', 'Engineer'), a('ops', 'cto', 'Ken', 'DevOps'),
+    a('cmo', 'ceo', 'Mia', 'CMO'), a('pm', 'cmo', 'Pat', 'PM'), a('gen', 'cto', 'Gus')]);
+  assert.deepEqual(f.map((x) => x.key), ['records', 'lobby', 'dept-product', 'dept-marketing', 'dept-engineering', 'dept-executive']);
+  assert.deepEqual(f.map((x) => x.name), ['Records', 'Lobby', 'Product', 'Marketing', 'Engineering', 'Executive'], 'the top role on the top floor; a tie of ranks keeps the department order (Engineering above Marketing)');
+  assert.deepEqual(f.map((x) => x.wing), ['', '', 'Teams', 'Leads', 'Leads', 'Executive'], 'the elevator groups the floors by the rank of their highest employee');
+  const eng = f.find((x) => x.dept === 'engineering');
+  assert.deepEqual(eng.rooms.map((r) => [r.key, r.name, r.employees.map((e) => e.id)]), [['rank-1', 'Leads', ['cto']], ['rank-2', 'Teams', ['dev', 'ops', 'gen']]],
+    'a room per rank, highest first; a general employee works in the department of its manager');
+  assert.deepEqual(eng.employees.map((e) => [e.id, e.rank]), [['cto', 1], ['dev', 2], ['ops', 2], ['gen', 2]]);
+  assert.equal(eng.rank, 1);
+  assert.deepEqual(f.find((x) => x.key === 'lobby').rooms, []);
+  assert.deepEqual(departmentsOf([a('g', 'ceo'), a('ceo', null, 'C', 'CEO'), a('h', null)]), new Map([['g', 'general'], ['ceo', 'executive'], ['h', 'general']]),
+    'a general employee under the CEO only, or with no manager, is in General');
 });
 
 test('floors: a loop in reporting lines, a missing manager and a self report never loop or lose an employee', () => {
   const f = floorsOf([a('x', 'y'), a('y', 'x'), a('z', 'ghost'), a('s', 's')]);
   const ids = f.flatMap((x) => x.employees.map((e) => e.id)).sort();
   assert.deepEqual(ids, ['s', 'x', 'y', 'z']);
+  assert.deepEqual(f.flatMap((x) => x.rooms.flatMap((r) => r.employees.map((e) => e.id))).sort(), ids, 'every employee sits in one room');
   assert.deepEqual(floorsOf([]).map((x) => x.key), ['records', 'lobby']);
-  assert.equal(floorsOf(Array.from({ length: 40 }, (_, i) => a('n' + i, i ? 'n' + (i - 1) : null))).length, 2 + 8, 'depth is capped at 8 ranks; deeper employees share the last one');
+  const deep = floorsOf(Array.from({ length: 40 }, (_, i) => a('n' + i, i ? 'n' + (i - 1) : null)));
+  assert.equal(deep.length, 3, 'one department, one floor');
+  assert.equal(deep[2].rooms.length, 8, 'depth is capped at 8 ranks; deeper employees share the last room');
+  assert.equal(deep[2].rooms.at(-1).employees.length, 33);
+  assert.equal(deep[2].rooms.at(-1).name, 'Rank 8');
 });
 
 test('the Lobby counts what Paperclip said and says unknown (null) for what it could not read', () => {

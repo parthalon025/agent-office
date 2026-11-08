@@ -251,6 +251,19 @@ test('lobby: the memo, the directory board and the nameplate read in every theme
   }
 });
 
+// #226: the label of the HQ cables at the elevator (public/cables.js FACE): the faces of a nameplate, the title and the lighter people line.
+test('HQ cables: the label at the elevator reads in every theme (cables.js FACE)', async () => {
+  await import('../public/screen-kit.js'); await import('../public/cables.js');
+  const F = globalThis.OfficeCables.pure.FACE;
+  each((T, th) => {
+    atLeast('cable label title', 4.5, T(F.ink), T(F.face), th);
+    atLeast('cable label people', 4.5, mix(T(F.ink), T(F.face), F.subAlpha), T(F.face), th);
+  });
+  const src = read('public/cables.js'), body = src.slice(src.indexOf('function makeLabel('), src.indexOf('function placeLabels('));
+  assert.ok(body.length > 40);
+  assert.doesNotMatch(body, /tok\[['"]|tok\.[a-z]|#[0-9a-f]{3}\b/i, 'the label paints with FACE only');
+});
+
 // #90: the desk objects' painted faces (public/desk.js FACES): the approval paper, its Approve stamp, the question note and the
 // pause key. Every text at 4.5:1 on its face, the bands (the strip on top of a paper) at 3:1.
 test('desk: the approval paper, the stamps, the question note and the pause key read in every theme (desk.js FACES)', async () => {

@@ -602,6 +602,21 @@ test('the org chart editor words (#202): top floor first, the line of each emplo
   assert.deepEqual(V.hq.org(null).floors, []);
 });
 
+test('the HQ Lobby in the scene (#226): the memo names the company and the counts in four lines at most; the task board counts by state; unknown says so', () => {
+  const lobby = { tasks: { open: 3, todo: 1, inProgress: 1, blocked: 1, inReview: 0, backlog: 0 }, approvals: { pending: 1 }, spend: { spent: 12.4, limit: 100 } };
+  const q = { company: { name: 'Acme' }, agents: [{}, {}], lobby };
+  assert.deepEqual(V.hq.memo(q), { title: 'Acme', lines: ['2 employees · 3 open tasks', '1 approval waits for you', '$12.40 of $100.00 this month', 'Click the memo for the HQ.'] });
+  assert.deepEqual(V.hq.memo({ ...q, lobby: { tasks: null, approvals: null, spend: null } }).lines, ['2 employees · tasks unknown', 'Approvals unknown', 'Click the memo for the HQ.']);
+  assert.equal(V.hq.memo(null).title, 'Paperclip HQ');
+  assert.match(V.hq.memo(null).lines.join(' '), /not connected/);
+  const b = V.hq.taskBoard(q);
+  assert.equal(b.title, 'Tasks');
+  assert.deepEqual(b.rows.map((r) => [r.name, r.text]), [['Backlog', '0'], ['To do', '1'], ['In progress', '1'], ['In review', '0'], ['Blocked', '1']]);
+  assert.equal(b.foot, '3 open tasks');
+  assert.deepEqual(V.hq.taskBoard({ lobby: { tasks: null } }).rows.map((r) => r.text), ['No data', 'No data', 'No data', 'No data', 'No data'], 'never a zero that looks real');
+  assert.equal(V.hq.lobbyVerbs.desk, 'Hire an employee', 'the open desk of the HQ Lobby is the HR desk');
+});
+
 test('the goals view words (#207): a row says level, status and owner, the options follow the goal, write follows the grid, unknown says so', () => {
   const q = { goalWrite: true, agents: [{ id: 'a', name: 'Ada' }, { id: 'g', name: 'Grace' }],
     goals: { total: 3, rows: [

@@ -79,9 +79,15 @@ test('nameplates on top of each other: the first shows, the one over it waits; a
 test('every lobby object has a Ctrl+K action: an open desk on each floor, the Reception, the tour, and the directory search', () => {
   const office = fs.readFileSync(new URL('../public/office.js', import.meta.url), 'utf8');
   const lobby = fs.readFileSync(new URL('../public/lobby.js', import.meta.url), 'utf8');
-  const verbs = /var VERB = \{ desk: '([^']+)', memo: '([^']+)', directory: '([^']+)', pipeline: '([^']+)', monitor: '([^']+)' \};/.exec(lobby);
+  const verbs = /var VERB = Object\.assign\(\{ desk: '([^']+)', memo: '([^']+)', directory: '([^']+)', pipeline: '([^']+)', monitor: '([^']+)' \}, o\.verbs \|\| \{\}\);/.exec(lobby);
   assert.ok(verbs, 'the in-scene verbs');
   assert.deepEqual(verbs.slice(1), ['Start an agent here', 'Open the Reception', 'Search the office', 'Open the pipeline', 'Start an agent here']);
+  // the HQ Lobby (#226): the HR desk hires (page-hire), the memo and the task board open the HQ (page-hq), the directory the search
+  assert.deepEqual(globalThis.OfficeVocab.hq.lobbyVerbs, { desk: 'Hire an employee', monitor: 'Hire an employee', memo: 'Open the HQ', pipeline: 'Open the HQ tasks', directory: 'Search the HQ' });
+  assert.match(office, /id: 'page-hire', label: 'Hire an employee'/);
+  assert.match(office, /id: 'page-hq', label: 'Paperclip HQ'/);
+  assert.match(office, /onDesk: function \(roomId\) \{ if \(lobMount\.hq\) setDlg\(\{ name: 'hire' \}\);/);
+  assert.match(office, /else if \(lobMount\.hq\) setDlg\(\{ name: 'hq' \}\)/);
   assert.match(office, /part === 'pipeline'\) setDlg\(\{ name: 'flow' \}\)/, 'pipeline: the Changes dialog, also in Ctrl+K as page-flow');
   // an open desk on each floor moved into desk.js (#90): one list of the scene's actions, which test/desk.test.mjs checks
   assert.match(office, /OfficeDesk\.pure\.paletteActions\(dt,/, 'desk: Start an agent on <floor>');

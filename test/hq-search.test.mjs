@@ -15,7 +15,7 @@ test('search index: employees, floors, tasks, goals, approvals and routines, cap
   const issues = [{ id: 'i1', identifier: 'ACM-1', title: 'Add a route', status: 'in_progress', assigneeAgentId: 'a' }, { id: 'i2' }];
   const s = searchOf({ agents, floors, issues, goals: [{ id: 'go', title: 'Ship', status: 'active' }], approvals: [{ id: 'p', type: 'hire_agent', status: 'pending', requestedByAgentId: 'g', payload: { secret: 'x' } }], routines: [{ id: 'r', title: 'Nightly', status: 'active', agent: 'Ada' }] });
   const by = (k) => s.filter((x) => x.kind === k);
-  assert.deepEqual(by('floor').map((x) => x.id), ['lobby', 'rank-1', 'rank-0'], 'Records is not searched');
+  assert.deepEqual(by('floor').map((x) => x.id), ['lobby', 'dept-engineering', 'dept-executive'], 'Records is not searched; a floor is a department (#226)');
   assert.deepEqual(by('employee').map((x) => [x.id, x.label, x.hint]), [['g', 'Grace', 'Chief · Plan the year'], ['a', 'Ada', 'Engineer']]);
   assert.deepEqual(by('task').map((x) => [x.id, x.label, x.hint]), [['i1', 'ACM-1 Add a route', 'Task · in progress · Ada']], 'a task with no title is left out');
   assert.deepEqual(by('approval').map((x) => [x.label, x.hint]), [['Approval: hire agent', 'Approval · from Grace · pending']]);

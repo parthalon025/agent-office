@@ -111,7 +111,7 @@ test('connect: the HQ in the snapshot with its company, budget, agents and routi
 
 test('the HQ building (#197): floors from the org chart and the Lobby in the snapshot, the fuller model on GET /api/hq/lobby, no key or secret in any answer', async () => {
   const s = (await snapshot()).hq;
-  assert.deepEqual(s.floors.map((f) => f.key), ['records', 'lobby', 'rank-2', 'rank-1', 'rank-0']);
+  assert.deepEqual(s.floors.map((f) => f.key), ['records', 'lobby', 'dept-engineering', 'dept-executive']);
   assert.equal(s.floors.at(-1).employees[0].name, 'Grace');
   assert.deepEqual([s.lobby.employees.total, s.lobby.tasks.open, s.lobby.approvals.pending, s.lobby.goals.total, s.lobby.secrets.names], [3, 2, 1, 2, ['GITHUB_TOKEN']]);
   const r = await call('/api/hq/lobby', null, pageToken, 'GET');

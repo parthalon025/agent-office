@@ -24,7 +24,7 @@ The UI is the Agent Office design system (DS x1.7.18). Read `docs/design-system/
 - The page's own styles go in `public/office.css`. The DS sets its theme on `.ao-office`, and `chat-extras.js` mirrors it to `<html data-theme>`, so page UI reads tokens only.
 - In-scene controls (the Security room screens) have no keyboard or screen reader path (ADR 0003, the exception line in the DS Definition of done). Do not add one.
 - Every ask-first Confirm stays reachable at 400 px.
-- Before you finish a UI change: `python kit/check.py public/index.html public/office.css public/page-core.js public/skills.js public/dialogs.js public/schedules.js public/extensions.js public/hq.js public/characters.js public/reception.js public/panels.js public/changes.js public/screens.js public/merge.js public/needs.js public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/persona.js public/lobby.js public/desk.js public/wheel-gate.js public/vocab.js public/ask.js public/client.js public/screen-kit.js public/scene-host.js public/building.js public/format.js public/toasts.js public/wire.js public/security.js public/vocab-security.js public/vocab-layers.js public/vocab-persona.js components/bundle.css components/bundle.js kit/page.html`, run `npm run gate:jobs` once, then look at screenshots in Day, Night, Sublevel, Fluent and Fluent Dark at 1360, 1100 and 400 px.
+- Before you finish a UI change: `python kit/check.py public/index.html public/office.css public/page-core.js public/skills.js public/dialogs.js public/schedules.js public/extensions.js public/hq.js public/characters.js public/reception.js public/panels.js public/changes.js public/screens.js public/merge.js public/needs.js public/office.js public/adapter.js public/chat-extras.js public/city.js public/board.js public/terminal.js public/persona.js public/lobby.js public/cables.js public/desk.js public/wheel-gate.js public/vocab.js public/ask.js public/client.js public/screen-kit.js public/scene-host.js public/building.js public/format.js public/toasts.js public/wire.js public/security.js public/vocab-security.js public/vocab-layers.js public/vocab-persona.js components/bundle.css components/bundle.js kit/page.html`, run `npm run gate:jobs` once, then look at screenshots in Day, Night, Sublevel, Fluent and Fluent Dark at 1360, 1100 and 400 px.
 
 ## Commands
 
@@ -98,7 +98,7 @@ Server (`src/`):
 
 Paperclip (`src/`):
 - `paperclip.mjs`: the HQ watcher, the supervision checks and the one writer (`hq.write`).
-- `hq-model.mjs`: the pure HQ read model (org chart, lobby, costs, rooms, search), self-approval, the office adapter state.
+- `hq-model.mjs`: the pure HQ read model (org chart: floors by department going up by rank, a room per rank, reporting-line cables; lobby, costs, rooms, search), self-approval, the office adapter state.
 - `hq-writes/`: the write kinds, one file each (grid row, requests, what Paperclip must answer, the ids returned, samples); `index.mjs` lists them in grid order with the grid rules and `planWrite`; `shared.mjs` their checks and limits.
 - `paperclip-runtime.mjs`: the Paperclip the office installs, runs, updates or connects to; the board key.
 - `paperclip-runs.mjs`, `integrations/paperclip-adapter/`: runs Paperclip hands to the office; the adapter plugin Paperclip loads.
@@ -115,11 +115,11 @@ Providers (`src/providers/`):
 
 Page (`public/`):
 - `client.js`, `ask.js`, `wire.js`: the one module that knows the routes; the ask-first protocol; the `/events` wire format.
-- `building.js`, `adapter.js`: the snapshot store and building adapter; the launch code, SSE and `window.officeAdapter`.
+- `building.js`, `adapter.js`: the snapshot store and building adapter (also the HQ as a building you enter: `OfficeBuilding.HQ_KEY`, employees at desks, #226); the launch code, SSE and `window.officeAdapter`.
 - `vocab.js`, `vocab-security.js`, `vocab-layers.js`, `vocab-persona.js`: `OfficeVocab`, the shared words and rules.
 - `format.js`, `toasts.js`, `wheel-gate.js`: display formats; toast rules and placement; when scrolling out leaves a level.
 - `scene-host.js`, `screen-kit.js`: the one reader of the DS stage (picks, focus, flights, pinned screens); the painted screen kit.
-- `board.js`, `terminal.js`, `security.js`, `lobby.js`, `desk.js`, `persona.js`, `city.js`: room boards, desk terminals, the Security room walls, the lobby, desk actions, bot cues, the city.
+- `board.js`, `terminal.js`, `security.js`, `lobby.js`, `desk.js`, `persona.js`, `city.js`, `cables.js`: room boards, desk terminals, the Security room walls, the lobby, desk actions, bot cues, the city, the HQ reporting lines as cables.
 - `page-core.js`, `dialogs.js`, `panels.js`: shared page helpers (`OfficePage`); session dialogs; room panels and pinned-screen parts.
 - `skills.js`, `schedules.js`, `extensions.js`, `hq.js`, `characters.js`, `reception.js`, `changes.js`, `merge.js`, `screens.js`, `needs.js`: page features, one Module each on `OfficePage`.
 - `office.js`, `chat-extras.js`: the React app (city, Ctrl+K, scene mount, dialog wiring; loads last); chat grips, the `/` list, the theme mirror.

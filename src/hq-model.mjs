@@ -5,8 +5,10 @@
 //
 // Read model (the views the page shows; each is `view().<name>` of paperclip.mjs unless said). A null is unknown, never a zero that
 // looks real.
-// - floorsOf(agents): the org chart as the floors of the HQ building, bottom to top: Records, Lobby, then one floor per reporting rank,
-//   the top role on top. Loop-safe, depth capped at 8, no employee lost.
+// - floorsOf(agents): the org chart as the floors of the HQ building, bottom to top: Records, Lobby, then one floor per department
+//   (departmentsOf: from the Paperclip role; a general employee takes its manager's department), going up by rank so the top role is on
+//   top, with one room per rank in each floor (#226). Loop-safe, depth capped at 8, no employee lost. public/building.js mounts it as the
+//   HQ scene (its desks), and the cables of cablesOf join the desks there (public/cables.js).
 // - cablesOf(agents): one cable per reporting line whose manager is in the chart; none for a self report, a ghost manager or a loop.
 //   reportingProblem(agents, id, managerId) says why a reporting line change is refused: unknown employee or manager, self, loop (#202).
 // - lobbyOf(...): the dashboard counts and short lists.
@@ -113,14 +115,57 @@ export function shapeProblems(name, json) {
   return out;
 }
 
-// ---------- floors from the org chart ----------
+// ---------- floors from the org chart (#202, #226) ----------
 const MAX_RANKS = 8;
 const RANK_NAMES = ['Executive', 'Leads', 'Teams'];
+export const rankName = (r) => RANK_NAMES[r] || `Rank ${r + 1}`;
+// The departments of the HQ, top first: each takes the Paperclip roles of its people (AGENT_ROLES of the pinned release,
+// @paperclipai/shared constants.js: ceo, cto, cmo, cfo, security, engineer, designer, pm, qa, devops, researcher, general). Paperclip has
+// no department field: the role is the only fact, and the label of the office (roleLabel, 'CEO', 'DevOps', ...) lowercases to the same key.
+export const DEPARTMENTS = [
+  { key: 'executive', name: 'Executive', roles: ['ceo'] },
+  { key: 'engineering', name: 'Engineering', roles: ['cto', 'engineer', 'qa', 'devops'] },
+  { key: 'security', name: 'Security', roles: ['security'] },
+  { key: 'product', name: 'Product', roles: ['pm', 'designer'] },
+  { key: 'research', name: 'Research', roles: ['researcher'] },
+  { key: 'marketing', name: 'Marketing', roles: ['cmo'] },
+  { key: 'finance', name: 'Finance', roles: ['cfo'] },
+  { key: 'general', name: 'General', roles: ['general'] },
+];
+const DEPT_OF_ROLE = new Map(DEPARTMENTS.flatMap((d) => d.roles.map((r) => [r, d.key])));
+const DEPT_ORDER = new Map(DEPARTMENTS.map((d, i) => [d.key, i]));
+const roleDept = (role) => DEPT_OF_ROLE.get(String(role || '').toLowerCase()) || 'general';
 /**
- * The floors of the HQ building, bottom to top: Records, Lobby, then one floor per rank of the org chart, the lowest rank first, so the
- * top role is on the top floor. Rank is the length of the reporting line to a root (an employee with no manager, a manager that is not in
- * the list, or a loop). Depth stops at MAX_RANKS; deeper employees share the last rank. Never loops, never drops an employee.
- * agents: [{ id, reportsTo, ... }]. Each floor: { key, name, rank, employees }.
+ * The department of each employee: the one of its role. An employee with the general role (or a role the office does not know) works in
+ * the department of the first manager above it that has its own department (not general, not executive), else in General. Loop-safe.
+ * agents: [{ id, reportsTo, role }]. Returns Map id -> department key.
+ */
+export function departmentsOf(agents) {
+  const by = new Map(agents.map((a) => [a.id, a]));
+  const out = new Map();
+  for (const a of agents) {
+    let d = roleDept(a.role);
+    if (d === 'general') {
+      const seen = new Set([a.id]);
+      for (let cur = by.get(a.reportsTo); cur && !seen.has(cur.id); cur = by.get(cur.reportsTo)) {
+        seen.add(cur.id);
+        const m = roleDept(cur.role);
+        if (m !== 'general' && m !== 'executive') { d = m; break; }
+      }
+    }
+    out.set(a.id, d);
+  }
+  return out;
+}
+/**
+ * The floors of the HQ building, bottom to top: Records, Lobby, then one floor per department of the org chart (#226). The floors go up by
+ * rank: a department whose highest employee ranks higher stands higher, so the top role is on the top floor; a tie keeps the order of
+ * DEPARTMENTS (the first one higher). In a floor, one room per rank, the highest first, and the employees in that order. Rank is the
+ * length of the reporting line to a root (an employee with no manager, a manager that is not in the list, or a loop). Depth stops at
+ * MAX_RANKS; deeper employees share the last rank. Never loops, never drops an employee.
+ * agents: [{ id, reportsTo, role, ... }]. Each floor: { key: 'dept-<department>', name, dept, rank (its highest), wing (the name of that
+ * rank: the elevator groups floors by it), employees (with rank), rooms: [{ key: 'rank-<n>', name, rank, employees }] }. Records and the
+ * Lobby have dept and wing '' and rank null.
  */
 export function floorsOf(agents) {
   const by = new Map(agents.map((a) => [a.id, a]));
@@ -130,11 +175,25 @@ export function floorsOf(agents) {
     while (cur.reportsTo && by.has(cur.reportsTo) && !seen.has(cur.reportsTo) && n < MAX_RANKS - 1) { cur = by.get(cur.reportsTo); seen.add(cur.id); n++; }
     return n;
   };
-  const ranks = new Map();
-  for (const a of agents) { const r = rankOf(a); if (!ranks.has(r)) ranks.set(r, []); ranks.get(r).push(a); }
-  const used = [...ranks.keys()].sort((x, y) => y - x);
-  const floors = [{ key: 'records', name: 'Records', rank: null, employees: [] }, { key: 'lobby', name: 'Lobby', rank: null, employees: [] }];
-  for (const r of used) floors.push({ key: `rank-${r}`, name: RANK_NAMES[r] || `Rank ${r + 1}`, rank: r, employees: ranks.get(r) });
+  const dept = departmentsOf(agents), groups = new Map();
+  for (const a of agents) {
+    const d = dept.get(a.id), r = rankOf(a);
+    if (!groups.has(d)) groups.set(d, []);
+    groups.get(d).push({ a, r });
+  }
+  const top = (d) => Math.min(...groups.get(d).map((x) => x.r));
+  const used = [...groups.keys()].sort((x, y) => top(y) - top(x) || DEPT_ORDER.get(y) - DEPT_ORDER.get(x));
+  const floors = [{ key: 'records', name: 'Records', dept: '', rank: null, wing: '', employees: [], rooms: [] }, { key: 'lobby', name: 'Lobby', dept: '', rank: null, wing: '', employees: [], rooms: [] }];
+  for (const d of used) {
+    const list = groups.get(d).slice().sort((x, y) => x.r - y.r);   // a stable sort: same rank keeps the list order
+    const rooms = [];
+    for (const { a, r } of list) {
+      let room = rooms.find((x) => x.rank === r);
+      if (!room) rooms.push(room = { key: `rank-${r}`, name: rankName(r), rank: r, employees: [] });
+      room.employees.push({ ...a, rank: r });
+    }
+    floors.push({ key: `dept-${d}`, name: DEPARTMENTS[DEPT_ORDER.get(d)].name, dept: d, rank: top(d), wing: rankName(top(d)), employees: rooms.flatMap((x) => x.employees), rooms });
+  }
   return floors;
 }
 
