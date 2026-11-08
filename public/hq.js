@@ -310,6 +310,8 @@
       })) : null,
       h('h3', { className: 'ext-h' + (p.mark('floor', 'rank-0') ? ' is-found' : ''), id: 'hq-floor-goals' }, 'Executive floor: goals'),
       h(Goals, { q: q, toast: p.toast, mark: p.mark }),
+      h('h3', { className: 'ext-h' }, 'Mailroom: tasks'),
+      h(Mailroom, { q: q, toast: p.toast, mark: p.mark }),
       h('h3', { className: 'ext-h' }, 'Org chart'),
       h(OrgChart, { q: q, toast: p.toast, mark: p.mark }),
       h('h3', { className: 'ext-h' }, 'Activity'),
@@ -389,6 +391,75 @@
               r.description && !shown ? h('div', { className: 'past-sub' }, r.description) : null,
               shown ? fields(r) : null),
             v.write && !shown ? h('div', { className: 'past-actions' }, h(A.Button, { variant: 'quiet', icon: 'edit', onClick: function () { show(r.id, r); } }, 'Edit')) : null);
+        })));
+  }
+
+  // The mailroom (#224): the open tasks of the company. Make a task, assign it to an employee, move it to another status and comment on it.
+  // Words, options and request bodies are OfficeVocab.hq.tasks. Every change is one call of hqWrite (the HQ write grid, #198): Allow sends,
+  // Confirm shows the exact change here and waits for the painted Confirm, Deny turns the forms off and says why. One change at a time.
+  function Mailroom(p) {
+    var v = window.OfficeVocab.hq.tasks(p.q), mark = p.mark;
+    var os = useState(!!(mark && mark('mailroom', 'new'))), open = os[0], setOpen = os[1];   // the new task form shows
+    var fs = useState({ title: '', description: '', assignee: '' }), form = fs[0], setForm = fs[1];
+    var ts = useState(''), sel = ts[0], setSel = ts[1];                     // the task whose comment box shows
+    var cs = useState(''), text = cs[0], setText = cs[1];
+    var as = useState(null), ask = as[0], setAsk = as[1];                   // { body, text }: the change that waits for its Confirm
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var er = useState(''), err = er[0], setErr = er[1];
+    var lock = React.useRef(false);
+    function send(body, confirmed) {
+      if (!body || lock.current) return;
+      lock.current = true; setBusy(true); setErr('');
+      client.hqWrite(Object.assign({}, body, confirmed ? { confirmed: true } : {})).then(function () {
+        lock.current = false; setBusy(false); setAsk(null);
+        if (body.kind === 'comment') { setText(''); setSel(''); } else if (body.action === 'create') { setForm({ title: '', description: '', assignee: '' }); setOpen(false); }
+        p.toast({ tone: 'success', title: window.OfficeVocab.hq.tasks(p.q).done(body) });
+      }, function (x) {
+        lock.current = false; setBusy(false);
+        var q = window.OfficeAsk.asked(x, 'write', confirmed);
+        if (q) { setAsk({ body: body, text: q.text }); return; }
+        setAsk(null); setErr(x.message || 'The office could not write to Paperclip.');
+        p.toast({ tone: 'error', title: 'Task not changed', text: x.message });
+      });
+    }
+    var setF = function (k) { return function (val) { var o = Object.assign({}, form); o[k] = val; setForm(o); setAsk(null); }; };
+    var confirmBar = function () { return ask ? h(ConfirmBar, { key: ask.text, text: ask.text, busy: busy, onConfirm: function () { send(ask.body, true); }, onCancel: function () { if (!lock.current) setAsk(null); } }) : null; };
+    var newBody = v.create(form);
+    var creating = open ? h('div', { className: 'form wide goal-form' },
+      h(A.TextInput, { id: 'task-new-title', label: 'Title', value: form.title, onChange: setF('title') }),
+      h(O.Area, { id: 'task-new-desc', label: 'Description', rows: 3, value: form.description, onChange: setF('description') }),
+      h(A.Select, { id: 'task-new-assignee', label: 'Assign to', options: v.assignOptions, value: form.assignee, onChange: setF('assignee') }),
+      ask && ask.body.action === 'create' ? confirmBar()
+        : h('div', { className: 'past-actions' },
+          h(A.Button, { variant: 'primary', icon: 'approve', loading: busy, disabled: busy || !newBody, onClick: function () { send(newBody, false); } }, 'Create task'),
+          h(A.Button, { variant: 'quiet', onClick: function () { setOpen(false); setAsk(null); } }, 'Close'))) : null;
+    return h('div', { className: 'goal-tree' + (mark && mark('mailroom', 'new') ? ' is-found' : ''), id: 'hq-mailroom-new' },
+      h('p', { className: 'note', role: 'status' }, v.note),
+      v.write && !v.unknown && !open ? h('div', { className: 'past-actions' }, h(A.Button, { variant: 'quiet', icon: 'plus', onClick: function () { setOpen(true); } }, 'New task')) : null,
+      v.write && !v.unknown ? creating : null,
+      err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
+      v.unknown ? h('p', { className: 'note' }, 'Unknown: Paperclip did not answer for the tasks.')
+        : !v.rows.length ? h('p', { className: 'note' }, 'No open tasks.')
+        : h('ul', { className: 'past', 'aria-label': 'Open tasks' }, v.rows.map(function (r) {
+          var commenting = sel === r.id, cBody = v.comment(r.id, text);
+          var mine = ask && ask.body.issue === r.id;
+          return h('li', { key: r.id, id: 'hq-task-' + r.id, className: 'past-row' + (mark && mark('task', r.id) ? ' is-found' : '') },
+            h('div', { className: 'past-main' },
+              h('div', { className: 'past-title' }, h('b', null, r.title), h(Tag, null, r.word)),
+              h('div', { className: 'past-meta' }, r.line),
+              h(PaperclipLink, { href: r.link }),
+              v.write ? h('div', { className: 'row' },
+                h(A.Select, { id: 'task-st-' + r.id, label: 'Status', options: v.statusOptions, value: r.status, disabled: busy || !!ask, onChange: function (val) { if (val !== r.status) send(v.move(r.id, val), false); } }),
+                h(A.Select, { id: 'task-as-' + r.id, label: 'Assign to', options: v.assignOptions, value: r.assigneeId, disabled: busy || !!ask, onChange: function (val) { if (val && val !== r.assigneeId) send(v.assign(r.id, val), false); } })) : null,
+              mine && ask.body.kind === 'task' ? confirmBar() : null,
+              !v.commentWrite ? h('p', { className: 'note' }, v.commentDenied)
+                : commenting ? h('div', { className: 'form wide' },
+                  h(O.Area, { id: 'task-cm-' + r.id, label: 'Comment', rows: 3, value: text, onChange: function (val) { setText(val); setAsk(null); } }),
+                  mine && ask.body.kind === 'comment' ? confirmBar()
+                    : h('div', { className: 'past-actions' },
+                      h(A.Button, { variant: 'primary', icon: 'approve', loading: busy, disabled: busy || !cBody, onClick: function () { send(cBody, false); } }, 'Add comment'),
+                      h(A.Button, { variant: 'quiet', onClick: function () { setSel(''); setText(''); setAsk(null); } }, 'Close')))
+                  : h('div', { className: 'past-actions' }, h(A.Button, { variant: 'quiet', icon: 'edit', onClick: function () { setSel(r.id); setText(''); setAsk(null); } }, 'Comment'))));
         })));
   }
 
@@ -1080,5 +1151,5 @@
         })) : h('p', { className: 'note' }, 'No agent has a history yet.')));
   }
 
-  O.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel, AdapterInstall: AdapterInstall, ApprovalDecide: ApprovalDecide, PaperclipLink: PaperclipLink, WriteGrid: WriteGrid };
+  O.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel, AdapterInstall: AdapterInstall, ApprovalDecide: ApprovalDecide, PaperclipLink: PaperclipLink, WriteGrid: WriteGrid, Mailroom: Mailroom };
 })();

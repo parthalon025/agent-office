@@ -309,6 +309,23 @@ export function inboxOf(i) {
   return out.sort((a, b) => a.at - b.at).slice(0, INBOX_CAP);
 }
 
+// ---------- the mailroom list (#224) ----------
+/**
+ * The open tasks of the company for the mailroom: { id, identifier, title, status, assigneeId, assignee, link }, newest first, at most TASKS_CAP.
+ * null: the issues were not read (unknown, never an empty list). Names and statuses only: no description, no comment, no payload.
+ * in: { link, agents: [agent views], issues: [Paperclip issues]|null }.
+ */
+export const TASKS_CAP = 50;
+export function mailroomOf(i) {
+  if (!i.issues) return null;
+  const link = i.link || (() => null);
+  const nameOf = (id) => (i.agents.find((a) => a.id === id) || {}).name || '';
+  const when = (x) => Date.parse(x.updatedAt || x.createdAt || '') || 0;
+  return i.issues.filter((x) => x && typeof x.id === 'string' && ID_RE.test(x.id) && x.status !== 'done' && x.status !== 'cancelled')
+    .sort((a, b) => when(b) - when(a)).slice(0, TASKS_CAP)
+    .map((x) => ({ id: x.id, identifier: clip(x.identifier || '', 30), title: clip(x.title || 'Untitled', 200), status: String(x.status || ''), assigneeId: typeof x.assigneeAgentId === 'string' ? x.assigneeAgentId : '', assignee: nameOf(x.assigneeAgentId), link: link('issue', x.identifier || x.id) }));
+}
+
 // ---------- self-approval (#203, ADR 0010) ----------
 // An employee may approve its own work only for the approval kinds the user allows here. Paperclip's approval types (APPROVAL_TYPES of the
 // pinned release): hire_agent and budget_override_required are the hire and the budget, so they are never self-approvable; access and

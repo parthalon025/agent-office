@@ -233,3 +233,19 @@ test('org chart (#202): a loop, a self report, an unknown employee or manager is
     assert.equal(pc.requests.filter((r) => r.method === 'PATCH').length, 0);
   } finally { hq.disconnect(); await pc.close(); }
 });
+
+test('read model: the view lists the open tasks for the mailroom with the assignee and a link, and no description (#224)', async () => {
+  const pc = await startFakePaperclip(DEMO());
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS });
+  try {
+    await hq.connect({ url: pc.url });
+    await until(() => hq.state() === 'on', 'the events socket');
+    const t = hq.view().tasks;
+    assert.equal(t.length, 2, 'the two open tasks of the demo company');
+    for (const x of t) {
+      assert.deepEqual(Object.keys(x).sort(), ['assignee', 'assigneeId', 'id', 'identifier', 'link', 'status', 'title']);
+      assert.match(x.link, /^http:\/\/127\.0\.0\.1:\d+\/ACM\/issues\//);
+    }
+    assert.ok(t.some((x) => x.assignee), 'an assigned task names its employee');
+  } finally { hq.disconnect(); await pc.close(); }
+});
