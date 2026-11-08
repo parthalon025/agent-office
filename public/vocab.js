@@ -450,7 +450,26 @@
   }
   function approvalLabel(action) { return APPROVAL_ACT[action] || ''; }
   function approvalDone(action) { return APPROVAL_DONE[action] || 'Approval decided'; }
-  var hq = { kindSupervision: hqKindSupervision, hire: hqHire, adapter: hqAdapter, goals: hqGoals, routineStates: routineStates, routineFacts: routineFacts, routineForm: routineForm, routineCalls: routineCalls, routineDone: routineDone, approvalBody: approvalBody, approvalLabel: approvalLabel, approvalDone: approvalDone, linkLabel: 'Open in Paperclip', approvalDenied: 'Read only. The HQ write grid denies approvals.', approvalBlocked: 'This approval cannot be decided here.', searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg };
+  // The write grid wall (#223): each row of the write grid as the words of the wall. Order of strictness: Deny, Confirm, Allow. A change to a
+  // looser value asks first (the painted Confirm); a stricter one applies at once. Use default is a change back to the row's default.
+  var GRID_RANK = { deny: 0, confirm: 1, allow: 2 };
+  var GRID_WORD = { confirm: 'Confirm', allow: 'Allow', deny: 'Deny' };
+  var GRID_MEANS = { confirm: 'Asks you first', allow: 'Sends at once', deny: 'Never sends' };
+  function gridLooser(from, to) { return GRID_RANK[to] > GRID_RANK[from]; }
+  function gridCell(row) {
+    var opts = (row.options || []).map(function (o) { return { value: o, word: GRID_WORD[o] || o, on: o === row.value }; });
+    return { kind: row.kind, label: row.label, value: row.value, word: GRID_WORD[row.value] || row.value, means: GRID_MEANS[row.value] || '',
+      source: row.set ? 'Set by you' : 'Default', options: opts, canReset: !!row.set, def: row.def, defWord: GRID_WORD[row.def] || row.def,
+      noAllow: (row.options || []).indexOf('allow') < 0 };
+  }
+  // The words of one change: the Confirm text of a looser change, the toast of a done one. to null is Use default.
+  function gridChange(row, to) {
+    var target = to === null ? row.def : to;
+    return { to: to, ask: gridLooser(row.value, target), text: 'set ' + row.label + ' to ' + GRID_WORD[target] + ' (' + GRID_MEANS[target].toLowerCase() + ')', done: row.label + ': ' + GRID_WORD[target] };
+  }
+  var hqGrid = { title: 'Write rules', note: 'Each kind of change the office makes in Paperclip has a rule. Confirm asks you first. Allow sends at once. Deny never sends. Secrets never take Allow.',
+    cell: gridCell, change: gridChange, looser: gridLooser, search: { id: 'page-hq-grid', label: 'Paperclip write rules', keywords: 'paperclip hq write grid rules confirm allow deny tasks comments approvals secrets permissions' } };
+  var hq = { grid: hqGrid, kindSupervision: hqKindSupervision, hire: hqHire, adapter: hqAdapter, goals: hqGoals, routineStates: routineStates, routineFacts: routineFacts, routineForm: routineForm, routineCalls: routineCalls, routineDone: routineDone, approvalBody: approvalBody, approvalLabel: approvalLabel, approvalDone: approvalDone, linkLabel: 'Open in Paperclip', approvalDenied: 'Read only. The HQ write grid denies approvals.', approvalBlocked: 'This approval cannot be decided here.', searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg };
 
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
   // priced: sessions with a cost figure. unknown: sessions whose agent reports no cost (costUnknown), shown as "unknown".

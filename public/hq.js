@@ -1,5 +1,5 @@
 /* Agent Office for Claude Code x0.2: the hq feature (#184, the page features of #168).
-   The Manager board, the Paperclip HQ and earned trust (#157, #76, #153). One Module: its Interface is window.OfficePage.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel, AdapterInstall: AdapterInstall } (the HR desk, #201; company memory, #205).
+   The Manager board, the Paperclip HQ and earned trust (#157, #76, #153). One Module: its Interface is window.OfficePage.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel, AdapterInstall: AdapterInstall, ApprovalDecide, PaperclipLink, WriteGrid } (the HR desk, #201; company memory, #205).
    Plain functions over the page core (window.OfficePage); office.js calls the Interface and holds none of the parts.
    The HQ dialog also holds the Lobby (#197): Lobby shows the dashboard cards (from OfficeVocab.hq.cards), the approvals
    and goals that wait, the org chart as floors top first, and the activity. A waiting approval is decided here and in
@@ -647,6 +647,42 @@
           }))));
   }
 
+  // The write grid wall (#223): every write kind with its value and where the value comes from. A looser change (Deny to Confirm, Confirm to Allow)
+  // shows the painted Confirm first and the route refuses it without; a stricter change applies at once. Secrets offer no Allow. Use default
+  // clears a cell the user set. The words are OfficeVocab.hq.grid. It reads the office only, so it shows while Paperclip is not connected too.
+  function WriteGrid(p) {
+    var G = window.OfficeVocab.hq.grid;
+    var st = useState({ rows: undefined, err: '' }), v = st[0], setV = st[1];
+    var ps = useState(null), pend = ps[0], setPend = ps[1], bz = useState(false), busy = bz[0], setBusy = bz[1];
+    function load() { client.get('hqGrid').then(function (j) { setV({ rows: j.grid || null, err: '' }); }, function (x) { setV({ rows: null, err: x.message }); }); }
+    useEffect(function () { load(); }, []);
+    function send(row, to, confirmed) {
+      var ch = G.change(row, to);
+      setBusy(true);
+      client.send('hqGridSet', { kind: row.kind, value: to, confirmed: confirmed === true }).then(function (j) { setBusy(false); setPend(null); setV({ rows: j.grid, err: '' }); p.toast({ tone: 'success', title: ch.done }); },
+        function (x) { setBusy(false); setPend(null); p.toast({ tone: 'error', title: 'Not changed', text: x.message }); });
+    }
+    function pick(row, to) { var ch = G.change(row, to); if (ch.ask) setPend({ kind: row.kind, to: to, text: ch.text }); else { setPend(null); send(row, to, false); } }
+    var rows = v.rows;
+    return h('div', { className: 'hq-floor' + (p.mark ? ' is-found' : ''), id: 'hq-grid-rules' },
+      h('h3', { className: 'ext-h' }, G.title),
+      h('p', { className: 'note' }, G.note),
+      v.err ? h('p', { className: 'ao-err', role: 'alert' }, 'The office could not read the rules. ' + v.err)
+        : rows === undefined ? h('p', { className: 'note', role: 'status' }, 'Reading the rules.')
+        : !rows ? h('p', { className: 'note' }, 'The office could not read the rules.')
+        : h('ul', { className: 'past', 'aria-label': G.title }, rows.map(function (row) {
+          var c = G.cell(row);
+          return h('li', { key: row.kind, className: 'past-row' },
+            h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h('b', null, c.label), h(Tag, null, c.word)), h('div', { className: 'past-meta' }, c.means + '. ' + c.source + '.')),
+            h('div', { className: 'past-actions' },
+              c.options.map(function (o) {
+                return h(A.Button, { key: o.value, variant: o.on ? 'primary' : 'quiet', disabled: busy || o.on, 'aria-pressed': o.on, 'aria-label': c.label + ': ' + o.word, onClick: function () { pick(row, o.value); } }, o.word);
+              }),
+              c.canReset ? h(A.Button, { variant: 'quiet', disabled: busy, 'aria-label': c.label + ': use default (' + c.defWord + ')', onClick: function () { pick(row, null); } }, 'Use default') : null),
+            pend && pend.kind === row.kind ? h(ConfirmBar, { key: 'wg' + row.kind, busy: busy, text: pend.text, onConfirm: function () { send(row, pend.to, true); }, onCancel: function () { setPend(null); } }) : null);
+        })));
+  }
+
   // The one Confirm of an ask-first change in the HQ (#221): the exact words of the change, a Confirm and a Cancel. It scrolls its
   // buttons into view when it appears, because it sits under a long form in a scrolling dialog (a phone shows one screen of it). Every
   // inline Confirm of this file uses it; the caller keeps the pending and busy state. Props: text (the words after "Confirm: ") or
@@ -809,7 +845,8 @@
     if (!q || !q.company) return h(A.Dialog, { open: true, title: 'Paperclip HQ', onClose: p.onClose, actions: close },
       h('div', { className: 'form wide' },
         h(A.EmptyState, { icon: 'hq', compact: true, title: 'Paperclip is not connected', text: q ? H.state(q) : 'Install and start Paperclip below, or connect to yours. Then connect it in Attach sessions.' }),
-        runtime));
+        runtime,
+        h(WriteGrid, { toast: p.toast, mark: mark('grid', 'rules') })));
     return h(A.Dialog, { open: true, title: q.company.name + ': Paperclip HQ', onClose: p.onClose, actions: close },
       h('div', { className: 'form wide' },
         h('p', { className: 'note', role: 'status' }, H.state(q)),
@@ -824,6 +861,7 @@
         h(MemoryPanel, { toast: p.toast }),
         h(Catalog, null),
         h(Access, { company: q.company.name, toast: p.toast }),
+        h(WriteGrid, { toast: p.toast, mark: mark('grid', 'rules') }),
         h(SelfApproval, { toast: p.toast }),
         h(CompanyBudget, { toast: p.toast }),
         h(Portability, { company: q.company.name, toast: p.toast }),
@@ -1042,5 +1080,5 @@
         })) : h('p', { className: 'note' }, 'No agent has a history yet.')));
   }
 
-  O.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel, AdapterInstall: AdapterInstall, ApprovalDecide: ApprovalDecide, PaperclipLink: PaperclipLink };
+  O.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel, AdapterInstall: AdapterInstall, ApprovalDecide: ApprovalDecide, PaperclipLink: PaperclipLink, WriteGrid: WriteGrid };
 })();

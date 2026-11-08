@@ -122,6 +122,7 @@ Page (`public/`):
 - `board.js`, `terminal.js`, `security.js`, `lobby.js`, `desk.js`, `persona.js`, `city.js`: room boards, desk terminals, the Security room walls, the lobby, desk actions, bot cues, the city.
 - `page-core.js`, `dialogs.js`, `panels.js`: shared page helpers (`OfficePage`); session dialogs; room panels and pinned-screen parts.
 - `skills.js`, `schedules.js`, `extensions.js`, `hq.js`, `characters.js`, `reception.js`, `changes.js`, `merge.js`, `screens.js`, `needs.js`: page features, one Module each on `OfficePage`.
+- `hq.js` `WriteGrid` (#223): the HQ write grid wall (words `OfficeVocab.hq.grid`), in the HQ dialog also while Paperclip is not connected; Ctrl+K "Paperclip write rules" opens the HQ with `focus: { kind: 'grid', id: 'rules' }`. It reads `hqGrid`, sends `hqGridSet`, and a looser cell goes behind `ConfirmBar`. Tested in `test/hq-grid-wall.test.mjs`.
 - `office.js`, `chat-extras.js`: the React app (city, Ctrl+K, scene mount, dialog wiring; loads last); chat grips, the `/` list, the theme mirror.
 - `index.html` (the load order), `office.css`, `vendor/` (React and fonts, byte for byte; `vendor/README.md`).
 
