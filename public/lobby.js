@@ -16,6 +16,8 @@
      the DS body and caption sizes on screen at every zoom (plateBox; #92 review: a plate on the desk was 2 px text at the floor's zoom).
    The plate is a sprite drawn at those sizes and scaled each frame to that many CSS pixels. A plate whose screen box overlaps
    one shown before it waits until the zoom parts them (declutter).
+   The HQ building (#226) uses the same Lobby with three options: o.memo() (the memo's title and lines, OfficeVocab.hq.memo), o.pipeline()
+   (the board's title and rows: the HQ task board, OfficeVocab.hq.taskBoard) and o.verbs (the hints: the open desk is the HR desk).
    The lobby tour flies to its monitor stop at an agent's monitor (terminal.js look(), passed as o.monitor), else at an open
    desk's DS screen (K.screens).
    Pure part (window.OfficeLobby.pure; tested in test/lobby.test.mjs): tourSteps, tourDue, plateLines, plateBox, declutter,
@@ -149,6 +151,7 @@
       rows.forEach(function (r) {
         if (y > h - lh) return;
         if (r.wing && r.wing !== wing) { wing = r.wing; c.globalAlpha = F0.wingAlpha; c.font = Kit.font(K, Math.round(lh * 0.62), 600); c.fillText(r.wing.toUpperCase(), 32, y); c.globalAlpha = 1; y += Math.round(lh * 0.8); }
+        else if (!r.wing && wing) { wing = null; y += Math.round(lh * 0.4); }   // a floor of no wing (the Lobby) is not under the wing above it: a gap, as the elevator panel has
         if (r.state) { c.fillStyle = dotOf(tok, r.state); c.beginPath(); c.arc(44, y + lh * 0.42, lh * 0.22, 0, 7); c.fill(); }
         c.fillStyle = ink; c.font = Kit.font(K, Math.round(lh * 0.75), 600); c.fillText(Kit.clip(c, r.id + '  ' + r.name, w * 0.42), 70, y);
         c.font = Kit.font(K, Math.round(lh * 0.66), 400); c.fillText(Kit.clip(c, r.line, w * 0.5), w * 0.47, y + 2);
@@ -164,7 +167,7 @@
       c.fillStyle = tok[F0.face]; c.fillRect(0, 0, w, h);
       c.strokeStyle = ink; c.lineWidth = 14; c.strokeRect(7, 7, w - 14, h - 14);
       c.fillStyle = ink; c.textBaseline = 'top';
-      c.font = Kit.font(K, 44, 600); c.fillText('Pipeline', 32, 26);
+      c.font = Kit.font(K, 44, 600); c.fillText(p.title || 'Pipeline', 32, 26);
       var top = 92, foot = p.foot ? 44 : 0, lh = Math.max(24, Math.floor((h - top - foot - 24) / p.rows.length)), max = Math.max(1, p.rows.reduce(function (m, r) { return Math.max(m, r.count); }, 1));
       p.rows.forEach(function (r, i) {
         var y = top + i * lh, none = r.text === 'No data';
@@ -254,8 +257,8 @@
       if (K.tok !== lastTok) { lastTok = K.tok; paintedSig = {}; }
       scan();
       boards.forEach(function (b) {
-        if (b.kind === 'memo') { var m = memoLines(o.layout ? o.layout() : null, o.since ? o.since() : []); repaint(b, JSON.stringify(m), function (c, w, h) { paintMemo(c, w, h, m); }); }
-        if (b.kind === 'pipeline') { var pl0 = pipelineLines(o.changes ? o.changes() : null); repaint(b, JSON.stringify(pl0), function (c, w, h) { paintPipeline(c, w, h, pl0); }); }
+        if (b.kind === 'memo') { var m = o.memo ? o.memo() : memoLines(o.layout ? o.layout() : null, o.since ? o.since() : []); repaint(b, JSON.stringify(m), function (c, w, h) { paintMemo(c, w, h, m); }); }
+        if (b.kind === 'pipeline') { var pl0 = o.pipeline ? o.pipeline() : pipelineLines(o.changes ? o.changes() : null); repaint(b, JSON.stringify(pl0), function (c, w, h) { paintPipeline(c, w, h, pl0); }); }
         if (b.kind === 'directory') {
           var rows = directoryRows(o.floors ? o.floors() : [], o.agents ? o.agents() : {}, o.states ? o.states() : {});
           repaint(b, JSON.stringify(rows), function (c, w, h) { paintDirectory(c, w, h, rows); });
@@ -301,7 +304,7 @@
       var up = new T.Vector3(0, 1, 0).applyQuaternion(st.cam.quaternion);
       hint.position.copy(hintPoint).addScaledVector(up, (hpx / 2 + cssNum('space-2', 8)) * wpp);
     }
-    var VERB = { desk: 'Start an agent here', memo: 'Open the Reception', directory: 'Search the office', pipeline: 'Open the pipeline', monitor: 'Start an agent here' };
+    var VERB = Object.assign({ desk: 'Start an agent here', memo: 'Open the Reception', directory: 'Search the office', pipeline: 'Open the pipeline', monitor: 'Start an agent here' }, o.verbs || {});
     function keyOf(it) { return it.kind + ':' + it.roomId + (it.kind === 'desk' || it.kind === 'monitor' ? ':' + it.i : ''); }
     function hintOf(it) { var f = host.focused(); return f && f.key === keyOf(it) ? VERB[it.kind] : it.kind === 'desk' ? 'Look at the open desk' : 'Look closer'; }
     var target = {

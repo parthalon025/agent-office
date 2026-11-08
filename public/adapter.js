@@ -110,6 +110,8 @@
   // The DS commands of one mounted building, as REST calls.
   function send(m, cmd) {
     var uids, uidsOf = m.uidsOf, sessionOf = store.sessionByUid;
+    // The HQ (#226): its bots are Paperclip employees, not sessions. Work goes to an employee as a task, through the HQ write grid.
+    if (m.hq) return Promise.resolve({ ok: false, reason: 'An employee takes work as a Paperclip task. Give it a task at the HQ.' });
     switch (cmd.type) {
       case 'session.stop': return post('close', { uid: cmd.session });
       case 'approve': case 'decline': return post('answer', { id: cmd.requestId, allow: cmd.type === 'approve' });

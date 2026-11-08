@@ -7,8 +7,8 @@
    shrinks away; sessions pop in and out. Reduced motion skips them.
    The camera: zoom to mouse, bounded pan, click or zoom in to enter a building. OfficeCity.cameraFeel(stage) also gives the
    office scene zoom to mouse. A building with hq: true (the Paperclip HQ, #76, from hqBuilding in office.js) gets a penthouse
-   and a mast (crown) and its own sign line (sub); its pips are Paperclip agents, and a click on it opens the HQ dialog, not a
-   scene.
+   and a mast (crown) and its own sign line (sub); its pips are Paperclip agents, and a click on it enters the HQ building (#226:
+   office.js openHq, the scene of building.js's HQ mount).
    Labels in the city sit on layer 1, so the bloom pass skips them. The City label card is the bg color (the DS K.tok has no
    chip or line); its ink and muted read on bg in every theme.
    The minimum zoom is Show all (SHOW_ZOOM times s.D over the fit distance), set every frame. Do not set ctl.minZoom to a

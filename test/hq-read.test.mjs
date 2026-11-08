@@ -16,7 +16,9 @@ test('read model: the view carries floors from the org chart and the Lobby, and 
     await hq.connect({ url: pc.url });
     await until(() => hq.state() === 'on', 'the events socket');
     const v = hq.view();
-    assert.deepEqual(v.floors.map((f) => [f.key, f.employees.map((e) => e.name)]), [['records', []], ['lobby', []], ['rank-2', ['Linus']], ['rank-1', ['Ada']], ['rank-0', ['Grace']]], 'the CEO is on the top floor');
+    assert.deepEqual(v.floors.map((f) => [f.key, f.employees.map((e) => e.name)]), [['records', []], ['lobby', []], ['dept-engineering', ['Ada', 'Linus']], ['dept-executive', ['Grace']]], 'a floor per department; the CEO is on the top floor');
+    assert.deepEqual(v.floors[2].rooms.map((r) => [r.name, r.employees.map((e) => [e.name, e.rank])]), [['Leads', [['Ada', 1]]], ['Teams', [['Linus', 2]]]], 'a room per rank (#226)');
+    assert.deepEqual(v.cables, [{ from: 'a1000000-0000-4000-8000-000000000002', to: 'a1000000-0000-4000-8000-000000000001' }, { from: 'a1000000-0000-4000-8000-000000000003', to: 'a1000000-0000-4000-8000-000000000002' }], 'a cable per reporting line');
     assert.equal(v.floors.at(-1).name, 'Executive');
     assert.equal(v.floors.at(-1).employees[0].floor, 'Executive');
     const l = v.lobby;
@@ -178,14 +180,15 @@ test('org chart (#202): the view carries the reporting cables; a reporting line 
     await hq.connect({ url: pc.url });
     await until(() => hq.state() === 'on', 'the events socket');
     assert.deepEqual(hq.view().cables, [{ from: ada.id, to: grace.id }, { from: linus.id, to: ada.id }]);
-    assert.equal(hq.view().floors.at(-3).employees[0].reportsTo, ada.id, 'an employee carries its manager');
+    assert.equal(hq.view().floors.at(-2).employees[1].reportsTo, ada.id, 'an employee carries its manager');
     const before = pc.requests.filter((r) => r.method === 'PATCH').length;
     const r = await line(linus.id, grace.id);
     assert.equal(r.ok, true);
     const patches = pc.requests.filter((r2) => r2.method === 'PATCH').slice(before);
     assert.equal(patches.length, 1, 'one PATCH');
     assert.deepEqual(patches[0].body, { reportsTo: grace.id }, 'the body names the reporting line and nothing else');
-    assert.deepEqual(hq.view().floors.map((f) => [f.key, f.employees.map((e) => e.name).sort()]), [['records', []], ['lobby', []], ['rank-1', ['Ada', 'Linus']], ['rank-0', ['Grace']]], 'Linus moved up a floor');
+    assert.deepEqual(hq.view().floors.map((f) => [f.key, f.employees.map((e) => e.name).sort()]), [['records', []], ['lobby', []], ['dept-engineering', ['Ada', 'Linus']], ['dept-executive', ['Grace']]], 'Linus stays in Engineering');
+    assert.deepEqual(hq.view().floors[2].rooms.map((x) => [x.name, x.employees.map((e) => e.name)]), [['Leads', ['Ada', 'Linus']]], 'Linus moved up a rank: the Leads room');
     assert.deepEqual(hq.view().cables, [{ from: ada.id, to: grace.id }, { from: linus.id, to: grace.id }]);
     await line(ada.id, null);   // a root: no manager
     assert.equal(hq.view().cables.length, 1);
@@ -229,4 +232,40 @@ test('org chart (#202): a loop, a self report, an unknown employee or manager is
     }
     assert.equal(pc.requests.filter((r) => r.method === 'PATCH').length, 0);
   } finally { hq.disconnect(); await pc.close(); }
+});
+
+test('read model: the view lists the open tasks for the mailroom with the assignee and a link, and no description (#224)', async () => {
+  const pc = await startFakePaperclip(DEMO());
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS });
+  try {
+    await hq.connect({ url: pc.url });
+    await until(() => hq.state() === 'on', 'the events socket');
+    const t = hq.view().tasks;
+    assert.equal(t.length, 2, 'the two open tasks of the demo company');
+    for (const x of t) {
+      assert.deepEqual(Object.keys(x).sort(), ['assignee', 'assigneeId', 'id', 'identifier', 'link', 'status', 'title']);
+      assert.match(x.link, /^http:\/\/127\.0\.0\.1:\d+\/ACM\/issues\//);
+    }
+    assert.ok(t.some((x) => x.assignee), 'an assigned task names its employee');
+  } finally { hq.disconnect(); await pc.close(); }
+});
+
+test('costs (#227): the month cost is asked for the month; a company with no cost number is unknown, not $0.00', async () => {
+  const pc = await startFakePaperclip(DEMO());
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS });
+  try {
+    await hq.connect({ url: pc.url });
+    await until(() => hq.state() === 'on', 'the events socket');
+    await until(() => pc.requests.some((r) => /\/costs\/summary$/.test(r.path)), 'the cost read');
+    assert.ok(pc.requests.some((r) => /\/costs\/summary$/.test(r.path) && r.query === '?period=month'), 'the summary is the month summary of the release');
+    assert.deepEqual(hq.view().lobby.spend, { spent: 12.4, limit: 100, percent: 12 });
+  } finally { hq.disconnect(); await pc.close(); }
+  const seed = DEMO(), { spentMonthlyCents, budgetMonthlyCents, ...bare } = seed.companies[0];
+  const pc2 = await startFakePaperclip({ ...seed, companies: [bare], costs: null });
+  const hq2 = createHq({ ...fast, hooksFile: () => HOOKS });
+  try {
+    await hq2.connect({ url: pc2.url });
+    await until(() => hq2.state() === 'on', 'the events socket');
+    assert.equal(hq2.view().lobby.spend, null, 'no cost number: unknown');
+  } finally { hq2.disconnect(); await pc2.close(); }
 });

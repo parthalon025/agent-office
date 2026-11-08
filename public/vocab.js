@@ -69,6 +69,8 @@
                          office request), budget(b) ("$8.30 of $50.00 this month"), every(seconds) (a heartbeat), supervision(agent)
                          ("Supervised in office" or the label), state(snap.hq) (the connection as a line), desk(s) (#206: the rows of a Paperclip run's context, [] for another session),
                          kindSupervision(kind) ("Supervised" for a gated office agent kind, else its label: the hire's Confirm and the HR desk), hire (the HR desk words).
+                         The HQ building in the scene (#226): memo(snap.hq) (the reception memo), taskBoard(snap.hq) (the open tasks by
+                         state on the Reception's back wall) and lobbyVerbs (the hints of the Lobby's objects: the HR desk hires).
      layers           -> the four layers of detail (ADR 0006): glance (is all fine), look (what is it doing, how is it going), inspect (exactly
                          what happened), deep (proof and rules). order, opens(layer) (the next layer, '' at deep), surfaces (each surface's
                          layer and the layer it opens), surface(id), mood(state) ({ key, word } of a worst state: calm, busy, needs you, failed),
@@ -305,6 +307,15 @@
     if (st === 'missing') return { line: 'Office adapter: not installed', ok: false, install: true, why: why };
     return { line: 'Office adapter: unknown', ok: false, install: false, why: why || 'The office has not read the adapter list of Paperclip yet.' };
   }
+  // The Paperclip line of the Spend screen (#227): the company's cost this month and its budget. No connection: no line. A cost the office
+  // could not read is unknown, never $0.00.
+  function hqSpendLine(q) {
+    if (!q || !q.company) return '';
+    var sp = q.lobby && q.lobby.spend;
+    if (!sp) return 'Paperclip, this month: cost unknown.';
+    if (!(sp.limit > 0)) return 'Paperclip, this month: ' + money(sp.spent) + '. No budget set.';
+    return 'Paperclip, this month: ' + money(sp.spent) + ' of ' + money(sp.limit) + (sp.percent != null ? ' (' + sp.percent + '%)' : '') + '.';
+  }
   function hqPlural(n, one) { return n + ' ' + (n === 1 ? one : one + 's'); }
   function hqGlance(q) {
     var l = q && q.lobby;
@@ -315,6 +326,24 @@
     else if (l.approvals.pending) out.push(hqPlural(l.approvals.pending, 'approval') + (l.approvals.pending === 1 ? ' waits' : ' wait'));
     if (l.spend) out.push(hqBudget(l.spend));
     return out.join(' · ');
+  }
+  // The HQ building in the scene (#226): the reception memo of its Lobby (the company, the Lobby counts, what a click does) and the task
+  // board on the Reception's back wall (the open tasks by state). null in the data is unknown, said so.
+  function hqMemo(q) {
+    if (!q || !q.company) return { title: 'Paperclip HQ', lines: ['Paperclip is not connected.', 'Click the memo to open the HQ and connect it.'] };
+    // four lines at most, as the memo of an office building: the rest is in the HQ
+    var l = q.lobby, lines = [hqPlural((q.agents || []).length, 'employee') + (l ? ' · ' + (l.tasks ? hqPlural(l.tasks.open, 'open task') : 'tasks unknown') : '')];
+    if (l) {
+      lines.push(!l.approvals ? 'Approvals unknown' : l.approvals.pending ? hqPlural(l.approvals.pending, 'approval') + (l.approvals.pending === 1 ? ' waits for you' : ' wait for you') : 'No approval waits');
+      if (l.spend) lines.push(hqBudget(l.spend));
+    }
+    return { title: q.company.name, lines: lines.concat(['Click the memo for the HQ.']) };
+  }
+  var HQ_TASK_ROWS = [['backlog', 'Backlog'], ['todo', 'To do'], ['inProgress', 'In progress'], ['inReview', 'In review'], ['blocked', 'Blocked']];
+  function hqTaskBoard(q) {
+    var t = q && q.lobby && q.lobby.tasks;
+    return { title: 'Tasks', rows: HQ_TASK_ROWS.map(function (r) { var n = t ? +t[r[0]] || 0 : 0; return { id: r[0], name: r[1], count: n, text: t ? String(n) : 'No data' }; }),
+      foot: t ? hqPlural(t.open, 'open task') : 'The office could not read the tasks' };
   }
   function hqCards(l) {
     var U = 'Unknown', e = l.employees;
@@ -407,6 +436,37 @@
       parentOptions: function () { return [{ value: '', label: 'No parent goal' }].concat(rows.map(function (r) { return { value: r.id, label: r.title }; })); },
     };
   }
+  // The mailroom (#224): the open tasks of the company and the forms to make, assign, comment on and move a task. unknown: Paperclip did not
+  // answer for the tasks. write and commentWrite: the HQ write grid does not say Deny for the Tasks and Comments cells. Every change is one hqWrite.
+  var TASK_STATUS = [['backlog', 'Backlog'], ['todo', 'To do'], ['in_progress', 'In progress'], ['in_review', 'In review'], ['blocked', 'Blocked'], ['done', 'Done'], ['cancelled', 'Cancelled']];
+  function taskWord(v) { var x = TASK_STATUS.filter(function (y) { return y[0] === v; })[0]; return x ? x[1] : String(v || 'Unknown').replace(/_/g, ' '); }
+  function hqTasks(q) {
+    var write = !!(q && q.taskWrite), tasks = q && q.tasks, agents = (q && q.agents) || [];
+    return {
+      unknown: !tasks, write: write, commentWrite: !!(q && q.commentWrite),
+      rows: (tasks || []).map(function (t) {
+        return { id: t.id, title: (t.identifier ? t.identifier + ' ' : '') + t.title, status: t.status, word: taskWord(t.status), assigneeId: t.assigneeId || '', link: t.link || null,
+          line: t.assignee ? 'Assigned to ' + t.assignee : 'Not assigned' };
+      }),
+      note: write ? 'Tasks are Paperclip\'s. A change here goes to Paperclip after the write grid allows it or you confirm it.' : 'Read only. The HQ write grid denies task changes. Allow them in the write grid to edit.',
+      commentDenied: 'Read only. The HQ write grid denies comments.',
+      statusOptions: TASK_STATUS.map(function (x) { return { value: x[0], label: x[1] }; }),
+      assignOptions: [{ value: '', label: 'Not assigned' }].concat(agents.map(function (a) { return { value: a.id, label: a.name }; })),
+      // The hqWrite body of each action. null: nothing to send (an empty title or comment, an unknown status).
+      create: function (f) {
+        var title = String((f && f.title) || '').trim();
+        if (!title) return null;
+        var b = { kind: 'task', action: 'create', title: title }, d = String((f && f.description) || '').trim();
+        if (d) b.description = d;
+        if (f.assignee) b.assigneeAgentId = f.assignee;
+        return b;
+      },
+      assign: function (id, agent) { return agent ? { kind: 'task', action: 'assign', issue: id, agent: agent } : null; },
+      move: function (id, status) { return TASK_STATUS.some(function (x) { return x[0] === status; }) ? { kind: 'task', action: 'status', issue: id, status: status } : null; },
+      comment: function (id, text) { var t = String(text || '').trim(); return t ? { kind: 'comment', action: 'add', issue: id, text: t } : null; },
+      done: function (b) { return b.kind === 'comment' ? 'Comment added' : b.action === 'create' ? 'Task created' : b.action === 'assign' ? 'Task assigned' : 'Task moved'; },
+    };
+  }
   // Routines (#209). routineFacts: the line under a routine. routineForm: the edit form of a routine (null: a new one). routineCalls: the
   // hqWrite bodies a saved form needs, only for what changed (update for title, text, employee or state; schedule for the cron line).
   var routineStates = [{ value: 'active', label: 'Active' }, { value: 'paused', label: 'Paused' }, { value: 'archived', label: 'Archived' }];
@@ -450,7 +510,28 @@
   }
   function approvalLabel(action) { return APPROVAL_ACT[action] || ''; }
   function approvalDone(action) { return APPROVAL_DONE[action] || 'Approval decided'; }
-  var hq = { kindSupervision: hqKindSupervision, hire: hqHire, adapter: hqAdapter, goals: hqGoals, routineStates: routineStates, routineFacts: routineFacts, routineForm: routineForm, routineCalls: routineCalls, routineDone: routineDone, approvalBody: approvalBody, approvalLabel: approvalLabel, approvalDone: approvalDone, linkLabel: 'Open in Paperclip', approvalDenied: 'Read only. The HQ write grid denies approvals.', approvalBlocked: 'This approval cannot be decided here.', searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg };
+  // The write grid wall (#223): each row of the write grid as the words of the wall. Order of strictness: Deny, Confirm, Allow. A change to a
+  // looser value asks first (the painted Confirm); a stricter one applies at once. Use default is a change back to the row's default.
+  var GRID_RANK = { deny: 0, confirm: 1, allow: 2 };
+  var GRID_WORD = { confirm: 'Confirm', allow: 'Allow', deny: 'Deny' };
+  var GRID_MEANS = { confirm: 'Asks you first', allow: 'Sends at once', deny: 'Never sends' };
+  function gridLooser(from, to) { return GRID_RANK[to] > GRID_RANK[from]; }
+  function gridCell(row) {
+    var opts = (row.options || []).map(function (o) { return { value: o, word: GRID_WORD[o] || o, on: o === row.value }; });
+    return { kind: row.kind, label: row.label, value: row.value, word: GRID_WORD[row.value] || row.value, means: GRID_MEANS[row.value] || '',
+      source: row.set ? 'Set by you' : 'Default', options: opts, canReset: !!row.set, def: row.def, defWord: GRID_WORD[row.def] || row.def,
+      noAllow: (row.options || []).indexOf('allow') < 0 };
+  }
+  // The words of one change: the Confirm text of a looser change, the toast of a done one. to null is Use default.
+  function gridChange(row, to) {
+    var target = to === null ? row.def : to;
+    return { to: to, ask: gridLooser(row.value, target), text: 'set ' + row.label + ' to ' + GRID_WORD[target] + ' (' + GRID_MEANS[target].toLowerCase() + ')', done: row.label + ': ' + GRID_WORD[target] };
+  }
+  var hqGrid = { title: 'Write rules', note: 'Each kind of change the office makes in Paperclip has a rule. Confirm asks you first. Allow sends at once. Deny never sends. Secrets never take Allow.',
+    cell: gridCell, change: gridChange, looser: gridLooser, search: { id: 'page-hq-grid', label: 'Paperclip write rules', keywords: 'paperclip hq write grid rules confirm allow deny tasks comments approvals secrets permissions' } };
+  var hq = { grid: hqGrid, kindSupervision: hqKindSupervision, hire: hqHire, adapter: hqAdapter, goals: hqGoals, tasks: hqTasks, routineStates: routineStates, routineFacts: routineFacts, routineForm: routineForm, routineCalls: routineCalls, routineDone: routineDone, approvalBody: approvalBody, approvalLabel: approvalLabel, approvalDone: approvalDone, linkLabel: 'Open in Paperclip', approvalDenied: 'Read only. The HQ write grid denies approvals.', approvalBlocked: 'This approval cannot be decided here.', searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, spendLine: hqSpendLine, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg, memo: hqMemo, taskBoard: hqTaskBoard,
+    // the hints of the HQ Lobby's objects in the scene (#226): the HR desk hires, the memo and the task board open the HQ
+    lobbyVerbs: { desk: 'Hire an employee', monitor: 'Hire an employee', memo: 'Open the HQ', pipeline: 'Open the HQ tasks', directory: 'Search the HQ' } };
 
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
   // priced: sessions with a cost figure. unknown: sessions whose agent reports no cost (costUnknown), shown as "unknown".

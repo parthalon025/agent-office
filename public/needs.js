@@ -128,7 +128,10 @@
               h('span', null, [e.title, clip(e.line, 60)].filter(Boolean).join(' · ')),
               h('span', { className: 'look-facts' }, e.supervision));
           })) : h('p', { className: 'look-facts' }, 'No employees yet.'),
-          p.onHq ? h(A.Button, { variant: 'quiet', icon: 'hq', onClick: p.onHq }, 'Open Paperclip HQ') : null)) : null,
+          h('div', { className: 'inline-actions' },
+            p.onHq ? h(A.Button, { variant: 'quiet', icon: 'hq', onClick: p.onHq }, 'Open Paperclip HQ') : null,
+            // the HQ as a building (#226): its floors (the org chart), the employees at their desks and the reporting lines
+            p.onHqBuilding ? h(A.Button, { variant: 'quiet', icon: 'building', onClick: p.onHqBuilding }, 'Show the HQ building') : null))) : null,
       h('section', { className: 'phone-sec', 'aria-label': 'Buildings' },
         h('h2', { className: 'phone-h' }, 'Buildings'),
         !ph.buildings.length ? h(A.EmptyState, { icon: 'building', compact: true, title: 'No buildings yet', text: 'Open a session in a repository to see it here.' }) : null,

@@ -10,6 +10,7 @@ import { slimPayload } from '../src/payload.mjs';
 import { placeOfSession, placeOfWorktree, normPath, securityRoomIdOf, seatOf } from '../src/place.mjs';
 import { settleRooms, viewRooms } from '../src/rooms.mjs';
 import { newRecord, shownFloors, layoutView, edit as editLayout } from '../src/archetypes.mjs';
+import { floorsOf, cablesOf } from '../src/hq-model.mjs';
 import '../src/vocab.mjs';
 import '../public/wire.js';
 import '../public/building.js';
@@ -1957,4 +1958,71 @@ test('mail: a mail of a goal is one message.agent between the two bots, told onc
   // a mail between two names that have no bot here, or of another building, says nothing
   r.plans = plan([one, { from: 'Ghost', to: 'Bo', text: 'x', t: 11 }]); r.plans.plans[0].building = KEY_B; r.push();
   assert.equal(of(m.ev, 'message.agent').length, 2);
+});
+
+// The Paperclip HQ as a building you enter (#226): its floors are the org chart the server reads (hq-model.mjs floorsOf, the view of
+// paperclip.mjs), each employee a bot at a desk of its room, and the reporting lines (cablesOf) are cables between the bots.
+function hqView(agents) {
+  const floors = floorsOf(agents).map((f) => {
+    const emp = (e) => ({ id: e.id, name: e.name, role: e.role, reportsTo: e.reportsTo, floor: f.name, rank: e.rank });
+    return { key: f.key, name: f.name, dept: f.dept, rank: f.rank, wing: f.wing, employees: f.employees.map(emp), rooms: f.rooms.map((x) => ({ ...x, employees: x.employees.map(emp) })) };
+  });
+  return { state: 'on', url: 'http://127.0.0.1:3100', company: { id: 'c1', name: 'Acme' }, agents, floors, cables: cablesOf(agents), inbox: [], lobby: null };
+}
+const emp = (id, name, role, reportsTo, more = {}) => ({ id, name, role, reportsTo, title: '', status: 'idle', run: null, task: null, budget: { spent: 1, limit: 10 }, supervision: { state: 'supervised', label: 'Supervised' }, ...more });
+const ACME = () => [emp('g', 'Grace', 'CEO', null), emp('a', 'Ada', 'Engineer', 'g', { run: { id: 'r1', status: 'running' }, task: { id: 'i1', identifier: 'ACM-1', title: 'Add a route', status: 'in_progress' } }), emp('l', 'Linus', 'DevOps', 'a')];
+
+test('HQ (#226): entering the HQ shows its floors, a room per rank and each employee at a desk; the events fit the schema', () => {
+  const r = rig();
+  r.hq = hqView(ACME()); r.push();
+  const m = r.mount(B.HQ_KEY);
+  assert.equal(m.hq, true);
+  assert.equal(m.def.name, 'Acme');
+  assert.deepEqual(m.def.floors.map((f) => [f.id, f.fn, f.name, f.wingName]), [[1, 'records', 'Records', ''], [2, 'lobby', 'Lobby', ''], [3, 'dept-engineering', 'Engineering', 'Leads'], [4, 'dept-executive', 'Executive', 'Executive']]);
+  assert.deepEqual(m.def.floors.map((f) => f.rooms.map((x) => [x.type, x.name])), [[['team', 'Records']], [['lobby', 'Reception']], [['team', 'Leads'], ['team', 'Teams']], [['hq', 'Executive']]]);
+  assert.equal(m.def.floors[1].rooms[0].spare, 1, 'the Reception keeps one open desk: the HR desk');
+  const added = of(m.ev, 'bot.add');
+  assert.deepEqual(added.map((e) => [e.bot.name, e.roomId, e.bot.status, e.seeded]),
+    [['Grace', 'hq-dept-executive-rank-0', 'resting', true], ['Ada', 'hq-dept-engineering-rank-1', 'working', true], ['Linus', 'hq-dept-engineering-rank-2', 'resting', true]]);
+  const ada = added.find((e) => e.bot.name === 'Ada').bot;
+  assert.deepEqual([ada.role, ada.task, ada.platform, ada.owner, ada.cost], ['coder', 'ACM-1 Add a route', 'Paperclip Engineer, Supervised in office', 'Acme', '$1.00 of $10.00 this month']);
+  assert.equal(added.find((e) => e.bot.name === 'Grace').bot.role, 'planner');
+  assert.deepEqual(B.startFloor(m, r.store.latest(), null, null), { id: 2, key: 'lobby' }, 'the HQ opens on its Lobby');
+  assert.deepEqual(m.agentsByFloor(), { 3: ['Ada', 'Linus'], 4: ['Grace'] });
+  assert.equal(m.rollup().floors[3], 'working');
+  assert.deepEqual(m.deskTargets(), { papers: [], notes: [], empty: [] }, 'no request and no agent start: an employee takes work as a task');
+  assert.deepEqual([m.securityRoom(), m.session('Ada'), m.spareRoomOf('lobby'), m.employee('Linus').id, m.uidsOf({ bot: 'Ada' }).length], [null, null, 'reception', 'l', 0]);
+  assert.deepEqual(r.store.buildings().map((b) => b.key), [], 'the HQ is not a repository building');
+  assert.equal(r.store.preview(B.HQ_KEY).floors[3].rooms[0].bots[0].name, 'Grace');
+});
+
+test('HQ (#226): the cables follow the reporting lines, by bot name and floor', () => {
+  const r = rig();
+  r.hq = hqView(ACME()); r.push();
+  const m = r.mount(B.HQ_KEY);
+  assert.deepEqual(m.cables(), [{ from: 'Ada', to: 'Grace', fromFloor: 3, toFloor: 4, fromFloorName: 'Engineering', toFloorName: 'Executive' }, { from: 'Linus', to: 'Ada', fromFloor: 3, toFloor: 3, fromFloorName: 'Engineering', toFloorName: 'Engineering' }]);
+});
+
+test('HQ (#226): a run is a status event; a hire, a move or a new reporting line mounts the HQ again; no Paperclip, no seats', () => {
+  const r = rig();
+  r.hq = hqView(ACME()); r.push();
+  const m = r.mount(B.HQ_KEY), n0 = m.ev.length;
+  const next = ACME(); next[2].run = { id: 'r2', status: 'queued' }; r.hq = hqView(next); r.push();
+  assert.deepEqual(m.ev.slice(n0).map((e) => [e.type, e.bot, e.status, e.task, e.seeded]), [['status', 'Linus', 'working', 'Queued in Paperclip', undefined]], 'live news, not seeded');
+  assert.equal(m.stale(), false);
+  next[1].supervision = { state: 'unsupervised', label: 'Unsupervised' }; r.hq = hqView(next); r.push();
+  assert.deepEqual(m.ev.slice(n0 + 1).map((e) => e.type), ['bot.remove', 'bot.add'], 'a new card line seats the bot again');
+  assert.equal(of(m.ev, 'bot.add').at(-1).bot.platform, 'Paperclip Engineer, Unsupervised');
+  next[2].reportsTo = 'g'; r.hq = hqView(next); r.push();
+  assert.equal(m.stale(), true, 'Linus moved to the Leads room: the DS cannot move a bot to another room');
+  const again = r.mount(B.HQ_KEY);
+  assert.equal(again.stale(), false);
+  assert.deepEqual(again.def.floors[2].rooms.map((x) => x.name), ['Leads']);
+  r.hq = hqView([...next, emp('n', 'Nia', 'Designer', 'g')]); r.push();
+  assert.equal(again.stale(), true, 'a hire is a new desk');
+  r.hq = null; r.push();
+  const off = r.mount(B.HQ_KEY);
+  assert.deepEqual(off.def.floors.map((f) => f.fn), ['lobby']);
+  assert.deepEqual(off.def.floors[0].rooms.map((x) => [x.name, x.spare]), [['Reception', 0]], 'not connected: no HR desk');
+  assert.deepEqual([off.cables(), off.spareRoomOf('lobby')], [[], null]);
 });

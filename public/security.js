@@ -208,6 +208,14 @@
     if (!q.company) return V.hq.state(q) + '.';
     return V.hq.state(q) + '. Supervise in office sends the Claude Code runs of an agent through the office hooks.';
   }
+  // The write grid's Supervise in office cell says Deny (hq.superviseWrite false): no button, and the wall says why.
+  var DENIED_WHY = 'The Security room denies Supervise in office. Set its cell to Confirm in the write grid to allow it.';
+  function hqDenied(data) { return !!(data && data.hq && data.hq.superviseWrite === false); }
+  function canSupervise(data, a) { return !!(a.supervision && a.supervision.can) && !hqDenied(data); }
+  function whyOf(data, a) {
+    var w = a.supervision.why || 'Its runs hold every call Claude Code asks about in the office.';
+    return hqDenied(data) && a.supervision.can ? w + ' ' + DENIED_WHY : w;
+  }
   function hqTone(a) { var s = a.supervision && a.supervision.state; return s === 'supervised' ? 'allow' : s === 'partly' ? 'ask' : 'deny'; }
   function hqWord(a) { var s = a.supervision && a.supervision.state; return s === 'supervised' ? 'Supervised' : s === 'partly' ? 'Partly' : 'Unsupervised'; }
   function stateChip(p, x, y, w, h, a, s) {
@@ -222,7 +230,7 @@
     // the narrow view keeps the head to the connection: what Supervise in office does is on its Confirm
     var head = big && list ? V.hq.state(data.hq) + '.' : hqHead(data);
     var y = para(p, 48, big ? 150 : 134, hs, hs + 6, 'muted', wrap(head, hs, W - 96, 400), { maxW: W - 96 }) + (big ? 6 : 2);
-    var hint = view.note || (!view.focused ? 'Click to look closer.' : list && list.some(function (a) { return a.supervision && a.supervision.can; }) ? (big ? 'The office asks before it writes to Paperclip.' : 'Click Supervise in office for an agent. The office asks before it writes to Paperclip.') : 'No agent here needs Supervise in office.');
+    var hint = view.note || (!view.focused ? 'Click to look closer.' : list && list.some(function (a) { return canSupervise(data, a); }) ? (big ? 'The office asks before it writes to Paperclip.' : 'Click Supervise in office for an agent. The office asks before it writes to Paperclip.') : list && hqDenied(data) && list.some(function (a) { return a.supervision && a.supervision.can; }) ? DENIED_WHY : 'No agent here needs Supervise in office.');
     var ns = big ? 32 : 24, hl = wrap(hint, ns, W - 96, 400);
     function foot() { if (view.pending) { confirmBand(p, view, big); return; } para(p, 48, H - 30 - (hl.length - 1) * (ns + 6), ns, ns + 6, view.note ? 'error' : 'ink', hl, { maxW: W - 96 }); }
     if (!list || !list.length) {
@@ -242,8 +250,8 @@
       text(p, 48, y + 46, 48, 'ink', a.name, { wt: 600, maxW: W - 96 - 330 });
       text(p, 48, y + 86, 30, 'muted', a.title || a.role, { maxW: W - 96 - 330 });
       stateChip(p, W - 48 - 300, y + 4, 300, 80, a, 40);
-      var can = a.supervision.can && !view.pending, room = (can ? bottom - 100 : bottom) - (y + 130);
-      var wl = upTo(wrap(a.supervision.why || 'Its runs hold every call Claude Code asks about in the office.', 30, W - 96, 400), Math.max(1, Math.floor(room / 36) + 1));
+      var can = canSupervise(data, a) && !view.pending, room = (can ? bottom - 100 : bottom) - (y + 130);
+      var wl = upTo(wrap(whyOf(data, a), 30, W - 96, 400), Math.max(1, Math.floor(room / 36) + 1));
       para(p, 48, y + 130, 30, 36, 'muted', wl, { maxW: W - 96 });
       var byy = Math.min(bottom - 92, y + 130 + wl.length * 36 - 10);
       if (can) {
@@ -263,8 +271,8 @@
       text(p, 48, y + 38, fit(a.name, 28, nameW, 600), 'ink', a.name, { wt: 600, maxW: nameW });
       text(p, 48, y + 70, 21, 'muted', a.title || a.role, { maxW: nameW });
       stateChip(p, chipX, y + 20, chipW, 52, a, 24);
-      var can = a.supervision && a.supervision.can, whyW = W - 48 - whyX - (can ? bw + 16 : 0);
-      para(p, whyX, y + 28, 20, 24, 'muted', upTo(wrap(a.supervision.why || 'Its runs hold every call Claude Code asks about in the office.', 20, whyW, 400), 3), { maxW: whyW });
+      var can = canSupervise(data, a), whyW = W - 48 - whyX - (can ? bw + 16 : 0);
+      para(p, whyX, y + 28, 20, 24, 'muted', upTo(wrap(whyOf(data, a), 20, whyW, 400), 3), { maxW: whyW });
       if (can) {
         var pend = isHq(view.pending) && view.pending.hq === a.id, id = 'hq:' + a.id, bx = W - 48 - bw;
         if (pend) { fill(p, bx, y + 18, bw, 56, 'pending', 28); text(p, bx + bw / 2, y + 46 + 9, 24, 'onPending', 'Confirm?', { wt: 600, align: 'center', maxW: bw - 16 }); }
@@ -516,8 +524,9 @@
     }
     fill(p, 48, y, W - 96, 2, 'line');
     if (asking) { confirmBand(p, view, big); return; }   // the band takes the bottom of the screen until Confirm or Cancel
-    var es = big ? 40 : 26;
-    para(p, 48, y + (big ? 56 : 44), es, es + 8, 'ink', wrap('Extensions: local or project scope only. User scope stays out of reach.', es, W - 96, 400), { maxW: W - 96 });
+    var es = big ? 40 : 26, pcl = V.hq.spendLine(data.hq), py = y + (big ? 56 : 44);
+    if (pcl) { var pw = wrap(pcl, es, W - 96, 400); para(p, 48, py, es, es + 8, 'ink', pw, { maxW: W - 96 }); py += pw.length * (es + 8) + 8; }
+    para(p, 48, py, es, es + 8, 'ink', wrap('Extensions: local or project scope only. User scope stays out of reach.', es, W - 96, 400), { maxW: W - 96 });
     var hint = view.note || (editing ? 'Type a number of dollars. Enter saves, Esc cancels. 0 means no limit.' : !view.focused ? 'Click to look closer.' : 'Minus and plus change the limit by $1. Click the value to type it.');
     var hs = big ? 32 : 24, hw = wrap(hint, hs, W - 96, 400);
     para(p, 48, H - 34 - (hw.length - 1) * (hs + 6), hs, hs + 6, view.note ? 'error' : big ? 'muted' : 'ink', hw, { maxW: W - 96 });

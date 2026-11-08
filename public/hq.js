@@ -1,5 +1,5 @@
 /* Agent Office for Claude Code x0.2: the hq feature (#184, the page features of #168).
-   The Manager board, the Paperclip HQ and earned trust (#157, #76, #153). One Module: its Interface is window.OfficePage.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel, AdapterInstall: AdapterInstall } (the HR desk, #201; company memory, #205).
+   The Manager board, the Paperclip HQ and earned trust (#157, #76, #153). One Module: its Interface is window.OfficePage.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel, AdapterInstall: AdapterInstall, ApprovalDecide, PaperclipLink, WriteGrid } (the HR desk, #201; company memory, #205).
    Plain functions over the page core (window.OfficePage); office.js calls the Interface and holds none of the parts.
    The HQ dialog also holds the Lobby (#197): Lobby shows the dashboard cards (from OfficeVocab.hq.cards), the approvals
    and goals that wait, the org chart as floors top first, and the activity. A waiting approval is decided here and in
@@ -310,6 +310,8 @@
       })) : null,
       h('h3', { className: 'ext-h' + (p.mark('floor', 'rank-0') ? ' is-found' : ''), id: 'hq-floor-goals' }, 'Executive floor: goals'),
       h(Goals, { q: q, toast: p.toast, mark: p.mark }),
+      h('h3', { className: 'ext-h' }, 'Mailroom: tasks'),
+      h(Mailroom, { q: q, toast: p.toast, mark: p.mark }),
       h('h3', { className: 'ext-h' }, 'Org chart'),
       h(OrgChart, { q: q, toast: p.toast, mark: p.mark }),
       h('h3', { className: 'ext-h' }, 'Activity'),
@@ -389,6 +391,75 @@
               r.description && !shown ? h('div', { className: 'past-sub' }, r.description) : null,
               shown ? fields(r) : null),
             v.write && !shown ? h('div', { className: 'past-actions' }, h(A.Button, { variant: 'quiet', icon: 'edit', onClick: function () { show(r.id, r); } }, 'Edit')) : null);
+        })));
+  }
+
+  // The mailroom (#224): the open tasks of the company. Make a task, assign it to an employee, move it to another status and comment on it.
+  // Words, options and request bodies are OfficeVocab.hq.tasks. Every change is one call of hqWrite (the HQ write grid, #198): Allow sends,
+  // Confirm shows the exact change here and waits for the painted Confirm, Deny turns the forms off and says why. One change at a time.
+  function Mailroom(p) {
+    var v = window.OfficeVocab.hq.tasks(p.q), mark = p.mark;
+    var os = useState(!!(mark && mark('mailroom', 'new'))), open = os[0], setOpen = os[1];   // the new task form shows
+    var fs = useState({ title: '', description: '', assignee: '' }), form = fs[0], setForm = fs[1];
+    var ts = useState(''), sel = ts[0], setSel = ts[1];                     // the task whose comment box shows
+    var cs = useState(''), text = cs[0], setText = cs[1];
+    var as = useState(null), ask = as[0], setAsk = as[1];                   // { body, text }: the change that waits for its Confirm
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    var er = useState(''), err = er[0], setErr = er[1];
+    var lock = React.useRef(false);
+    function send(body, confirmed) {
+      if (!body || lock.current) return;
+      lock.current = true; setBusy(true); setErr('');
+      client.hqWrite(Object.assign({}, body, confirmed ? { confirmed: true } : {})).then(function () {
+        lock.current = false; setBusy(false); setAsk(null);
+        if (body.kind === 'comment') { setText(''); setSel(''); } else if (body.action === 'create') { setForm({ title: '', description: '', assignee: '' }); setOpen(false); }
+        p.toast({ tone: 'success', title: window.OfficeVocab.hq.tasks(p.q).done(body) });
+      }, function (x) {
+        lock.current = false; setBusy(false);
+        var q = window.OfficeAsk.asked(x, 'write', confirmed);
+        if (q) { setAsk({ body: body, text: q.text }); return; }
+        setAsk(null); setErr(x.message || 'The office could not write to Paperclip.');
+        p.toast({ tone: 'error', title: 'Task not changed', text: x.message });
+      });
+    }
+    var setF = function (k) { return function (val) { var o = Object.assign({}, form); o[k] = val; setForm(o); setAsk(null); }; };
+    var confirmBar = function () { return ask ? h(ConfirmBar, { key: ask.text, text: ask.text, busy: busy, onConfirm: function () { send(ask.body, true); }, onCancel: function () { if (!lock.current) setAsk(null); } }) : null; };
+    var newBody = v.create(form);
+    var creating = open ? h('div', { className: 'form wide goal-form' },
+      h(A.TextInput, { id: 'task-new-title', label: 'Title', value: form.title, onChange: setF('title') }),
+      h(O.Area, { id: 'task-new-desc', label: 'Description', rows: 3, value: form.description, onChange: setF('description') }),
+      h(A.Select, { id: 'task-new-assignee', label: 'Assign to', options: v.assignOptions, value: form.assignee, onChange: setF('assignee') }),
+      ask && ask.body.action === 'create' ? confirmBar()
+        : h('div', { className: 'past-actions' },
+          h(A.Button, { variant: 'primary', icon: 'approve', loading: busy, disabled: busy || !newBody, onClick: function () { send(newBody, false); } }, 'Create task'),
+          h(A.Button, { variant: 'quiet', onClick: function () { setOpen(false); setAsk(null); } }, 'Close'))) : null;
+    return h('div', { className: 'goal-tree' + (mark && mark('mailroom', 'new') ? ' is-found' : ''), id: 'hq-mailroom-new' },
+      h('p', { className: 'note', role: 'status' }, v.note),
+      v.write && !v.unknown && !open ? h('div', { className: 'past-actions' }, h(A.Button, { variant: 'quiet', icon: 'plus', onClick: function () { setOpen(true); } }, 'New task')) : null,
+      v.write && !v.unknown ? creating : null,
+      err ? h('p', { className: 'ao-err', role: 'alert' }, err) : null,
+      v.unknown ? h('p', { className: 'note' }, 'Unknown: Paperclip did not answer for the tasks.')
+        : !v.rows.length ? h('p', { className: 'note' }, 'No open tasks.')
+        : h('ul', { className: 'past', 'aria-label': 'Open tasks' }, v.rows.map(function (r) {
+          var commenting = sel === r.id, cBody = v.comment(r.id, text);
+          var mine = ask && ask.body.issue === r.id;
+          return h('li', { key: r.id, id: 'hq-task-' + r.id, className: 'past-row' + (mark && mark('task', r.id) ? ' is-found' : '') },
+            h('div', { className: 'past-main' },
+              h('div', { className: 'past-title' }, h('b', null, r.title), h(Tag, null, r.word)),
+              h('div', { className: 'past-meta' }, r.line),
+              h(PaperclipLink, { href: r.link }),
+              v.write ? h('div', { className: 'row' },
+                h(A.Select, { id: 'task-st-' + r.id, label: 'Status', options: v.statusOptions, value: r.status, disabled: busy || !!ask, onChange: function (val) { if (val !== r.status) send(v.move(r.id, val), false); } }),
+                h(A.Select, { id: 'task-as-' + r.id, label: 'Assign to', options: v.assignOptions, value: r.assigneeId, disabled: busy || !!ask, onChange: function (val) { if (val && val !== r.assigneeId) send(v.assign(r.id, val), false); } })) : null,
+              mine && ask.body.kind === 'task' ? confirmBar() : null,
+              !v.commentWrite ? h('p', { className: 'note' }, v.commentDenied)
+                : commenting ? h('div', { className: 'form wide' },
+                  h(O.Area, { id: 'task-cm-' + r.id, label: 'Comment', rows: 3, value: text, onChange: function (val) { setText(val); setAsk(null); } }),
+                  mine && ask.body.kind === 'comment' ? confirmBar()
+                    : h('div', { className: 'past-actions' },
+                      h(A.Button, { variant: 'primary', icon: 'approve', loading: busy, disabled: busy || !cBody, onClick: function () { send(cBody, false); } }, 'Add comment'),
+                      h(A.Button, { variant: 'quiet', onClick: function () { setSel(''); setText(''); setAsk(null); } }, 'Close')))
+                  : h('div', { className: 'past-actions' }, h(A.Button, { variant: 'quiet', icon: 'edit', onClick: function () { setSel(r.id); setText(''); setAsk(null); } }, 'Comment'))));
         })));
   }
 
@@ -647,6 +718,42 @@
           }))));
   }
 
+  // The write grid wall (#223): every write kind with its value and where the value comes from. A looser change (Deny to Confirm, Confirm to Allow)
+  // shows the painted Confirm first and the route refuses it without; a stricter change applies at once. Secrets offer no Allow. Use default
+  // clears a cell the user set. The words are OfficeVocab.hq.grid. It reads the office only, so it shows while Paperclip is not connected too.
+  function WriteGrid(p) {
+    var G = window.OfficeVocab.hq.grid;
+    var st = useState({ rows: undefined, err: '' }), v = st[0], setV = st[1];
+    var ps = useState(null), pend = ps[0], setPend = ps[1], bz = useState(false), busy = bz[0], setBusy = bz[1];
+    function load() { client.get('hqGrid').then(function (j) { setV({ rows: j.grid || null, err: '' }); }, function (x) { setV({ rows: null, err: x.message }); }); }
+    useEffect(function () { load(); }, []);
+    function send(row, to, confirmed) {
+      var ch = G.change(row, to);
+      setBusy(true);
+      client.send('hqGridSet', { kind: row.kind, value: to, confirmed: confirmed === true }).then(function (j) { setBusy(false); setPend(null); setV({ rows: j.grid, err: '' }); p.toast({ tone: 'success', title: ch.done }); },
+        function (x) { setBusy(false); setPend(null); p.toast({ tone: 'error', title: 'Not changed', text: x.message }); });
+    }
+    function pick(row, to) { var ch = G.change(row, to); if (ch.ask) setPend({ kind: row.kind, to: to, text: ch.text }); else { setPend(null); send(row, to, false); } }
+    var rows = v.rows;
+    return h('div', { className: 'hq-floor' + (p.mark ? ' is-found' : ''), id: 'hq-grid-rules' },
+      h('h3', { className: 'ext-h' }, G.title),
+      h('p', { className: 'note' }, G.note),
+      v.err ? h('p', { className: 'ao-err', role: 'alert' }, 'The office could not read the rules. ' + v.err)
+        : rows === undefined ? h('p', { className: 'note', role: 'status' }, 'Reading the rules.')
+        : !rows ? h('p', { className: 'note' }, 'The office could not read the rules.')
+        : h('ul', { className: 'past', 'aria-label': G.title }, rows.map(function (row) {
+          var c = G.cell(row);
+          return h('li', { key: row.kind, className: 'past-row' },
+            h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h('b', null, c.label), h(Tag, null, c.word)), h('div', { className: 'past-meta' }, c.means + '. ' + c.source + '.')),
+            h('div', { className: 'past-actions' },
+              c.options.map(function (o) {
+                return h(A.Button, { key: o.value, variant: o.on ? 'primary' : 'quiet', disabled: busy || o.on, 'aria-pressed': o.on, 'aria-label': c.label + ': ' + o.word, onClick: function () { pick(row, o.value); } }, o.word);
+              }),
+              c.canReset ? h(A.Button, { variant: 'quiet', disabled: busy, 'aria-label': c.label + ': use default (' + c.defWord + ')', onClick: function () { pick(row, null); } }, 'Use default') : null),
+            pend && pend.kind === row.kind ? h(ConfirmBar, { key: 'wg' + row.kind, busy: busy, text: pend.text, onConfirm: function () { send(row, pend.to, true); }, onCancel: function () { setPend(null); } }) : null);
+        })));
+  }
+
   // The one Confirm of an ask-first change in the HQ (#221): the exact words of the change, a Confirm and a Cancel. It scrolls its
   // buttons into view when it appears, because it sits under a long form in a scrolling dialog (a phone shows one screen of it). Every
   // inline Confirm of this file uses it; the caller keeps the pending and busy state. Props: text (the words after "Confirm: ") or
@@ -788,6 +895,37 @@
             })) : h('p', { key: 'en', className: 'note' }, 'Paperclip has no environment.')]);
   }
 
+  // Profile settings (#228), owner only, beside the instance settings: the name of the person the board key signs in as. The office reads the
+  // name and the e-mail and writes the name only (one write of the grid's Your Paperclip profile cell behind a painted Confirm); it never
+  // shows or sends the picture.
+  function Profile(p) {
+    var st = useState({ pro: undefined, err: '' }), s = st[0], setS = st[1];
+    var nm = useState(null), name = nm[0], setName = nm[1];
+    var ps = useState(false), pend = ps[0], setPend = ps[1];
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    function load() { client.get('hqProfile').then(function (j) { setS({ pro: j.profile || null, err: '' }); }, function (x) { setS({ pro: null, err: x.message }); }); }
+    useEffect(function () { load(); }, []);
+    function send() {
+      var body = { kind: 'profile', action: 'name', name: name.trim(), confirmed: true };
+      setBusy(true);
+      client.send('hqWrite', body).then(function () { setBusy(false); setPend(false); setName(null); p.toast({ tone: 'success', title: 'Done', text: 'Profile name changed.' }); load(); },
+        function (x) { setBusy(false); setPend(false); p.toast({ tone: 'error', title: 'Not changed', text: x.message }); });
+    }
+    var pro = s.pro, shown = name === null ? (pro && pro.name) || '' : name, changed = !!pro && !pro.error && shown.trim() && shown.trim() !== (pro.name || '');
+    return h('div', { className: 'hq-floor', id: 'hq-profile' },
+      h('h3', { className: 'ext-h' }, 'Your Paperclip profile'),
+      h('p', { className: 'note' }, 'This is the person the office signs in to Paperclip as. Only you, the owner, can change it here. The change asks first, as the write grid says (Your Paperclip profile). The office changes the name only. It does not show or change the picture or the e-mail.'),
+      s.err ? h('p', { className: 'ao-err', role: 'alert' }, 'The office could not read the profile. ' + s.err)
+        : pro === undefined ? h('p', { className: 'note', role: 'status' }, 'Reading the profile.')
+        : !pro ? h('p', { className: 'note' }, 'The office is not connected to Paperclip.')
+        : pro.error ? h('p', { className: 'ao-err', role: 'alert' }, 'The office could not read the profile. ' + pro.error)
+        : h('div', { className: 'form' },
+          pro.email ? h('p', { className: 'note' }, 'Signed in as ' + pro.email + '.') : null,
+          h(A.TextInput, { id: 'profile-name', label: 'Name', value: shown, onChange: function (v) { setName(v); setPend(false); } }),
+          h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'approve', disabled: !changed, onClick: function () { setPend(true); } }, 'Save name')),
+          pend ? h(ConfirmBar, { key: 'cp', busy: busy, text: 'Change your Paperclip profile name to "' + shown.trim() + '".', onConfirm: send, onCancel: function () { setPend(false); } }) : null));
+  }
+
   // The HQ: what Paperclip says about its company. Goals, routines and company admin have their own writes (Goals, Routines, Access); the rest
   // is read only. Supervise
   // in office is on the Agents screen of a Security room, with its painted Confirm (no button here: one place for a write).
@@ -809,7 +947,8 @@
     if (!q || !q.company) return h(A.Dialog, { open: true, title: 'Paperclip HQ', onClose: p.onClose, actions: close },
       h('div', { className: 'form wide' },
         h(A.EmptyState, { icon: 'hq', compact: true, title: 'Paperclip is not connected', text: q ? H.state(q) : 'Install and start Paperclip below, or connect to yours. Then connect it in Attach sessions.' }),
-        runtime));
+        runtime,
+        h(WriteGrid, { toast: p.toast, mark: mark('grid', 'rules') })));
     return h(A.Dialog, { open: true, title: q.company.name + ': Paperclip HQ', onClose: p.onClose, actions: close },
       h('div', { className: 'form wide' },
         h('p', { className: 'note', role: 'status' }, H.state(q)),
@@ -824,9 +963,11 @@
         h(MemoryPanel, { toast: p.toast }),
         h(Catalog, null),
         h(Access, { company: q.company.name, toast: p.toast }),
+        h(WriteGrid, { toast: p.toast, mark: mark('grid', 'rules') }),
         h(SelfApproval, { toast: p.toast }),
         h(CompanyBudget, { toast: p.toast }),
         h(Portability, { company: q.company.name, toast: p.toast }),
+        h(Profile, { toast: p.toast }),
         h(Instance, { toast: p.toast }),
         h('h3', { className: 'ext-h' }, 'Agents'),
         q.agents.length ? h('ul', { className: 'past' }, q.agents.map(function (a) {
@@ -1042,5 +1183,5 @@
         })) : h('p', { className: 'note' }, 'No agent has a history yet.')));
   }
 
-  O.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel, AdapterInstall: AdapterInstall, ApprovalDecide: ApprovalDecide, PaperclipLink: PaperclipLink };
+  O.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel, AdapterInstall: AdapterInstall, ApprovalDecide: ApprovalDecide, PaperclipLink: PaperclipLink, WriteGrid: WriteGrid, Mailroom: Mailroom };
 })();

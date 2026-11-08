@@ -543,7 +543,7 @@ export function createOffice(cfg) {
   // 403, Confirm asks first and the editor's own Change button is that Confirm, Allow sends) and the writer checks a loop, a self report or a
   // stranger before anything is asked. The snapshot's hq tells the page whether to offer the editor, and an approval decision:
   // each is writable unless the grid says Deny (`approvalWrite` for the Approvals cell).
-  const hqView = () => { const v = hq.view(); return v && { ...v, reportingWrite: writeValueOf(saved.get('hqGrid'), 'reporting') !== 'deny', goalWrite: writeValueOf(saved.get('hqGrid'), 'goal') !== 'deny', employeeWrite: writeValueOf(saved.get('hqGrid'), 'pause') !== 'deny', approvalWrite: writeValueOf(saved.get('hqGrid'), 'approval') !== 'deny' }; };
+  const hqView = () => { const v = hq.view(); return v && { ...v, reportingWrite: writeValueOf(saved.get('hqGrid'), 'reporting') !== 'deny', goalWrite: writeValueOf(saved.get('hqGrid'), 'goal') !== 'deny', employeeWrite: writeValueOf(saved.get('hqGrid'), 'pause') !== 'deny', approvalWrite: writeValueOf(saved.get('hqGrid'), 'approval') !== 'deny', taskWrite: writeValueOf(saved.get('hqGrid'), 'task') !== 'deny', commentWrite: writeValueOf(saved.get('hqGrid'), 'comment') !== 'deny', superviseWrite: writeValueOf(saved.get('hqGrid'), 'supervise') !== 'deny' }; };
   async function reportingLineHq(body) {
     const r = await hq.write({ kind: 'reporting', action: 'set', agent: String(body.agent || ''), manager: body.manager ? String(body.manager) : null }, { confirmed: body.confirmed === true });
     broadcast();
@@ -1457,6 +1457,7 @@ export function createOffice(cfg) {
     R('GET', '/api/hq/access', 'page', async () => ({ access: await hq.access() })),
     // Company admin, the rest (#221): the instance settings and environments (names and states, no config or env value) and a company export
     // (a read of Paperclip that changes nothing; the bundle goes to the page as a file, the office keeps no copy). Import is a write: kind company.
+    R('GET', '/api/hq/profile', 'page', async () => ({ profile: await hq.profile() })),
     R('GET', '/api/hq/instance', 'page', async () => ({ instance: await hq.instance() })),
     R('POST', '/api/hq/company/export', 'page', ({ body }) => hq.exportCompany(body)),
     // The Paperclip runtime (#193): install (409 without the Confirm), start, stop, and the board key's approval link. Never the key.

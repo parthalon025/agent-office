@@ -24,7 +24,7 @@ function load(file) {
 const SHAPES = {
   'schedules.js': ['Schedules', ['Dialog']],
   'extensions.js': ['Extensions', ['Dialog']],
-  'hq.js': ['Hq', ['AdapterInstall', 'ApprovalDecide', 'Hire', 'HireForm', 'Hq', 'Manager', 'Memory', 'PaperclipLink', 'Trust']],
+  'hq.js': ['Hq', ['AdapterInstall', 'ApprovalDecide', 'Hire', 'HireForm', 'Hq', 'Mailroom', 'Manager', 'Memory', 'PaperclipLink', 'Trust', 'WriteGrid']],
   'characters.js': ['Characters', ['Dialog']],
   'skills.js': ['Skills', ['Dialog']],
   'merge.js': ['Merge', ['Flow', 'Row', 'use']],
@@ -96,7 +96,7 @@ test('hq.js: every inline ask-first Confirm is the one shared ConfirmBar, which 
   assert.match(bar, /scrollIntoView\(\{ block: 'nearest' \}\)/);
   assert.match(bar, /loading: p\.busy, disabled: p\.busy/);
   // Each Confirm path renders it and has no scroll code of its own.
-  for (const name of ['OrgChart', 'MemoryPanel', 'Access', 'useConfirm', 'SelfApproval', 'Goals', 'AdapterInstall', 'TrustDialog', 'Instance']) {
+  for (const name of ['OrgChart', 'MemoryPanel', 'Access', 'useConfirm', 'SelfApproval', 'Goals', 'AdapterInstall', 'TrustDialog', 'Instance', 'WriteGrid', 'Mailroom']) {
     const body = fn(name);
     assert.match(body, /h\(ConfirmBar,/, name + ' uses ConfirmBar');
     assert.doesNotMatch(body, /scrollIntoView/, name + ' has no scroll code of its own');

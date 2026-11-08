@@ -29,7 +29,7 @@
 // Supervise cell can Deny it) that reads the agent again and sends one PATCH with this office's command hooks file (HOOKS_CMD_FILE in
 // office.mjs, forward slashes). The company step of Orientation (#199)
 // is POST /api/paperclip/company; a reporting line (#202) is POST /api/hq/reporting-line, a thin call of `write`. The snapshot
-// `hq.reportingWrite` is false only when the grid says Deny: the org chart editor (`OrgChart` in public/hq.js) is then read only.
+// `hq.reportingWrite` (and `hq.superviseWrite`, which hides Supervise in office on the Agents screen, #231) is false only when the grid says Deny: the org chart editor (`OrgChart` in public/hq.js) is then read only.
 // The routes of the read model, costs, catalog, access and instance are with the functions below; the grid and write routes are
 // in src/hq-writes/index.mjs. User words and the Paperclip routes used by #221 and their source files are also in docs/paperclip.md.
 //
@@ -153,7 +153,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { runIds, cleanIds } from './payload.mjs';
 import { readArgs, CLAUDE_FLAGS_VERSION } from './providers/claude-code.mjs';
-import { paperclipLinker, floorsOf, cablesOf, goalsOf, lobbyOf, inboxOf, costsOf, catalogOf, roomsOf, monthWindows, searchOf, shapeProblems, officeAdapterOf, NEVER_SELF_APPROVED, selfApprovalOn } from './hq-model.mjs';
+import { paperclipLinker, floorsOf, cablesOf, goalsOf, lobbyOf, inboxOf, mailroomOf, costsOf, catalogOf, roomsOf, monthWindows, searchOf, shapeProblems, officeAdapterOf, NEVER_SELF_APPROVED, selfApprovalOn } from './hq-model.mjs';
 import { WRITES, writeRegistry } from './hq-writes/index.mjs';
 import { gridError as httpError, obj, strings, text, ID_RE } from './hq-writes/shared.mjs';
 import { archetypeOf, GENERAL } from './archetypes.mjs';
@@ -561,7 +561,7 @@ export function createHq(deps = {}) {
       shaped('goals', `/api/companies/${id}/goals`, null),
       shaped('approvals', `/api/companies/${id}/approvals?status=pending`, null),
       shaped('activity', `/api/companies/${id}/activity`, null),
-      shaped('costs', `/api/companies/${id}/costs/summary`, null),
+      shaped('costs', `/api/companies/${id}/costs/summary?period=month`, null),
       shaped('secrets', `/api/companies/${id}/secrets`, null),
       call(conn, '/api/companies').catch(() => null),   // the other companies of this Paperclip (#221): buildings of the campus; a failed read keeps the last list
     ]);
@@ -796,13 +796,13 @@ export function createHq(deps = {}) {
     if (!c) return null;
     const others = c.companyId ? list(c.all).filter((x) => x.id !== c.companyId).slice(0, 12).map((x) => ({ id: x.id, name: x.name })) : [];
     const base = { state: c.state, url: c.url, error: c.error, companies: c.state === 'choose' ? c.companies : null, others };
-    if (!d) return { ...base, company: null, budget: null, agents: [], routines: [], floors: [], cables: [], inbox: null, rooms: [], goals: null, lobby: null, search: [], contract: [] };
+    if (!d) return { ...base, company: null, budget: null, agents: [], routines: [], floors: [], cables: [], inbox: null, rooms: [], goals: null, tasks: null, lobby: null, search: [], contract: [] };
     const agents = [...d.agents.values()].filter((a) => a.status !== 'terminated').map(agentView), hr = d.hqRead;
     const link = paperclipLinker(c.url, d.company.issuePrefix);
     const lobby = lobbyOf({
       link,
       agents, issues: known('issues') ? d.issues : null, approvals: known('approvals') ? hr.approvals : null, goals: known('goals') ? hr.goals : null, activity: known('activity') ? activityOf(8) : null,
-      costs: known('costs') && hr.costs ? hr.costs : { spent: cents(d.company.spentMonthlyCents), limit: cents(d.company.budgetMonthlyCents) }, secrets: known('secrets') ? hr.secrets : null, unread: d.unread,
+      costs: known('costs') && hr.costs ? hr.costs : (Number.isFinite(d.company.spentMonthlyCents) && d.company.spentMonthlyCents >= 0 ? { spent: cents(d.company.spentMonthlyCents), limit: cents(d.company.budgetMonthlyCents) } : null), secrets: known('secrets') ? hr.secrets : null, unread: d.unread,
     });
     const floors = floorsOf(agents), routines = d.routines.filter((r) => r && r.id && r.status !== 'archived').map(routineView);
     return {
@@ -810,10 +810,15 @@ export function createHq(deps = {}) {
       company: { id: String(d.company.id || c.companyId), name: text(d.company.name, 80) || 'Paperclip' },
       budget: { spent: cents(d.company.spentMonthlyCents), limit: cents(d.company.budgetMonthlyCents) },
       agents,
-      floors: floors.map((f) => ({ key: f.key, name: f.name, rank: f.rank, employees: f.employees.map((e) => ({ id: e.id, name: e.name, role: e.role, reportsTo: e.reportsTo, floor: f.name })) })),
+      // the org chart as floors (#226): one per department, going up by rank, a room per rank; an employee carries its floor and its rank
+      floors: floors.map((f) => {
+        const emp = (e) => ({ id: e.id, name: e.name, role: e.role, reportsTo: e.reportsTo, floor: f.name, rank: e.rank });
+        return { key: f.key, name: f.name, dept: f.dept, rank: f.rank, wing: f.wing, employees: f.employees.map(emp), rooms: f.rooms.map((r) => ({ key: r.key, name: r.name, rank: r.rank, employees: r.employees.map(emp) })) };
+      }),
       rooms: known('projects') ? roomsOf({ projects: d.projects, agents, issues: known('issues') ? d.issues : null }) : [],
       cables: cablesOf(agents),
       goals: known('goals') ? goalsOf(hr.goals, agents) : null,
+      tasks: mailroomOf({ agents, issues: known('issues') ? d.issues : null, link }),
       inbox: inboxOf({ link, agents, issues: known('issues') ? d.issues : null, approvals: known('approvals') ? hr.approvals : null }),
       lobby, contract: d.contract,
       routines,
@@ -1039,6 +1044,21 @@ export function createHq(deps = {}) {
     const general = g ? { censorUsernameInLogs: g.censorUsernameInLogs === true, feedbackDataSharingPreference: text(g.feedbackDataSharingPreference, 20) || 'prompt' } : null;
     return { environments: environments || [], general, defaultEnvironmentId: set.json ? def : null, known: { environments: !!environments, general: !!general }, problem: [set, env].map((x) => x.err).find(Boolean) || '' };
   }
+  /**
+   * The profile of the person the board key signs in as (#228, owner only): id, name and e-mail, read when the HQ opens it, for GET
+   * /api/hq/profile. The picture is dropped (it can be a large data URL). Paperclip answers 401 for a key that is no person's (the local
+   * trusted mode has none): that is `error`, not a failure. Reads only; the change is the `profile` write kind.
+   */
+  async function profile() {
+    const conn = c;
+    if (!conn || !d) return null;
+    let json, error = null;
+    try { json = await call(conn, '/api/auth/profile'); } catch (e) { error = e.message; }
+    if (c !== conn) return null;
+    if (!error) { const p = shapeProblems('userProfile', json); if (p.length) error = `Paperclip answered in a shape the office does not know (${p[0]}) Update the office or the pinned Paperclip.`; }
+    if (error) return { id: null, name: null, email: null, error };
+    return { id: String(json.id), name: text(json.name, 120) || null, email: text(json.email, 120) || null, error: null };
+  }
   async function instance() {
     const conn = c;
     if (!conn || !d) return null;
@@ -1190,5 +1210,5 @@ export function createHq(deps = {}) {
     return writes.resultOf(plan, made);
   }
 
-  return { connect, disconnect, supervise, handoffGoal, handoffTasks, write, adapter: adapterState, selfApprove: () => { if (c) selfApprove(c); }, tasksOf, task, access, instance, exportCompany, view, model, costs, catalog, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
+  return { connect, disconnect, supervise, handoffGoal, handoffTasks, write, adapter: adapterState, selfApprove: () => { if (c) selfApprove(c); }, tasksOf, task, access, instance, profile, exportCompany, view, model, costs, catalog, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
 }

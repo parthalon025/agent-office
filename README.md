@@ -54,7 +54,7 @@ All the jobs, with every control, are in [Using the office](docs/using-the-offic
 | [Agent kinds](docs/agents.md) | Claude Code, local models, ACP agents, OpenClaw, Agent Framework, cloud agents and Copilot CLI: setup, readiness and supervision. |
 | [Security](docs/security.md) | The Security room, the two tokens, what the office keeps on disk, and links to the [security review](docs/security-review.md) and the decision records in [docs/adr](docs/adr). |
 | [Remote access](docs/remote-access.md) | Open the office from a phone or laptop through Cloudflare Tunnel and Access. |
-| [Paperclip HQ](docs/paperclip.md) | Watch a Paperclip company as a building, hold its Claude Code calls, and let the office install and run Paperclip for you. |
+| [Paperclip HQ](docs/paperclip.md) | Enter a Paperclip company as a building (its org chart as floors, its employees at desks), hold its Claude Code calls, and let the office install and run Paperclip for you. |
 | [Manager board](docs/manager.md) | Goals, plans, steps and the handoff to Paperclip. |
 | [Customization](docs/customization.md) | Personas, teams, wall screens, export, rituals and Focus mode. |
 | [Configuration](docs/configuration.md) | Every environment variable. |

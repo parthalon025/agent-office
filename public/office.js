@@ -78,13 +78,14 @@
     return hq ? [hq].concat(otherHqBuildings(snap), out) : out;
   }
   // Paperclip HQ (#76): its company as the first building, once the office has read it. A pip per Paperclip agent, in the
-  // state Paperclip reports (hq.status: never waiting, a Paperclip approval is not an office request). It is not a repository:
-  // a click opens the HQ dialog, not a scene. Its sign carries the company's budget for its runs.
-  var HQ_KEY = 'paperclip:hq';
+  // state Paperclip reports (hq.status: never waiting, a Paperclip approval is not an office request). It is not a repository,
+  // but a click enters it like one (#226): its floors are the org chart (building.js mount of OfficeBuilding.HQ_KEY), its desks the
+  // employees, and its Lobby opens the HQ dialog. Its sign carries the company's budget for its runs.
+  var HQ_KEY = window.OfficeBuilding.HQ_KEY;
   function hqBuilding(snap) {
     var q = snap && snap.hq, H = window.OfficeVocab.hq;
     if (!q || !q.company) return null;
-    // The floors follow the org chart (#197, hq-model.mjs floorsOf): Records, Lobby, then one per rank, the top role on top. A server that sends none gets one HQ floor.
+    // The floors follow the org chart (#197, #226, hq-model.mjs floorsOf): Records, Lobby, then one per department going up by rank, the top role on top. A server that sends none gets one HQ floor.
     var floors = q.floors && q.floors.length ? q.floors : [{ name: 'HQ', key: 'hq', employees: [] }], at = {};
     floors.forEach(function (f) { (f.employees || []).forEach(function (e) { at[e.id] = f.name; }); });
     var bots = q.agents.map(function (a) { var st = H.status(a); return { uid: 'hq:' + a.id, name: a.name, status: st.key, word: st.word, floor: at[a.id] || floors[0].name }; });
@@ -133,7 +134,7 @@
     var list = snap ? cityData(snap) : [];
     useEffect(function () {
       if (!window.OfficeCity) return undefined;
-      city.current = window.OfficeCity.mount(ref.current, { root: document.documentElement, onHover: setHov, onPick: function (d) { if (d.hq) p.onHq(d.companyId); else p.onEnter(d.key, city.current); } });
+      city.current = window.OfficeCity.mount(ref.current, { root: document.documentElement, onHover: setHov, onPick: function (d) { if (d.hq) p.onHq(d.companyId, city.current); else p.onEnter(d.key, city.current); } });
       return function () { if (city.current) city.current.dispose(); city.current = null; };
     }, []);
     useEffect(function () {
@@ -155,7 +156,7 @@
     // Ctrl+K in the city: the page's own actions (they include Go to each building), the theme, and the city view.
     var palActions = A.CommandPalette.actions({ setMode: function (m) { if (city.current) city.current.setMode(m); } })
       .filter(function (a) { return a.id.indexOf('page-b-') !== 0 && a.id.indexOf('page-s-go-') !== 0 && a.id !== 'page-city'; })   // the page's Go to only picks the building, and the bot rows already go to a session
-      .concat(list.map(function (b) { return b.hq ? { id: 'city-hq' + (b.companyId ? ':' + b.companyId : ''), label: b.companyId ? 'Open the HQ of ' + b.name : 'Open Paperclip HQ', icon: 'hq', group: 'Buildings', keywords: 'paperclip hq company agents budget heartbeats routines ' + b.name, run: function () { p.onHq(b.companyId); } }
+      .concat(list.map(function (b) { return b.hq ? { id: 'city-hq' + (b.companyId ? ':' + b.companyId : ''), label: 'Go to the HQ of ' + b.name, icon: 'hq', group: 'Buildings', keywords: 'paperclip hq company employees org chart floors desks budget ' + b.name, run: function () { p.onHq(b.companyId, city.current); } }
         : { id: 'city-go-' + b.key, label: 'Go to ' + b.name, icon: 'building', group: 'Buildings', keywords: 'building repository ' + b.name, run: function () { p.onEnter(b.key, city.current); } }; }))
       .concat([{ id: 'city-fit', label: 'Show all buildings', icon: 'building', group: 'City', run: function () { if (city.current) city.current.fit(false); } }]);
     return h('div', { className: 'city' },
@@ -170,7 +171,7 @@
           !list.length ? h(A.EmptyState, { icon: 'building', compact: true, title: 'No buildings yet', text: 'Open a session in a git repository to add its building.' }) : null,
           h('ul', { className: 'city-list' }, list.map(function (b) {
             return h('li', { key: b.key },
-              h('button', { type: 'button', className: 'city-row' + (b.key === p.shown ? ' is-shown' : '') + (hov && hov.key === b.key ? ' is-hover' : '') + (b.hq ? ' is-hq' : ''), onClick: function () { if (b.hq) p.onHq(b.companyId); else p.onEnter(b.key, city.current); } },
+              h('button', { type: 'button', className: 'city-row' + (b.key === p.shown ? ' is-shown' : '') + (hov && hov.key === b.key ? ' is-hover' : '') + (b.hq ? ' is-hq' : ''), onClick: function () { if (b.hq) p.onHq(b.companyId, city.current); else p.onEnter(b.key, city.current); } },
                 h('span', { className: 'city-main' },
                   h('span', { className: 'city-name' }, b.hq ? h(A.Icon, { name: 'hq', size: 14, label: 'Paperclip HQ' }) : null, b.name),
                   h('span', { className: 'city-sub mono' }, b.hq ? b.line : plural(b.floors.length, 'floor', 'floors') + ' · ' + plural(b.sessions, 'session', 'sessions')),
@@ -219,11 +220,12 @@
     var sy = useState(false), syl = sy[0], setSyl = sy[1];
     // Toasts (toasts.js): an error or a toast with an action stays until closed; the others close after 8 s, and wait while the pointer or focus is on them, or while the stack has no room (is-off).
     var tt = useState([]), toasts = tt[0], setToasts = tt[1], tid = React.useRef(0), toastBox = React.useRef(null);
-    // The HQ dialog; with a company id (a building of another company of the Paperclip, #221) the office first watches that company.
-    function openHq(companyId) {
+    // Enter the HQ building (#226), from the city (city is its camera, for the flight in); with a company id (a building of another
+    // company of the Paperclip, #221) the office first watches that company. The HQ dialog stays one tap away: its memo, Ctrl+K.
+    function openHq(companyId, city) {
       var q = latestSnap.current && latestSnap.current.hq;
-      if (!companyId || !q || !q.url) { setDlg({ name: 'hq' }); return; }
-      O.client.paperclipConnect({ url: q.url, company: companyId }).then(function () { setDlg({ name: 'hq' }); },
+      if (!companyId || !q || !q.url) { enter(HQ_KEY, city); return; }
+      O.client.paperclipConnect({ url: q.url, company: companyId }).then(function () { enter(HQ_KEY, null); },
         function (x) { toast({ tone: 'error', title: 'Company not opened', text: x.message }); });
     }
     function toast(t) {
@@ -367,7 +369,8 @@
     var list = snap ? window.officeAdapter.buildings(snap) : [];
     var queue = snap ? window.officeAdapter.queue(snap) : null;
     var needs = queue ? queue.items : [];   // the one queue: every open request of every building, oldest first (Needs you)
-    var hasCur = list.some(function (b) { return b.key === cur; });
+    var hqOn = !!(snap && snap.hq && snap.hq.company);
+    var hasCur = list.some(function (b) { return b.key === cur; }) || (cur === HQ_KEY && hqOn);   // the HQ shows while the office reads a company (#226)
     // Show the chosen building while it has sessions; when it empties, go where the work is.
     var shown = hasCur || (!list.length && cur != null) ? cur : (list.length ? list[0].key : '');
     // Compact view: the DS ambient bar, for a second screen. ?ambient=1 starts in it.
@@ -439,6 +442,8 @@
     useEffect(function () { if (lobbyRef.current) lobbyRef.current.refresh(); }, [snap]);
     var deskRef = React.useRef(null);   // the desk objects: approval papers, question notes, pause keys (desk.js, #90)
     useEffect(function () { if (deskRef.current) deskRef.current.refresh(); }, [snap]);
+    var cablesRef = React.useRef(null);   // the reporting lines of the HQ as cables (cables.js, #226); only in the HQ building
+    useEffect(function () { if (cablesRef.current) cablesRef.current.refresh(); }, [snap]);
     // the screen the camera looks at (step 1 of a screen: scene-host.js focus), or null
     var lk = useState(null), look = lk[0], setLook = lk[1];
     // The pinned layer of the screen in focus (scene-host.js layer, #89): its screen, state and waiting count, not its box
@@ -505,6 +510,7 @@
       if (securityRef.current) { securityRef.current.dispose(); securityRef.current = null; }
       if (lobbyRef.current) { lobbyRef.current.dispose(); lobbyRef.current = null; }
       if (deskRef.current) { deskRef.current.dispose(); deskRef.current = null; }
+      if (cablesRef.current) { cablesRef.current.dispose(); cablesRef.current = null; }
       if (hostRef.current) { hostRef.current.dispose(); hostRef.current = null; }
       setBoard(null); setLook(null); setLayer(null); setChg(null);
     }; }, [sceneKey, cur2.view]);
@@ -553,6 +559,9 @@
     // The spare room of an empty building takes no bots and no message: the DS broadcast bar is hidden then (office.css).
     var spareNow = !!(mount && mount.spare && mount.spare());
     useEffect(function () { var el = document.getElementById('office'); if (el) el.classList.toggle('no-rooms', spareNow); }, [spareNow]);
+    // The HQ building (#226): its bots are employees, not sessions, so the DS broadcast bar (a message to a room) is hidden (office.css).
+    var hqNow = !!(mount && mount.hq && cur2.view === 'office');
+    useEffect(function () { var el = document.getElementById('office'); if (el) el.classList.toggle('is-hq', hqNow); }, [hqNow]);
     // A side panel changes the free part of the view: the screen in focus is framed again beside it. The window too.
     useEffect(function () { if (hostRef.current) hostRef.current.refit(); }, [panelOpen]);
     // A Security room screen in focus (review M6): at 820 px and below office.css hides the floor list and the room card (the
@@ -643,9 +652,10 @@
         selectPending(o);
         window.officeScene = o;   // the mounted office API, for the console and tests
         var st = o.inspect && o.inspect().stage;
-        if (boardRef.current) boardRef.current.dispose();
-        if (terminalRef.current) terminalRef.current.dispose();
-        if (personaRef.current) personaRef.current.dispose();
+        if (boardRef.current) { boardRef.current.dispose(); boardRef.current = null; }
+        if (terminalRef.current) { terminalRef.current.dispose(); terminalRef.current = null; }
+        if (personaRef.current) { personaRef.current.dispose(); personaRef.current = null; }
+        if (deskRef.current) { deskRef.current.dispose(); deskRef.current = null; }
         if (securityRef.current) { securityRef.current.dispose(); securityRef.current = null; }
         if (hostRef.current) hostRef.current.dispose();
         // waiting: the bezel of the screen in focus counts every request of every building (Needs you)
@@ -679,7 +689,16 @@
           if (!f || f.kind !== 'changes') setChg(null);
           if (f && f.pin && f.kind === 'terminal' && f.item && f.item.name) o.select(f.item.name);
         });
-        if (st && host && window.OfficeBoard) {
+        // The HQ (#226): its bots are employees, not sessions. It has no room boards, Security room, session monitors, personas or desk
+        // papers; its Lobby (lobby.js with the HQ memo, task board and HR desk) and the reporting-line cables (cables.js) are its own.
+        var isHq = !!(mount && mount.hq);
+        if (cablesRef.current) { cablesRef.current.dispose(); cablesRef.current = null; }
+        if (isHq && st && host && window.OfficeCables) {
+          var cabMount = mount;
+          cablesRef.current = window.OfficeCables.attach(o, { host: host, cables: function () { return cabMount.cables(latestSnap.current); } });
+          window.officeCables = cablesRef.current;   // the HQ cables, for the console and tests
+        }
+        if (st && host && window.OfficeBoard && !isHq) {
           boardRef.current = window.OfficeBoard.attach(o, {
             host: host,
             room: function (id) { return mount.roomInfo(id); },
@@ -695,7 +714,7 @@
             onOpen: function (id, kind) { if (kind !== 'changes') setBoard({ id: id, kind: kind }); }
           });
         }
-        if (st && host && window.OfficeSecurity) {
+        if (st && host && window.OfficeSecurity && !isHq) {
           var secMount = mount;
           securityRef.current = window.OfficeSecurity.attach(o, {
             host: host,
@@ -710,7 +729,12 @@
         if (st && host && window.OfficeLobby) {
           var lobMount = mount;
           if (lobbyRef.current) lobbyRef.current.dispose();
-          lobbyRef.current = window.OfficeLobby.attach(o, {
+          var hqLobby = isHq ? {
+            memo: function () { return window.OfficeVocab.hq.memo(latestSnap.current && latestSnap.current.hq); },
+            pipeline: function () { return window.OfficeVocab.hq.taskBoard(latestSnap.current && latestSnap.current.hq); },
+            verbs: window.OfficeVocab.hq.lobbyVerbs
+          } : {};
+          lobbyRef.current = window.OfficeLobby.attach(o, Object.assign({
             host: host,
             layout: function () { var sn = latestSnap.current; return (sn && sn.layouts && sn.layouts[lobMount.repo]) || null; },
             since: function () { try { var sm = o.summary ? o.summary() : null; return ((sm && sm.top) || []).map(function (x) { return typeof x === 'string' ? x : String(x && x.text || ''); }); } catch (x) { return []; } },
@@ -720,14 +744,16 @@
             states: function () { return lobMount.rollup().floors; },
             agents: function () { return lobMount.agentsByFloor(); },
             session: function (botName) { return lobMount.session(botName); },
-            onDesk: function (roomId) { deskStart(roomId); },
+            // the HQ's open desk is the HR desk (#226): it opens the hire, never an agent start
+            onDesk: function (roomId) { if (lobMount.hq) setDlg({ name: 'hire' }); else deskStart(roomId); },
             // the tour's monitor stop: an agent's monitor on the floor first (terminal.js look), else an open desk's
             monitor: function () { return !!(terminalRef.current && terminalRef.current.look && terminalRef.current.look()); },
-            onReception: function (part) { if (part === 'directory') openPalette(); else if (part === 'pipeline') setDlg({ name: 'flow' }); else setDlg({ name: 'reception' }); }
-          });
+            // in the HQ the memo and the task board open the HQ dialog (its Lobby), the directory the search (it finds Paperclip too)
+            onReception: function (part) { if (part === 'directory') openPalette(); else if (lobMount.hq) setDlg({ name: 'hq' }); else if (part === 'pipeline') setDlg({ name: 'flow' }); else setDlg({ name: 'reception' }); }
+          }, hqLobby));
           window.officeLobby = lobbyRef.current;   // the lobby (open desks, memo, directory, nameplates), for the console and tests
         }
-        if (st && host && window.OfficeTerminal) {
+        if (st && host && window.OfficeTerminal && !isHq) {
           terminalRef.current = window.OfficeTerminal.attach(o, {
             host: host,
             session: function (botName) { return mount.session(botName); },
@@ -735,12 +761,12 @@
             onOpen: function () { setDeskTab('chat'); }
           });
         }
-        if (st && host && window.OfficePersona) {
+        if (st && host && window.OfficePersona && !isHq) {
           if (personaRef.current) personaRef.current.dispose();
           personaRef.current = window.OfficePersona.attach(o, { host: host, session: function (botName) { return mount.session(botName); }, off: function () { return focusRef.current; } });
           window.officePersona = personaRef.current;   // for the console and tests
         }
-        if (st && host && window.OfficeDesk) {
+        if (st && host && window.OfficeDesk && !isHq) {
           var deskMount = mount;
           if (deskRef.current) deskRef.current.dispose();
           deskRef.current = window.OfficeDesk.attach(o, {
@@ -818,7 +844,8 @@
     }
     var readyFor = mount ? mount.id : null;
     useEffect(function () {
-      if (!readyFor || orient !== true || ambient || touring || !window.OfficeLobby || !window.OfficeLobby.pure.tourDue(tourSeen(), cur2.view === 'office')) return undefined;
+      // the tour is of an office building (open desks start agents): it waits for one, never in the HQ (#226)
+      if (!readyFor || mount.hq || orient !== true || ambient || touring || !window.OfficeLobby || !window.OfficeLobby.pure.tourDue(tourSeen(), cur2.view === 'office')) return undefined;
       // after the intro flight, once the scene and its lobby are ready (at most 10 s)
       var n = 0, t = setInterval(function () { if (lobbyRef.current && lobbyRef.current.idle()) { clearInterval(t); startTour(); } else if (++n > 40) clearInterval(t); }, reduced() ? 50 : 250);
       return function () { clearInterval(t); };
@@ -889,10 +916,16 @@
     if (planAll.groups.length || planAll.unreadable.length) actions.push({ id: 'page-manager', label: planWaits.length ? 'Manager board (' + planWaits.length + ' waits for you)' : 'Manager board', icon: 'plan', group: 'Office', keywords: 'manager plan goal steps paperclip office tasks approve', run: function () { setDlg({ name: 'manager' }); } });
     planWaits.forEach(function (w, i) { actions.push({ id: 'page-plan-' + i, label: w.text, icon: 'waiting', group: 'Office', keywords: 'manager plan goal approve retry step', run: function () { setDlg({ name: 'manager' }); } }); });
     if (snap && snap.hq && snap.hq.company) actions.push({ id: 'page-hire', label: 'Hire an employee', icon: 'add', group: 'Office', keywords: 'hire hr desk employee agent role budget onboarding paperclip', run: function () { setDlg({ name: 'hire' }); } });
-    actions.push({ id: 'page-hq', label: 'Paperclip HQ', icon: 'hq', group: 'Office', keywords: 'paperclip hq company lobby org chart floors agents budget heartbeats routines supervise runtime install', run: function () { setDlg({ name: 'hq' }); } });
+    actions.push({ id: 'page-hq-grid', label: 'Paperclip write rules', icon: 'security', group: 'Office', keywords: window.OfficeVocab.hq.grid.search.keywords, run: function () { setDlg({ name: 'hq', focus: { kind: 'grid', id: 'rules' } }); } });
+    if (snap && snap.hq && snap.hq.company && snap.hq.taskWrite) actions.push({ id: 'page-new-task', label: 'New Paperclip task', icon: 'plus', group: 'Office', keywords: 'task mailroom create assign comment status issue paperclip', run: function () { setDlg({ name: 'hq', focus: { kind: 'mailroom', id: 'new' } }); } });
+    actions.push({ id: 'page-hq', label: 'Paperclip HQ', icon: 'hq', group: 'Office', keywords: 'paperclip hq company lobby org chart floors agents budget heartbeats routines supervise runtime install profile name instance', run: function () { setDlg({ name: 'hq' }); } });
     // Ctrl+K searches Paperclip (#214): an employee, floor, task, goal, approval or routine opens the HQ at it.
     window.OfficeVocab.hq.searchItems(snap && snap.hq).forEach(function (x) { actions.push({ id: 'page-' + x.id, label: x.label, hint: x.hint, icon: x.icon, group: x.group, keywords: x.keywords, run: function () { setDlg({ name: 'hq', focus: x.ref }); } }); });
     list.forEach(function (b) { if (b.key !== shown) actions.push({ id: 'page-b-' + b.key, label: 'Go to ' + b.name, icon: 'building', group: 'Buildings', keywords: 'building repository ' + b.name, run: function () { pick(b.key); } }); });
+    // Enter the HQ building (#226): its floors (the org chart), its desks (the employees) and the reporting-line cables.
+    // On a phone (820 px and below) it also leaves the list, so the building shows (Back to the list returns).
+    function enterHqHere() { setPhoneList(false); setDlg(null); pick(HQ_KEY); go('office'); }
+    if (hqOn && shown !== HQ_KEY) actions.push({ id: 'page-b-hq', label: 'Go to the HQ of ' + snap.hq.company.name, icon: 'hq', group: 'Buildings', keywords: 'paperclip hq building company employees org chart floors desks cables reporting lines ' + snap.hq.company.name, run: enterHqHere });
     // The Reception lists the office's own actions (the dock had them before #92), so a touch screen reaches them with no keyboard.
     var officeActions = actions.filter(function (a) { return ['page-orientation', 'page-open', 'page-needs', 'page-flow', 'page-sessions', 'page-past', 'page-schedules', 'page-hooks', 'page-kinds', 'page-floors', 'page-city', 'page-compact'].indexOf(a.id) >= 0; })
       .concat([{ id: 'page-search', label: 'Search actions', icon: 'search', run: openPalette }]);
@@ -950,7 +983,7 @@
 
     return h(React.Fragment, null,
       h('div', { className: 'view' + (fading ? ' is-fading' : '') }, scene),
-      phoneOn ? h(PhoneView, { toast: toast, onHq: function () { setDlg({ name: 'hq' }); }, onManager: function () { setDlg({ name: 'manager' }); }, onGo: function (r) { var x = snap && snap.sessions.filter(function (y) { return y.uid === r.uid; })[0]; if (x) { setPhoneList(false); goTo(x); } },
+      phoneOn ? h(PhoneView, { toast: toast, onHq: function () { setDlg({ name: 'hq' }); }, onHqBuilding: enterHqHere, onManager: function () { setDlg({ name: 'manager' }); }, onGo: function (r) { var x = snap && snap.sessions.filter(function (y) { return y.uid === r.uid; })[0]; if (x) { setPhoneList(false); goTo(x); } },
         onOpenAgent: function (uid) { var x = window.officeAdapter.sessionByUid(uid); if (x) { setPhoneList(false); goTo(x); } } }) : null,
       win.w <= PHONE_MAX && !phoneList ? h('div', { className: 'phone-back' }, h(A.Button, { variant: 'emphasis', icon: 'chevron-right', onClick: function () { blurScene(); setBoard(null); setPhoneList(true); } }, 'Back to the list')) : null,
       !ambient && touring && cur2.view === 'office' ? h(TourCard, { onStep: tourStep, onDone: endTour }) : null,
