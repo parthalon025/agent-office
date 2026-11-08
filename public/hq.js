@@ -234,6 +234,13 @@
       form, runDialog);
   }
 
+  // The link out to the item's own page in Paperclip (#225, story 40). The server builds the address (hq-model.mjs paperclipLinker); the page
+  // holds no Paperclip route. No address (a Paperclip that gives no company prefix) shows nothing.
+  function PaperclipLink(p) {
+    if (typeof p.href !== 'string' || !/^http:\/\/127\.0\.0\.1:\d+\//.test(p.href)) return null;
+    return h('a', { className: 'ao-rt-a', href: p.href, target: '_blank', rel: 'noopener noreferrer' }, window.OfficeVocab.hq.linkLabel);
+  }
+
   // One waiting Paperclip approval (#225). The first click sends hq.write with no confirmed flag. Confirm (the Approvals cell)
   // answers 409 { confirm: 'write' }; the painted Confirm sends that same body with confirmed: true. Allow resolves the first call.
   // Deny (approvalWrite false, or a 403) sends nothing. A render sends nothing. A note edit, a new id, or a stale answer drops
@@ -298,7 +305,8 @@
       l.approvals && l.approvals.items.length ? h('ul', { className: 'past' }, l.approvals.items.map(function (a) {
         return h('li', { key: a.id, id: 'hq-approval-' + a.id, className: 'past-row' }, h('div', { className: 'past-main' },
           h('div', { className: 'past-title' }, h('b', null, String(a.kind || 'approval').replace(/_/g, ' ')), a.by ? h(Tag, null, 'From ' + a.by) : null),
-          h(ApprovalDecide, { id: a.id, write: q.approvalWrite !== false, toast: p.toast, place: 'lobby' })));
+          h(PaperclipLink, { href: a.link }),
+          h(ApprovalDecide, { id: a.approval, write: q.approvalWrite !== false, toast: p.toast, place: 'lobby' })));
       })) : null,
       h('h3', { className: 'ext-h' + (p.mark('floor', 'rank-0') ? ' is-found' : ''), id: 'hq-floor-goals' }, 'Executive floor: goals'),
       h(Goals, { q: q, toast: p.toast, mark: p.mark }),
@@ -1034,5 +1042,5 @@
         })) : h('p', { className: 'note' }, 'No agent has a history yet.')));
   }
 
-  O.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel, AdapterInstall: AdapterInstall, ApprovalDecide: ApprovalDecide };
+  O.Hq = { Manager: ManagerDialog, Hq: HqDialog, Trust: TrustDialog, Hire: HireDialog, HireForm: HireForm, Memory: MemoryPanel, AdapterInstall: AdapterInstall, ApprovalDecide: ApprovalDecide, PaperclipLink: PaperclipLink };
 })();

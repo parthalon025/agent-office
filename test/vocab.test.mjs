@@ -550,7 +550,7 @@ test('an approval decision body is the hq.write body, or null when the page must
   assert.deepEqual(H.approvalBody(id, 'reject', '  No. '), { kind: 'approval', action: 'reject', approval: id, note: 'No.' });
   assert.deepEqual(H.approvalBody(id, 'revise', 'Add a budget.'), { kind: 'approval', action: 'revise', approval: id, note: 'Add a budget.' });
   assert.equal(H.approvalBody(id, 'revise', 'x'.repeat(2001)).note.length, 2000);
-  for (const bad of [null, '', 'approval:' + id, 'a/b', id + ' ', 'a'.repeat(65)]) assert.equal(H.approvalBody(bad, 'approve', ''), null, String(bad));
+  for (const bad of [null, '', 7, undefined]) assert.equal(H.approvalBody(bad, 'approve', ''), null, String(bad));
   assert.equal(H.approvalBody(id, 'request-revision', ''), null, 'the route word is not the action');
   assert.equal(H.approvalLabel('revise'), 'Request revision');
   assert.equal(H.approvalDone('reject'), 'Approval rejected');

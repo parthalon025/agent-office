@@ -437,13 +437,12 @@
   }
   function routineDone(c) { return c.action === 'create' ? 'Routine created' : c.action === 'schedule' ? 'Schedule changed' : 'Routine changed'; }
   // One Paperclip approval decision (#225). The page sends this body through hq.write. The Approvals cell asks first.
-  // action is approve, reject or revise. The id is the plain approval id, never the queue id. A note is optional.
+  // action is approve, reject or revise. The id is the plain approval id (the server gives it only when it is a plain id, hq-model.mjs inboxOf), never the queue id. A note is optional.
   // null: the page must not send (a bad id or an unknown action).
   var APPROVAL_ACT = { approve: 'Approve', reject: 'Reject', revise: 'Request revision' };
-  var APPROVAL_DONE = { approve: 'Approval sent', reject: 'Approval rejected', revise: 'Revision requested' };
-  var APPROVAL_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+  var APPROVAL_DONE = { approve: 'Approved', reject: 'Approval rejected', revise: 'Revision requested' };
   function approvalBody(id, action, note) {
-    if (!Object.prototype.hasOwnProperty.call(APPROVAL_ACT, action) || typeof id !== 'string' || !APPROVAL_ID.test(id)) return null;
+    if (!Object.prototype.hasOwnProperty.call(APPROVAL_ACT, action) || typeof id !== 'string' || !id) return null;
     var b = { kind: 'approval', action: action, approval: id };
     var n = String(note || '').trim();
     if (n) b.note = n.slice(0, 2000);
@@ -451,7 +450,7 @@
   }
   function approvalLabel(action) { return APPROVAL_ACT[action] || ''; }
   function approvalDone(action) { return APPROVAL_DONE[action] || 'Approval decided'; }
-  var hq = { kindSupervision: hqKindSupervision, hire: hqHire, adapter: hqAdapter, goals: hqGoals, routineStates: routineStates, routineFacts: routineFacts, routineForm: routineForm, routineCalls: routineCalls, routineDone: routineDone, approvalBody: approvalBody, approvalLabel: approvalLabel, approvalDone: approvalDone, approvalDenied: 'Read only. The HQ write grid denies approvals.', approvalBlocked: 'This approval cannot be decided here.', searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg };
+  var hq = { kindSupervision: hqKindSupervision, hire: hqHire, adapter: hqAdapter, goals: hqGoals, routineStates: routineStates, routineFacts: routineFacts, routineForm: routineForm, routineCalls: routineCalls, routineDone: routineDone, approvalBody: approvalBody, approvalLabel: approvalLabel, approvalDone: approvalDone, linkLabel: 'Open in Paperclip', approvalDenied: 'Read only. The HQ write grid denies approvals.', approvalBlocked: 'This approval cannot be decided here.', searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg };
 
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
   // priced: sessions with a cost figure. unknown: sessions whose agent reports no cost (costUnknown), shown as "unknown".

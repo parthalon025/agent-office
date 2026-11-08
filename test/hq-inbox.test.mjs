@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import '../src/vocab.mjs';
-import { inboxOf, INBOX_CAP } from '../src/hq-model.mjs';
+import { inboxOf, INBOX_CAP, paperclipLinker } from '../src/hq-model.mjs';
 import { createHq } from '../src/paperclip.mjs';
 import { startFakePaperclip, DEMO } from './fixtures/fake-paperclip.mjs';
 
@@ -44,5 +44,36 @@ test('the view of a connected company carries the inbox: the pending approval an
     assert.ok(inbox.find((x) => x.kind === 'approval').text.includes('hire agent'));
     assert.ok(inbox.find((x) => x.kind === 'issue').text.includes('Decide the logo'));
     assert.ok(!JSON.stringify(hq.view()).includes('do-not-show'), 'no payload in the view');
+  } finally { await hq.disconnect(); await pc.close(); }
+});
+
+test('link out (#225): the server builds the Paperclip page of an approval and a task; no key, loopback only, prefix first', () => {
+  const link = paperclipLinker('http://127.0.0.1:3100', 'ACM');
+  assert.equal(link('approval', 'p1'), 'http://127.0.0.1:3100/ACM/approvals/p1');
+  assert.equal(link('issue', 'ACM-12'), 'http://127.0.0.1:3100/ACM/issues/ACM-12');
+  assert.equal(link('approval', 'a/b'), null);
+  assert.equal(link('other', 'p1'), null);
+  assert.equal(paperclipLinker('http://127.0.0.1:3100', '')('approval', 'p1'), null, 'no company prefix: no link');
+  assert.equal(paperclipLinker('http://evil.example:3100', 'ACM')('approval', 'p1'), null, 'not loopback');
+  assert.equal(paperclipLinker('http://user:pw@127.0.0.1:3100', 'ACM')('approval', 'p1'), null, 'no credentials in an address');
+  const agents = [{ id: 'g', name: 'Grace' }];
+  const r = inboxOf({ agents, link, approvals: [{ id: 'p1', type: 't', at: 1 }], issues: [{ id: 'i1', identifier: 'ACM-1', title: 'T', status: 'todo', assigneeUserId: 'u', updatedAt: '2026-01-01' }] });
+  assert.equal(r.find((x) => x.kind === 'approval').link, 'http://127.0.0.1:3100/ACM/approvals/p1');
+  assert.equal(r.find((x) => x.kind === 'issue').link, 'http://127.0.0.1:3100/ACM/issues/ACM-1');
+  assert.equal(inboxOf({ agents, approvals: [{ id: 'p1', type: 't', at: 1 }], issues: [] })[0].link, null, 'no linker: no link');
+});
+
+test('the connected view carries the links of the inbox and the lobby approvals', async () => {
+  const pc = await startFakePaperclip(DEMO());
+  const hq = createHq({ refetchMs: 20, retryMs: [50, 50], hooksFile: () => ({}) });
+  try {
+    await hq.connect({ url: pc.url });
+    for (let n = 0; n < 200 && hq.state() !== 'on'; n++) await new Promise((r) => setTimeout(r, 25));
+    const v = hq.view(), a = v.inbox.find((x) => x.kind === 'approval');
+    assert.equal(a.link, `${pc.url}/ACM/approvals/${a.approval}`);
+    const l = v.lobby.approvals.items[0];
+    assert.equal(l.link, `${pc.url}/ACM/approvals/${l.id}`);
+    assert.equal(l.approval, l.id);
+    assert.ok(!/pcp_|token|key/i.test(a.link));
   } finally { await hq.disconnect(); await pc.close(); }
 });

@@ -87,7 +87,7 @@ const DEMO0 = (hooksFile = null) => {
   const companyId = 'c0ffee00-0000-4000-8000-000000000001';
   const agent = (o) => ({ companyId, urlKey: o.name.toLowerCase(), title: null, icon: null, status: 'idle', reportsTo: null, capabilities: null, adapterType: 'claude_local', runtimeConfig: { heartbeat: { enabled: false } }, budgetMonthlyCents: 0, spentMonthlyCents: 0, pauseReason: null, pausedAt: null, permissions: { canCreateAgents: false }, lastHeartbeatAt: null, metadata: null, createdAt: '2026-11-01T09:00:00.000Z', updatedAt: '2026-11-01T09:00:00.000Z', ...o });
   return {
-    companies: [{ id: companyId, name: 'Acme Robotics', status: 'active', budgetMonthlyCents: 10000, spentMonthlyCents: 1240 }],
+    companies: [{ id: companyId, name: 'Acme Robotics', issuePrefix: 'ACM', status: 'active', budgetMonthlyCents: 10000, spentMonthlyCents: 1240 }],
     agents: [
       // the Paperclip default since 2026.10: claude_local on the ACP engine, which approves every call
       agent({ id: 'a1000000-0000-4000-8000-000000000001', name: 'Grace', role: 'ceo', adapterConfig: { cwd: 'C:/work/acme', model: 'sonnet' }, budgetMonthlyCents: 3000, spentMonthlyCents: 410, runtimeConfig: { heartbeat: { enabled: true, intervalSec: 1800 } }, lastHeartbeatAt: '2026-11-05T08:30:00.000Z' }),

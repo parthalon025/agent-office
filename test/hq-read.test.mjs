@@ -22,7 +22,7 @@ test('read model: the view carries floors from the org chart and the Lobby, and 
     const l = v.lobby;
     assert.deepEqual(l.employees, { total: 3, working: 1, paused: 0, error: 0, unsupervised: 3 });
     assert.deepEqual(l.tasks, { open: 2, todo: 1, inProgress: 1, blocked: 0, inReview: 0, backlog: 0 });
-    assert.deepEqual(l.approvals, { pending: 1, items: [{ id: 'p1000000-0000-4000-8000-000000000001', kind: 'hire_agent', by: 'Grace' }] });
+    assert.deepEqual(l.approvals, { pending: 1, items: [{ id: 'p1000000-0000-4000-8000-000000000001', kind: 'hire_agent', by: 'Grace', approval: 'p1000000-0000-4000-8000-000000000001', link: `${pc.url}/ACM/approvals/p1000000-0000-4000-8000-000000000001` }] });
     assert.equal(l.goals.total, 2);
     assert.deepEqual(l.spend, { spent: 12.4, limit: 100, percent: 12 });
     assert.deepEqual(l.secrets, { count: 1, names: ['GITHUB_TOKEN'] });

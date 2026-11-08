@@ -121,7 +121,7 @@ test('a render sends nothing; Confirm is a second click with the same body', asy
   await tick();
   assert.equal(calls.length, 2);
   assert.deepEqual(calls[1], { kind: 'approval', action: 'approve', approval: ID, note: 'Add a budget.', confirmed: true });
-  assert.equal(toasts.at(-1).title, 'Approval sent');
+  assert.equal(toasts.at(-1).title, 'Approved');
   tree = m.render();
   assert.ok(byText(tree, AO, 'Approve'), 'the row stays until Paperclip drops it');
   assert.equal(calls.length, 2, 'showing the row again sends nothing');
@@ -156,14 +156,14 @@ test('Cancel sends nothing more, and a 409 that is not the ask is an error', asy
   assert.equal(confirmBar(tree, React), null, 'a stale approval is not a Confirm');
 });
 
-test('Deny shows the reason and sends nothing; a bad id sends nothing', async () => {
+test('Deny shows the reason and sends nothing; no id (the server gave none) sends nothing', async () => {
   const { React, AO, Decide, calls, toast } = rig();
   const denied = mount(React, Decide, { id: ID, write: false, toast, place: 'lobby' });
   let tree = denied.render();
   assert.match(text(tree), /denies approvals/);
   assert.equal(buttons(tree, AO).length, 0);
   assert.equal(calls.length, 0);
-  const bad = mount(React, Decide, { id: 'approval:' + ID, write: true, toast, place: 'lobby' });
+  const bad = mount(React, Decide, { id: null, write: true, toast, place: 'lobby' });
   tree = bad.render();
   assert.match(text(tree), /cannot be decided here/);
   assert.equal(calls.length, 0);
@@ -177,7 +177,7 @@ test('Allow sends on the first click; a failed send shows the error and does not
   byText(tree, AO, 'Approve').props.onClick();
   await tick();
   assert.deepEqual(calls, [{ kind: 'approval', action: 'approve', approval: ID }]);
-  assert.equal(toasts[0].title, 'Approval sent');
+  assert.equal(toasts[0].title, 'Approved');
   setMode('fail');
   tree = m.render();
   byText(tree, AO, 'Reject').props.onClick();
@@ -219,8 +219,8 @@ test('a double click sends one request, and a late answer for another approval d
 test('Needs you decides an approval and leaves a task as a link', async () => {
   const { React, AO, sb, Needs, calls, toast } = rig();
   sb.items = [
-    { id: 'hq:approval:' + ID, kind: 'paperclip', item: 'approval', approval: ID, text: 'Approval from Grace: hire agent', buildingName: 'Acme', roomName: 'Approval', t: 5, bot: 'Paperclip' },
-    { id: 'hq:issue:i1', kind: 'paperclip', item: 'issue', approval: null, text: 'Task for you: ACM-1 Plan', buildingName: 'Acme', roomName: 'Task', t: 9, bot: 'Paperclip' },
+    { id: 'hq:approval:' + ID, kind: 'paperclip', item: 'approval', approval: ID, link: 'http://127.0.0.1:3100/ACM/approvals/' + ID, text: 'Approval from Grace: hire agent', buildingName: 'Acme', roomName: 'Approval', t: 5, bot: 'Paperclip' },
+    { id: 'hq:issue:i1', kind: 'paperclip', item: 'issue', approval: null, link: 'http://127.0.0.1:3100/ACM/issues/ACM-1', text: 'Task for you: ACM-1 Plan', buildingName: 'Acme', roomName: 'Task', t: 9, bot: 'Paperclip' },
   ];
   const opened = [];
   const dialog = mount(React, Needs.Dialog, { onClose() {}, onHq: () => opened.push('hq'), onManager() {}, onGo() {}, toast });
@@ -235,7 +235,11 @@ test('Needs you decides an approval and leaves a task as a link', async () => {
   const task = all(tree).filter((e) => e.type === 'li').find((e) => text(e).includes('Task for you'));
   assert.ok(task);
   assert.equal(all(task).some((e) => e.type === sb.OfficePage.Hq.ApprovalDecide), false);
-  assert.match(text(task), /Decide it in Paperclip/);
+  assert.doesNotMatch(text(task), /Decide it in Paperclip/);
+  const taskLink = all(task).find((e) => e.type === sb.OfficePage.Hq.PaperclipLink);
+  assert.equal(taskLink.props.href, 'http://127.0.0.1:3100/ACM/issues/ACM-1');
+  const apLink = all(tree).find((e) => e.type === sb.OfficePage.Hq.PaperclipLink && /approvals/.test(e.props.href));
+  assert.ok(apLink, 'the approval row links out');
   assert.ok(byText(task, AO, 'Open Paperclip HQ'));
   const part = mount(React, decide.type, decide.props);
   part.render();
@@ -265,7 +269,7 @@ test('the HQ lobby uses the same decision part and sends nothing on render', () 
   const { React, sb, calls } = rig();
   const q = {
     company: { name: 'Acme' }, approvalWrite: true, agents: [], routines: [],
-    lobby: { employees: { total: 0, working: 0, paused: 0, error: 0, unsupervised: 0 }, tasks: { open: 0, inProgress: 0, blocked: 0 }, approvals: { pending: 1, items: [{ id: ID, kind: 'hire_agent', by: 'Grace' }] }, goals: { total: 0, items: [] }, spend: null, activity: [] },
+    lobby: { employees: { total: 0, working: 0, paused: 0, error: 0, unsupervised: 0 }, tasks: { open: 0, inProgress: 0, blocked: 0 }, approvals: { pending: 1, items: [{ id: ID, approval: ID, kind: 'hire_agent', by: 'Grace', link: 'http://127.0.0.1:3100/ACM/approvals/' + ID }] }, goals: { total: 0, items: [] }, spend: null, activity: [] },
   };
   const dialog = mount(React, sb.OfficePage.Hq.Hq, { snap: { hq: q }, onClose() {}, onAttach() {}, toast() {} });
   const tree = dialog.render();
@@ -277,4 +281,28 @@ test('the HQ lobby uses the same decision part and sends nothing on render', () 
   assert.equal(decide.props.write, true);
   assert.match(text(lobbyTree), /hire agent/);
   assert.match(text(lobbyTree), /Decide them here/);
+});
+
+test('the Paperclip link opens a new tab with no opener, and a missing or foreign address shows nothing', () => {
+  const { React, sb } = rig();
+  const L = sb.OfficePage.Hq.PaperclipLink;
+  const a = mount(React, L, { href: 'http://127.0.0.1:3100/ACM/approvals/' + ID }).render();
+  assert.equal(a.type, 'a');
+  assert.equal(a.props.target, '_blank');
+  assert.equal(a.props.rel, 'noopener noreferrer');
+  assert.equal(a.props.href, 'http://127.0.0.1:3100/ACM/approvals/' + ID);
+  assert.equal(text(a), 'Open in Paperclip');
+  for (const bad of [null, undefined, '', 'https://example.com/x', 'javascript:alert(1)']) assert.equal(mount(React, L, { href: bad }).render(), null, String(bad));
+});
+
+test('the lobby approval row links out', () => {
+  const { React, sb } = rig();
+  const q = {
+    company: { name: 'Acme' }, approvalWrite: true, agents: [], routines: [],
+    lobby: { employees: { total: 0, working: 0, paused: 0, error: 0, unsupervised: 0 }, tasks: { open: 0, inProgress: 0, blocked: 0 }, approvals: { pending: 1, items: [{ id: ID, approval: ID, kind: 'hire_agent', by: 'Grace', link: 'http://127.0.0.1:3100/ACM/approvals/' + ID }] }, goals: { total: 0, items: [] }, spend: null, activity: [] },
+  };
+  const dialog = mount(React, sb.OfficePage.Hq.Hq, { snap: { hq: q }, onClose() {}, onAttach() {}, toast() {} });
+  const lobby = all(dialog.render()).find((e) => e.props && e.props.q === q);
+  const link = all(mount(React, lobby.type, lobby.props).render()).find((e) => e.type === sb.OfficePage.Hq.PaperclipLink);
+  assert.equal(link.props.href, 'http://127.0.0.1:3100/ACM/approvals/' + ID);
 });
