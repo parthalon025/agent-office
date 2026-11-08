@@ -566,3 +566,44 @@ test('hire: refused with the reason while the adapter is missing or off, before 
     assert.match(made.id, /^a4000000/);
   } finally { await r.done(); }
 });
+
+// ---------- profile settings (#228): the signed-in person's name, PATCH /api/auth/profile through the grid ----------
+test('profile() reads the signed-in person and drops the picture; a key that is no person\'s is an error, not a throw', async () => {
+  const r = await rig({});
+  try {
+    const p = await r.hq.profile();
+    assert.deepEqual(p, { id: 'u1', name: 'Justin', email: 'j@example.com', error: null });
+    assert.doesNotMatch(JSON.stringify(p), /do-not-show|base64/);
+  } finally { await r.done(); }
+  const n = await rig({}, { ...DEMO(), noProfile: true });
+  try {
+    const p = await n.hq.profile();
+    assert.equal(p.name, null);
+    assert.match(p.error, /does not accept the board key/);
+    assert.doesNotMatch(JSON.stringify(p), new RegExp(KEY));
+  } finally { await n.done(); }
+});
+
+test('the profile name waits for the Confirm, then is one PATCH with the name only; bad names are refused before anything is sent', async () => {
+  const r = await rig({});
+  try {
+    const e = await r.hq.write({ kind: 'profile', action: 'name', name: ' Justin M ' }).then(() => null, (x) => x);
+    assert.equal(e.status, 409);
+    assert.equal(e.answer.body.write.summary, 'Change your Paperclip profile name to "Justin M"');
+    assert.equal(r.writes().length, 0);
+    for (const b of [{}, { name: '' }, { name: '   ' }, { name: 7 }, { name: 'x'.repeat(121) }]) {
+      await assert.rejects(r.hq.write({ kind: 'profile', action: 'name', ...b }, { confirmed: true }), (x) => x.status === 400, JSON.stringify(b));
+    }
+    assert.equal(r.writes().length, 0);
+    assert.deepEqual(await r.hq.write({ kind: 'profile', action: 'name', name: ' Justin M ' }, { confirmed: true }), { ok: true });
+    assert.deepEqual(r.writes(), [['PATCH', '/api/auth/profile', { name: 'Justin M' }]]);
+    assert.equal((await r.hq.profile()).name, 'Justin M');
+    assert.ok(r.feed.some(([, t]) => /Justin M/.test(t)));
+    assert.ok(!JSON.stringify(r.feed).includes(KEY));
+  } finally { await r.done(); }
+  const d = await rig({ profile: 'deny' });
+  try {
+    await assert.rejects(d.hq.write({ kind: 'profile', action: 'name', name: 'X' }, { confirmed: true }), (x) => x.status === 403 && /Your Paperclip profile/.test(x.message));
+    assert.equal(d.writes().length, 0);
+  } finally { await d.done(); }
+});

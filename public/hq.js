@@ -895,6 +895,37 @@
             })) : h('p', { key: 'en', className: 'note' }, 'Paperclip has no environment.')]);
   }
 
+  // Profile settings (#228), owner only, beside the instance settings: the name of the person the board key signs in as. The office reads the
+  // name and the e-mail and writes the name only (one write of the grid's Your Paperclip profile cell behind a painted Confirm); it never
+  // shows or sends the picture.
+  function Profile(p) {
+    var st = useState({ pro: undefined, err: '' }), s = st[0], setS = st[1];
+    var nm = useState(null), name = nm[0], setName = nm[1];
+    var ps = useState(false), pend = ps[0], setPend = ps[1];
+    var bz = useState(false), busy = bz[0], setBusy = bz[1];
+    function load() { client.get('hqProfile').then(function (j) { setS({ pro: j.profile || null, err: '' }); }, function (x) { setS({ pro: null, err: x.message }); }); }
+    useEffect(function () { load(); }, []);
+    function send() {
+      var body = { kind: 'profile', action: 'name', name: name.trim(), confirmed: true };
+      setBusy(true);
+      client.send('hqWrite', body).then(function () { setBusy(false); setPend(false); setName(null); p.toast({ tone: 'success', title: 'Done', text: 'Profile name changed.' }); load(); },
+        function (x) { setBusy(false); setPend(false); p.toast({ tone: 'error', title: 'Not changed', text: x.message }); });
+    }
+    var pro = s.pro, shown = name === null ? (pro && pro.name) || '' : name, changed = !!pro && !pro.error && shown.trim() && shown.trim() !== (pro.name || '');
+    return h('div', { className: 'hq-floor', id: 'hq-profile' },
+      h('h3', { className: 'ext-h' }, 'Your Paperclip profile'),
+      h('p', { className: 'note' }, 'This is the person the office signs in to Paperclip as. Only you, the owner, can change it here. The change asks first, as the write grid says (Your Paperclip profile). The office changes the name only. It does not show or change the picture or the e-mail.'),
+      s.err ? h('p', { className: 'ao-err', role: 'alert' }, 'The office could not read the profile. ' + s.err)
+        : pro === undefined ? h('p', { className: 'note', role: 'status' }, 'Reading the profile.')
+        : !pro ? h('p', { className: 'note' }, 'The office is not connected to Paperclip.')
+        : pro.error ? h('p', { className: 'ao-err', role: 'alert' }, 'The office could not read the profile. ' + pro.error)
+        : h('div', { className: 'form' },
+          pro.email ? h('p', { className: 'note' }, 'Signed in as ' + pro.email + '.') : null,
+          h(A.TextInput, { id: 'profile-name', label: 'Name', value: shown, onChange: function (v) { setName(v); setPend(false); } }),
+          h('div', { className: 'inline-actions' }, h(A.Button, { variant: 'quiet', icon: 'approve', disabled: !changed, onClick: function () { setPend(true); } }, 'Save name')),
+          pend ? h(ConfirmBar, { key: 'cp', busy: busy, text: 'Change your Paperclip profile name to "' + shown.trim() + '".', onConfirm: send, onCancel: function () { setPend(false); } }) : null));
+  }
+
   // The HQ: what Paperclip says about its company. Goals, routines and company admin have their own writes (Goals, Routines, Access); the rest
   // is read only. Supervise
   // in office is on the Agents screen of a Security room, with its painted Confirm (no button here: one place for a write).
@@ -936,6 +967,7 @@
         h(SelfApproval, { toast: p.toast }),
         h(CompanyBudget, { toast: p.toast }),
         h(Portability, { company: q.company.name, toast: p.toast }),
+        h(Profile, { toast: p.toast }),
         h(Instance, { toast: p.toast }),
         h('h3', { className: 'ext-h' }, 'Agents'),
         q.agents.length ? h('ul', { className: 'past' }, q.agents.map(function (a) {

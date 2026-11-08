@@ -85,6 +85,8 @@ export const SHAPES = {
   // instance's environments (routes/environments.ts), the export bundle of a company (routes/companies.ts) and what an import answers.
   instanceSettings: { list: false, fields: { id: 'string', defaultEnvironmentId: 'string?', general: 'object' } },
   environments: { list: true, fields: { id: 'string', name: 'string', driver: 'string', status: 'string' } },
+  // The signed-in person's profile (#228, routes/auth.ts GET /api/auth/profile, currentUserProfileSchema): id, e-mail, name and picture; the office keeps the first three.
+  userProfile: { list: false, fields: { id: 'string', name: 'string?', email: 'string?' } },
   exportBundle: { list: false, fields: { rootPath: 'string', manifest: 'object', files: 'object' } },
   importPreview: { list: false, fields: { plan: 'object', warnings: 'array', errors: 'array' } },
   importResult: { list: false, fields: { company: 'object' } },
