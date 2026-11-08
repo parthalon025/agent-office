@@ -98,7 +98,7 @@ Server (`src/`):
 
 Paperclip (`src/`):
 - `paperclip.mjs`: the HQ watcher, the supervision checks and the one writer (`hq.write`).
-- `hq-model.mjs`: the pure HQ read model (org chart, lobby, costs, rooms, search), self-approval, the office adapter state.
+- `hq-model.mjs`: the pure HQ read model (org chart, lobby, costs, rooms, search), self-approval, the office adapter state. `mailroomOf` (#224) lists the open tasks for the mailroom (`view().tasks`; page: `Mailroom` in `public/hq.js`, words in `OfficeVocab.hq.tasks`, Ctrl+K New Paperclip task; every change is one `hqWrite` of kind task or comment).
 - `hq-writes/`: the write kinds, one file each (grid row, requests, what Paperclip must answer, the ids returned, samples); `index.mjs` lists them in grid order with the grid rules and `planWrite`; `shared.mjs` their checks and limits.
 - `paperclip-runtime.mjs`: the Paperclip the office installs, runs, updates or connects to; the board key.
 - `paperclip-runs.mjs`, `integrations/paperclip-adapter/`: runs Paperclip hands to the office; the adapter plugin Paperclip loads.

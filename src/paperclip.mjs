@@ -153,7 +153,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { runIds, cleanIds } from './payload.mjs';
 import { readArgs, CLAUDE_FLAGS_VERSION } from './providers/claude-code.mjs';
-import { paperclipLinker, floorsOf, cablesOf, goalsOf, lobbyOf, inboxOf, costsOf, catalogOf, roomsOf, monthWindows, searchOf, shapeProblems, officeAdapterOf, NEVER_SELF_APPROVED, selfApprovalOn } from './hq-model.mjs';
+import { paperclipLinker, floorsOf, cablesOf, goalsOf, lobbyOf, inboxOf, mailroomOf, costsOf, catalogOf, roomsOf, monthWindows, searchOf, shapeProblems, officeAdapterOf, NEVER_SELF_APPROVED, selfApprovalOn } from './hq-model.mjs';
 import { WRITES, writeRegistry } from './hq-writes/index.mjs';
 import { gridError as httpError, obj, strings, text, ID_RE } from './hq-writes/shared.mjs';
 import { archetypeOf, GENERAL } from './archetypes.mjs';
@@ -796,7 +796,7 @@ export function createHq(deps = {}) {
     if (!c) return null;
     const others = c.companyId ? list(c.all).filter((x) => x.id !== c.companyId).slice(0, 12).map((x) => ({ id: x.id, name: x.name })) : [];
     const base = { state: c.state, url: c.url, error: c.error, companies: c.state === 'choose' ? c.companies : null, others };
-    if (!d) return { ...base, company: null, budget: null, agents: [], routines: [], floors: [], cables: [], inbox: null, rooms: [], goals: null, lobby: null, search: [], contract: [] };
+    if (!d) return { ...base, company: null, budget: null, agents: [], routines: [], floors: [], cables: [], inbox: null, rooms: [], goals: null, tasks: null, lobby: null, search: [], contract: [] };
     const agents = [...d.agents.values()].filter((a) => a.status !== 'terminated').map(agentView), hr = d.hqRead;
     const link = paperclipLinker(c.url, d.company.issuePrefix);
     const lobby = lobbyOf({
@@ -814,6 +814,7 @@ export function createHq(deps = {}) {
       rooms: known('projects') ? roomsOf({ projects: d.projects, agents, issues: known('issues') ? d.issues : null }) : [],
       cables: cablesOf(agents),
       goals: known('goals') ? goalsOf(hr.goals, agents) : null,
+      tasks: mailroomOf({ agents, issues: known('issues') ? d.issues : null, link }),
       inbox: inboxOf({ link, agents, issues: known('issues') ? d.issues : null, approvals: known('approvals') ? hr.approvals : null }),
       lobby, contract: d.contract,
       routines,

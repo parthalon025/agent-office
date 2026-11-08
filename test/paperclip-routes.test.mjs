@@ -172,7 +172,9 @@ test('org chart editor (#202): the snapshot carries the cables; the reporting li
   assert.ok(Array.isArray(s.hq.cables) && s.hq.cables.length === 2, 'cables in the snapshot');
   assert.equal(s.hq.reportingWrite, true, 'the grid does not deny reporting lines by default: the editor is writable');
   assert.equal(s.hq.goalWrite, true, 'goal writes are not denied by the grid by default (Confirm): the goal forms show');
-  assert.equal(s.hq.approvalWrite, true, 'approval writes are not denied by the grid by default (Confirm): the decision buttons show');
+  assert.deepEqual([s.hq.taskWrite, s.hq.commentWrite], [true, true], 'Tasks and Comments default to Allow: the mailroom shows its forms');
+  assert.ok(Array.isArray(s.hq.tasks) && s.hq.tasks.every((t) => t.id && t.status), 'the snapshot lists the open tasks for the mailroom');
+  assert.equal(s.hq.approvalWrite, true,'approval writes are not denied by the grid by default (Confirm): the decision buttons show');
   assert.deepEqual(s.hq.goals.rows.map((r) => [r.title, r.depth, r.owner]), [['Ship the Q1 roadmap', 0, 'Grace'], ['Health route', 1, 'Ada']], 'the executive floor goals are a tree with owner names');
   const [grace, ada, linus] = DEMO().agents;
   const patches = () => pc.requests.filter((q) => q.method === 'PATCH').length;
