@@ -2,7 +2,8 @@
    The request rows with their three layers (RequestLayers), GroupRow, QueueList (uses Merge.use and Merge.Row), NeedsDialog,
    PhoneView (#148; PHONE_MAX; below 820 px) and openPalette. The paper flow itself (Ready to merge, the pipeline board) is
    in merge.js. The Paperclip HQ card of the phone list lists the employees and what needs the user from OfficeVocab.hq.phone
-   (#215). Plain functions over the page core (window.OfficePage); they put their names on it for office.js.
+   (#215). A Paperclip approval row decides the approval (Hq.ApprovalDecide). A task row links to the task in Paperclip (Hq.PaperclipLink) and has Open Paperclip HQ.
+   Plain functions over the page core (window.OfficePage); they put their names on it for office.js.
    Interface: OfficePage.Needs = { Dialog, Phone, PHONE_MAX, openPalette }. Needs page-core.js and merge.js. */
 (function () {
   'use strict';
@@ -64,9 +65,14 @@
           var r = g.items[0];
           if (r.kind === 'plan') return h('li', { key: r.id, className: 'past-row' }, h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h(A.Icon, { name: 'plan', size: 16 }), h('b', null, r.text), h(Tag, null, r.buildingName))),
             h('div', { className: 'past-actions' }, h(A.Button, { variant: 'emphasis', icon: 'plan', onClick: function () { p.onManager(); } }, 'Open Manager board')));
+          if (r.kind === 'paperclip' && r.item === 'approval') return h('li', { key: r.id, className: 'past-row' }, h('div', { className: 'past-main' },
+            h('div', { className: 'past-title' }, h(A.Icon, { name: 'hq', size: 16 }), h('b', null, r.text), h(Tag, null, r.buildingName)),
+            h('div', { className: 'past-meta mono' }, 'Paperclip approval' + (r.t ? ' · ' + ago(r.t) : '') + '.'),
+            O.Hq && O.Hq.ApprovalDecide ? h(O.Hq.ApprovalDecide, { id: r.approval, write: !(snap.hq && snap.hq.approvalWrite === false), toast: p.toast, place: 'needs' }) : null),
+            h('div', { className: 'past-actions' }, O.Hq && O.Hq.PaperclipLink ? h(O.Hq.PaperclipLink, { href: r.link }) : null, h(A.Button, { variant: 'quiet', icon: 'hq', onClick: function () { p.onHq(); } }, 'Open Paperclip HQ')));
           if (r.kind === 'paperclip') return h('li', { key: r.id, className: 'past-row' }, h('div', { className: 'past-main' }, h('div', { className: 'past-title' }, h(A.Icon, { name: 'hq', size: 16 }), h('b', null, r.text), h(Tag, null, r.buildingName)),
-            h('div', { className: 'past-meta mono' }, 'Paperclip ' + r.roomName.toLowerCase() + (r.t ? ' · ' + ago(r.t) : '') + '. Decide it in Paperclip.')),
-            h('div', { className: 'past-actions' }, h(A.Button, { variant: 'emphasis', icon: 'hq', onClick: function () { p.onHq(); } }, 'Open Paperclip HQ')));
+            h('div', { className: 'past-meta mono' }, 'Paperclip ' + r.roomName.toLowerCase() + (r.t ? ' · ' + ago(r.t) : '') + '.')),
+            h('div', { className: 'past-actions' }, O.Hq && O.Hq.PaperclipLink ? h(O.Hq.PaperclipLink, { href: r.link }) : null, h(A.Button, { variant: 'quiet', icon: 'hq', onClick: function () { p.onHq(); } }, 'Open Paperclip HQ')));
           if (r.kind === 'merge') return h(O.Merge.Row, { key: r.id, r: r, busy: M.busy, onMerge: function (x) { M.start(x); } });
           var q = r.kind === 'question';
           return h('li', { key: r.id, className: 'past-row' },

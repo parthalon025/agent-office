@@ -780,11 +780,12 @@ test('requests: a goal that waits for approval and a failed office step are in N
 // The Paperclip inbox (#210): a pending approval or a task for the user is in Needs you, in the one queue, with the company named.
 test('requests: Paperclip inbox items join the queue; they open in the list, not at a desk', async () => {
   const r = rig();
-  r.hq = { company: { name: 'Acme' }, inbox: [{ id: 'approval:p1', kind: 'approval', text: 'Approval from Grace: hire agent', by: 'Grace', at: 5 }, { id: 'issue:i1', kind: 'issue', text: 'Task for you: ACM-1 Plan', by: '', at: 9 }] };
+  r.hq = { company: { name: 'Acme' }, inbox: [{ id: 'approval:p1', kind: 'approval', approval: 'p1', link: 'http://127.0.0.1:3100/ACM/approvals/p1', text: 'Approval from Grace: hire agent', by: 'Grace', at: 5 }, { id: 'issue:i1', kind: 'issue', text: 'Task for you: ACM-1 Plan', by: '', at: 9 }] };
   r.push();
   const list = r.store.requests();
-  assert.deepEqual(list.map((x) => [x.kind, x.id, x.text, x.buildingName, x.uid]), [
-    ['paperclip', 'hq:approval:p1', 'Approval from Grace: hire agent', 'Acme', null], ['paperclip', 'hq:issue:i1', 'Task for you: ACM-1 Plan', 'Acme', null]]);
+  assert.deepEqual(list.map((x) => [x.kind, x.id, x.text, x.buildingName, x.uid, x.approval]), [
+    ['paperclip', 'hq:approval:p1', 'Approval from Grace: hire agent', 'Acme', null, 'p1'], ['paperclip', 'hq:issue:i1', 'Task for you: ACM-1 Plan', 'Acme', null, null]]);
+  assert.deepEqual(list.map((x) => x.link), ['http://127.0.0.1:3100/ACM/approvals/p1', null], 'the server link is carried; none stays null');
   const q = r.store.queue();
   assert.equal(q.count, 2);
   assert.deepEqual(q.reach(q.oldest), { via: 'list' });

@@ -295,12 +295,13 @@
   }
 
   // What Paperclip holds for the user (#210): its pending approvals and the tasks assigned to a person (snap.hq.inbox, hq-model.mjs inboxOf).
-  // Not a session's request: it has no desk, so it opens in the Needs you list, and the answer is given in Paperclip (HQ dialog).
+  // Not a session's request: it has no desk. An approval carries its plain id (`approval`) so Needs you can decide it through hq.write.
+  // A task has no approval id and stays a link to the HQ dialog.
   function hqRequests(snap) {
     var q = snap && snap.hq;
     if (!q || !q.company || !q.inbox) return [];
     return q.inbox.map(function (x) {
-      return { id: 'hq:' + x.id, kind: 'paperclip', item: x.kind, text: x.text, uid: null, bot: 'Paperclip', building: '', buildingName: q.company.name, roomName: x.kind === 'approval' ? 'Approval' : 'Task', t: x.at || 0 };
+      return { id: 'hq:' + x.id, kind: 'paperclip', item: x.kind, approval: x.kind === 'approval' && typeof x.approval === 'string' ? x.approval : null, link: typeof x.link === 'string' ? x.link : null, text: x.text, uid: null, bot: 'Paperclip', building: '', buildingName: q.company.name, roomName: x.kind === 'approval' ? 'Approval' : 'Task', t: x.at || 0 };
     });
   }
 

@@ -24,7 +24,7 @@ function load(file) {
 const SHAPES = {
   'schedules.js': ['Schedules', ['Dialog']],
   'extensions.js': ['Extensions', ['Dialog']],
-  'hq.js': ['Hq', ['AdapterInstall', 'Hire', 'HireForm', 'Hq', 'Manager', 'Memory', 'Trust']],
+  'hq.js': ['Hq', ['AdapterInstall', 'ApprovalDecide', 'Hire', 'HireForm', 'Hq', 'Manager', 'Memory', 'PaperclipLink', 'Trust']],
   'characters.js': ['Characters', ['Dialog']],
   'skills.js': ['Skills', ['Dialog']],
   'merge.js': ['Merge', ['Flow', 'Row', 'use']],

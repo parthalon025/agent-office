@@ -51,11 +51,12 @@ export function verdict(results, limits = LIMITS) {
 const VIS = '(()=>{const r=e.getBoundingClientRect();if(!(r.width>0&&r.height>0))return false;if(r.bottom<0||r.top>innerHeight||r.right<0||r.left>innerWidth)return true;const t=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return !!t&&(t===e||e.contains(t))})()';
 const LABEL = '(e.getAttribute("aria-label")||e.textContent).trim()';
 const ITEMS = 'document.querySelectorAll("button,[role=option],[role=menuitem]")';
-/** Expression for the first visible control whose label starts with `text` (`last`: the last one, the top dialog's). */
-const control = (text, { exact = false, last = false } = {}) => {
+/** Expression for the first visible control whose label starts with `text` (`last`: the last one, the top dialog's; `beside`: only one whose row also has a button with that label, so the Approve of an agent request is not the Approve of a Paperclip approval, #225). */
+const control = (text, { exact = false, last = false, beside = '' } = {}) => {
   const t = JSON.stringify(text);
   const test = exact ? `${LABEL}===${t}` : `${LABEL}.startsWith(${t})`;
-  return `(()=>{const l=[...${ITEMS}].filter(e=>${VIS}&&${test});return l[${last ? 'l.length-1' : '0'}]||null})()`;
+  const sib = beside ? `&&[...e.parentElement.querySelectorAll("button")].some(b=>b.textContent.trim().startsWith(${JSON.stringify(beside)}))` : '';
+  return `(()=>{const l=[...${ITEMS}].filter(e=>${VIS}&&${test}${sib});return l[${last ? 'l.length-1' : '0'}]||null})()`;
 };
 const seen = (text, opts) => `!!${control(text, opts)}`;
 const textHas = (s) => `document.body.innerText.includes(${JSON.stringify(s)})`;
@@ -158,8 +159,8 @@ export async function run({ shots = true } = {}) {
           await sleep(500);
         },
         steps: [
-          { label: 'open the queue', run: async () => { if (await p.evaluate(seen('Approve', { exact: true }))) return false; return p.click(control('Needs you')); } },
-          { label: 'Approve', run: async () => { await p.waitFor(seen('Approve', { exact: true }), 8000, 'Approve'); return p.click(control('Approve', { exact: true })); } },
+          { label: 'open the queue', run: async () => { if (await p.evaluate(seen('Approve', { exact: true, beside: 'Decline' }))) return false; return p.click(control('Needs you')); } },
+          { label: 'Approve', run: async () => { await p.waitFor(seen('Approve', { exact: true, beside: 'Decline' }), 8000, 'Approve'); return p.click(control('Approve', { exact: true, beside: 'Decline' })); } },
         ],
         goal: null,   // the hook answer, below
         extra: async () => { const a = await Promise.race([held, sleep(8000).then(() => null)]); return !!a && JSON.stringify(a).includes('allow'); },

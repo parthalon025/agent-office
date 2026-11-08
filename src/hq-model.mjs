@@ -12,9 +12,11 @@
 // - lobbyOf(...): the dashboard counts and short lists.
 // - inboxOf({ agents, issues, approvals }) (#210): what Paperclip holds for the user, as items of the one queue: each pending
 //   approval, then each open task with a person assignee (assigneeUserId), oldest first, capped at INBOX_CAP. Names only, never a
-//   payload. Null when neither list was read. It is `view().inbox`. public/building.js hqRequests makes them requests of kind
-//   `paperclip` (id hq:..., no uid), so they count in Needs you, the queue, the alerts and the tab title, and open in the Needs you
-//   list with Open Paperclip HQ, not at a desk. Tested in test/hq-inbox.test.mjs and test/building.test.mjs.
+//   payload. Null when neither list was read. It is `view().inbox`. An approval item also carries `approval`, the plain id the page
+//   sends to hq.write (never the queue id). public/building.js hqRequests makes them requests of kind `paperclip` (id hq:..., no uid),
+//   so they count in Needs you, the queue, the alerts and the tab title. An approval is decided in that list and in the HQ lobby.
+//   A task row stays Open Paperclip HQ. Neither opens a desk. Tested in test/hq-inbox.test.mjs, test/building.test.mjs and
+//   test/approval-desk.test.mjs.
 // - searchOf(...) (the Ctrl+K index, #214): one entry per employee, floor, open task, goal, pending approval and routine, names and
 //   statuses only, capped per kind by SEARCH_CAPS. It is `view().search`. The page turns it into palette actions with
 //   OfficeVocab.hq.searchItems, and a pick opens the HQ dialog with focus: { kind, id }: a found card, and the row of an employee,
@@ -249,6 +251,7 @@ const ACTIVE_RUN = new Set(['running', 'queued']);
  *   activity: [{ id, text, at }]|null, costs: { spent, limit }|null, secrets: [name]|null, unread: [route names] }.
  */
 export function lobbyOf(i) {
+  const link = i.link || (() => null);
   const n = (st) => (i.issues || []).filter((x) => x && x.status === st).length;
   const nameOf = (id) => (i.agents.find((a) => a.id === id) || {}).name || '';
   const tasks = i.issues ? { open: n('backlog') + n('todo') + n('in_progress') + n('in_review') + n('blocked'), todo: n('todo'), inProgress: n('in_progress'), blocked: n('blocked'), inReview: n('in_review'), backlog: n('backlog') } : null;
@@ -262,7 +265,7 @@ export function lobbyOf(i) {
       unsupervised: i.agents.filter((a) => a.supervision && a.supervision.state !== 'supervised').length,
     },
     tasks,
-    approvals: i.approvals ? { pending: i.approvals.length, items: i.approvals.slice(0, 5).map((p) => ({ id: p.id, kind: p.type, by: nameOf(p.requestedByAgentId) })) } : null,
+    approvals: i.approvals ? { pending: i.approvals.length, items: i.approvals.slice(0, 5).map((p) => ({ id: p.id, kind: p.type, by: nameOf(p.requestedByAgentId), approval: typeof p.id === 'string' && ID_RE.test(p.id) ? p.id : null, link: link('approval', p.id) })) } : null,
     goals: i.goals ? { total: i.goals.length, items: i.goals.slice(0, 6).map((g) => ({ id: g.id, title: g.title, status: g.status })) } : null,
     spend: i.costs ? { spent: i.costs.spent, limit: i.costs.limit, percent: pct } : null,
     activity: i.activity,
@@ -271,6 +274,25 @@ export function lobbyOf(i) {
   };
 }
 
+
+// ---------- the link out (#225, story 40 of #191) ----------
+// The page of an approval or a task in Paperclip's own web UI: <address>/<issuePrefix>/approvals/<id> and <address>/<issuePrefix>/issues/<id or identifier>.
+// Routes from the UI router (ui/src/App.tsx, Paperclip 0.3.1, read from D:\SSD\AI_Tools\paperclip: the pinned server serves the built UI from ui-dist,
+// which npm run paperclip:source does not fetch). The company prefix comes first (company.issuePrefix, @paperclipai/shared types/company.d.ts); an
+// unprefixed approval path is not routed. Built here so the page holds no Paperclip routing rule. The address is the connected loopback address;
+// no key, no query. null: unknown.
+const PREFIX_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,15}$/;
+const LINK_PATH = { approval: 'approvals', issue: 'issues' };
+export function paperclipLinker(base, prefix) {
+  let origin = '';
+  try { const u = new URL(String(base || '')); if (u.protocol === 'http:' && u.hostname === '127.0.0.1' && !u.username && !u.password) origin = u.origin; } catch { /* no address */ }
+  const pre = typeof prefix === 'string' && PREFIX_RE.test(prefix) ? prefix : '';
+  return (kind, id) => {
+    const seg = LINK_PATH[kind] || '';
+    const t = typeof id === 'string' ? id : '';
+    return origin && pre && seg && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/.test(t) ? `${origin}/${pre}/${seg}/${encodeURIComponent(t)}` : null;
+  };
+}
 
 // ---------- the inbox (#210) ----------
 /**
@@ -281,17 +303,19 @@ export function lobbyOf(i) {
  */
 export const INBOX_CAP = 20;
 export function inboxOf(i) {
+  const link = i.link || (() => null);
   if (!i.approvals && !i.issues) return null;
   const nameOf = (id) => (i.agents.find((a) => a.id === id) || {}).name || '';
   const out = [];
   for (const p of i.approvals || []) {
     const by = nameOf(p.requestedByAgentId), kind = String(p.type || 'request').replace(/_/g, ' ');
-    out.push({ id: `approval:${p.id}`, kind: 'approval', text: by ? `Approval from ${by}: ${kind}` : `Approval: ${kind}`, by, at: p.at || 0 });
+    const raw = typeof p.id === 'string' ? p.id : '';
+    out.push({ id: `approval:${raw}`, kind: 'approval', approval: ID_RE.test(raw) ? raw : null, link: link('approval', raw), text: by ? `Approval from ${by}: ${kind}` : `Approval: ${kind}`, by, at: p.at || 0 });
   }
   for (const x of i.issues || []) {
     if (!x || !x.id || !x.assigneeUserId || x.status === 'done' || x.status === 'cancelled') continue;
     const name = [x.identifier, x.title].filter(Boolean).join(' ');
-    out.push({ id: `issue:${x.id}`, kind: 'issue', text: `Task for you${x.status === 'blocked' ? ' (blocked)' : ''}: ${name || 'untitled'}`, by: '', at: Date.parse(x.updatedAt || x.createdAt || '') || 0 });
+    out.push({ id: `issue:${x.id}`, kind: 'issue', link: link('issue', x.identifier || x.id), text: `Task for you${x.status === 'blocked' ? ' (blocked)' : ''}: ${name || 'untitled'}`, by: '', at: Date.parse(x.updatedAt || x.createdAt || '') || 0 });
   }
   return out.sort((a, b) => a.at - b.at).slice(0, INBOX_CAP);
 }

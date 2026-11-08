@@ -34,7 +34,7 @@ test('the Lobby counts what Paperclip said and says unknown (null) for what it c
   assert.deepEqual(l.employees, { total: 2, working: 1, paused: 1, error: 0, unsupervised: 1 });
   assert.deepEqual(l.tasks, { open: 3, todo: 1, inProgress: 1, blocked: 1, inReview: 0, backlog: 0 });
   assert.equal(l.goals, null);
-  assert.deepEqual(l.approvals, { pending: 1, items: [{ id: 'p', kind: 'hire_agent', by: 'Ada' }] });
+  assert.deepEqual(l.approvals, { pending: 1, items: [{ id: 'p', kind: 'hire_agent', by: 'Ada', approval: 'p', link: null }] });
   assert.deepEqual(l.spend, { spent: 12.4, limit: 100, percent: 12 });
   assert.deepEqual(l.secrets, { count: 1, names: ['A'] });
   assert.equal(lobbyOf({ agents: [], issues: null, approvals: null, goals: null, activity: null, costs: null, secrets: null, unread: [] }).tasks, null);
