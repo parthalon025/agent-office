@@ -230,3 +230,23 @@ test('org chart (#202): a loop, a self report, an unknown employee or manager is
     assert.equal(pc.requests.filter((r) => r.method === 'PATCH').length, 0);
   } finally { hq.disconnect(); await pc.close(); }
 });
+
+test('costs (#227): the month cost is asked for the month; a company with no cost number is unknown, not $0.00', async () => {
+  const pc = await startFakePaperclip(DEMO());
+  const hq = createHq({ ...fast, hooksFile: () => HOOKS });
+  try {
+    await hq.connect({ url: pc.url });
+    await until(() => hq.state() === 'on', 'the events socket');
+    await until(() => pc.requests.some((r) => /\/costs\/summary$/.test(r.path)), 'the cost read');
+    assert.ok(pc.requests.some((r) => /\/costs\/summary$/.test(r.path) && r.query === '?period=month'), 'the summary is the month summary of the release');
+    assert.deepEqual(hq.view().lobby.spend, { spent: 12.4, limit: 100, percent: 12 });
+  } finally { hq.disconnect(); await pc.close(); }
+  const seed = DEMO(), { spentMonthlyCents, budgetMonthlyCents, ...bare } = seed.companies[0];
+  const pc2 = await startFakePaperclip({ ...seed, companies: [bare], costs: null });
+  const hq2 = createHq({ ...fast, hooksFile: () => HOOKS });
+  try {
+    await hq2.connect({ url: pc2.url });
+    await until(() => hq2.state() === 'on', 'the events socket');
+    assert.equal(hq2.view().lobby.spend, null, 'no cost number: unknown');
+  } finally { hq2.disconnect(); await pc2.close(); }
+});

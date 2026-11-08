@@ -305,6 +305,15 @@
     if (st === 'missing') return { line: 'Office adapter: not installed', ok: false, install: true, why: why };
     return { line: 'Office adapter: unknown', ok: false, install: false, why: why || 'The office has not read the adapter list of Paperclip yet.' };
   }
+  // The Paperclip line of the Spend screen (#227): the company's cost this month and its budget. No connection: no line. A cost the office
+  // could not read is unknown, never $0.00.
+  function hqSpendLine(q) {
+    if (!q || !q.company) return '';
+    var sp = q.lobby && q.lobby.spend;
+    if (!sp) return 'Paperclip, this month: cost unknown.';
+    if (!(sp.limit > 0)) return 'Paperclip, this month: ' + money(sp.spent) + '. No budget set.';
+    return 'Paperclip, this month: ' + money(sp.spent) + ' of ' + money(sp.limit) + (sp.percent != null ? ' (' + sp.percent + '%)' : '') + '.';
+  }
   function hqPlural(n, one) { return n + ' ' + (n === 1 ? one : one + 's'); }
   function hqGlance(q) {
     var l = q && q.lobby;
@@ -450,7 +459,7 @@
   }
   function approvalLabel(action) { return APPROVAL_ACT[action] || ''; }
   function approvalDone(action) { return APPROVAL_DONE[action] || 'Approval decided'; }
-  var hq = { kindSupervision: hqKindSupervision, hire: hqHire, adapter: hqAdapter, goals: hqGoals, routineStates: routineStates, routineFacts: routineFacts, routineForm: routineForm, routineCalls: routineCalls, routineDone: routineDone, approvalBody: approvalBody, approvalLabel: approvalLabel, approvalDone: approvalDone, linkLabel: 'Open in Paperclip', approvalDenied: 'Read only. The HQ write grid denies approvals.', approvalBlocked: 'This approval cannot be decided here.', searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg };
+  var hq = { kindSupervision: hqKindSupervision, hire: hqHire, adapter: hqAdapter, goals: hqGoals, routineStates: routineStates, routineFacts: routineFacts, routineForm: routineForm, routineCalls: routineCalls, routineDone: routineDone, approvalBody: approvalBody, approvalLabel: approvalLabel, approvalDone: approvalDone, linkLabel: 'Open in Paperclip', approvalDenied: 'Read only. The HQ write grid denies approvals.', approvalBlocked: 'This approval cannot be decided here.', searchItems: hqSearchItems, phone: hqPhone, desk: hqDesk, status: hqStatus, budget: hqBudget, spendLine: hqSpendLine, every: hqEvery, supervision: hqSupervision, state: hqState, runtime: runtimeState, runtimeKey: runtimeKey, glance: hqGlance, cards: hqCards, org: hqOrg };
 
   // The room's numbers. list: the open sessions in the room. Waiting counts sessions, by isWaiting().
   // priced: sessions with a cost figure. unknown: sessions whose agent reports no cost (costUnknown), shown as "unknown".

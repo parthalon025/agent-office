@@ -561,7 +561,7 @@ export function createHq(deps = {}) {
       shaped('goals', `/api/companies/${id}/goals`, null),
       shaped('approvals', `/api/companies/${id}/approvals?status=pending`, null),
       shaped('activity', `/api/companies/${id}/activity`, null),
-      shaped('costs', `/api/companies/${id}/costs/summary`, null),
+      shaped('costs', `/api/companies/${id}/costs/summary?period=month`, null),
       shaped('secrets', `/api/companies/${id}/secrets`, null),
       call(conn, '/api/companies').catch(() => null),   // the other companies of this Paperclip (#221): buildings of the campus; a failed read keeps the last list
     ]);
@@ -802,7 +802,7 @@ export function createHq(deps = {}) {
     const lobby = lobbyOf({
       link,
       agents, issues: known('issues') ? d.issues : null, approvals: known('approvals') ? hr.approvals : null, goals: known('goals') ? hr.goals : null, activity: known('activity') ? activityOf(8) : null,
-      costs: known('costs') && hr.costs ? hr.costs : { spent: cents(d.company.spentMonthlyCents), limit: cents(d.company.budgetMonthlyCents) }, secrets: known('secrets') ? hr.secrets : null, unread: d.unread,
+      costs: known('costs') && hr.costs ? hr.costs : (Number.isFinite(d.company.spentMonthlyCents) && d.company.spentMonthlyCents >= 0 ? { spent: cents(d.company.spentMonthlyCents), limit: cents(d.company.budgetMonthlyCents) } : null), secrets: known('secrets') ? hr.secrets : null, unread: d.unread,
     });
     const floors = floorsOf(agents), routines = d.routines.filter((r) => r && r.id && r.status !== 'archived').map(routineView);
     return {

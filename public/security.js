@@ -516,8 +516,9 @@
     }
     fill(p, 48, y, W - 96, 2, 'line');
     if (asking) { confirmBand(p, view, big); return; }   // the band takes the bottom of the screen until Confirm or Cancel
-    var es = big ? 40 : 26;
-    para(p, 48, y + (big ? 56 : 44), es, es + 8, 'ink', wrap('Extensions: local or project scope only. User scope stays out of reach.', es, W - 96, 400), { maxW: W - 96 });
+    var es = big ? 40 : 26, pcl = V.hq.spendLine(data.hq), py = y + (big ? 56 : 44);
+    if (pcl) { var pw = wrap(pcl, es, W - 96, 400); para(p, 48, py, es, es + 8, 'ink', pw, { maxW: W - 96 }); py += pw.length * (es + 8) + 8; }
+    para(p, 48, py, es, es + 8, 'ink', wrap('Extensions: local or project scope only. User scope stays out of reach.', es, W - 96, 400), { maxW: W - 96 });
     var hint = view.note || (editing ? 'Type a number of dollars. Enter saves, Esc cancels. 0 means no limit.' : !view.focused ? 'Click to look closer.' : 'Minus and plus change the limit by $1. Click the value to type it.');
     var hs = big ? 32 : 24, hw = wrap(hint, hs, W - 96, 400);
     para(p, 48, H - 34 - (hw.length - 1) * (hs + 6), hs, hs + 6, view.note ? 'error' : big ? 'muted' : 'ink', hw, { maxW: W - 96 });
