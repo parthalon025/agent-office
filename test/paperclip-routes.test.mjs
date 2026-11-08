@@ -171,6 +171,7 @@ test('org chart editor (#202): the snapshot carries the cables; the reporting li
   const s = await snapshot();
   assert.ok(Array.isArray(s.hq.cables) && s.hq.cables.length === 2, 'cables in the snapshot');
   assert.equal(s.hq.reportingWrite, true, 'the grid does not deny reporting lines by default: the editor is writable');
+  assert.equal(s.hq.superviseWrite, true, 'Supervise in office is not denied by the grid by default: the wall shows its button');
   assert.equal(s.hq.goalWrite, true, 'goal writes are not denied by the grid by default (Confirm): the goal forms show');
   assert.deepEqual([s.hq.taskWrite, s.hq.commentWrite], [true, true], 'Tasks and Comments default to Allow: the mailroom shows its forms');
   assert.ok(Array.isArray(s.hq.tasks) && s.hq.tasks.every((t) => t.id && t.status), 'the snapshot lists the open tasks for the mailroom');

@@ -29,7 +29,7 @@
 // Supervise cell can Deny it) that reads the agent again and sends one PATCH with this office's command hooks file (HOOKS_CMD_FILE in
 // office.mjs, forward slashes). The company step of Orientation (#199)
 // is POST /api/paperclip/company; a reporting line (#202) is POST /api/hq/reporting-line, a thin call of `write`. The snapshot
-// `hq.reportingWrite` is false only when the grid says Deny: the org chart editor (`OrgChart` in public/hq.js) is then read only.
+// `hq.reportingWrite` (and `hq.superviseWrite`, which hides Supervise in office on the Agents screen, #231) is false only when the grid says Deny: the org chart editor (`OrgChart` in public/hq.js) is then read only.
 // The routes of the read model, costs, catalog, access and instance are with the functions below; the grid and write routes are
 // in src/hq-writes/index.mjs. User words and the Paperclip routes used by #221 and their source files are also in docs/paperclip.md.
 //
