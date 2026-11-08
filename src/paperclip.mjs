@@ -1039,6 +1039,21 @@ export function createHq(deps = {}) {
     const general = g ? { censorUsernameInLogs: g.censorUsernameInLogs === true, feedbackDataSharingPreference: text(g.feedbackDataSharingPreference, 20) || 'prompt' } : null;
     return { environments: environments || [], general, defaultEnvironmentId: set.json ? def : null, known: { environments: !!environments, general: !!general }, problem: [set, env].map((x) => x.err).find(Boolean) || '' };
   }
+  /**
+   * The profile of the person the board key signs in as (#228, owner only): id, name and e-mail, read when the HQ opens it, for GET
+   * /api/hq/profile. The picture is dropped (it can be a large data URL). Paperclip answers 401 for a key that is no person's (the local
+   * trusted mode has none): that is `error`, not a failure. Reads only; the change is the `profile` write kind.
+   */
+  async function profile() {
+    const conn = c;
+    if (!conn || !d) return null;
+    let json, error = null;
+    try { json = await call(conn, '/api/auth/profile'); } catch (e) { error = e.message; }
+    if (c !== conn) return null;
+    if (!error) { const p = shapeProblems('userProfile', json); if (p.length) error = `Paperclip answered in a shape the office does not know (${p[0]}) Update the office or the pinned Paperclip.`; }
+    if (error) return { id: null, name: null, email: null, error };
+    return { id: String(json.id), name: text(json.name, 120) || null, email: text(json.email, 120) || null, error: null };
+  }
   async function instance() {
     const conn = c;
     if (!conn || !d) return null;
@@ -1190,5 +1205,5 @@ export function createHq(deps = {}) {
     return writes.resultOf(plan, made);
   }
 
-  return { connect, disconnect, supervise, handoffGoal, handoffTasks, write, adapter: adapterState, selfApprove: () => { if (c) selfApprove(c); }, tasksOf, task, access, instance, exportCompany, view, model, costs, catalog, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
+  return { connect, disconnect, supervise, handoffGoal, handoffTasks, write, adapter: adapterState, selfApprove: () => { if (c) selfApprove(c); }, tasksOf, task, access, instance, profile, exportCompany, view, model, costs, catalog, labelOf, held, planSource, state: () => (c ? c.state : 'off') };
 }

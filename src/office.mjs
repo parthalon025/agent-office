@@ -1457,6 +1457,7 @@ export function createOffice(cfg) {
     R('GET', '/api/hq/access', 'page', async () => ({ access: await hq.access() })),
     // Company admin, the rest (#221): the instance settings and environments (names and states, no config or env value) and a company export
     // (a read of Paperclip that changes nothing; the bundle goes to the page as a file, the office keeps no copy). Import is a write: kind company.
+    R('GET', '/api/hq/profile', 'page', async () => ({ profile: await hq.profile() })),
     R('GET', '/api/hq/instance', 'page', async () => ({ instance: await hq.instance() })),
     R('POST', '/api/hq/company/export', 'page', ({ body }) => hq.exportCompany(body)),
     // The Paperclip runtime (#193): install (409 without the Confirm), start, stop, and the board key's approval link. Never the key.

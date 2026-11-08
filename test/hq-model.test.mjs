@@ -82,7 +82,7 @@ test('contract: the office needs only what was recorded, and the fake Paperclip 
       activity: `/api/companies/${id}/activity`, costs: `/api/companies/${id}/costs/summary`, secrets: `/api/companies/${id}/secrets`,
       skills: `/api/companies/${id}/skills`, plugins: '/api/plugins', adapters: '/api/adapters',
       costsByAgent: `/api/companies/${id}/costs/by-agent?from=2026-11-01T00:00:00.000Z&to=2026-12-01T00:00:00.000Z`, costsByProject: `/api/companies/${id}/costs/by-project?from=2026-11-01T00:00:00.000Z&to=2026-12-01T00:00:00.000Z`, budgets: `/api/companies/${id}/budgets/overview`,
-      instanceSettings: '/api/instance/settings', environments: `/api/companies/${id}/environments` };
+      instanceSettings: '/api/instance/settings', userProfile: '/api/auth/profile', environments: `/api/companies/${id}/environments` };
     for (const [name, r] of Object.entries(route)) {
       const json = await (await fetch(pc.url + r)).json();
       assert.deepEqual(shapeProblems(name, json), [], name);

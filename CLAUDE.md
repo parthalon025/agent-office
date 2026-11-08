@@ -99,7 +99,7 @@ Server (`src/`):
 Paperclip (`src/`):
 - `paperclip.mjs`: the HQ watcher, the supervision checks and the one writer (`hq.write`).
 - `hq-model.mjs`: the pure HQ read model (org chart, lobby, costs, rooms, search), self-approval, the office adapter state.
-- `hq-writes/`: the write kinds, one file each (grid row, requests, what Paperclip must answer, the ids returned, samples); `index.mjs` lists them in grid order with the grid rules and `planWrite`; `shared.mjs` their checks and limits.
+- `hq-writes/`: the write kinds, one file each (grid row, requests, what Paperclip must answer, the ids returned, samples); `index.mjs` lists them in grid order with the grid rules and `planWrite`; `shared.mjs` their checks and limits. `profile.mjs` (#228) is the signed-in person's name (`PATCH /api/auth/profile`; read `GET /api/hq/profile`, `hq.profile()`).
 - `paperclip-runtime.mjs`: the Paperclip the office installs, runs, updates or connects to; the board key.
 - `paperclip-runs.mjs`, `integrations/paperclip-adapter/`: runs Paperclip hands to the office; the adapter plugin Paperclip loads.
 

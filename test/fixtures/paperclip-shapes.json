@@ -257,6 +257,14 @@
     "updatedAt": "string"
    }
   },
+  "userProfile": {
+   "list": false,
+   "fields": {
+    "id": "string",
+    "email": "string",
+    "name": "string"
+   }
+  },
   "environments": {
    "list": true,
    "fields": {

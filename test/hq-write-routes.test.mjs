@@ -49,11 +49,11 @@ test('not connected: a write is 409 and nothing is sent', async () => {
   assert.equal(pc.requests.length, 0);
 });
 
-test('the grid: sixteen kinds, the defaults, and no cell saved until the user sets one', async () => {
+test('the grid: seventeen kinds, the defaults, and no cell saved until the user sets one', async () => {
   const r = await get('/api/hq/grid');
   assert.equal(r.status, 200);
   assert.deepEqual(r.json.grid.map((x) => [x.kind, x.value, x.set]), [['hire', 'confirm', false], ['pause', 'confirm', false], ['budget', 'confirm', false], ['approval', 'confirm', false], ['reporting', 'confirm', false],
-    ['routine', 'confirm', false], ['access', 'confirm', false], ['secret', 'confirm', false], ['task', 'allow', false], ['comment', 'allow', false], ['company', 'confirm', false], ['goal', 'confirm', false], ['instance', 'confirm', false], ['adapter', 'confirm', false],
+    ['routine', 'confirm', false], ['access', 'confirm', false], ['secret', 'confirm', false], ['task', 'allow', false], ['comment', 'allow', false], ['company', 'confirm', false], ['goal', 'confirm', false], ['instance', 'confirm', false], ['profile', 'confirm', false], ['adapter', 'confirm', false],
     ['supervise', 'confirm', false], ['export', 'allow', false]]);
   assert.deepEqual(r.json.grid.find((x) => x.kind === 'secret').options, ['confirm', 'deny']);
   assert.deepEqual(state().hqGrid || {}, {});
@@ -177,4 +177,21 @@ test('company admin, the rest (#221): export, import, the instance and a second 
   assert.equal(set.status, 409);
   for (const r of [await call('/api/hq/company/export', {}, agentToken), await call('/api/hq/instance', null, agentToken, 'GET'),
     await call('/api/hq/write', { kind: 'company', action: 'import', bundle, confirmed: true }, agentToken)]) assert.ok(r.status === 401 || r.status === 403);
+});
+
+test('profile settings (#228): GET /api/hq/profile and the profile write are page routes only', async () => {
+  const p = await get('/api/hq/profile');
+  assert.equal(p.status, 200);
+  assert.equal(p.json.profile.name, 'Justin');
+  assert.doesNotMatch(JSON.stringify(p.json), /base64|do-not-show/);
+  const n = writes().length;
+  const q = await call('/api/hq/write', { kind: 'profile', action: 'name', name: 'Justin M' });
+  assert.equal(q.status, 409);
+  assert.equal(q.json.confirm, 'write');
+  assert.equal(writes().length, n, 'the question sent nothing');
+  const yes = await call('/api/hq/write', { kind: 'profile', action: 'name', name: 'Justin M', confirmed: true });
+  assert.deepEqual([yes.status, yes.json], [200, { ok: true }]);
+  assert.deepEqual(writes().at(-1), ['PATCH', '/api/auth/profile', { name: 'Justin M' }]);
+  assert.equal((await get('/api/hq/profile')).json.profile.name, 'Justin M');
+  for (const r of [await call('/api/hq/write', { kind: 'profile', action: 'name', name: 'X', confirmed: true }, agentToken), await call('/api/hq/profile', null, agentToken, 'GET')]) assert.ok(r.status === 401 || r.status === 403);
 });

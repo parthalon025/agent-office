@@ -75,12 +75,13 @@ import comment from './comment.mjs';
 import company from './company.mjs';
 import goal from './goal.mjs';
 import instance from './instance.mjs';
+import profile from './profile.mjs';
 import adapter from './adapter.mjs';
 import supervise from './supervise.mjs';
 import exportKind from './export.mjs';
 
 /** Every write kind, in the order of the write grid. */
-export const KINDS = Object.freeze([hire, pause, budget, approval, reporting, routine, access, secret, task, comment, company, goal, instance, adapter, supervise, exportKind]);
+export const KINDS = Object.freeze([hire, pause, budget, approval, reporting, routine, access, secret, task, comment, company, goal, instance, profile, adapter, supervise, exportKind]);
 
 const STRICT = { deny: 0, confirm: 1, allow: 2 };
 

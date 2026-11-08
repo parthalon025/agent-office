@@ -79,6 +79,7 @@ const withHq = (d) => {
     environments: [{ id: 'e1000000-0000-4000-8000-000000000001', name: 'Local', description: null, driver: 'local', status: 'active', config: {}, envVars: {}, metadata: null, createdAt: '2026-11-01T09:00:00.000Z', updatedAt: '2026-11-01T09:00:00.000Z' },
       { id: 'e1000000-0000-4000-8000-000000000002', name: 'Build box', description: 'The ssh host', driver: 'ssh', status: 'active', config: { host: 'build.example.com', privateKey: 'do-not-show' }, envVars: { API_KEY: { type: 'plain', value: 'do-not-show' } }, metadata: null, createdAt: '2026-11-02T09:00:00.000Z', updatedAt: '2026-11-02T09:00:00.000Z' }],
     instance: { id: 'is100000-0000-4000-8000-000000000001', defaultEnvironmentId: null, general: { censorUsernameInLogs: false, feedbackDataSharingPreference: 'prompt', backupRetention: { dailyDays: 7, weeklyWeeks: 4, monthlyMonths: 1 } }, experimental: { enableEnvironments: true }, createdAt: '2026-11-01T09:00:00.000Z', updatedAt: '2026-11-01T09:00:00.000Z' },
+    profile: { id: 'u1', email: 'j@example.com', name: 'Justin', image: 'data:image/png;base64,do-not-show' },
     secrets: [{ id: 's1', companyId, name: 'GITHUB_TOKEN', provider: 'local_encrypted', description: null, latestVersion: 1, value: 'do-not-show' }],
   };
 };
@@ -113,7 +114,7 @@ const DEMO0 = (hooksFile = null) => {
  * 403 to every route (a Paperclip in authenticated mode). port: 0 for a free one.
  */
 export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
-  const st = { companies: structuredClone(seed.companies || []), agents: structuredClone(seed.agents || []), issues: structuredClone(seed.issues || []), routines: structuredClone(seed.routines || []), projects: structuredClone(seed.projects || []), liveRuns: structuredClone(seed.liveRuns || []),
+  const st = { profile: structuredClone(seed.profile || { id: 'u1', email: 'j@example.com', name: 'Justin', image: null }), companies: structuredClone(seed.companies || []), agents: structuredClone(seed.agents || []), issues: structuredClone(seed.issues || []), routines: structuredClone(seed.routines || []), projects: structuredClone(seed.projects || []), liveRuns: structuredClone(seed.liveRuns || []),
     goals: structuredClone(seed.goals || []), approvals: structuredClone(seed.approvals || []), activity: structuredClone(seed.activity || []), costs: structuredClone(seed.costs || null), secrets: structuredClone(seed.secrets || []), skills: structuredClone(seed.skills || []), plugins: structuredClone(seed.plugins || []), adapters: structuredClone(seed.adapters || []), costMonths: structuredClone(seed.costMonths || {}), budgets: structuredClone(seed.budgets || null),
     invites: structuredClone(seed.invites || []), joinRequests: structuredClone(seed.joinRequests || []), members: structuredClone(seed.members || []),
     environments: structuredClone(seed.environments || []), instance: structuredClone(seed.instance || { id: 'is100000-0000-4000-8000-000000000001', defaultEnvironmentId: null, general: { censorUsernameInLogs: false, feedbackDataSharingPreference: 'prompt' }, experimental: {}, createdAt: '2026-11-01T09:00:00.000Z', updatedAt: '2026-11-01T09:00:00.000Z' }) };
@@ -199,6 +200,18 @@ export function startFakePaperclip(seed = DEMO(), { port = 0 } = {}) {
         if (!parsed || !Object.keys(parsed).length || Object.entries(parsed).some(([k, v]) => !ok[k] || !ok[k](v))) return send(res, 422, { error: 'Validation error' });
         Object.assign(st.instance.general, parsed);
         return send(res, 200, st.instance.general);
+      }
+      // the signed-in person (routes/auth.ts, mounted at /api/auth): GET /profile answers { id, email, name, image }; PATCH /profile is strict over
+      // name (1 to 120 characters after trim) and image (optional). Both need a board actor: seed.noProfile is a key that is no person's (401).
+      if (u.pathname === '/api/auth/profile') {
+        if (seed.noProfile) return send(res, 401, { error: 'Board authentication required' });
+        if (req.method === 'GET') return send(res, 200, st.profile);
+        if (req.method === 'PATCH') {
+          const name = parsed && typeof parsed.name === 'string' ? parsed.name.trim() : '';
+          if (!name || name.length > 120 || Object.keys(parsed).some((k) => !['name', 'image'].includes(k))) return send(res, 422, { error: 'Validation error' });
+          st.profile.name = name;
+          return send(res, 200, st.profile);
+        }
       }
       // environments (routes/environments.ts): the list is instance wide whatever the company in the path; PATCH is strict over name, description,
       // driver, status (active | archived), config, envVars, metadata.
