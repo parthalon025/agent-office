@@ -19,7 +19,7 @@ jobs:
         run: |
           for f in src/*.mjs src/providers/*.mjs src/integrations/openclaw-plugin/*.js public/*.js test/*.mjs test/fixtures/*.mjs; do node --check "$f"; done
       - name: Cache the pinned Paperclip source (about 100 MB to download)
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .paperclip-source
           key: paperclip-source-${{ hashFiles('test/paperclip-source.mjs', 'src/paperclip-runtime.mjs') }}
